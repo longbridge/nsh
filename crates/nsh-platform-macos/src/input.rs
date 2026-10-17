@@ -592,6 +592,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         NSEventType::MouseMoved | NSEventType::MouseEntered => {
             input.last.set(Some((x, y)));
             hover(surface, x, y);
+            reveal_indicators(surface, x, y);
             update_cursor(surface, x, y);
         }
         NSEventType::MouseExited => {
@@ -1753,6 +1754,18 @@ fn hover(surface: &Surface, x: f32, y: f32) {
         None => Vec::new(),
     };
     set_hovered(surface, views);
+}
+
+/// The scroll views under the mouse at `(x, y)` show their indicators.
+fn reveal_indicators(surface: &Rc<Surface>, x: f32, y: f32) {
+    if let Some(hit) = pick(&surface.root, x, y) {
+        for v in chain(&hit.view)
+            .iter()
+            .filter(|v| v.kind() == ViewKind::Scroll)
+        {
+            crate::scroll::hovered(surface, v);
+        }
+    }
 }
 
 fn set_hovered(surface: &Surface, views: Vec<NshView>) {

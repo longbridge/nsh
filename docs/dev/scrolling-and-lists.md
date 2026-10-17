@@ -8,9 +8,11 @@
   the velocity. Lists keep the visible rows in place when items are inserted above them (`splice`).
 - **Input**: fingers (and pens) drag scroll views; on the desktop backends and the web the mouse never does (dragging
   the content is a touchscreen's way to scroll): it scrolls with the wheel, the touchpad, the keyboard and the
-  indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). So with a mouse alone,
-  pull to refresh needs a touchpad that rubber-bands (macOS) and horizontal lists need a horizontal wheel, Shift +
-  wheel or the keyboard.
+  indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). The indicator shows while
+  the mouse moves over the view (`scroll::hovered` on the desktop backends, as overlay scroll bars do), and horizontal
+  views keep theirs with `showsIndicator={false}` (the platforms' `scroll::config`; on the web `nsh-noindicator-x`
+  hides it only outside the desktop idiom): a mouse without a horizontal wheel has no other way to move them. With a
+  mouse alone, pull to refresh needs a touchpad that rubber-bands (macOS): apps offer another way on the desktop.
 - **Content container** (`<Scroll>`): `contentContainerStyle` / `contentContainerClass` are the renderer's
   (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in

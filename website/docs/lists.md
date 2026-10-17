@@ -111,7 +111,7 @@ Pass a new array to change the items: `posts.set([...posts(), ...more])`. The li
 | `viewabilityConfig` | `ViewabilityConfig` | | When items count as viewable. |
 | `keyExtractor` | `(item, index) => string` | | The key in viewability tokens. |
 | `refreshing` / `onRefresh` | `boolean` / `() => void` | | Pull to refresh. |
-| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. |
+| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `ref` | `YNode` | | `scrollToIndex`, `scrollToOffset`, `scrollToEnd`, `scrollTo`. |
 
 The header, footer and empty slots take a component (`ListHeaderComponent={Header}`) or an element (`ListHeaderComponent={<Header />}`). They are cells of their own, never recycled, and they are reactive like any other JSX.

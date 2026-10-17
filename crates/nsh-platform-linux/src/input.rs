@@ -1827,18 +1827,22 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
 // --- Hover --------------------------------------------------------------------------
 
 /// The mouse moved to `(x, y)`: updates `HOVERED` along the views under it.
-fn hover(surface: &Surface, x: f32, y: f32) {
+fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
     let input = &surface.input;
+    let views = pick(&surface.root, x, y)
+        .map(|hit| chain(&hit.view))
+        .unwrap_or_default();
+    // The scroll views under the mouse show their indicators.
+    for v in views.iter().filter(|v| v.kind() == ViewKind::Scroll) {
+        crate::scroll::hovered(surface, v);
+    }
     if input.hover_tracked.borrow().is_empty() && input.hovered.borrow().is_empty() {
         return;
     }
-    let views = match pick(&surface.root, x, y) {
-        Some(hit) => chain(&hit.view)
-            .into_iter()
-            .filter(|v| v.state().tracked & HOVERED != 0)
-            .collect(),
-        None => Vec::new(),
-    };
+    let views = views
+        .into_iter()
+        .filter(|v| v.state().tracked & HOVERED != 0)
+        .collect();
     set_hovered(surface, views);
 }
 
