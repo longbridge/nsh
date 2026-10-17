@@ -31,7 +31,10 @@ mod text;
 
 use std::cell::{Cell, RefCell};
 
-use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size};
+use nsh_core::{
+    EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size,
+    keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
+};
 use nsh_engine::{
     App, Assets, Bundle, Chunk, ColorScheme, EngineConfig, EngineControl, Environment, HotUpdate,
     Idiom, Limits, LocalEngine, MountSink, Os, Policy,
@@ -59,6 +62,10 @@ thread_local! {
     /// What the page reported last ([`nsh_environment`]), kept for the
     /// next [`nsh_start`].
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
+    /// The app's keyboard shortcuts (`MountItem::Keymap`), matched in
+    /// [`nsh_key`] while a key event is being handled. Apart from [`APP`]
+    /// so that matching never needs the engine.
+    static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
@@ -509,6 +516,7 @@ pub extern "C" fn nsh_compiled_len() -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_stop() {
     APP.with(|a| a.borrow_mut().take());
+    KEYMAP.with(|k| k.borrow_mut().take());
     BATCHES.with(|b| b.borrow_mut().clear());
 }
 
@@ -527,6 +535,11 @@ fn flush() {
         for batch in &batches {
             for item in &batch.items {
                 app.animation.apply(item);
+                if let MountItem::Keymap(keymap) = item {
+                    let keymap = (!keymap.is_empty()).then(|| keymap.clone());
+                    KEYMAP.with(|k| *k.borrow_mut() = keymap);
+                    continue;
+                }
                 if !matches!(
                     item,
                     MountItem::Animation(_) | MountItem::AnimationBindings { .. }
@@ -783,6 +796,95 @@ pub unsafe extern "C" fn nsh_touch(ptr: *const u8, len: usize) -> f64 {
             ROOT_ID,
             EventKind::Touch,
             EventPayload::Touch(Box::new(event)),
+        )
+    })
+}
+
+/// The key [`nsh_key`] gets: a printable ASCII character's code (as
+/// typed without Shift on the US layout), or one of these past 255.
+fn key_of(code: u32) -> Option<Key> {
+    Some(match code {
+        0x20..=0x7e => Key::Char((code as u8 as char).to_ascii_lowercase()),
+        256 => Key::Enter,
+        257 => Key::Escape,
+        258 => Key::Tab,
+        259 => Key::Backspace,
+        260 => Key::Delete,
+        261 => Key::Insert,
+        262 => Key::Up,
+        263 => Key::Down,
+        264 => Key::Left,
+        265 => Key::Right,
+        266 => Key::Home,
+        267 => Key::End,
+        268 => Key::PageUp,
+        269 => Key::PageDown,
+        // F1 to F24.
+        513..=536 => Key::F((code - 512) as u8),
+        _ => return None,
+    })
+}
+
+/// Whether bindings resolve `mod` to Command for `os`
+/// (`Keystroke::parse`). The web's OS (`Os::Web`) resolves it to Control:
+/// Apple browsers get Command through [`nsh_key`]'s swap, other browsers
+/// Control as is (a page forcing another OS is swapped likewise).
+fn mod_is_cmd(os: Os) -> bool {
+    matches!(os, Os::Ios | Os::MacOs)
+}
+
+/// Matches a key against the app's shortcuts (`nsh/keymap`) on the spot,
+/// while the browser's key event is handled: `key` as [`key_of`] takes
+/// it, `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta (Command, the
+/// Windows key) and 16 for a browser on an Apple platform, `editing` when
+/// a text field has the focus, `repeat` for an auto-repeat. Returns the binding that fires, -1 for none (the key
+/// goes on) or -2 for a held key's repeat (consumed, nothing fires). JS
+/// reports a firing binding with [`nsh_key_command`].
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -> i32 {
+    let Some(key) = key_of(key) else { return -1 };
+    let (mut ctrl, mut cmd) = (modifiers & 1 != 0, modifiers & 8 != 0);
+    // `mod` is Command for a browser on an Apple platform, Control
+    // elsewhere; bindings were resolved for the app's OS, so where the two
+    // disagree the key users press for `mod` is the other one.
+    let os_mod_is_cmd = APP.with(|a| {
+        a.try_borrow()
+            .ok()
+            .and_then(|a| a.as_ref().map(|app| mod_is_cmd(app.environment.os)))
+    });
+    if os_mod_is_cmd.is_some_and(|os| os != (modifiers & 16 != 0)) {
+        std::mem::swap(&mut ctrl, &mut cmd);
+    }
+    let keystroke = Keystroke {
+        modifiers: Modifiers {
+            ctrl,
+            alt: modifiers & 2 != 0,
+            shift: modifiers & 4 != 0,
+            cmd,
+        },
+        key,
+    };
+    let found = KEYMAP.with(|k| {
+        k.borrow().as_ref().map_or(KeyMatch::None, |k| {
+            k.find(keystroke, editing != 0, repeat != 0)
+        })
+    });
+    match found {
+        KeyMatch::None => -1,
+        KeyMatch::Held => -2,
+        KeyMatch::Fire(id) => id as i32,
+    }
+}
+
+/// Binding `id` of the app's shortcuts fired ([`nsh_key`]): the root's
+/// `onKeyCommand`.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_key_command(id: u32) -> f64 {
+    send(|app| {
+        app.control.dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(id as f64)),
         )
     })
 }

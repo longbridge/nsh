@@ -27,6 +27,18 @@ requestAnimationFrame ──────────────┘             
 - **Native animations run in Rust** on `requestAnimationFrame`: `Animated` timing, spring and decay, `interpolate`, native values bound to `opacity`, `transform` and `backgroundColor`, drags bound with `pan`, scroll-linked values and canvas arguments. JS is not involved per frame, as on devices.
 - **Input:** presses with `activeOpacity` and long presses, the responder system (`onTouch*`, `PanResponder`), native drags and two-finger pinch and rotation, scroll views (the browser's scrolling, plus dragging with a mouse), `<Input>` with controlled values, focus and submit, `Canvas`, `Stack` and `Screen` with a header, `Modal`, `Alert`.
 
+## Keyboard, mouse and touch
+
+Published apps behave as desktop apps in desktop browsers and as phone apps in phone browsers:
+
+- **Wheels and touchpads** scroll the innermost scroll view along their axis that can still move (a vertical wheel scrolls a horizontal list when nothing vertical can), and stay on it until the scroll ends; wheel notches glide, paging and snapping views move one page per scroll. Ctrl + wheel and touchpad pinches pinch views with native pinch values instead of zooming the page. Mouse drags scroll with momentum. Scroll views report `onScrollBeginDrag` / `onScrollEndDrag`, `onMomentumScrollBegin` / `End` and `onScrollEnd` as on the desktop platforms.
+- **Keyboard**: Tab and Shift+Tab move between pressables and inputs (a focus ring and `focus:` styles show the keyboard focus); Return presses the focused pressable, Space presses it when released; arrows, Page Up / Page Down, Space, Home and End scroll the scroll view around the focus or under the mouse; Escape leaves a field, closes the dialog, then goes back. `nsh/keymap` shortcuts work in the browser, matched on the spot (`mod` is Command in Safari and Chrome on a Mac, Control elsewhere).
+- **Going back**: Escape, Alt+Left (Cmd+[ on a Mac) and the mouse's back button pop the innermost stack, or ask the newest modal to close, as the Android back button does; `preventBack` and `onBackPress` work as there. When the app is the whole page, every pushed screen and presented modal is a browser history entry, so the browser's back button goes back in the app.
+- **Touch**: only scroll views pan; the page itself never scrolls, zooms or pulls to refresh under the app, and taps have no delay. In an iframe, swipes the app does not take scroll the embedding page. Drags on views with native pans, pinches and the responder system are the app's.
+- **Accessibility**: `accessibilityRole`, `accessibilityLabel`, `accessibilityHint`, `accessibilityState`, `accessibilityValue`, `accessibilityLiveRegion` and `accessibilityElementsHidden` become ARIA; `AccessibilityInfo.announceForAccessibility` speaks through a live region and `setAccessibilityFocus` moves the focus. Views under a modal or alert are inert.
+- **Selection and menus**: a mouse drag selects only in `selectable` text and inputs (where Ctrl/Cmd+A selects all of that text); the browser's context menu appears only there.
+
+
 ## Publish an app
 
 ```sh
@@ -133,6 +145,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
   assetBase: "./assets/",   // where `asset:/…` URIs (image imports) are served from
   // dark: true,            // force an appearance; otherwise it follows the system
   // idiom: "phone",        // force "phone", "pad" or "desktop"; otherwise the pointer and the size decide
+  // history: false,        // screens and modals as browser history entries; by default only when the app is the page, not in an iframe
 });
 player.run(await (await fetch("./bundle.js")).text());
 ```
@@ -205,7 +218,7 @@ A chunk that cannot be downloaded rejects the `import()` with a `TypeError` nami
 The web runtime is for demos and documentation. It does not have:
 
 - **Web views, videos and native components**: `WebView` maps to an `<iframe>` and `Video` to `<video>` only in the simplest form; registered native components render an empty box.
-- **Platform services**: toasts and the Android back button do nothing.
+- **Platform services**: toasts do nothing.
 - **Custom fonts loaded before first use**: imported fonts are registered with `FontFace`, which loads asynchronously, so the first frame may be measured with a fallback font.
 - **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
 - **Pull to refresh and zooming scroll views.**

@@ -27,6 +27,18 @@ requestAnimationFrame ───────────┘                      
 - **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的原生值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。
 - **输入**：带 `activeOpacity` 的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动，并支持鼠标拖动）、受控的 `<Input>`（焦点、提交）、`Canvas`、带标题栏的 `Stack` 和 `Screen`、`Modal`、`Alert`。
 
+## 键盘、鼠标和触摸
+
+发布出去的应用，在桌面浏览器里表现得像桌面应用，在手机浏览器里表现得像手机应用：
+
+- **滚轮和触控板**滚动沿其方向、还能继续滚动的最内层滚动视图（没有可滚动的纵向视图时，纵向滚轮也会滚动横向列表），并且直到这次滚动结束都停留在这个视图上；滚轮的每一格平滑滑动，分页和吸附的视图每次滚动移动一页。Ctrl + 滚轮和触控板捏合会捏合带原生捏合值的视图，而不是缩放页面。鼠标拖动带惯性滚动。滚动视图像桌面平台一样上报 `onScrollBeginDrag` / `onScrollEndDrag`、`onMomentumScrollBegin` / `End` 和 `onScrollEnd`。
+- **键盘**：Tab 和 Shift+Tab 在可按压的视图和输入框之间移动（焦点环和 `focus:` 样式标出键盘焦点）；回车按下获得焦点的视图，空格在松开时按下；方向键、Page Up / Page Down、空格、Home 和 End 滚动焦点所在或鼠标下方的滚动视图；Escape 先离开输入框、关闭对话框，再返回。`nsh/keymap` 的快捷键在浏览器里同样有效，当场匹配（Mac 上的 Safari 和 Chrome 里 `mod` 是 Command，其他地方是 Control）。
+- **返回**：Escape、Alt+左方向键（Mac 上是 Cmd+[）和鼠标的后退键会弹出最内层的栈，或请求关闭最上层的模态框，和 Android 返回键一样；`preventBack` 和 `onBackPress` 也照常生效。应用占据整个页面时，每个压入的页面和弹出的模态框都是一条浏览器历史记录，浏览器的后退按钮会在应用内返回。
+- **触摸**：只有滚动视图可以平移；应用下面的页面本身不会滚动、缩放或下拉刷新，点按没有延迟。嵌在 iframe 里时，应用不处理的滑动会滚动外层页面。在带原生平移、捏合的视图和响应者系统上的拖动都交给应用处理。
+- **无障碍**：`accessibilityRole`、`accessibilityLabel`、`accessibilityHint`、`accessibilityState`、`accessibilityValue`、`accessibilityLiveRegion` 和 `accessibilityElementsHidden` 会转成 ARIA；`AccessibilityInfo.announceForAccessibility` 通过实时区域朗读，`setAccessibilityFocus` 移动焦点。模态框或提示框下面的视图不可交互。
+- **选择和菜单**：鼠标拖动只会在 `selectable` 文字和输入框里选择文字（在那里 Ctrl/Cmd+A 全选这段文字）；浏览器的右键菜单也只在那里出现。
+
+
 ## 发布应用
 
 ```sh
@@ -119,6 +131,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
   assetBase: "./assets/",   // `asset:/…` URI（导入的图片）从这里加载
   // dark: true,            // 强制外观；不设置时跟随系统
   // idiom: "phone",        // 强制 "phone"、"pad" 或 "desktop"；不设置时由指针和尺寸决定
+  // history: false,        // 页面和模态框是否作为浏览器历史记录；默认只在应用占据整个页面时开启，iframe 里不开启
 });
 player.run(await (await fetch("./bundle.js")).text());
 ```
@@ -192,7 +205,7 @@ player.run(code, {
 Web 运行时用于演示和文档，下列能力不提供：
 
 - **Web 视图、视频和原生组件**：`WebView` 只以最简单的方式映射为 `<iframe>`，`Video` 映射为 `<video>`；注册的原生组件渲染为空盒子。
-- **平台服务**：Toast 和 Android 返回键不起作用。
+- **平台服务**：Toast 不起作用。
 - **首次使用前加载好的自定义字体**：导入的字体通过 `FontFace` 注册，它是异步加载的，所以第一帧可能用后备字体测量。
 - **文本整形细节**：换行规则只是 UAX #14 的一个子集（空格、CJK、连字符），没有自动断词，除段落方向外也不做双向重排。
 - **下拉刷新和可缩放的滚动视图。**

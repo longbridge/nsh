@@ -284,8 +284,11 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
     if s.opacity < 1.0 {
         let _ = write!(css, "opacity:{};", s.opacity);
     }
+    // `clip`, not `hidden`: a hidden box is still a scroll container, which
+    // the browser scrolls to bring a focused field into view, moving
+    // content away from where the core laid it out.
     if s.overflow_hidden {
-        css.push_str("overflow:hidden;");
+        css.push_str("overflow:clip;");
     }
     let mut shadows = Vec::new();
     if s.shadow.opacity > 0.0 && !s.shadow.color.is_transparent() {
@@ -573,6 +576,33 @@ fn props_json(p: &ViewProps) -> String {
     }
     if a.state.selected {
         s.push_str(",\"selected\":true");
+    }
+    if let Some(c) = a.state.checked {
+        let _ = write!(s, ",\"checked\":{}", json_str(&kebab(&format!("{c:?}"))));
+    }
+    if a.state.busy {
+        s.push_str(",\"busy\":true");
+    }
+    if let Some(e) = a.state.expanded {
+        let _ = write!(s, ",\"expanded\":{e}");
+    }
+    if let Some(v) = &a.value {
+        let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
+        let _ = write!(
+            s,
+            ",\"value\":[{},{},{},{}]",
+            n(v.min),
+            n(v.max),
+            n(v.now),
+            v.text.as_deref().map_or("null".to_owned(), json_str)
+        );
+    }
+    if a.live_region != nsh_core::LiveRegion::None {
+        let _ = write!(
+            s,
+            ",\"live\":{}",
+            json_str(&kebab(&format!("{:?}", a.live_region)))
+        );
     }
     if a.hidden {
         s.push_str(",\"hidden\":true");
@@ -921,7 +951,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         },
         MountItem::Command { id, command } => encode_command(out, *id, command),
         MountItem::Component { id, name } => out.item("comp").num(*id).str(name).end(),
-        // Browsers hit-test what overflows a box themselves.
+        // Browsers hit-test what overflows a box themselves; the keymap
+        // stays in Rust (`nsh_key`).
         MountItem::ComponentProps { .. }
         | MountItem::Keymap(_)
         | MountItem::Overflow { .. }
@@ -969,8 +1000,15 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 }
                 push_str(&mut out.s, &b.text);
             }
+            out.s.push_str("],[");
+            for (i, b) in d.buttons.iter().enumerate() {
+                if i > 0 {
+                    out.s.push(',');
+                }
+                push_str(&mut out.s, &kebab(&format!("{:?}", b.style)));
+            }
             out.s.push(']');
-            out.end();
+            out.bool(d.cancelable).end();
         }
         Command::SetJsResponder { block } => {
             out.item("cmd")
@@ -987,6 +1025,9 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         Command::InjectJavaScript(s) => {
             out.item("cmd").num(id).str("injectJavaScript").str(s).end();
         }
+        Command::Back => out.item("cmd").num(id).str("back").end(),
+        Command::Announce(text) => out.item("cmd").num(id).str("announce").str(text).end(),
+        Command::AccessibilityFocus => out.item("cmd").num(id).str("a11yFocus").end(),
         Command::Seek(t) => out.item("cmd").num(id).str("seek").num(*t).end(),
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
         Command::ReadClipboard {

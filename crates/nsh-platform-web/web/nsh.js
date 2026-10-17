@@ -28,6 +28,11 @@ const PRESSED = 1;
 const HOVERED = 2;
 const FOCUSED = 4;
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
+/** `accessibilityRole`s whose ARIA role has another name; others are the same. */
+const ARIA_ROLES = {
+  none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
+  search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
+};
 
 const KEYFRAMES = `
 @keyframes nsh-spin { to { transform: rotate(360deg); } }
@@ -37,11 +42,26 @@ const KEYFRAMES = `
   0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
   50% { transform: none; animation-timing-function: cubic-bezier(0,0,0.2,1); }
 }
-.nsh-root { position: relative; width: 100%; height: 100%; overflow: hidden; -webkit-user-select: none; user-select: none;
-  -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* Touches pan only scroll views (the page neither scrolls, zooms nor
+   refreshes under the app, and pans and presses get no pointercancel);
+   overflow is clipped, never hidden, so that the browser cannot scroll a
+   box the core laid out to show a focused field. */
+.nsh-root { position: relative; width: 100%; height: 100%; overflow: clip; -webkit-user-select: none; user-select: none;
+  -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none;
+  touch-action: none; }
 .nsh-root * { box-sizing: border-box; }
 .nsh-v { position: absolute; margin: 0; padding: 0; min-width: 0; min-height: 0; }
+.nsh-v:focus { outline: none; }
+.nsh-v:focus-visible { outline: 2px solid var(--nsh-focus-ring, #0a84ff); outline-offset: -2px; }
 .nsh-scroll { overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.nsh-scroll { touch-action: pan-x pan-y; }
+/* In an iframe, swipes the app does not take scroll the embedding page. */
+.nsh-root.nsh-embedded { touch-action: pan-x pan-y; }
+/* Views with native pans: none, or the other axis's scrolling. */
+.nsh-pan { touch-action: none; }
+.nsh-pan-x { touch-action: pan-y; }
+.nsh-pan-y { touch-action: pan-x; }
+.nsh-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* Scroll indicators: a thin, translucent thumb with no track, as on phones,
    rather than the platform's scrollbar (with arrow buttons on Windows).
    Chromium ignores the pseudo-elements once scrollbar-width / scrollbar-color
@@ -58,7 +78,7 @@ const KEYFRAMES = `
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 .nsh-field { position: absolute; border: 0; outline: none; background: transparent; padding: 0; margin: 0;
   resize: none; font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
-.nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; }
+.nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .nsh-selectable ::selection { background: var(--nsh-selection, Highlight); }
 .nsh-header { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center;
   justify-content: center; font: 600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -71,7 +91,7 @@ const KEYFRAMES = `
 .nsh-dialog-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.35); display: flex;
   align-items: center; justify-content: center; z-index: 1000; }
 .nsh-dialog { width: 270px; border-radius: 14px; background: rgba(245,245,245,.97); color: #000; text-align: center;
-  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: clip; }
 .nsh-dialog h3 { font-size: 17px; font-weight: 600; margin: 18px 16px 4px; }
 .nsh-dialog p { margin: 0 16px 18px; }
 .nsh-dialog button { display: block; width: 100%; border: 0; border-top: 0.5px solid rgba(0,0,0,.2); background: none;
@@ -80,6 +100,39 @@ const KEYFRAMES = `
   background: #b42318; color: #fff; font: 12px/1.4 ui-monospace, Menlo, monospace; padding: 10px 12px;
   border-radius: 10px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
 `;
+
+/** An Apple keyboard: Command is the shortcut key, Option+Left moves by word. */
+const APPLE = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform ?? navigator.platform);
+
+/** `nsh_key`'s codes of the keys that are not characters. */
+const NAMED_KEYS = {
+  Enter: 256, Escape: 257, Tab: 258, Backspace: 259, Delete: 260, Insert: 261, ArrowUp: 262, ArrowDown: 263,
+  ArrowLeft: 264, ArrowRight: 265, Home: 266, End: 267, PageUp: 268, PageDown: 269,
+};
+/** The US layout's characters of the punctuation keys (`KeyboardEvent.code`). */
+const CODE_CHARS = {
+  Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Backslash: "\\", IntlBackslash: "\\", Semicolon: ";",
+  Quote: "'", Comma: ",", Period: ".", Slash: "/", Backquote: "`", Space: " ",
+};
+
+/**
+ * The key of a key event as `nsh_key` takes it (-1: none): the character
+ * it types without modifiers, or, when Shift or Option change it or the
+ * layout types no ASCII there, the US layout's character of the same key
+ * (shortcuts work on any layout, as menus' do).
+ */
+function keyCode(e) {
+  const named = NAMED_KEYS[e.key];
+  if (named) return named;
+  const f = /^F([0-9]{1,2})$/.exec(e.key);
+  if (f) return Number(f[1]) >= 1 && Number(f[1]) <= 24 ? 512 + Number(f[1]) : -1;
+  const k = e.key;
+  if (k.length === 1 && !e.shiftKey && !e.altKey && k >= " " && k <= "~") return k.toLowerCase().charCodeAt(0);
+  const c = e.code ?? "";
+  if (/^Key[A-Z]$/.test(c)) return c.charCodeAt(3) + 32;
+  if (/^(Digit|Numpad)[0-9]$/.test(c)) return c.charCodeAt(c.length - 1);
+  return CODE_CHARS[c]?.charCodeAt(0) ?? -1;
+}
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -113,6 +166,9 @@ export async function createPlayer(container, options = {}) {
 }
 
 class Player {
+  /** The player that last took input (keys go to it while nothing has the focus). */
+  static active = null;
+
   constructor(container, options) {
     this.options = options;
     this.assetBase = options.assetBase ?? "";
@@ -124,7 +180,7 @@ class Player {
       document.head.append(style);
     }
     this.root = document.createElement("div");
-    this.root.className = "nsh-root";
+    this.root.className = window.top === window ? "nsh-root" : "nsh-root nsh-embedded";
     // Its size is in the class: the core styles the root too (a
     // right-to-left layout), which replaces its inline style.
     container.append(this.root);
@@ -138,6 +194,11 @@ class Player {
     this.pointers = new Map();
     this.requests = new Map();
     this.dark = options.dark ?? matchMedia("(prefers-color-scheme: dark)").matches;
+    // The navigation stacks and modals are the browser's history: by
+    // default only when the app is the page (in an iframe each push would
+    // be an entry of the embedding page's history too).
+    this.history = options.history ?? window.top === window;
+    if (window.top === window) document.documentElement.style.overscrollBehavior = "none";
   }
 
   async load(url) {
@@ -267,10 +328,12 @@ class Player {
     chunkBase = this.options.chunkBase,
   } = {}) {
     this.stop();
+    this.resetHistory();
     this.app = (this.app ?? 0) + 1;
     this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI };
     const root = this.root;
     root.textContent = "";
+    root.append(this.live);
     this.views.clear();
     root._id = ROOT_ID;
     root._kind = "root";
@@ -580,7 +643,7 @@ class Player {
       img.addEventListener("error", () => this.imageFailed(el));
       el.append(img);
       el._img = img;
-      el._base = "overflow:hidden;";
+      el._base = "overflow:clip;";
     }
     if (kind === "scroll") {
       el._spacer = document.createElement("div");
@@ -592,7 +655,7 @@ class Player {
     }
     if (kind === "screen") el.classList.add("nsh-screen");
     if (kind === "modal") el.classList.add("nsh-modal");
-    if (kind === "stack") el._base = "overflow:hidden;";
+    if (kind === "stack") el._base = "overflow:clip;";
     if (this.layoutAnimation?.create) this.animateIn(el, this.layoutAnimation.create);
     this.views.set(id, el);
   }
@@ -622,8 +685,10 @@ class Player {
       return;
     }
     const parent = el.parentNode;
+    const focused = el.contains(document.activeElement);
     el.remove();
     if (parent?._kind === "stack") this.stackChanged(parent);
+    this.screenGone(el, focused);
   }
 
   op_d([, id]) {
@@ -635,12 +700,23 @@ class Player {
       return;
     }
     const parent = el.parentNode;
+    const focused = el.contains(document.activeElement);
     if (this.layoutAnimation?.delete && parent) {
       this.animateOut(el, this.layoutAnimation.delete);
     } else {
       el.remove();
     }
     if (parent?._kind === "stack") this.stackChanged(parent);
+    this.screenGone(el, focused);
+  }
+
+  /** A screen left its stack: the focus goes back to what had it when the
+   * screen was pushed, unless it moved elsewhere meanwhile. */
+  screenGone(el, focused) {
+    const restore = el._restoreFocus;
+    el._restoreFocus = null;
+    const focus = document.activeElement;
+    if (restore?.isConnected && (focused || !focus || focus === document.body)) restore.focus({ preventScroll: true });
   }
 
   op_f([, id, x, y, w, h]) {
@@ -675,8 +751,10 @@ class Player {
     if (!el) return;
     el._css = css;
     const transition = el.style.transition;
-    el.style.cssText = (el._base ?? "") + css + (el._extra ?? "");
+    // The press cursor goes before the view's own `cursor`, which wins.
+    el.style.cssText = (el._base ?? "") + (el._pressable ? "cursor:pointer;" : "") + css + (el._extra ?? "");
     if (transition) el.style.transition = transition;
+    if (el._kind === "scroll") this.scrollOverflow(el);
     this.placeFrame(el);
     for (const [prop, value] of Object.entries(el._animation)) {
       if (prop !== "border-color" && prop !== "color") el.style.setProperty(prop, value);
@@ -741,14 +819,19 @@ class Player {
     el.classList.toggle("nsh-selectable", !!selectable);
     if (selectionColor) el.style.setProperty("--nsh-selection", selectionColor);
     else el.style.removeProperty("--nsh-selection");
-    el.setAttribute("aria-label", runs.map((r) => r[2]).join(""));
+    el._textLabel = runs.map((r) => r[2]).join("");
+    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
   }
 
   op_e([, id, events]) {
     const el = this.view(id);
     if (!el) return;
     el._events = new Set(events);
-    if (PRESS_EVENTS.some((e) => el._events.has(e))) el.style.cursor ||= "pointer";
+    const pressable = PRESS_EVENTS.some((e) => el._events.has(e));
+    if (pressable && !el._pressable && !el.style.cursor) el.style.cursor = "pointer";
+    el._pressable = pressable;
+    this.updateFocusable(el);
+    this.updateTouchAction(el);
   }
 
   op_ts([, id, states]) {
@@ -775,20 +858,75 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._props = props;
-    if (props.label) el.setAttribute("aria-label", props.label);
     if (props.testID) el.dataset.testid = props.testID;
-    if (props.role && props.role !== "none") el.setAttribute("role", props.role === "header" ? "heading" : props.role);
+    else delete el.dataset.testid;
     const pe = props.pointerEvents;
-    el.style.pointerEvents = pe === "none" || pe === "box-none" ? "none" : "";
+    // Kept in `_extra` so that restyling (`op_s`) keeps it.
+    el._extra = pe === "none" || pe === "box-none" ? "pointer-events:none;" : "";
+    el.style.pointerEvents = el._extra ? "none" : "";
     if (pe === "box-none") el._boxNone = true;
+    this.updateFocusable(el);
+    this.updateTouchAction(el);
   }
 
   op_al([, id, label]) {
     const el = this.view(id);
     if (!el) return;
-    if (el._props) el._props.label = label;
-    if (label) el.setAttribute("aria-label", label);
-    else el.removeAttribute("aria-label");
+    (el._props ??= {}).label = label;
+    this.updateAria(el);
+  }
+
+  /** ARIA attributes from the accessibility props (`op_vp`). */
+  updateAria(el) {
+    const p = el._props ?? {};
+    const set = (name, value) => (value == null || value === false ? el.removeAttribute(name) : el.setAttribute(name, String(value)));
+    const role = ARIA_ROLES[p.role] ?? (p.role && p.role !== "none" ? p.role : el._pressable ? "button" : null);
+    set("role", role);
+    set("aria-label", p.label ?? el._textLabel);
+    set("aria-description", p.hint);
+    set("aria-disabled", p.disabled && "true");
+    set("aria-selected", p.selected && "true");
+    set("aria-checked", p.checked);
+    set("aria-busy", p.busy && "true");
+    set("aria-expanded", p.expanded);
+    const [min, max, now, text] = p.value ?? [];
+    set("aria-valuemin", min);
+    set("aria-valuemax", max);
+    set("aria-valuenow", now);
+    set("aria-valuetext", text);
+    set("aria-live", p.live);
+    set("aria-hidden", p.hidden && "true");
+  }
+
+  /** Pressables take the keyboard focus (Tab; Enter and Space press them),
+   * unless disabled or hidden from assistive technologies. */
+  updateFocusable(el) {
+    const p = el._props;
+    const focusable = el._pressable && !p?.disabled && !p?.hidden;
+    if (focusable) el.tabIndex = 0;
+    else if (el.hasAttribute("tabindex") && !el._a11yFocus) el.removeAttribute("tabindex");
+    if (focusable && !el._focusListeners) {
+      el._focusListeners = true;
+      // `focus:` classes follow the keyboard focus (the browser draws a
+      // ring only then), not the focus a click would give.
+      el.addEventListener("focus", () => el.matches(":focus-visible") && this.setState(el, FOCUSED, true));
+      el.addEventListener("blur", () => this.setState(el, FOCUSED, false));
+    }
+    this.updateAria(el);
+  }
+
+  /** What touches on `el` leave to the browser: nothing on views with
+   * native pans, pinches or rotations; a `panActivation` gate along one
+   * axis leaves scrolling along the other. */
+  updateTouchAction(el) {
+    const pan = el._gestures?.pan || el._events.has("onPanStart") || el._events.has("onPanEnd");
+    const pinch = el._gestures?.pinch || el._gestures?.rotation;
+    const gate = el._props?.panActivation;
+    const horizontal = gate && gate[0] != null && gate[1] == null;
+    const vertical = gate && gate[1] != null && gate[0] == null;
+    el.classList.toggle("nsh-pan", !!(pinch || (pan && !horizontal && !vertical)));
+    el.classList.toggle("nsh-pan-x", !pinch && !!horizontal);
+    el.classList.toggle("nsh-pan-y", !pinch && !!vertical);
   }
 
   op_la([, create, update, del]) {
@@ -917,6 +1055,7 @@ class Player {
     const b = el._behavior;
     for (const m of el._markers ?? []) m.remove();
     el._markers = [];
+    el._snapPoints = null;
     if (!b || !el._content || !el._frame) {
       el.style.scrollSnapType = "";
       return;
@@ -932,6 +1071,7 @@ class Player {
       el.style.scrollSnapType = "";
       return;
     }
+    el._snapPoints = [...points].sort((a, b) => a - b);
     el.style.scrollSnapType = `${el._horizontal ? "x" : "y"} mandatory`;
     for (const p of points) {
       const m = document.createElement("div");
@@ -964,12 +1104,33 @@ class Player {
 
   scrolled(el) {
     this.updateSticky(el);
+    // Still moving after the finger left (touch scrolling is the
+    // browser's): a glide.
+    if (el._released && !el._momentum && performance.now() - el._released < 150) {
+      el._momentum = true;
+      this.scrollEvent(el, "onMomentumScrollBegin");
+    }
     this.call((w) => w.nsh_scroll(el._id, el.scrollLeft, el.scrollTop, el._applied));
   }
 
+  /** The browser's scrolling stopped: the end, unless the scroll is driven
+   * here (`drive`) or a finger still holds it. */
   scrollEnded(el) {
-    const payload = { x: el.scrollLeft, y: el.scrollTop };
-    for (const name of ["onScrollEnd", "onMomentumScrollEnd"]) if (el._events.has(name)) this.event(el._id, name, payload);
+    if (el._driven || el._touchDrag) return;
+    // The browser's end of a scroll that ended here (`ownEnd`).
+    const own = el._ownEnd;
+    el._ownEnd = null;
+    if (own && own[0] === el.scrollLeft && own[1] === el.scrollTop) return;
+    el._released = 0;
+    if (el._restoreSnap) {
+      el._restoreSnap = false;
+      this.snapMarkers(el);
+    }
+    if (el._momentum) {
+      el._momentum = false;
+      this.scrollEvent(el, "onMomentumScrollEnd");
+    }
+    this.scrollEvent(el, "onScrollEnd");
   }
 
   op_ref() {}
@@ -1086,7 +1247,9 @@ class Player {
 
   op_g([, id, pan, pinch, rotation]) {
     const el = this.view(id);
-    if (el) el._gestures = { pan, pinch, rotation };
+    if (!el) return;
+    el._gestures = { pan, pinch, rotation };
+    this.updateTouchAction(el);
   }
 
   // Inputs
@@ -1152,7 +1315,7 @@ class Player {
     });
     field.addEventListener("keydown", (e) => {
       if (el._events.has("onKeyPress")) {
-        const key = e.key === "Backspace" || e.key === "Enter" ? e.key : e.key.length === 1 ? e.key : null;
+        const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" ? e.key : e.key.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
       // Return submits unless it inserts a line break (`submitBehavior`);
@@ -1289,8 +1452,151 @@ class Player {
       below.style.visibility = "";
       below.style.transform = "";
     }
+    screen._popping = true;
     screen.style.transform = "translateX(100%)";
     setTimeout(() => this.event(screen._id, "onDismiss"), 300);
+    this.syncHistorySoon();
+  }
+
+  /** A stack's screens, without one going back. */
+  screensOf(stack) {
+    return [...stack.children].filter((s) => s._kind === "screen" && !s._popping);
+  }
+
+  /** The newest modal that is presented and not leaving. */
+  topModal() {
+    const modals = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving);
+    return modals[modals.length - 1] ?? null;
+  }
+
+  /** The innermost shown stack (inside `within`, else anywhere) that goes
+   * back: it has a screen under the top one, or a top one that asks. */
+  backStack(within) {
+    const shown = (el) => el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true);
+    const candidates = [];
+    for (const el of this.views.values()) {
+      if (el._kind !== "stack" || !shown(el) || (within && !within.contains(el))) continue;
+      const screens = this.screensOf(el);
+      if (screens.length > 1 || screens[screens.length - 1]?._screen?.preventBack) candidates.push(el);
+    }
+    return candidates.find((c) => !candidates.some((o) => o !== c && c.contains(o))) ?? null;
+  }
+
+  /**
+   * Going back (Escape, the browser's or the mouse's back button): a stack
+   * inside the newest modal pops, else that modal asks to close; without a
+   * modal the app's `onBackPress` hears it first when it listens (it sends
+   * `Command::Back` when no listener takes it), else the innermost stack
+   * pops. Decided here from what is mounted, as on Android and desktops.
+   * Whether something took it.
+   */
+  back() {
+    if (!this.topModal() && this.root._events?.has("onBackPress")) {
+      this.event(ROOT_ID, "onBackPress");
+      return true;
+    }
+    return this.defaultBack();
+  }
+
+  /** Going back as without the app's listeners (`Command::Back`). */
+  defaultBack() {
+    const modal = this.topModal();
+    const stack = this.backStack(modal);
+    if (stack) {
+      const screens = this.screensOf(stack);
+      this.goBack(screens[screens.length - 1]);
+      return true;
+    }
+    if (modal) {
+      this.requestClose(modal);
+      return true;
+    }
+    return false;
+  }
+
+  // History: one entry per screen over the bottom one of each shown stack
+  // and per presented modal, so that the browser's back button goes back
+  // in the app. Entries the app takes away itself are gone back over
+  // (`history.go`), their `popstate` ignored.
+
+  installHistory() {
+    this.historyDepth = 0;
+    this.ignoredPops = 0;
+    // Entries are this page load's: those of an earlier load (a reload
+    // keeps them, with their depths) are foreign, below this one's.
+    this.historySession = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    history.replaceState(this.historyState(0), "");
+    window.addEventListener("popstate", (e) => this.popState(e));
+  }
+
+  historyState(depth) {
+    return { ...(history.state ?? {}), nsh: depth, nshSession: this.historySession };
+  }
+
+  /** A new run starts at the app's first entry. */
+  resetHistory() {
+    if (!this.history || !this.historyDepth) return;
+    this.ignoredPops++;
+    history.go(-this.historyDepth);
+    this.historyDepth = 0;
+  }
+
+  backDepth() {
+    let depth = [...this.root.children].filter((el) => el._kind === "modal" && !el._leaving).length;
+    for (const el of this.views.values()) {
+      if (el._kind === "stack" && el.isConnected && (el.checkVisibility?.({ visibilityProperty: true }) ?? true)) {
+        depth += Math.max(0, this.screensOf(el).length - 1);
+      }
+    }
+    return depth;
+  }
+
+  syncHistorySoon() {
+    if (!this.history || this.historySync) return;
+    this.historySync = setTimeout(() => {
+      this.historySync = 0;
+      this.syncHistory();
+    }, 0);
+  }
+
+  syncHistory() {
+    const depth = this.backDepth();
+    const have = this.historyDepth;
+    for (let i = have + 1; i <= depth; i++) history.pushState(this.historyState(i), "");
+    if (depth < have) {
+      this.ignoredPops++;
+      history.go(depth - have);
+    }
+    this.historyDepth = depth;
+  }
+
+  popState(e) {
+    if (this.ignoredPops > 0) {
+      this.ignoredPops--;
+      return;
+    }
+    const have = this.historyDepth;
+    if (e.state?.nshSession !== this.historySession) {
+      // Back past the app's first entry: the app goes back to its start.
+      // An earlier load's entries (a reload keeps them) are passed over,
+      // as if the page had been left from its first screen.
+      this.historyDepth = 0;
+      for (let i = 0; i < have; i++) if (!this.back()) break;
+      if (e.state?.nsh != null) history.back();
+      return;
+    }
+    const at = e.state.nsh ?? 0;
+    if (at < have) {
+      // Back (several entries from the back button's menu): what the app
+      // does not let go back gets its entry again.
+      this.historyDepth = at;
+      for (let i = at; i < have; i++) if (!this.back()) break;
+      this.syncHistorySoon();
+    } else if (at > have) {
+      // Forward to a screen that is gone: back where the app is.
+      this.ignoredPops++;
+      history.go(have - at);
+    }
   }
 
   stackChanged(stack, added) {
@@ -1306,6 +1612,8 @@ class Player {
       const top = i === screens.length - 1;
       screen.style.visibility = top || i === screens.length - 2 ? "" : "hidden";
       if (screen === added && i > 0) {
+        const focus = document.activeElement;
+        if (focus && focus !== document.body && this.root.contains(focus) && !added.contains(focus)) added._restoreFocus = focus;
         screen.style.transform = "translateX(100%)";
         requestAnimationFrame(() => requestAnimationFrame(() => { screen.style.transform = ""; }));
       } else {
@@ -1314,6 +1622,7 @@ class Player {
       this.renderHeader(screen);
     });
     if (added && stack._frame) this.reportRoot(added, stack._frame[2], stack._frame[3]);
+    this.syncHistorySoon();
   }
 
   reportRoot(el, width, height) {
@@ -1324,10 +1633,10 @@ class Player {
 
   // Modals
 
-  op_mc([, id, animation, transparent]) {
+  op_mc([, id, animation, transparent, dismissible]) {
     const el = this.view(id);
     if (!el) return;
-    el._modal = { animation, transparent };
+    el._modal = { animation, transparent, dismissible };
     el.style.background = transparent ? "" : (this.shownDark ? "#000" : "#fff");
   }
 
@@ -1341,7 +1650,16 @@ class Player {
     el.style.transition = "none";
     el.style.transform = animation === "slide" ? "translateY(100%)" : "";
     el.style.opacity = animation === "fade" ? "0" : "";
+    el._leaving = false;
+    el._closed = false;
+    // The focus leaves the views under it, and comes back when it closes.
+    const focus = document.activeElement;
+    el._restoreFocus = focus !== document.body && this.root.contains(focus) ? focus : null;
+    el._restoreFocus?.blur();
+    el.setAttribute("aria-modal", "true");
     this.root.append(el);
+    this.scopeFocus();
+    this.syncHistorySoon();
     this.reportRoot(el, w, h);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       el.style.transition = "";
@@ -1351,14 +1669,42 @@ class Player {
     }));
   }
 
-  dismiss(el) {
+  /** Takes modal `el` away; `onDismiss` follows unless `reported`. */
+  dismiss(el, reported = el._closed) {
+    if (el._leaving) return;
+    el._leaving = true;
     const animation = el._modal?.animation ?? "slide";
     if (animation === "slide") el.style.transform = "translateY(100%)";
     if (animation === "fade") el.style.opacity = "0";
+    this.scopeFocus();
+    this.syncHistorySoon();
+    const restore = el._restoreFocus;
+    if (restore?.isConnected && !this.topModal()) restore.focus({ preventScroll: true });
     setTimeout(() => {
-      el.remove();
-      this.event(el._id, "onDismiss");
+      if (el._leaving) el.remove();
+      if (!reported) this.event(el._id, "onDismiss");
     }, animation === "none" ? 0 : 350);
+  }
+
+  /** Going back or Escape on a modal: it asks to close (`onRequestClose`);
+   * a `dismissible` one closes natively, then reports `onDismiss`. */
+  requestClose(el) {
+    this.event(el._id, "onRequestClose");
+    if (el._modal?.dismissible && !el._leaving) {
+      el._closed = true;
+      this.event(el._id, "onDismiss");
+      this.dismiss(el, true);
+    }
+  }
+
+  /** Only the newest modal or dialog takes the focus, input and the
+   * screen reader: what lies under it is inert. */
+  scopeFocus() {
+    const top = this.dialogs?.[this.dialogs.length - 1] ?? this.topModal();
+    for (const child of this.root.children) {
+      if (child === this.live || child.classList.contains("nsh-error")) continue;
+      child.inert = (child._kind === "modal" && !!child._leaving) || (!!top && child !== top);
+    }
   }
 
   // Web views and videos
@@ -1406,13 +1752,27 @@ class Player {
         el._applied++;
         el.scrollTo({ left: el._horizontal ? el.scrollWidth : 0, top: el._horizontal ? 0 : el.scrollHeight, behavior: args[0] ? "smooth" : "instant" });
         break;
-      case "dialog": this.dialog(args[0], args[1], args[2], args[3]); break;
+      case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true); break;
       case "reload": el?._frameEl?.contentWindow?.location.reload(); break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "setClipboard": navigator.clipboard?.writeText(args[0]).catch(() => {}); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "statusBar": this.setThemeColor(args[0]); break;
+      case "back": this.defaultBack(); break;
+      case "announce":
+        // Cleared first: the same text again is announced again.
+        this.live.textContent = "";
+        setTimeout(() => { this.live.textContent = args[0]; }, 50);
+        break;
+      case "a11yFocus":
+        if (!el) break;
+        if (!el.hasAttribute("tabindex")) {
+          el.tabIndex = -1;
+          el._a11yFocus = true;
+        }
+        el.focus();
+        break;
       default: break;
     }
   }
@@ -1566,7 +1926,7 @@ class Player {
     request.resume?.();
   }
 
-  dialog(dialogId, title, message, buttons) {
+  dialog(dialogId, title, message, buttons, styles, cancelable) {
     const backdrop = document.createElement("div");
     backdrop.className = "nsh-dialog-backdrop";
     const box = document.createElement("div");
@@ -1581,19 +1941,38 @@ class Player {
       p.textContent = message;
       box.append(p);
     }
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", title ?? message ?? "");
+    const focus = document.activeElement;
+    const restore = focus !== document.body && this.root.contains(focus) ? focus : null;
     const close = (index) => {
       backdrop.remove();
+      this.dialogs = this.dialogs.filter((d) => d !== backdrop);
+      this.scopeFocus();
+      if (restore?.isConnected) restore.focus({ preventScroll: true });
       this.event(ROOT_ID, "onDialog", { id: dialogId, index });
     };
-    (buttons.length ? buttons : ["OK"]).forEach((text, index) => {
+    // Escape (`keyDown`) presses the cancel button, else answers as a
+    // click beside the box does.
+    const cancel = styles.indexOf("cancel");
+    backdrop._cancel = () => (cancel >= 0 ? close(cancel) : cancelable && close(-1));
+    const list = buttons.length ? buttons : ["OK"];
+    // The last regular button is the default action (Return).
+    let preferred = null;
+    list.forEach((text, index) => {
       const b = document.createElement("button");
       b.textContent = text;
       b.addEventListener("click", () => close(index));
       box.append(b);
+      if ((styles[index] ?? "default") === "default") preferred = b;
     });
-    backdrop.addEventListener("click", (e) => e.target === backdrop && close(-1));
+    backdrop.addEventListener("click", (e) => e.target === backdrop && cancelable && close(-1));
     backdrop.append(box);
     this.root.append(backdrop);
+    (this.dialogs ??= []).push(backdrop);
+    this.scopeFocus();
+    (preferred ?? box.querySelector("button")).focus({ preventScroll: true });
   }
 
   op_comp() {}
@@ -1621,6 +2000,334 @@ class Player {
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
     // A drag that scrolls must not also select or drag images.
     root.addEventListener("dragstart", (e) => e.preventDefault());
+    // A click leaves the keyboard focus where it is (in a field, too) and
+    // selects nothing, as in native apps; fields, selectable text and
+    // hosted pages and videos take it as usual.
+    root.addEventListener("mousedown", (e) => {
+      if (this.lastPointer === "touch" || this.editable(e.target)) return;
+      e.preventDefault();
+      // Which would also keep the keys from an app in an iframe.
+      if (!document.hasFocus()) window.focus();
+    });
+    // No page menu over the app (nor iOS's callout on a long press); fields
+    // and selectable text keep theirs.
+    root.addEventListener("contextmenu", (e) => this.editable(e.target) || e.preventDefault());
+    root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
+    root.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "mouse") this.hover = [e.clientX, e.clientY];
+    });
+    root.addEventListener("focusin", () => (Player.active = this));
+    window.addEventListener("keydown", (e) => this.keyDown(e));
+    window.addEventListener("keyup", (e) => this.keyUp(e));
+    // The mouse's back button goes back in the app (with history, as the
+    // browser's back button does).
+    root.addEventListener("mouseup", (e) => {
+      if (e.button !== 3 || this.history) return;
+      e.preventDefault();
+      this.back();
+    });
+    this.live = document.createElement("div");
+    this.live.className = "nsh-live";
+    this.live.setAttribute("aria-live", "polite");
+    if (this.history) this.installHistory();
+  }
+
+  /** Whether the browser handles presses at `target` itself: fields,
+   * selectable text, hosted pages and videos. */
+  editable(target) {
+    return !!target?.closest?.(".nsh-field, .nsh-selectable, iframe, video");
+  }
+
+  /** This player takes the keys: the focus is in it, or it was the last
+   * one used and the focus is on no element. */
+  takesKeys() {
+    const focus = document.activeElement;
+    if (focus && focus !== document.body) return this.root.contains(focus);
+    return (Player.active ?? this) === this;
+  }
+
+  // Keyboard
+
+  keyDown(e) {
+    if (!this.wasm || !this.takesKeys()) return;
+    const focus = document.activeElement;
+    const inRoot = focus && this.root.contains(focus);
+    const editing = inRoot && !!focus.closest(".nsh-field, iframe");
+    // The app's shortcuts first, where the focus is (`nsh/keymap`): matched
+    // natively against the mounted table, then reported.
+    const code = e.isComposing ? -1 : keyCode(e);
+    if (code >= 0) {
+      const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0) | (APPLE ? 16 : 0);
+      const found = this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
+      if (found !== -1) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (found >= 0) this.call((w) => w.nsh_key_command(found));
+        return;
+      }
+    }
+    if (e.defaultPrevented || e.isComposing) return;
+    const plain = !e.ctrlKey && !e.altKey && !e.metaKey;
+    const dialog = this.dialogs?.[this.dialogs.length - 1];
+    if (dialog) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        dialog._cancel();
+      }
+      return;
+    }
+    if (editing) {
+      // Escape leaves the field.
+      if (e.key === "Escape" && plain && focus.classList.contains("nsh-field")) {
+        e.preventDefault();
+        focus.blur();
+      }
+      return;
+    }
+    if (this.selectionKey(e)) return;
+    if (inRoot && focus._pressable && plain && !e.shiftKey && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      if (e.repeat) return;
+      // Return presses at once, Space when it is released, as buttons do.
+      this.keyPress = { press: focus, states: this.ancestors(focus).filter((v) => v._tracked & PRESSED) };
+      this.pressIn(this.keyPress);
+      for (const v of this.keyPress.states) this.setState(v, PRESSED, true);
+      if (e.key === "Enter") this.keyPressEnd(true);
+      return;
+    }
+    const backKey = e.key === "BrowserBack" || (e.altKey && !APPLE && e.key === "ArrowLeft") || (e.metaKey && APPLE && e.key === "[");
+    if ((e.key === "Escape" && plain) || backKey) {
+      // With history the browser goes back itself on its keys (`popState`).
+      if (backKey && this.history) return;
+      if (this.back()) e.preventDefault();
+      return;
+    }
+    if (plain && this.scrollKey(e, inRoot ? focus : null)) e.preventDefault();
+  }
+
+  keyUp(e) {
+    if (e.key === " " && this.keyPress) this.keyPressEnd(true);
+  }
+
+  keyPressEnd(inside) {
+    const p = this.keyPress;
+    this.keyPress = null;
+    this.pressOut(p, inside);
+    for (const v of p.states) this.setState(v, PRESSED, false);
+  }
+
+  /** Select all and Escape in selectable text with a selection: within it. */
+  selectionKey(e) {
+    const sel = getSelection();
+    const anchor = sel?.anchorNode;
+    const text = sel?.rangeCount && !sel.isCollapsed && anchor && this.root.contains(anchor)
+      ? (anchor.nodeType === 1 ? anchor : anchor.parentElement)?.closest(".nsh-selectable")
+      : null;
+    if (!text) return false;
+    if (e.key === "a" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      sel.selectAllChildren(text);
+      return true;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      sel.removeAllRanges();
+      return true;
+    }
+    return false;
+  }
+
+  /** Arrows (40 points), Page Up / Down and Space / Shift+Space (a page),
+   * Home / End scroll the scroll view around the focus, else the one under
+   * the pointer. */
+  scrollKey(e, focus) {
+    const k = e.key;
+    const horizontal = k === "ArrowLeft" || k === "ArrowRight";
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", " ", "Home", "End"].includes(k)) return false;
+    if (e.shiftKey && k !== " ") return false;
+    let start = focus && focus !== this.root ? focus : null;
+    if (!start && this.hover) start = document.elementFromPoint(this.hover[0], this.hover[1]);
+    const chain = this.scrollChain(start);
+    const el = chain.find((v) => !!v._horizontal === horizontal) ?? (horizontal ? null : chain[0]);
+    if (!el) return false;
+    const h = !!el._horizontal;
+    const pos = h ? el.scrollLeft : el.scrollTop;
+    const max = h ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight;
+    const page = (h ? el.clientWidth : el.clientHeight) * 0.875;
+    const d = { ArrowUp: -40, ArrowLeft: -40, ArrowDown: 40, ArrowRight: 40, PageUp: -page, PageDown: page,
+      " ": e.shiftKey ? -page : page, Home: -pos, End: max - pos }[k];
+    if (el._snapPoints) this.snapStep(el, Math.sign(d));
+    else this.scrollSmoothly(el, h ? d : 0, h ? 0 : d, true);
+    return true;
+  }
+
+  // Wheels and touchpads
+
+  /** The scroll views around `target` that scroll, innermost first. */
+  scrollChain(target) {
+    const view = target ? this.viewOf(target) : null;
+    return view ? this.ancestors(view).filter((v) => v._kind === "scroll" && v._behavior?.enabled !== false) : [];
+  }
+
+  /**
+   * A wheel or touchpad scroll goes to the innermost scroll view along its
+   * axis that can move that way (a vertical wheel scrolls a horizontal view
+   * when no vertical one can), and stays on it until the scroll ends
+   * (events 200 ms apart). Notches glide; Ctrl + wheel (a touchpad's pinch)
+   * pinches the view under the pointer and never zooms the page.
+   */
+  wheel(e) {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      this.wheelPinch(e);
+      return;
+    }
+    const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? this.size[1] : 1;
+    let dx = e.deltaX * unit;
+    let dy = e.deltaY * unit;
+    if (e.shiftKey && !dx) [dx, dy] = [dy, 0];
+    const now = performance.now();
+    let lock = this.wheelLock;
+    if (!lock || now - lock.t > 200 || !lock.el.isConnected) {
+      const chain = this.scrollChain(e.target);
+      const horizontal = Math.abs(dx) > Math.abs(dy);
+      const can = (v, d) => {
+        const h = !!v._horizontal;
+        const pos = h ? v.scrollLeft : v.scrollTop;
+        const max = h ? v.scrollWidth - v.clientWidth : v.scrollHeight - v.clientHeight;
+        return d < 0 ? pos > 0.5 : d > 0 && pos < max - 0.5;
+      };
+      const el = chain.find((v) => !!v._horizontal === horizontal && can(v, horizontal ? dx : dy))
+        ?? (horizontal ? null : chain.find((v) => v._horizontal && can(v, dy)));
+      // Nothing to scroll: the page around may.
+      this.wheelLock = lock = el ? { el, total: 0, snapped: false } : null;
+      if (!lock) return;
+    }
+    e.preventDefault();
+    lock.t = now;
+    const el = lock.el;
+    const d = el._horizontal ? dx || dy : dy;
+    if (el._snapPoints) {
+      // One snap point per scroll.
+      lock.total += d;
+      if (!lock.snapped && Math.abs(lock.total) >= 20) {
+        lock.snapped = true;
+        this.snapStep(el, Math.sign(lock.total));
+      }
+      return;
+    }
+    // Wheel notches glide; touchpads move with the fingers.
+    const smooth = e.deltaMode !== 0 || Math.abs(d) >= 40;
+    this.scrollSmoothly(el, el._horizontal ? d : 0, el._horizontal ? 0 : d, smooth);
+  }
+
+  /** Moves `el` by (`dx`, `dy`), gliding there when `smooth`; once it
+   * settles (no more input for 200 ms), `onScrollEnd`. */
+  scrollSmoothly(el, dx, dy, smooth) {
+    let a = el._glide;
+    if (!a) {
+      a = el._glide = { x: el.scrollLeft, y: el.scrollTop, frame: 0, timer: 0, last: 0 };
+      this.drive(el, 1);
+    }
+    a.x = Math.min(Math.max(a.x + dx, 0), el.scrollWidth - el.clientWidth);
+    a.y = Math.min(Math.max(a.y + dy, 0), el.scrollHeight - el.clientHeight);
+    const settle = () => {
+      if (a.frame || a.timer) return;
+      el._glide = null;
+      this.drive(el, -1);
+      this.ownEnd(el);
+    };
+    if (!smooth) {
+      cancelAnimationFrame(a.frame);
+      a.frame = 0;
+      el.scrollLeft = a.x;
+      el.scrollTop = a.y;
+    } else if (!a.frame) {
+      a.last = performance.now();
+      // Where the glide is: browsers round the offsets they are given.
+      a.at = [el.scrollLeft, el.scrollTop];
+      const step = (now) => {
+        const k = 1 - Math.pow(0.75, (now - a.last) / 16.7);
+        a.last = now;
+        const x = a.at[0] + (a.x - a.at[0]) * k;
+        const y = a.at[1] + (a.y - a.at[1]) * k;
+        const done = Math.abs(a.x - x) < 0.5 && Math.abs(a.y - y) < 0.5;
+        a.at = done ? [a.x, a.y] : [x, y];
+        el.scrollLeft = a.at[0];
+        el.scrollTop = a.at[1];
+        a.frame = done ? 0 : requestAnimationFrame(step);
+        if (done) settle();
+      };
+      a.frame = requestAnimationFrame(step);
+    }
+    clearTimeout(a.timer);
+    a.timer = setTimeout(() => {
+      a.timer = 0;
+      settle();
+    }, 200);
+  }
+
+  /** The snap point of a snapping view next to where it is towards `dir`
+   * (0: the nearest). */
+  snapPoint(el, dir) {
+    const pos = el._horizontal ? el.scrollLeft : el.scrollTop;
+    const points = el._snapPoints;
+    if (dir > 0) return points.find((p) => p > pos + 1);
+    if (dir < 0) return [...points].reverse().find((p) => p < pos - 1);
+    return points.reduce((a, b) => (Math.abs(b - pos) < Math.abs(a - pos) ? b : a));
+  }
+
+  /** Scrolls a snapping view to its next snap point towards `dir`. */
+  snapStep(el, dir) {
+    if (dir) this.snapTo(el, this.snapPoint(el, dir));
+  }
+
+  /** Glides to snap point `target` as the momentum of a scroll (the
+   * browser's `scrollend` ends it); false when it is there. */
+  snapTo(el, target) {
+    const h = !!el._horizontal;
+    if (target == null || Math.abs(target - (h ? el.scrollLeft : el.scrollTop)) < 1) return false;
+    el._momentum = true;
+    this.scrollEvent(el, "onMomentumScrollBegin");
+    el.scrollTo({ [h ? "left" : "top"]: target, behavior: "smooth" });
+    return true;
+  }
+
+  /** Ctrl + wheel pinches the view under the pointer (native values),
+   * ending when the wheel stops for 150 ms. */
+  wheelPinch(e) {
+    let t = this.wheelPinchState;
+    if (!t) {
+      const view = this.viewOf(e.target);
+      const el = view && this.ancestors(view).find((v) => v._gestures?.pinch);
+      if (!el) return;
+      t = this.wheelPinchState = { el, scale: 1, timer: 0 };
+      this.call((w) => w.nsh_transform_gesture(el._id, 0, 0, 1));
+    }
+    t.scale *= Math.exp(-e.deltaY / 100);
+    this.call((w) => w.nsh_transform_gesture(t.el._id, 0, 1, t.scale));
+    clearTimeout(t.timer);
+    t.timer = setTimeout(() => {
+      this.wheelPinchState = null;
+      this.call((w) => w.nsh_transform_gesture(t.el._id, 0, 2, t.scale));
+    }, 150);
+  }
+
+  /** Counts what drives `el`'s scrolling here (mouse drags, glides, wheels,
+   * keys): meanwhile the browser's `scrollend` is not the end. */
+  drive(el, n) {
+    el._driven = Math.max(0, (el._driven ?? 0) + n);
+  }
+
+  /** `onScrollEnd` of a scroll driven here; the browser's `scrollend`
+   * that may follow at the same offset is not another. */
+  ownEnd(el) {
+    el._ownEnd = [el.scrollLeft, el.scrollTop];
+    this.scrollEvent(el, "onScrollEnd");
+  }
+
+  scrollEvent(el, name) {
+    if (el._events.has(name)) this.event(el._id, name, { x: el.scrollLeft, y: el.scrollTop });
   }
 
   point(e) {
@@ -1649,10 +2356,14 @@ class Player {
   }
 
   pointerDown(e) {
+    this.lastPointer = e.pointerType;
+    Player.active = this;
     if (e.button > 0) return;
     const target = this.viewOf(e.target);
     if (!target) return;
     const isField = e.target.classList?.contains("nsh-field");
+    // A mouse drag selects in selectable text and fields instead of scrolling.
+    const selects = this.editable(e.target);
     const chain = this.ancestors(target);
     const [x, y] = this.point(e);
     const p = {
@@ -1660,7 +2371,9 @@ class Player {
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       pan: chain.find((v) => v._gestures?.pan || v._events.has("onPanStart") || v._events.has("onPanEnd")) ?? null,
-      scroll: e.pointerType === "mouse" && !isField ? chain.find((v) => v._kind === "scroll") ?? null : null,
+      scroll: e.pointerType === "mouse" && !selects ? chain.find((v) => v._kind === "scroll") ?? null : null,
+      // Touch scrolling is the browser's, reported from here (`touchScroll`).
+      scrolls: e.pointerType === "touch" ? chain.filter((v) => v._kind === "scroll") : null,
       pinch: chain.find((v) => v._gestures?.pinch || v._gestures?.rotation) ?? null,
       // `panActivation`: decided here as the pointer moves (PanActivation::decide).
       gate: chain.find((v) => v._props?.panActivation) ?? null,
@@ -1738,7 +2451,8 @@ class Player {
       } else if (p.scroll && !gated) {
         p.mode = "scroll";
         p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop];
-        if (p.scroll._events.has("onScrollBeginDrag")) this.event(p.scroll._id, "onScrollBeginDrag", { x: p.scroll.scrollLeft, y: p.scroll.scrollTop });
+        this.drive(p.scroll, 1);
+        this.scrollEvent(p.scroll, "onScrollBeginDrag");
       }
       if (p.mode || Math.hypot(tx, ty) > 10) {
         this.pressOut(p, false);
@@ -1777,6 +2491,7 @@ class Player {
   pointerUp(e, cancelled) {
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
+    if (cancelled && p.scrolls?.length) this.touchScroll(p, this.point(e));
     if (p.touchPath.length) this.touchEvent(cancelled ? 3 : 2, e.pointerId);
     this.pointers.delete(e.pointerId);
     if (this.twoFinger) {
@@ -1788,8 +2503,15 @@ class Player {
       this.call((w) => w.nsh_pan(p.pan._id, 2, p.x - p.startX, p.y - p.startY, p.vx, p.vy));
     } else if (p.mode === "scroll") {
       const s = p.scroll;
-      if (s._events.has("onScrollEndDrag")) this.event(s._id, "onScrollEndDrag", { x: s.scrollLeft, y: s.scrollTop });
-      this.glide(s, s._horizontal ? -p.vx : -p.vy);
+      this.scrollEvent(s, "onScrollEndDrag");
+      const v = s._horizontal ? -p.vx : -p.vy;
+      if (s._snapPoints) {
+        // Snapping views settle on the next snap point along a flick, else
+        // on the nearest one; snapping comes back once they are there.
+        this.drive(s, -1);
+        s._restoreSnap = true;
+        if (!this.snapTo(s, this.snapPoint(s, Math.abs(v) > 300 ? Math.sign(v) : 0))) this.scrollEnded(s);
+      } else this.glide(s, v);
     } else if (p.press) {
       const rect = p.press.getBoundingClientRect();
       const inside = e.clientX >= rect.left - 8 && e.clientX <= rect.right + 8 && e.clientY >= rect.top - 8 && e.clientY <= rect.bottom + 8;
@@ -1797,15 +2519,49 @@ class Player {
     }
   }
 
+  /** The browser took a touch to scroll (`pointercancel`): the drag of
+   * the scroll view along the way it moved, until the fingers lift. */
+  touchScroll(p, [x, y]) {
+    const horizontal = Math.abs(x - p.startX) > Math.abs(y - p.startY);
+    const el = p.scrolls.find((v) => !!v._horizontal === horizontal) ?? p.scrolls[0];
+    if (el._touchDrag) return;
+    el._touchDrag = true;
+    el._momentum = false;
+    (this.touchDrags ??= new Set()).add(el);
+    this.scrollEvent(el, "onScrollBeginDrag");
+    if (!this.touchEndListener) {
+      this.touchEndListener = (e) => {
+        if (e.touches.length) return;
+        for (const v of this.touchDrags) {
+          v._touchDrag = false;
+          v._released = performance.now();
+          this.scrollEvent(v, "onScrollEndDrag");
+          // Without a glide no scroll follows (nor, sometimes, `scrollend`).
+          setTimeout(() => v._released && !v._momentum && this.scrollEnded(v), 200);
+        }
+        this.touchDrags.clear();
+      };
+      window.addEventListener("touchend", this.touchEndListener);
+      window.addEventListener("touchcancel", this.touchEndListener);
+    }
+  }
+
   /** Momentum after a mouse drag (touch scrolling is the browser's). */
   glide(s, velocity) {
     let v = Math.abs(velocity) > 80 ? velocity / 1000 : 0;
     let last = performance.now();
-    const restoreSnap = () => this.snapMarkers(s);
+    const momentum = v !== 0;
+    const end = () => {
+      this.drive(s, -1);
+      this.snapMarkers(s);
+      if (momentum) this.scrollEvent(s, "onMomentumScrollEnd");
+      this.ownEnd(s);
+    };
     if (!v) {
-      restoreSnap();
+      end();
       return;
     }
+    this.scrollEvent(s, "onMomentumScrollBegin");
     const step = (now) => {
       const dt = now - last;
       last = now;
@@ -1813,7 +2569,7 @@ class Player {
       else s.scrollTop += v * dt;
       v *= Math.pow(0.995, dt);
       if (Math.abs(v) > 0.02) requestAnimationFrame(step);
-      else restoreSnap();
+      else end();
     };
     requestAnimationFrame(step);
   }

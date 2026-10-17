@@ -152,6 +152,58 @@ as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by t
 `Image.getSize` / `prefetch` (`Command::ImageInfo`) load an `Image` in the page and answer with `onImageInfo` on
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
+## Input
+
+`nsh.js` turns browser input into what the desktop backends report (`docs/dev/linux.md` is the reference), and phone
+browsers' touches into what phones report:
+
+- **Touches** pan only scroll views: the root is `touch-action: none` (`pan-x pan-y` in an iframe, `nsh-embedded`,
+  so that swipes the app does not take scroll the embedding page), scroll views `pan-x pan-y`, views with native
+  pans or pinches `none` (a `panActivation` gate along one axis leaves the other axis to the scroll views around), so
+  the page neither scrolls, zooms nor refreshes under the app and presses and pans get no `pointercancel`. Touch
+  scrolling is the browser's: a `pointercancel` in a scroll view starts its drag, `touchend` ends it, a scroll within
+  150 ms after it begins the glide, `scrollend` ends it (`touchScroll`, `scrolled`, `scrollEnded`).
+- **Wheels and touchpads** (`wheel`) go to the innermost scroll view along their axis that can move that way (a
+  vertical wheel scrolls a horizontal view when no vertical one can) and stay on it while events come within 200 ms;
+  notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
+  event goes on to the page around (an embedding page scrolls). Ctrl + wheel (a touchpad's pinch) pinches the view
+  under the pointer and never zooms the page. Mouse drags scroll as before, with momentum, and snapping views settle
+  on the next snap point along a flick. Scroll events follow the desktop backends: drags send `onScrollBeginDrag` /
+  `EndDrag`, glides and snaps `onMomentumScrollBegin` / `End`, every scroll ends with one `onScrollEnd` (the browser's
+  `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
+- **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
+  Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
+  passed as the character they type without modifiers, else the US layout's character of their `code`; while the app's
+  OS resolves `mod` otherwise than the browser's platform does (Command on Apple platforms, Control elsewhere: `APPLE`
+  in `nsh.js`, bit 16 of `nsh_key`'s modifiers), Control and Command swap, since bindings resolved `mod` for the app's
+  OS (`mod_is_cmd`; `Os::Web` resolves it to Control)); an open dialog (Escape presses its cancel button); a focused
+  field (Escape leaves it); selectable text with a selection (select all, Escape); a focused pressable (Return presses
+  it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the scroll view around the
+  focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page, Home / End).
+- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled or hidden,
+  so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
+  draws a ring inside the view; a popped screen gives the focus back to what had it when the screen was pushed
+  (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
+  text and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
+  modal or dialog are `inert`; the focus a modal or dialog took comes back when it closes.
+- **Accessibility**: `op_vp` sets ARIA from the accessibility props (roles mapped by `ARIA_ROLES`, `aria-disabled`,
+  `-selected`, `-checked`, `-busy`, `-expanded`, `-value*`, `-live`, `-hidden`, the hint as `aria-description`);
+  `Command::Announce` writes into a polite live region, `Command::AccessibilityFocus` focuses the view.
+- **Going back** (`back`) is decided from what is mounted, as on Android and the desktops: a stack inside the newest
+  modal pops, else the modal asks to close (`onRequestClose`; a `dismissible` one closes and reports `onDismiss`);
+  without a modal the root's `onBackPress` hears it when the app listens, else the innermost stack pops (a screen
+  with `preventBack` gets `onBackRequest`). `Command::Back` goes back as without the app's listeners.
+- **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every screen
+  above a stack's first and every modal is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
+  back button and the mouse's go back in the app; entries the app takes away itself are gone back over with
+  `history.go`, whose `popstate` is ignored, and a back the app refuses gets its entry again; a new `run` goes back
+  to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
+  which going back passes over (`history.back()` again) as if the app had been left from its first screen. In an
+  iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
+- **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
+  selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
+  laid out to show a focused field.
+
 ## Not implemented
 
 Refresh controls, zooming scroll views, registered native components, platform services other than the theme color,
