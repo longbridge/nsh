@@ -244,7 +244,7 @@ function Input(props: InputProps): YNode;
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
 | `GestureResponderEvent`、`LayoutEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
 | `ImageAsset` | 导入图片文件得到的对象（`{ uri, width, height }`） |
-| `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux"` |
+| `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`、`AccessibilityState` | 无障碍属性 |
 
 ```tsx

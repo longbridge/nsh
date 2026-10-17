@@ -130,6 +130,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
   wasm: "./nsh.wasm",
   assetBase: "./assets/",   // where `asset:/…` URIs (image imports) are served from
   // dark: true,            // force an appearance; otherwise it follows the system
+  // idiom: "phone",        // force "phone", "pad" or "desktop"; otherwise the pointer and the size decide
 });
 player.run(await (await fetch("./bundle.js")).text());
 ```
@@ -140,8 +141,29 @@ With `nsh-playground.wasm`, `player.runSource(tsx)` compiles TSX first and retur
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 
-> [!NOTE]
-> The web build reports `Platform.OS` as `"ios"`, so apps render their iOS look. It exists to show apps, not as a third target platform.
+## The browser as a platform
+
+`Platform.OS` is `"web"`. What kind of device the browser is on decides how the app behaves, as `Platform.constants.interfaceIdiom`:
+
+- `"desktop"`: a mouse (a fine pointer that hovers) and a container at least 600 points wide. `Platform.isDesktop` is `true`, `Platform.select` picks `desktop`, `desktop={{…}}` props apply and headers are as tall as on the desktop backends.
+- `"pad"`: a touch screen whose short side is at least 600 points; `"phone"` otherwise. These are mobile: `Platform.select` picks `mobile`.
+
+The idiom is decided when the app starts and stays the same while it runs, as on every platform; a narrow desktop window is still a desktop, laid out for its `windowSize()`. `web={{…}}` props, `Platform.select({ web })` and `web:` classes apply in browsers only; `ios={{…}}`, `native` and `ios:` do not apply there.
+
+The page reports the rest of the environment, and keeps it current:
+
+| Value | From the browser |
+|---|---|
+| Locale (`Intl`'s default) | `navigator.languages[0]` |
+| `I18nManager.isRTL` | `<html dir>` when set, else the locale's script |
+| `reduceMotion()` | `prefers-reduced-motion` |
+| `fontScale()` | the root element's font size / 16 px (the browser's text size setting) |
+| `PixelRatio.get()` | `devicePixelRatio` (it changes with zoom and screens) |
+| `colorScheme()` | `prefers-color-scheme` |
+| `safeArea()` | `env(safe-area-inset-*)` where it overlaps the container (`viewport-fit=cover` pages on phones) |
+| `keyboard()` | how much of the container the on-screen keyboard covers (`visualViewport`) |
+
+`Platform.Version` is `"0.0"`, and `screenReaderEnabled()` stays `false` (browsers do not tell). [`StatusBar`](../components/status-bar.md)'s `web={{ themeColor }}` sets the page's `<meta name="theme-color">`, the color browsers give their bars around the page.
 
 ## Networking
 
@@ -158,7 +180,7 @@ The container's size is the app's window (`windowSize()`); resizing the containe
 The web runtime is for demos and documentation. It does not have:
 
 - **Web views, videos and native components**: `WebView` maps to an `<iframe>` and `Video` to `<video>` only in the simplest form; registered native components render an empty box.
-- **Platform services**: the status bar, toasts and the Android back button do nothing, and there is no software keyboard to avoid (`keyboard()` stays 0).
+- **Platform services**: toasts and the Android back button do nothing.
 - **Custom fonts loaded before first use**: imported fonts are registered with `FontFace`, which loads asynchronously, so the first frame may be measured with a fallback font.
 - **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
 - **Pull to refresh and zooming scroll views.**

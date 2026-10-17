@@ -1,10 +1,11 @@
 //! The OS the platform reports decides `Platform` and which platform-only
-//! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`) apply.
+//! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`)
+//! apply; on the web, the idiom decides between mobile and desktop.
 
 use std::time::Duration;
 
 use nsh_core::{ApproxTextEngine, MountItem, Size};
-use nsh_engine::{Bundle, Engine, EngineConfig, Environment, Os};
+use nsh_engine::{Bundle, Engine, EngineConfig, Environment, Idiom, Os};
 
 use crate::ChannelSink;
 
@@ -17,16 +18,21 @@ mount(
       ios={{ accessibilityLabel: "ios" }}
       android={{ accessibilityLabel: "android" }}
       desktop={{ accessibilityLabel: "desktop" }}
+      web={{ accessibilityHint: "web" }}
     >
-      <Text>{`${Platform.OS} ${Platform.isDesktop} ${Platform.select({ ios: "i", mobile: "m", desktop: "d" })}`}</Text>
+      <Text>{`${Platform.OS} ${Platform.isDesktop} ${Platform.select({ ios: "i", mobile: "m", desktop: "d" })} ${Platform.select({ native: "n", default: "-" })}`}</Text>
     </View>
   ),
 );
 "#;
 
-/// The first frame's texts and accessibility labels on `os`.
-fn first_frame(os: Os) -> (Vec<String>, Vec<String>) {
-    let dir = std::env::temp_dir().join(format!("nsh-platform-{}", std::process::id()));
+/// The first frame's texts and accessibility labels and hints on `os`.
+fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
+    let dir = std::env::temp_dir().join(format!(
+        "nsh-platform-{}-{}-{idiom:?}",
+        std::process::id(),
+        os.name()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("App.tsx");
     std::fs::write(&entry, APP).unwrap();
@@ -45,6 +51,7 @@ fn first_frame(os: Os) -> (Vec<String>, Vec<String>) {
         assets: None,
         environment: Environment {
             os,
+            idiom,
             ..Environment::default()
         },
         header_heights: (44.0, 96.0),
@@ -63,6 +70,7 @@ fn first_frame(os: Os) -> (Vec<String>, Vec<String>) {
             MountItem::Text { text, .. } => texts.push(text.text.clone()),
             MountItem::ViewProps { props, .. } => {
                 labels.extend(props.accessibility.label.as_deref().map(str::to_owned));
+                labels.extend(props.accessibility.hint.as_deref().map(str::to_owned));
             }
             _ => {}
         }
@@ -72,19 +80,22 @@ fn first_frame(os: Os) -> (Vec<String>, Vec<String>) {
 
 #[test]
 fn platform_props_and_select_follow_the_os() {
-    assert_eq!(
-        first_frame(Os::Ios),
-        (vec!["ios false i".to_owned()], vec!["ios".to_owned()])
-    );
-    assert_eq!(
-        first_frame(Os::Android),
-        (
-            vec!["android false m".to_owned()],
-            vec!["android".to_owned()]
-        )
-    );
-    assert_eq!(
-        first_frame(Os::MacOs),
-        (vec!["macos true d".to_owned()], vec!["desktop".to_owned()])
-    );
+    let frame = |os, idiom, text: &str, labels: &[&str]| {
+        assert_eq!(
+            first_frame(os, idiom),
+            (
+                vec![text.to_owned()],
+                labels.iter().map(|l| (*l).to_owned()).collect()
+            ),
+            "{os:?} {idiom:?}"
+        );
+    };
+    frame(Os::Ios, Idiom::Phone, "ios false i n", &["ios"]);
+    frame(Os::Android, Idiom::Phone, "android false m n", &["android"]);
+    frame(Os::MacOs, Idiom::Desktop, "macos true d n", &["desktop"]);
+    // `native` is not the web, as in React Native.
+    frame(Os::Web, Idiom::Phone, "web false m -", &["web"]);
+    frame(Os::Web, Idiom::Pad, "web false m -", &["web"]);
+    // A desktop browser behaves as a desktop.
+    frame(Os::Web, Idiom::Desktop, "web true d -", &["desktop", "web"]);
 }

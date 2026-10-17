@@ -1386,7 +1386,9 @@ fn ui_environment(env: &Environment, window: Size) -> nsh_core::ui::Environment 
 fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment {
     nsh_core::tailwind::ClassEnvironment {
         dark: env.color_scheme == ColorScheme::Dark,
-        platform: if cfg!(target_os = "android") {
+        platform: if env.os == Os::Web {
+            nsh_core::tailwind::Platform::Web
+        } else if cfg!(target_os = "android") {
             nsh_core::tailwind::Platform::Android
         } else {
             nsh_core::tailwind::Platform::Ios

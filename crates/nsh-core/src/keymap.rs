@@ -203,6 +203,8 @@ impl Keystroke {
                 Key::F(11) if m == Modifiers::default() => Some("it toggles full screen"),
                 _ => None,
             },
+            // The browser keeps its own keys: the page never sees them.
+            Os::Web => None,
         }
     }
 

@@ -22,12 +22,13 @@ function App() {
         <Row label="Platform.OS" value={Platform.OS} />
         <Row label="Platform.Version" value={String(Platform.Version)} />
         <Row label="interfaceIdiom" value={Platform.constants.interfaceIdiom} />
+        <Row label="Locale" value={new Intl.DateTimeFormat().resolvedOptions().locale} />
         <Row label="PixelRatio.get()" value={String(PixelRatio.get())} />
         <Row label="I18nManager.isRTL" value={String(I18nManager.isRTL)} />
       </View>
 
       <Text class="text-[#565a61] dark:text-[#8d9198]">
-        {Platform.select({ ios: "Running on iOS.", android: "Running on Android.", default: "Running elsewhere." })}
+        {Platform.select({ ios: "Running on iOS.", android: "Running on Android.", web: "Running in a browser.", default: "Running elsewhere." })}
       </Text>
 
       <View class="gap-1">

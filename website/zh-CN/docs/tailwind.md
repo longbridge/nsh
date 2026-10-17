@@ -59,7 +59,7 @@ demo: guide-tailwind
 | `max-sm:`、`max-md:` ... | 窗口宽度小于该断点 |
 | `min-[600px]:`、`max-[600px]:` | 任意断点 |
 | `portrait:`、`landscape:` | 窗口方向 |
-| `ios:`、`android:` | 平台 |
+| `ios:`、`android:`、`web:` | 平台 |
 | `rtl:`、`ltr:` | [布局方向](./layout.md) |
 | `motion-safe:`、`motion-reduce:` | 用户的“减弱动态效果”设置 |
 

@@ -372,6 +372,12 @@ fn variants() {
     assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(4.0));
     let (s, _) = styled_with("pt-1 ios:pt-3 android:pt-5", dark, (390.0, 844.0), 0);
     assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(20.0));
+    let web = ClassEnvironment {
+        platform: Platform::Web,
+        ..ClassEnvironment::default()
+    };
+    let (s, _) = styled_with("pt-1 ios:pt-3 web:pt-5", web, (390.0, 844.0), 0);
+    assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(20.0));
     let (s, _) = styled_with(
         "w-screen h-screen",
         ClassEnvironment::default(),

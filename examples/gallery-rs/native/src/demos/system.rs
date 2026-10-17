@@ -362,6 +362,7 @@ impl System {
                 hidden: Some(self.bar_hidden),
                 animated: Some(true),
                 android: None,
+                web: None,
             }))
             .child(
                 segmented(

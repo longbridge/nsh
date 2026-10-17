@@ -144,12 +144,12 @@ function BottomBar() {
 
 | 成员 | 说明 |
 |---|---|
-| `Platform.OS` | `"ios"`、`"android"`、`"macos"`、`"windows"` 或 `"linux"`。Mac Catalyst 报告 `"ios"`。 |
+| `Platform.OS` | `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。Mac Catalyst 报告 `"ios"`。 |
 | `Platform.Version` | iOS 和桌面平台：版本字符串（`"17.5"`）；Android：API 级别（数字）。 |
 | `Platform.isPad` | iPad（或 iPad 界面风格）。 |
 | `Platform.isTV` | 电视。 |
 | `Platform.isMacCatalyst` | Mac 界面风格的 Mac Catalyst。 |
-| `Platform.isDesktop` | macOS、Windows 或 Linux。 |
+| `Platform.isDesktop` | macOS、Windows 或 Linux，或桌面浏览器（Web 上界面风格为 `"desktop"`）。 |
 | `Platform.constants` | `{ osVersion, interfaceIdiom }`，界面风格为 `"phone"`、`"pad"`、`"mac"`、`"tv"` 或 `"desktop"`。 |
 | `Platform.select(spec)` | 当前平台对应的值；见[平台特定代码](./platform-specific.md#platformselect)。 |
 
@@ -173,6 +173,10 @@ const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && 
 上也是如此（Windows 沿用了这个版本号）。安全区域和键盘高度为 0，`colorScheme()` 实时跟随“设置 > 个性化 > 颜色”，`fontScale()`
 跟随“文本大小”设置（1 到 2.25），`reduceMotion()` 跟随“动画效果”设置，`PixelRatio.get()` 为显示器的缩放比例，`Intl`
 按用户的区域格式进行格式化。
+
+在浏览器中（[Web 运行时](./web.md)），`Platform.OS` 为 `"web"`，`Platform.Version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
+`"desktop"`（此时 `Platform.isDesktop` 为 `true`），平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`reduceMotion()`、
+`fontScale()`（浏览器的文字大小）、`PixelRatio.get()`、安全区域和键盘高度都来自浏览器，并实时跟随。
 
 ## 像素密度
 

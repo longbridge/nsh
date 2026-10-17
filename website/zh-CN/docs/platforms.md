@@ -57,8 +57,8 @@ nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows
 
 应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，nsh 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：
 
-- **平台专属属性**放在 `ios={{…}}`、`android={{…}}` 或 `desktop={{…}}`（macOS、Windows 和 Linux）里。
-- **`Platform.select`** 按操作系统取值，也可以按 `mobile` 和 `desktop` 整体取值；`Platform.OS` 是 `"ios"`、`"android"`、`"macos"`、`"windows"` 或 `"linux"`。
+- **平台专属属性**放在 `ios={{…}}`、`android={{…}}`、`web={{…}}` 或 `desktop={{…}}`（macOS、Windows、Linux 和桌面浏览器）里。
+- **`Platform.select`** 按操作系统取值，也可以按 `mobile` 和 `desktop` 整体取值；`Platform.OS` 是 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。
 - **输入跟随平台。** 手机上是触摸和软键盘；桌面上是鼠标、触控板和键盘。
 
 [`nsh/ui/mobile`](../components/index.md) 的组件由 nsh 绘制，所以在桌面上也能运行，样子和在手机上一样。目前还没有桌面 UI 套件：桌面布局用基础元素（`View`、`Text`、`Scroll`、`List` 等）和 `Platform.select({ desktop: … })` 搭建，示例应用 gallery 的桌面布局就是这样做的。

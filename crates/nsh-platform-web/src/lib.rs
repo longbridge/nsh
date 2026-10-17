@@ -1,6 +1,8 @@
 //! WebAssembly backend for nsh: runs an app in a browser page and renders
 //! it to the DOM: apps published with `nsh package --target web`, the web
-//! development host and the website's live demos.
+//! development host and the website's live demos. `Platform.OS` is `"web"`;
+//! the page reports the idiom (phone, tablet or desktop browser), locale
+//! and the user's settings ([`nsh_environment`]).
 //!
 //! - The engine runs on the page's main thread ([`nsh_engine::LocalEngine`]):
 //!   the JS runtime (`web/nsh.js`) calls [`nsh_pump`] after input and when
@@ -54,6 +56,9 @@ thread_local! {
     static OPTIONS: RefCell<BundleOptions> = RefCell::new(BundleOptions::default());
     /// A hot update could not be applied in place ([`nsh_hot_failed`]).
     static HOT_FAILED: Cell<bool> = const { Cell::new(false) };
+    /// What the page reported last ([`nsh_environment`]), kept for the
+    /// next [`nsh_start`].
+    static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
@@ -188,11 +193,87 @@ fn environment(width: f32, height: f32, dark: bool, pixel_ratio: f32) -> Environ
             ColorScheme::Light
         },
         pixel_ratio,
-        // The demos show what the iOS build looks like.
-        os: Os::Ios,
-        idiom: Idiom::Phone,
-        ..Environment::default()
+        ..page()
     }
+}
+
+/// The page's environment as last reported (`os` is the web's).
+fn page() -> Environment {
+    PAGE.with(Cell::get).unwrap_or(Environment {
+        os: Os::Web,
+        ..Environment::default()
+    })
+}
+
+/// What the page knows about the user and the device, as JSON: `idiom`
+/// (`"phone"`, `"pad"`, `"desktop"`), `locale` (a BCP 47 tag), `rtl`,
+/// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
+/// bottom, left]`) and `keyboard` (the height the on-screen keyboard
+/// covers); missing keys keep their value. Called before [`nsh_start`]
+/// and on every change; the idiom is the one at start, as on every
+/// platform. Returns the pump delay.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let json = unsafe { string(ptr, len) };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return pump();
+    };
+    let mut env = page();
+    let num = |k: &str| value.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
+    let flag = |k: &str| value.get(k).and_then(|v| v.as_bool());
+    if let Some(idiom) = value.get("idiom").and_then(|v| v.as_str()) {
+        env.idiom = match idiom {
+            "desktop" => Idiom::Desktop,
+            "pad" => Idiom::Pad,
+            _ => Idiom::Phone,
+        };
+    }
+    if let Some(locale) = value
+        .get("locale")
+        .and_then(|v| v.as_str())
+        .and_then(nsh_core::platform::Locale::parse)
+    {
+        env.locale = locale;
+    }
+    env.rtl = flag("rtl").unwrap_or(env.rtl);
+    env.reduce_motion = flag("reduceMotion").unwrap_or(env.reduce_motion);
+    if let Some(scale) = num("fontScale").filter(|s| *s > 0.0) {
+        env.font_scale = scale;
+    }
+    if let Some(ratio) = num("pixelRatio").filter(|r| *r > 0.0) {
+        env.pixel_ratio = ratio;
+    }
+    if let Some([top, right, bottom, left]) = value
+        .get("safeArea")
+        .and_then(|v| v.as_array())
+        .filter(|a| a.len() == 4)
+        .map(|a| [0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(0.0) as f32))
+    {
+        env.safe_area = nsh_core::platform::Insets {
+            top,
+            right,
+            bottom,
+            left,
+        };
+    }
+    env.keyboard_height = num("keyboard").unwrap_or(env.keyboard_height);
+    PAGE.with(|p| p.set(Some(env)));
+    send(|app| {
+        let e = &mut app.environment;
+        e.locale = env.locale;
+        e.rtl = env.rtl;
+        e.reduce_motion = env.reduce_motion;
+        e.font_scale = env.font_scale;
+        e.pixel_ratio = env.pixel_ratio;
+        e.safe_area = env.safe_area;
+        e.keyboard_height = env.keyboard_height;
+        app.control.set_environment(app.environment);
+    })
 }
 
 /// Starts the app in `bundle` (JS source, an ES module as `nsh build`
@@ -248,7 +329,13 @@ pub unsafe extern "C" fn nsh_start(
         network: Some(std::sync::Arc::new(net::WebNetwork)),
         assets: Some(std::sync::Arc::new(PageAssets)),
         environment,
-        header_heights: (44.0, 96.0),
+        // A desktop browser's headers are as tall as the desktop backends'
+        // (`navigation::HEADER_HEIGHTS` there).
+        header_heights: if environment.idiom == Idiom::Desktop {
+            (47.0, 94.0)
+        } else {
+            (44.0, 96.0)
+        },
         limits: Limits::default(),
         ui_sets: vec![nsh_ui_mobile::registry()],
         runtime: None,

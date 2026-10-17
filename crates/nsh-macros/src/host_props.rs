@@ -10,8 +10,8 @@ use crate::ts_doc;
 /// One JS name of a variant.
 struct Name {
     name: String,
-    /// `ios = …` / `android = …` / `desktop = …`: inside `ios={{…}}` /
-    /// `android={{…}}` / `desktop={{…}}`.
+    /// `ios = …` / `android = …` / `desktop = …` / `web = …`: inside
+    /// `ios={{…}}` / `android={{…}}` / `desktop={{…}}` / `web={{…}}`.
     platform: TokenStream2,
 }
 
@@ -37,6 +37,7 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
         "ios" => quote!(::nsh_core::js::host::Platform::Ios),
         "android" => quote!(::nsh_core::js::host::Platform::Android),
         "desktop" => quote!(::nsh_core::js::host::Platform::Desktop),
+        "web" => quote!(::nsh_core::js::host::Platform::Web),
         _ => quote!(::nsh_core::js::host::Platform::All),
     };
     for attr in attrs {
@@ -50,7 +51,7 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
                 .map(|i| i.to_string())
                 .unwrap_or_default();
             match key.as_str() {
-                "js" | "ios" | "android" | "desktop" => out.names.push(Name {
+                "js" | "ios" | "android" | "desktop" | "web" => out.names.push(Name {
                     name: meta.value()?.parse::<LitStr>()?.value(),
                     platform: platform(&key),
                 }),
@@ -67,7 +68,7 @@ fn variant_attrs(attrs: &[syn::Attribute]) -> syn::Result<VariantAttrs> {
                 "once" => out.once = true,
                 _ => {
                     return Err(meta.error(
-                        "expected `js`, `ios`, `android`, `desktop`, `default`, `min`, `max`, `on`, `ts`, \
+                        "expected `js`, `ios`, `android`, `desktop`, `web`, `default`, `min`, `max`, `on`, `ts`, \
                          `with`, `reset`, `required`, `nested`, `internal` or `once`",
                     ));
                 }

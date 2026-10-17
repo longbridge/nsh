@@ -1,6 +1,9 @@
 //! `StatusBar`: what the status bar shows, rendered or set.
 
-use nsh_core::ui::{StatusBarEntry, StatusBarSetting, StatusBarStyle, prelude::*};
+use nsh_core::{
+    platform::Os,
+    ui::{StatusBarEntry, StatusBarSetting, StatusBarStyle, prelude::*},
+};
 
 /// A rendered status bar setting ([`StatusBarProps`]).
 #[derive(Debug, Default)]
@@ -23,6 +26,8 @@ pub struct StatusBarProps {
     pub animated: Option<bool>,
     /// What only Android has.
     pub android: Option<StatusBarAndroid>,
+    /// What only the web has.
+    pub web: Option<StatusBarWeb>,
 }
 
 /// The props of a [`StatusBar`] only Android has.
@@ -30,6 +35,14 @@ pub struct StatusBarProps {
 pub struct StatusBarAndroid {
     /// The bar's color (before edge-to-edge, API 35).
     pub background_color: Option<Color>,
+}
+
+/// The props of a [`StatusBar`] only the web has.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub struct StatusBarWeb {
+    /// The color the browser gives its own bars around the page (the
+    /// page's `<meta name="theme-color">`).
+    pub theme_color: Option<Color>,
 }
 
 /// The color of the status bar's content.
@@ -67,12 +80,17 @@ pub enum BarAnimation {
     Slide,
 }
 
-fn setting(props: &StatusBarProps) -> StatusBarSetting {
+fn setting(props: &StatusBarProps, os: Os) -> StatusBarSetting {
+    let background = if os == Os::Web {
+        props.web.as_ref().and_then(|w| w.theme_color)
+    } else {
+        props.android.as_ref().and_then(|a| a.background_color)
+    };
     StatusBarSetting {
         style: props.bar_style.map(Into::into),
         hidden: props.hidden,
         animated: props.animated,
-        background: props.android.as_ref().and_then(|a| a.background_color),
+        background,
     }
 }
 
@@ -81,7 +99,8 @@ impl Component for StatusBar {
     type Event = NoEvent;
 
     fn setup(&mut self, props: &StatusBarProps, cx: &mut Context<'_, Self>) {
-        self.entry = Some(cx.add_status_bar(setting(props)));
+        let setting = setting(props, cx.environment().os);
+        self.entry = Some(cx.add_status_bar(setting));
     }
 
     fn props_changed(
@@ -91,7 +110,8 @@ impl Component for StatusBar {
         cx: &mut Context<'_, Self>,
     ) {
         if let Some(entry) = self.entry {
-            cx.update_status_bar(entry, setting(new));
+            let setting = setting(new, cx.environment().os);
+            cx.update_status_bar(entry, setting);
         }
     }
 

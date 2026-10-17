@@ -57,8 +57,8 @@ Each view is one engine with its own VM, and an app can show several. The host r
 
 Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, nsh gives the difference one place ([Platform-specific code](./platform-specific.md)):
 
-- **Platform-only props** go in `ios={{…}}`, `android={{…}}` or `desktop={{…}}` (macOS, Windows and Linux).
-- **`Platform.select`** takes a value per OS, or for `mobile` and `desktop` as a whole; `Platform.OS` is `"ios"`, `"android"`, `"macos"`, `"windows"` or `"linux"`.
+- **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `web={{…}}` or `desktop={{…}}` (macOS, Windows, Linux and desktop browsers).
+- **`Platform.select`** takes a value per OS, or for `mobile` and `desktop` as a whole; `Platform.OS` is `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"`.
 - **Input follows the platform.** Phones get touches and the software keyboard; desktops get the mouse, the trackpad and the keyboard.
 
 The components of [`nsh/ui/mobile`](../components/index.md) are drawn by nsh, so they also run on desktops, looking as they do on phones. There is no desktop UI set yet: a desktop layout is built from the primitives (`View`, `Text`, `Scroll`, `List`, …) and `Platform.select({ desktop: … })`, as the gallery's desktop layout is.

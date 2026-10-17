@@ -2,6 +2,7 @@
 
 `crates/nsh-platform-web` runs nsh apps in a browser page, rendering to the DOM: apps published with `nsh package
 --target web`, the web development host (`nsh run --target web`) and the website's live demos (`website/demos/*.tsx`).
+`Platform.OS` is `"web"` (`Os::Web`).
 User-facing page: `website/docs/web.md`.
 
 ## Building
@@ -81,6 +82,24 @@ oxc's transformer links `oxc-browserslist`, whose wasm32 build depends on `js-sy
 glue (`__wbindgen_placeholder__`, `__wbindgen_externref_xform__`) that nsh never calls (it only reads dates for
 browserslist queries). `nsh.js` gives every import it does not know a stub that throws if called.
 
+## The environment
+
+`nsh.js` reports what the page knows with `nsh_environment(json)` before `nsh_start` and whenever it changes (only
+when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `rtl` (`<html dir>`, else the locale's script),
+`reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read
+through a hidden probe element, clipped to the container) and `keyboard` (the container's part below
+`visualViewport`). The Rust side keeps it (`PAGE`) for the next start; the appearance and the window keep their own
+calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `languagechange`, `visualViewport`,
+`resize` and a mutation observer on `<html dir lang>`.
+
+The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
+container at least 600 wide (headless Chromium has no pointer: it measures as a tablet or phone), `pad` for a screen
+whose short side is at least 600, else `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
+(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `Platform.select`'s `desktop` key and
+`Platform.isDesktop`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). A
+desktop-idiom page gets the desktop backends' header heights (47 / 94). `Command::StatusBar`'s `background` (from
+`StatusBar`'s `web={{ themeColor }}`) becomes `<meta name="theme-color">`.
+
 ## The protocol
 
 Exports are `nsh_*` functions (`src/lib.rs`); imports are module `nsh` (`src/ffi.rs`). Every export that reaches
@@ -127,6 +146,6 @@ the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
 ## Not implemented
 
-Refresh controls, zooming scroll views, registered native components, the status bar and other
-platform services, fonts that are usable before `FontFace` finishes loading. A published app ships JS source, not
-bytecode, and no source map.
+Refresh controls, zooming scroll views, registered native components, platform services other than the theme color,
+fonts that are usable before `FontFace` finishes loading. A published app ships JS source, not bytecode, and no source
+map.

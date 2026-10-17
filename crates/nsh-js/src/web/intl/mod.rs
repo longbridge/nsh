@@ -807,9 +807,8 @@ fn local_offset(ctx: Ctx, ms: f64) -> R<i32> {
 /// The time `v` stands for (`undefined`: now), or a `RangeError`.
 fn time_value(ctx: Ctx, v: Raw) -> R<f64> {
     let ms = if js::is_undefined(v) {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0.0, |d| d.as_millis() as f64)
+        // Not std's clock: WebAssembly has none.
+        nsh_core::time::unix_ms()
     } else {
         js::to_number(ctx, v)?
     };

@@ -45,6 +45,15 @@ function PhotoViewer() {
 }
 ```
 
+## 在浏览器中
+
+Web 没有状态栏；最接近的是浏览器给页面周围的栏使用的颜色（手机上的地址栏、已安装 Web 应用的标题栏）。`web={{ themeColor }}`
+以页面的 `<meta name="theme-color">` 设置它，同样是最近挂载的优先；`barStyle` 和 `hidden` 在浏览器中不起作用。
+
+```tsx
+<StatusBar barStyle="light-content" web={{ themeColor: "#0b0b0f" }} />
+```
+
 ## 用函数设置
 
 静态函数设置的是基础设置，任何渲染出来的 `StatusBar` 都会覆盖它。
@@ -76,6 +85,7 @@ StatusBar.setHidden(false);
 | `hidden` | `boolean \| null` | 不设置 | 隐藏状态栏。 |
 | `animated` | `boolean \| null` | 不设置 | 以动画呈现 `barStyle` 和 `hidden` 的变化。 |
 | `android` | `{ backgroundColor?: string \| null }` | 不设置 | 仅 Android：状态栏的背景色。 |
+| `web` | `{ themeColor?: string \| null }` | 不设置 | 仅浏览器：页面的主题色（`<meta name="theme-color">`）。 |
 
 未设置的属性，会把状态栏的这一部分交给下层的 `StatusBar` 或函数决定。`StatusBar` 没有事件。
 

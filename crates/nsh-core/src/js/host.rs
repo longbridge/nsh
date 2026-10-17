@@ -118,7 +118,7 @@ pub mod on {
 }
 
 /// The platform a prop is for: everywhere, or inside `ios={{…}}` /
-/// `android={{…}}` / `desktop={{…}}`.
+/// `android={{…}}` / `desktop={{…}}` / `web={{…}}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     /// Every platform.
@@ -127,8 +127,10 @@ pub enum Platform {
     Ios,
     /// `android={{…}}`.
     Android,
-    /// `desktop={{…}}` (macOS, Windows, Linux).
+    /// `desktop={{…}}` (macOS, Windows, Linux, desktop browsers).
     Desktop,
+    /// `web={{…}}`.
+    Web,
 }
 
 /// One host prop, for the generated TypeScript.
@@ -637,6 +639,7 @@ pub fn declarations() -> String {
             (Platform::Ios, "IOS", " inside `ios={{…}}`"),
             (Platform::Android, "Android", " inside `android={{…}}`"),
             (Platform::Desktop, "Desktop", " inside `desktop={{…}}`"),
+            (Platform::Web, "Web", " inside `web={{…}}`"),
         ] {
             let props: Vec<&HostPropSpec> = specs
                 .iter()
