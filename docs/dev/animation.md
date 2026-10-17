@@ -36,3 +36,5 @@
   the next commit's frames, insertions and removals natively. The presets are `LayoutAnimation::EASE_IN_EASE_OUT` /
   `LINEAR` / `SPRING` in Rust (what Rust components pass to `animate_layout`), handed to `nsh/animated` as data; the config's
   decoding and types come from the same module.
+- **Web**: native values run in Rust as elsewhere; layout animations, transitions, keyframes and screen transitions
+  are Web Animations and CSS made to match the Linux backend (`web.md` "Animation").

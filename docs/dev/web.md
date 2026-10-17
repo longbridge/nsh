@@ -200,6 +200,39 @@ borders) so they never move the content the core placed. Native animation items 
 of the Android animator); bound properties go out as `["a", id, prop, value]` after each batch and each
 `requestAnimationFrame` tick.
 
+## Animation
+
+What moves on the web follows the Linux backend (`nsh-platform-linux` `transition.rs`, `navigation.rs`), which was
+measured against it frame by frame (`requestAnimationFrame` samplers of computed styles in headless Chromium):
+
+- **Native values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
+  `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
+  first frame.
+- **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
+  border overlay gets its own for border colors, widths and radii, since it draws the border.
+- **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
+  transforms follow the view's own (and the native values bound to it), as the native backends apply them after
+  the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *
+  var(--nsh-ko))`, and the keyframes add to the registered `--nsh-ko` (initial 1).
+- **Layout animations** (`op_la`, for the rest of the batch) run with Web Animations, which play over the views' own
+  inline and class styles without replacing them: frames animate `left` / `top` / `width` / `height` from where the
+  view shows (a running animation's frame, so an interruption continues from there), never a view's first frame;
+  views created in the batch appear (opacity from 0 to their own, or a scale added to their transform), removed and
+  deleted ones disappear and are detached at the end (a view inside one that disappears goes with it; one inserted
+  again comes back at once). Springs are CSS `linear()` easings sampled from the Linux backend's curve
+  (`spring_easing`). Navigation's views (stacks, screens, modals, header items) are left out.
+- **Screens** push and pop as on Linux: a slide of 300 ms with the screen under it moving by 30 % of the width, a
+  200 ms fade for `animation: "fade"` (and for every screen with reduced motion), nothing for `"none"`, easing out
+  cubically (`cubic-bezier(.333,1,.667,1)` is exactly 1 − (1 − t)³). Screens a batch removes stay until the stack is
+  reconciled after it (`reconcileStacks`): the top one slides out when the app popped it.
+- **Press feedback** (`activeOpacity`) fades to that fraction of the view's opacity in 100 ms and back in 250 ms,
+  easing out quadratically, as an animation over the style (the style's own opacity is kept).
+- **Release velocities** of drags (`nsh_pan`) are measured over the last 100 ms of pointer samples (zero after a
+  pause), as on Linux, not from the last two events.
+- **Images** with `fadeDuration` fade in linearly, and only when they had to load (not from the cache).
+- **Reduced motion** (`prefers-reduced-motion`): no layout animations, style transitions or keyframes (root class
+  `nsh-reduce`), screens fade.
+
 A split bundle's chunks (`native-pipeline.md`) are fetched by the page: the engine asks through the `load_chunk`
 import (`Sink::load_chunk`), `nsh.js` fetches `chunks[id]` or `id` relative to `chunkBase` (`player.run(code,
 { chunks, chunkBase })`) and hands it to `nsh_chunk(id, code, ok)` (`ok` 1: source, 2: bytecode, which a bundle run
