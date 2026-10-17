@@ -841,9 +841,10 @@ pub enum ModalProp {
     /// `animationType`: how the modal appears.
     #[prop(js = "animationType", on = MODAL)]
     Animation(ModalAnimation),
-    /// `presentationStyle` (iOS, desktop): `"pageSheet"` / `"formSheet"` keep what is
-    /// behind visible (on a desktop: a card centered in the window).
-    #[prop(ios = "presentationStyle", desktop = "presentationStyle", on = MODAL)]
+    /// `presentationStyle` (iOS, desktop, web): `"pageSheet"` / `"formSheet"` keep what
+    /// is behind visible (on a desktop: a card centered in the window; in a phone
+    /// browser: a card from just below the top, as on iPhones).
+    #[prop(ios = "presentationStyle", desktop = "presentationStyle", web = "presentationStyle", on = MODAL)]
     Presentation(ModalPresentation),
     /// `transparent`: the background shows what is behind.
     #[prop(js = "transparent", on = MODAL)]

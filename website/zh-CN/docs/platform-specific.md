@@ -58,10 +58,11 @@ group: platforms
 | `ios={{ allowsBackForwardNavigationGestures }}` | `WebView` | 滑动在页面历史中前进后退。 |
 | `desktop={{ headerLargeTitle }}`、`desktop={{ headerBackTitle }}` | `Screen` | 大标题；返回按钮上的文字。 |
 | `desktop={{ presentationStyle }}` | `Modal` | `"pageSheet"` / `"formSheet"`：窗口中居中的卡片。 |
+| `web={{ presentationStyle }}` | `Modal` | 所有浏览器中的 `"pageSheet"` / `"formSheet"`：桌面和平板浏览器中是居中的卡片，手机浏览器中是停在顶部稍下方的表单。 |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 | `desktop={{ windowDrag }}` | 所有元素 | 按住它拖动窗口，像系统标题栏一样（见 [nsh/desktop](../modules/nsh-desktop.md#自定义标题栏)）。 |
 
-`desktop={{…}}` 在所有地方都可以使用；上面列出的是目前仅限桌面的属性。`web={{…}}` 同样在所有地方都可以使用，目前还没有元素属性（[`StatusBar`](../components/status-bar.md) 接受 `web={{ themeColor }}`）。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
+`desktop={{…}}` 在所有地方都可以使用；上面列出的是目前仅限桌面的属性。`web={{…}}` 同样在所有地方都可以使用，目前唯一的元素属性是 `Modal` 的 `presentationStyle`（[`StatusBar`](../components/status-bar.md) 接受 `web={{ themeColor }}`）。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
 
 在两个平台上都存在、只是效果略有不同的属性不做分组：`Alert.alert` 的 `cancelable` 选项两个平台都有（iOS 提示框本来就不会因点击外部而关闭），`pagingEnabled`、`refreshing`、`hitSlop` 等在所有平台上都可用。
 

@@ -145,6 +145,7 @@ export interface ModalProps extends ModalHostProps {
   ios?: IOSModalHostProps;
   android?: AndroidModalHostProps;
   desktop?: DesktopModalHostProps;
+  web?: WebModalHostProps;
 }
 "#;
 

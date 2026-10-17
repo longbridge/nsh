@@ -101,6 +101,21 @@ const KEYFRAMES = `
 .nsh-header-right { position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center; }
 .nsh-screen { transition: transform .35s cubic-bezier(.2,.8,.2,1); isolation: isolate; }
 .nsh-modal { transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease; z-index: 100; }
+/* Modals: opaque ones cover the root; sheets are cards over a scrim that
+   dims what is behind (the desktop backends' and iOS's colors). */
+.nsh-modal-opaque { background: #fff; }
+.nsh-dark .nsh-modal-opaque { background: #000; }
+.nsh-modal-scrim { position: absolute; inset: 0; z-index: 100; background: rgba(0,0,0,.32); transition: opacity .3s ease; }
+.nsh-dark .nsh-modal-scrim { background: rgba(0,0,0,.5); }
+.nsh-modal-sheet { background: #fff; border-radius: 12px; overflow: clip; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+/* The hairline edge, over the content. */
+.nsh-modal-sheet::after { content: ""; position: absolute; inset: 0; border: 1px solid rgba(0,0,0,.1); border-radius: inherit;
+  pointer-events: none; z-index: 2147483647; }
+.nsh-dark .nsh-modal-sheet { background: #242426; }
+.nsh-dark .nsh-modal-sheet::after { border-color: rgba(255,255,255,.1); }
+.nsh-modal-sheet.nsh-modal-top { border-radius: 10px 10px 0 0; box-shadow: none; }
+.nsh-modal-sheet.nsh-modal-top::after { content: none; }
+.nsh-dark .nsh-modal-sheet.nsh-modal-top { background: #1c1c1e; }
 .nsh-dialog-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.35); display: flex;
   align-items: center; justify-content: center; z-index: 1000; }
 .nsh-dialog { width: 270px; border-radius: 14px; background: rgba(245,245,245,.97); color: #000; text-align: center;
@@ -622,7 +637,7 @@ class Player {
     this.size = [width, height];
     this.call((w) => w.nsh_resize(width, height));
     this.environmentChanged();
-    for (const el of this.views.values()) if (el._kind === "modal" && el.isConnected) this.reportRoot(el, width, height);
+    for (const el of this.views.values()) if (el._kind === "modal" && el.isConnected && !el._leaving) this.placeModal(el);
   }
 
   // Environment ---------------------------------------------------------
@@ -895,7 +910,9 @@ class Player {
 
   op_f([, id, x, y, w, h]) {
     const el = this.view(id);
-    if (!el) return;
+    // Where a modal sits, and its size, are the platform's (a sheet is a
+    // card inside the root): the core lays it out at the size reported.
+    if (!el || el._kind === "modal") return;
     const update = this.layoutAnimation?.update;
     if (update && el._frame) {
       const t = `${update.duration}ms ${update.easing} ${update.delay}ms`;
@@ -2152,47 +2169,146 @@ class Player {
     this.syncHistorySoon();
   }
 
-  reportRoot(el, width, height) {
-    // Modals cover the root, and so its safe area.
-    const [top, right, bottom, left] = el._kind === "modal" && this.safeProbe ? this.safeArea() : [0, 0, 0, 0];
+  reportRoot(el, width, height, insets = [0, 0, 0, 0]) {
+    const [top, right, bottom, left] = insets;
     this.call((w) => w.nsh_root_size(el._id, width, height, top, right, bottom, left));
   }
 
   // Modals
 
-  op_mc([, id, animation, transparent, dismissible]) {
+  op_mc([, id, animation, transparent, dismissible, presentation]) {
     const el = this.view(id);
     if (!el) return;
-    el._modal = { animation, transparent, dismissible };
-    el.style.background = transparent ? "" : (this.shownDark ? "#000" : "#fff");
+    el._modal = { animation, transparent, dismissible, presentation };
+    // Its presentation decides its frame and whether a scrim dims the root.
+    if (el.isConnected && !el._leaving) this.placeModal(el);
+    else this.styleModal(el);
+  }
+
+  /**
+   * How modal `el` is presented, as the platform the idiom is like does:
+   * `"card"` for a page or form sheet with the desktop or pad idiom (a card
+   * centered over the dimmed root, as the desktop backends and iPads show
+   * one), `"top"` for one in a phone browser (a card up to just below the
+   * top, as on iPhones), else `null`: it covers the root (transparent ones
+   * too, as on iOS).
+   */
+  sheetKind(el) {
+    const m = el._modal;
+    if (!m || m.transparent || !m.presentation || m.presentation === "fullScreen") return null;
+    return this.idiom === "phone" ? "top" : "card";
+  }
+
+  /** Classes of modal `el`: an opaque background, or a sheet's card. */
+  styleModal(el) {
+    const kind = this.sheetKind(el);
+    el.classList.toggle("nsh-modal-opaque", !kind && !el._modal?.transparent);
+    el.classList.toggle("nsh-modal-sheet", !!kind);
+    el.classList.toggle("nsh-modal-top", kind === "top");
+  }
+
+  /**
+   * Where modal `el` sits in the root, and the insets system UI covers in
+   * it: the whole root with its safe area, or a sheet's card. Cards are as
+   * wide as the root allows up to 720 (page sheets) or 540 × 620 (form
+   * sheets), with a margin of 32 (less in small roots), as on Linux and
+   * macOS; a phone's starts 10 below the safe area's top.
+   */
+  modalFrame(el) {
+    const [w, h] = this.size;
+    const safe = this.safeProbe ? this.safeArea() : [0, 0, 0, 0];
+    const kind = this.sheetKind(el);
+    if (!kind) return { frame: [0, 0, w, h], insets: safe };
+    if (kind === "top") {
+      const y = safe[0] + 10;
+      return { frame: [0, y, w, Math.max(0, h - y)], insets: [0, safe[1], safe[2], safe[3]] };
+    }
+    const form = el._modal.presentation === "formSheet";
+    const margin = (extent) => Math.max(8, Math.min(32, Math.round(extent * 0.05)));
+    const cw = Math.round(Math.max(0, Math.min(w - 2 * margin(w), form ? 540 : 720)));
+    const ch = Math.round(Math.max(0, Math.min(h - 2 * margin(h), form ? 620 : Infinity)));
+    return { frame: [Math.round((w - cw) / 2), Math.round((h - ch) / 2), cw, ch], insets: [0, 0, 0, 0] };
+  }
+
+  /** Sizes presented modal `el` (and its scrim) and reports its size. */
+  placeModal(el) {
+    this.styleModal(el);
+    const { frame, insets } = this.modalFrame(el);
+    el._frame = frame;
+    this.placeFrame(el);
+    if (this.sheetKind(el)) {
+      if (!el._scrim) {
+        const scrim = (el._scrim = document.createElement("div"));
+        scrim.className = "nsh-modal-scrim";
+        // Clicking it asks the sheet to close, as going back does; only
+        // clicks pressed on it count (not the one of the press that
+        // presented the sheet).
+        let down = false;
+        scrim.addEventListener("pointerdown", (e) => {
+          down = true;
+          e.stopPropagation();
+        });
+        scrim.addEventListener("click", () => {
+          if (down && !el._leaving) this.requestClose(el);
+          down = false;
+        });
+        if (el.isConnected) el.before(scrim);
+      }
+    } else if (el._scrim) {
+      el._scrim.remove();
+      el._scrim = null;
+    }
+    const key = `${frame[2]},${frame[3]},${insets}`;
+    if (el._reported !== key) {
+      el._reported = key;
+      this.reportRoot(el, frame[2], frame[3], insets);
+    }
+  }
+
+  /** The motion modal `el` comes and goes with: `"slide"`, `"fade"` or
+   * `"none"` (slides fade when the user asked for less motion). */
+  modalMotion(el) {
+    const animation = el._modal?.animation ?? "slide";
+    return animation === "slide" && this.reducedMotion?.matches ? "fade" : animation;
+  }
+
+  /** Modal `el` out of sight, as it starts and ends: below the root's
+   * bottom edge, or transparent. */
+  hideModal(el, motion) {
+    const below = this.size[1] - (el._frame?.[1] ?? 0);
+    if (motion === "slide") el.style.transform = `translateY(${below}px)`;
+    if (motion === "fade") el.style.opacity = "0";
+    if (el._scrim) el._scrim.style.opacity = "0";
   }
 
   present(el) {
-    const [w, h] = this.size;
-    el.style.left = "0";
-    el.style.top = "0";
-    el.style.width = `${w}px`;
-    el.style.height = `${h}px`;
-    const animation = el._modal?.animation ?? "slide";
-    el.style.transition = "none";
-    el.style.transform = animation === "slide" ? "translateY(100%)" : "";
-    el.style.opacity = animation === "fade" ? "0" : "";
+    const motion = this.modalMotion(el);
     el._leaving = false;
     el._closed = false;
+    el._reported = null;
     // The focus leaves the views under it, and comes back when it closes.
     const focus = document.activeElement;
     el._restoreFocus = focus !== document.body && this.root.contains(focus) ? focus : null;
     el._restoreFocus?.blur();
     el.setAttribute("aria-modal", "true");
     this.root.append(el);
+    this.placeModal(el);
+    const scrim = el._scrim;
+    el.style.transition = "none";
+    if (scrim) scrim.style.transition = "none";
+    this.hideModal(el, motion);
+    if (scrim && motion === "none") scrim.style.opacity = "";
     this.scopeFocus();
     this.syncHistorySoon();
-    this.reportRoot(el, w, h);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       el.style.transition = "";
       el.style.transform = "";
       el.style.opacity = "";
-      setTimeout(() => this.event(el._id, "onShow"), animation === "none" ? 0 : 350);
+      if (scrim) {
+        scrim.style.transition = "";
+        scrim.style.opacity = "";
+      }
+      setTimeout(() => this.event(el._id, "onShow"), motion === "none" ? 0 : 350);
     }));
   }
 
@@ -2200,17 +2316,20 @@ class Player {
   dismiss(el, reported = el._closed) {
     if (el._leaving) return;
     el._leaving = true;
-    const animation = el._modal?.animation ?? "slide";
-    if (animation === "slide") el.style.transform = "translateY(100%)";
-    if (animation === "fade") el.style.opacity = "0";
+    const motion = this.modalMotion(el);
+    this.hideModal(el, motion);
+    const scrim = el._scrim;
+    el._scrim = null;
+    if (scrim) scrim.style.pointerEvents = "none";
     this.scopeFocus();
     this.syncHistorySoon();
     const restore = el._restoreFocus;
     if (restore?.isConnected && !this.topModal()) restore.focus({ preventScroll: true });
     setTimeout(() => {
       if (el._leaving) el.remove();
+      scrim?.remove();
       if (!reported) this.event(el._id, "onDismiss");
-    }, animation === "none" ? 0 : 350);
+    }, motion === "none" ? 0 : 350);
   }
 
   /** Going back or Escape on a modal: it asks to close (`onRequestClose`);
@@ -2229,7 +2348,7 @@ class Player {
   scopeFocus() {
     const top = this.dialogs?.[this.dialogs.length - 1] ?? this.topModal();
     for (const child of this.root.children) {
-      if (child === this.live || child.classList.contains("nsh-error")) continue;
+      if (child === this.live || child.classList.contains("nsh-error") || child.classList.contains("nsh-modal-scrim")) continue;
       child.inert = (child._kind === "modal" && !!child._leaving) || (!!top && child !== top);
     }
   }

@@ -58,10 +58,11 @@ What exists today:
 | `ios={{ allowsBackForwardNavigationGestures }}` | `WebView` | Swipe back and forward in the page history. |
 | `desktop={{ headerLargeTitle }}`, `desktop={{ headerBackTitle }}` | `Screen` | A large title; the back button's label. |
 | `desktop={{ presentationStyle }}` | `Modal` | `"pageSheet"` / `"formSheet"`: a card centered in the window. |
+| `web={{ presentationStyle }}` | `Modal` | `"pageSheet"` / `"formSheet"` in every browser: a centered card in desktop and tablet browsers, a sheet from just below the top in phone browsers. |
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS: two-finger trackpad swipes go back and forward in the page history; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `desktop={{ windowDrag }}` | every element | Pressing it drags the window, as the system's title bar would (see [nsh/desktop](../modules/nsh-desktop.md#a-title-bar-of-your-own)). |
 
-`desktop={{…}}` is accepted everywhere; the props above are the desktop-only ones so far. `web={{…}}` is accepted everywhere too and has no element props yet ([`StatusBar`](../components/status-bar.md) takes `web={{ themeColor }}`). The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
+`desktop={{…}}` is accepted everywhere; the props above are the desktop-only ones so far. `web={{…}}` is accepted everywhere too; `Modal`'s `presentationStyle` is its only element prop so far ([`StatusBar`](../components/status-bar.md) takes `web={{ themeColor }}`). The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
 
 Cross-platform props whose effect differs slightly are not grouped: `Alert.alert`'s `cancelable` option exists on both (iOS alerts are simply never dismissed by a tap outside), and `pagingEnabled`, `refreshing`, `hitSlop` and the rest work on every platform.
 

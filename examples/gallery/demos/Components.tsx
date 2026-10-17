@@ -147,6 +147,7 @@ function PressableSheet() {
         visible={sheet()}
         ios={{ presentationStyle: "pageSheet" }}
         desktop={{ presentationStyle: "pageSheet" }}
+        web={{ presentationStyle: "pageSheet" }}
         animationType="slide"
         onRequestClose={() => sheet.set(false)}
       >

@@ -242,6 +242,7 @@ function Settings() {
 | `onShow` | `() => void` | | It has appeared. |
 | `onDismiss` | `() => void` | | It has gone. |
 | `ios={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | iOS: sheets keep what is behind visible. |
+| `desktop={{ presentationStyle }}`, `web={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | Desktops and browsers: sheets are cards centered over the dimmed window (in phone browsers: a sheet from just below the top); Escape or a click outside asks to close. |
 | `ios={{ supportedOrientations }}` | `("portrait" \| "landscape" \| …)[]` | the presenter's | iOS: the orientations it allows. |
 | `android={{ statusBarTranslucent }}` | `boolean` | `false` | Android: the content reaches under the status bar. |
 

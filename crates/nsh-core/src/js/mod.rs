@@ -176,6 +176,10 @@ mod tests {
                 "DesktopModalHostProps",
                 "  presentationStyle?: ModalPresentation;",
             ),
+            (
+                "WebModalHostProps",
+                "  presentationStyle?: ModalPresentation;",
+            ),
             ("DesktopScreenHostProps", "  headerBackTitle?: string;"),
             (
                 "DesktopWebViewHostProps",

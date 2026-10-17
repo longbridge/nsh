@@ -936,6 +936,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .str(&enum_name(&config.animation))
                 .bool(config.transparent)
                 .bool(config.dismissible)
+                .str(&enum_name(&config.presentation))
                 .end();
         }
         MountItem::NativeProps { id, props } => match props {

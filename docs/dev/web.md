@@ -279,6 +279,17 @@ browsers' touches into what phones report:
   modal pops, else the modal asks to close (`onRequestClose`; a `dismissible` one closes and reports `onDismiss`);
   without a modal the root's `onBackPress` hears it when the app listens, else the innermost stack pops (a screen
   with `preventBack` gets `onBackRequest`). `Command::Back` goes back as without the app's listeners.
+- **Modals** are children of the root above the app's views (`present` / `dismiss`); where one sits and its size are
+  the platform's (`placeModal`; the core's frames are ignored, it lays the modal out at the size `nsh_root_size`
+  reports). `fullScreen` (and every transparent modal) covers the root with its safe area; with the desktop or pad
+  idiom a `pageSheet` / `formSheet` (`desktop={{…}}` / `web={{…}}`) is a card centered over a scrim, as wide as the
+  root allows up to 720 (page) or 540 × 620 (form) with a margin of up to 32, the sizes of the Linux and macOS
+  backends (and iPad sheets), reporting no insets; in a phone browser it is a card from 10 below the safe area's
+  top to the bottom, with rounded top corners, as on iPhones (insets: the safe area's sides and bottom). Cards and
+  scrims are classes (`nsh-modal-sheet`, `nsh-modal-top`, `nsh-modal-scrim`, `nsh-modal-opaque`) that follow
+  `nsh-dark`. A click pressed on the scrim asks the sheet to close, as going back does. `slide` moves the modal up
+  from below the root's bottom edge (a fade with reduced motion), `fade` fades it; the scrim fades with it;
+  `onShow` follows the transition. A modal the app removes leaves the same way, then reports `onDismiss`.
 - **History**: when the app is the page (`window.top === window`, or `createPlayer`'s `history` option) every screen
   above a stack's first and every modal is a history entry (`pushState`, state `{ nsh: depth }`), so the browser's
   back button and the mouse's go back in the app; entries the app takes away itself are gone back over with

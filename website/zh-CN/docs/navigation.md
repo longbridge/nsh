@@ -242,6 +242,7 @@ function Settings() {
 | `onShow` | `() => void` | | 已经出现。 |
 | `onDismiss` | `() => void` | | 已经消失。 |
 | `ios={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | iOS：表单样式会保留后面内容的可见部分。 |
+| `desktop={{ presentationStyle }}`、`web={{ presentationStyle }}` | `"fullScreen" \| "pageSheet" \| "formSheet"` | `"fullScreen"` | 桌面和浏览器：表单是居中于变暗窗口上的卡片（手机浏览器中是停在顶部稍下方的表单）；Escape 或点击外部会请求关闭。 |
 | `ios={{ supportedOrientations }}` | `("portrait" \| "landscape" \| …)[]` | 与呈现者相同 | iOS：允许的方向。 |
 | `android={{ statusBarTranslucent }}` | `boolean` | `false` | Android：内容延伸到状态栏下方。 |
 

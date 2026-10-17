@@ -445,6 +445,7 @@ export function Navigation() {
         visible={sheet() === "fullScreen" || sheet() === "pageSheet" || sheet() === "formSheet" || sheet() === "fade"}
         ios={{ presentationStyle: sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen" }}
         desktop={{ presentationStyle: sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen" }}
+        web={{ presentationStyle: sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen" }}
         animationType={sheet() === "fade" ? "fade" : "slide"}
         onRequestClose={close}
       >
@@ -463,6 +464,7 @@ export function Navigation() {
         dismissible
         ios={{ presentationStyle: "pageSheet" }}
         desktop={{ presentationStyle: "pageSheet" }}
+        web={{ presentationStyle: "pageSheet" }}
         onRequestClose={close}
       >
         <ModalBody

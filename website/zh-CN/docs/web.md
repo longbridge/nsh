@@ -27,6 +27,7 @@ requestAnimationFrame ───────────┘                      
 - **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的原生值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。
 - **输入**：带 `activeOpacity` 的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动）、下拉刷新、可缩放的滚动视图（双指捏合、Ctrl+滚轮和触控板捏合、`zoomTo`）、受控的 `<Input>`（焦点、提交）、`Canvas`、带标题栏的 `Stack` 和 `Screen`、`Modal`。
 - **系统界面绘制在页面内**：`Alert` 和 `ActionSheet` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文），`Toast.show` 在底部显示提示。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
+- **模态视图**按浏览器所像的平台呈现：`pageSheet` 和 `formSheet`（`desktop={{ presentationStyle }}` 或 `web={{ presentationStyle }}`）在桌面和平板浏览器中是居中于变暗页面上的卡片，尺寸与桌面后端相同，可用 Escape、浏览器的返回按钮或点击卡片外部关闭（都会通过 `onRequestClose` 询问）；在手机浏览器中则像 iPhone 的表单一样从底部升起，停在顶部稍下方。`fullScreen` 和透明的模态视图覆盖整个应用；`animationType`、`onShow` 和 `onDismiss` 与设备上一致。
 
 ## 键盘、鼠标和触摸
 
