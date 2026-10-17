@@ -6,7 +6,7 @@ User-facing page: `website/docs/web.md`.
 
 ## Building
 
-`cargo xtask web` builds `nsh.wasm` (`--target wasm32-unknown-unknown --release`), copies `web/nsh.js` and
+`cargo xtask web` builds `nsh.wasm` (`--target wasm32-unknown-unknown --profile web`: the release profile optimized for size, QuickJS still at `-O3`), copies `web/nsh.js` and
 `web/index.html` (the player), `nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two
 builds keep their caches), and bundles each demo with `nsh build --release` into `website/public/play/` (generated,
 ignored by git). Check the crate with `cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown`: off

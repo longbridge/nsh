@@ -38,7 +38,7 @@ The output directory holds:
 
 | File | What it is |
 |---|---|
-| `nsh.wasm` | The engine, the core, the mobile components and QuickJS (about 4.6 MB, 1.5 MB gzipped) |
+| `nsh.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli; built with the `web` profile) |
 | `nsh-playground.wasm` | The same plus nsh's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
 | `nsh.js` | The DOM runtime: loads `nsh.wasm`, applies batches, turns input into events |
 | `index.html` | A player page: runs `demos/<name>.js` for `#<name>` |

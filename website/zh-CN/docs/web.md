@@ -38,7 +38,7 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 | 文件 | 内容 |
 |---|---|
-| `nsh.wasm` | 引擎、核心、移动端组件和 QuickJS（约 4.6 MB，gzip 后 1.5 MB） |
+| `nsh.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB；用 `web` profile 构建） |
 | `nsh-playground.wasm` | 同上，另含 nsh 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
 | `nsh.js` | DOM 运行时：加载 `nsh.wasm`，应用批次，把输入转成事件 |
 | `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.js` |

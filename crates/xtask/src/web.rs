@@ -29,7 +29,8 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
     cargo(
         &[
             "build",
-            "--release",
+            "--profile",
+            "web",
             "-p",
             "nsh-platform-web",
             "--target",
@@ -42,7 +43,8 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
     cargo(
         &[
             "build",
-            "--release",
+            "--profile",
+            "web",
             "-p",
             "nsh-platform-web",
             "--features",
@@ -60,14 +62,14 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
         &root
             .join("target")
             .join(WASM)
-            .join("release/nsh_platform_web.wasm"),
+            .join("web/nsh_platform_web.wasm"),
         &out.join("nsh.wasm"),
     )?;
     copy(
         &root
             .join("target/web-playground")
             .join(WASM)
-            .join("release/nsh_platform_web.wasm"),
+            .join("web/nsh_platform_web.wasm"),
         &out.join("nsh-playground.wasm"),
     )?;
     let web = root.join("crates/nsh-platform-web/web");
