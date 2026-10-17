@@ -58,13 +58,6 @@ const activeSection = rest.replace(/^zh-CN(\/|$)/, '').split('/')[0];
         </a>
       ))}
       <a
-        href={url(isZh ? 'zh-CN/playground' : 'playground')}
-        class:list={['site-nav__link', { active: activeSection === 'playground' }]}
-        aria-current={activeSection === 'playground' ? 'true' : undefined}
-      >
-        {isZh ? '在线试用' : 'Playground'}
-      </a>
-      <a
         href={url(isZh ? 'zh-CN/gallery' : 'gallery')}
         class:list={['site-nav__link', { active: activeSection === 'gallery' }]}
         aria-current={activeSection === 'gallery' ? 'true' : undefined}

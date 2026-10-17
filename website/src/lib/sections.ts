@@ -13,7 +13,7 @@ export interface Section {
 export const SECTIONS: Section[] = [
   {
     id: 'docs',
-    label: { en: 'Guide', 'zh-CN': '指南' },
+    label: { en: 'Docs', 'zh-CN': '文档' },
     blurb: {
       en: 'Install the toolchain, write a first app, and learn how state, layout, styles and navigation work.',
       'zh-CN': '安装工具链、编写第一个应用，了解状态、布局、样式与导航的工作方式。',
