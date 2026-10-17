@@ -1,11 +1,15 @@
 //! Mount batches as the JSON the DOM mounter (`web/nsh.js`, `apply`)
 //! reads: one array per batch, one array per item, `[op, id, ...]`. Visual
-//! styles are turned into CSS here, so JS only assigns them.
+//! styles are turned into CSS here, so JS only assigns them: each distinct
+//! CSS text is a class, `nsh-` and 8 hex digits of its hash
+//! ([`class_key`]), defined once per page (`["css", name, text]`, before
+//! the first item that uses it), so the browser parses it once, elements
+//! carry no inline style but their geometry, and batches carry names.
 //!
 //! Native animation items stay in Rust ([`crate::animation::UiAnimation`]); the DOM
 //! gets their results each frame.
 
-use std::fmt::Write as _;
+use std::{cell::RefCell, fmt::Write as _};
 
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
@@ -13,6 +17,7 @@ use nsh_core::{
     OriginLen, ResizeMode, ScrollBehavior, Transform, TransformKind, TransitionProps, ViewKind,
     ViewProps, ViewStyle, WebSource, ui::JsValue,
 };
+use rustc_hash::FxHashMap;
 
 use crate::text::{WebLayout, css_font};
 
@@ -95,6 +100,136 @@ impl Out {
     pub(crate) fn animation(&mut self, id: u32, prop: &str, value: &str) {
         self.item("a").num(id).str(prop).str(value).end();
     }
+}
+
+/// New classes a view may define before its styles get rules of their own,
+/// which are replaced as they change: a style animated from JS (a new CSS
+/// text every frame) must not grow the stylesheet by a rule a frame.
+const OWN_RULES_AFTER: u8 = 16;
+
+/// The style classes defined in the page.
+#[derive(Default)]
+struct Classes {
+    /// Class key -> a second hash of its text, which tells a collision.
+    defined: FxHashMap<u32, u64>,
+    /// How many classes each view defined (by node id).
+    count: Vec<u8>,
+}
+
+thread_local! {
+    static CLASSES: RefCell<Classes> = RefCell::new(Classes::default());
+}
+
+/// The key of the class of CSS text `css`: its 32-bit FNV-1a hash (as
+/// `nsh.js` computes the names of the classes it makes itself).
+fn class_key(css: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in css.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h
+}
+
+/// The 64-bit FNV-1a hash of `css`, which two texts with the same
+/// [`class_key`] hardly share.
+fn text_hash(css: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in css.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    h
+}
+
+/// The class of a style.
+#[derive(Clone, Copy)]
+enum Class {
+    /// No CSS.
+    None,
+    /// By content: `nsh-<8 hex digits of the key>`.
+    Shared(u32),
+    /// A view's own rule (`nsh.js` puts its player's prefix in front).
+    Own(u32, Part),
+}
+
+/// Which of a view's styles.
+#[derive(Clone, Copy)]
+enum Part {
+    View,
+    Border,
+    Text(usize),
+    Selection,
+    Field,
+}
+
+impl Out {
+    /// The class of `css`, style `part` of view `id`, defining it first
+    /// when the page does not have it.
+    fn class(&mut self, id: u32, part: Part, css: &str) -> Class {
+        if css.is_empty() {
+            return Class::None;
+        }
+        let key = class_key(css);
+        let hash = text_hash(css);
+        // `Some(new)`: shared; `None`: the view's own rule.
+        let shared = CLASSES.with(|c| {
+            let mut c = c.borrow_mut();
+            match c.defined.get(&key) {
+                Some(&h) if h == hash => return Some(false),
+                // Another text has this name.
+                Some(_) => return None,
+                None => {}
+            }
+            let i = id as usize;
+            if c.count.len() <= i {
+                c.count.resize(i + 1, 0);
+            }
+            if c.count[i] >= OWN_RULES_AFTER {
+                return None;
+            }
+            c.count[i] += 1;
+            c.defined.insert(key, hash);
+            Some(true)
+        });
+        let class = match shared {
+            Some(_) => Class::Shared(key),
+            None => Class::Own(id, part),
+        };
+        if shared != Some(false) {
+            self.item("css");
+            self.class_arg(class).str(css).end();
+        }
+        class
+    }
+
+    fn push_class(&mut self, class: Class) {
+        let _ = match class {
+            Class::None => write!(self.s, "null"),
+            Class::Shared(key) => write!(self.s, "\"nsh-{key:08x}\""),
+            Class::Own(id, Part::View) => write!(self.s, "\"i{id}\""),
+            Class::Own(id, Part::Border) => write!(self.s, "\"i{id}b\""),
+            Class::Own(id, Part::Text(i)) => write!(self.s, "\"i{id}t{i}\""),
+            Class::Own(id, Part::Selection) => write!(self.s, "\"i{id}s\""),
+            Class::Own(id, Part::Field) => write!(self.s, "\"i{id}f\""),
+        };
+    }
+
+    /// Appends a class (after [`Out::class`]).
+    fn class_arg(&mut self, class: Class) -> &mut Self {
+        self.s.push(',');
+        self.push_class(class);
+        self
+    }
+}
+
+/// A view was deleted: its id's next view starts afresh.
+fn forget_view(id: u32) {
+    CLASSES.with(|c| {
+        if let Some(n) = c.borrow_mut().count.get_mut(id as usize) {
+            *n = 0;
+        }
+    });
 }
 
 fn push_str(out: &mut String, v: &str) {
@@ -619,8 +754,7 @@ fn input_json(c: &InputConfig) -> String {
     let mut s = String::from("{");
     let _ = write!(
         s,
-        "\"css\":{},\"placeholder\":{},\"secure\":{},\"keyboard\":{},\"returnKey\":{},\"multiline\":{},\"editable\":{},\"submit\":{},\"autoFocus\":{},\"autoCapitalize\":{},\"autoCorrect\":{}",
-        json_str(&text_css(&c.style, None)),
+        "\"placeholder\":{},\"secure\":{},\"keyboard\":{},\"returnKey\":{},\"multiline\":{},\"editable\":{},\"submit\":{},\"autoFocus\":{},\"autoCapitalize\":{},\"autoCorrect\":{},\"placeholderColor\":{}",
         json_str(&c.placeholder),
         c.secure,
         json_str(&enum_name(&c.keyboard)),
@@ -631,25 +765,34 @@ fn input_json(c: &InputConfig) -> String {
         c.auto_focus,
         json_str(&enum_name(&c.auto_capitalize)),
         c.auto_correct,
+        c.placeholder_color.is_some(),
     );
-    let align = match c.align {
-        nsh_core::TextAlign::Center => "center",
-        nsh_core::TextAlign::Right => "right",
-        _ => "left",
-    };
-    let _ = write!(s, ",\"align\":\"{align}\"");
-    if let Some(c) = c.placeholder_color {
-        let _ = write!(s, ",\"placeholderColor\":{}", json_str(&css_color(c)));
-    }
-    if let Some(c) = c.selection_color {
-        let _ = write!(s, ",\"selectionColor\":{}", json_str(&css_color(c)));
-    }
     if let Some(m) = c.max_length {
         let _ = write!(s, ",\"maxLength\":{m}");
     }
-    let _ = write!(s, ",\"lineHeight\":{}", c.style.line_height);
     s.push('}');
     s
+}
+
+/// The CSS of a field's text: its style, alignment, line height, the
+/// placeholder's color (`--ph`) and the caret's.
+fn field_css(c: &InputConfig) -> String {
+    let mut css = text_css(&c.style, None);
+    match c.align {
+        nsh_core::TextAlign::Center => css.push_str("text-align:center;"),
+        nsh_core::TextAlign::Right => css.push_str("text-align:right;"),
+        _ => css.push_str("text-align:left;"),
+    }
+    if c.style.line_height > 0.0 {
+        let _ = write!(css, "line-height:{}px;", c.style.line_height);
+    }
+    if let Some(c) = c.placeholder_color {
+        let _ = write!(css, "--ph:{};", css_color(c));
+    }
+    if let Some(c) = c.selection_color {
+        let _ = write!(css, "caret-color:{};", css_color(c));
+    }
+    css
 }
 
 fn behavior_json(b: &ScrollBehavior) -> String {
@@ -722,7 +865,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             out.end();
         }
         MountItem::Remove { id } => out.item("r").num(*id).end(),
-        MountItem::Delete { id } => out.item("d").num(*id).end(),
+        MountItem::Delete { id } => {
+            forget_view(*id);
+            out.item("d").num(*id).end();
+        }
         MountItem::Frame { id, frame } => {
             out.item("f")
                 .num(*id)
@@ -734,7 +880,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         }
         MountItem::ViewStyle { id, style } => {
             let (css, border) = view_css(style);
-            out.item("s").num(*id).str(&css).opt_str(border.as_deref());
+            let class = out.class(*id, Part::View, &css);
+            let border = match &border {
+                Some(border) => out.class(*id, Part::Border, border),
+                None => Class::None,
+            };
+            out.item("s").num(*id).class_arg(class).class_arg(border);
             match style.tint_color {
                 Some(c) => out.str(&css_color(c)),
                 None => out.raw("null"),
@@ -747,13 +898,40 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             layout,
             content,
         } => {
+            let layout = layout.downcast::<WebLayout>();
+            // Defined before the item that uses them. A line box as tall
+            // as the font: the baseline sits at the run's top plus its
+            // ascent, where layout put it.
+            let classes: Vec<Class> = layout.map_or_else(Vec::new, |layout| {
+                layout
+                    .styles
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let css = format!(
+                            "{}line-height:{}px;",
+                            text_css(&s.style, text.shadow.as_ref()),
+                            s.ascent + s.descent
+                        );
+                        out.class(*id, Part::Text(i), &css)
+                    })
+                    .collect()
+            });
+            let selection = match text.selection_color {
+                Some(c) => out.class(
+                    *id,
+                    Part::Selection,
+                    &format!("--nsh-selection:{};", css_color(c)),
+                ),
+                None => Class::None,
+            };
             out.item("t")
                 .num(*id)
                 .num(content.x)
                 .num(content.y)
                 .num(content.width)
                 .num(content.height);
-            let Some(layout) = layout.downcast::<WebLayout>() else {
+            let Some(layout) = layout else {
                 out.raw("[]").raw("[]").end();
                 return;
             };
@@ -772,26 +950,18 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 out.s.push(']');
             }
             out.s.push_str("],[");
-            for (i, s) in layout.styles.iter().enumerate() {
+            for (i, class) in classes.into_iter().enumerate() {
                 if i > 0 {
                     out.s.push(',');
                 }
-                // A line box as tall as the font: the baseline sits at the
-                // run's top plus its ascent, where layout put it.
-                let css = format!(
-                    "{}line-height:{}px;",
-                    text_css(&s.style, text.shadow.as_ref()),
-                    s.ascent + s.descent
-                );
-                push_str(&mut out.s, &css);
+                out.push_class(class);
             }
             out.s.push(']');
             match text.selectable {
                 Some(on) => out.bool(on),
                 None => out.raw("null"),
             };
-            out.opt_str(text.selection_color.map(css_color).as_deref())
-                .end();
+            out.class_arg(selection).end();
         }
         MountItem::Events { id, events } => {
             out.item("e").num(*id);
@@ -897,7 +1067,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .end();
         }
         MountItem::Input { id, config } => {
-            out.item("in").num(*id).raw(&input_json(config)).end();
+            let class = out.class(*id, Part::Field, &field_css(config));
+            out.item("in")
+                .num(*id)
+                .raw(&input_json(config))
+                .class_arg(class)
+                .end();
         }
         MountItem::InputValue { id, text, count } => {
             out.item("iv").num(*id).str(text).num(*count).end();

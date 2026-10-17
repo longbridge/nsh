@@ -82,6 +82,40 @@ const KEYFRAMES = `
 .nsh-noindicator::-webkit-scrollbar { display: none; }
 .nsh-run { position: absolute; white-space: pre; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
+.nsh-pointer { cursor: pointer; }
+/* The mounter's own styles: no element has an inline style but its frame
+   and animated values (generated classes, \`op_css\`, come after these). */
+.nsh-page { overscroll-behavior: none; }
+.nsh-scheme-light { color-scheme: light; }
+.nsh-scheme-dark { color-scheme: dark; }
+.nsh-hidden { visibility: hidden; }
+.nsh-gone { display: none; }
+.nsh-inert { pointer-events: none; }
+.nsh-clip { overflow: clip; }
+.nsh-stuck { z-index: 5; }
+.nsh-v.nsh-slotted { position: relative; }
+.nsh-fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
+img.nsh-fill { pointer-events: none; }
+.nsh-fit-cover { object-fit: cover; }
+.nsh-fit-contain { object-fit: contain; }
+.nsh-fit-fill { object-fit: fill; }
+.nsh-fit-scale-down { object-fit: scale-down; }
+.nsh-spacer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; visibility: hidden; }
+/* Over the style's \`overflow: clip\`. */
+.nsh-scroll.nsh-ox.nsh-ox { overflow-x: auto; overflow-y: hidden; }
+.nsh-scroll.nsh-oy.nsh-oy { overflow-x: hidden; overflow-y: auto; }
+.nsh-scroll.nsh-oxy.nsh-oxy { overflow: auto; }
+.nsh-scroll.nsh-onone.nsh-onone { overflow: hidden; }
+.nsh-scroll.nsh-zoom.nsh-zoom { touch-action: none; }
+.nsh-snap-x { scroll-snap-type: x mandatory; }
+.nsh-snap-y { scroll-snap-type: y mandatory; }
+.nsh-snap { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; scroll-snap-align: start; }
+.nsh-snap-stop { scroll-snap-stop: always; }
+.nsh-offscreen { position: fixed; left: -9999px; top: 0; opacity: 0; }
+.nsh-probe { position: fixed; left: 0; top: 0; width: 0; height: 0; visibility: hidden; pointer-events: none;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.nsh-field.nsh-inset { inset: 0; }
+.nsh-ph::placeholder { color: var(--ph); opacity: 1; }
 .nsh-field { position: absolute; border: 0; outline: none; background: transparent; padding: 0; margin: 0;
   resize: none; font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
 .nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
@@ -192,7 +226,22 @@ const KEYFRAMES = `
 .nsh-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
 .nsh-spinner { position: absolute; left: 50%; width: 20px; height: 20px; margin-left: -10px; pointer-events: none; z-index: 5; }
 .nsh-spinner i { position: absolute; left: 8.75px; top: 0; width: 2.5px; height: 5.5px; border-radius: 1.25px;
-  background: #404040; transform-origin: 1.25px 10px; }
+  background: #404040; transform-origin: 1.25px 10px; opacity: .8; }
+.nsh-spinner i:nth-child(2) { transform: rotate(45deg); }
+.nsh-spinner i:nth-child(3) { transform: rotate(90deg); }
+.nsh-spinner i:nth-child(4) { transform: rotate(135deg); }
+.nsh-spinner i:nth-child(5) { transform: rotate(180deg); }
+.nsh-spinner i:nth-child(6) { transform: rotate(225deg); }
+.nsh-spinner i:nth-child(7) { transform: rotate(270deg); }
+.nsh-spinner i:nth-child(8) { transform: rotate(315deg); }
+.nsh-spinner.full i { opacity: 1; }
+.nsh-spinner.full i:nth-child(2) { opacity: 0.25625; }
+.nsh-spinner.full i:nth-child(3) { opacity: 0.3625; }
+.nsh-spinner.full i:nth-child(4) { opacity: 0.46875; }
+.nsh-spinner.full i:nth-child(5) { opacity: 0.575; }
+.nsh-spinner.full i:nth-child(6) { opacity: 0.68125; }
+.nsh-spinner.full i:nth-child(7) { opacity: 0.7875; }
+.nsh-spinner.full i:nth-child(8) { opacity: 0.89375; }
 .nsh-dark .nsh-spinner i { background: #fff; }
 .nsh-spinner.spin { animation: nsh-spin .8s steps(8) infinite; }
 .nsh-error { position: absolute; left: 8px; right: 8px; bottom: 8px; max-height: 45%; overflow: auto; z-index: 2000;
@@ -235,6 +284,71 @@ function keyCode(e) {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+/**
+ * The style classes of the document, shared by its players: no element
+ * carries an inline style but its geometry and animated values. A class
+ * named after its CSS (`nsh-` and 8 hex digits of its FNV-1a hash, made by
+ * the engine, `op_css`, or here, `cssClass`) is one rule whatever defines
+ * it; a view's own rule (`i<id>…` from the engine, `nsh-p<player>-` in
+ * front) is replaced as the view's style changes. Name -> its CSS text.
+ */
+const CLASSES = { sheets: {}, rules: new Map(), texts: new Map() };
+
+/** The sheet of the generated classes (`nsh-classes`), after the runtime's
+ * own rules, or of the views' own rules (`nsh-own`): changing a rule makes
+ * the browser go over its whole sheet again, so those that change are
+ * apart. */
+function classSheet(id) {
+  if (!CLASSES.sheets[id]) {
+    const style = document.createElement("style");
+    style.id = id;
+    document.head.append(style);
+    CLASSES.sheets[id] = style.sheet;
+  }
+  return CLASSES.sheets[id];
+}
+
+/** Adds (or, for a view's own rule, replaces) class `name` with `text`.
+ * The class is doubled: it wins over the runtime's rules of a class and a
+ * pseudo-class (`.nsh-v:focus`), as inline styles did. */
+function defineClass(name, text, replace, weight = 2) {
+  const rule = CLASSES.rules.get(name);
+  if (rule) {
+    if (replace) rule.style.cssText = text;
+    else if (CLASSES.texts.get(name) !== text) console.warn(`[nsh] two styles named ${name}:`, CLASSES.texts.get(name), text);
+    return;
+  }
+  const sheet = classSheet(replace ? "nsh-own" : "nsh-classes");
+  try {
+    const i = sheet.insertRule(`${`.${name}`.repeat(weight)}{${text}}`, sheet.cssRules.length);
+    CLASSES.rules.set(name, sheet.cssRules[i]);
+    CLASSES.texts.set(name, text);
+  } catch (err) {
+    console.warn("[nsh] style rule not accepted:", text, err);
+  }
+}
+
+/** The class of CSS text `text` (as the engine names them), defined when
+ * new; `weight` repeats it in the selector, over the views' style classes. */
+function cssClass(text, weight = 2) {
+  let h = 0x811c9dc5;
+  for (const b of encoder.encode(text)) h = Math.imul(h ^ b, 0x01000193);
+  const name = `nsh-${(h >>> 0).toString(16).padStart(8, "0")}`;
+  defineClass(name, text, false, weight);
+  return name;
+}
+
+/** Puts `el` in class `name` in place of its previous one of `slot`. */
+function swapClass(el, slot, name) {
+  const old = el[slot];
+  if (old === name) return;
+  if (old) el.classList.remove(old);
+  if (name) el.classList.add(name);
+  el[slot] = name;
+}
+
+let players = 0;
 
 /**
  * The script a web view's HTML starts with: the first message from the
@@ -309,6 +423,8 @@ class Player {
     // right-to-left layout), which replaces its inline style.
     container.append(this.root);
     this.views = new Map();
+    // Of the views' own style rules (`op_css`).
+    this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
     this.frame = 0;
     this.measure = measureContext();
@@ -322,7 +438,7 @@ class Player {
     // default only when the app is the page (in an iframe each push would
     // be an entry of the embedding page's history too).
     this.history = options.history ?? window.top === window;
-    if (window.top === window) document.documentElement.style.overscrollBehavior = "none";
+    if (window.top === window) document.documentElement.classList.add("nsh-page");
   }
 
   async load(url) {
@@ -443,11 +559,11 @@ class Player {
   fontLoading(loading) {
     const pending = (this.fontsPending ??= []);
     pending.push(loading.catch((err) => console.warn("[nsh] font failed to load:", err)));
-    if (this.starting && this.root.style.visibility !== "hidden") {
-      this.root.style.visibility = "hidden";
+    if (this.starting && !this.root.classList.contains("nsh-hidden")) {
+      this.root.classList.add("nsh-hidden");
       // A face that never settles must not keep the app hidden.
       clearTimeout(this.fontTimer);
-      this.fontTimer = setTimeout(() => { this.root.style.visibility = ""; }, 3000);
+      this.fontTimer = setTimeout(() => this.root.classList.remove("nsh-hidden"), 3000);
     }
     if (pending.length > 1) return;
     const settle = () => {
@@ -462,7 +578,7 @@ class Player {
         this.metricsCache.clear();
         this.call((w) => w.nsh_fonts_loaded());
         clearTimeout(this.fontTimer);
-        this.root.style.visibility = "";
+        this.root.classList.remove("nsh-hidden");
       });
     };
     settle();
@@ -674,8 +790,7 @@ class Player {
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
     // `env(safe-area-inset-*)` is only readable through a style it sets.
     this.safeProbe = document.createElement("div");
-    this.safeProbe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;"
-      + "padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
+    this.safeProbe.className = "nsh-probe";
     document.body.append(this.safeProbe);
   }
 
@@ -787,14 +902,14 @@ class Player {
     if (kind === "canvas") {
       el = document.createElement("div");
       const canvas = document.createElement("canvas");
-      canvas.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%";
+      canvas.className = "nsh-fill";
       el.append(canvas);
       el._canvas = canvas;
       el._slots = [];
     } else if (kind === "web") {
       el = document.createElement("div");
       const frame = document.createElement("iframe");
-      frame.style.cssText = "position:absolute;inset:0;width:100%;height:100%;border:0";
+      frame.className = "nsh-fill";
       el.append(frame);
       el._frameEl = frame;
       frame.addEventListener("load", () => this.webLoaded(el));
@@ -802,7 +917,7 @@ class Player {
       el = document.createElement("div");
       const video = document.createElement("video");
       video.playsInline = true;
-      video.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+      video.className = "nsh-fill";
       el.append(video);
       el._video = video;
       this.wireVideo(el, video);
@@ -813,22 +928,21 @@ class Player {
     el._kind = kind;
     el._events = new Set();
     el._animation = {};
-    el._css = "";
     el._frame = null;
     el.className = kind === "scroll" ? "nsh-v nsh-scroll" : "nsh-v";
     if (kind === "image") {
       const img = document.createElement("img");
       img.draggable = false;
-      img.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;pointer-events:none";
+      img.className = "nsh-fill nsh-fit-cover";
       img.addEventListener("load", () => this.imageLoaded(el, img));
       img.addEventListener("error", () => this.imageFailed(el));
       el.append(img);
       el._img = img;
-      el._base = "overflow:clip;";
+      el.classList.add("nsh-clip");
     }
     if (kind === "scroll") {
       el._spacer = document.createElement("div");
-      el._spacer.style.cssText = "position:absolute;left:0;top:0;width:1px;height:1px;pointer-events:none;visibility:hidden";
+      el._spacer.className = "nsh-spacer";
       el.append(el._spacer);
       el._applied = 0;
       el.addEventListener("scroll", () => this.scrolled(el), { passive: true });
@@ -836,7 +950,7 @@ class Player {
     }
     if (kind === "screen") el.classList.add("nsh-screen");
     if (kind === "modal") el.classList.add("nsh-modal");
-    if (kind === "stack") el._base = "overflow:clip;";
+    if (kind === "stack") el.classList.add("nsh-clip");
     if (this.layoutAnimation?.create) this.animateIn(el, this.layoutAnimation.create);
     this.views.set(id, el);
   }
@@ -936,27 +1050,25 @@ class Player {
     s.height = `${f[3]}px`;
   }
 
-  /** Visual CSS; the frame and animated properties are kept. */
+  /** A class from the engine: a view's own rules are the player's. */
+  styleClass(name) {
+    return name && name.charCodeAt(0) === 105 ? this.classPrefix + name : name;
+  }
+
+  op_css([, name, text]) {
+    const own = name.charCodeAt(0) === 105;
+    defineClass(own ? this.classPrefix + name : name, text, own);
+  }
+
+  /** Visual style: its class replaces the previous one; the frame and
+   * animated properties are inline. */
   op_s([, id, css, border, tint]) {
     const el = this.view(id);
     if (!el) return;
-    el._css = css;
-    const transition = el.style.transition;
-    // The press cursor goes before the view's own `cursor`, which wins.
-    el.style.cssText = (el._base ?? "") + (el._pressable ? "cursor:pointer;" : "") + css + (el._extra ?? "");
-    if (transition) el.style.transition = transition;
-    if (el._kind === "scroll") this.scrollOverflow(el);
-    this.placeFrame(el);
-    for (const [prop, value] of Object.entries(el._animation)) {
-      if (prop !== "border-color" && prop !== "color") el.style.setProperty(prop, value);
-    }
-    if (el._sticky) el.style.translate = el._sticky;
+    swapClass(el, "_class", this.styleClass(css));
     if (border) {
-      if (!el._border) {
-        el._border = document.createElement("div");
-        el._border.className = "nsh-border";
-      }
-      el._border.style.cssText = border;
+      if (!el._border) el._border = document.createElement("div");
+      el._border.className = `nsh-border ${this.styleClass(border)}`;
       if (el._animation["border-color"]) el._border.style.borderColor = el._animation["border-color"];
       el.append(el._border);
     } else if (el._border) {
@@ -991,16 +1103,15 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selectionColor]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection]) {
     const el = this.view(id);
     if (!el) return;
     const frag = document.createDocumentFragment();
     for (const [x, y, text, style, after] of runs) {
       const span = document.createElement("span");
-      span.className = "nsh-run";
-      span.style.cssText = styles[style] ?? "";
-      span.style.left = `${cx + x}px`;
-      span.style.top = `${cy + y}px`;
+      const name = this.styleClass(styles[style]);
+      span.className = name ? `nsh-run ${name}` : "nsh-run";
+      span.style.cssText = `left:${cx + x}px;top:${cy + y}px`;
       span.textContent = text;
       // The line's break, for copying (`copy`).
       if (after) span._after = after;
@@ -1011,8 +1122,8 @@ class Player {
     el.insertBefore(frag, el.firstChild);
     el.classList.toggle("nsh-selectable", !!selectable);
     el.classList.toggle("nsh-autoselect", selectable == null);
-    if (selectionColor) el.style.setProperty("--nsh-selection", selectionColor);
-    else el.style.removeProperty("--nsh-selection");
+    // Its `--nsh-selection`.
+    swapClass(el, "_selection", this.styleClass(selection));
     el._textLabel = runs.map((r) => r[2]).join("");
     if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
   }
@@ -1022,7 +1133,8 @@ class Player {
     if (!el) return;
     el._events = new Set(events);
     const pressable = PRESS_EVENTS.some((e) => el._events.has(e));
-    if (pressable && !el._pressable && !el.style.cursor) el.style.cursor = "pointer";
+    // Under the view's own `cursor` (its class).
+    el.classList.toggle("nsh-pointer", pressable);
     el._pressable = pressable;
     this.updateFocusable(el);
     this.updateTouchAction(el);
@@ -1056,9 +1168,7 @@ class Player {
     if (props.testID) el.dataset.testid = props.testID;
     else delete el.dataset.testid;
     const pe = props.pointerEvents;
-    // Kept in `_extra` so that restyling (`op_s`) keeps it.
-    el._extra = pe === "none" || pe === "box-none" ? "pointer-events:none;" : "";
-    el.style.pointerEvents = el._extra ? "none" : "";
+    el.classList.toggle("nsh-inert", pe === "none" || pe === "box-none");
     if (pe === "box-none") el._boxNone = true;
     this.updateFocusable(el);
     this.updateTouchAction(el);
@@ -1152,7 +1262,8 @@ class Player {
   // The app's appearance (`setColorScheme`): 0 the system's, 1 light, 2 dark.
   op_appearance([, appearance]) {
     this.appearance = appearance;
-    this.root.style.colorScheme = appearance === 1 ? "light" : appearance === 2 ? "dark" : "";
+    this.root.classList.toggle("nsh-scheme-light", appearance === 1);
+    this.root.classList.toggle("nsh-scheme-dark", appearance === 2);
     this.updateRootClasses();
   }
 
@@ -1172,19 +1283,19 @@ class Player {
     const el = this.view(id);
     if (!el?._img) return;
     const img = el._img;
-    img.style.objectFit = mode;
-    img.style.filter = blur > 0 ? `blur(${blur}px)` : "";
+    el._fit = mode;
+    // The image's and the placeholder's classes (`nsh-hidden` is their state).
+    el._imgClass = `nsh-fill nsh-fit-${mode}${blur > 0 ? ` ${cssClass(`filter:blur(${blur}px);`)}` : ""}`;
+    img.className = el._imgClass + (img.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
     el._fade = fade;
     const ph = placeholder ? this.asset(placeholder) : "";
     if (ph && !el._ph) {
       el._ph = document.createElement("img");
       el._ph.draggable = false;
-      el._ph.style.cssText = img.style.cssText;
       el.insertBefore(el._ph, img);
     }
     if (el._ph) {
-      el._ph.style.objectFit = mode;
-      el._ph.style.filter = img.style.filter;
+      el._ph.className = el._imgClass + (el._ph.classList.contains("nsh-hidden") ? " nsh-hidden" : "");
       if (ph) {
         if (el._ph.getAttribute("src") !== ph) el._ph.src = ph;
       } else {
@@ -1196,7 +1307,7 @@ class Player {
     if (el._src === src) return;
     el._src = src;
     el._failed = false;
-    if (el._ph) el._ph.style.visibility = "";
+    if (el._ph) el._ph.classList.remove("nsh-hidden");
     if (!src) {
       img.removeAttribute("src");
       return;
@@ -1213,15 +1324,15 @@ class Player {
   applyTint(el) {
     if (!el._img) return;
     if (el._tint && el._src) {
-      el._img.style.visibility = "hidden";
-      el.style.backgroundColor = el._tint;
-      const fit = el._img.style.objectFit;
+      el._img.classList.add("nsh-hidden");
+      const fit = el._fit;
       const size = fit === "fill" ? "100% 100%" : fit === "scale-down" ? "contain" : fit || "cover";
-      const mask = `url("${el._src}") center / ${size} no-repeat`;
-      el.style.mask = mask;
-      el.style.webkitMask = mask;
+      const mask = `url(${JSON.stringify(el._src)}) center / ${size} no-repeat`;
+      // Over the view's own background.
+      swapClass(el, "_tintClass", cssClass(`background-color:${el._tint};-webkit-mask:${mask};mask:${mask};`, 3));
     } else {
-      el._img.style.visibility = el._failed ? "hidden" : "";
+      el._img.classList.toggle("nsh-hidden", !!el._failed);
+      swapClass(el, "_tintClass", null);
     }
   }
 
@@ -1233,7 +1344,7 @@ class Player {
     if (el._ph) {
       const ph = el._ph;
       clearTimeout(el._phTimer);
-      el._phTimer = setTimeout(() => { if (el._ph === ph) ph.style.visibility = "hidden"; }, el._fade > 0 ? el._fade : 0);
+      el._phTimer = setTimeout(() => { if (el._ph === ph) ph.classList.add("nsh-hidden"); }, el._fade > 0 ? el._fade : 0);
     }
     if (el._events.has("onLoad")) this.event(el._id, "onLoad", { width: img.naturalWidth, height: img.naturalHeight });
     if (el._events.has("onLoadEnd")) this.event(el._id, "onLoadEnd");
@@ -1242,7 +1353,7 @@ class Player {
   imageFailed(el) {
     // No broken-image icon: the placeholder, or nothing, shows.
     el._failed = true;
-    el._img.style.visibility = "hidden";
+    el._img.classList.add("nsh-hidden");
     if (el._events.has("onError")) this.event(el._id, "onError", { message: `failed to load ${el._src}` });
     if (el._events.has("onLoadEnd")) this.event(el._id, "onLoadEnd");
   }
@@ -1289,16 +1400,14 @@ class Player {
   /** Scrolls only along the view's axis, and not at all while scrolling is
    * disabled. With `overflow: auto` on both axes, a vertical view's own bar
    * narrows it below its content's laid-out width and adds a horizontal bar.
-   * Kept in `_base` so that restyling (`op_s`) keeps it. */
+   * Inline, over the style's `overflow`. */
   scrollOverflow(el) {
     const scroll = el._behavior?.enabled === false ? "hidden" : "auto";
     // Zoomable content scrolls both ways, panned and pinched here (touch-action none).
     const zooms = this.zooms(el);
-    const [x, y] = zooms ? [scroll, scroll] : el._horizontal ? [scroll, "hidden"] : ["hidden", scroll];
-    el._base = `overflow-x:${x};overflow-y:${y};${zooms ? "touch-action:none;" : ""}`;
-    el.style.overflowX = x;
-    el.style.overflowY = y;
-    el.style.touchAction = zooms ? "none" : "";
+    const axes = scroll === "hidden" ? "nsh-onone" : zooms ? "nsh-oxy" : el._horizontal ? "nsh-ox" : "nsh-oy";
+    swapClass(el, "_overflow", axes);
+    el.classList.toggle("nsh-zoom", zooms);
   }
 
   snapMarkers(el) {
@@ -1306,10 +1415,8 @@ class Player {
     for (const m of el._markers ?? []) m.remove();
     el._markers = [];
     el._snapPoints = null;
-    if (!b || !el._content || !el._frame) {
-      el.style.scrollSnapType = "";
-      return;
-    }
+    el.classList.remove("nsh-snap-x", "nsh-snap-y");
+    if (!b || !el._content || !el._frame) return;
     const axis = el._horizontal ? 0 : 1;
     const viewport = el._frame[2 + axis];
     const max = Math.max(0, el._content[axis] - viewport);
@@ -1317,16 +1424,13 @@ class Player {
     if (b.snapInterval > 0) for (let p = 0; p <= max + 0.5; p += b.snapInterval) points.push(p);
     else if (b.snapOffsets.length) points = b.snapOffsets;
     else if (b.paging && viewport > 0) for (let p = 0; p <= max + 0.5; p += viewport) points.push(p);
-    if (!points.length) {
-      el.style.scrollSnapType = "";
-      return;
-    }
+    if (!points.length) return;
     el._snapPoints = [...points].sort((a, b) => a - b);
-    el.style.scrollSnapType = `${el._horizontal ? "x" : "y"} mandatory`;
+    el.classList.add(el._horizontal ? "nsh-snap-x" : "nsh-snap-y");
     for (const p of points) {
       const m = document.createElement("div");
-      m.style.cssText = `position:absolute;width:1px;height:1px;pointer-events:none;scroll-snap-align:start;${el._horizontal ? `left:${p}px;top:0` : `top:${p}px;left:0`}`;
-      if (b.paging || b.snapInterval > 0) m.style.scrollSnapStop = "always";
+      m.className = b.paging || b.snapInterval > 0 ? "nsh-snap nsh-snap-stop" : "nsh-snap";
+      m.style.cssText = el._horizontal ? `left:${p}px` : `top:${p}px`;
       el.append(m);
       el._markers.push(m);
     }
@@ -1348,7 +1452,7 @@ class Player {
       const shift = Math.min(Math.max(offset - start, 0), end - start);
       cell._sticky = el._horizontal ? `${shift}px 0` : `0 ${shift}px`;
       cell.style.translate = cell._sticky;
-      cell.style.zIndex = shift > 0 ? "5" : "";
+      cell.classList.toggle("nsh-stuck", shift > 0);
     }
   }
 
@@ -1652,28 +1756,24 @@ class Player {
     const shown = el._pull > 0;
     let spinner = el._spinner;
     if (!shown) {
-      if (spinner) spinner.style.display = "none";
+      spinner?.classList.add("nsh-gone");
       return;
     }
     if (!spinner) {
       spinner = el._spinner = document.createElement("div");
       spinner.className = "nsh-spinner";
       for (let i = 0; i < 8; i++) {
-        const spoke = document.createElement("i");
-        spoke.style.transform = `rotate(${i * 45}deg)`;
-        spinner.append(spoke);
+        spinner.append(document.createElement("i"));
       }
       el.append(spinner);
     }
-    spinner.style.display = "";
+    spinner.classList.remove("nsh-gone");
     spinner.style.top = `${el._pull - REFRESH_SPACE / 2 - 10}px`;
     const progress = el._refreshing ? 1 : Math.min(1, el._pull / REFRESH_PULL);
     const count = Math.min(8, Math.ceil(progress * 8));
-    [...spinner.children].forEach((spoke, i) => {
-      spoke.style.visibility = i < count ? "" : "hidden";
-      // Turning, the spokes fade behind the lead one.
-      spoke.style.opacity = progress < 1 ? "0.8" : String(1 - ((8 - i) % 8) / 8 * 0.85);
-    });
+    [...spinner.children].forEach((spoke, i) => spoke.classList.toggle("nsh-hidden", i >= count));
+    // Pulled all the way, the spokes fade behind the lead one.
+    spinner.classList.toggle("full", progress >= 1);
     spinner.classList.toggle("spin", !!el._refreshing);
   }
 
@@ -1798,7 +1898,9 @@ class Player {
 
   // Inputs
 
-  op_in([, id, config]) {
+  /** A field; `css` is the class of its text (font, color, alignment,
+   * line height, placeholder and caret colors). */
+  op_in([, id, config, css]) {
     const el = this.view(id);
     if (!el) return;
     let field = el._field;
@@ -1813,11 +1915,9 @@ class Player {
       el.append(field);
       if (el._content) this.placeContent(el);
     }
-    field.style.cssText = config.css + (el._content ? "" : "inset:0;");
-    field.style.textAlign = config.align;
-    if (config.lineHeight > 0) field.style.lineHeight = `${config.lineHeight}px`;
-    if (config.placeholderColor) field.style.setProperty("--ph", config.placeholderColor);
-    if (config.selectionColor) field.style.caretColor = config.selectionColor;
+    swapClass(field, "_class", this.styleClass(css));
+    // Filling the view, or placed at its content's frame (`placeContent`).
+    field.classList.toggle("nsh-inset", !el._content);
     field.placeholder = config.placeholder;
     if (!config.multiline) {
       field.type = config.secure ? "password"
@@ -1836,16 +1936,7 @@ class Player {
     if (config.maxLength != null) field.maxLength = config.maxLength;
     else field.removeAttribute("maxlength");
     el._config = config;
-    if (config.placeholderColor && !el._phStyle) {
-      el._phStyle = true;
-      field.classList.add("nsh-ph");
-      if (!document.getElementById("nsh-ph-style")) {
-        const s = document.createElement("style");
-        s.id = "nsh-ph-style";
-        s.textContent = ".nsh-ph::placeholder { color: var(--ph); opacity: 1; }";
-        document.head.append(s);
-      }
-    }
+    field.classList.toggle("nsh-ph", !!config.placeholderColor);
     if (config.autoFocus && !el._autoFocused) {
       el._autoFocused = true;
       setTimeout(() => field.focus(), 0);
@@ -1911,7 +2002,7 @@ class Player {
     const field = el._field;
     if (!field || !el._content) return;
     const [x, y, w, h] = el._content;
-    field.style.inset = "";
+    field.classList.remove("nsh-inset");
     field.style.left = `${x}px`;
     field.style.top = `${y}px`;
     field.style.width = `${w}px`;
@@ -1938,18 +2029,17 @@ class Player {
     }
     if (!header) {
       header = document.createElement("div");
-      header.className = "nsh-header";
       screen._header = header;
     }
     header.textContent = "";
-    header.style.height = `${c.height}px`;
-    header.style.background = c.background ?? (this.shownDark ? "#1c1c1e" : "#f9f9f9");
-    header.style.color = c.titleColor ?? (this.shownDark ? "#fff" : "#000");
+    const background = c.background ?? (this.shownDark ? "#1c1c1e" : "#f9f9f9");
+    const color = c.titleColor ?? (this.shownDark ? "#fff" : "#000");
+    header.className = `nsh-header ${cssClass(`height:${c.height}px;background:${background};color:${color};`)}`;
     const title = document.createElement("span");
     title.textContent = c.title ?? "";
     const titleView = c.titleView != null ? this.view(c.titleView) : null;
     if (titleView) {
-      titleView.style.position = "relative";
+      titleView.classList.add("nsh-slotted");
       header.append(titleView);
     } else {
       header.append(title);
@@ -1961,13 +2051,12 @@ class Player {
     if (leftView) {
       const slot = document.createElement("div");
       slot.className = "nsh-header-back";
-      leftView.style.position = "relative";
+      leftView.classList.add("nsh-slotted");
       slot.append(leftView);
       header.append(slot);
     } else if (index > 0 && c.backVisible) {
       const back = document.createElement("button");
-      back.className = "nsh-header-back";
-      back.style.color = c.tint ?? "#007aff";
+      back.className = `nsh-header-back ${cssClass(`color:${c.tint ?? "#007aff"};`)}`;
       back.textContent = "‹ Back";
       back.addEventListener("click", () => this.goBack(screen));
       header.append(back);
@@ -1976,7 +2065,7 @@ class Player {
     if (rightView) {
       const slot = document.createElement("div");
       slot.className = "nsh-header-right";
-      rightView.style.position = "relative";
+      rightView.classList.add("nsh-slotted");
       slot.append(rightView);
       header.append(slot);
     }
@@ -1993,7 +2082,7 @@ class Player {
     const below = screens[screens.indexOf(screen) - 1];
     if (below) {
       clearTimeout(stack._hideTimer);
-      below.style.visibility = "";
+      below.classList.remove("nsh-hidden");
       below.style.transform = "";
     }
     screen._popping = true;
@@ -2149,12 +2238,12 @@ class Player {
     // The screen under the top one shows while the top one slides.
     stack._hideTimer = setTimeout(() => {
       screens.forEach((screen, i) => {
-        if (i < screens.length - 1 && screen.parentNode === stack) screen.style.visibility = "hidden";
+        if (i < screens.length - 1 && screen.parentNode === stack) screen.classList.add("nsh-hidden");
       });
     }, 400);
     screens.forEach((screen, i) => {
       const top = i === screens.length - 1;
-      screen.style.visibility = top || i === screens.length - 2 ? "" : "hidden";
+      screen.classList.toggle("nsh-hidden", !(top || i === screens.length - 2));
       if (screen === added && i > 0) {
         const focus = document.activeElement;
         if (focus && focus !== document.body && this.root.contains(focus) && !added.contains(focus)) added._restoreFocus = focus;
@@ -2320,7 +2409,7 @@ class Player {
     this.hideModal(el, motion);
     const scrim = el._scrim;
     el._scrim = null;
-    if (scrim) scrim.style.pointerEvents = "none";
+    scrim?.classList.add("nsh-inert");
     this.scopeFocus();
     this.syncHistorySoon();
     const restore = el._restoreFocus;
@@ -2454,7 +2543,7 @@ class Player {
     video.playbackRate = rate;
     video.loop = repeat;
     video.controls = controls;
-    video.style.objectFit = fit;
+    video.className = `nsh-fill nsh-fit-${fit}`;
     if (paused) video.pause();
     else if (url && video.paused) {
       video.play().catch((err) => {
@@ -2601,7 +2690,7 @@ class Player {
     const copy = () => {
       const area = document.createElement("textarea");
       area.value = text;
-      area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+      area.className = "nsh-offscreen";
       document.body.append(area);
       area.select();
       try {

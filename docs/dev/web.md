@@ -193,8 +193,9 @@ the engine pumps it and returns the next delay in milliseconds (-1: none), which
 The engine is not reentrant: `nsh.js` routes every call through `Player.call`, which defers calls made while a
 batch is being applied (a batch arrives inside a wasm call).
 
-A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, css,
-borderCss, tint]`, `["t", id, ...content, runs, styles, selectable]` (`selectable` `null` when unset), and so on; `nsh.js` has one `op_<name>` method per
+A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, class,
+borderClass, tint]`, `["t", id, ...content, runs, styles, selectable, selectionClass]` (`styles`: a class per run
+style; `selectable` `null` when unset), `["in", id, config, class]`, `["css", class, text]`, and so on; `nsh.js` has one `op_<name>` method per
 item. Views are absolutely positioned at the core's frames; borders are an overlay element (as UIKit draws layer
 borders) so they never move the content the core placed. Native animation items stay in Rust (`src/animation.rs`, a port
 of the Android animator); bound properties go out as `["a", id, prop, value]` after each batch and each
@@ -210,6 +211,42 @@ Text (`src/text.rs`) is broken into lines here, with widths and font metrics fro
 `font_ascent` and `font_descent` imports (canvas `measureText`, cached per font and string); runs are drawn at the
 positions computed here with a line height equal to the font's ascent + descent, so the baseline lands where layout
 put it.
+
+## Styles as classes
+
+No element has an inline style but its geometry (frames, a field's content box, sticky offsets, a zoomed layer, snap
+markers) and animated values (`["a", …]`, layout and screen transitions, press feedback): the same text in every
+element and every batch would be parsed again each time. Every visual style is a class. `src/encode.rs` turns a view's
+style, its border overlay's, each text run style (with its line height), a text's selection color and a field's text
+into CSS, and names each distinct text `nsh-` and 8 hex digits of its 32-bit FNV-1a hash (`class_key`; the mounter's
+fixed classes are words, `nsh-root`, `nsh-hidden`, so the two never meet). The first item that uses a class the page
+does not have comes after `["css", name, text]`; `nsh.js` inserts `.name.name{text}` into `<style id="nsh-classes">`,
+shared by the document's players (the doubled class wins over the runtime's rules of a class and a pseudo-class,
+`.nsh-v:focus`, as inline styles did). What the mounter styles itself is fixed classes in its stylesheet (scroll axes,
+snapping, fits, hidden states, the press cursor `nsh-pointer`, `nsh-inert` for `pointerEvents`), or classes it names
+the same way from the CSS it makes (`cssClass`: header colors, a blur, an image's tint and mask, the latter over the
+view's own background with a tripled class). A second hash of each text in Rust tells two texts with the same name
+apart: the later one then gets a view's own rule.
+
+A view whose styles keep changing (a style animated from JS: a new text each frame) would grow the sheet by a rule a
+frame. After 16 classes defined for one view (`OWN_RULES_AFTER`) its new styles go to rules of its own (`i<id>`,
+`i<id>b`, `i<id>t<style>`, …, `nsh-p<player>-` in front), in `<style id="nsh-own">`, which `op_css` replaces in
+place (a sheet of its own: the browser goes over a changed sheet again); deleting the view resets its count.
+
+Measured in headless Chromium against inline styles (2026-10):
+
+| | inline | classes |
+|---|---:|---:|
+| packaged gallery, phone layout, first batch | 62.5 KB | 39.9 KB |
+| packaged gallery, desktop: the shell's first batch / the Stocks chunk's | 33.3 / 226.2 KB | 28.6 / 180.8 KB |
+| packaged gallery, desktop, Stocks (ticking every 50 ms) then Styles, Tailwind, Text, Form, Lists, dark | 3.79 MB | 3.01 MB |
+| Lists grid scrolled to the end (40 wheel steps): batches, main thread | 65.9 KB, 90 ms | 25.5 KB, 76–78 ms |
+| the website's 31 demos, first render in all | 428 KB | 286 KB (−33%) |
+| a box whose background, border and text color change every frame from JS, over 6 s: style recalculation, main thread | 25 ms, 272 ms | 41 ms, 291 ms |
+
+Screenshots are pixel-identical but for animations caught at other moments (the 31 demos, the gallery's demos, dark
+mode switched at run time, hover, focus). A field restyled after its content box was placed (dark mode) no longer
+loses its position: the old full `cssText` replaced it.
 
 ## Networking
 
