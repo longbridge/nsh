@@ -1,5 +1,6 @@
 //! WebAssembly backend for nsh: runs an app in a browser page and renders
-//! it to the DOM, for the website's live demos.
+//! it to the DOM: apps published with `nsh package --target web`, the web
+//! development host and the website's live demos.
 //!
 //! - The engine runs on the page's main thread ([`nsh_engine::LocalEngine`]):
 //!   the JS runtime (`web/nsh.js`) calls [`nsh_pump`] after input and when
@@ -30,8 +31,8 @@ use std::cell::{Cell, RefCell};
 
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size};
 use nsh_engine::{
-    App, Assets, Bundle, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits,
-    LocalEngine, MountSink, Os, Policy,
+    App, Assets, Bundle, ColorScheme, EngineConfig, EngineControl, Environment, HotUpdate, Idiom,
+    Limits, LocalEngine, MountSink, Os, Policy,
 };
 
 pub use crate::net::{
@@ -49,9 +50,25 @@ thread_local! {
     static FRAME_REQUESTED: Cell<bool> = const { Cell::new(false) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// How the next [`nsh_start`] runs its bundle ([`nsh_bundle_options`]).
+    static OPTIONS: RefCell<BundleOptions> = RefCell::new(BundleOptions::default());
+    /// A hot update could not be applied in place ([`nsh_hot_failed`]).
+    static HOT_FAILED: Cell<bool> = const { Cell::new(false) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// What [`nsh_bundle_options`] set for the next [`nsh_start`].
+#[derive(Default)]
+struct BundleOptions {
+    /// Run as a release: hardened, as packaged apps run (default:
+    /// development settings, for the player and the dev server).
+    release: bool,
+    /// What the app declares (`capabilities.json`).
+    capabilities: Option<String>,
+    /// The bundle's source map (JSON).
+    source_map: Option<String>,
 }
 
 struct Running {
@@ -77,6 +94,10 @@ impl MountSink for Sink {
 
     fn request_frame(&self) {
         FRAME_REQUESTED.with(|f| f.set(true));
+    }
+
+    fn hot_update_failed(&self) {
+        HOT_FAILED.with(|f| f.set(true));
     }
 }
 
@@ -202,7 +223,23 @@ pub unsafe extern "C" fn nsh_start(
     let code = unsafe { string(ptr, len) };
     APP.with(|a| a.borrow_mut().take());
     let environment = environment(width, height, dark != 0, pixel_ratio);
-    let mut bundle = Bundle::source(code).with_policy(Policy::development());
+    let options = OPTIONS.with(|o| std::mem::take(&mut *o.borrow_mut()));
+    let policy = if options.release {
+        Policy::default()
+    } else {
+        Policy::development()
+    };
+    let mut bundle = Bundle::source(code).with_policy(policy);
+    if let Some(map) = options.source_map {
+        bundle = bundle.with_source_map(map);
+    }
+    let mut bundle = match bundle.with_capabilities_json(options.capabilities.as_deref()) {
+        Ok(bundle) => bundle,
+        Err(err) => {
+            ffi::report_error(&err);
+            return -1.0;
+        }
+    };
     bundle.base_url = BASE_URL.with(|b| b.borrow().clone());
     let config = EngineConfig {
         app: App::Js(bundle),
@@ -243,6 +280,76 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
     // SAFETY: guaranteed by the caller.
     let url = unsafe { string(ptr, len) };
     BASE_URL.with(|b| *b.borrow_mut() = Some(url));
+}
+
+/// Sets how the next [`nsh_start`] runs its bundle: as a release
+/// (`release` 1: hardened, as `nsh package --target web` ships apps) or
+/// with development settings (0, the default), under the capabilities the
+/// app declares (`capabilities.json`; empty: no declaration) and with the
+/// bundle's source map (empty: none).
+///
+/// # Safety
+///
+/// Both ranges are memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_bundle_options(
+    release: u32,
+    capabilities: *const u8,
+    capabilities_len: usize,
+    map: *const u8,
+    map_len: usize,
+) {
+    // SAFETY: guaranteed by the caller.
+    let (capabilities, map) =
+        unsafe { (string(capabilities, capabilities_len), string(map, map_len)) };
+    OPTIONS.with(|o| {
+        *o.borrow_mut() = BundleOptions {
+            release: release != 0,
+            capabilities: (!capabilities.is_empty()).then_some(capabilities),
+            source_map: (!map.is_empty()).then_some(map),
+        }
+    });
+}
+
+/// Applies a development update (a script from the dev server's hot
+/// updates, named `name` in stack traces, with its source map or none)
+/// to the running app. Returns the pump delay; [`nsh_hot_failed`] then
+/// tells whether the app must be loaded again instead.
+///
+/// # Safety
+///
+/// The three ranges are memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_hot_update(
+    name: *const u8,
+    name_len: usize,
+    code: *const u8,
+    code_len: usize,
+    map: *const u8,
+    map_len: usize,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let (name, code, map) = unsafe {
+        (
+            string(name, name_len),
+            string(code, code_len),
+            string(map, map_len),
+        )
+    };
+    HOT_FAILED.with(|f| f.set(false));
+    let update = HotUpdate {
+        name,
+        code,
+        source_map: (!map.is_empty()).then(|| map.into()),
+    };
+    send(|app| app.control.hot_update(update))
+}
+
+/// Whether the last [`nsh_hot_update`] could not be applied in place (1):
+/// the app must be started again with the new bundle.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_hot_failed() -> u32 {
+    HOT_FAILED.with(|f| f.replace(false)) as u32
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the

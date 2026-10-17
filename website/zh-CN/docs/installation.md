@@ -77,6 +77,7 @@ dist/nsh/runtime/android/{release,dev}/                      # classes.dex, lib/
 dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        # the macOS (AppKit) development host and release runner
 dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        # the Linux development host and release runner
 dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  # the Windows development host and release runner
+dist/nsh/runtime/web/{nsh.wasm,nsh.js}                       # the web runtime (nsh package / run --target web)
 dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS apps
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
 ```
@@ -110,6 +111,7 @@ cargo xtask android --dev                                       # nsh run --targ
 cargo build -p nsh-macos-host                                   # nsh run --target macos (built for you in a checkout)
 cargo build -p nsh-linux-host                                   # nsh run on Linux (built for you in a checkout)
 cargo build -p nsh-windows-host                                 # nsh run on Windows (built for you in a checkout)
+cargo build --profile web -p nsh-platform-web --target wasm32-unknown-unknown   # nsh run --target web (built for you in a checkout)
 ```
 
 如果要使用 `nsh package`，还需要构建发布版运行器：
@@ -121,6 +123,7 @@ cargo xtask android                                             # nsh package --
 cargo build -p nsh-macos-app                                    # nsh package --target macos
 cargo build -p nsh-linux-app                                    # nsh package --target linux
 cargo build -p nsh-windows-app                                  # nsh package --target windows
+# nsh package --target web uses the same web runtime as nsh run --target web
 ```
 
 从源码构建的 CLI 会按自身的 profile 在 `target/<triple>/<profile>`（macOS、Linux 和 Windows 运行时为本机构建，位于 `target/<profile>`）和 `target/android/<profile>[-dev]` 中查找运行时：`./target/debug/nsh` 使用 debug 运行时，`./target/release/nsh` 使用 release 运行时。请用相同的 profile 构建两者（若希望应用更快，给所有命令都加上 `--release`）。

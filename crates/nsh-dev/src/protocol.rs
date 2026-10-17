@@ -26,7 +26,8 @@ pub enum ClientMessage {
         /// [`PROTOCOL_VERSION`] of the client.
         protocol: u32,
         /// Bytecode format the host's engine can load; the server falls back
-        /// to JS source when it differs from its own.
+        /// to JS source when it differs from its own. Empty: the host runs
+        /// JS source only (the web host).
         bytecode_version: String,
         /// Human-readable device name, shown in logs.
         device: String,
@@ -70,6 +71,8 @@ pub enum HostPlatform {
     MacOs,
     /// The Windows host.
     Windows,
+    /// The web host: a browser page the dev server serves.
+    Web,
     /// A platform this version does not know.
     #[serde(other)]
     Other,

@@ -8,6 +8,12 @@
 //
 //   const player = await createPlayer(container, { wasm: "nsh.wasm" });
 //   player.run(await (await fetch("app.js")).text());
+//
+// Options: `wasm` (its URL, or a `Response` promise), `assetBase` (where
+// `asset:/<path>` is served) or `assets` (a map from `<path>` to its URL,
+// as `nsh package --target web` writes it), `readAsset(uri)` (the bytes
+// of an asset the engine needs at once, a font: a `Uint8Array` or null),
+// `dark`, `overlay` (false: no error box), `onError`, `onLog`.
 
 const ROOT_ID = 1;
 const PRESSED = 1;
@@ -142,7 +148,12 @@ class Player {
           (level <= 1 ? console.error : level === 2 ? console.warn : console.log)("[nsh]", message);
           this.options.onLog?.(level <= 1 ? "error" : level === 2 ? "warn" : "log", message);
         },
-        read_asset: () => 0,
+        read_asset: (p, l) => {
+          const data = this.options.readAsset?.(this.str(p, l));
+          if (!data) return 0;
+          this.withStrings([data], (dp, dl) => this.wasm.nsh_asset_bytes(dp, dl));
+          return 1;
+        },
         fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow) =>
           this.fetchStart(id, this.str(mp, ml), this.str(up, ul), JSON.parse(this.str(hp, hl)),
             kind === 1 ? this.bytes(bp, bl).slice() : null, kind === 2, follow !== 0),
@@ -217,8 +228,13 @@ class Player {
 
   // Running -------------------------------------------------------------
 
-  /** Runs `code` (a bundle from `nsh build`), replacing what ran. */
-  run(code) {
+  /**
+   * Runs `code` (a bundle from `nsh build`), replacing what ran. Options:
+   * `release` (hardened, as packaged apps run; default: development
+   * settings), `capabilities` (the app's `capabilities.json`) and
+   * `sourceMap` (JSON).
+   */
+  run(code, { release = false, capabilities = "", sourceMap = "" } = {}) {
     this.stop();
     this.app = (this.app ?? 0) + 1;
     const root = this.root;
@@ -232,6 +248,8 @@ class Player {
     const width = root.clientWidth || 390;
     const height = root.clientHeight || 844;
     this.size = [width, height];
+    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
+      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
     this.call(() => this.withStrings([code], (p, l) =>
       this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1)));
   }
@@ -253,6 +271,22 @@ class Player {
     if (result.error) return result.error;
     this.run(result.code);
     return null;
+  }
+
+  /**
+   * Applies a hot update from the dev server (a script replacing changed
+   * modules) to the running app. Returns false when it could not be
+   * applied in place: run the new bundle instead.
+   */
+  hotUpdate(code, name = "hot.js", sourceMap = "") {
+    let applied = true;
+    this.call(() => {
+      const delay = this.withStrings([name, code, sourceMap ?? ""], (np, nl, cp, cl, mp, ml) =>
+        this.wasm.nsh_hot_update(np, nl, cp, cl, mp, ml));
+      applied = !this.wasm.nsh_hot_failed();
+      return delay;
+    });
+    return applied;
   }
 
   stop() {
@@ -336,7 +370,10 @@ class Player {
 
   asset(uri) {
     if (!uri) return uri;
-    if (uri.startsWith("asset:/")) return this.assetBase + uri.slice("asset:/".length).replace(/^\/+/, "");
+    if (uri.startsWith("asset:/")) {
+      const path = uri.slice("asset:/".length).replace(/^\/+/, "");
+      return this.options.assets?.[path] ?? this.assetBase + path;
+    }
     return uri;
   }
 

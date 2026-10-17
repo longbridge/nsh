@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>nsh dev</title>
+<meta name="color-scheme" content="light dark">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; color: #1c1c1e; }
+  @media (prefers-color-scheme: dark) { html, body { background: #000; color: #f2f2f7; } }
+  #app { position: fixed; inset: 0; }
+  #status { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 3000; padding: 6px 12px;
+    border-radius: 999px; background: rgba(60,60,67,.85); color: #fff; pointer-events: none;
+    font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #status[hidden], #problem[hidden] { display: none; }
+  #problem { position: fixed; inset: 0; z-index: 3000; overflow: auto; padding: 24px; box-sizing: border-box;
+    background: rgba(20,20,22,.94); color: #f2f2f7; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #problem h1 { margin: 0 0 12px; font-size: 17px; color: #ff6b5f; }
+  #problem pre { margin: 0; white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    -webkit-user-select: text; user-select: text; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="status" role="status">Connecting…</div>
+<div id="problem" role="alert" hidden><h1></h1><pre></pre></div>
+<script type="module">
+  // The web development host, served by `nsh dev` / `nsh run --target web`:
+  // connects to the dev server's WebSocket as the other hosts do, runs
+  // each bundle (JS source), applies hot updates in place, forwards the
+  // app's logs to the terminal and shows build errors over the app.
+  import { createPlayer } from "./nsh.js";
+
+  const PROTOCOL = {{protocol}};
+  const UI_SETS = {{ui_sets}};
+  const status = document.getElementById("status");
+  const problem = document.getElementById("problem");
+  const decoder = new TextDecoder();
+  const text = (data) => (data ? decoder.decode(data) : "");
+
+  let socket;
+  let session = 0;
+  // The build the page runs: { session, version }.
+  let running = null;
+  // A message whose binary frames are still coming: { message, frames, count }.
+  let pending = null;
+  let retry = 100;
+
+  function showStatus(message) {
+    status.textContent = message;
+    status.hidden = !message;
+  }
+
+  function showProblem(title, detail) {
+    problem.querySelector("h1").textContent = title;
+    problem.querySelector("pre").textContent = detail;
+    problem.hidden = false;
+  }
+
+  const send = (message) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(message));
+  const levels = { error: "error", warn: "warn", log: "info" };
+
+  // Fonts are read synchronously (text is measured with them).
+  const fonts = new Map();
+  function readAsset(uri) {
+    const path = uri.replace(/^asset:\/+/, "");
+    if (fonts.has(path)) return fonts.get(path);
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", `/assets/${path}`, false);
+    xhr.overrideMimeType("text/plain; charset=x-user-defined");
+    xhr.send();
+    let data = null;
+    if (xhr.status === 200) {
+      const s = xhr.responseText;
+      data = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) data[i] = s.charCodeAt(i) & 0xff;
+    }
+    fonts.set(path, data);
+    return data;
+  }
+
+  const player = await createPlayer(document.getElementById("app"), {
+    wasm: "./nsh.wasm",
+    assetBase: "/assets/",
+    readAsset,
+    onLog: (level, message) => send({ type: "log", level: levels[level] ?? "info", target: "js", message }),
+  });
+  window.player = player;
+
+  function device() {
+    const ua = navigator.userAgent;
+    const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox"
+      : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "browser";
+    return `Web (${browser})`;
+  }
+
+  function received(message, frames) {
+    switch (message.type) {
+      case "patch": {
+        if (running?.session !== session || running.version !== message.base) return;
+        const applied = player.hotUpdate(text(frames[0]), `hot-${message.version}.js`, text(frames[1]));
+        if (applied) {
+          running = { session, version: message.version };
+          problem.hidden = true;
+        } else {
+          // The bundle of this version follows: it loads from scratch.
+          running = null;
+        }
+        return;
+      }
+      case "bundle": {
+        showStatus("");
+        if (running?.session === session && running.version === message.version) return;
+        running = { session, version: message.version };
+        problem.hidden = true;
+        player.run(text(frames[0]), { capabilities: message.capabilities ?? "", sourceMap: text(frames[1]) });
+        return;
+      }
+    }
+  }
+
+  function connect() {
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(`${scheme}://${location.host}/ws`);
+    socket.binaryType = "arraybuffer";
+    socket.onopen = () => {
+      retry = 100;
+      pending = null;
+      // No bytecode version: this host runs JS source.
+      send({ type: "hello", protocol: PROTOCOL, bytecode_version: "", device: device(), platform: "web", ui_sets: UI_SETS });
+    };
+    socket.onmessage = (event) => {
+      if (typeof event.data !== "string") {
+        if (!pending) return;
+        pending.frames.push(new Uint8Array(event.data));
+        if (pending.frames.length === pending.count) {
+          const { message, frames } = pending;
+          pending = null;
+          received(message, frames);
+        }
+        return;
+      }
+      const message = JSON.parse(event.data);
+      switch (message.type) {
+        case "hello":
+          session = message.session ?? 0;
+          showStatus("");
+          break;
+        case "building":
+          showStatus("Building…");
+          break;
+        case "build_failed":
+          showStatus("");
+          showProblem("Build failed", message.message);
+          break;
+        case "cannot_run":
+          showStatus("");
+          showProblem("This host cannot run the app", message.message);
+          break;
+        case "patch":
+        case "bundle":
+          pending = { message, frames: [], count: message.source_map ? 2 : 1 };
+          break;
+      }
+    };
+    socket.onclose = () => {
+      showStatus("Dev server disconnected — reconnecting…");
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 2000);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>

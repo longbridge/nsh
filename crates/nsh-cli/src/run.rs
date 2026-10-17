@@ -27,6 +27,9 @@ pub(crate) enum Target {
     Macos,
     /// The Windows development host, in a window on this machine.
     Windows,
+    /// The web development host, in the browser (the dev server serves its
+    /// page).
+    Web,
 }
 
 impl Target {
@@ -51,7 +54,9 @@ impl Target {
             Target::Linux => crate::runtime::Platform::Linux,
             Target::Macos => crate::runtime::Platform::MacOs,
             Target::Windows => crate::runtime::Platform::Windows,
-            Target::Ios | Target::Android => crate::runtime::Platform::IphoneSimulator,
+            Target::Ios | Target::Android | Target::Web => {
+                crate::runtime::Platform::IphoneSimulator
+            }
         }
     }
 }
@@ -86,6 +91,9 @@ pub(crate) fn run(
     if target == Target::Android {
         return run_android(entry, port, release, &work, trace);
     }
+    if target == Target::Web {
+        return run_web(entry, port, release);
+    }
     // The host a previous session left running would connect to this one
     // until it is replaced.
     let udid = match target {
@@ -94,9 +102,12 @@ pub(crate) fn run(
             let _ = simctl(&["terminate", &udid, BUNDLE_ID]);
             Some(udid)
         }
-        Target::Catalyst | Target::Android | Target::Linux | Target::Macos | Target::Windows => {
-            None
-        }
+        Target::Catalyst
+        | Target::Android
+        | Target::Linux
+        | Target::Macos
+        | Target::Windows
+        | Target::Web => None,
     };
     let session = DevSession::start(entry, port, release)?;
     session.print_urls();
@@ -167,8 +178,20 @@ pub(crate) fn run(
             drop(stoppable);
             result
         }
-        Target::Android => unreachable!("handled above"),
+        Target::Android | Target::Web => unreachable!("handled above"),
     }
+}
+
+/// Starts a dev session that serves the web host and opens it in the
+/// browser; every browser that opens the page (on this machine or, at the
+/// LAN address, on a phone) runs the app until the session ends.
+fn run_web(entry: &Path, port: u16, release: bool) -> anyhow::Result<()> {
+    // Built first in a checkout: the session serves the runtime it finds.
+    crate::runtime::web(true)?.context("no web runtime")?;
+    let session = DevSession::start(entry, port, release)?;
+    session.print_urls();
+    crate::web::open_browser(&session.web_url());
+    session.watch(|| Ok(false))
 }
 
 /// Runs `command`, a host in a window on this machine, until its window
@@ -549,7 +572,12 @@ fn info_plist(target: Target) -> String {
              <key>LSMinimumSystemVersion</key><string>11.0</string>"
         }
         // A launch screen entry opts into the full screen (no letterboxing).
-        Target::Ios | Target::Android | Target::Linux | Target::Macos | Target::Windows => {
+        Target::Ios
+        | Target::Android
+        | Target::Linux
+        | Target::Macos
+        | Target::Windows
+        | Target::Web => {
             "<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>\n    \
              <key>MinimumOSVersion</key><string>15.0</string>\n    \
              <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>\n    \

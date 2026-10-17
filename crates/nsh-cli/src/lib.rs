@@ -18,6 +18,7 @@ mod rust_app;
 mod sign;
 mod trace;
 mod ui;
+mod web;
 mod windows;
 
 use std::{path::PathBuf, process::ExitCode, sync::OnceLock};
@@ -155,7 +156,7 @@ enum Command {
     /// Like `dev`, and also run the app in a development host: the Mac
     /// Catalyst app (default on macOS), the macOS (AppKit) app, the Linux
     /// app (default on Linux), the Windows app (default on Windows), an iOS
-    /// simulator, or an Android device or emulator.
+    /// simulator, an Android device or emulator, or a browser.
     Run {
         /// The entry module, or the app's directory (default: the current one),
         /// whose `App.tsx` is the entry.
@@ -315,7 +316,8 @@ struct PackageArgs {
     #[arg(long, env = "NSH_KEYSTORE_PASSWORD", hide_env_values = true)]
     keystore_password: Option<String>,
     /// Install and launch the app in the simulator or on the Android device
-    /// afterwards (Linux, macOS, Windows: launch it).
+    /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
+    /// machine and open it in the browser).
     #[arg(long)]
     run: bool,
 }

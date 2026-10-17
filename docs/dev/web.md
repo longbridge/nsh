@@ -1,7 +1,7 @@
 # The web runtime (WebAssembly)
 
-`crates/nsh-platform-web` runs nsh apps in a browser page, rendering to the DOM. It exists for the website's live
-demos (`website/demos/*.tsx`), not as a target platform: it reports `Platform.OS` as `"ios"`.
+`crates/nsh-platform-web` runs nsh apps in a browser page, rendering to the DOM: apps published with `nsh package
+--target web`, the web development host (`nsh run --target web`) and the website's live demos (`website/demos/*.tsx`).
 User-facing page: `website/docs/web.md`.
 
 ## Building
@@ -16,6 +16,40 @@ QuickJS is C, so the build needs a clang that targets wasm32 and an `llvm-ar` (C
 `AR_wasm32_unknown_unknown=llvm-ar`). Apple's clang has no WebAssembly target: on macOS point
 `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown` at an LLVM toolchain's `clang` and `llvm-ar` (Homebrew's
 `llvm`, or the Android NDK's `toolchains/llvm/prebuilt/*/bin`).
+
+## The CLI's web target
+
+`crates/nsh-cli/src/web.rs`. The CLI finds the runtime as it finds the others (`runtime::web`): `runtime/web/nsh.wasm`
+and `runtime/web/nsh.js` in the distribution (`cargo xtask dist` puts them there); in a checkout it builds
+`nsh-platform-web` with `--profile web --target wasm32-unknown-unknown` whatever its own profile (a debug build is
+several times larger and slower; `AR_wasm32_unknown_unknown` defaults to `llvm-ar`) and takes `nsh.js` from the crate.
+
+- **`nsh package --target web`** writes a static site. Every file but `index.html` and `manifest.webmanifest` is
+  content-addressed (`<stem>.<10 hex digits of SHA-256>.<ext>`, `web::hashed_name`), so hosts cache them for good
+  (`immutable`) and only the page is revalidated. The page (template `crates/nsh-cli/src/web/index.html`) imports the
+  hashed `nsh.js`, preloads the wasm, the app's code and its fonts, and passes `createPlayer` the wasm URL, `assets`
+  (each `asset:/<path>` to its hashed URL: images and videos load from there on demand) and `readAsset` (the fonts'
+  bytes, fetched before the app starts: the engine reads fonts synchronously, `Assets::read`, to measure text with
+  them). It runs the bundle with `run(code, { release: true, capabilities })`; an app whose capabilities restrict `network`
+  gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
+  `host:*`), as the browser follows redirects before nsh could check them. Relative URLs resolve against the page
+  (`document.baseURI`, `nsh_set_base_url`). The app's code ships as JS source
+  (`web::CODE`; the web build's QuickJS is 32-bit, so the CLI's bytecode would not load there); code-split chunks are
+  meant for `chunks/<name>.<digest>.js`. Apps with a Rust crate of their own are refused: the prebuilt wasm has only
+  `nsh/ui/mobile`. `--run` serves the directory with `nsh_dev::SiteServer` (the cache headers a CDN should send) and
+  opens the browser.
+- **The development host** is a page the dev server serves (`DevServer::serve_web`: the page at `/`, `nsh.js` and
+  `nsh.wasm` next to it, all `no-cache`), from `crates/nsh-cli/src/web/dev.html`. `nsh dev` serves it whenever a web
+  runtime exists (`runtime::web(false)`), `nsh run --target web` builds one first and opens the browser. The page
+  speaks the dev protocol over the same port's WebSocket: its hello has platform `web` and an empty
+  `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it applies
+  patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
+  follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
+  reads fonts with a synchronous `XMLHttpRequest` from `/assets/`.
+
+`nsh_bundle_options` sets how the next `nsh_start` runs: development settings by default (the player, the
+playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities and a source
+map.
 
 ## What WebAssembly changes in the shared crates
 
@@ -94,4 +128,5 @@ the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 ## Not implemented
 
 Refresh controls, zooming scroll views, registered native components, the status bar and other
-platform services, fonts that are usable before `FontFace` finishes loading.
+platform services, fonts that are usable before `FontFace` finishes loading. A published app ships JS source, not
+bytecode, and no source map.

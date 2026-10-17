@@ -9,6 +9,7 @@
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
+//! dist/nsh/runtime/web/{nsh.wasm,nsh.js}                       the web runtime (`nsh package --target web`)
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
 //! ```
@@ -19,7 +20,9 @@
 //! GTK 4, Pango and, for web views, WebKitGTK 6.0 must be installed;
 //! without WebKitGTK's development files it is built with placeholders for
 //! web views and needs only GTK); the Windows runtime likewise, on
-//! Windows only (where the CLI is `bin/nsh.exe`).
+//! Windows only (where the CLI is `bin/nsh.exe`). The web runtime is built
+//! everywhere: it needs a clang that targets wasm32 and `llvm-ar`
+//! (`docs/dev/web.md`).
 
 use std::{env, fs, path::Path, process::Command};
 
@@ -99,6 +102,30 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             )?;
         }
     }
+
+    // The web runtime: the same files on every machine.
+    let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    web.current_dir(&root).args([
+        "build",
+        "--profile",
+        "web",
+        "-p",
+        "nsh-platform-web",
+        "--target",
+        "wasm32-unknown-unknown",
+    ]);
+    if env::var_os("AR_wasm32_unknown_unknown").is_none() && env::var_os("AR").is_none() {
+        web.env("AR_wasm32_unknown_unknown", "llvm-ar");
+    }
+    term::cargo(&mut web, "the web runtime")?;
+    copy(
+        &release.join("wasm32-unknown-unknown/web/nsh_platform_web.wasm"),
+        &out.join("runtime/web/nsh.wasm"),
+    )?;
+    copy(
+        &root.join("crates/nsh-platform-web/web/nsh.js"),
+        &out.join("runtime/web/nsh.js"),
+    )?;
 
     // Android runtimes. Windows machines often have no Android SDK: the
     // distribution is then made without them.

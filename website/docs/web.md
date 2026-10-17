@@ -1,6 +1,6 @@
 ---
 title: Web (WebAssembly)
-description: Run nsh apps in a browser with the WebAssembly build of the runtime, which renders to the DOM; it powers the live demos on this site.
+description: Run nsh apps in a browser with the WebAssembly build of the runtime, which renders to the DOM; publish them as static sites with nsh package --target web, develop them with nsh run --target web.
 order: 16
 group: platforms
 demo: counter
@@ -8,7 +8,7 @@ demo: counter
 
 # Web (WebAssembly)
 
-The nsh runtime also compiles to WebAssembly. The same engine runs in a browser page and renders to the DOM instead of UIKit or Android views: the core, the reactive graph, the renderer, Taffy layout, the `nsh/ui/mobile` components and QuickJS itself. Every live demo on this site is an app bundle from `nsh build` running on this runtime.
+The nsh runtime also compiles to WebAssembly. The same engine runs in a browser page and renders to the DOM instead of UIKit or Android views: the core, the reactive graph, the renderer, Taffy layout, the `nsh/ui/mobile` components and QuickJS itself. `nsh package --target web` publishes an app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)), and every live demo on this site is an app bundle from `nsh build` running on this runtime.
 
 ## What runs where
 
@@ -27,7 +27,72 @@ requestAnimationFrame ──────────────┘             
 - **Native animations run in Rust** on `requestAnimationFrame`: `Animated` timing, spring and decay, `interpolate`, native values bound to `opacity`, `transform` and `backgroundColor`, drags bound with `pan`, scroll-linked values and canvas arguments. JS is not involved per frame, as on devices.
 - **Input:** presses with `activeOpacity` and long presses, the responder system (`onTouch*`, `PanResponder`), native drags and two-finger pinch and rotation, scroll views (the browser's scrolling, plus dragging with a mouse), `<Input>` with controlled values, focus and submit, `Canvas`, `Stack` and `Screen` with a header, `Modal`, `Alert`.
 
-## Build it
+## Publish an app
+
+```sh
+nsh package App.tsx --target web           # out/<Name>/: a static site
+nsh package App.tsx --target web --run     # and serve it on this machine, opened in the browser
+```
+
+`nsh package --target web` writes `out/<Name>/` (`--out` for another directory), laid out like a frontend build: one
+page and files named after their content.
+
+| File | What it is |
+|---|---|
+| `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
+| `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
+| `nsh.<digest>.js` | The DOM runtime |
+| `nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli) |
+| `app.<digest>.js` | The app, built as `nsh build --release` builds it |
+| `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the app starts: text is measured with them) |
+| `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
+
+`<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
+new release changes only `index.html` and the files that really changed. Everything uses relative URLs, so the site
+works from any directory of any host (`https://example.com/apps/counter/`).
+
+### Deploy it
+
+Upload the directory to any static host: an object store behind a CDN, Cloudflare Pages, Netlify, GitHub Pages,
+nginx. Two rules make it load fast and update reliably:
+
+| Files | `Cache-Control` |
+|---|---|
+| `index.html`, `manifest.webmanifest` | `no-cache` (revalidated on every load, so a release shows at once) |
+| everything else | `public, max-age=31536000, immutable` |
+
+Serve `.wasm` as `application/wasm` (browsers then compile it while it downloads) and let the host or CDN compress
+text and WebAssembly (gzip or brotli). `nsh package --target web --run` serves the site this way on
+`http://127.0.0.1:4173/`.
+
+An app published for the web runs like a packaged native app: as a release, [hardened](./sandbox-and-capabilities.md)
+(no `eval`), with the capabilities its `nsh.json` declares. When they restrict `network`, the page also carries a
+Content-Security-Policy `connect-src` with the declared hosts (and the page's own origin), so the browser itself
+refuses requests and redirect hops to any other host. An error that keeps it from starting is shown on the page;
+later errors go to the browser's console.
+
+### Embed it with an iframe
+
+There is no embedding API on the web: embed the published app with an `<iframe>`. Its size is the app's window:
+
+```html
+<iframe src="https://apps.example.com/counter/" title="Counter"
+        style="width: 390px; height: 844px; border: 0"></iframe>
+```
+
+## Develop in the browser
+
+```sh
+nsh run App.tsx --target web
+```
+
+starts the dev server and opens its page, `http://127.0.0.1:8790/`, in the browser. The page is a development host
+like the others: it runs each build of the app, applies edits in place (hot updates), shows build errors and runtime
+errors over the app, and sends the app's `console` output to the terminal. Phones on the same network open the
+address `nsh run` prints (`browsers on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
+web runtime is there (in the distribution, always).
+
+## Build the website's player
 
 ```sh
 cargo xtask web                       # nsh.wasm, nsh.js, the player and website/demos/*.tsx
@@ -69,6 +134,8 @@ const player = await createPlayer(document.querySelector("#phone"), {
 player.run(await (await fetch("./bundle.js")).text());
 ```
 
+`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, and `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`; `player.run(code, { release: true, capabilities })` runs a bundle as a release under the capabilities it declares (the default is development settings). The page `nsh package --target web` writes uses all three.
+
 With `nsh-playground.wasm`, `player.runSource(tsx)` compiles TSX first and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
@@ -96,9 +163,10 @@ The web runtime is for demos and documentation. It does not have:
 - **Text shaping details**: line breaking is a subset of UAX #14 (spaces, CJK, hyphens), with no hyphenation and no bidirectional reordering beyond the paragraph direction.
 - **Pull to refresh and zooming scroll views.**
 
-The QuickJS VM runs with development settings (no hardening) and the default [limits](./sandbox-and-capabilities.md).
+The player and the dev server run apps with development settings (no hardening); published apps run hardened. Both use the default [limits](./sandbox-and-capabilities.md).
 
 ## See also
 
+- [Packaging](./packaging.md): the other targets of `nsh package`.
 - [Architecture](./architecture.md): the engine, the core and the mount batches the web build reuses.
 - [Testing and trace](./testing-and-trace.md): `nsh trace` runs the same engine headless, with an approximate text engine.

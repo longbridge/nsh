@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+{{head}}
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+{{colors}}
+  #app { position: fixed; inset: 0; }
+  #status { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; padding: 24px; box-sizing: border-box; text-align: center;
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; pointer-events: none; }
+  #status[hidden] { display: none; }
+  /* Shown only when loading takes a while: no flash on a fast load. */
+  .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(128,128,128,.25);
+    border-top-color: rgba(128,128,128,.85); animation: spin .8s linear infinite, appear .2s .4s both; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes appear { from { opacity: 0; } }
+  #status.failed { pointer-events: auto; }
+  #status pre { margin: 0; max-width: 640px; max-height: 50vh; overflow: auto; text-align: left; white-space: pre-wrap;
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; opacity: .7; -webkit-user-select: text; user-select: text; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="status" role="status" aria-live="polite"><div class="spinner" aria-label="Loading"></div></div>
+<noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif">{{title}} needs JavaScript.</div></noscript>
+<script type="module">
+  // Written by `nsh package --target web`: loads the runtime, the app's
+  // code and its fonts in parallel, then runs the app as a release.
+  import { createPlayer } from "./{{runtime}}";
+
+  const app = {{app}};
+  const status = document.getElementById("status");
+  const fonts = new Map();
+  let player;
+
+  function fail(title, detail) {
+    status.hidden = false;
+    status.className = "failed";
+    status.setAttribute("role", "alert");
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const pre = document.createElement("pre");
+    pre.textContent = detail;
+    status.replaceChildren(heading, pre);
+  }
+
+  async function get(url) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+    return response;
+  }
+
+  const path = (uri) => uri.replace(/^asset:\/+/, "");
+
+  try {
+    const [loaded, code] = await Promise.all([
+      createPlayer(document.getElementById("app"), {
+        wasm: app.wasm,
+        assets: app.assets,
+        readAsset: (uri) => fonts.get(path(uri)) ?? null,
+        // A release shows no error box; an app that could not start says so.
+        overlay: false,
+        onError: (message) => {
+          if (!player || player.views.size <= 1) fail("This app could not start.", message);
+        },
+      }),
+      get(app.code).then((r) => r.text()),
+      ...app.fonts.map(async (font) =>
+        fonts.set(font, new Uint8Array(await (await get(app.assets[font])).arrayBuffer()))),
+    ]);
+    player = loaded;
+    status.hidden = true;
+    player.run(code, { release: true, capabilities: app.capabilities ?? "" });
+  } catch (err) {
+    fail("This app could not be loaded.", String(err?.message ?? err));
+  }
+</script>
+</body>
+</html>

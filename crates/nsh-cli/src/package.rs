@@ -2,7 +2,7 @@
 //! app bundle and its assets. Needs no Rust; iOS packaging uses Xcode's
 //! command line tools (`codesign`, and `actool` for icons), macOS packaging
 //! `codesign` and `sips`, Linux packaging `tar`; Windows packaging needs
-//! nothing (`windows.rs`).
+//! nothing (`windows.rs`), nor does the web's (`web.rs`).
 
 use std::{
     fs,
@@ -35,6 +35,9 @@ pub(crate) enum PackageTarget {
     /// Windows: a directory with the runner as `<name>.exe` (the app's
     /// icon embedded) and the bundle, and the same as a `.zip`.
     Windows,
+    /// The web: a static site (`index.html` and files named by their
+    /// content) for any web server or CDN.
+    Web,
 }
 
 /// App metadata: `nsh.json` next to the entry, overridden by flags.
@@ -82,7 +85,8 @@ pub(crate) struct PackageOptions<'a> {
     /// Android release keystore, key alias and password.
     pub(crate) keystore: Option<(&'a Path, &'a str, &'a str)>,
     /// Install and launch in the simulator or on the device afterwards
-    /// (Linux, macOS, Windows: launch it).
+    /// (Linux, macOS, Windows: launch it; the web: serve it and open it in
+    /// the browser).
     pub(crate) run: bool,
 }
 
@@ -148,6 +152,9 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         PackageTarget::Windows => {
             return crate::windows::package(&options, config, &name, &id, &built);
         }
+        PackageTarget::Web => {
+            return crate::web::package(&options, config, &name, &id, &built);
+        }
     };
     let runner = runtime::file(platform, true)?;
 
@@ -178,7 +185,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Android
         | PackageTarget::Linux
         | PackageTarget::Macos
-        | PackageTarget::Windows => "iphonesimulator",
+        | PackageTarget::Windows
+        | PackageTarget::Web => "iphonesimulator",
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk);
     if let Some(icon) = &config.icon {
@@ -204,7 +212,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         PackageTarget::Android
         | PackageTarget::Linux
         | PackageTarget::Macos
-        | PackageTarget::Windows => {
+        | PackageTarget::Windows
+        | PackageTarget::Web => {
             unreachable!("packaged above")
         }
         PackageTarget::Ios => {

@@ -1,6 +1,6 @@
 ---
 title: Web（WebAssembly）
-description: 用 WebAssembly 版运行时在浏览器里运行 nsh 应用，渲染到 DOM；本站的实时演示都由它驱动。
+description: 用 WebAssembly 版运行时在浏览器里运行 nsh 应用，渲染到 DOM；用 nsh package --target web 发布为静态站点，用 nsh run --target web 开发。
 order: 16
 group: platforms
 demo: counter
@@ -8,7 +8,7 @@ demo: counter
 
 # Web（WebAssembly）
 
-nsh 运行时也能编译成 WebAssembly。同一个引擎跑在浏览器页面里，只是渲染目标从 UIKit 或 Android 视图换成了 DOM：核心、响应式图、渲染器、Taffy 布局、`nsh/ui/mobile` 组件，以及 QuickJS 本身，全都一样。本站每一个实时演示，都是 `nsh build` 打出的应用包运行在这个运行时上。
+nsh 运行时也能编译成 WebAssembly。同一个引擎跑在浏览器页面里，只是渲染目标从 UIKit 或 Android 视图换成了 DOM：核心、响应式图、渲染器、Taffy 布局、`nsh/ui/mobile` 组件，以及 QuickJS 本身，全都一样。`nsh package --target web` 把应用发布成可放在任何 Web 服务器或 CDN 上的静态站点（[发布应用](#发布应用)），`nsh run --target web` 在你编辑时把它运行在浏览器里（[在浏览器里开发](#在浏览器里开发)），本站每一个实时演示，都是 `nsh build` 打出的应用包运行在这个运行时上。
 
 ## 各部分在哪里运行
 
@@ -27,7 +27,58 @@ requestAnimationFrame ───────────┘                      
 - **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的原生值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。
 - **输入**：带 `activeOpacity` 的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动，并支持鼠标拖动）、受控的 `<Input>`（焦点、提交）、`Canvas`、带标题栏的 `Stack` 和 `Screen`、`Modal`、`Alert`。
 
-## 构建
+## 发布应用
+
+```sh
+nsh package App.tsx --target web           # out/<Name>/：一个静态站点
+nsh package App.tsx --target web --run     # 并在本机提供服务，在浏览器中打开
+```
+
+`nsh package --target web` 写出 `out/<Name>/`（用 `--out` 指定其他目录），结构与前端构建产物相同：一个页面，其余文件都以内容命名。
+
+| 文件 | 内容 |
+|---|---|
+| `index.html` | 应用的页面：以应用名作为标题，带图标、按 `appearance` 设定的颜色、加载指示，以及应用无法加载或启动时的提示 |
+| `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
+| `nsh.<digest>.js` | DOM 运行时 |
+| `nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB） |
+| `app.<digest>.js` | 应用本身，构建方式与 `nsh build --release` 相同 |
+| `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在应用启动前加载：文本要用它们测量） |
+| `icons/<size>.<digest>.png` | `nsh.json` 中的图标，尺寸为 32（favicon）、180（`apple-touch-icon`）、192 和 512 像素 |
+
+`<digest>` 是文件内容 SHA-256 的前几位：文件名只在内容变化时才变化，所以新版本只会改动 `index.html` 和真正变化了的文件。所有 URL 都是相对的，站点放在任何主机的任何目录下都能运行（`https://example.com/apps/counter/`）。
+
+### 部署
+
+把目录上传到任意静态托管：CDN 后面的对象存储、Cloudflare Pages、Netlify、GitHub Pages、nginx。遵循两条规则，加载就快，更新也可靠：
+
+| 文件 | `Cache-Control` |
+|---|---|
+| `index.html`、`manifest.webmanifest` | `no-cache`（每次加载都重新验证，新版本立即生效） |
+| 其余所有文件 | `public, max-age=31536000, immutable` |
+
+以 `application/wasm` 类型提供 `.wasm`（浏览器会边下载边编译），并让托管服务或 CDN 压缩文本和 WebAssembly（gzip 或 brotli）。`nsh package --target web --run` 就按这种方式在 `http://127.0.0.1:4173/` 上提供站点。
+
+发布到 Web 的应用与打包的原生应用运行方式相同：以发布模式运行，经过[加固](./sandbox-and-capabilities.md)（没有 `eval`），具有其 `nsh.json` 声明的能力。当能力限制了 `network` 时，页面还会带上 Content-Security-Policy `connect-src`，其中列出声明的主机（以及页面自身的源），由浏览器自己拒绝发往其他主机的请求和重定向。导致应用无法启动的错误会显示在页面上；之后的错误输出到浏览器控制台。
+
+### 用 iframe 嵌入
+
+Web 上没有嵌入 API：用 `<iframe>` 嵌入已发布的应用，它的尺寸就是应用的窗口：
+
+```html
+<iframe src="https://apps.example.com/counter/" title="Counter"
+        style="width: 390px; height: 844px; border: 0"></iframe>
+```
+
+## 在浏览器里开发
+
+```sh
+nsh run App.tsx --target web
+```
+
+会启动开发服务器，并在浏览器中打开它的页面 `http://127.0.0.1:8790/`。这个页面和其他开发宿主一样：运行应用的每次构建，就地应用修改（热更新），在应用上方显示构建错误和运行时错误，并把应用的 `console` 输出发送到终端。同一网络中的手机打开 `nsh run` 打印的地址（`browsers on this network: http://192.168.…:8790/`）即可。只要 Web 运行时存在（发行包中总是存在），`nsh dev` 也会提供同一个页面。
+
+## 构建本站的播放器
 
 ```sh
 cargo xtask web                       # nsh.wasm、nsh.js、播放器页面，以及 website/demos/*.tsx
@@ -69,6 +120,8 @@ const player = await createPlayer(document.querySelector("#phone"), {
 player.run(await (await fetch("./bundle.js")).text());
 ```
 
+`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）。`nsh package --target web` 写出的页面三者都用到了。
+
 使用 `nsh-playground.wasm` 时，`player.runSource(tsx)` 会先编译 TSX，返回编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
@@ -96,9 +149,10 @@ Web 运行时用于演示和文档，下列能力不提供：
 - **文本整形细节**：换行规则只是 UAX #14 的一个子集（空格、CJK、连字符），没有自动断词，除段落方向外也不做双向重排。
 - **下拉刷新和可缩放的滚动视图。**
 
-QuickJS 虚拟机以开发模式运行（不做加固），使用默认的[资源限制](./sandbox-and-capabilities.md)。
+播放器和开发服务器以开发模式运行应用（不做加固），发布的应用经过加固。两者都使用默认的[资源限制](./sandbox-and-capabilities.md)。
 
 ## 另请参阅
 
+- [打包](./packaging.md)：`nsh package` 的其他目标。
 - [架构](./architecture.md)：Web 版复用的引擎、核心和挂载批次。
 - [测试与 trace](./testing-and-trace.md)：`nsh trace` 以近似的文本引擎无界面地运行同一个引擎。

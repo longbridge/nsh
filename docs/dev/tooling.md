@@ -86,7 +86,11 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 - The CLI watches sources with notify and pushes every rebuild over WebSocket (`/ws`, default port 8790, the next free port if taken) to all
   connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
-- Bytecode version negotiation: the client reports `BYTECODE_VERSION` in its handshake; on a mismatch the server sends JS source instead.
+- Bytecode version negotiation: the client reports `BYTECODE_VERSION` in its handshake; on a mismatch the server sends JS source instead
+  (an empty version, the web host's, asks for source without a warning).
+- The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
+  `/nsh.wasm`) when a web runtime exists; browsers connect to `/ws` on the same port. `nsh run --target web` builds the
+  runtime in a checkout and opens the page (`docs/dev/web.md`, "The CLI's web target").
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh run` defaults to the host that runs on this machine: `--target catalyst` on macOS, `--target linux` (the GTK
@@ -226,7 +230,8 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 `target/<triple>/<profile>` (Linux's, macOS's and Windows', built for this machine, in `target/<profile>`, Windows'
 `nsh-windows-host.exe` / `nsh-windows-app.exe`) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
-`cargo xtask android --dev`), so `nsh run` never uses a missing or stale host.
+`cargo xtask android --dev`), so `nsh run` never uses a missing or stale host. The web runtime (`runtime/web/nsh.wasm`
+and `nsh.js`) is always built with the `web` profile, into `target/wasm32-unknown-unknown/web/`.
 
 ## Releases
 

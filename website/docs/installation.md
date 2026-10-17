@@ -77,6 +77,7 @@ dist/nsh/runtime/android/{release,dev}/                      # classes.dex, lib/
 dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        # the macOS (AppKit) development host and release runner
 dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        # the Linux development host and release runner
 dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  # the Windows development host and release runner
+dist/nsh/runtime/web/{nsh.wasm,nsh.js}                       # the web runtime (nsh package / run --target web)
 dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS apps
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
 ```
@@ -109,6 +110,7 @@ cargo xtask android --dev                                       # nsh run --targ
 cargo build -p nsh-macos-host                                   # nsh run --target macos (built for you in a checkout)
 cargo build -p nsh-linux-host                                   # nsh run on Linux (built for you in a checkout)
 cargo build -p nsh-windows-host                                 # nsh run on Windows (built for you in a checkout)
+cargo build --profile web -p nsh-platform-web --target wasm32-unknown-unknown   # nsh run --target web (built for you in a checkout)
 ```
 
 For `nsh package`, build the release runners as well:
@@ -120,6 +122,7 @@ cargo xtask android                                             # nsh package --
 cargo build -p nsh-macos-app                                    # nsh package --target macos
 cargo build -p nsh-linux-app                                    # nsh package --target linux
 cargo build -p nsh-windows-app                                  # nsh package --target windows
+# nsh package --target web uses the same web runtime as nsh run --target web
 ```
 
 A CLI built from a checkout looks for the runtimes in `target/<triple>/<profile>` (the macOS, Linux and Windows ones, built for this machine, in `target/<profile>`) and `target/android/<profile>[-dev]`, using its own profile: `./target/debug/nsh` uses debug runtimes, `./target/release/nsh` release ones. Build both with the same profile (add `--release` to all of them for faster apps).

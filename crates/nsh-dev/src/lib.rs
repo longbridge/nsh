@@ -7,7 +7,8 @@
 //!
 //! - [`protocol`]: the wire format, shared by both sides.
 //! - `client` (feature `client`): the host side.
-//! - `server` (feature `server`): the CLI side.
+//! - `server` (feature `server`): the CLI side, and [`SiteServer`]: a
+//!   static site as a CDN would serve it (`nsh package --target web --run`).
 
 pub mod protocol;
 
@@ -15,8 +16,13 @@ pub mod protocol;
 mod client;
 #[cfg(feature = "server")]
 mod server;
+#[cfg(feature = "server")]
+mod site;
 
 #[cfg(feature = "client")]
 pub use crate::client::{DevClient, DevEvent, HostInfo};
 #[cfg(feature = "server")]
-pub use crate::server::{ClientEvent, ClientLog, DevServer};
+pub use crate::{
+    server::{ClientEvent, ClientLog, DevServer},
+    site::SiteServer,
+};

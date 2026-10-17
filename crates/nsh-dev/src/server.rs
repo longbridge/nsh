@@ -103,6 +103,9 @@ struct Shared {
     /// Files served at `/assets/<path>` from elsewhere (the files the UI
     /// sets' crates ship), by path.
     files: Mutex<std::collections::HashMap<String, std::path::PathBuf>>,
+    /// The web host's files ([`DevServer::serve_web`]), by path (`""`:
+    /// the page).
+    web: Mutex<std::collections::HashMap<String, axum::body::Bytes>>,
     /// The commands that install the app's host, by platform.
     install: Mutex<std::collections::HashMap<HostPlatform, String>>,
     /// The state a newly connected client must see first.
@@ -153,6 +156,7 @@ impl DevServer {
         let shared = Arc::new(Shared {
             assets_root: assets_root.and_then(|p| dunce::canonicalize(p).ok()),
             files: Mutex::default(),
+            web: Mutex::default(),
             install: Mutex::default(),
             latest: Mutex::new(None),
             events: broadcast::channel(16).0,
@@ -167,6 +171,7 @@ impl DevServer {
             .route(WS_PATH, get(upgrade))
             .route("/bundle.js", get(bundle_source))
             .route("/assets/{*path}", get(asset))
+            .fallback(web_file)
             .with_state(shared.clone());
         runtime.spawn(async move {
             if let Err(err) = axum::serve(listener, app).await {
@@ -186,6 +191,22 @@ impl DevServer {
     /// crates of Rust components ship them.
     pub fn serve_files(&self, files: impl IntoIterator<Item = (String, std::path::PathBuf)>) {
         self.shared.files.lock().expect("files lock").extend(files);
+    }
+
+    /// Serves the web host: `page` (HTML) at `/` and each `(path,
+    /// bytes)` at `/<path>` (the runtime's `nsh.js` and `nsh.wasm`). The
+    /// page connects to [`WS_PATH`] as the other hosts do, saying it runs
+    /// JS source ([`ClientMessage::Hello`]).
+    pub fn serve_web(&self, page: String, files: impl IntoIterator<Item = (String, Vec<u8>)>) {
+        let mut web = self.shared.web.lock().expect("web lock");
+        web.insert(String::new(), page.into());
+        web.extend(files.into_iter().map(|(path, bytes)| (path, bytes.into())));
+    }
+
+    /// Whether [`DevServer::serve_web`] was called: browsers can open the
+    /// app at `http://<address>/`.
+    pub fn serves_web(&self) -> bool {
+        !self.shared.web.lock().expect("web lock").is_empty()
     }
 
     /// Sets the command that installs the app's host, for each platform
@@ -299,22 +320,73 @@ async fn asset(
             file
         }
     };
-    let content_type = match file
+    match tokio::fs::read(&file).await {
+        Ok(bytes) => ([(header::CONTENT_TYPE, content_type(&file))], bytes).into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// The web host's page and runtime ([`DevServer::serve_web`]); never
+/// cached, as they change with the runtime.
+async fn web_file(State(shared): State<Arc<Shared>>, uri: axum::http::Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path == "index.html" { "" } else { path };
+    let bytes = shared.web.lock().expect("web lock").get(path).cloned();
+    match bytes {
+        Some(bytes) => {
+            let content_type = match path {
+                "" => "text/html; charset=utf-8",
+                path => content_type(std::path::Path::new(path)),
+            };
+            (
+                [
+                    (header::CONTENT_TYPE, content_type),
+                    (header::CACHE_CONTROL, "no-cache"),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// The media type of a file, by its extension: what browsers need to
+/// load scripts, WebAssembly (compiled while it streams only as
+/// `application/wasm`), images, fonts and media.
+pub(crate) fn content_type(path: &std::path::Path) -> &'static str {
+    match path
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js" | "mjs") => "text/javascript; charset=utf-8",
+        Some("json" | "map") => "application/json",
+        Some("webmanifest") => "application/manifest+json",
+        Some("wasm") => "application/wasm",
+        Some("css") => "text/css; charset=utf-8",
+        Some("txt") => "text/plain; charset=utf-8",
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
         Some("heic") => "image/heic",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("wav") => "audio/wav",
         _ => "application/octet-stream",
-    };
-    match tokio::fs::read(&file).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -355,6 +427,8 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
     }
     let format = if bytecode_version == shared.bytecode_version {
         BundleFormat::Bytecode
+    } else if bytecode_version.is_empty() {
+        BundleFormat::Source
     } else {
         log::warn!(
             "{device}: bytecode {bytecode_version} != {}, sending JS source",

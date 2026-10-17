@@ -51,6 +51,12 @@ impl DevSession {
         let server = start_server(port, &src_dir, devices.clone())?;
         server.serve_files(crate::build::crate_assets().map(|a| (a.path, a.source)));
         server.install_commands(install_commands(&src_dir));
+        // Browsers too, when there is a web runtime to serve (`nsh run
+        // --target web` builds it in a checkout).
+        if let Ok(Some(runtime)) = crate::runtime::web(false) {
+            let (page, files) = crate::web::dev_host(&runtime)?;
+            server.serve_web(page, files);
+        }
         let session = DevSession {
             entry,
             src_dir,
@@ -77,14 +83,26 @@ impl DevSession {
         )
     }
 
+    /// The web host's page for browsers on this machine.
+    pub(crate) fn web_url(&self) -> String {
+        format!("http://127.0.0.1:{}/", self.server.local_addr().port())
+    }
+
     /// Prints where hosts can connect.
     pub(crate) fn print_urls(&self) {
         let port = self.server.local_addr().port();
         ui::note(format!("dev server {}", self.local_url()));
+        let web = self.server.serves_web();
+        if web {
+            ui::detail(format!("browsers: {}", self.web_url()));
+        }
         for ip in lan_ips() {
             ui::detail(format!(
                 "devices on this network: ws://{ip}:{port}{WS_PATH}"
             ));
+            if web {
+                ui::detail(format!("browsers on this network: http://{ip}:{port}/"));
+            }
         }
     }
 
@@ -333,6 +351,7 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
         (HostPlatform::Windows, run(Target::Windows, "windows")),
         (HostPlatform::IosSimulator, run(Target::Ios, "ios")),
         (HostPlatform::Android, run(Target::Android, "android")),
+        (HostPlatform::Web, run(Target::Web, "web")),
     ]
 }
 

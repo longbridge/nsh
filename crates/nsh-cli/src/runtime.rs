@@ -16,13 +16,18 @@
 //! runtime/windows/nsh-windows-app.exe        release runner (Windows)
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support
+//! runtime/web/nsh.wasm                 the web runtime (`nsh-platform-web`)
+//! runtime/web/nsh.js                   the DOM runtime that loads it
 //! ```
 //!
 //! In a cargo checkout, the same files come from `target/<triple>/<profile>`
 //! (with the profile of this CLI; Linux's, macOS's and Windows' from
 //! `target/<profile>`, as they are built for this machine), and are built
 //! with cargo first, so a run
-//! never uses a missing or stale host. `NSH_RUNTIME` overrides the root.
+//! never uses a missing or stale host. The web runtime is always built with
+//! the `web` profile (a debug build is several times larger and slower), into
+//! `target/wasm32-unknown-unknown/web/`, its `nsh.js` read from the crate.
+//! `NSH_RUNTIME` overrides the root.
 //! An app with a Rust crate of its own gets hosts built for it instead
 //! (`rust_app.rs`).
 
@@ -197,6 +202,81 @@ fn android_existing(dir: PathBuf, dev: bool) -> anyhow::Result<PathBuf> {
         dir.display(),
         if dev { " --dev" } else { "" }
     )
+}
+
+/// The web runtime: the engine (`nsh.wasm`) and the DOM runtime that
+/// loads it (`nsh.js`), which only work together.
+pub(crate) struct WebRuntime {
+    pub(crate) wasm: PathBuf,
+    pub(crate) js: PathBuf,
+}
+
+/// The web runtime ([`WebRuntime`]). In a checkout it is built first when
+/// `build` is set; without it, the build that is there, if any (`None`).
+pub(crate) fn web(build: bool) -> anyhow::Result<Option<WebRuntime>> {
+    const WASM: &str = "wasm32-unknown-unknown";
+    let found = |dir: PathBuf| {
+        let runtime = WebRuntime {
+            wasm: dir.join("nsh.wasm"),
+            js: dir.join("nsh.js"),
+        };
+        (runtime.wasm.exists() && runtime.js.exists()).then_some(runtime)
+    };
+    if let Some(root) = env::var_os("NSH_RUNTIME") {
+        let dir = PathBuf::from(root).join("web");
+        return match found(dir.clone()) {
+            Some(runtime) => Ok(Some(runtime)),
+            None if build => bail!("the web runtime is not in {}", dir.display()),
+            None => Ok(None),
+        };
+    }
+    let exe = cli_exe()?;
+    let bin = exe.parent().context("cli has no parent directory")?;
+    if let Some(runtime) = found(bin.join("../runtime/web")) {
+        return Ok(Some(runtime));
+    }
+    let Some(root) = checkout(bin) else {
+        if build {
+            bail!(
+                "the web runtime is not at {}",
+                bin.join("../runtime/web").display()
+            );
+        }
+        return Ok(None);
+    };
+    if build {
+        let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
+        let mut command = Command::new(&cargo);
+        command
+            .args(["build", "--profile", "web", "-p", "nsh-platform-web"])
+            .args(["--target", WASM])
+            .current_dir(&root);
+        // QuickJS' archive needs an `ar` that knows WebAssembly objects.
+        let ar = format!("AR_{}", WASM.replace('-', "_"));
+        if env::var_os(&ar).is_none() && env::var_os("AR").is_none() {
+            command.env(&ar, "llvm-ar");
+        }
+        crate::ui::cargo(&mut command, "the web runtime")?;
+    }
+    let wasm = bin
+        .parent()
+        .context("cli is not in a target directory")?
+        .join(WASM)
+        .join("web/nsh_platform_web.wasm");
+    let runtime = WebRuntime {
+        wasm,
+        js: root.join("crates/nsh-platform-web/web/nsh.js"),
+    };
+    if runtime.wasm.exists() {
+        return Ok(Some(runtime));
+    }
+    if build {
+        bail!(
+            "the web runtime is not at {}\nin a nsh checkout, build it with: cargo build --profile web -p nsh-platform-web --target {WASM}",
+            runtime.wasm.display()
+        );
+    }
+    Ok(None)
 }
 
 /// Path of the development host (`runner` false) or release runner for
