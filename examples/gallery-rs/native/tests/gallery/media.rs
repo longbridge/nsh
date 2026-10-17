@@ -253,10 +253,7 @@ fn media_talks_to_its_web_views() {
         site,
         EventKind::NavigationStateChange,
         vec![
-            (
-                "url",
-                PayloadValue::Str("https://nsh.dev/docs/".into()),
-            ),
+            ("url", PayloadValue::Str("https://nsh.dev/docs/".into())),
             ("title", PayloadValue::Str("NSH".into())),
             ("loading", PayloadValue::Bool(true)),
             ("canGoBack", PayloadValue::Bool(true)),
