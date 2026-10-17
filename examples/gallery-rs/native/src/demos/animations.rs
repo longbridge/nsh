@@ -242,8 +242,8 @@ fn Hero() -> impl IntoElement {
             .bind_opacity(&r.interpolate(&[0.0, 0.15, 1.0], &[0.0, 0.6, 0.0]))
             .bind_scale(&r.interpolate(&[0.0, 1.0], &[0.35, 1.45]))
     });
-    // The core's colors are the appearance's: made again when it changes.
-    let core = dynamic(move || {
+    // The core's colors follow the appearance natively.
+    let core = {
         view()
             .absolute()
             .left(px(S / 2.0 - 26.0))
@@ -252,14 +252,13 @@ fn Hero() -> impl IntoElement {
             .rounded(px(26.0))
             .items_center()
             .justify_center()
-            .bind_background(&breathe.interpolate_colors(
-                &[0.0, 1.0],
-                &[color(colors::ACCENT_FILL), color(colors::UP)],
-            ))
+            .bind_background(
+                &breathe.interpolate_colors(&[0.0, 1.0], &[colors::ACCENT_FILL, colors::UP]),
+            )
             .finish_shadow(Finish::Accent)
             .bind_scale(&breathe.interpolate(&[0.0, 1.0], &[0.9, 1.08]))
             .child(icon(IconName::Animation, 22.0, colors::ON_ACCENT))
-    });
+    };
     Card::new()
         .icon(IconName::Animation)
         .title("Native motion")
@@ -909,18 +908,13 @@ fn Interpolations() -> impl IntoElement {
                 .text_color(colors::FAINT),
         )
     };
-    // The extending shape's colors are the appearance's: made again when it
-    // changes.
+    // The extending shape's colors follow the appearance natively.
     let extend = {
         let t = t.clone();
-        dynamic(move || {
+        {
             let fill = t.interpolate_colors(
                 &[0.0, 1.0, 2.0],
-                &[
-                    color(colors::INFO),
-                    color(colors::ACCENT),
-                    color(colors::DANGER),
-                ],
+                &[colors::INFO, colors::ACCENT, colors::DANGER],
             );
             view()
                 .size(px(64.0))
@@ -928,7 +922,7 @@ fn Interpolations() -> impl IntoElement {
                 .border_curve(BorderCurve::Continuous)
                 .bind_background(&fill)
                 .bind_rotate(&angle)
-        })
+        }
     };
     let spring_to = t.clone();
     Card::new()
@@ -972,7 +966,7 @@ fn Interpolations() -> impl IntoElement {
                                 .finish(Finish::Light),
                         ),
                 )
-                .child(figure("extend", extend))
+                .child(figure("extend", extend.into_element()))
                 .child(figure(
                     "clamp",
                     view()

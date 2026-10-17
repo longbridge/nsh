@@ -19,7 +19,7 @@ use nsh_animation::{
 };
 
 use super::{
-    Color,
+    AdaptiveColor,
     task::{Action, Answer, Executor},
 };
 
@@ -141,10 +141,49 @@ impl NativeNode {
         )
     }
 
-    /// Maps the value to colors (`backgroundColor` bindings).
-    pub fn interpolate_colors(&self, input: &[f32], colors: &[Color]) -> NativeNode {
-        let colors = colors.iter().map(|c| c.0).collect();
-        self.interpolate_with(input, Output::Colors(colors), Interpolation::default())
+    /// Maps the value to colors (`backgroundColor` bindings). Theme colors
+    /// (`AdaptiveColor`s) follow the appearance: when it changes, the node
+    /// takes the other appearance's colors in place, its bindings as they
+    /// are.
+    pub fn interpolate_colors<C: Into<AdaptiveColor> + Copy>(
+        &self,
+        input: &[f32],
+        colors: &[C],
+    ) -> NativeNode {
+        let colors: Rc<[AdaptiveColor]> = colors.iter().map(|&c| c.into()).collect();
+        let pick = {
+            let colors = colors.clone();
+            move |dark: bool| {
+                Output::Colors(
+                    colors
+                        .iter()
+                        .map(|c| if dark { c.dark.0 } else { c.light.0 })
+                        .collect(),
+                )
+            }
+        };
+        if colors.iter().all(|c| c.light == c.dark) {
+            return self.interpolate_with(input, pick(false), Interpolation::default());
+        }
+        let node = self.interpolate_with(
+            input,
+            pick(super::untracked(super::ambient::dark)),
+            Interpolation::default(),
+        );
+        // The appearance's colors from now on; the handle keeps the node
+        // while the binding lives.
+        let held = node.clone();
+        let first = Cell::new(true);
+        super::reactive::render_effect(move || {
+            let output = pick(super::ambient::dark());
+            if !first.replace(false) {
+                held.0.act(AnimationOp::SetOutput {
+                    node: held.id(),
+                    output,
+                });
+            }
+        });
+        node
     }
 
     /// [`Self::interpolate`] with any output, extrapolation on each side
@@ -585,7 +624,11 @@ impl NativeValue {
     }
 
     /// See [`NativeNode::interpolate_colors`].
-    pub fn interpolate_colors(&self, input: &[f32], colors: &[Color]) -> NativeNode {
+    pub fn interpolate_colors<C: Into<AdaptiveColor> + Copy>(
+        &self,
+        input: &[f32],
+        colors: &[C],
+    ) -> NativeNode {
         self.0.interpolate_colors(input, colors)
     }
 

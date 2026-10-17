@@ -423,6 +423,17 @@ impl Graph {
                 self.insert(node, Node::Math { op, a, b })
             }
             AnimationOp::Set { node, value } => self.set(node, value, finished),
+            AnimationOp::SetOutput { node, output } => {
+                if let Some(Some(Node::Interpolate {
+                    input_range,
+                    output: current,
+                    ..
+                })) = self.nodes.get_mut(node as usize)
+                    && output_len(&output) == input_range.len()
+                {
+                    *current = output;
+                }
+            }
             AnimationOp::Start {
                 node,
                 animation,
@@ -768,6 +779,14 @@ impl Graph {
     }
 }
 
+/// How many outputs an interpolation has.
+fn output_len(output: &Output) -> usize {
+    match output {
+        Output::Numbers(v) => v.len(),
+        Output::Colors(v) => v.len(),
+    }
+}
+
 fn interpolate(
     x: f32,
     input: &[f32],
@@ -775,10 +794,7 @@ fn interpolate(
     (left, right): (Extrapolate, Extrapolate),
     easing: Easing,
 ) -> AnimationValue {
-    let n = input.len().min(match output {
-        Output::Numbers(v) => v.len(),
-        Output::Colors(v) => v.len(),
-    });
+    let n = input.len().min(output_len(output));
     if n == 0 {
         return AnimationValue::Number(x);
     }
@@ -873,6 +889,48 @@ mod tests {
             interpolate(0.5, &[0.0, 1.0], &colors, CLAMP, Easing::Linear),
             AnimationValue::Color(0x8000_00ff)
         );
+    }
+
+    #[test]
+    fn an_interpolation_takes_other_outputs() {
+        let mut g = Graph::default();
+        let mut finished = Vec::new();
+        g.apply(
+            AnimationOp::CreateValue {
+                node: 1,
+                value: 1.0,
+            },
+            &mut finished,
+        );
+        g.apply(
+            AnimationOp::CreateInterpolate {
+                node: 2,
+                input: 1,
+                input_range: vec![0.0, 1.0],
+                output: Output::Colors(vec![0x0000_00ff, 0xff00_00ff]),
+                extrapolate_left: Extrapolate::Clamp,
+                extrapolate_right: Extrapolate::Clamp,
+                easing: Easing::Linear,
+            },
+            &mut finished,
+        );
+        g.apply(
+            AnimationOp::SetOutput {
+                node: 2,
+                output: Output::Colors(vec![0x0000_00ff, 0x00ff_00ff]),
+            },
+            &mut finished,
+        );
+        assert_eq!(g.eval(2), AnimationValue::Color(0x00ff_00ff));
+        // Another number of outputs than of inputs is refused.
+        g.apply(
+            AnimationOp::SetOutput {
+                node: 2,
+                output: Output::Colors(vec![0xffff_ffff]),
+            },
+            &mut finished,
+        );
+        assert_eq!(g.eval(2), AnimationValue::Color(0x00ff_00ff));
     }
 
     #[test]

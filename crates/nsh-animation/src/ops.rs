@@ -236,6 +236,14 @@ pub enum AnimationOp {
         /// Right operand.
         b: Operand,
     },
+    /// Gives an interpolation other outputs (the same number): colors that
+    /// follow the appearance.
+    SetOutput {
+        /// Interpolation node.
+        node: NodeId,
+        /// Its outputs from now on.
+        output: Output,
+    },
     /// Sets a value immediately, stopping its animation.
     Set {
         /// Value node.

@@ -46,7 +46,6 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
     });
     let (knob_light, _) = Finish::Knob.shadows();
     let press = on.clone();
-    // The track's colors are the appearance's: made again when it changes.
     let track = on.clone();
     view()
         .w(px(50.0))
@@ -72,16 +71,18 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
             press.spring(knob(next), motion::SETTLE);
             cx.emit(ToggleEvent::Change(next));
         })
-        .child(dynamic(move || {
-            let colors = [color(colors::TRACK), color(colors::ACCENT_FILL)];
-            // Inside the border: its radius less the border's width.
+        // Inside the border: its radius less the border's width; its colors
+        // follow the appearance natively.
+        .child(
             view()
                 .absolute()
                 .inset_0()
                 .rounded(px(14.0))
                 .pointer_events(PointerEvents::None)
-                .bind_background(&track.interpolate_colors(&[0.0, 1.0], &colors))
-        }))
+                .bind_background(
+                    &track.interpolate_colors(&[0.0, 1.0], &[colors::TRACK, colors::ACCENT_FILL]),
+                ),
+        )
         .child(
             view()
                 .size(px(22.0))

@@ -138,13 +138,6 @@ pub(crate) fn Physics() -> impl IntoElement {
     let (x, y) = (native_value(0.0), native_value(0.0));
     // The pulse: 0 at rest, 1 at its peak; and 1 while the card is held.
     let (pressed, lift) = (native_value(0.0), native_value(0.0));
-    // 0 in the light appearance, 1 in the dark: the card's color is picked
-    // natively from the pair of the appearance (see `fill`).
-    let appearance = native_value(0.0);
-    {
-        let appearance = appearance.clone();
-        effect(move || appearance.set(if dark() { 1.0 } else { 0.0 }));
-    }
     let mode = signal(Mode::default());
     let feel = signal(Feel::default());
     // The stage's size, from its layout.
@@ -241,16 +234,8 @@ pub(crate) fn Physics() -> impl IntoElement {
         }
     };
     // The card's color: `pressed` runs from the accent to the info color
-    // of the appearance's pair, both pairs in one interpolation.
-    let fill = pressed.add(&appearance.mul(2.0)).interpolate_colors(
-        &[0.0, 1.0, 2.0, 3.0],
-        &[
-            colors::ACCENT_FILL.light,
-            colors::INFO.light,
-            colors::ACCENT_FILL.dark,
-            colors::INFO.dark,
-        ],
-    );
+    // (theme colors: they follow the appearance natively).
+    let fill = pressed.interpolate_colors(&[0.0, 1.0], &[colors::ACCENT_FILL, colors::INFO]);
     let tether = (x.clone(), y.clone());
     let fast = computed(move || speed.get() > 1500.0);
     view()

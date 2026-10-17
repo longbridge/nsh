@@ -6151,6 +6151,53 @@ mod views {
         );
     }
 
+    /// A track whose color moves between two theme colors natively.
+    #[component]
+    fn Track() -> impl IntoElement {
+        let on = native_value(0.0);
+        let off_color = AdaptiveColor {
+            light: rgb(0xeeeeee),
+            dark: rgb(0x222222),
+        };
+        view().size_10().bind_background(&on.interpolate_colors(
+            &[0.0, 1.0],
+            &[off_color, AdaptiveColor::from(rgb(0x00ff00))],
+        ))
+    }
+
+    #[test]
+    fn interpolated_theme_colors_follow_the_appearance() {
+        let colors = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::Animation(
+                    nsh_animation::AnimationOp::CreateInterpolate { output, .. }
+                    | nsh_animation::AnimationOp::SetOutput { output, .. },
+                ) => Some(output.clone()),
+                _ => None,
+            })
+        };
+        let mut c = core();
+        c.mount_root(&Root::new::<Track>(|| ()));
+        assert_eq!(
+            colors(&c.commit().unwrap()),
+            Some(nsh_animation::Output::Colors(vec![0xeeeeeeff, 0x00ff00ff]))
+        );
+        c.set_environment(crate::ui::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        // The same node, the dark colors: no view is made again.
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            colors(&batch),
+            Some(nsh_animation::Output::Colors(vec![0x222222ff, 0x00ff00ff]))
+        );
+        assert!(!batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::Animation(nsh_animation::AnimationOp::CreateInterpolate { .. })
+        )));
+    }
+
     /// A style bound to a signal.
     #[derive(Default)]
     struct Lamp;

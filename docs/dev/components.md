@@ -182,7 +182,10 @@ child components go with it. The design and its reasons: `reactive-components.md
   and modules.
 - **Native values** (`ui/animated.rs`) are nodes of the platform's animation graph with odd ids (JS's are even,
   like node ids: the graph indexes nodes by id, so both must stay dense; ids from 2^31 are the graph's own
-  composite steps); the last handle released frees the node. Deriving the same node again gets the live one. Bound
+  composite steps); the last handle released frees the node. Deriving the same node again gets the live one. Colors
+  interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK, colors::ACCENT])`, any
+  `AdaptiveColor`) follow the appearance: a binding of the view gives the node the other appearance's colors in
+  place when it changes (`AnimationOp::SetOutput`), so nothing is made again and its bindings stay. Bound
   style properties go into the element's inline style, before the app's `style` on a host (the core keeps the app's
   and composes the two). The animations' ends come back through `Core::animations_finished` (the engine hands JS
   the rest). An `Animation` is sent whole as one `AnimationOp::StartComposite` and runs in the graph step after step;

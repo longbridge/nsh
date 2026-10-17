@@ -225,9 +225,8 @@ fn Ball() -> impl IntoElement {
     let state = signal((SharedString::from("Idle"), Tone::Neutral));
     // 1 while held.
     let grab = native_value(0.0);
-    // The ball's colors are the appearance's: it is made again when that
-    // changes.
-    let ball = dynamic(move || {
+    // The ball's colors follow the appearance natively.
+    let ball = {
         let (grant, release, terminate) = (grab.clone(), grab.clone(), grab.clone());
         view()
             .absolute()
@@ -238,10 +237,9 @@ fn Ball() -> impl IntoElement {
             .rounded(px(30.0))
             .items_center()
             .justify_center()
-            .bind_background(&grab.interpolate_colors(
-                &[0.0, 1.0],
-                &[color(colors::INFO), color(colors::ACCENT_FILL)],
-            ))
+            .bind_background(
+                &grab.interpolate_colors(&[0.0, 1.0], &[colors::INFO, colors::ACCENT_FILL]),
+            )
             .map(knob)
             .style_with(move |s| {
                 let (x, y) = pos.get();
@@ -274,7 +272,7 @@ fn Ball() -> impl IntoElement {
                     .rounded(px(9.0))
                     .bg(rgb_a(0x13160c, 0.35)),
             )
-    });
+    };
     Card::new()
         .icon(IconName::Scroll)
         .title("PanResponder")
@@ -464,9 +462,9 @@ fn PressEvents() -> impl IntoElement {
             }
         }
     };
-    // The chips' colors are the appearance's: made again when it changes.
-    let chips = dynamic(move || {
-        let (raised, fill) = (color(colors::RAISED), color(colors::ACCENT_FILL));
+    // The chips' colors follow the appearance natively.
+    let chips = {
+        let (raised, fill) = (colors::RAISED, colors::ACCENT_FILL);
         PRESS_EVENTS
             .iter()
             .zip(flashes.iter())
@@ -489,7 +487,7 @@ fn PressEvents() -> impl IntoElement {
                     )
             })
             .collect::<Vec<_>>()
-    });
+    };
     // The underlay's color follows the appearance.
     let ripple = view()
         .on_press(fire("ripple"))
@@ -544,7 +542,7 @@ fn PressEvents() -> impl IntoElement {
                         .text_color(colors::ON_LIGHT),
                 ),
         )
-        .child(view().flex_row().gap(px(6.0)).child(chips))
+        .child(view().flex_row().gap(px(6.0)).children(chips))
         .child(
             text(move || {
                 log.with(|log| {
