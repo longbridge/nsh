@@ -69,7 +69,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "createNavigator",
         Export::Function(create_navigator, 1),
-        Ts::Function(
+        Ts::function(
             "A stack of routes for `<Stack>`, starting with `initial`.",
             &["<R>(initial: R | R[]): Navigator<R>"],
         ),
@@ -77,7 +77,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Stack",
         Export::Function(stack, 1),
-        Ts::Function(
+        Ts::function(
             "A native navigation stack: UINavigationController on iOS (swipe back,\nnative header), a stack with a toolbar and predictive back on Android.\nScreens stay mounted (with their state) while they are in the stack.",
             &["<R>(props: StackProps<R>): YNode"],
         ),
@@ -85,7 +85,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Screen",
         Export::Function(screen, 1),
-        Ts::Function(
+        Ts::function(
             "One screen of a `<Stack>`, with its header options.",
             &["(props: ScreenProps): YNode"],
         ),
@@ -93,7 +93,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Modal",
         Export::Function(modal, 1),
-        Ts::Function(
+        Ts::function(
             "Content presented over everything else, in its own native window layer.",
             &["(props: ModalProps): JSX.Element"],
         ),

@@ -21,7 +21,10 @@ use std::{
     sync::Arc,
 };
 
-use nsh_core::ui::{ComponentSpec, ModuleSpec, Registry};
+use nsh_core::{
+    decl,
+    ui::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry},
+};
 use rquickjs::qjs;
 
 use crate::{
@@ -57,6 +60,38 @@ pub(crate) enum Ts {
     Internal,
 }
 
+impl Ts {
+    // Constructors for the tables: the text is left out of builds without
+    // declarations (`nsh_core::ui::DECLARATIONS`).
+
+    /// [`Ts::Function`].
+    pub(crate) const fn function(doc: &'static str, signatures: &'static [&'static str]) -> Ts {
+        if DECLARATIONS {
+            Ts::Function(doc, signatures)
+        } else {
+            Ts::Internal
+        }
+    }
+
+    /// [`Ts::Const`].
+    pub(crate) const fn value(doc: &'static str, ty: &'static str) -> Ts {
+        if DECLARATIONS {
+            Ts::Const(doc, ty)
+        } else {
+            Ts::Internal
+        }
+    }
+
+    /// [`Ts::Class`].
+    pub(crate) const fn class(doc: &'static str, body: &'static str) -> Ts {
+        if DECLARATIONS {
+            Ts::Class(doc, body)
+        } else {
+            Ts::Internal
+        }
+    }
+}
+
 /// An export: its name, how it is made and its declaration.
 pub(crate) type Item = (&'static str, Export, Ts);
 
@@ -74,7 +109,7 @@ const NSH: &[Item] = &[
     (
         "signal",
         Export::Function(reactive::signal, 2),
-        Ts::Function(
+        Ts::function(
             "A signal holding `value`.",
             &[
                 "<T>(value: T, options?: SignalOptions<T>): Signal<T>",
@@ -85,7 +120,7 @@ const NSH: &[Item] = &[
     (
         "computed",
         Export::Function(reactive::computed, 2),
-        Ts::Function(
+        Ts::function(
             "A value derived from signals, computed again when they change (and read).",
             &["<T>(fn: (previous: T | undefined) => T, options?: SignalOptions<T>): Accessor<T>"],
         ),
@@ -93,7 +128,7 @@ const NSH: &[Item] = &[
     (
         "effect",
         Export::Function(reactive::effect, 1),
-        Ts::Function(
+        Ts::function(
             "Runs `fn` after rendering, and again when what it read changes.",
             &["(fn: () => void): void"],
         ),
@@ -101,7 +136,7 @@ const NSH: &[Item] = &[
     (
         "batch",
         Export::Function(reactive::batch, 1),
-        Ts::Function(
+        Ts::function(
             "Runs `fn`, applying its writes together at the end.",
             &["<T>(fn: () => T): T"],
         ),
@@ -109,7 +144,7 @@ const NSH: &[Item] = &[
     (
         "untracked",
         Export::Function(reactive::untrack, 1),
-        Ts::Function(
+        Ts::function(
             "Runs `fn` without tracking what it reads.",
             &["<T>(fn: () => T): T"],
         ),
@@ -117,7 +152,7 @@ const NSH: &[Item] = &[
     (
         "cleanup",
         Export::Function(reactive::on_cleanup, 1),
-        Ts::Function(
+        Ts::function(
             "Runs `fn` before the current effect or component runs again or goes away.",
             &["(fn: () => void): void"],
         ),
@@ -125,7 +160,7 @@ const NSH: &[Item] = &[
     (
         "context",
         Export::Function(dom::context, 1),
-        Ts::Function(
+        Ts::function(
             "A context with a default value.",
             &["<T>(defaultValue: T): Context<T>"],
         ),
@@ -133,7 +168,7 @@ const NSH: &[Item] = &[
     (
         "mount",
         Export::Function(dom::mount, 2),
-        Ts::Function(
+        Ts::function(
             "Renders `app` into the surface; returns a function that removes it.",
             &["<P extends object>(app: Component<P>, props?: P): () => void"],
         ),
@@ -141,7 +176,7 @@ const NSH: &[Item] = &[
     (
         "split",
         Export::Function(dom::split, 2),
-        Ts::Function(
+        Ts::function(
             "`[picked, rest]`: the props named in `keys` and the others, both still\nfollowing what they read (a component passing the rest on: `<Input {...rest} />`).",
             &[
                 "<T extends object, K extends readonly (keyof T)[]>(props: T, keys: K): [Pick<T, K[number]>, Omit<T, K[number]>]",
@@ -151,7 +186,7 @@ const NSH: &[Item] = &[
     (
         "View",
         Export::Value(|ctx| dom::host_component(ctx, "view", true)),
-        Ts::Function(
+        Ts::function(
             "A view: the box layout, styles, touches and accessibility work on\n(UIView / ViewGroup).",
             &["(props: ViewProps): YNode"],
         ),
@@ -159,7 +194,7 @@ const NSH: &[Item] = &[
     (
         "Text",
         Export::Value(|ctx| dom::host_component(ctx, "text", true)),
-        Ts::Function(
+        Ts::function(
             "A paragraph of text; a `<Text>` in it is a span of the same paragraph, other\nelements are inline attachments.",
             &["(props: TextProps): YNode"],
         ),
@@ -167,7 +202,7 @@ const NSH: &[Item] = &[
     (
         "Scroll",
         Export::Value(|ctx| dom::host_component(ctx, "scroll", true)),
-        Ts::Function(
+        Ts::function(
             "A native scroll view (UIScrollView / ScrollView), zoomable; for long\nlists, `List` (`nsh/list`).",
             &["(props: ScrollProps): YNode"],
         ),
@@ -175,7 +210,7 @@ const NSH: &[Item] = &[
     (
         "Input",
         Export::Value(|ctx| dom::host_component(ctx, "input", true)),
-        Ts::Function(
+        Ts::function(
             "A native text input (UITextField / UITextView, EditText); `ref` has\n`focus()`, `blur()` and `setSelection(start, end)`.",
             &["(props: InputProps): YNode"],
         ),
@@ -214,7 +249,7 @@ pub(crate) const MODULES: &[NativeModule] = &[
     NativeModule {
         name: "nsh",
         exports: NSH,
-        types: NSH_TYPES,
+        types: decl!(NSH_TYPES),
     },
     NativeModule {
         name: "nsh:rt",
@@ -224,62 +259,62 @@ pub(crate) const MODULES: &[NativeModule] = &[
     NativeModule {
         name: "nsh/device",
         exports: env::DEVICE_EXPORTS,
-        types: env::DEVICE_TYPES,
+        types: decl!(env::DEVICE_TYPES),
     },
     NativeModule {
         name: "nsh/accessibility",
         exports: env::ACCESSIBILITY_EXPORTS,
-        types: env::ACCESSIBILITY_TYPES,
+        types: decl!(env::ACCESSIBILITY_TYPES),
     },
     NativeModule {
         name: "nsh/android",
         exports: platform_modules::ANDROID_EXPORTS,
-        types: platform_modules::ANDROID_TYPES,
+        types: decl!(platform_modules::ANDROID_TYPES),
     },
     NativeModule {
         name: "nsh/ios",
         exports: platform_modules::IOS_EXPORTS,
-        types: platform_modules::IOS_TYPES,
+        types: decl!(platform_modules::IOS_TYPES),
     },
     NativeModule {
         name: "nsh/desktop",
         exports: desktop::EXPORTS,
-        types: desktop::TYPES,
+        types: decl!(desktop::TYPES),
     },
     NativeModule {
         name: "nsh/webview",
         exports: platform_modules::WEBVIEW_EXPORTS,
-        types: platform_modules::WEBVIEW_TYPES,
+        types: decl!(platform_modules::WEBVIEW_TYPES),
     },
     NativeModule {
         name: "nsh/video",
         exports: platform_modules::VIDEO_EXPORTS,
-        types: platform_modules::VIDEO_TYPES,
+        types: decl!(platform_modules::VIDEO_TYPES),
     },
     NativeModule {
         name: "nsh/native",
         exports: platform_modules::NATIVE_EXPORTS,
-        types: platform_modules::NATIVE_TYPES,
+        types: decl!(platform_modules::NATIVE_TYPES),
     },
     NativeModule {
         name: "nsh/gesture",
         exports: touch::GESTURE_EXPORTS,
-        types: touch::GESTURE_TYPES,
+        types: decl!(touch::GESTURE_TYPES),
     },
     NativeModule {
         name: "nsh/animated",
         exports: animated::EXPORTS,
-        types: animated::TYPES,
+        types: decl!(animated::TYPES),
     },
     NativeModule {
         name: "nsh/canvas",
         exports: canvas::EXPORTS,
-        types: canvas::TYPES,
+        types: decl!(canvas::TYPES),
     },
     NativeModule {
         name: "nsh/list",
         exports: list::EXPORTS,
-        types: list::TYPES,
+        types: decl!(list::TYPES),
     },
     NativeModule {
         name: "nsh/image",
@@ -289,7 +324,7 @@ pub(crate) const MODULES: &[NativeModule] = &[
     NativeModule {
         name: "nsh/keymap",
         exports: keymap::EXPORTS,
-        types: keymap::TYPES,
+        types: decl!(keymap::TYPES),
     },
 ];
 
@@ -302,7 +337,7 @@ const IMAGE_EXPORTS: &[Item] = &[(
         components::add_runtime_functions(ctx, image, "nsh/image", "Image");
         image
     }),
-    Ts::Const(
+    Ts::value(
         "An image (a URL or `import logo from \"./logo.png\"`), decoded and cached\nnatively; `Image.getSize(uri)` and `Image.prefetch(uri)` ask about one\nwithout showing it.",
         "((props: ImageProps) => YNode) & ImageModule",
     ),

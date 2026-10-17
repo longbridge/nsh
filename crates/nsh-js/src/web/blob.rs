@@ -771,7 +771,8 @@ arrayBuffer(): Promise<ArrayBuffer>;
 bytes(): Promise<Uint8Array>;
 text(): Promise<string>;
 stream(): ReadableStream<Uint8Array>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::File,
@@ -794,7 +795,8 @@ stream(): ReadableStream<Uint8Array>;"#,
 readonly name: string;
 readonly lastModified: number;
 readonly webkitRelativePath: string;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::FormData,
@@ -833,7 +835,8 @@ entries(): IterableIterator<[string, FormDataEntryValue]>;
 keys(): IterableIterator<string>;
 values(): IterableIterator<FormDataEntryValue>;
 [Symbol.iterator](): IterableIterator<[string, FormDataEntryValue]>;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

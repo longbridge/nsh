@@ -867,7 +867,8 @@ removeEventListener(
   options?: { capture?: boolean } | boolean,
 ): void;
 dispatchEvent(event: Event): boolean;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::Event,
@@ -918,7 +919,8 @@ composedPath(): EventTarget[];
 preventDefault(): void;
 stopPropagation(): void;
 stopImmediatePropagation(): void;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::CustomEvent,
@@ -935,7 +937,8 @@ stopImmediatePropagation(): void;"#,
             head: "<T = any> extends Event",
             members: r#"constructor(type: string, init?: EventInit & { detail?: T });
 readonly detail: T;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::AbortSignal,
@@ -965,7 +968,8 @@ throwIfAborted(): void;
 static abort(reason?: any): AbortSignal;
 static timeout(milliseconds: number): AbortSignal;
 static any(signals: Iterable<AbortSignal>): AbortSignal;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::AbortController,
@@ -982,7 +986,8 @@ static any(signals: Iterable<AbortSignal>): AbortSignal;"#,
             head: "",
             members: r#"readonly signal: AbortSignal;
 abort(reason?: any): void;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

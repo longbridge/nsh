@@ -216,7 +216,8 @@ pub(crate) const SPECS: &[Spec] = &[
             members: r#"readonly encoding: "utf-8";
 readonly readable: ReadableStream<Uint8Array>;
 readonly writable: WritableStream<string>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::TextDecoderStream,
@@ -243,7 +244,8 @@ readonly fatal: boolean;
 readonly ignoreBOM: boolean;
 readonly readable: ReadableStream<string>;
 readonly writable: WritableStream<BufferSource>;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

@@ -6,7 +6,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Expr, Fields, LitStr, Path, Type, spanned::Spanned};
 
-use crate::ts_doc;
+use crate::{decl, ts_doc};
 
 #[derive(Default)]
 struct OpAttrs {
@@ -177,7 +177,7 @@ pub(crate) fn js_ops(input: DeriveInput) -> syn::Result<TokenStream2> {
         arms.push(quote! {
             #code => return ::core::result::Result::Ok(::core::option::Option::Some(#decode)),
         });
-        let doc = ts_doc(&v.attrs);
+        let doc = decl(&ts_doc(&v.attrs));
         if let Some(method) = &a.method {
             let names = a.params.iter().map(|(n, _)| n);
             let defaults = a.params.iter().map(|(_, d)| match d {
@@ -190,7 +190,11 @@ pub(crate) fn js_ops(input: DeriveInput) -> syn::Result<TokenStream2> {
                     [#((#names, #defaults)),*];
                 let mut params = ::std::vec::Vec::with_capacity(#count);
                 #({
-                    let ts = <#fields as #ops::OpArg<#cx>>::ts(types);
+                    let ts = if ::nsh_core::ui::DECLARATIONS {
+                        <#fields as #ops::OpArg<#cx>>::ts(types)
+                    } else {
+                        ::std::string::String::new()
+                    };
                     for _ in 0..<#fields as #ops::OpArg<#cx>>::ARITY {
                         let (name, default) = names[params.len()];
                         params.push(#ops::OpParam { name, ts: ts.clone(), default });
@@ -221,7 +225,11 @@ pub(crate) fn js_ops(input: DeriveInput) -> syn::Result<TokenStream2> {
                 out.push(#ops::OpProperty {
                     name: #property,
                     code: #code,
-                    ts: #ts,
+                    ts: if ::nsh_core::ui::DECLARATIONS {
+                        #ts
+                    } else {
+                        ::std::string::String::new()
+                    },
                     initial: #initial,
                     doc: #doc,
                 });

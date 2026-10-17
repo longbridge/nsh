@@ -493,7 +493,8 @@ keys(): IterableIterator<string>;
 values(): IterableIterator<string>;
 [Symbol.iterator](): IterableIterator<[string, string]>;
 toString(): string;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::Url,
@@ -549,6 +550,7 @@ hash: string;
 readonly searchParams: URLSearchParams;
 toString(): string;
 toJSON(): string;"#,
-        },
+        }
+        .declared(),
     },
 ];

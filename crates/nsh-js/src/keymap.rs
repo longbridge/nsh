@@ -269,7 +269,7 @@ unsafe extern "C" fn on_key_command(
 pub(crate) const EXPORTS: &[Item] = &[(
     "keymap",
     Export::Value(make),
-    Ts::Const(
+    Ts::value(
         "The app's keyboard shortcuts: `keymap.bind(\"mod+k\", openSearch)`.",
         "Keymap",
     ),

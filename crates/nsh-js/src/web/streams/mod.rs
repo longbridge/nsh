@@ -284,7 +284,8 @@ pub(crate) const SPECS: &[Spec] = &[
             members: r#"constructor(init: { highWaterMark: number });
 readonly highWaterMark: number;
 readonly size: (chunk: ArrayBufferView) => number;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::CountQueuingStrategy,
@@ -305,7 +306,8 @@ readonly size: (chunk: ArrayBufferView) => number;"#,
             members: r#"constructor(init: { highWaterMark: number });
 readonly highWaterMark: number;
 readonly size: (chunk: any) => 1;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

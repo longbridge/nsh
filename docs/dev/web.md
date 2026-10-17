@@ -94,6 +94,19 @@ interpreter is about 10% slower, and QuickJS is the slowest link. `nsh-platform-
 `disable-assertions` (QuickJS' internal `assert`s, which check its own invariants: 37 KB, and a little faster); the
 native platforms keep them.
 
+The runtime carries no declaration text (the documentation and TypeScript of the specs, which only make
+`.nsh/types`: `docs/dev/tooling.md`): 69 KB, 20 KB with brotli.
+
+Where the rest goes (raw, before compression): QuickJS about 0.8 MB of code (its parser and compiler 0.18 MB of
+it), the web APIs of `nsh-js` 0.36 MB (streams alone 0.14 MB), the core and Taffy about 0.65 MB, `url`'s IDNA with
+ICU4X's normalization data 0.16 MB, generic code of `core` / `alloc` / `hashbrown` 0.6 MB, data 0.43 MB. Tried and
+left out:
+
+- `wasm-opt -Oz` (binaryen): 15% smaller raw, but no smaller (slightly larger) with brotli or gzip.
+- An ASCII-only IDNA (`idna_adapter` 1.0): 33 KB less with brotli, but non-ASCII host names would fail to parse;
+  `idna_adapter` 1.1 (the unicode-rs crates) is larger than ICU4X.
+- Rust at `opt-level = "s"`: larger.
+
 Measure with names kept (`CARGO_PROFILE_WEB_STRIP=false`) and `twiggy top` / `twiggy dominators`, or a linker map
 (`RUSTFLAGS="-C link-arg=--Map=map.txt"`, which also sizes the data segment by symbol). Compare raw, `gzip -9` and
 `brotli -q 11` sizes: pages are served compressed, and a change can shrink the raw module and not the compressed one.

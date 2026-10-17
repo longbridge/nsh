@@ -188,6 +188,18 @@ impl TsTypes {
 /// A function giving a TypeScript type (declaring the named types it uses).
 pub type TsType = fn(&mut TsTypes) -> String;
 
+/// `T`'s [`JsValue::ts_type`], or one giving nothing in builds without
+/// declarations ([`super::DECLARATIONS`]): what generated code calls, so
+/// runtimes link none of the TypeScript.
+#[doc(hidden)]
+pub const fn ts_of<T: JsValue>() -> TsType {
+    if super::DECLARATIONS {
+        T::ts_type
+    } else {
+        |_| String::new()
+    }
+}
+
 /// A type props and event data can have: how it converts from and to JSON,
 /// and its TypeScript type. `#[derive(PropEnum)]` implements it for enums
 /// of unit variants, `#[derive(JsObject)]` for structs.

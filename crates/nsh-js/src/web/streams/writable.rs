@@ -998,7 +998,8 @@ readonly locked: boolean;
 abort(reason?: any): Promise<void>;
 close(): Promise<void>;
 getWriter(): WritableStreamDefaultWriter<W>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::WritableStreamDefaultWriter,
@@ -1030,7 +1031,8 @@ abort(reason?: any): Promise<void>;
 close(): Promise<void>;
 releaseLock(): void;
 write(chunk?: W): Promise<void>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::WritableStreamDefaultController,
@@ -1047,7 +1049,8 @@ write(chunk?: W): Promise<void>;"#,
             head: "",
             members: r#"readonly signal: AbortSignal;
 error(e?: any): void;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

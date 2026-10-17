@@ -1423,7 +1423,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Canvas",
         Export::Function(canvas, 1),
-        Ts::Function(
+        Ts::function(
             "A view drawn with a 2D context (HTML Canvas 2D API). `draw` records the\ndrawing in one go; the platform replays it natively (CGContext, Android\nCanvas), at the screen's resolution.",
             &["(props: CanvasProps): YNode"],
         ),
@@ -1431,7 +1431,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Path2D",
         Export::Value(|ctx| class_function(ctx, c"Path2D", path_2d, PATH, 1)),
-        Ts::Class(
+        Ts::class(
             "A path to fill, stroke or clip; `new Path2D(\"M0 0 L10 10\")` takes SVG\npath data (parsed natively).",
             r#" {
   #private;
@@ -1448,7 +1448,7 @@ export interface Path2D extends CanvasPath {}"#,
             let name = c"CanvasRenderingContext2D";
             class_function(ctx, name, illegal_constructor, CONTEXT, 0)
         }),
-        Ts::Class(
+        Ts::class(
             "The 2D context `<Canvas draw>` gets (an HTML Canvas 2D subset). Calls only\nrecord operations; the platform draws them after `draw` returns (and again\nwhenever a native value they read changes). Coordinates are in points,\nthe origin at the canvas's top left.",
             r#" {
   #private;
@@ -1504,7 +1504,7 @@ export interface CanvasRenderingContext2D extends CanvasPath, CanvasContextMetho
         Export::Value(|ctx| {
             class_function(ctx, c"CanvasGradient", illegal_constructor, GRADIENT, 0)
         }),
-        Ts::Class(
+        Ts::class(
             "A gradient from `createLinearGradient` / `createRadialGradient` /\n`createConicGradient`.",
             r#" {
   #private;

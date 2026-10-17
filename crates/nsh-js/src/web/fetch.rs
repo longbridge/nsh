@@ -1889,7 +1889,8 @@ entries(): IterableIterator<[string, string]>;
 keys(): IterableIterator<string>;
 values(): IterableIterator<string>;
 [Symbol.iterator](): IterableIterator<[string, string]>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::Request,
@@ -1957,7 +1958,8 @@ formData(): Promise<FormData>;
 json(): Promise<any>;
 text(): Promise<string>;
 clone(): Request;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::Response,
@@ -2014,7 +2016,8 @@ formData(): Promise<FormData>;
 json(): Promise<any>;
 text(): Promise<string>;
 clone(): Response;"#,
-        },
+        }
+        .declared(),
     },
 ];
 
@@ -2023,8 +2026,12 @@ pub(crate) const FUNCTIONS: &[super::Function] = &[super::Function {
     name: c"fetch",
     native: fetch,
     length: 1,
-    doc: "HTTP through the platform's network stack (NSURLSession,\nHttpURLConnection), streaming both ways; `data:` and `blob:` URLs are\nanswered locally.",
-    signature: "(input: string | URL | Request, init?: RequestInit): Promise<Response>",
+    doc: nsh_core::decl!(
+        "HTTP through the platform's network stack (NSURLSession,\nHttpURLConnection), streaming both ways; `data:` and `blob:` URLs are\nanswered locally."
+    ),
+    signature: nsh_core::decl!(
+        "(input: string | URL | Request, init?: RequestInit): Promise<Response>"
+    ),
 }];
 
 /// The TypeScript types of this file's classes (`globals.d.ts`).

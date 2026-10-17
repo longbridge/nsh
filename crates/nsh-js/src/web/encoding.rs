@@ -342,7 +342,8 @@ pub(crate) const SPECS: &[Spec] = &[
             members: r#"readonly encoding: "utf-8";
 encode(input?: string): Uint8Array;
 encodeInto(source: string, destination: Uint8Array): { read: number; written: number };"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::TextDecoder,
@@ -366,7 +367,8 @@ readonly encoding: string;
 readonly fatal: boolean;
 readonly ignoreBOM: boolean;
 decode(input?: BufferSource, options?: { stream?: boolean }): string;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

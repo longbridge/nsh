@@ -23,6 +23,11 @@
     `INTERNAL_EVENTS`);
   - a web class: its spec's `ClassTs` (members as in a class body; the constants come from the spec's table), the
     types its file declares in `TYPES`, a global function's `web::Function`, the other globals `host::GLOBALS`.
+- The text of declarations (documentation, TypeScript) is only in builds that can write them: the WebAssembly runtime
+  (`nsh_core::ui::DECLARATIONS` is false there) leaves it out, as pages download it. The tables keep their shape and
+  wrap the text: `Ts::function` / `value` / `class`, `ClassTs { … }.declared()`, `decl!("…")` (a constant's text is
+  then not in the binary at all), and generated code calls `ts_of::<T>()` instead of `T::ts_type`. New tables do
+  the same; nothing the runtime needs (names, lengths, whether a method returns) goes through them.
 - The tests keep them true: every module is loaded and its exports compared with its declarations
   (`declarations_match_the_modules`), every web class's members with its spec (`web_classes_declare_their_members`),
   the globals with a host's (`globals_match_the_host`: what is declared exists, and every global the host adds to

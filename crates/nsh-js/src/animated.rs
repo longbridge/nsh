@@ -1669,7 +1669,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "NativeNode",
         Export::Value(|ctx| class_function(ctx, c"NativeNode", native_node, 0)),
-        Ts::Class(
+        Ts::class(
             "A node of the native animation graph: evaluated on the UI thread.",
             r#" {
   #private;
@@ -1700,7 +1700,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "NativeValue",
         Export::Value(|ctx| class_function(ctx, c"NativeValue", native_value, 1)),
-        Ts::Class(
+        Ts::class(
             "A settable, animatable native value.",
             r#" extends NativeNode {
   constructor(value: number);
@@ -1734,7 +1734,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "createNativeValue",
         Export::Function(native_value, 1),
-        Ts::Function(
+        Ts::function(
             "Creates a native value. Bind it (or nodes derived from it) to style\nproperties (`opacity`, `transform`, `backgroundColor`, `borderColor`, a\ntext's `color`, `shadowColor` / `shadowOpacity` / `shadowRadius`), to a\nscroll position (`scrollValue`) or to drags (`pan`).",
             &["(value?: number): NativeValue"],
         ),
@@ -1742,7 +1742,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Animated",
         Export::Value(animated),
-        Ts::Const(
+        Ts::value(
             "Animations composed natively (React Native's `Animated`): each step\nstarts on the UI thread the moment the previous one ends.",
             "AnimatedModule",
         ),
@@ -1750,7 +1750,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Easing",
         Export::Value(easing),
-        Ts::Const(
+        Ts::value(
             "Easing functions (React Native's `Easing`): curves in their \"in\" form,\nturned around with `out` / `inOut`.",
             "EasingModule",
         ),
@@ -1758,7 +1758,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "LayoutAnimation",
         Export::Value(layout_animation),
-        Ts::Const(
+        Ts::value(
             "Animates the layout changes of the next render natively: frames move,\nnew views fade in, removed views fade out.",
             "LayoutAnimationModule",
         ),

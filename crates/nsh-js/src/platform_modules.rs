@@ -233,12 +233,12 @@ pub(crate) const ANDROID_EXPORTS: &[Item] = &[
     (
         "isAvailable",
         Export::Value(|ctx| boolean(os(ctx) == Os::Android)),
-        Ts::Const("True on Android.", "boolean"),
+        Ts::value("True on Android.", "boolean"),
     ),
     (
         "BackHandler",
         Export::Value(back_handler),
-        Ts::Const(
+        Ts::value(
             "The back button, after modals and stacks had their turn.",
             "BackHandlerModule & BackListeners",
         ),
@@ -260,7 +260,7 @@ pub(crate) const IOS_EXPORTS: &[Item] = &[
     (
         "isAvailable",
         Export::Value(|ctx| boolean(os(ctx) == Os::Ios)),
-        Ts::Const("True on iOS (and Mac Catalyst).", "boolean"),
+        Ts::value("True on iOS (and Mac Catalyst).", "boolean"),
     ),
     (
         "InputAccessoryView",
@@ -271,7 +271,7 @@ pub(crate) const IOS_EXPORTS: &[Item] = &[
                 reactive::new_function(ctx, c"InputAccessoryView", nothing, 1)
             }
         }),
-        Ts::Function(
+        Ts::function(
             "A bar over the keyboard of the inputs whose `inputAccessoryViewID` is its\n`nativeID` (iOS's `inputAccessoryView`): as wide as the window and as tall\nas its content, moving with the keyboard natively. It renders nothing where\nit is placed in the tree, and nothing at all on Android.",
             &["(props: InputAccessoryViewProps): YNode | null"],
         ),
@@ -292,7 +292,7 @@ pub(crate) const IOS_TYPES: &str = r#"export interface InputAccessoryViewProps {
 pub(crate) const WEBVIEW_EXPORTS: &[Item] = &[(
     "WebView",
     Export::Value(|ctx| dom::host_component(ctx, "webview", false)),
-    Ts::Const(
+    Ts::value(
         "A web page (WKWebView / android.webkit.WebView); its `ref` has\n`reload()`, `goBack()`, `goForward()`, `stopLoading()`,\n`injectJavaScript(script)` and `postMessage(data)`.",
         "(props: WebViewProps) => YNode",
     ),
@@ -312,7 +312,7 @@ export interface WebViewProps extends Omit<ViewProps, "children" | "ios" | "desk
 pub(crate) const VIDEO_EXPORTS: &[Item] = &[(
     "Video",
     Export::Value(|ctx| dom::host_component(ctx, "video", false)),
-    Ts::Const(
+    Ts::value(
         "A video player (AVPlayer / MediaPlayer); its `ref` has `seek(seconds)`.",
         "(props: VideoProps) => YNode",
     ),
@@ -466,7 +466,7 @@ unsafe extern "C" fn native_event(
 pub(crate) const NATIVE_EXPORTS: &[Item] = &[(
     "nativeComponent",
     Export::Function(native_component, 2),
-    Ts::Function(
+    Ts::function(
         "A component for the native component the embedding app registered as\n`name` (Swift `NshAppView.register(component:)`, Java\n`NshView.registerComponent`). It is laid out like a view, at the size its\nstyle gives it, else at the size the component reports. Its `ref` calls\ncommands: `ref.command(\"zoomTo\", { level: 3 })`. Where nothing is\nregistered under `name`, it renders an empty view.",
         &[
             "<P extends object = {}, E extends object = {}>(name: string, spec: NativeComponentSpec<P, E>): (props: NativeComponentProps<P, E>) => YNode",

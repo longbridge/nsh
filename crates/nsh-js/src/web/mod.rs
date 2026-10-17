@@ -142,6 +142,17 @@ impl ClassTs {
         head: "",
         members: "",
     };
+
+    /// This declaration, or [`ClassTs::NONE`] in builds without
+    /// declarations (`nsh_core::ui::DECLARATIONS`): the text is then not in
+    /// the binary.
+    pub(crate) const fn declared(self) -> ClassTs {
+        if nsh_core::ui::DECLARATIONS {
+            self
+        } else {
+            ClassTs::NONE
+        }
+    }
 }
 
 fn specs() -> impl Iterator<Item = &'static Spec> {

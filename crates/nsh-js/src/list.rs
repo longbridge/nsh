@@ -1023,7 +1023,7 @@ fn report(ctx: *mut JsContext, id: NodeId) -> JsValue {
 pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
     "List",
     crate::modules::Export::Function(list, 1),
-    crate::modules::Ts::Function(
+    crate::modules::Ts::function(
         "A virtualized, recycling list on a native scroll view. Only rows near the\n\
          viewport exist; the native side decides which, and cells are reused.\n\
          Positions, columns, sticky headers and viewability are computed natively.\n\n\

@@ -574,7 +574,8 @@ pub(crate) const SPECS: &[Spec] = &[
             members: r#"constructor(transformer?: Transformer<I, O>, writableStrategy?: QueuingStrategy<I>, readableStrategy?: QueuingStrategy<O>);
 readonly readable: ReadableStream<O>;
 readonly writable: WritableStream<I>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::TransformStreamDefaultController,
@@ -597,7 +598,8 @@ readonly writable: WritableStream<I>;"#,
 enqueue(chunk?: O): void;
 error(reason?: any): void;
 terminate(): void;"#,
-        },
+        }
+        .declared(),
     },
 ];
 

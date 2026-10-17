@@ -35,6 +35,12 @@ use syn::{
     parse_macro_input, punctuated::Punctuated, spanned::Spanned,
 };
 
+/// `text` as declaration text in generated code: left out of builds
+/// without declarations (`nsh_core::ui::DECLARATIONS`).
+fn decl(text: &str) -> TokenStream2 {
+    quote!(::nsh_core::decl!(#text))
+}
+
 /// The doc comment of an item, lines joined.
 fn docs(attrs: &[Attribute]) -> String {
     let mut lines = Vec::new();
@@ -222,7 +228,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     let Fields::Named(fields) = &data.fields else {
         return Err(syn::Error::new(input.span(), "`Props` needs named fields"));
     };
-    let doc = docs(&input.attrs);
+    let doc = decl(&docs(&input.attrs));
     let ui = quote!(::nsh_core::ui);
     let mut specs = Vec::new();
     let mut initial = Vec::new();
@@ -240,7 +246,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             .rename
             .clone()
             .unwrap_or_else(|| camel(&ident.to_string()));
-        let field_doc = docs(&field.attrs);
+        let field_doc = decl(&docs(&field.attrs));
         let kind = match last_segment(ty) {
             Some((id, Some(inner))) if id == "Option" => match last_segment(inner) {
                 Some((s, _)) if s == "Slot" => Kind::Slot,
@@ -263,7 +269,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                 specs.push(quote! {
                     #ui::PropSpec {
                         name: #js,
-                        ts: <#ty as #ui::JsValue>::ts_type(types),
+                        ts: #ui::ts_of::<#ty>()(types),
                         optional: #optional,
                         doc: #field_doc,
                         kind: #ui::PropKind::Value,
@@ -584,7 +590,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
     for v in &data.variants {
         let ident = &v.ident;
         let js = camel(&ident.to_string());
-        let doc = docs(&v.attrs);
+        let doc = decl(&docs(&v.attrs));
         match &v.fields {
             Fields::Unit => {
                 specs.push(quote! {
@@ -596,7 +602,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             Fields::Unnamed(f) if f.unnamed.len() == 1 => {
                 let ty = &f.unnamed[0].ty;
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, data: <#ty as #ui::JsValue>::ts_type(types), doc: #doc }
+                    #ui::EventSpec { name: #js, data: #ui::ts_of::<#ty>()(types), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
                 data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_json(v)));
@@ -612,11 +618,13 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 specs.push(quote! {
                     #ui::EventSpec {
                         name: #js,
-                        data: {
+                        data: if #ui::DECLARATIONS {
                             let fields: ::std::vec::Vec<::std::string::String> = ::std::vec![
                                 #(::std::format!("{}: {}", #keys, <#tys as #ui::JsValue>::ts_type(types))),*
                             ];
                             ::std::format!("{{ {} }}", fields.join("; "))
+                        } else {
+                            ::std::string::String::new()
                         },
                         doc: #doc,
                     }
@@ -875,7 +883,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
-        let doc = docs(&f.attrs);
+        let doc = decl(&docs(&f.attrs));
         let mut inputs = f.sig.inputs.iter();
         match inputs.next() {
             Some(FnArg::Receiver(r)) if r.reference.is_some() => {}
@@ -916,7 +924,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             };
             let name = camel(&name.ident.to_string());
             let local = format_ident!("__arg{}", i);
-            params.push(quote!((#name, <#ty as #ui::JsValue>::ts_type)));
+            params.push(quote!((#name, #ui::ts_of::<#ty>())));
             decode.push(quote! {
                 let #local: #ty = <#ty as #ui::JsValue>::from_json(
                     args.next().unwrap_or(::nsh_core::JsonValue::Null),
@@ -937,7 +945,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 },
             ),
             ReturnType::Type(_, ty) => (
-                quote!(::core::option::Option::Some(<#ty as #ui::JsValue>::ts_type)),
+                quote!(::core::option::Option::Some(#ui::ts_of::<#ty>())),
                 quote! {
                     let value: #ty = this.#ident(#(#call_args),*);
                     ::core::result::Result::Ok(#ui::JsValue::to_json(&value))
@@ -1136,13 +1144,13 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
         ));
     };
     let module_name = type_name.to_string();
-    let module_doc = docs(&item.attrs);
+    let module_doc = decl(&docs(&item.attrs));
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
-        let doc = docs(&f.attrs);
+        let doc = decl(&docs(&f.attrs));
         let is_async = f.sig.asyncness.is_some();
         let typed: Vec<_> = f
             .sig
@@ -1180,7 +1188,7 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             let name = camel(&name.ident.to_string());
             let local = format_ident!("__arg{}", i);
             let optional = matches!(last_segment(ty), Some((id, _)) if id == "Option");
-            params.push(quote!((#name, <#ty as #ui::JsValue>::ts_type, #optional)));
+            params.push(quote!((#name, #ui::ts_of::<#ty>(), #optional)));
             decode.push(quote! {
                 let #local: #ty = <#ty as #ui::JsValue>::from_json(
                     args.next().unwrap_or(::nsh_core::JsonValue::Null),
@@ -1207,13 +1215,13 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             ),
             ReturnType::Type(_, ty) => match result_ok(ty) {
                 Some(ok) => (
-                    quote!(::core::option::Option::Some(<#ok as #ui::JsValue>::ts_type)),
+                    quote!(::core::option::Option::Some(#ui::ts_of::<#ok>())),
                     quote!(value
                         .map(|v| #ui::JsValue::to_json(&v))
                         .map_err(|e| ::std::string::ToString::to_string(&e))),
                 ),
                 None => (
-                    quote!(::core::option::Option::Some(<#ty as #ui::JsValue>::ts_type)),
+                    quote!(::core::option::Option::Some(#ui::ts_of::<#ty>())),
                     quote!(::core::result::Result::Ok(#ui::JsValue::to_json(&value))),
                 ),
             },

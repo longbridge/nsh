@@ -16,7 +16,7 @@ use std::{
     ffi::{CStr, c_int},
 };
 
-use nsh_core::{Command, NodeId, Op, TouchEvent, TouchPhase, TouchPoint, ui::PanGesture};
+use nsh_core::{Command, NodeId, Op, TouchEvent, TouchPhase, TouchPoint, decl, ui::PanGesture};
 use rquickjs::qjs;
 use rustc_hash::FxHashMap;
 
@@ -34,77 +34,109 @@ const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 /// The touch and responder props: name, handler type and documentation
 /// (the declarations of `TouchProps`).
 pub(crate) const TOUCH_PROPS: [(&str, &str, &str); 20] = [
-    ("onTouchStart", "(e: GestureResponderEvent) => void", ""),
-    ("onTouchMove", "(e: GestureResponderEvent) => void", ""),
-    ("onTouchEnd", "(e: GestureResponderEvent) => void", ""),
-    ("onTouchCancel", "(e: GestureResponderEvent) => void", ""),
+    (
+        "onTouchStart",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
+    (
+        "onTouchMove",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
+    (
+        "onTouchEnd",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
+    (
+        "onTouchCancel",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
     (
         "onTouchStartCapture",
-        "(e: GestureResponderEvent) => void",
+        decl!("(e: GestureResponderEvent) => void"),
         "",
     ),
     (
         "onTouchMoveCapture",
-        "(e: GestureResponderEvent) => void",
+        decl!("(e: GestureResponderEvent) => void"),
         "",
     ),
     (
         "onTouchEndCapture",
-        "(e: GestureResponderEvent) => void",
+        decl!("(e: GestureResponderEvent) => void"),
         "",
     ),
     (
         "onTouchCancelCapture",
-        "(e: GestureResponderEvent) => void",
+        decl!("(e: GestureResponderEvent) => void"),
         "",
     ),
     (
         "onStartShouldSetResponder",
-        "(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean",
-        "Become the responder when a finger goes down (asked from the target outwards).",
+        decl!("(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean"),
+        decl!("Become the responder when a finger goes down (asked from the target outwards)."),
     ),
     (
         "onMoveShouldSetResponder",
-        "(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean",
-        "Become the responder when a finger moves (`gestureState`: the gesture since the first finger went down, e.g. `Math.abs(g.dx) > 10`).",
+        decl!("(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean"),
+        decl!(
+            "Become the responder when a finger moves (`gestureState`: the gesture since the first finger went down, e.g. `Math.abs(g.dx) > 10`)."
+        ),
     ),
     (
         "onStartShouldSetResponderCapture",
-        "(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean",
-        "As above, asked from the outside in, before the bubbling ones.",
+        decl!("(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean"),
+        decl!("As above, asked from the outside in, before the bubbling ones."),
     ),
     (
         "onMoveShouldSetResponderCapture",
-        "(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean",
+        decl!("(e: GestureResponderEvent, gestureState: ResponderGestureState) => boolean"),
         "",
     ),
     (
         "onResponderGrant",
-        "(e: GestureResponderEvent) => boolean | void",
-        "This view is the responder now. Return true to keep native scroll views from taking the touches.",
+        decl!("(e: GestureResponderEvent) => boolean | void"),
+        decl!(
+            "This view is the responder now. Return true to keep native scroll views from taking the touches."
+        ),
     ),
     (
         "onResponderReject",
-        "(e: GestureResponderEvent) => void",
-        "Another view is the responder and would not let go.",
+        decl!("(e: GestureResponderEvent) => void"),
+        decl!("Another view is the responder and would not let go."),
     ),
-    ("onResponderStart", "(e: GestureResponderEvent) => void", ""),
-    ("onResponderMove", "(e: GestureResponderEvent) => void", ""),
-    ("onResponderEnd", "(e: GestureResponderEvent) => void", ""),
+    (
+        "onResponderStart",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
+    (
+        "onResponderMove",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
+    (
+        "onResponderEnd",
+        decl!("(e: GestureResponderEvent) => void"),
+        "",
+    ),
     (
         "onResponderRelease",
-        "(e: GestureResponderEvent) => void",
-        "The last finger lifted.",
+        decl!("(e: GestureResponderEvent) => void"),
+        decl!("The last finger lifted."),
     ),
     (
         "onResponderTerminate",
-        "(e: GestureResponderEvent) => void",
-        "Another view (or a native gesture) took the touches.",
+        decl!("(e: GestureResponderEvent) => void"),
+        decl!("Another view (or a native gesture) took the touches."),
     ),
     (
         "onResponderTerminationRequest",
-        "(e: GestureResponderEvent) => boolean",
-        "Another view wants the touches: return false to keep them (default true).",
+        decl!("(e: GestureResponderEvent) => boolean"),
+        decl!("Another view wants the touches: return false to keep them (default true)."),
     ),
 ];
 
@@ -831,7 +863,7 @@ fn pan_responder(ctx: *mut JsContext) -> JsValue {
 pub(crate) const GESTURE_EXPORTS: &[Item] = &[(
     "PanResponder",
     Export::Value(pan_responder),
-    Ts::Const(
+    Ts::value(
         "Pan gestures on top of the responder system (React Native's\n`PanResponder`).",
         "{ create(config: PanResponderCallbacks): PanResponderInstance }",
     ),

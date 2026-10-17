@@ -46,6 +46,26 @@ mod theme;
 mod value;
 pub(crate) mod virtual_list;
 
+/// Whether this build carries the text of declarations: the documentation
+/// and TypeScript of the specs, which only make `.nsh/types`. The
+/// WebAssembly runtime, which pages download and which writes no
+/// declarations, goes without ([`decl!`](crate::decl)); the specs keep
+/// their shape (names, kinds, whether a method returns).
+pub const DECLARATIONS: bool = !cfg!(target_arch = "wasm32");
+
+/// Declaration text: `$text` where the build carries it
+/// ([`DECLARATIONS`]), `""` (a list: `&[]`) where it does not. In a
+/// constant the text is then not in the binary at all.
+#[macro_export]
+macro_rules! decl {
+    ([$($text:expr),* $(,)?]) => {
+        if $crate::ui::DECLARATIONS { &[$($text),*] as &[&'static str] } else { &[] }
+    };
+    ($text:expr) => {
+        if $crate::ui::DECLARATIONS { $text } else { "" }
+    };
+}
+
 pub use nsh_animation::{
     Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing,
 };
@@ -94,7 +114,7 @@ pub use self::{
     },
     task::{Answer, AsyncCx, DialogAnswer, ImageSize, Task, Updated, WeakComponent},
     theme::{Theme, ThemeColors, ThemeError},
-    value::{JsValue, NodeRef, PropError, SharedString, TsType, TsTypes},
+    value::{JsValue, NodeRef, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };
 pub(crate) use self::{

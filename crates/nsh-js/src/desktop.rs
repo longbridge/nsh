@@ -449,12 +449,12 @@ pub(crate) const EXPORTS: &[Item] = &[
                 qjs::JS_FALSE
             }
         }),
-        Ts::Const("True on desktops (macOS, Windows, Linux).", "boolean"),
+        Ts::value("True on desktops (macOS, Windows, Linux).", "boolean"),
     ),
     (
         "titleBar",
         Export::Value(crate::env::title_bar),
-        Ts::Const(
+        Ts::value(
             "The title bar's area while the app hides it (`Window.setTitleBar(\"hidden\")`),\nin points (reactive): its `height`, and the widths the system's window\ncontrols take at its `left` and `right` ends (macOS's traffic lights,\nWindows' caption buttons, GTK's window buttons). All 0 while the system\nshows its title bar, and off desktops.",
             "Accessor<TitleBarArea>",
         ),
@@ -462,7 +462,7 @@ pub(crate) const EXPORTS: &[Item] = &[
     (
         "Menu",
         Export::Value(menu),
-        Ts::Const(
+        Ts::value(
             "The application menu and context menus (desktops; nothing happens\nelsewhere).",
             "MenuModule",
         ),

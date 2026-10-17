@@ -3396,7 +3396,8 @@ pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<voi
 tee(): [ReadableStream<R>, ReadableStream<R>];
 values(options?: { preventCancel?: boolean }): AsyncIterableIterator<R>;
 [Symbol.asyncIterator](options?: { preventCancel?: boolean }): AsyncIterableIterator<R>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::ReadableStreamDefaultReader,
@@ -3420,7 +3421,8 @@ readonly closed: Promise<void>;
 read(): Promise<ReadableStreamReadResult<R>>;
 releaseLock(): void;
 cancel(reason?: any): Promise<void>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::ReadableStreamBYOBReader,
@@ -3444,7 +3446,8 @@ readonly closed: Promise<void>;
 read<T extends ArrayBufferView>(view: T, options?: { min?: number }): Promise<ReadableStreamReadResult<T>>;
 releaseLock(): void;
 cancel(reason?: any): Promise<void>;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::ReadableStreamDefaultController,
@@ -3467,7 +3470,8 @@ cancel(reason?: any): Promise<void>;"#,
 close(): void;
 enqueue(chunk?: R): void;
 error(e?: any): void;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::ReadableByteStreamController,
@@ -3494,7 +3498,8 @@ readonly desiredSize: number | null;
 close(): void;
 enqueue(chunk: ArrayBufferView): void;
 error(e?: any): void;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::ReadableStreamBYOBRequest,
@@ -3519,7 +3524,8 @@ error(e?: any): void;"#,
             members: r#"readonly view: ArrayBufferView | null;
 respond(bytesWritten: number): void;
 respondWithNewView(view: ArrayBufferView): void;"#,
-        },
+        }
+        .declared(),
     },
     Spec {
         class: Class::ReadableStreamAsyncIterator,
