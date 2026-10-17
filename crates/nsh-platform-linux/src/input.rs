@@ -1856,10 +1856,7 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
     if input.hover_tracked.borrow().is_empty() && input.hovered.borrow().is_empty() {
         return;
     }
-    let views = views
-        .into_iter()
-        .filter(hoverable)
-        .collect();
+    let views = views.into_iter().filter(hoverable).collect();
     set_hovered(surface, views);
 }
 
