@@ -62,7 +62,7 @@ A horizontal scroll view takes `horizontal` and a row as its child:
 
 Right to left (see [Device and environment](./device-and-environment.md#right-to-left)), a horizontal scroll view starts at its right end and keeps its distance from it.
 
-Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, dragging with the mouse does not scroll, as in desktop apps: the mouse scrolls with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which it drags as a scroll bar, and its drags go to the app's pans, responders and text selection. Touchscreens on desktops still drag. Give a horizontal carousel without an indicator another way to move on the desktop (arrow buttons, for instance) if mouse users without a horizontal wheel need it.
+Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, dragging with the mouse does not scroll, as in desktop apps: the mouse scrolls with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which shows while the mouse moves over the view and drags as a scroll bar, and its drags go to the app's pans, responders and text selection. Touchscreens on desktops still drag. Horizontal views keep their indicator there even with `showsIndicator={false}`, since a mouse without a horizontal wheel has no other way to move them.
 
 ### Behavior props
 
@@ -71,7 +71,7 @@ Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the bro
 | `horizontal` | `boolean` | `false` | Scrolls sideways. |
 | `scrollEnabled` | `boolean` | `true` | The user can scroll it. Scrolling from code still works. |
 | `bounces` | `boolean` | `true` | Overscroll past the edges. |
-| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. |
+| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `contentInset` | `{ top?, right?, bottom?, left? }` | | Room around the content, scrollable into. |
 | `contentOffset` | `{ x?, y? }` | | Where it starts. |
 | `decelerationRate` | `"normal" \| "fast" \| number` | the platform's | How fast a fling slows down: `"normal"`, `"fast"`, or the velocity kept per millisecond (`0.998` is normal, `0.99` fast; `0` is the platform's default). |

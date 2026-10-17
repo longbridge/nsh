@@ -1,9 +1,10 @@
 import { computed, Input, Scroll, signal, Text, View, type YNode } from "nsh";
 import { LayoutAnimation } from "nsh/animated";
+import { Platform } from "nsh/device";
 import { List } from "nsh/list";
 import { keyboard, KeyboardAvoidingView, useSafeAreaInsets } from "nsh/ui/mobile";
 import { Icon, type IconName } from "../icons";
-import { Appear, Badge, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, type Tone, toneColor, toneTint } from "../ui";
+import { Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, type Tone, toneColor, toneTint } from "../ui";
 
 const tones: Tone[] = ["accent", "info", "warn", "up", "danger", "neutral"];
 
@@ -354,6 +355,7 @@ function More() {
       refreshing.set(false);
     }, 1000);
   };
+  const refreshKey = bindRefresh(refresh);
   const edit = (change: () => void) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     change();
@@ -366,7 +368,7 @@ function More() {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <IconTile name="arrow-down" tint={refreshing() ? colors.accent : colors.text} />
             <View style={{ flex: 1, gap: 2 }}>
-              <Text style={{ fontSize: 15, color: colors.text }}>{refreshing() ? "Refreshing…" : "Pull the page down"}</Text>
+              <Text style={{ fontSize: 15, color: colors.text }}>{refreshing() ? "Refreshing…" : hint("Pull the page down", refreshKey ? `Refresh or ${refreshKey}` : "Refresh below")}</Text>
               <Text style={{ fontSize: 13, color: colors.muted }}>The system spinner on a plain scroll view</Text>
             </View>
             <View style={{ alignItems: "flex-end" }}>
@@ -374,6 +376,10 @@ function More() {
               <Text style={{ fontSize: 12, color: colors.faint }}>refreshes</Text>
             </View>
           </View>
+          {/* The mouse does not pull scroll views down: desktops refresh here. */}
+          <If when={Platform.isDesktop}>
+            <Button label="Refresh" variant="secondary" disabled={refreshing()} onPress={refresh} />
+          </If>
         </Section>
 
         <Section title="Horizontal scroll view" note={range()}>

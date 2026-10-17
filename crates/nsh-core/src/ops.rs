@@ -1127,7 +1127,8 @@ pub enum Prop {
     /// Scrolling behavior of a scroll view or list.
     #[prop(nested)]
     Scroll(ScrollProp),
-    /// `showsIndicator`: the scroll indicator shows (default true).
+    /// `showsIndicator`: the scroll indicator shows (default true). On the
+    /// desktop a horizontal view keeps it: it is the mouse's scroll bar.
     #[prop(js = "showsIndicator", default = true, on = SCROLL | LIST)]
     ShowsIndicator(bool),
     /// `refreshing`: the pull-to-refresh spinner shows.

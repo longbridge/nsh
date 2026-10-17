@@ -31,7 +31,7 @@ demo: el-scroll
 |---|---|---|---|
 | `horizontal` | `boolean` | `false` | 横向滚动。 |
 | `scrollEnabled` | `boolean` | `true` | 用户可以滚动。 |
-| `showsIndicator` | `boolean` | `true` | 显示滚动条。 |
+| `showsIndicator` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `bounces` | `boolean` | `true` | 允许越过边缘回弹。 |
 | `pagingEnabled` | `boolean` | `false` | 停在视口尺寸的整数倍处。 |
 | `snapToInterval` | `number` | `0` | 停在该长度的整数倍处（0 表示关闭）。 |

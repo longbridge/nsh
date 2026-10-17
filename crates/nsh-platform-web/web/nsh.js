@@ -105,8 +105,11 @@ const KEYFRAMES = `
 @supports not selector(::-webkit-scrollbar) {
   .nsh-scroll { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.45) transparent; }
 }
-.nsh-noindicator { scrollbar-width: none; }
-.nsh-noindicator::-webkit-scrollbar { display: none; }
+/* A horizontal view keeps its scroll bar in the desktop idiom: a mouse
+   without a horizontal wheel has no other way to move it (mouse drags do
+   not scroll). */
+.nsh-noindicator, .nsh-root:not(.nsh-desktop) .nsh-noindicator-x { scrollbar-width: none; }
+.nsh-noindicator::-webkit-scrollbar, .nsh-root:not(.nsh-desktop) .nsh-noindicator-x::-webkit-scrollbar { display: none; }
 .nsh-run { position: absolute; white-space: pre; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 .nsh-pointer { cursor: pointer; }
@@ -1541,7 +1544,8 @@ class Player {
     if (!el) return;
     el._horizontal = horizontal;
     this.scrollOverflow(el);
-    el.classList.toggle("nsh-noindicator", !indicator);
+    el.classList.toggle("nsh-noindicator", !indicator && !horizontal);
+    el.classList.toggle("nsh-noindicator-x", !indicator && !!horizontal);
   }
 
   op_scs([, id, w, h]) {

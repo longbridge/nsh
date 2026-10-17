@@ -110,7 +110,7 @@ const toggle = (id: number) =>
 | `viewabilityConfig` | `ViewabilityConfig` | | 什么情况下条目算作可见。 |
 | `keyExtractor` | `(item, index) => string` | | 可见性回调中的键。 |
 | `refreshing` / `onRefresh` | `boolean` / `() => void` | | 下拉刷新。 |
-| `showsIndicator` | `boolean` | `true` | 显示滚动条。 |
+| `showsIndicator` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
 | `ref` | `YNode` | | `scrollToIndex`、`scrollToOffset`、`scrollToEnd`、`scrollTo`。 |
 
 头部、尾部和空状态插槽接受组件（`ListHeaderComponent={Header}`）或元素（`ListHeaderComponent={<Header />}`）。它们是独立的单元格，从不被复用，并且和其他 JSX 一样是响应式的。

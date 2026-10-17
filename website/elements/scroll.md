@@ -34,7 +34,7 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `View
 |---|---|---|---|
 | `horizontal` | `boolean` | `false` | Scrolls sideways. |
 | `scrollEnabled` | `boolean` | `true` | The user can scroll it. |
-| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. |
+| `showsIndicator` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `bounces` | `boolean` | `true` | Overscroll past the edges. |
 | `pagingEnabled` | `boolean` | `false` | Stops at multiples of the viewport. |
 | `snapToInterval` | `number` | `0` | Stops at multiples of this length (0: off). |

@@ -2,6 +2,7 @@ import type { JSX, ScrollProps, ViewStyle } from "nsh";
 import { computed, effect, Scroll, signal, Text, View } from "nsh";
 import { createNativeValue, Easing } from "nsh/animated";
 import { colorScheme, Platform, windowSize } from "nsh/device";
+import { keymap } from "nsh/keymap";
 import { Icon, type IconName } from "./icons";
 
 /** Whether the gallery shows its dark palette (reactive: reading it subscribes). */
@@ -282,6 +283,19 @@ export const header = {
  * `pointer` on desktops (a mouse, a touchpad, a keyboard).
  */
 export const hint = (touch: string, pointer: string) => (Platform.isDesktop ? pointer : touch);
+
+/**
+ * Desktops' way to refresh what phones pull down (the mouse does not drag
+ * scroll views): Ctrl+R / Cmd+R calls `refresh` while the calling component
+ * shows, next to the refresh button the demo shows. Browsers keep the key to
+ * reload the page, and the development hosts to reload the app. Returns the
+ * key's label for the hint, or null where it is not bound.
+ */
+export function bindRefresh(refresh: () => void): string | null {
+  if (!Platform.isDesktop || Platform.OS === "web") return null;
+  keymap.bind("mod+r", refresh);
+  return keymap.label("mod+r");
+}
 
 /** The width of the desktop layout's sidebar. */
 export const SIDEBAR = 264;
