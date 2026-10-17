@@ -122,6 +122,7 @@ pub(crate) fn package(
         Some(icon) => Icons::write(&site, icon)?,
         None => Icons::default(),
     };
+    let (fonts, chunk_fonts) = font_loads(&fonts, &built.code, &built.chunks);
     let appearance = Appearance::of(config);
     fs::write(
         dir.join("manifest.webmanifest"),
@@ -134,6 +135,7 @@ pub(crate) fn package(
         "capabilities": built.capabilities_json(),
         "assets": assets,
         "fonts": fonts,
+        "chunkFonts": chunk_fonts,
         "chunks": chunks,
     });
     let html = page(&PageParts {
@@ -320,6 +322,39 @@ fn url_path(path: &str) -> String {
         }
     }
     out
+}
+
+/// When the page fetches each font (`fonts`, paths): those only chunks
+/// register (`font("asset:/<path>")` in their code, as the bundler writes
+/// font imports) come with the chunk that needs them, by chunk id; the
+/// others (the entry's, the UI sets', which the engine registers as it
+/// starts) before the app starts. Fonts are read synchronously, so each
+/// must be there before the code registering it runs.
+fn font_loads(
+    fonts: &[String],
+    entry: &str,
+    chunks: &[crate::build::BuiltChunk],
+) -> (Vec<String>, serde_json::Map<String, serde_json::Value>) {
+    let mut eager = Vec::new();
+    let mut by_chunk = serde_json::Map::new();
+    for font in fonts {
+        let uri = format!("asset:/{font}");
+        let users: Vec<&crate::build::BuiltChunk> =
+            chunks.iter().filter(|c| c.code.contains(&uri)).collect();
+        if entry.contains(&uri) || users.is_empty() {
+            eager.push(font.clone());
+            continue;
+        }
+        for chunk in users {
+            let list = by_chunk
+                .entry(chunk.id.clone())
+                .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+            if let serde_json::Value::Array(list) = list {
+                list.push(font.clone().into());
+            }
+        }
+    }
+    (eager, by_chunk)
 }
 
 /// Fonts are read synchronously when the app starts or imports them: the
@@ -610,6 +645,31 @@ mod tests {
         );
         let any = caps(serde_json::json!({ "network": { "hosts": ["*"] } }));
         assert_eq!(connect_src(Some(&any)), None);
+    }
+
+    #[test]
+    fn fonts_only_chunks_register_come_with_them() {
+        let chunk = |id: &str, code: &str| crate::build::BuiltChunk {
+            id: id.to_owned(),
+            code: code.to_owned(),
+            bytecode: Vec::new(),
+            source_map: None,
+        };
+        let fonts = ["a.ttf", "b.ttf", "@ui/c.ttf"].map(String::from);
+        let chunks = [
+            chunk(
+                "Text.js",
+                "font(`asset:/b.ttf`, `B`); font(`asset:/a.ttf`, `A`)",
+            ),
+            chunk("Other.js", "font(`asset:/b.ttf`, `B`)"),
+        ];
+        let (eager, by_chunk) = font_loads(&fonts, "font(`asset:/a.ttf`, `A`)", &chunks);
+        // The entry's, and the UI set's (which no code names), first.
+        assert_eq!(eager, ["a.ttf", "@ui/c.ttf"]);
+        assert_eq!(
+            serde_json::Value::Object(by_chunk),
+            serde_json::json!({ "Text.js": ["b.ttf"], "Other.js": ["b.ttf"] })
+        );
     }
 
     #[test]

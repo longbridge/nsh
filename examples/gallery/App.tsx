@@ -2,74 +2,55 @@ import { mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Platform, windowSize } from "nsh/device";
 import { Image } from "nsh/image";
 import { Screen, Stack, StatusBar } from "nsh/ui/mobile";
-import { Animations } from "./demos/Animations";
-import { CanvasDemo } from "./demos/CanvasDemo";
-import { Components } from "./demos/Components";
-import { Form } from "./demos/Form";
-import { Gestures } from "./demos/Gestures";
-import { Images } from "./demos/Images";
-import { Lists } from "./demos/Lists";
-import { Media } from "./demos/Media";
-import { MobileUi } from "./demos/MobileUi";
-import { Navigation } from "./demos/Navigation";
-import { Photos } from "./demos/Photos";
-import { Physics } from "./demos/Physics";
-import { Scrolling } from "./demos/Scrolling";
-import { Stocks } from "./demos/Stocks";
-import { Chat } from "./demos/Chat";
-import { Styles } from "./demos/Styles";
-import { System } from "./demos/System";
-import { Tailwind } from "./demos/Tailwind";
-import { TextDemo } from "./demos/TextDemo";
 import { Icon } from "./icons";
 import logo from "./logo@2x.png";
 import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, colors, desktop, header, IconTile, isDark, mono, Press, radius, SIDEBAR } from "./ui";
+import { Appear, Badge, colors, desktop, header, IconTile, isDark, lazy, mono, Press, radius, SIDEBAR } from "./ui";
 
-/** The demos, by what they show. */
+/** The demos, by what they show; each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
   {
     title: "Apps",
     demos: [
-      { name: "Stocks", detail: "A live watchlist and a stock: candles, depth, the tape, a tick every 50 ms", icon: "stocks", screen: Stocks },
-      { name: "AI Chat", detail: "Streaming replies, tools, reasoning, attachments, errors", icon: "chat", screen: Chat },
-      { name: "Photos", detail: "A long recycled list: images, pull to refresh, paging", icon: "photos", screen: Photos },
+      { name: "Stocks", detail: "A live watchlist and a stock: candles, depth, the tape, a tick every 50 ms", icon: "stocks", screen: lazy(() => import("./demos/Stocks").then((m) => m.Stocks)) },
+      { name: "AI Chat", detail: "Streaming replies, tools, reasoning, attachments, errors", icon: "chat", screen: lazy(() => import("./demos/Chat").then((m) => m.Chat)) },
+      { name: "Photos", detail: "A long recycled list: images, pull to refresh, paging", icon: "photos", screen: lazy(() => import("./demos/Photos").then((m) => m.Photos)) },
     ],
   },
   {
     title: "Layout and lists",
     demos: [
-      { name: "Lists", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: Lists },
-      { name: "Scrolling", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll", screen: Scrolling },
-      { name: "Navigation", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: Navigation },
-      { name: "Form", detail: "Inputs, keyboard types, the keyboard over the content", icon: "form", screen: Form },
+      { name: "Lists", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
+      { name: "Scrolling", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll", screen: lazy(() => import("./demos/Scrolling").then((m) => m.Scrolling)) },
+      { name: "Navigation", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
+      { name: "Form", detail: "Inputs, keyboard types, the keyboard over the content", icon: "form", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
     ],
   },
   {
     title: "Touch and motion",
     demos: [
-      { name: "Gestures", detail: "Pinch, rotate, press states, hit slop, pointer events", icon: "gestures", screen: Gestures },
-      { name: "Physics", detail: "Drags and springs on the UI thread", icon: "physics", screen: Physics },
-      { name: "Animations", detail: "Easing, sequence / parallel / stagger / loop, springs, interpolation", icon: "animation", screen: Animations },
+      { name: "Gestures", detail: "Pinch, rotate, press states, hit slop, pointer events", icon: "gestures", screen: lazy(() => import("./demos/Gestures").then((m) => m.Gestures)) },
+      { name: "Physics", detail: "Drags and springs on the UI thread", icon: "physics", screen: lazy(() => import("./demos/Physics").then((m) => m.Physics)) },
+      { name: "Animations", detail: "Easing, sequence / parallel / stagger / loop, springs, interpolation", icon: "animation", screen: lazy(() => import("./demos/Animations").then((m) => m.Animations)) },
     ],
   },
   {
     title: "Drawing and type",
     demos: [
-      { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: CanvasDemo },
-      { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: Styles },
-      { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: Tailwind },
-      { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation", icon: "text", screen: TextDemo },
-      { name: "Images", detail: "Resize modes, tint, GIF / WebP, placeholders, blur, fade", icon: "image", screen: Images },
+      { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
+      { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
+      { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
+      { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
+      { name: "Images", detail: "Resize modes, tint, GIF / WebP, placeholders, blur, fade", icon: "image", screen: lazy(() => import("./demos/Images").then((m) => m.Images)) },
     ],
   },
   {
     title: "Platform",
     demos: [
-      { name: "Mobile UI", detail: "nsh/ui/mobile in Rust: a ListView and a Group of the app's rows", icon: "mobile", screen: MobileUi },
-      { name: "Components", detail: "Press feedback, sheet, layout animation, input accessory, modal options", icon: "components", screen: Components },
-      { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: Media },
-      { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: System },
+      { name: "Mobile UI", detail: "nsh/ui/mobile in Rust: a ListView and a Group of the app's rows", icon: "mobile", screen: lazy(() => import("./demos/MobileUi").then((m) => m.MobileUi)) },
+      { name: "Components", detail: "Press feedback, sheet, layout animation, input accessory, modal options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
+      { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
+      { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
     ],
   },
 ];

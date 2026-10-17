@@ -867,3 +867,50 @@ export function DemoPage(props: {
     </Scroll>
   );
 }
+
+/**
+ * A screen whose module loads the first time it is shown: `load` is an
+ * `import()` of it. Native bundles hold every module (the import resolves
+ * at once); on the web each demo is a chunk of its own, downloaded when
+ * opened, so the first load fetches only the index and the demo shown.
+ */
+export function lazy(load: () => Promise<() => JSX.Element>): () => JSX.Element {
+  let screen: (() => JSX.Element) | undefined;
+  let loading: Promise<void> | undefined;
+  const ready = signal(false);
+  const failed = signal("");
+  const start = () =>
+    (loading ??= load().then(
+      (loaded) => {
+        screen = loaded;
+        ready.set(true);
+      },
+      (err) => {
+        // The next showing tries again.
+        loading = undefined;
+        failed.set(String(err));
+      },
+    ));
+  function Loaded() {
+    const Screen = screen!;
+    return <Screen />;
+  }
+  return function Lazy() {
+    start();
+    return (
+      <If when={ready()} else={<Loading failed={failed()} />}>
+        <Loaded />
+      </If>
+    );
+  };
+}
+
+function Loading(props: { failed: string }) {
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <Text style={{ fontSize: 13, color: props.failed ? colors.danger : colors.faint, textAlign: "center" }}>
+        {props.failed || "Loading…"}
+      </Text>
+    </View>
+  );
+}

@@ -57,7 +57,7 @@ nsh package App.tsx --target web --run     # 并在本机提供服务，在浏�
 | `nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB） |
 | `app.<digest>.js` | 应用本身，构建方式与 `nsh build --release --split` 相同 |
 | `chunks/<name>.<digest>.js` | `import()` 加载的代码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
-| `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在应用启动前加载：文本要用它们测量） |
+| `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在注册它们的代码运行前加载，因为文本要用它们测量：在应用启动前，或随导入它们的分块一起加载） |
 | `icons/<size>.<digest>.png` | `nsh.json` 中的图标，尺寸为 32（favicon）、180（`apple-touch-icon`）、192 和 512 像素 |
 
 `<digest>` 是文件内容 SHA-256 的前几位：文件名只在内容变化时才变化，所以新版本只会改动 `index.html` 和真正变化了的文件。所有 URL 都是相对的，站点放在任何主机的任何目录下都能运行（`https://example.com/apps/counter/`）。
@@ -200,6 +200,12 @@ player.run(code, {
 ```
 
 无法下载的 chunk 会让 `import()` 以一个指明该 chunk 的 `TypeError` 拒绝；下一次 `import()` 会重新尝试。chunk 名称是 bundle 中固定的文件名：应用无法让页面下载其他任何东西。
+
+[示例应用](/zh-CN/gallery)就是这样加载每个演示的：`lazy`（位于 `examples/gallery/ui.tsx`）生成一个组件，它在第一次渲染时开始导入，导入完成前显示占位内容，之后渲染导入的组件。首次加载只有索引和最先显示的演示；演示导入的字体随该演示的 chunk 一起加载。原生构建包含所有模块，因此导入会立即完成：
+
+```tsx
+const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
+```
 
 ## 限制
 

@@ -29,7 +29,8 @@
 <noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif">{{title}} needs JavaScript.</div></noscript>
 <script type="module">
   // Written by `nsh package --target web`: loads the runtime, the app's
-  // code and its fonts in parallel, then runs the app as a release.
+  // code and its fonts in parallel, then runs the app as a release; a
+  // chunk's own fonts come with it.
   import { createPlayer } from "./{{runtime}}";
 
   const app = {{app}};
@@ -55,6 +56,14 @@
   }
 
   const path = (uri) => uri.replace(/^asset:\/+/, "");
+  // Each font once: before the app starts, or with the chunk that needs it.
+  const loads = new Map();
+  const loadFont = (font) => {
+    if (!loads.has(font)) {
+      loads.set(font, get(app.assets[font]).then(async (r) => fonts.set(font, new Uint8Array(await r.arrayBuffer()))));
+    }
+    return loads.get(font);
+  };
 
   try {
     const [loaded, code] = await Promise.all([
@@ -62,6 +71,7 @@
         wasm: app.wasm,
         assets: app.assets,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
+        prepareChunk: (id) => Promise.all((app.chunkFonts[id] ?? []).map(loadFont)),
         // A release shows no error box; an app that could not start says so.
         overlay: false,
         onError: (message) => {
@@ -69,8 +79,7 @@
         },
       }),
       get(app.code).then((r) => r.text()),
-      ...app.fonts.map(async (font) =>
-        fonts.set(font, new Uint8Array(await (await get(app.assets[font])).arrayBuffer()))),
+      ...app.fonts.map(loadFont),
     ]);
     player = loaded;
     status.hidden = true;

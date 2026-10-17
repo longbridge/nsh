@@ -58,7 +58,7 @@ page and files named after their content.
 | `nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli) |
 | `app.<digest>.js` | The app, built as `nsh build --release --split` builds it |
 | `chunks/<name>.<digest>.js` | What `import()` loads, downloaded the first time it is imported ([split bundles](#split-bundles)) |
-| `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the app starts: text is measured with them) |
+| `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
 
 `<digest>` is the start of the SHA-256 of the file's content: a file's name changes exactly when its content does, so a
@@ -213,6 +213,12 @@ player.run(code, {
 ```
 
 A chunk that cannot be downloaded rejects the `import()` with a `TypeError` naming it; the next `import()` tries again. Chunk names are fixed file names from the bundle: the app cannot make the page download anything else.
+
+The [gallery](/gallery) loads each demo this way: `lazy` (in `examples/gallery/ui.tsx`) makes a component that starts the import the first time it renders, shows a placeholder until it resolves, then renders what it loaded. Its first load is the index and the demo shown first; a font a demo imports comes with that demo's chunk. Native builds hold every module, so there the import resolves at once:
+
+```tsx
+const Stocks = lazy(() => import("./demos/Stocks").then((m) => m.Stocks));
+```
 
 ## Limits
 

@@ -13,7 +13,9 @@
 // `asset:/<path>` is served) or `assets` (a map from `<path>` to its URL,
 // as `nsh package --target web` writes it), `readAsset(uri)` (the bytes
 // of an asset the engine needs at once, a font: a `Uint8Array` or null),
-// `chunks` / `chunkBase` (see `run`), `dark`, `idiom` ("phone", "pad" or
+// `chunks` / `chunkBase` (see `run`), `prepareChunk(id)` (a promise for
+// what chunk `id` needs once it runs, such as fonts for `readAsset`;
+// awaited with the chunk's download), `dark`, `idiom` ("phone", "pad" or
 // "desktop" instead of the one the pointer and the viewport suggest),
 // `overlay` (false: no error box), `onError`, `onLog`.
 //
@@ -501,7 +503,9 @@ class Player {
     let code;
     let ok = 1;
     try {
-      const response = await fetch(new URL(map[id] ?? id, base));
+      // What the chunk needs synchronously once it runs (its fonts), from
+      // the page, alongside it.
+      const [response] = await Promise.all([fetch(new URL(map[id] ?? id, base)), this.options.prepareChunk?.(id)]);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
       code = await response.text();
     } catch (err) {

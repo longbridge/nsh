@@ -31,8 +31,10 @@ several times larger and slower; `AR_wasm32_unknown_unknown` defaults to `llvm-a
   (`immutable`) and only the page is revalidated. The page (template `crates/nsh-cli/src/web/index.html`) imports the
   hashed `nsh.js`, preloads the wasm, the app's code and its fonts, and passes `createPlayer` the wasm URL, `assets`
   (each `asset:/<path>` to its hashed URL: images and videos load from there on demand) and `readAsset` (the fonts'
-  bytes, fetched before the app starts: the engine reads fonts synchronously, `Assets::read`, to measure text with
-  them). It runs the bundle with `run(code, { release: true, capabilities, chunks })`; an app whose capabilities restrict `network`
+  bytes: the engine reads fonts synchronously, `Assets::read`, to measure text with them). Fonts the entry or the UI
+  sets register are fetched before the app starts; one only chunks register (`font("asset:/…")` in their code) comes
+  with the first of them, through `createPlayer`'s `prepareChunk(id)`, which `nsh.js` awaits with the chunk's download
+  (`web::font_loads`). It runs the bundle with `run(code, { release: true, capabilities, chunks })`; an app whose capabilities restrict `network`
   gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
   `host:*`), as the browser follows redirects before nsh could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as JS source
@@ -56,23 +58,27 @@ map.
 
 ### What a published app downloads
 
-`examples/gallery` as `nsh package --target web` publishes it (2026-10; `gzip -9`, `brotli -q 11`). The first load is
-the page, the runtime, the app's code and its fonts (preloaded: text is measured with them); images load when shown,
-icons when the browser wants them.
+`examples/gallery` as `nsh package --target web` publishes it (2026-10; `gzip -9`, `brotli -q 11`). Each demo is a
+module the index loads with `import()` (the gallery's `lazy`), so it is a chunk of its own: the first load is the page,
+the runtime, the app's shell and the demo shown first (Stocks, in the desktop layout; none in the phone layout's
+index). The other demos, 18 chunks of 265 KB (72 KB gzipped) in all, and the fonts they register (Pacifico, with
+the Text demo: `web::font_loads`, the page's `prepareChunk`) come when opened; images when shown, icons when the
+browser wants them.
 
 | File | Raw | gzip | brotli |
 |---|---:|---:|---:|
-| `index.html` | 4.6 KB | 2.1 KB | 1.7 KB |
-| `nsh.<digest>.js` (minified; 70.6 / 20.3 / 17.7 KB before) | 41.8 KB | 14.0 KB | 12.6 KB |
-| `nsh.<digest>.wasm` | 3776 KB | 1310 KB | 1001 KB |
-| `app.<digest>.js` (minified by rolldown) | 347 KB | 92.5 KB | 74.9 KB |
-| `assets/fonts/Pacifico-Regular.<digest>.ttf` | 329 KB | 145 KB | 121 KB |
-| **first load** (with the 32 px favicon) | **4500 KB** | **1565 KB** | **1212 KB** |
+| `index.html` (with the chunk map) | 5.7 KB | 2.6 KB | 2.1 KB |
+| `nsh.<digest>.js` (minified) | 57.5 KB | 18.9 KB | 17.1 KB |
+| `nsh.<digest>.wasm` | 3779 KB | 1311 KB | 1001 KB |
+| `app.<digest>.js`: the shell (minified by rolldown) | 34.9 KB | 9.7 KB | 8.5 KB |
+| `chunks/Stocks.<digest>.js` | 55.9 KB | 17.3 KB | 15.4 KB |
+| **first load** (with the 32 px favicon) | **3934 KB** | **1361 KB** | **1046 KB** |
+| before the demos were split: `app.<digest>.js` 347 / 92.5 / 74.9 KB and the preloaded font 329 / 145 / 121 KB | 4518 KB | 1571 KB | 1217 KB |
 | `manifest.webmanifest` | 0.4 KB | 0.3 KB | 0.2 KB |
 | images (`bounce.gif`, `logo@2x.png`, `spinner.webp`) | 16.1 KB | 6.0 KB | 5.6 KB |
 | icons 180 / 192 / 512 px | 114 KB | 89.4 KB | 86.9 KB |
 
-The wasm is three quarters of the first load. `nsh.js` is minified at package time
+The app's own share of the first load went from 676 KB (195 KB with brotli) to 91 KB (24 KB). The wasm is now nearly all of the first load. `nsh.js` is minified at package time
 (`nsh_bundler::minify_module`: oxc's minifier, local names mangled, property names kept, since the mounter looks its
 `op_<name>` methods up by name); the dev host serves it as it is. Published sites carry no source maps.
 
