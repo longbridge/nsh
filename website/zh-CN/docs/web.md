@@ -118,6 +118,7 @@ const player = await createPlayer(document.querySelector("#phone"), {
   wasm: "./nsh.wasm",
   assetBase: "./assets/",   // `asset:/…` URI（导入的图片）从这里加载
   // dark: true,            // 强制外观；不设置时跟随系统
+  // idiom: "phone",        // 强制 "phone"、"pad" 或 "desktop"；不设置时由指针和尺寸决定
 });
 player.run(await (await fetch("./bundle.js")).text());
 ```
@@ -131,7 +132,29 @@ player.run(await (await fetch("./bundle.js")).text());
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 
 > [!NOTE]
-> Web 版把 `Platform.OS` 报告为 `"ios"`，所以应用呈现的是 iOS 外观。它的用途是展示应用，而不是第三个目标平台。
+## 浏览器作为平台
+
+`Platform.OS` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `Platform.constants.interfaceIdiom`：
+
+- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `Platform.isDesktop` 为 `true`，`Platform.select` 选 `desktop`，`desktop={{…}}` 属性生效，标题栏高度与桌面后端相同。
+- `"pad"`：短边至少 600 点的触摸屏；其余为 `"phone"`。两者都属于移动端：`Platform.select` 选 `mobile`。
+
+界面风格在应用启动时确定，运行期间不变，与其他平台一致；变窄的桌面窗口仍是桌面，按自己的 `windowSize()` 布局。`web={{…}}` 属性、`Platform.select({ web })` 和 `web:` 类只在浏览器中生效；`ios={{…}}`、`native` 和 `ios:` 在浏览器中不生效。
+
+环境的其余部分由页面报告，并随时更新：
+
+| 值 | 来自浏览器的 |
+|---|---|
+| 区域设置（`Intl` 的默认值） | `navigator.languages[0]` |
+| `I18nManager.isRTL` | 设置了 `<html dir>` 时取它，否则取区域设置的书写方向 |
+| `reduceMotion()` | `prefers-reduced-motion` |
+| `fontScale()` | 根元素字号 / 16 px（浏览器的文字大小设置） |
+| `PixelRatio.get()` | `devicePixelRatio`（随缩放和屏幕变化） |
+| `colorScheme()` | `prefers-color-scheme` |
+| `safeArea()` | 与容器重叠部分的 `env(safe-area-inset-*)`（手机上 `viewport-fit=cover` 的页面） |
+| `keyboard()` | 屏幕键盘遮住容器的高度（`visualViewport`） |
+
+`Platform.Version` 为 `"0.0"`，`screenReaderEnabled()` 始终为 `false`（浏览器不提供这一信息）。[`StatusBar`](../components/status-bar.md) 的 `web={{ themeColor }}` 设置页面的 `<meta name="theme-color">`，也就是浏览器给页面周围的栏使用的颜色。
 
 ## 网络
 
@@ -169,7 +192,7 @@ player.run(code, {
 Web 运行时用于演示和文档，下列能力不提供：
 
 - **Web 视图、视频和原生组件**：`WebView` 只以最简单的方式映射为 `<iframe>`，`Video` 映射为 `<video>`；注册的原生组件渲染为空盒子。
-- **平台服务**：状态栏、Toast 和 Android 返回键不起作用，也没有需要避让的软键盘（`keyboard()` 始终为 0）。
+- **平台服务**：Toast 和 Android 返回键不起作用。
 - **首次使用前加载好的自定义字体**：导入的字体通过 `FontFace` 注册，它是异步加载的，所以第一帧可能用后备字体测量。
 - **文本整形细节**：换行规则只是 UAX #14 的一个子集（空格、CJK、连字符），没有自动断词，除段落方向外也不做双向重排。
 - **下拉刷新和可缩放的滚动视图。**

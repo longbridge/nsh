@@ -49,6 +49,16 @@ function PhotoViewer() {
 }
 ```
 
+## In a browser
+
+The web has no status bar; the closest is the color browsers give their own bars around the page (the address bar on
+phones, the title bar of an installed web app). `web={{ themeColor }}` sets it, as the page's
+`<meta name="theme-color">`, with the same most-recent-wins rule; `barStyle` and `hidden` do nothing there.
+
+```tsx
+<StatusBar barStyle="light-content" web={{ themeColor: "#0b0b0f" }} />
+```
+
 ## Setting it with functions
 
 The static functions set a base setting. Every rendered `StatusBar` overrides it.
@@ -80,6 +90,7 @@ StatusBar.setHidden(false);
 | `hidden` | `boolean \| null` | not set | Hides the status bar. |
 | `animated` | `boolean \| null` | not set | Animates changes of `barStyle` and `hidden`. |
 | `android` | `{ backgroundColor?: string \| null }` | not set | Android only: the bar's background color. |
+| `web` | `{ themeColor?: string \| null }` | not set | Browsers only: the page's theme color (`<meta name="theme-color">`). |
 
 A prop that is not set leaves that part of the status bar to the `StatusBar` below, or to the functions. `StatusBar`
 has no events.

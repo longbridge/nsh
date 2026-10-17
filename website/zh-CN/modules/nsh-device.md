@@ -54,7 +54,7 @@ const fontScale: Accessor<number>;
 
 ```ts
 const Platform: {
-  readonly OS: "ios" | "android" | "macos" | "windows" | "linux";
+  readonly OS: "ios" | "android" | "macos" | "windows" | "linux" | "web";
   readonly isDesktop: boolean;
   readonly Version: string | number;
   readonly isPad: boolean;
@@ -72,8 +72,8 @@ const Platform: {
 
 | 成员 | 说明 |
 |---|---|
-| `OS` | 操作系统。iOS、iOS 模拟器和 Mac Catalyst 都报告 `"ios"`。 |
-| `isDesktop` | 是否为桌面系统（macOS、Windows、Linux）。 |
+| `OS` | 操作系统。iOS、iOS 模拟器和 Mac Catalyst 都报告 `"ios"`，浏览器报告 `"web"`。 |
+| `isDesktop` | 是否为桌面系统（macOS、Windows、Linux），或有鼠标且窗口较宽的浏览器。 |
 | `Version` | iOS 和桌面系统：版本字符串（`"17.5"`）；Android：API 级别（数字）。 |
 | `isPad` | 平板：iPad 或 Android 平板。 |
 | `isTV` | 电视（Apple TV 形态、Android TV）。 |
@@ -98,7 +98,7 @@ interface PlatformSelectSpec<T> {
 }
 ```
 
-依次返回当前操作系统（`ios`、`android` 等）对应的值，否则 `mobile` / `desktop`，否则 `native`，否则 `default`，都没有则返回 `undefined`。
+依次返回当前操作系统（`ios`、`android`、`web` 等）对应的值，否则 `mobile` / `desktop`，否则 `native`（除 Web 外的所有平台），否则 `default`，都没有则返回 `undefined`。在浏览器中，`mobile` 还是 `desktop` 由界面风格决定。
 
 ```ts
 const shadow = Platform.select({

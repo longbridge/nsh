@@ -452,10 +452,6 @@ fn idiom(env: &Environment) -> &'static str {
     }
 }
 
-fn is_desktop(os: Os) -> bool {
-    matches!(os, Os::MacOs | Os::Windows | Os::Linux)
-}
-
 /// `Platform`: the OS and form factor, constant while the app runs.
 fn platform(ctx: *mut JsContext) -> JsValue {
     let e = current(ctx);
@@ -471,7 +467,7 @@ fn platform(ctx: *mut JsContext) -> JsValue {
         ctx,
         &[
             (c"OS", string(ctx, e.os.name())),
-            (c"isDesktop", boolean(is_desktop(e.os))),
+            (c"isDesktop", boolean(e.desktop())),
             (c"Version", os_version(ctx, &e)),
             (c"isPad", boolean(e.idiom == Idiom::Pad)),
             (c"isTV", boolean(e.idiom == Idiom::Tv)),
@@ -483,7 +479,7 @@ fn platform(ctx: *mut JsContext) -> JsValue {
 }
 
 /// `Platform.select(spec)`: this OS's value, else `mobile` / `desktop`,
-/// else `native`, else `default`.
+/// else `native` (not on the web, as in React Native), else `default`.
 unsafe extern "C" fn platform_select(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -495,9 +491,13 @@ unsafe extern "C" fn platform_select(
     if !unsafe { qjs::JS_IsObject(spec) } {
         return UNDEFINED;
     }
-    let os = current(ctx).os;
-    let kind = if is_desktop(os) { "desktop" } else { "mobile" };
-    for key in [os.name(), kind, "native", "default"] {
+    let env = current(ctx);
+    let kind = if env.desktop() { "desktop" } else { "mobile" };
+    let keys = [env.os.name(), kind, "native", "default"];
+    for key in keys
+        .into_iter()
+        .filter(|k| *k != "native" || env.os != Os::Web)
+    {
         let key = std::ffi::CString::new(key).unwrap_or_default();
         let v = unsafe { qjs::JS_GetPropertyStr(ctx, spec, key.as_ptr()) };
         if !unsafe { qjs::JS_IsUndefined(v) } {
@@ -734,20 +734,23 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   macos?: T;
   windows?: T;
   linux?: T;
-  /** iOS and Android. */
+  web?: T;
+  /** iOS, Android, and phone and tablet browsers. */
   mobile?: T;
-  /** macOS, Windows and Linux. */
+  /** macOS, Windows, Linux, and desktop browsers. */
   desktop?: T;
-  /** Every platform (nsh only runs natively). */
+  /** Every platform but the web. */
   native?: T;
   default?: T;
 }
 
 export interface PlatformStatic {
   readonly OS: OS;
-  /** A desktop OS (macOS, Windows, Linux). */
+  /** Desktop behavior applies: macOS, Windows, Linux, and browsers with a
+   * mouse and a wide viewport (`interfaceIdiom` `"desktop"`). */
   readonly isDesktop: boolean;
-  /** iOS and desktops: the version string (`"17.5"`); Android: the API level. */
+  /** iOS and desktops: the version string (`"17.5"`); Android: the API
+   * level; the web: `"0.0"`. */
   readonly Version: string | number;
   readonly isPad: boolean;
   readonly isTV: boolean;
@@ -757,8 +760,9 @@ export interface PlatformStatic {
     readonly osVersion: string | number;
     readonly interfaceIdiom: "phone" | "pad" | "mac" | "tv" | "desktop";
   };
-  /** The value for this platform: its OS (`ios`, `macos`, ...), else
-   * `mobile` / `desktop`, else `native`, else `default`. */
+  /** The value for this platform: its OS (`ios`, `macos`, `web`, ...),
+   * else `mobile` / `desktop`, else `native` (not on the web), else
+   * `default`. */
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
 

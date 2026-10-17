@@ -158,7 +158,8 @@ current platform's object is sent; the others are ignored.
 |---|---|
 | `ios={{…}}` | iOS and Mac Catalyst. `<Input>`, `Modal` and `WebView` add their own keys. |
 | `android={{…}}` | Android. Every element takes `ripple`, `elevation` and `accessibilityLiveRegion` (below). |
-| `desktop={{…}}` | Desktop platforms; ignored on mobile. Every element takes `windowDrag` (below). |
+| `desktop={{…}}` | Desktop platforms and desktop browsers; ignored on mobile. Every element takes `windowDrag` (below). |
+| `web={{…}}` | Browsers; ignored elsewhere. |
 
 | `android` key | Type | Description |
 |---|---|---|

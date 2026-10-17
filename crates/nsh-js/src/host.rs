@@ -470,7 +470,7 @@ impl Host {
                 let result = (|| {
                     let raw = ctx.as_raw().as_ptr();
                     // SAFETY: the state of this host's context.
-                    unsafe { &(*crate::state::state(raw)).dom }.set_os(env.os);
+                    unsafe { &(*crate::state::state(raw)).dom }.set_platform(env.os, env.desktop());
                     if crate::env::set_environment(raw, env).is_err() {
                         return Err(rquickjs::Error::Exception);
                     }

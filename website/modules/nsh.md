@@ -249,7 +249,7 @@ The other elements come from their own modules: `Image` from [`nsh/image`](./nsh
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
 | `GestureResponderEvent`, `LayoutEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
 | `ImageAsset` | What importing an image file gives (`{ uri, width, height }`) |
-| `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux"` |
+| `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`, `AccessibilityState` | Accessibility props |
 
 ```tsx

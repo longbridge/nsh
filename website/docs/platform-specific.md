@@ -1,24 +1,24 @@
 ---
 title: Platform-specific code
-description: Writing one app for phones and desktops - platform-only props in ios={{}} / android={{}} / desktop={{}}, the nsh/ios and nsh/android modules, Platform.OS and Platform.select, and platform Tailwind variants.
+description: Writing one app for phones, desktops and browsers - platform-only props in ios={{}} / android={{}} / desktop={{}} / web={{}}, the nsh/ios and nsh/android modules, Platform.OS and Platform.select, and platform Tailwind variants.
 order: 17
 group: platforms
 ---
 
 # Platform-specific code
 
-One nsh bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst). Most of an app needs no platform checks at all: elements, styles, layout, components and modules behave the same everywhere, and the components of `nsh/ui/mobile` are drawn by nsh rather than borrowed from each platform, so they look the same everywhere. When something really is specific to one platform, nsh gives it a clear place, so platform code stays visible and contained:
+One nsh bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst), and in browsers through the [web runtime](./web.md). Most of an app needs no platform checks at all: elements, styles, layout, components and modules behave the same everywhere, and the components of `nsh/ui/mobile` are drawn by nsh rather than borrowed from each platform, so they look the same everywhere. When something really is specific to one platform, nsh gives it a clear place, so platform code stays visible and contained:
 
 | Where | For |
 |---|---|
-| [`ios={{…}}`, `android={{…}}`, `desktop={{…}}`](#platform-only-props) | Props only one platform has. |
+| [`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`](#platform-only-props) | Props only one platform has. |
 | [`nsh/ios`, `nsh/android`](#platform-modules) | APIs only one platform has. |
 | [`Platform.OS`, `Platform.select`](#platformos-and-platformselect) | Choosing values or code per platform. |
-| [`ios:` / `android:` classes](#platform-variants-in-tailwind) | Styles per platform. |
+| [`ios:` / `android:` / `web:` classes](#platform-variants-in-tailwind) | Styles per platform. |
 
 ## Platform-only props
 
-Props that exist on one platform only are grouped in an object named after it. Each element accepts `ios`, `android` and `desktop` (macOS, Windows, Linux); on other platforms the object is ignored, and on its own platform only its keys are applied.
+Props that exist on one platform only are grouped in an object named after it. Each element accepts `ios`, `android`, `desktop` (macOS, Windows, Linux, and browsers in the desktop idiom) and `web` (browsers); on other platforms the object is ignored, and on its own platform only its keys are applied. A desktop browser applies both `desktop` and `web`.
 
 ```tsx
 <View
@@ -61,7 +61,7 @@ What exists today:
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS: two-finger trackpad swipes go back and forward in the page history; Windows: touchscreen swipes; Linux: touchpad swipes. |
 | `desktop={{ windowDrag }}` | every element | Pressing it drags the window, as the system's title bar would (see [nsh/desktop](../modules/nsh-desktop.md#a-title-bar-of-your-own)). |
 
-`desktop={{…}}` is accepted everywhere; the props above are the desktop-only ones so far. The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
+`desktop={{…}}` is accepted everywhere; the props above are the desktop-only ones so far. `web={{…}}` is accepted everywhere too and has no element props yet ([`StatusBar`](../components/status-bar.md) takes `web={{ themeColor }}`). The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
 
 Cross-platform props whose effect differs slightly are not grouped: `Alert.alert`'s `cancelable` option exists on both (iOS alerts are simply never dismissed by a tap outside), and `pagingEnabled`, `refreshing`, `hitSlop` and the rest work on every platform.
 
@@ -146,7 +146,7 @@ In an app embedded in a native one, the host app's view controller decides the s
 
 ## Platform.OS and Platform.select
 
-`Platform` from `nsh/device` tells you where the app runs: `Platform.OS` is `"ios"`, `"android"`, `"macos"`, `"windows"` or `"linux"` (Mac Catalyst is `"ios"`, with `Platform.isMacCatalyst`; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props). See [Device and environment](./device-and-environment.md#the-platform) for `Version`, `isPad` and the rest.
+`Platform` from `nsh/device` tells you where the app runs: `Platform.OS` is `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"` (Mac Catalyst is `"ios"`, with `Platform.isMacCatalyst`; the [macOS backend](./macos.md) is `"macos"`, the [Linux backend](./linux.md) `"linux"` and the [Windows backend](./windows.md) `"windows"`, and their elements apply their `desktop` props; [browsers](./web.md) are `"web"`, and apply `desktop` props too when the idiom is `"desktop"`). See [Device and environment](./device-and-environment.md#the-platform) for `Version`, `isPad` and the rest.
 
 ```tsx
 import { Platform } from "nsh/device";
@@ -158,7 +158,7 @@ if (Platform.OS === "android") {
 
 ### Platform.select
 
-`Platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `mobile` (iOS and Android) or `desktop` (macOS, Windows, Linux), then `native` (every platform), then `default`:
+`Platform.select(spec)` returns the value for this platform. It looks for the OS's own key, then `mobile` (iOS, Android, phone and tablet browsers) or `desktop` (macOS, Windows, Linux, desktop browsers), then `native` (every platform but the web, as in React Native), then `default`:
 
 ```tsx
 const styles = {
@@ -195,7 +195,7 @@ or inline with [`<If>`](../elements/control-flow.md):
 
 ## Platform variants in Tailwind
 
-The `ios:` and `android:` variants apply classes on one platform:
+The `ios:`, `android:` and `web:` variants apply classes on one platform:
 
 ```tsx
 <View class="rounded-xl bg-white p-4 ios:shadow-md android:border android:border-zinc-200">…</View>

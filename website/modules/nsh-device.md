@@ -54,7 +54,7 @@ The user's preferred text size relative to the default (`1` is the default size;
 
 ```ts
 const Platform: {
-  readonly OS: "ios" | "android" | "macos" | "windows" | "linux";
+  readonly OS: "ios" | "android" | "macos" | "windows" | "linux" | "web";
   readonly isDesktop: boolean;
   readonly Version: string | number;
   readonly isPad: boolean;
@@ -72,8 +72,8 @@ The platform the app runs on, constant while it runs.
 
 | Member | Description |
 |---|---|
-| `OS` | The operating system. iOS, the iOS simulator and Mac Catalyst report `"ios"`. |
-| `isDesktop` | A desktop OS (macOS, Windows, Linux). |
+| `OS` | The operating system. iOS, the iOS simulator and Mac Catalyst report `"ios"`, browsers `"web"`. |
+| `isDesktop` | A desktop OS (macOS, Windows, Linux), or a browser with a mouse and a wide window. |
 | `Version` | iOS and desktops: the version string (`"17.5"`); Android: the API level (a number). |
 | `isPad` | A tablet: an iPad, or an Android tablet. |
 | `isTV` | A TV (Apple TV idiom, Android TV). |
@@ -98,7 +98,7 @@ interface PlatformSelectSpec<T> {
 }
 ```
 
-Returns the value for the current OS (`ios`, `android`, ...), else `mobile` / `desktop`, else `native`, else `default`, else `undefined`.
+Returns the value for the current OS (`ios`, `android`, `web`, ...), else `mobile` / `desktop`, else `native` (every platform but the web), else `default`, else `undefined`. In a browser, `mobile` or `desktop` follows the idiom.
 
 ```ts
 const shadow = Platform.select({

@@ -13,7 +13,9 @@
 // `asset:/<path>` is served) or `assets` (a map from `<path>` to its URL,
 // as `nsh package --target web` writes it), `readAsset(uri)` (the bytes
 // of an asset the engine needs at once, a font: a `Uint8Array` or null),
-// `chunks` / `chunkBase` (see `run`), `dark`, `overlay` (false: no error box), `onError`, `onLog`.
+// `chunks` / `chunkBase` (see `run`), `dark`, `idiom` ("phone", "pad" or
+// "desktop" instead of the one the pointer and the viewport suggest),
+// `overlay` (false: no error box), `onError`, `onLog`.
 //
 // A split bundle (`nsh build --split`) loads its chunks on demand: from
 // `chunks[id]` when given (`app.<digest>.js` on a CDN), else `id` relative
@@ -35,7 +37,7 @@ const KEYFRAMES = `
   0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
   50% { transform: none; animation-timing-function: cubic-bezier(0,0,0.2,1); }
 }
-.nsh-root { position: relative; overflow: hidden; -webkit-user-select: none; user-select: none;
+.nsh-root { position: relative; width: 100%; height: 100%; overflow: hidden; -webkit-user-select: none; user-select: none;
   -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .nsh-root * { box-sizing: border-box; }
 .nsh-v { position: absolute; margin: 0; padding: 0; min-width: 0; min-height: 0; }
@@ -89,6 +91,20 @@ function measureContext() {
   return canvas.getContext("2d");
 }
 
+/** Whether `locale`'s script is written right to left. */
+function rightToLeft(locale) {
+  try {
+    const l = new Intl.Locale(locale);
+    const info = l.getTextInfo?.() ?? l.textInfo;
+    if (info?.direction) return info.direction === "rtl";
+    const script = l.maximize().script;
+    if (script) return ["Arab", "Hebr", "Thaa", "Syrc", "Nkoo", "Adlm", "Rohg"].includes(script);
+  } catch {
+    // Not a valid tag.
+  }
+  return /^(ar|he|iw|fa|ur|ps|sd|ug|yi|dv|ckb|syr)(-|$)/i.test(locale);
+}
+
 /** Loads the runtime and makes a player in `container`. */
 export async function createPlayer(container, options = {}) {
   const player = new Player(container, options);
@@ -109,8 +125,8 @@ class Player {
     }
     this.root = document.createElement("div");
     this.root.className = "nsh-root";
-    this.root.style.width = "100%";
-    this.root.style.height = "100%";
+    // Its size is in the class: the core styles the root too (a
+    // right-to-left layout), which replaces its inline style.
     container.append(this.root);
     this.views = new Map();
     this.timer = 0;
@@ -194,6 +210,7 @@ class Player {
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
       if (this.options.dark === undefined) this.setDark(e.matches);
     });
+    this.installEnvironment();
     this.installInput();
   }
 
@@ -265,8 +282,13 @@ class Player {
     this.size = [width, height];
     this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
       this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
-    this.call(() => this.withStrings([code], (p, l) =>
-      this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1)));
+    this.idiom = this.options.idiom ?? this.measureIdiom(width);
+    const environment = (this.reported = JSON.stringify(this.environment()));
+    this.call(() => {
+      this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
+      return this.withStrings([code], (p, l) =>
+        this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
+    });
   }
 
   /** Fetches chunk `id` of the running bundle and hands it to the engine. */
@@ -374,7 +396,100 @@ class Player {
     if (!this.size || !width || (width === this.size[0] && height === this.size[1])) return;
     this.size = [width, height];
     this.call((w) => w.nsh_resize(width, height));
+    this.environmentChanged();
     for (const el of this.views.values()) if (el._kind === "modal" && el.isConnected) this.reportRoot(el, width, height);
+  }
+
+  // Environment ---------------------------------------------------------
+
+  /**
+   * The kind of device, decided when an app starts (it never changes while
+   * it runs, as on every platform): a mouse (a fine pointer that hovers)
+   * and a viewport at least 600 wide make a desktop, a touch screen whose
+   * short side is at least 600 a tablet, the rest a phone.
+   */
+  measureIdiom(width) {
+    if (matchMedia("(pointer: fine) and (hover: hover)").matches && width >= 600) return "desktop";
+    return Math.min(screen.width, screen.height) >= 600 ? "pad" : "phone";
+  }
+
+  /** Follows what the page's environment depends on. */
+  installEnvironment() {
+    const changed = () => this.environmentChanged();
+    this.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+    this.reducedMotion.addEventListener("change", changed);
+    // The pixel ratio changes with the page's zoom and the screen: a query
+    // for the current one says when it no longer holds.
+    const resolution = () => {
+      matchMedia(`(resolution: ${devicePixelRatio || 1}dppx)`).addEventListener("change", () => {
+        resolution();
+        changed();
+      }, { once: true });
+    };
+    resolution();
+    addEventListener("languagechange", changed);
+    addEventListener("resize", changed);
+    visualViewport?.addEventListener("resize", changed);
+    visualViewport?.addEventListener("scroll", changed);
+    new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
+    // `env(safe-area-inset-*)` is only readable through a style it sets.
+    this.safeProbe = document.createElement("div");
+    this.safeProbe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;"
+      + "padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
+    document.body.append(this.safeProbe);
+  }
+
+  /** The page's insets covered by system UI, where they overlap the root. */
+  safeArea() {
+    const cs = getComputedStyle(this.safeProbe);
+    const r = this.root.getBoundingClientRect();
+    const px = (v) => parseFloat(v) || 0;
+    return [
+      Math.max(0, px(cs.paddingTop) - r.top),
+      Math.max(0, px(cs.paddingRight) - (innerWidth - r.right)),
+      Math.max(0, px(cs.paddingBottom) - (innerHeight - r.bottom)),
+      Math.max(0, px(cs.paddingLeft) - r.left),
+    ].map(Math.round);
+  }
+
+  /**
+   * How much of the root the on-screen keyboard covers: mobile browsers
+   * shrink the visual viewport under it, not the layout (0 while zoomed).
+   */
+  keyboardHeight() {
+    const vv = visualViewport;
+    if (!vv || vv.scale > 1.01) return 0;
+    const bottom = this.root.getBoundingClientRect().bottom;
+    return Math.max(0, Math.round(bottom - (vv.offsetTop + vv.height)));
+  }
+
+  /** What the page knows about the user and the device (`nsh_environment`). */
+  environment() {
+    const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+    const locale = languages.find(Boolean) ?? Intl.DateTimeFormat().resolvedOptions().locale;
+    const dir = document.documentElement.getAttribute("dir");
+    // The root's font size is the browser's default text size unless the
+    // page sets one: 16px at 100%.
+    const fontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    return {
+      idiom: this.idiom,
+      locale,
+      rtl: dir === "rtl" || dir === "ltr" ? dir === "rtl" : rightToLeft(locale),
+      reduceMotion: this.reducedMotion.matches,
+      fontScale: Math.round(fontSize / 16 * 100) / 100,
+      pixelRatio: devicePixelRatio || 1,
+      safeArea: this.safeArea(),
+      keyboard: this.keyboardHeight(),
+    };
+  }
+
+  /** Reports the environment if it changed since it was last reported. */
+  environmentChanged() {
+    if (!this.reported) return;
+    const json = JSON.stringify(this.environment());
+    if (json === this.reported) return;
+    this.reported = json;
+    this.call(() => this.withStrings([json], (p, l) => this.wasm.nsh_environment(p, l)));
   }
 
   setDark(dark) {
@@ -1202,7 +1317,9 @@ class Player {
   }
 
   reportRoot(el, width, height) {
-    this.call((w) => w.nsh_root_size(el._id, width, height, 0, 0, 0, 0));
+    // Modals cover the root, and so its safe area.
+    const [top, right, bottom, left] = el._kind === "modal" && this.safeProbe ? this.safeArea() : [0, 0, 0, 0];
+    this.call((w) => w.nsh_root_size(el._id, width, height, top, right, bottom, left));
   }
 
   // Modals
@@ -1295,8 +1412,27 @@ class Player {
       case "setClipboard": navigator.clipboard?.writeText(args[0]).catch(() => {}); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
+      case "statusBar": this.setThemeColor(args[0]); break;
       default: break;
     }
+  }
+
+  /** `StatusBar`'s `web={{ themeColor }}`: the page's theme color ("" for the page's own). */
+  setThemeColor(color) {
+    let meta = document.querySelector('meta[name="theme-color"]:not([media])');
+    if (!meta && !color) return;
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.name = "theme-color";
+      meta._nshAdded = true;
+      document.head.append(meta);
+    }
+    if (meta._nshOriginal === undefined) meta._nshOriginal = meta.getAttribute("content");
+    if (color) meta.content = color;
+    else if (meta._nshAdded) {
+      meta.remove();
+    } else if (meta._nshOriginal === null) meta.removeAttribute("content");
+    else meta.content = meta._nshOriginal;
   }
 
   /** `Clipboard.getString` / `hasString`: browsers only tell by reading (which may ask the user). */

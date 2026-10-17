@@ -1,24 +1,24 @@
 ---
 title: 平台特定代码
-description: 为手机和桌面编写同一个应用：ios={{}} / android={{}} / desktop={{}} 中的平台专属属性，nsh/ios 与 nsh/android 模块，Platform.OS 与 Platform.select，以及平台相关的 Tailwind 变体。
+description: 为手机、桌面和浏览器编写同一个应用：ios={{}} / android={{}} / desktop={{}} / web={{}} 中的平台专属属性，nsh/ios 与 nsh/android 模块，Platform.OS 与 Platform.select，以及平台相关的 Tailwind 变体。
 order: 17
 group: platforms
 ---
 
 # 平台特定代码
 
-同一个 nsh 包可以在 iOS、Android、macOS、Windows 和 Linux 上运行（也可以在 Mac Catalyst 中运行）。应用的大部分代码根本不需要判断平台：元素、样式、布局、组件和模块在各处的行为都相同，`nsh/ui/mobile` 的组件由 nsh 自己绘制而不是借用各平台的控件，所以在各处看起来都一样。当某样东西确实只属于一个平台时，nsh 给它安排了明确的位置，让平台代码一目了然、范围可控：
+同一个 nsh 包可以在 iOS、Android、macOS、Windows 和 Linux 上运行（也可以在 Mac Catalyst 中运行），还可以通过 [Web 运行时](./web.md)在浏览器中运行。应用的大部分代码根本不需要判断平台：元素、样式、布局、组件和模块在各处的行为都相同，`nsh/ui/mobile` 的组件由 nsh 自己绘制而不是借用各平台的控件，所以在各处看起来都一样。当某样东西确实只属于一个平台时，nsh 给它安排了明确的位置，让平台代码一目了然、范围可控：
 
 | 位置 | 用途 |
 |---|---|
-| [`ios={{…}}`、`android={{…}}`、`desktop={{…}}`](#平台专属属性) | 只有一个平台才有的属性。 |
+| [`ios={{…}}`、`android={{…}}`、`desktop={{…}}`、`web={{…}}`](#平台专属属性) | 只有一个平台才有的属性。 |
 | [`nsh/ios`、`nsh/android`](#平台模块) | 只有一个平台才有的 API。 |
 | [`Platform.OS`、`Platform.select`](#platformos-与-platformselect) | 按平台选择值或代码。 |
-| [`ios:` / `android:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
+| [`ios:` / `android:` / `web:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
 
 ## 平台专属属性
 
-只存在于某一个平台的属性，归入以该平台命名的对象中。每个元素都接受 `ios`、`android` 和 `desktop`（macOS、Windows、Linux）；在其他平台上这个对象会被忽略，在它自己的平台上只应用其中的键。
+只存在于某一个平台的属性，归入以该平台命名的对象中。每个元素都接受 `ios`、`android`、`desktop`（macOS、Windows、Linux，以及界面风格为桌面的浏览器）和 `web`（浏览器）；在其他平台上这个对象会被忽略，在它自己的平台上只应用其中的键。桌面浏览器同时应用 `desktop` 和 `web`。
 
 ```tsx
 <View
@@ -61,7 +61,7 @@ group: platforms
 | `desktop={{ allowsBackForwardNavigationGestures }}` | `WebView` | macOS：双指在触控板上轻扫，在页面历史中前进后退；Windows：在触摸屏上轻扫；Linux：在触控板上轻扫。 |
 | `desktop={{ windowDrag }}` | 所有元素 | 按住它拖动窗口，像系统标题栏一样（见 [nsh/desktop](../modules/nsh-desktop.md#自定义标题栏)）。 |
 
-`desktop={{…}}` 在所有地方都可以使用；上面列出的是目前仅限桌面的属性。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
+`desktop={{…}}` 在所有地方都可以使用；上面列出的是目前仅限桌面的属性。`web={{…}}` 同样在所有地方都可以使用，目前还没有元素属性（[`StatusBar`](../components/status-bar.md) 接受 `web={{ themeColor }}`）。类型（`IOSProps`、`AndroidProps`、`DesktopProps` 及其各元素的形式）会告诉编辑器每个元素接受什么。
 
 在两个平台上都存在、只是效果略有不同的属性不做分组：`Alert.alert` 的 `cancelable` 选项两个平台都有（iOS 提示框本来就不会因点击外部而关闭），`pagingEnabled`、`refreshing`、`hitSlop` 等在所有平台上都可用。
 
@@ -146,7 +146,7 @@ function PhotoViewer() {
 
 ## Platform.OS 与 Platform.select
 
-`nsh/device` 中的 `Platform` 告诉你应用运行在哪里：`Platform.OS` 为 `"ios"`、`"android"`、`"macos"`、`"windows"` 或 `"linux"`（Mac Catalyst 为 `"ios"`，同时 `Platform.isMacCatalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性）。`Version`、`isPad` 等见[设备与环境](./device-and-environment.md#平台)。
+`nsh/device` 中的 `Platform` 告诉你应用运行在哪里：`Platform.OS` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，同时 `Platform.isMacCatalyst` 为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，界面风格为 `"desktop"` 时也会应用 `desktop` 属性）。`Version`、`isPad` 等见[设备与环境](./device-and-environment.md#平台)。
 
 ```tsx
 import { Platform } from "nsh/device";
@@ -158,7 +158,7 @@ if (Platform.OS === "android") {
 
 ### Platform.select
 
-`Platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后是 `mobile`（iOS 和 Android）或 `desktop`（macOS、Windows、Linux），再是 `native`（所有平台），最后是 `default`：
+`Platform.select(spec)` 返回当前平台对应的值。它依次查找该操作系统自己的键，然后是 `mobile`（iOS、Android、手机和平板浏览器）或 `desktop`（macOS、Windows、Linux、桌面浏览器），再是 `native`（除 Web 外的所有平台，与 React Native 相同），最后是 `default`：
 
 ```tsx
 const styles = {
@@ -195,7 +195,7 @@ const Spinner = Platform.select({ ios: IosSpinner, default: MaterialSpinner })!;
 
 ## Tailwind 中的平台变体
 
-`ios:` 和 `android:` 变体只在一个平台上应用对应的类：
+`ios:`、`android:` 和 `web:` 变体只在一个平台上应用对应的类：
 
 ```tsx
 <View class="rounded-xl bg-white p-4 ios:shadow-md android:border android:border-zinc-200">…</View>

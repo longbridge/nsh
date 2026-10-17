@@ -60,9 +60,11 @@ pub(crate) struct Dom {
     nodes: RefCell<Vec<*mut NodeData>>,
     /// The root view's object (owned).
     root: Cell<JsValue>,
-    /// The platform: `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props
+    /// The platform: `ios={{…}}` / `android={{…}}` / `web={{…}}` props
     /// apply on it only.
     os: Cell<Os>,
+    /// Desktop behavior applies (`desktop={{…}}`; `Environment::desktop`).
+    desktop: Cell<bool>,
     /// The layout direction sent to the root (`None`: nothing mounted yet).
     rtl: Cell<Option<bool>>,
     /// The `onDismiss` handlers of modals the app removed, kept until the
@@ -231,6 +233,7 @@ impl Dom {
             nodes: RefCell::new(Vec::new()),
             root: Cell::new(UNDEFINED),
             os: Cell::new(Os::Ios),
+            desktop: Cell::new(false),
             rtl: Cell::new(None),
             env_rtl: Cell::new(false),
             dismissed: RefCell::new(Vec::new()),
@@ -247,9 +250,11 @@ impl Dom {
         }
     }
 
-    /// The platform `ios={{…}}` / `android={{…}}` props are for.
-    pub(crate) fn set_os(&self, os: Os) {
+    /// The platform `ios={{…}}` / `android={{…}}` / `web={{…}}` props are
+    /// for, and whether `desktop={{…}}` props apply.
+    pub(crate) fn set_platform(&self, os: Os, desktop: bool) {
         self.os.set(os);
+        self.desktop.set(desktop);
     }
 
     /// The platform the app runs on.
@@ -1099,7 +1104,9 @@ fn set_prop(
             }
             return Ok(());
         }
-        "ios" | "android" | "desktop" => return platform_props(ctx, node, name, value, prev),
+        "ios" | "android" | "desktop" | "web" => {
+            return platform_props(ctx, node, name, value, prev);
+        }
         "contentContainerStyle" | "contentContainerClass"
             if unsafe { (*p).tag } == Some(Tag::Scroll) =>
         {
@@ -1270,8 +1277,9 @@ pub(crate) fn is_ancestor_of(ctx: *mut JsContext, node: NodeId, of: NodeId) -> b
     is_ancestor(ctx, node, of)
 }
 
-/// `ios={{…}}` / `android={{…}}` / `desktop={{…}}`: the props of this
-/// platform only, each set (or cleared) on its own.
+/// `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}`: the
+/// props of this platform only, each set (or cleared) on its own. Desktop
+/// props apply on the desktop OSes and in desktop-class browsers.
 fn platform_props(
     ctx: *mut JsContext,
     node: JsValue,
@@ -1279,11 +1287,10 @@ fn platform_props(
     value: JsValue,
     prev: JsValue,
 ) -> Result<(), JsValue> {
-    let os = dom(ctx).os.get();
-    let desktop = matches!(os, Os::MacOs | Os::Windows | Os::Linux);
+    let dom = dom(ctx);
     let applies = match name {
-        "desktop" => desktop,
-        other => other == os.name(),
+        "desktop" => dom.desktop.get(),
+        other => other == dom.os.get().name(),
     };
     if !applies {
         return Ok(());

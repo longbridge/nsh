@@ -160,12 +160,12 @@ On Android, a view embedded below a toolbar gets only the parts of the system ba
 
 | Member | Description |
 |---|---|
-| `Platform.OS` | `"ios"`, `"android"`, `"macos"`, `"windows"` or `"linux"`. Mac Catalyst reports `"ios"`. |
+| `Platform.OS` | `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"`. Mac Catalyst reports `"ios"`. |
 | `Platform.Version` | iOS and desktops: the version string (`"17.5"`); Android: the API level (a number). |
 | `Platform.isPad` | An iPad (or the iPad idiom). |
 | `Platform.isTV` | A TV. |
 | `Platform.isMacCatalyst` | Mac Catalyst in the Mac idiom. |
-| `Platform.isDesktop` | macOS, Windows or Linux. |
+| `Platform.isDesktop` | macOS, Windows or Linux, or a desktop browser (the `"desktop"` idiom on the web). |
 | `Platform.constants` | `{ osVersion, interfaceIdiom }`, the idiom being `"phone"`, `"pad"`, `"mac"`, `"tv"` or `"desktop"`. |
 | `Platform.select(spec)` | The value for this platform; see [Platform-specific code](./platform-specific.md#platformselect). |
 
@@ -190,6 +190,12 @@ On [Windows](./windows.md), `Platform.OS` is `"windows"`, the idiom `"desktop"` 
 Windows 11 too (Windows kept the version number). The safe area and the keyboard height are 0, `colorScheme()` follows
 Settings > Personalization > Colors live, `fontScale()` the Text size setting (1 to 2.25), `reduceMotion()` the
 animation effects setting, `PixelRatio.get()` the monitor's scale, and `Intl` formats in the user's regional format.
+
+In a browser ([the web runtime](./web.md)), `Platform.OS` is `"web"` and `Platform.Version` `"0.0"`. The idiom is
+`"desktop"` with a mouse and a window at least 600 points wide (then `Platform.isDesktop` is `true`), `"pad"` on a
+tablet and `"phone"` on a phone, decided when the app starts. The locale, `reduceMotion()`, `fontScale()` (the
+browser's text size), `PixelRatio.get()`, the safe area and the keyboard height come from the browser and follow it
+live.
 
 ## Pixel density
 

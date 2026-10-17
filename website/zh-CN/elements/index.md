@@ -146,7 +146,8 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 |---|---|
 | `ios={{…}}` | iOS 和 Mac Catalyst。`<Input>`、`Modal` 和 `WebView` 有各自的键。 |
 | `android={{…}}` | Android。所有元素都支持 `ripple`、`elevation` 和 `accessibilityLiveRegion`（见下表）。 |
-| `desktop={{…}}` | 桌面平台；在移动端被忽略。所有元素都支持 `windowDrag`（见下表）。 |
+| `desktop={{…}}` | 桌面平台和桌面浏览器；在移动端被忽略。所有元素都支持 `windowDrag`（见下表）。 |
+| `web={{…}}` | 浏览器；在其他平台被忽略。 |
 
 | `android` 键 | 类型 | 说明 |
 |---|---|---|

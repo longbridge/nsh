@@ -59,7 +59,7 @@ Components from `nsh/ui/mobile` accept `class` and `classList` too; your classes
 | `max-sm:`, `max-md:`, ... | The window is narrower than the breakpoint |
 | `min-[600px]:`, `max-[600px]:` | Arbitrary breakpoints |
 | `portrait:`, `landscape:` | The window's orientation |
-| `ios:`, `android:` | The platform |
+| `ios:`, `android:`, `web:` | The platform |
 | `rtl:`, `ltr:` | The [layout direction](./layout.md#right-to-left) |
 | `motion-safe:`, `motion-reduce:` | The user's reduce motion setting |
 
