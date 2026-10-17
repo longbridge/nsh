@@ -52,6 +52,7 @@ mod imp {
                 limits,
                 harden: bundle.policy.harden,
                 ui_sets: ui_sets.to_vec(),
+                base_url: bundle.base_url.clone(),
             };
             let mut host = match Host::with_options(options) {
                 Ok(host) => host,

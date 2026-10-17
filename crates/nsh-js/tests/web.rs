@@ -182,6 +182,38 @@ fn fetch_goes_through_the_network_queue() {
 }
 
 #[test]
+fn relative_urls_resolve_against_the_base_url_only_where_there_is_one() {
+    let script = r#"
+        globalThis.out = [];
+        try { out.push(new Request("/api?q=1").url); } catch (e) { out.push(e instanceof TypeError); }
+        fetch("data.json").catch((e) => out.push(e.name));
+        "#;
+    // Native hosts: no document, so no base.
+    let host = Host::new().unwrap();
+    host.eval_source(script).unwrap();
+    let mut queue = NetworkQueue::default();
+    host.take_network(&mut queue);
+    assert!(started(&queue).is_empty(), "{queue:?}");
+    host.eval_source(&(REPORT.to_owned() + "report(JSON.stringify(out));"))
+        .unwrap();
+    assert_eq!(output(&host), r#"[true,"TypeError"]"#);
+    // The web: the page's URL.
+    let host = Host::with_options(nsh_js::HostOptions {
+        base_url: Some("https://app.example.com/shop/index.html".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    host.eval_source(script).unwrap();
+    let mut queue = NetworkQueue::default();
+    host.take_network(&mut queue);
+    let urls: Vec<_> = started(&queue).iter().map(|(_, r)| r.url.clone()).collect();
+    assert_eq!(urls, ["https://app.example.com/shop/data.json"]);
+    host.eval_source(&(REPORT.to_owned() + "report(JSON.stringify(out));"))
+        .unwrap();
+    assert_eq!(output(&host), r#"["https://app.example.com/api?q=1"]"#);
+}
+
+#[test]
 fn aborting_an_inflight_fetch_cancels_it() {
     let host = Host::new().unwrap();
     host.eval_source(

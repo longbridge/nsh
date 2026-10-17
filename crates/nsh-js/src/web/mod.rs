@@ -215,6 +215,9 @@ pub(crate) struct Web {
     /// The requests in flight.
     pub(crate) fetches: rustc_hash::FxHashMap<crate::net::RequestId, fetch::Inflight>,
     pub(crate) next_fetch: crate::net::RequestId,
+    /// What relative request URLs resolve against ([`crate::HostOptions`]
+    /// `base_url`).
+    pub(crate) base_url: Option<::url::Url>,
 }
 
 impl Web {

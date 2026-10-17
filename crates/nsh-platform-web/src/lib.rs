@@ -47,6 +47,8 @@ thread_local! {
     /// The bytes of the asset JS hands over in `read_asset`.
     pub(crate) static ASSET: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
     static FRAME_REQUESTED: Cell<bool> = const { Cell::new(false) };
+    /// The page's URL, which relative request URLs resolve against.
+    static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
@@ -200,7 +202,8 @@ pub unsafe extern "C" fn nsh_start(
     let code = unsafe { string(ptr, len) };
     APP.with(|a| a.borrow_mut().take());
     let environment = environment(width, height, dark != 0, pixel_ratio);
-    let bundle = Bundle::source(code).with_policy(Policy::development());
+    let mut bundle = Bundle::source(code).with_policy(Policy::development());
+    bundle.base_url = BASE_URL.with(|b| b.borrow().clone());
     let config = EngineConfig {
         app: App::Js(bundle),
         viewport: Size::new(width, height),
@@ -227,6 +230,19 @@ pub unsafe extern "C" fn nsh_start(
         });
     });
     pump()
+}
+
+/// Sets the page's URL (`document.baseURI`): relative request URLs
+/// (`fetch("/api")`) of the apps started next resolve against it.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let url = unsafe { string(ptr, len) };
+    BASE_URL.with(|b| *b.borrow_mut() = Some(url));
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the

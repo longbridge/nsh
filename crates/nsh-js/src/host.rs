@@ -83,6 +83,10 @@ pub struct HostOptions {
     /// The UI sets apps import as native modules
     /// (`nsh_ui_mobile::registry()`, served as `nsh/ui/mobile`).
     pub ui_sets: Vec<nsh_core::ui::Registry>,
+    /// The URL relative request URLs (`fetch("/api")`, `new Request("x")`)
+    /// resolve against: the page's on the web. `None` (native hosts):
+    /// they are invalid, as there is no document they belong to.
+    pub base_url: Option<String>,
 }
 
 impl Host {
@@ -111,6 +115,10 @@ impl Host {
         });
         ctx.with(|ctx| {
             crate::state::install(&ctx, shared.clone(), &options.ui_sets);
+            web::web(ctx.as_raw().as_ptr()).base_url = options
+                .base_url
+                .as_deref()
+                .and_then(|u| url::Url::parse(u).ok());
             install(&ctx, &shared)?;
             if options.harden {
                 sandbox::harden(&ctx)?;

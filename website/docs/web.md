@@ -80,8 +80,9 @@ The container's size is the app's window (`windowSize()`); resizing the containe
 
 `fetch` (with streams, `AbortController` and `FormData`) and `<Image>` URLs go through the browser's own network stack, after nsh has checked the app's [capabilities](./sandbox-and-capabilities.md). Since the requests are the browser's, the browser's rules apply:
 
+- **Relative URLs** resolve against the page's URL, as in the browser: a published app reaches its own API with `fetch("/api/items")`, and `<Image src="/photos/a.jpg" />` loads from its own server. (Native platforms have no page, so they need absolute URLs.)
 - **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`); otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
-- **Cookies** are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
+- **Cookies** (and HTTP authentication) are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
 - **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (nsh checks every hop, and browsers do not reveal a redirect before following it).
 - **Request bodies** that are a `ReadableStream` are collected first and sent in one piece; response bodies stream as they arrive.
 

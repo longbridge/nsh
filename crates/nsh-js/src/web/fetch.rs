@@ -3,7 +3,9 @@
 //! byte stream filled as the stack delivers chunks (the request is paused
 //! while more than [`QUEUE_LIMIT`] bytes wait unread), and a request body
 //! that is a `ReadableStream` is sent chunk by chunk as the stack asks for
-//! them. `data:` and `blob:` URLs are answered locally.
+//! them. `data:` and `blob:` URLs are answered locally. Relative URLs
+//! resolve against `HostOptions::base_url` (the page's URL on the web);
+//! hosts without one reject them.
 //!
 //! Not as in browsers: no CORS (an app talks to any host its capabilities
 //! allow), no forbidden request headers (an app may set `Cookie` or
@@ -675,6 +677,14 @@ fn init_enum(ctx: Ctx, init: Raw, key: &str, allowed: &[&str]) -> R<Option<Strin
     Ok(Some(s))
 }
 
+/// Parses a request's (or a redirect's, a referrer's) URL: relative to
+/// the host's base URL (the page's on the web), which other hosts lack.
+fn parse_url(ctx: Ctx, s: &str) -> Result<url::Url, url::ParseError> {
+    url::Url::options()
+        .base_url(web(ctx).base_url.as_ref())
+        .parse(s)
+}
+
 /// The `new Request(input, init)` steps.
 fn construct_request(ctx: Ctx, new_target: Raw, input: Raw, init: Raw) -> R<V> {
     if !js::is_nullish(init) && !js::is_object(init) {
@@ -685,7 +695,7 @@ fn construct_request(ctx: Ctx, new_target: Raw, input: Raw, init: Raw) -> R<V> {
         Some(b) => request(ctx, b.raw())?.url.clone(),
         None => {
             let s = js::to_string(ctx, input)?;
-            let u = url::Url::parse(&s)
+            let u = parse_url(ctx, &s)
                 .map_err(|_| js::type_error(ctx, &format!("Invalid URL: {s}")))?;
             if !u.username().is_empty() || u.password().is_some() {
                 return Err(js::type_error(ctx, "a request URL cannot have credentials"));
@@ -794,7 +804,7 @@ fn construct_request(ctx: Ctx, new_target: Raw, input: Raw, init: Raw) -> R<V> {
     let referrer = get("referrer")?;
     let referrer = match js::opt_string(ctx, referrer.raw())? {
         Some(r) if r.is_empty() => String::new(),
-        Some(r) => match url::Url::parse(&r) {
+        Some(r) => match parse_url(ctx, &r) {
             Ok(u) if u.as_str() == "about:client" => "about:client".to_owned(),
             Ok(u) => u.to_string(),
             Err(_) => return Err(js::type_error(ctx, &format!("invalid referrer `{r}`"))),
@@ -1159,7 +1169,7 @@ native!(
 native!(
     fn response_redirect(ctx, this, args) {
         let url = js::to_string(ctx, args.get(0))?;
-        let url = url::Url::parse(&url).map_err(|_| js::type_error(ctx, &format!("Invalid URL: {url}")))?;
+        let url = parse_url(ctx, &url).map_err(|_| js::type_error(ctx, &format!("Invalid URL: {url}")))?;
         let status = if js::is_undefined(args.get(1)) { 302 } else { js::to_number(ctx, args.get(1))? as u16 };
         if !is_redirect_status(status) {
             return Err(js::range_error(ctx, &format!("Invalid redirect status: {status}")));

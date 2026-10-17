@@ -83,6 +83,11 @@ do not follow (`redirect: "manual"` gives an opaque response without status or `
 `follow_redirects` off fails when it is redirected: JS `redirect: "manual"` / `"error"`, and the hops the engine
 follows itself to check each one against restricted capabilities (`access.rs`).
 
+Relative request URLs (`fetch("/api")`, `new Request("x")`) resolve against the page's `document.baseURI`, which
+`nsh.js` hands over once with `nsh_set_base_url` and `nsh_start` puts in `Bundle::base_url` (→ `HostOptions::base_url`,
+used by nsh-js `fetch.rs`); native hosts have no base and keep rejecting them. `new URL("/x")` without a base throws,
+as in browsers. Relative `<Image>` URLs are the `<img>` element's, resolved by the browser.
+
 `Image.getSize` / `prefetch` (`Command::ImageInfo`) load an `Image` in the page and answer with `onImageInfo` on
 the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 

@@ -80,6 +80,9 @@ pub struct Bundle {
     pub source_map: Option<Arc<str>>,
     /// What the code may do.
     pub policy: Policy,
+    /// What relative request URLs resolve against (the page's URL on the
+    /// web); `None`: they are invalid.
+    pub base_url: Option<String>,
 }
 
 /// What a bundle's code may do.
@@ -151,6 +154,7 @@ impl Bundle {
             code: BundleCode::Bytecode(bytes),
             source_map: None,
             policy: Policy::default(),
+            base_url: None,
         }
     }
 
@@ -160,12 +164,19 @@ impl Bundle {
             code: BundleCode::Source(code),
             source_map: None,
             policy: Policy::default(),
+            base_url: None,
         }
     }
 
     /// Attaches a source map.
     pub fn with_source_map(mut self, map: impl Into<Arc<str>>) -> Self {
         self.source_map = Some(map.into());
+        self
+    }
+
+    /// Sets the URL relative request URLs resolve against.
+    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into());
         self
     }
 
