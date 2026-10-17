@@ -332,6 +332,13 @@ browsers' touches into what phones report:
   way to scroll, the mouse has the wheel, the keyboard and the scroll bar. Its drags go to pans, the responder system
   and selectable text (`pointerDown` only takes touches and pens in zoomable views, which pan themselves; a press
   elsewhere has its `mousedown` prevented, so it selects no page text).
+- **Scroll bars** in the desktop idiom are nsh's own, as on the desktop backends (`showBar`): the browser's are hidden
+  (they would take 6 px from content the core laid out for the whole view), and a 4 px thumb in a sticky, zero-size
+  `.nsh-bar` at the view's top left (it stays put as the content scrolls, in step with the compositor) shows while
+  the view scrolls or the mouse moves over it and fades 700 ms after. Views along one axis with `showsIndicator`, and
+  horizontal ones always, have one. A mouse press within 12 px of the edge on the thumb, faded or not, drags it
+  (`grabBar`: `onScrollBeginDrag` / `EndDrag`, snapping off while it is held, a snapping view then settles on the
+  nearest snap point). Phones and tablets keep the browser's own overlay scroll bars.
 - **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
   passed as the character they type without modifiers, else the US layout's character of their `code`; `mod` was

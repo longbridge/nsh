@@ -39,6 +39,12 @@ const ARIA_ROLES = {
 /** How far a refreshable scroll view is pulled to refresh, and the room its spinner takes while refreshing (as on Linux and macOS). */
 const REFRESH_PULL = 64;
 const REFRESH_SPACE = 56;
+/** Desktop scroll bars (`showBar`): thickness, margin, the band along the
+ * edge a press grabs (points), and how long a shown bar stays (ms). */
+const BAR_THICK = 4;
+const BAR_MARGIN = 2;
+const BAR_GRAB = 12;
+const BAR_HOLD = 700;
 
 /* Keyframe animations (animate-spin, -ping, -pulse, -bounce) run with
    animation-composition: add: their transforms follow the view's own (as the
@@ -105,11 +111,17 @@ const KEYFRAMES = `
 @supports not selector(::-webkit-scrollbar) {
   .nsh-scroll { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.45) transparent; }
 }
-/* A horizontal view keeps its scroll bar in the desktop idiom: a mouse
-   without a horizontal wheel has no other way to move it (mouse drags do
-   not scroll). */
-.nsh-noindicator, .nsh-root:not(.nsh-desktop) .nsh-noindicator-x { scrollbar-width: none; }
-.nsh-noindicator::-webkit-scrollbar, .nsh-root:not(.nsh-desktop) .nsh-noindicator-x::-webkit-scrollbar { display: none; }
+.nsh-noindicator { scrollbar-width: none; }
+.nsh-noindicator::-webkit-scrollbar { display: none; }
+/* In the desktop idiom nsh draws the scroll bars (showBar) over the
+   content, as the desktop backends do: the browser's would take room from
+   content laid out for the whole view. The bar is sticky at the scroll
+   view's top left, so it stays in place as the content scrolls. */
+.nsh-desktop .nsh-scroll { scrollbar-width: none; }
+.nsh-desktop .nsh-scroll::-webkit-scrollbar { display: none; }
+.nsh-bar { position: sticky; left: 0; top: 0; width: 0; height: 0; z-index: 2147483000; pointer-events: none; }
+.nsh-bar > div { position: absolute; border-radius: 2px; background: rgba(0,0,0,.45); transition: opacity .3s; }
+.nsh-dark .nsh-bar > div { background: rgba(255,255,255,.55); }
 .nsh-run { position: absolute; white-space: pre; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 .nsh-pointer { cursor: pointer; }
@@ -1543,9 +1555,10 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._horizontal = horizontal;
+    el._indicator = indicator;
     this.scrollOverflow(el);
-    el.classList.toggle("nsh-noindicator", !indicator && !horizontal);
-    el.classList.toggle("nsh-noindicator-x", !indicator && !!horizontal);
+    el.classList.toggle("nsh-noindicator", !indicator);
+    if (el._bar && !this.barShown(el)) this.showBar(el);
   }
 
   op_scs([, id, w, h]) {
@@ -1636,8 +1649,111 @@ class Player {
     }
   }
 
+  // Desktop scroll bars (the desktop idiom): nsh's own, thin, over the
+  // content, shown while the view scrolls or the mouse moves over it and
+  // fading after, and dragged by the mouse as a scroll bar's thumb, as on
+  // the desktop backends.
+
+  /** Whether `el` has a bar: a scroll view along one axis with its
+   * indicator, and horizontal ones always (a mouse without a horizontal
+   * wheel has no other way to move them, as mouse drags do not scroll). */
+  barShown(el) {
+    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || el._horizontal);
+  }
+
+  /** `el`'s thumb along its axis: `[start, length, travel, max offset]`, or null when the content fits. */
+  barThumb(el) {
+    const h = !!el._horizontal;
+    const view = h ? el.clientWidth : el.clientHeight;
+    const total = h ? el.scrollWidth : el.scrollHeight;
+    if (total <= view + 0.5 || view <= 4 * BAR_MARGIN) return null;
+    const track = view - 2 * BAR_MARGIN;
+    const len = Math.min(track, Math.max(32, (track * view) / total));
+    const max = total - view;
+    const t = Math.min(Math.max((h ? el.scrollLeft : el.scrollTop) / max, 0), 1);
+    return [BAR_MARGIN + t * (track - len), len, track - len, max];
+  }
+
+  /** Shows `el`'s bar where its content is; it fades after `BAR_HOLD`
+   * unless the mouse holds it. */
+  showBar(el) {
+    const thumb = this.barShown(el) ? this.barThumb(el) : null;
+    if (!thumb) {
+      if (el._bar) el._bar.firstChild.style.opacity = "0";
+      return;
+    }
+    if (!el._bar) {
+      el._bar = document.createElement("div");
+      el._bar.className = "nsh-bar";
+      el._bar.append(document.createElement("div"));
+      el.insertBefore(el._bar, el.firstChild);
+    }
+    const [start, len] = thumb;
+    const edge = (el._horizontal ? el.clientHeight : el.clientWidth) - BAR_THICK - BAR_MARGIN;
+    el._bar.firstChild.style.cssText = el._horizontal
+      ? `left:${start}px;top:${edge}px;width:${len}px;height:${BAR_THICK}px`
+      : `left:${edge}px;top:${start}px;width:${BAR_THICK}px;height:${len}px`;
+    clearTimeout(el._barTimer);
+    if (!el._barHeld) el._barTimer = setTimeout(() => el._bar && (el._bar.firstChild.style.opacity = "0"), BAR_HOLD);
+  }
+
+  /** A mouse press on the bar of a scroll view around `e`'s target grabs
+   * it, faded or not: the content moves the other way, so the thumb
+   * follows the pointer. */
+  grabBar(e) {
+    const view = this.viewOf(e.target);
+    if (!view) return false;
+    for (const el of this.ancestors(view)) {
+      if (el._kind !== "scroll" || !this.barShown(el)) continue;
+      const thumb = this.barThumb(el);
+      if (!thumb) continue;
+      const r = el.getBoundingClientRect();
+      const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+      const h = !!el._horizontal;
+      const [along, across, edge] = h ? [x, y, el.clientHeight] : [y, x, el.clientWidth];
+      if (across < edge - BAR_GRAB || across > edge || along < thumb[0] - 4 || along > thumb[0] + thumb[1] + 4) continue;
+      e.preventDefault();
+      el._barHeld = true;
+      // Snapping would move the content under the thumb: back once it ends.
+      el.style.scrollSnapType = "none";
+      this.drive(el, 1);
+      this.scrollEvent(el, "onScrollBeginDrag");
+      this.pointers.set(e.pointerId, {
+        mode: "bar", scroll: el, start: h ? e.clientX : e.clientY, offset: h ? el.scrollLeft : el.scrollTop,
+        touchPath: [], states: [],
+      });
+      this.showBar(el);
+      return true;
+    }
+    return false;
+  }
+
+  dragBar(p, e) {
+    const el = p.scroll;
+    const thumb = this.barThumb(el);
+    if (!thumb || thumb[2] <= 0) return;
+    const d = ((el._horizontal ? e.clientX : e.clientY) - p.start) * (thumb[3] / thumb[2]);
+    if (el._horizontal) el.scrollLeft = p.offset + d;
+    else el.scrollTop = p.offset + d;
+  }
+
+  releaseBar(el) {
+    el._barHeld = false;
+    this.scrollEvent(el, "onScrollEndDrag");
+    this.drive(el, -1);
+    el._restoreSnap = true;
+    // Snapping views settle on the nearest snap point.
+    if (!el._snapPoints || !this.snapTo(el, this.snapPoint(el, 0))) {
+      el._restoreSnap = false;
+      el.style.scrollSnapType = "";
+      this.ownEnd(el);
+    }
+    this.showBar(el);
+  }
+
   scrolled(el) {
     this.updateSticky(el);
+    if (this.desktopUI) this.showBar(el);
     // Still moving after the finger left (touch scrolling is the
     // browser's): a glide.
     if (el._released && !el._momentum && performance.now() - el._released < 150) {
@@ -1657,6 +1773,10 @@ class Player {
     el._ownEnd = null;
     if (own && own[0] === el.scrollLeft && own[1] === el.scrollTop) return;
     el._released = 0;
+    if (el._restoreSnap) {
+      el._restoreSnap = false;
+      el.style.scrollSnapType = "";
+    }
     if (el._momentum) {
       el._momentum = false;
       this.scrollEvent(el, "onMomentumScrollEnd");
@@ -3305,7 +3425,12 @@ class Player {
     root.addEventListener("gesturechange", (e) => this.gesture && this.gestureZoom(e, 1));
     root.addEventListener("gestureend", (e) => this.gesture && this.gestureZoom(e, 2));
     root.addEventListener("pointermove", (e) => {
-      if (e.pointerType === "mouse") this.hover = [e.clientX, e.clientY];
+      if (e.pointerType !== "mouse") return;
+      this.hover = [e.clientX, e.clientY];
+      // The scroll views under the mouse show their bars.
+      if (!this.desktopUI || e.buttons) return;
+      const view = this.viewOf(e.target);
+      if (view) for (const el of this.ancestors(view)) if (el._kind === "scroll") this.showBar(el);
     });
     root.addEventListener("focusin", () => (Player.active = this));
     window.addEventListener("keydown", (e) => this.keyDown(e));
@@ -3696,6 +3821,7 @@ class Player {
     this.lastPointer = e.pointerType;
     Player.active = this;
     if (e.button > 0) return;
+    if (e.pointerType === "mouse" && this.desktopUI && this.grabBar(e)) return;
     // A drag selects in selectable text and fields instead of panning a
     // zoomable view.
     const selects = this.editable(e.target);
@@ -3804,6 +3930,11 @@ class Player {
   pointerMove(e) {
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
+    if (p.mode === "bar") {
+      e.preventDefault();
+      this.dragBar(p, e);
+      return;
+    }
     const [x, y] = this.point(e);
     const now = performance.now();
     const dt = Math.max(1, now - p.t);
@@ -3875,6 +4006,11 @@ class Player {
   pointerUp(e, cancelled) {
     const p = this.pointers.get(e.pointerId);
     if (!p) return;
+    if (p.mode === "bar") {
+      this.pointers.delete(e.pointerId);
+      this.releaseBar(p.scroll);
+      return;
+    }
     if (cancelled && p.scrolls?.length) this.touchScroll(p, this.point(e));
     if (p.touchPath.length) this.touchEvent(cancelled ? 3 : 2, e.pointerId);
     this.pointers.delete(e.pointerId);
