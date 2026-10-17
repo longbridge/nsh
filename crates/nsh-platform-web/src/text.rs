@@ -338,7 +338,9 @@ impl TextEngine for WebTextEngine {
                     AtomKind::Text | AtomKind::Space => {
                         self.width(&font, &text) + spacing * text.chars().count() as f32
                     }
-                    _ => 0.0,
+                    // Its placeholder's room on the line.
+                    AtomKind::Attachment(w, _) => w,
+                    AtomKind::Newline => 0.0,
                 };
                 atoms.push(Atom {
                     text,
