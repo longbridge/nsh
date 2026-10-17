@@ -696,7 +696,8 @@ pub extern "C" fn nsh_frame(now: f64) -> f64 {
         let mut app = a.borrow_mut();
         let Some(app) = app.as_mut() else { return };
         if app.animation.animating() {
-            app.animation.tick(now);
+            // The animation graph's clock is in seconds.
+            app.animation.tick(now / 1000.0);
             let mut out = Out::new();
             app.animation.outputs(&mut out);
             if !out.is_empty() {
