@@ -108,6 +108,7 @@ The output directory holds:
 | `nsh.js` | The DOM runtime: loads `nsh.wasm`, applies batches, turns input into events |
 | `index.html` | A player page: runs `demos/<name>.js` for `#<name>` |
 | `demos/<name>.js` | Each demo bundled by `nsh build --release` |
+| `gallery/` | The gallery app published with `nsh package --target web`, shown on the [Gallery](/gallery) page |
 
 Serve the directory with any static server (it needs the `application/wasm` MIME type for streaming compilation) and open `index.html#counter`.
 

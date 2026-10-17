@@ -14,7 +14,9 @@ bun run test       # content rules + a link check of dist/ (build first)
 `dev` first kills a dev server of this checkout that is still running (it
 would hold the port). `dev` and `build` install the dependencies if needed and build the
 WebAssembly player with the demos (`cargo xtask web`, incremental: a second
-start takes seconds). Without Rust (and its `wasm32-unknown-unknown` target)
+start takes seconds), and the gallery (`examples/gallery`), published with
+`nsh package --target web` into `public/play/gallery/` for the Gallery page
+(`/gallery`); its URLs are relative, so it works under any base path. Without Rust (and its `wasm32-unknown-unknown` target)
 they print a warning and the pages show demo sources without the live preview.
 While `dev` runs, demos are bundled from `demos/*.tsx` on each request and
 `nsh.js` is served from `crates/nsh-platform-web/web`, so edits to either show

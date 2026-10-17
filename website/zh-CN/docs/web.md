@@ -94,6 +94,7 @@ cargo xtask web --out target/play     # 输出到其他目录
 | `nsh.js` | DOM 运行时：加载 `nsh.wasm`，应用批次，把输入转成事件 |
 | `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.js` |
 | `demos/<name>.js` | 用 `nsh build --release` 打包的各个演示 |
+| `gallery/` | 用 `nsh package --target web` 发布的示例应用 Gallery，显示在[示例应用](/zh-CN/gallery)页面 |
 
 用任意静态服务器托管该目录即可（流式编译需要 `application/wasm` 这个 MIME 类型），然后打开 `index.html#counter`。
 

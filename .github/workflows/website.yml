@@ -10,6 +10,7 @@ on:
     paths:
       - "website/**"
       - "crates/**"
+      - "examples/gallery/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -19,6 +20,7 @@ on:
     paths:
       - "website/**"
       - "crates/nsh-platform-web/**"
+      - "examples/gallery/**"
       - ".github/workflows/website.yml"
   workflow_dispatch:
 
@@ -69,7 +71,8 @@ jobs:
         run: bun install
 
       # `build` runs `cargo xtask web` first: nsh.wasm, the player and every
-      # demo in website/demos, into website/public/play.
+      # demo in website/demos, into website/public/play, and the gallery
+      # published with `nsh package --target web` into play/gallery.
       - name: Build website
         working-directory: website
         env:

@@ -9,7 +9,8 @@ User-facing page: `website/docs/web.md`.
 `cargo xtask web` builds `nsh.wasm` (`--target wasm32-unknown-unknown --profile web`: the release profile optimized for size, QuickJS still at `-O3`), copies `web/nsh.js` and
 `web/index.html` (the player), `nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two
 builds keep their caches), and bundles each demo with `nsh build --release` into `website/public/play/` (generated,
-ignored by git). Check the crate with `cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown`: off
+ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
+Gallery page frames it). Check the crate with `cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown`: off
 WebAssembly it is empty. `.cargo/config.toml` gives wasm32 an 8 MiB stack (QuickJS recursion).
 
 QuickJS is C, so the build needs a clang that targets wasm32 and an `llvm-ar` (CI: Ubuntu's `clang` and `llvm`, with

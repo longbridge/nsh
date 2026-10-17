@@ -11,7 +11,7 @@ export const GET: APIRoute = async () => {
 
   // Each entry lists its translations, so search engines pair the locales.
   const entries: { href: string; en?: string; zh?: string }[] = [];
-  for (const [e, z] of [[url(''), url('zh-CN')], [url('playground'), url('zh-CN/playground')]]) {
+  for (const [e, z] of [[url(''), url('zh-CN')], [url('playground'), url('zh-CN/playground')], [url('gallery'), url('zh-CN/gallery')]]) {
     entries.push({ href: e, en: e, zh: z }, { href: z, en: e, zh: z });
   }
   for (const page of [...en, ...zh]) {
