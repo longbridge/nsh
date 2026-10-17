@@ -52,8 +52,6 @@ const IDLE_GC_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The app an engine runs.
 #[derive(Debug, Clone)]
-// One per surface, moved once into its engine: its size does not matter.
-#[allow(clippy::large_enum_variant)]
 pub enum App {
     /// A Rust app: its root component, mounted as the surface's content.
     Rust(Root),
@@ -84,7 +82,7 @@ pub struct Bundle {
     pub policy: Policy,
     /// What relative request URLs resolve against (the page's URL on the
     /// web); `None`: they are invalid.
-    pub base_url: Option<String>,
+    pub base_url: Option<Arc<str>>,
     /// The chunks of a split bundle that come with it (`import()` loads
     /// them without asking the platform); those missing are asked of
     /// [`MountSink::load_chunk`]. Shared by the bundle's clones.
@@ -232,7 +230,7 @@ impl Bundle {
     }
 
     /// Sets the URL relative request URLs resolve against.
-    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+    pub fn with_base_url(mut self, url: impl Into<Arc<str>>) -> Self {
         self.base_url = Some(url.into());
         self
     }

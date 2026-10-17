@@ -378,7 +378,7 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
             return -1.0;
         }
     };
-    bundle.base_url = BASE_URL.with(|b| b.borrow().clone());
+    bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
     let config = EngineConfig {
         app: App::Js(bundle),
         viewport: Size::new(width, height),

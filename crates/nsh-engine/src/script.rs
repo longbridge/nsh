@@ -53,7 +53,7 @@ mod imp {
                 harden: bundle.policy.harden,
                 harden_bytecode: bundle.harden_bytecode.clone(),
                 ui_sets: ui_sets.to_vec(),
-                base_url: bundle.base_url.clone(),
+                base_url: bundle.base_url.as_deref().map(str::to_owned),
             };
             let mut host = match Host::with_options(options) {
                 Ok(host) => host,
