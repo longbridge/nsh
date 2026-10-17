@@ -5,3 +5,4 @@ out/
 /dist
 /target-*
 /.claude/worktrees
+/crates/gpui/target
