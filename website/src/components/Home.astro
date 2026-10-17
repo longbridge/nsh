@@ -23,6 +23,7 @@ const copy = zh
       try: '在线试用',
       gallery: '打开示例应用',
       meta: [
+        ['gauge', '120 FPS · 低 CPU 占用'],
         ['scale', '开源 · Apache-2.0'],
         ['building', '由长桥（Longbridge）构建'],
       ],
@@ -38,7 +39,7 @@ const copy = zh
       replay: '重播',
       capKicker: 'AI 友好',
       capTitle: '为模型编写、为宿主把关而设计',
-      capLead: '生成的界面要是真正的原生界面，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。NSH 的每一层都围绕这几点设计。',
+      capLead: '生成的界面要是真正的原生界面、跑得流畅，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。NSH 的每一层都围绕这几点设计。',
       usesKicker: '三种用法',
       usesTitle: '同一个模块，三种用法',
       usesLead: '首要用途是 AI 生成的界面；同一套机制也让原生应用可以扩展，或者直接组成一个独立应用。',
@@ -61,6 +62,7 @@ const copy = zh
       try: 'Try the playground',
       gallery: 'Open the gallery',
       meta: [
+        ['gauge', '120 FPS · low CPU use'],
         ['scale', 'Open source · Apache-2.0'],
         ['building', 'Built at Longbridge'],
       ],
@@ -76,7 +78,7 @@ const copy = zh
       replay: 'Replay',
       capKicker: 'AI friendly',
       capTitle: 'Designed for models to write and hosts to trust.',
-      capLead: 'Generated UI has to be truly native, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of NSH is built around that.',
+      capLead: 'Generated UI has to be truly native and smooth, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of NSH is built around that.',
       usesKicker: 'Three uses',
       usesTitle: 'One module, three ways to use it.',
       usesLead: 'AI-generated UI is what NSH is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
@@ -94,6 +96,7 @@ const copy = zh
 
 const caps = zh
   ? [
+      { id: 'fast', icon: 'gauge', title: '高性能：120 FPS，低 CPU', body: '在 iOS 与 macOS 的 ProMotion 屏幕上，滚动和动画稳定在 120 FPS，CPU 占用很低。响应式图、渲染器、布局和每个模块都是 Rust，JS 只运行应用自己的代码；每一帧只有一次跨线程的批量提交，原生动画不经过 JS 逐帧计算。', chips: ['120 FPS', 'Rust', 'Taffy', 'QuickJS'] },
       { id: 'native', icon: 'devices', title: '真正的原生界面', body: '模块在手机上由 UIKit 与 Android 视图组成，在桌面上由 AppKit、GTK 4 以及用 Direct2D 绘制的 Win32 窗口呈现，在 GPUI 应用里由 GPUI 绘制，在浏览器里是网页的 HTML。地图、网页视图这类原生组件可以直接嵌入，与界面自然叠放；系统的文本、输入法和无障碍都原样可用。', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D', 'GPUI', 'HTML'] },
       { id: 'plugin', icon: 'plug', title: '插件，或独立应用', body: '在已有应用的任意页面放一个 NshAppView（iOS）、NshView（Android）、AppView（桌面，以及作为 GPUI 视图放进 GPUI 应用），或在网页里用 createPlayer 加载，运行时动态加载模块，新功能随时上线；同样的模块也能用 nsh package 打成独立应用或静态网站。', chips: ['NshAppView', 'NshView', 'AppView', 'createPlayer', 'nsh package'] },
       { id: 'tsx', icon: 'spark', title: 'AI 友好：TSX + Tailwind', body: '一个模块就是一个 TSX 文件：组件、信号和 Tailwind 类，正是模型最擅长写的格式。每个元素、属性和模块都有从 Rust 源码生成的 TypeScript 声明，文档以 llms.txt 提供给模型。', chips: ['TSX', 'Tailwind', 'llms.txt'] },
@@ -102,6 +105,7 @@ const caps = zh
       { id: 'signed', icon: 'shield', title: '签名下发，可吊销', body: '模块以 Ed25519 签名的 .nshpkg 到达；发布密钥由离线根密钥认证，设备端检查吊销列表。', chips: ['nsh publish', 'NshTrust'] },
     ]
   : [
+      { id: 'fast', icon: 'gauge', title: 'Fast: 120 FPS, low CPU', body: 'Scrolling and animations hold 120 FPS on ProMotion displays on iOS and macOS, with little CPU. The reactive graph, the renderer, layout and every module are Rust, and JS only runs the app’s own code; each frame crosses threads once, as one batch, and native animations never call into JS per frame.', chips: ['120 FPS', 'Rust', 'Taffy', 'QuickJS'] },
       { id: 'native', icon: 'devices', title: 'Real native UI', body: 'Modules are UIKit and Android views on phones, AppKit views, GTK 4 widgets and Win32 windows drawn with Direct2D on the desktop, GPUI elements in GPUI apps, and HTML in a web page. Native components such as maps and web views layer in naturally, and the system’s text, input and accessibility just work.', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D', 'GPUI', 'HTML'] },
       { id: 'plugin', icon: 'plug', title: 'Plugins, or standalone apps', body: 'Put an NshAppView (iOS), NshView (Android) or AppView (desktop, and as a GPUI view in GPUI apps) on any screen of an existing app, or createPlayer in a web page, and load modules into it at run time: features ship on your own schedule. The same modules also package into standalone apps and static sites with nsh package.', chips: ['NshAppView', 'NshView', 'AppView', 'createPlayer', 'nsh package'] },
       { id: 'tsx', icon: 'spark', title: 'AI-friendly: TSX + Tailwind', body: 'A module is one TSX file of components, signals and Tailwind classes: the format models write best. Every element, prop and module has TypeScript declarations generated from the Rust sources, and the docs are served to models as llms.txt.', chips: ['TSX', 'Tailwind', 'llms.txt'] },
@@ -188,6 +192,7 @@ const icons: Record<string, string> = {
   scale: '<path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM2 16l3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1ZM7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/>',
   building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
   plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>',
   spark: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
 };
@@ -252,7 +257,7 @@ const icon = (name: string, size = 16) =>
       </header>
       <div class="caps">
         {caps.map((c) => (
-          <article class="cap">
+          <article class={`cap cap--${c.id}`}>
             <h3><Fragment set:html={icon(c.icon)} />{c.title}</h3>
             <p>{c.body}</p>
             <ul class="chips">{c.chips.map((x) => <li>{x}</li>)}</ul>
@@ -274,6 +279,15 @@ const icon = (name: string, size = 16) =>
                     <div class="slot"><code>.nshpkg</code><span set:html={icon('arrow', 12)} /><code>NshAppView</code></div>
                     <i style="--w:62%"></i>
                   </div>
+                </div>
+              )}
+              {c.id === 'fast' && (
+                <div class="mini-fast">
+                  <div class="frames">
+                    {[42, 55, 38, 61, 47, 52, 36, 58, 44, 50, 40, 63, 46, 39, 54, 48, 57, 41, 49, 45].map((h) => <i style={`--h:${h}%`}></i>)}
+                    <span class="budget"><code>8.3 ms</code></span>
+                  </div>
+                  <div class="fps"><strong>120</strong><code>FPS</code></div>
                 </div>
               )}
               {c.id === 'check' && (
@@ -495,6 +509,9 @@ const icon = (name: string, size = 16) =>
   /* Capability grid: hairline cells, one diagram box each. */
   .caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
   .cap { display: flex; flex-direction: column; padding: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--finish-card-bg); box-shadow: var(--finish-card); }
+  .cap--fast { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; column-gap: 2.5rem; }
+  .cap--fast > :not(.mini) { grid-column: 1; }
+  .cap--fast > .mini { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; }
   .cap h3 { display: flex; align-items: center; gap: 0.55rem; margin: 0; font-size: 1rem; font-weight: 650; letter-spacing: -0.01em; }
   .cap h3 :global(svg) { flex-shrink: 0; color: var(--citrus); }
   .cap p { margin: 0.6rem 0 0; color: var(--muted-foreground); font-size: 0.9rem; line-height: 1.6; }
@@ -511,6 +528,14 @@ const icon = (name: string, size = 16) =>
   .mini-plugin .slot { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 8px; border: 1.5px dashed color-mix(in srgb, var(--data-3) 55%, transparent); border-radius: 7px; color: var(--data-3); font: 600 10.5px/1 var(--font-mono); white-space: nowrap; }
   .mini-plugin .slot code { font: inherit; }
   .mini-plugin .slot span { display: grid; place-items: center; }
+  .mini-fast { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 14px; height: 100%; }
+  .mini-fast .frames { position: relative; display: flex; align-items: flex-end; gap: 4px; height: 64px; }
+  .mini-fast .frames i { flex: 1; height: var(--h); border-radius: 2px 2px 0 0; background: color-mix(in srgb, var(--citrus) 55%, transparent); }
+  .mini-fast .budget { position: absolute; left: 0; right: 0; top: 18%; border-top: 1px dashed color-mix(in srgb, var(--muted-foreground) 60%, transparent); }
+  .mini-fast .budget code { position: absolute; right: 0; top: -16px; font: 10px var(--font-mono); color: var(--muted-foreground); }
+  .mini-fast .fps { display: grid; justify-items: end; line-height: 1; }
+  .mini-fast .fps strong { font-size: 28px; font-weight: 700; color: var(--citrus); }
+  .mini-fast .fps code { font: 11px var(--font-mono); color: var(--muted-foreground); }
   .mini-checks { display: grid; gap: 10px; margin: 6px 0 0; padding: 0; list-style: none; }
   .mini-checks li { display: grid; grid-template-columns: 14px 44px 1fr; align-items: center; gap: 8px; }
   .mini-checks span { display: grid; place-items: center; color: var(--success); }
@@ -613,6 +638,8 @@ const icon = (name: string, size = 16) =>
     .home { --section-gap: 4rem; }
     .band__inner { width: calc(100% - 2rem); }
     .caps { grid-template-columns: minmax(0, 1fr); }
+    .cap--fast { display: flex; }
+    .cap--fast > .mini { margin-top: 1.25rem; }
     .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .platform:nth-child(n) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
     .platform:nth-child(2n) { border-right: 0; }
