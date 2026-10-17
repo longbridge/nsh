@@ -16,7 +16,8 @@
 <div id="app"></div>
 <div id="status">Loading…</div>
 <script type="module">
-  // Runs website demo `#<name>` (demos/<name>.js, bundled by `nsh build`).
+  // Runs website demo `#<name>` (demos/<name>.nshc, compiled by `nsh build`:
+  // the site's runtime runs bytecode only).
   // `?theme=dark|light` overrides the system appearance.
   //
   // `?playground`: loads the runtime with the TSX compiler and runs the
@@ -53,9 +54,9 @@
     try {
       const [p, code] = await Promise.all([
         player(),
-        fetch(`demos/${encodeURIComponent(name)}.js`).then((r) => {
+        fetch(`demos/${encodeURIComponent(name)}.nshc`).then((r) => {
           if (!r.ok) throw new Error(`no demo named “${name}”`);
-          return r.text();
+          return r.arrayBuffer();
         }),
       ]);
       status.style.display = "none";

@@ -53,10 +53,11 @@ nsh package App.tsx --target web --run     # 并在本机提供服务，在浏�
 |---|---|
 | `index.html` | 应用的页面：以应用名作为标题，带图标、按 `appearance` 设定的颜色、加载指示，以及应用无法加载或启动时的提示 |
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
-| `nsh.<digest>.js` | DOM 运行时，已压缩（42 KB，brotli 后 12.6 KB） |
-| `nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB） |
-| `app.<digest>.js` | 应用本身，构建方式与 `nsh build --release --split` 相同 |
-| `chunks/<name>.<digest>.js` | `import()` 加载的代码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
+| `nsh.<digest>.js` | DOM 运行时，已压缩（79 KB，brotli 后 22.5 KB） |
+| `nsh.<digest>.wasm` | 引擎、核心、移动端组件和不含编译器的 QuickJS（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB） |
+| `app.<digest>.nshc` | 应用本身，构建方式与 `nsh build --release --split` 相同，并编译成 QuickJS 字节码：浏览器里不再编译，启动更快 |
+| `harden.<digest>.nshc` | [沙箱](./sandbox-and-capabilities.md)的加固脚本，同样编译成字节码（1.4 KB） |
+| `chunks/<name>.<digest>.nshc` | `import()` 加载的代码，同样是字节码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
 | `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在注册它们的代码运行前加载，因为文本要用它们测量：在应用启动前，或随导入它们的分块一起加载） |
 | `icons/<size>.<digest>.png` | `nsh.json` 中的图标，尺寸为 32（favicon）、180（`apple-touch-icon`）、192 和 512 像素 |
 
@@ -103,11 +104,11 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 | 文件 | 内容 |
 |---|---|
-| `gallery/nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB；用 `web` profile 构建），播放器和示例应用共用 |
+| `gallery/nsh.<digest>.wasm` | 已发布应用使用的运行时（约 3.5 MB，gzip 后 1.2 MB，brotli 后 0.93 MB；用 `web` profile 构建），播放器和示例应用共用 |
 | `nsh-playground.wasm` | 同上，另含 nsh 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
 | `gallery/nsh.<digest>.js` | DOM 运行时（已压缩）：加载 wasm，应用批次，把输入转成事件 |
-| `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.js` |
-| `demos/<name>.js` | 用 `nsh build --release` 打包的各个演示 |
+| `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.nshc` |
+| `demos/<name>.nshc` | 用 `nsh build --release` 编译的各个演示 |
 | `gallery/` | 用 `nsh package --target web` 发布的示例应用 Gallery，显示在[示例应用](/zh-CN/gallery)页面 |
 
 用任意静态服务器托管该目录即可（流式编译需要 `application/wasm` 这个 MIME 类型），然后打开 `index.html#counter`。
@@ -122,7 +123,7 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 ## 嵌入到页面
 
-`nsh.js` 是一个 ES 模块。`createPlayer` 把运行时加载进一个容器，`run` 启动一个应用包（即 `nsh build` 写出的 `bundle.js`）：
+`nsh.js` 是一个 ES 模块。`createPlayer` 把运行时加载进一个容器，`run` 启动 `nsh build` 写出的应用包：字节码 `bundle.nshc`（以字节传入），或 `bundle.js`（以字符串传入）。`nsh package --target web` 附带的运行时（`nsh.wasm`）不含 JavaScript 编译器，只运行字节码；开发用的运行时（发行包中的 `nsh-dev.wasm`）两者都能运行：
 
 ```js
 import { createPlayer } from "./nsh.js";
@@ -134,10 +135,10 @@ const player = await createPlayer(document.querySelector("#phone"), {
   // idiom: "phone",        // 强制 "phone"、"pad" 或 "desktop"；不设置时由指针和尺寸决定
   // history: false,        // 页面和模态框是否作为浏览器历史记录；默认只在应用占据整个页面时开启，iframe 里不开启
 });
-player.run(await (await fetch("./bundle.js")).text());
+player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 ```
 
-`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）。`nsh package --target web` 写出的页面三者都用到了。
+`assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）；运行字节码时，发布模式还要传入加固脚本的字节码（`harden`，即 `harden.<digest>.nshc` 的字节）。`nsh package --target web` 写出的页面都用到了。
 
 `run(code, { chunks, chunkBase })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
 
@@ -182,7 +183,7 @@ player.run(await (await fetch("./bundle.js")).text());
 
 ## 拆分 bundle
 
-Web 应用不必在第一个界面出现之前下载全部代码。`nsh package --target web` 以拆分方式发布应用：每个 chunk 写成 `chunks/<name>.<digest>.js`，由页面把 chunk 映射到这些文件。要自己拆分 bundle，可以用 `nsh build --split`，它把 `import()` 加载的模块放进各自的 chunk，放在 `bundle.js` 旁边：
+Web 应用不必在第一个界面出现之前下载全部代码。`nsh package --target web` 以拆分方式发布应用：每个 chunk 写成 `chunks/<name>.<digest>.nshc`，由页面把 chunk 映射到这些文件（以字节码运行的应用包，其 chunk 也以字节码加载：`Screen.js` 旁边的 `Screen.nshc`）。要自己拆分 bundle，可以用 `nsh build --split`，它把 `import()` 加载的模块放进各自的 chunk，放在 `bundle.js` 旁边：
 
 ```sh
 nsh build --release --split -o site/app

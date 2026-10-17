@@ -9,6 +9,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# A VM without QuickJS' parser and compiler (they are left out of the
+# binary): it runs bytecode only. The web runtime of published apps.
+bytecode-only = []
+
 [dependencies]
 serde_json.workspace = true
 log.workspace = true

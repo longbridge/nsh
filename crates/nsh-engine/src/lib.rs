@@ -52,6 +52,8 @@ const IDLE_GC_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The app an engine runs.
 #[derive(Debug, Clone)]
+// One per surface, moved once into its engine: its size does not matter.
+#[allow(clippy::large_enum_variant)]
 pub enum App {
     /// A Rust app: its root component, mounted as the surface's content.
     Rust(Root),
@@ -87,6 +89,11 @@ pub struct Bundle {
     /// them without asking the platform); those missing are asked of
     /// [`MountSink::load_chunk`]. Shared by the bundle's clones.
     pub chunks: Arc<Vec<Chunk>>,
+    /// The sandbox's hardening as bytecode (`nsh_js::compile_harden`),
+    /// for a runtime without QuickJS' parser (the web runtime of published
+    /// apps); `None`: compiled when the policy hardens. Set it with
+    /// [`Bundle::with_harden_bytecode`].
+    pub harden_bytecode: Option<Arc<Vec<u8>>>,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -202,6 +209,7 @@ impl Bundle {
             policy: Policy::default(),
             base_url: None,
             chunks: Arc::default(),
+            harden_bytecode: None,
         }
     }
 
@@ -213,6 +221,7 @@ impl Bundle {
             policy: Policy::default(),
             base_url: None,
             chunks: Arc::default(),
+            harden_bytecode: None,
         }
     }
 
@@ -225,6 +234,17 @@ impl Bundle {
     /// Sets the URL relative request URLs resolve against.
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = Some(url.into());
+        self
+    }
+
+    /// Hardens with `bytes` ([`Bundle::harden_bytecode`]).
+    ///
+    /// # Safety
+    ///
+    /// As [`Bundle::bytecode`]: `bytes` comes from `nsh_js::compile_harden`
+    /// of this runtime's `BYTECODE_VERSION`, from a trusted source.
+    pub unsafe fn with_harden_bytecode(mut self, bytes: Vec<u8>) -> Self {
+        self.harden_bytecode = Some(Arc::new(bytes));
         self
     }
 

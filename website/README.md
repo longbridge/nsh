@@ -114,7 +114,7 @@ The player in `public/play/` is the WebAssembly build of the nsh runtime
 `nsh build`; it is generated, not checked in:
 
 ```sh
-bun run play       # = cargo xtask web: nsh.wasm, nsh.js, index.html, demos/*.js (dev and build run it)
+bun run play       # = cargo xtask web: nsh.wasm, nsh.js, index.html, demos/*.nshc (dev and build run it)
 ```
 
 Run it again after changing a demo or the runtime. Embedded demos follow

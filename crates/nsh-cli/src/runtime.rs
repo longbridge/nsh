@@ -34,6 +34,7 @@
 use std::{
     env,
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -211,13 +212,37 @@ pub(crate) struct WebRuntime {
     pub(crate) js: PathBuf,
 }
 
-/// The web runtime ([`WebRuntime`]). In a checkout it is built first when
-/// `build` is set; without it, the build that is there, if any (`None`).
-pub(crate) fn web(build: bool) -> anyhow::Result<Option<WebRuntime>> {
+/// Which web runtime: the two differ in QuickJS only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WebKind {
+    /// Published apps' (`nsh package --target web`): without QuickJS'
+    /// parser (feature `bytecode-only`), it runs the bytecode the CLI
+    /// compiled. `nsh.wasm`.
+    Release,
+    /// The development host's (`nsh dev`, `nsh run --target web`): it runs
+    /// JS source and hot updates. `nsh-dev.wasm`.
+    Dev,
+}
+
+impl WebKind {
+    /// Its file in the distribution (`runtime/web/`) and, in a checkout,
+    /// next to the build's output.
+    fn file(self) -> &'static str {
+        match self {
+            WebKind::Release => "nsh.wasm",
+            WebKind::Dev => "nsh-dev.wasm",
+        }
+    }
+}
+
+/// The web runtime ([`WebRuntime`]) of `kind`. In a checkout it is built
+/// first when `build` is set; without it, the build that is there, if any
+/// (`None`).
+pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntime>> {
     const WASM: &str = "wasm32-unknown-unknown";
     let found = |dir: PathBuf| {
         let runtime = WebRuntime {
-            wasm: dir.join("nsh.wasm"),
+            wasm: dir.join(kind.file()),
             js: dir.join("nsh.js"),
         };
         (runtime.wasm.exists() && runtime.js.exists()).then_some(runtime)
@@ -244,11 +269,21 @@ pub(crate) fn web(build: bool) -> anyhow::Result<Option<WebRuntime>> {
         }
         return Ok(None);
     };
+    let out = bin
+        .parent()
+        .context("cli is not in a target directory")?
+        .join(WASM)
+        .join("web");
+    let features: &[&str] = match kind {
+        WebKind::Release => &["--features", "bytecode-only"],
+        WebKind::Dev => &[],
+    };
     if build {
         let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
         let mut command = Command::new(&cargo);
         command
             .args(["build", "--profile", "web", "-p", "nsh-platform-web"])
+            .args(features)
             .args(["--target", WASM])
             .current_dir(&root);
         // QuickJS' archive needs an `ar` that knows WebAssembly objects.
@@ -257,24 +292,20 @@ pub(crate) fn web(build: bool) -> anyhow::Result<Option<WebRuntime>> {
             command.env(&ar, "llvm-ar");
         }
         crate::ui::cargo(&mut command, "the web runtime")?;
+        // Both kinds build to the same file: each keeps a copy of its own.
+        let built = out.join("nsh_platform_web.wasm");
+        fs::copy(&built, out.join(kind.file()))
+            .with_context(|| format!("copy {}", built.display()))?;
     }
-    let wasm = bin
-        .parent()
-        .context("cli is not in a target directory")?
-        .join(WASM)
-        .join("web/nsh_platform_web.wasm");
     let runtime = WebRuntime {
-        wasm,
+        wasm: out.join(kind.file()),
         js: root.join("crates/nsh-platform-web/web/nsh.js"),
     };
     if runtime.wasm.exists() {
         return Ok(Some(runtime));
     }
     if build {
-        bail!(
-            "the web runtime is not at {}\nin a nsh checkout, build it with: cargo build --profile web -p nsh-platform-web --target {WASM}",
-            runtime.wasm.display()
-        );
+        bail!("the web runtime is not at {}", runtime.wasm.display());
     }
     Ok(None)
 }

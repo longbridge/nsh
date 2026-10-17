@@ -50,4 +50,5 @@ pub use crate::{
     error::JsError,
     host::{ErrorHandler, Host, HostOptions, TextMeasurer},
     net::{FetchEvent, FetchOp, HttpBody, HttpHead, HttpRequest, NetworkQueue, RequestId},
+    sandbox::compile_harden,
 };

@@ -241,8 +241,9 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 `target/<triple>/<profile>` (Linux's, macOS's and Windows', built for this machine, in `target/<profile>`, Windows'
 `nsh-windows-host.exe` / `nsh-windows-app.exe`) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
-`cargo xtask android --dev`), so `nsh run` never uses a missing or stale host. The web runtime (`runtime/web/nsh.wasm`
-and `nsh.js`) is always built with the `web` profile, into `target/wasm32-unknown-unknown/web/`.
+`cargo xtask android --dev`), so `nsh run` never uses a missing or stale host. The web runtimes (`runtime/web/nsh.wasm`
+for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
+the `web` profile, into `target/wasm32-unknown-unknown/web/`.
 
 ## Releases
 

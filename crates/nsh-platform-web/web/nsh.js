@@ -449,14 +449,19 @@ class Player {
   // Running -------------------------------------------------------------
 
   /**
-   * Runs `code` (a bundle from `nsh build`), replacing what ran. Options:
+   * Runs `code` (a bundle from `nsh build`: `bundle.js` as a string, or its
+   * bytecode `bundle.nshc` as an `ArrayBuffer` / `Uint8Array`, the only
+   * form the runtime of published apps runs), replacing what ran. Options:
    * `release` (hardened, as packaged apps run; default: development
-   * settings), `capabilities` (the app's `capabilities.json`),
+   * settings), `harden` (with bytecode: the hardening's bytecode the CLI
+   * ships, `harden.nshc`), `capabilities` (the app's `capabilities.json`),
    * `sourceMap` (JSON), and where a split bundle's chunks are: `chunks[id]`
-   * (a URL), else `id` relative to `chunkBase` (default: the page).
+   * (a URL), else `id` relative to `chunkBase` (default: the page); the
+   * chunks of a bytecode bundle are bytecode too.
    */
   run(code, {
     release = false,
+    harden = null,
     capabilities = "",
     sourceMap = "",
     chunks = this.options.chunks,
@@ -465,7 +470,9 @@ class Player {
     this.stop();
     this.resetHistory();
     this.app = (this.app ?? 0) + 1;
-    this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI };
+    if (code instanceof ArrayBuffer) code = new Uint8Array(code);
+    const bytecode = typeof code !== "string";
+    this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
     const root = this.root;
     root.textContent = "";
     root.append(this.live);
@@ -480,6 +487,7 @@ class Player {
     this.size = [width, height];
     this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
       this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
+    if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
     this.idiom = this.options.idiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
@@ -488,8 +496,9 @@ class Player {
     try {
       this.call(() => {
         this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
+        const start = bytecode ? this.wasm.nsh_start_bytecode : this.wasm.nsh_start;
         return this.withStrings([code], (p, l) =>
-          this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
+          start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
       });
     } finally {
       this.starting = false;
@@ -498,18 +507,20 @@ class Player {
 
   /** Fetches chunk `id` of the running bundle and hands it to the engine. */
   async loadChunk(id) {
-    const { map, base } = this.chunks;
+    const { map, base, bytecode } = this.chunks;
     const app = this.app;
     let code;
-    let ok = 1;
+    let ok = bytecode ? 2 : 1;
+    // `nsh build --split` writes a chunk's bytecode next to it: `Screen.nshc`.
+    const url = map[id] ?? (bytecode ? id.replace(/\.js$/, ".nshc") : id);
     try {
       // What the chunk needs synchronously once it runs (its fonts), from
       // the page, alongside it.
-      const [response] = await Promise.all([fetch(new URL(map[id] ?? id, base)), this.options.prepareChunk?.(id)]);
+      const [response] = await Promise.all([fetch(new URL(url, base)), this.options.prepareChunk?.(id)]);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
-      code = await response.text();
+      code = bytecode ? new Uint8Array(await response.arrayBuffer()) : await response.text();
     } catch (err) {
-      code = `${err.message ?? err} (${map[id] ?? id})`;
+      code = `${err.message ?? err} (${url})`;
       ok = 0;
     }
     // A chunk of an app that was replaced meanwhile is dropped.

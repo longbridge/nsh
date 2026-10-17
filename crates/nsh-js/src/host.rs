@@ -72,6 +72,38 @@ pub struct Host {
     budget: Budget,
 }
 
+/// A context with `JS_NewContext`'s intrinsics. With feature
+/// `bytecode-only` without the one that compiles source (`eval`, the
+/// function constructors, `Module::declare`): nothing then reaches QuickJS'
+/// parser and compiler, which the linker leaves out, and the VM runs
+/// bytecode only (the web runtime of published apps).
+fn new_context(rt: &Runtime) -> rquickjs::Result<Context> {
+    #[cfg(not(feature = "bytecode-only"))]
+    {
+        Context::full(rt)
+    }
+    #[cfg(feature = "bytecode-only")]
+    {
+        use rquickjs::context::intrinsic::{
+            Date, Json, MapSet, Performance, Promise, Proxy, RegExp, TypedArrays, WeakRef,
+        };
+        let ctx = Context::custom::<(
+            Date,
+            RegExp,
+            Json,
+            Proxy,
+            MapSet,
+            TypedArrays,
+            Promise,
+            WeakRef,
+            Performance,
+        )>(rt)?;
+        // SAFETY: a new, live context; rquickjs has no intrinsic for it.
+        ctx.with(|ctx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(ctx.as_raw().as_ptr()) });
+        Ok(ctx)
+    }
+}
+
 /// How a VM is set up.
 #[derive(Debug, Clone, Default)]
 pub struct HostOptions {
@@ -80,6 +112,11 @@ pub struct HostOptions {
     /// Removes `eval` and the function constructors and freezes the shared
     /// prototypes (see `sandbox`). Off for development bundles.
     pub harden: bool,
+    /// The hardening as bytecode ([`crate::compile_harden`]), run instead
+    /// of compiling it: a runtime without QuickJS' parser
+    /// (`bytecode-only`) needs it to harden. Trusted input, like a bundle's
+    /// bytecode: only from the CLI that compiled the app.
+    pub harden_bytecode: Option<std::sync::Arc<Vec<u8>>>,
     /// The UI sets apps import as native modules
     /// (`nsh_ui_mobile::registry()`, served as `nsh/ui/mobile`).
     pub ui_sets: Vec<nsh_core::ui::Registry>,
@@ -108,7 +145,7 @@ impl Host {
         }
         let budget = Budget::new(limits);
         rt.set_interrupt_handler(Some(budget.interrupt_handler(None)));
-        let ctx = Context::full(&rt)?;
+        let ctx = new_context(&rt)?;
         let shared = Rc::new(Shared {
             limits,
             ..Shared::default()
@@ -121,7 +158,11 @@ impl Host {
                 .and_then(|u| url::Url::parse(u).ok());
             install(&ctx, &shared)?;
             if options.harden {
-                sandbox::harden(&ctx)?;
+                match &options.harden_bytecode {
+                    // SAFETY: trusted, per the option's contract.
+                    Some(bytecode) => unsafe { sandbox::harden_from(&ctx, bytecode)? },
+                    None => sandbox::harden(&ctx)?,
+                }
             }
             Ok(())
         })
@@ -1108,7 +1149,20 @@ const report = (v) => text(String(v));
 
     #[test]
     fn hardened_vms_run_no_code_from_strings() {
-        let host = sandboxed(Limits::default());
+        // Hardened from source, and from the bytecode the CLI ships to
+        // runtimes without a parser.
+        let from_bytecode = Host::with_options(HostOptions {
+            harden: true,
+            harden_bytecode: Some(crate::compile_harden().unwrap().into()),
+            ..HostOptions::default()
+        })
+        .unwrap();
+        for host in [sandboxed(Limits::default()), from_bytecode] {
+            hardened_vm_runs_no_code_from_strings(&host);
+        }
+    }
+
+    fn hardened_vm_runs_no_code_from_strings(host: &Host) {
         host.eval_source(&(REPORT.to_owned()
             + r#"
             const results = [];
@@ -1143,7 +1197,7 @@ const report = (v) => text(String(v));
             "#))
         .unwrap();
         assert_eq!(
-            reported(&host),
+            reported(host),
             [
                 "ReferenceError,TypeError,TypeError,TypeError,TypeError,TypeError,TypeError,ran,ran,ran,TypeError"
             ]

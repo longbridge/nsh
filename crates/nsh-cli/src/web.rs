@@ -9,8 +9,9 @@
 //! manifest.webmanifest             name, icons, colors (installing it as an app)
 //! nsh.<digest>.js                  the DOM runtime
 //! nsh.<digest>.wasm                the engine, the core, the components and QuickJS
-//! app.<digest>.js                  the app's bundle
-//! chunks/<name>.<digest>.js        what `import()` loads, fetched when first imported
+//! app.<digest>.nshc                the app's bundle, compiled to QuickJS bytecode
+//! harden.<digest>.nshc             the sandbox's hardening, compiled likewise
+//! chunks/<name>.<digest>.nshc      what `import()` loads, fetched when first imported
 //! assets/<path>.<digest>.<ext>     `asset:/<path>`, loaded from its URL when used
 //! icons/<size>.<digest>.png        favicon, apple-touch-icon, the manifest's
 //! ```
@@ -20,6 +21,11 @@
 //! page. The page names the others and maps `asset:/<path>` to its file;
 //! fonts are fetched before the app starts, as text is measured with them
 //! synchronously.
+//!
+//! The app ships compiled: the runtime of published apps has no QuickJS
+//! parser (`runtime::WebKind::Release`), and starts sooner without
+//! compiling. The bytecode is the CLI's (`nsh_js::BYTECODE_VERSION`),
+//! which the web build's 32-bit QuickJS reads as the 64-bit hosts do.
 
 use std::{
     fmt::Write as _,
@@ -48,10 +54,9 @@ const DEV_PAGE: &str = include_str!("web/dev.html");
 /// The UI sets the web runtime serves.
 const UI_SETS: &[&str] = &["nsh/ui/mobile"];
 
-/// How the app's code ships: the one place that decides it. The web runtime
-/// runs JS source (`nsh_start`); bytecode would have to be compiled for its
-/// 32-bit QuickJS.
-const CODE: (&str, &str) = ("app", "js");
+/// The app's code: its bundle compiled to bytecode (`nsh_start_bytecode`),
+/// the only form the runtime of published apps runs.
+const CODE: (&str, &str) = ("app", "nshc");
 
 /// Hex digits of the SHA-256 in content-addressed names.
 const DIGEST_LEN: usize = 10;
@@ -83,7 +88,7 @@ pub(crate) fn package(
             missing.join(", ")
         );
     }
-    let runtime = runtime::web(true)?.context("no web runtime")?;
+    let runtime = runtime::web(runtime::WebKind::Release, true)?.context("no web runtime")?;
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
     if dir.exists() {
@@ -100,12 +105,16 @@ pub(crate) fn package(
         "nsh.wasm",
         &fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?,
     )?;
-    let code = site.add(&format!("{}.{}", CODE.0, CODE.1), built.code.as_bytes())?;
+    let code = site.add(&format!("{}.{}", CODE.0, CODE.1), &built.bytecode)?;
+    // The runtime cannot compile its hardening: it comes compiled by the
+    // QuickJS that compiled the app.
+    let harden = site.add("harden.nshc", &nsh_js::compile_harden()?)?;
     // Chunk id -> URL: the page hands the map to the runtime, which fetches
     // a chunk the first time the app imports it (nothing is preloaded).
     let mut chunks = serde_json::Map::new();
     for chunk in &built.chunks {
-        let url = site.add(&format!("chunks/{}", chunk.id), chunk.code.as_bytes())?;
+        let stem = chunk.id.strip_suffix(".js").unwrap_or(&chunk.id);
+        let url = site.add(&format!("chunks/{stem}.{}", CODE.1), &chunk.bytecode)?;
         chunks.insert(chunk.id.clone(), url.into());
     }
     let mut assets = serde_json::Map::new();
@@ -131,7 +140,7 @@ pub(crate) fn package(
     let app = serde_json::json!({
         "wasm": wasm,
         "code": code,
-        "format": "source",
+        "harden": harden,
         "capabilities": built.capabilities_json(),
         "assets": assets,
         "fonts": fonts,
@@ -145,6 +154,7 @@ pub(crate) fn package(
         runtime: &js,
         wasm: &wasm,
         code: &code,
+        harden: &harden,
         fonts: &fonts
             .iter()
             .map(|path| assets[path].as_str().unwrap_or_default().to_owned())
@@ -467,6 +477,7 @@ struct PageParts<'a> {
     runtime: &'a str,
     wasm: &'a str,
     code: &'a str,
+    harden: &'a str,
     /// URLs of the fonts fetched before the app starts.
     fonts: &'a [String],
     /// What the page's script reads.
@@ -521,7 +532,7 @@ fn page(parts: &PageParts<'_>) -> String {
         let _ = writeln!(head, "<link rel=\"apple-touch-icon\" href=\"{touch}\">");
     }
     // The script asks for these only once the runtime has loaded.
-    for url in [parts.wasm, parts.code]
+    for url in [parts.wasm, parts.code, parts.harden]
         .into_iter()
         .chain(parts.fonts.iter().map(String::as_str))
     {
@@ -603,14 +614,15 @@ mod tests {
 
     #[test]
     fn the_page_names_the_files_and_cannot_be_broken_out_of() {
-        let app = serde_json::json!({ "code": "app.1.js", "x": "</script><b>" });
+        let app = serde_json::json!({ "code": "app.1.nshc", "x": "</script><b>" });
         let html = page(&PageParts {
             name: "A <b> & \"c\"",
             appearance: Appearance::System,
             icons: &Icons::default(),
             runtime: "nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
-            code: "app.1.js",
+            code: "app.1.nshc",
+            harden: "harden.2.nshc",
             fonts: &["assets/f.1.ttf".to_owned()],
             app: &app,
             connect: Some("'self' api.example.com:*"),
@@ -618,6 +630,7 @@ mod tests {
         assert!(html.contains("<title>A &lt;b&gt; &amp; &quot;c&quot;</title>"));
         assert!(html.contains("from \"./nsh.0123456789.js\""));
         assert!(html.contains("<link rel=\"preload\" href=\"assets/f.1.ttf\""));
+        assert!(html.contains("<link rel=\"preload\" href=\"harden.2.nshc\""));
         assert!(html.contains("media=\"(prefers-color-scheme: dark)\""));
         assert!(!html.contains("</script><b>"));
         assert!(!html.contains("{{"), "{html}");

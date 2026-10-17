@@ -51,6 +51,7 @@ mod imp {
             let options = HostOptions {
                 limits,
                 harden: bundle.policy.harden,
+                harden_bytecode: bundle.harden_bytecode.clone(),
                 ui_sets: ui_sets.to_vec(),
                 base_url: bundle.base_url.clone(),
             };

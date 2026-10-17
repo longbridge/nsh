@@ -29,8 +29,9 @@
 <noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif">{{title}} needs JavaScript.</div></noscript>
 <script type="module">
   // Written by `nsh package --target web`: loads the runtime, the app's
-  // code and its fonts in parallel, then runs the app as a release; a
-  // chunk's own fonts come with it.
+  // code (bytecode, with the hardening it runs first) and its fonts in
+  // parallel, then runs the app as a release; a chunk's own fonts come
+  // with it.
   import { createPlayer } from "./{{runtime}}";
 
   const app = {{app}};
@@ -66,7 +67,7 @@
   };
 
   try {
-    const [loaded, code] = await Promise.all([
+    const [loaded, code, harden] = await Promise.all([
       createPlayer(document.getElementById("app"), {
         wasm: app.wasm,
         assets: app.assets,
@@ -78,12 +79,13 @@
           if (!player || player.views.size <= 1) fail("This app could not start.", message);
         },
       }),
-      get(app.code).then((r) => r.text()),
+      get(app.code).then((r) => r.arrayBuffer()),
+      get(app.harden).then((r) => r.arrayBuffer()),
       ...app.fonts.map(loadFont),
     ]);
     player = loaded;
     status.hidden = true;
-    player.run(code, { release: true, capabilities: app.capabilities ?? "", chunks: app.chunks });
+    player.run(code, { release: true, harden, capabilities: app.capabilities ?? "", chunks: app.chunks });
   } catch (err) {
     fail("This app could not be loaded.", String(err?.message ?? err));
   }

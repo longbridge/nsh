@@ -38,8 +38,8 @@ use nsh_core::{
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
-    App, Assets, Bundle, Chunk, ColorScheme, EngineConfig, EngineControl, Environment, HotUpdate,
-    Idiom, Limits, LocalEngine, MountSink, Os, Policy,
+    App, Assets, Bundle, BundleCode, Chunk, ColorScheme, EngineConfig, EngineControl, Environment,
+    HotUpdate, Idiom, Limits, LocalEngine, MountSink, Os, Policy,
 };
 
 pub use crate::net::{
@@ -83,6 +83,8 @@ struct BundleOptions {
     capabilities: Option<String>,
     /// The bundle's source map (JSON).
     source_map: Option<String>,
+    /// The hardening as bytecode ([`nsh_bundle_harden`]).
+    harden: Option<Vec<u8>>,
 }
 
 struct Running {
@@ -312,6 +314,34 @@ pub unsafe extern "C" fn nsh_start(
     dark: u32,
     pixel_ratio: f32,
 ) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let code = unsafe { string(ptr, len) };
+    start(BundleCode::Source(code), width, height, dark, pixel_ratio)
+}
+
+/// [`nsh_start`] for a bundle compiled to QuickJS bytecode (`bundle.nshc`
+/// from `nsh build`; what `nsh package --target web` ships). The runtime of
+/// published apps (feature `bytecode-only`) runs nothing else.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`] holding bytecode the CLI
+/// of this runtime's `nsh_js::BYTECODE_VERSION` wrote: QuickJS trusts it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_start_bytecode(
+    ptr: *const u8,
+    len: usize,
+    width: f32,
+    height: f32,
+    dark: u32,
+    pixel_ratio: f32,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let code = unsafe { bytes(ptr, len) }.to_vec();
+    start(BundleCode::Bytecode(code), width, height, dark, pixel_ratio)
+}
+
+fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32) -> f64 {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         let _ = log::set_logger(&LOGGER);
@@ -320,8 +350,6 @@ pub unsafe extern "C" fn nsh_start(
             ffi::report_error(&format!("nsh panicked: {info}"));
         }));
     });
-    // SAFETY: guaranteed by the caller.
-    let code = unsafe { string(ptr, len) };
     APP.with(|a| a.borrow_mut().take());
     let environment = environment(width, height, dark != 0, pixel_ratio);
     let options = OPTIONS.with(|o| std::mem::take(&mut *o.borrow_mut()));
@@ -330,7 +358,16 @@ pub unsafe extern "C" fn nsh_start(
     } else {
         Policy::development()
     };
-    let mut bundle = Bundle::source(code).with_policy(policy);
+    let mut bundle = match code {
+        BundleCode::Source(code) => Bundle::source(code),
+        // SAFETY: trusted, per `nsh_start_bytecode`'s contract.
+        BundleCode::Bytecode(bytes) => unsafe { Bundle::bytecode(bytes) },
+    }
+    .with_policy(policy);
+    if let Some(harden) = options.harden {
+        // SAFETY: trusted, per `nsh_bundle_harden`'s contract.
+        bundle = unsafe { bundle.with_harden_bytecode(harden) };
+    }
     if let Some(map) = options.source_map {
         bundle = bundle.with_source_map(map);
     }
@@ -416,8 +453,25 @@ pub unsafe extern "C" fn nsh_bundle_options(
             release: release != 0,
             capabilities: (!capabilities.is_empty()).then_some(capabilities),
             source_map: (!map.is_empty()).then_some(map),
+            harden: None,
         }
     });
+}
+
+/// Sets the hardening the next [`nsh_start`] / [`nsh_start_bytecode`] of a
+/// release ([`nsh_bundle_options`]) runs, as bytecode
+/// (`nsh_js::compile_harden`, which `nsh package` ships with the app): the
+/// runtime of published apps cannot compile it.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`] holding what the CLI of
+/// this runtime's `nsh_js::BYTECODE_VERSION` compiled.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_bundle_harden(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let harden = unsafe { bytes(ptr, len) }.to_vec();
+    OPTIONS.with(|o| o.borrow_mut().harden = Some(harden));
 }
 
 /// Applies a development update (a script from the dev server's hot
@@ -462,12 +516,14 @@ pub extern "C" fn nsh_hot_failed() -> u32 {
 }
 
 /// Hands over chunk `id` of a split bundle that the page fetched after
-/// `load_chunk` (`ok` 1: `code` is its source; 0: `code` says why it could
-/// not be loaded). Returns the pump delay.
+/// `load_chunk` (`ok` 1: `code` is its source; 2: its bytecode, from the
+/// CLI as for [`nsh_start_bytecode`]; 0: `code` says why it could not be
+/// loaded). Returns the pump delay.
 ///
 /// # Safety
 ///
-/// Both ranges are memory from [`nsh_alloc`].
+/// Both ranges are memory from [`nsh_alloc`]; bytecode (`ok` 2) is
+/// trusted as in [`nsh_start_bytecode`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_chunk(
     id: *const u8,
@@ -477,10 +533,19 @@ pub unsafe extern "C" fn nsh_chunk(
     ok: u32,
 ) -> f64 {
     // SAFETY: guaranteed by the caller.
-    let (id, code) = unsafe { (string(id, id_len), string(code, code_len)) };
-    send(|app| match ok {
-        0 => app.control.chunk_failed(id, code),
-        _ => app.control.chunk_loaded(Chunk::source(id, code)),
+    let (id, code) = unsafe { (string(id, id_len), bytes(code, code_len)) };
+    let chunk = match ok {
+        0 => Err(String::from_utf8_lossy(code).into_owned()),
+        // SAFETY: trusted, per the contract.
+        2 => Ok(unsafe { Chunk::bytecode(id.clone(), code.to_vec()) }),
+        _ => Ok(Chunk::source(
+            id.clone(),
+            String::from_utf8_lossy(code).into_owned(),
+        )),
+    };
+    send(|app| match chunk {
+        Ok(chunk) => app.control.chunk_loaded(chunk),
+        Err(why) => app.control.chunk_failed(id, why),
     })
 }
 

@@ -187,7 +187,7 @@ pub(crate) fn run(
 /// LAN address, on a phone) runs the app until the session ends.
 fn run_web(entry: &Path, port: u16, release: bool) -> anyhow::Result<()> {
     // Built first in a checkout: the session serves the runtime it finds.
-    crate::runtime::web(true)?.context("no web runtime")?;
+    crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
     let session = DevSession::start(entry, port, release)?;
     session.print_urls();
     crate::web::open_browser(&session.web_url());

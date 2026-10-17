@@ -14,10 +14,10 @@
 //! nothing in JS is trusted: limits and checks are enforced here, in Rust,
 //! never in JS.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, ffi::c_int, rc::Rc};
 
 use nsh_core::{js::Limits, time::Instant};
-use rquickjs::Ctx;
+use rquickjs::{Ctx, qjs};
 
 /// The kind of call into JS, which decides its budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,4 +184,81 @@ const HARDEN: &str = r#"
 /// bundle.
 pub(crate) fn harden(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     ctx.eval::<(), _>(HARDEN)
+}
+
+/// The hardening compiled to bytecode ([`harden_from`]), for runtimes
+/// without QuickJS' parser (`bytecode-only`), which cannot compile it.
+/// The CLI makes it when it compiles the app, so it always matches the
+/// QuickJS the app's bytecode is for ([`crate::BYTECODE_VERSION`]).
+pub fn compile_harden() -> Result<Vec<u8>, crate::JsError> {
+    let rt = rquickjs::Runtime::new()?;
+    let ctx = rquickjs::Context::full(&rt)?;
+    ctx.with(|ctx| {
+        let raw = ctx.as_raw().as_ptr();
+        let source = std::ffi::CString::new(HARDEN).expect("no NUL in the hardening");
+        // SAFETY: a live context; the source is NUL-terminated; the
+        // function value is freed and the written buffer copied and freed.
+        unsafe {
+            // As `ctx.eval` runs it: a strict global script.
+            let function = qjs::JS_Eval(
+                raw,
+                source.as_ptr(),
+                HARDEN.len() as _,
+                c"harden.js".as_ptr(),
+                (qjs::JS_EVAL_TYPE_GLOBAL
+                    | qjs::JS_EVAL_FLAG_STRICT
+                    | qjs::JS_EVAL_FLAG_COMPILE_ONLY) as c_int,
+            );
+            if qjs::JS_IsException(function) {
+                return Err(crate::JsError::from_engine(
+                    &ctx,
+                    rquickjs::Error::Exception,
+                ));
+            }
+            let mut len = 0;
+            let flags = qjs::JS_WRITE_OBJ_BYTECODE
+                | qjs::JS_WRITE_OBJ_STRIP_SOURCE
+                | qjs::JS_WRITE_OBJ_STRIP_DEBUG;
+            let buf = qjs::JS_WriteObject(raw, &mut len, function, flags as c_int);
+            qjs::JS_FreeValue(raw, function);
+            if buf.is_null() {
+                return Err(crate::JsError::from_engine(
+                    &ctx,
+                    rquickjs::Error::Exception,
+                ));
+            }
+            let bytes = std::slice::from_raw_parts(buf, len as usize).to_vec();
+            qjs::js_free(raw, buf.cast());
+            Ok(bytes)
+        }
+    })
+}
+
+/// [`harden`] from the bytecode [`compile_harden`] made.
+///
+/// # Safety
+///
+/// `bytecode` comes from [`compile_harden`] of the same QuickJS build:
+/// QuickJS does not validate it.
+pub(crate) unsafe fn harden_from(ctx: &Ctx<'_>, bytecode: &[u8]) -> rquickjs::Result<()> {
+    let raw = ctx.as_raw().as_ptr();
+    // SAFETY: a live context; trusted bytecode per the contract; the
+    // function value is consumed by `JS_EvalFunction`, its result freed.
+    unsafe {
+        let function = qjs::JS_ReadObject(
+            raw,
+            bytecode.as_ptr(),
+            bytecode.len() as _,
+            qjs::JS_READ_OBJ_BYTECODE as c_int,
+        );
+        if qjs::JS_IsException(function) {
+            return Err(rquickjs::Error::Exception);
+        }
+        let result = qjs::JS_EvalFunction(raw, function);
+        if qjs::JS_IsException(result) {
+            return Err(rquickjs::Error::Exception);
+        }
+        qjs::JS_FreeValue(raw, result);
+    }
+    Ok(())
 }

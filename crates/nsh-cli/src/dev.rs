@@ -53,7 +53,7 @@ impl DevSession {
         server.install_commands(install_commands(&src_dir));
         // Browsers too, when there is a web runtime to serve (`nsh run
         // --target web` builds it in a checkout).
-        if let Ok(Some(runtime)) = crate::runtime::web(false) {
+        if let Ok(Some(runtime)) = crate::runtime::web(crate::runtime::WebKind::Dev, false) {
             let (page, files) = crate::web::dev_host(&runtime)?;
             server.serve_web(page, files);
         }

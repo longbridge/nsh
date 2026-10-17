@@ -2366,6 +2366,7 @@ dependencies = [
  "nsh-bundler",
  "nsh-core",
  "nsh-engine",
+ "nsh-js",
  "nsh-ui-mobile",
  "rquickjs",
  "rustc-hash",

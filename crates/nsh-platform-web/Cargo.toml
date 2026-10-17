@@ -13,6 +13,10 @@ workspace = true
 # The playground's build (`nsh-playground.wasm`): also compiles TSX in the
 # page (`nsh_compile`; nsh's JSX compiler, no rolldown), about 3 MB more.
 compiler = ["dep:nsh-bundler"]
+# The runtime of published apps (`nsh.wasm`): QuickJS without its parser
+# and compiler, 0.18 MB smaller; it runs bytecode only (`nsh_start_bytecode`,
+# bytecode chunks). The player and the dev host without it run source.
+bytecode-only = ["nsh-js/bytecode-only"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -22,6 +26,7 @@ crate-type = ["cdylib", "rlib"]
 nsh-core.workspace = true
 nsh-animation.workspace = true
 nsh-engine = { workspace = true, features = ["js"] }
+nsh-js.workspace = true
 nsh-ui-mobile.workspace = true
 nsh-bundler = { workspace = true, optional = true }
 # QuickJS without its internal `assert`s (NDEBUG): 37 KB smaller and a

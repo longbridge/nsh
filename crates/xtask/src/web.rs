@@ -1,12 +1,12 @@
 //! The web runtime and the website's demos: `nsh.wasm` (`nsh-platform-web`)
 //! plus its JS runtime and player page, each demo of `website/demos/*.tsx`
-//! bundled by `nsh build`, and the gallery (`examples/gallery`) published
+//! compiled by `nsh build`, and the gallery (`examples/gallery`) published
 //! with `nsh package --target web`, the website's showcase.
 //!
 //! ```text
-//! <out>/index.html    the player: runs demos/<name>.js for `#<name>`
+//! <out>/index.html    the player: runs demos/<name>.nshc for `#<name>`
 //! <out>/nsh-playground.wasm   the engine plus the TSX compiler (the playground)
-//! <out>/demos/<name>.js
+//! <out>/demos/<name>.nshc     a demo compiled to bytecode
 //! <out>/gallery/      the gallery as `nsh package --target web` writes it,
 //!                     with the runtime the player loads too:
 //! <out>/gallery/nsh.<digest>.js     the DOM runtime (minified)
@@ -14,7 +14,9 @@
 //! ```
 //!
 //! The player and the gallery share one runtime, so the site carries one
-//! `nsh.wasm`: the player's page is written with the gallery's file names.
+//! `nsh.wasm`, the runtime of published apps (no QuickJS parser: it runs
+//! bytecode only): the player's page is written with the gallery's file
+//! names. Only the playground, which compiles in the page, has a parser.
 //! (`astro dev` serves the player from its sources instead,
 //! `website/src/lib/play-dev.js`.)
 
@@ -34,18 +36,7 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
     let root = android::root();
     // Relative to the workspace, wherever `cargo xtask` runs from.
     let out = root.join(out);
-    cargo(
-        &[
-            "build",
-            "--profile",
-            "web",
-            "-p",
-            "nsh-platform-web",
-            "--target",
-            WASM,
-        ],
-        "nsh.wasm",
-    )?;
+    // `nsh.wasm` is built by `nsh package` (the gallery's, below).
     // Its own target directory: switching the feature would rebuild the
     // other one every time.
     cargo(
@@ -104,9 +95,10 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
             .arg(&path))
         .with_context(|| format!("bundling {name}"))?;
         copy(
-            &dir.join("bundle.js"),
-            &out.join("demos").join(format!("{name}.js")),
+            &dir.join("bundle.nshc"),
+            &out.join("demos").join(format!("{name}.nshc")),
         )?;
+        let _ = fs::remove_file(out.join("demos").join(format!("{name}.js")));
         demos_built += 1;
     }
     if demos.join("assets").is_dir() {

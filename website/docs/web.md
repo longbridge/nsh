@@ -54,10 +54,11 @@ page and files named after their content.
 |---|---|
 | `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
-| `nsh.<digest>.js` | The DOM runtime, minified (42 KB, 12.6 KB with brotli) |
-| `nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli) |
-| `app.<digest>.js` | The app, built as `nsh build --release --split` builds it |
-| `chunks/<name>.<digest>.js` | What `import()` loads, downloaded the first time it is imported ([split bundles](#split-bundles)) |
+| `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
+| `nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS without its compiler (about 3.5 MB, 1.2 MB gzipped, 0.93 MB with brotli) |
+| `app.<digest>.nshc` | The app, built as `nsh build --release --split` builds it, compiled to QuickJS bytecode: nothing is compiled in the browser, so it starts sooner |
+| `harden.<digest>.nshc` | The [sandbox's](./sandbox-and-capabilities.md) hardening, compiled likewise (1.4 KB) |
+| `chunks/<name>.<digest>.nshc` | What `import()` loads, compiled likewise, downloaded the first time it is imported ([split bundles](#split-bundles)) |
 | `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the code that registers them runs, as text is measured with them: before the app starts, or with the chunk that imports them) |
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
 
@@ -117,11 +118,11 @@ The output directory holds:
 
 | File | What it is |
 |---|---|
-| `gallery/nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli; built with the `web` profile), shared by the player and the gallery |
+| `gallery/nsh.<digest>.wasm` | The runtime of published apps (about 3.5 MB, 1.2 MB gzipped, 0.93 MB with brotli; built with the `web` profile), shared by the player and the gallery |
 | `nsh-playground.wasm` | The same plus nsh's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
 | `gallery/nsh.<digest>.js` | The DOM runtime (minified): loads the wasm, applies batches, turns input into events |
-| `index.html` | A player page: runs `demos/<name>.js` for `#<name>` |
-| `demos/<name>.js` | Each demo bundled by `nsh build --release` |
+| `index.html` | A player page: runs `demos/<name>.nshc` for `#<name>` |
+| `demos/<name>.nshc` | Each demo compiled by `nsh build --release` |
 | `gallery/` | The gallery app published with `nsh package --target web`, shown on the [Gallery](/gallery) page |
 
 Serve the directory with any static server (it needs the `application/wasm` MIME type for streaming compilation) and open `index.html#counter`.
@@ -136,7 +137,7 @@ The compiler is also a Rust function, `nsh_bundler::compile_module(name, source,
 
 ## Embed it in a page
 
-`nsh.js` is an ES module. `createPlayer` loads the runtime into a container; `run` starts a bundle (the `bundle.js` that `nsh build` writes):
+`nsh.js` is an ES module. `createPlayer` loads the runtime into a container; `run` starts a bundle that `nsh build` writes: `bundle.nshc`, its bytecode, as bytes, or `bundle.js` as a string. The runtime `nsh package --target web` ships (`nsh.wasm`) has no JavaScript compiler and runs bytecode only; the development runtime (`nsh-dev.wasm` in the distribution) runs both:
 
 ```js
 import { createPlayer } from "./nsh.js";
@@ -148,10 +149,10 @@ const player = await createPlayer(document.querySelector("#phone"), {
   // idiom: "phone",        // force "phone", "pad" or "desktop"; otherwise the pointer and the size decide
   // history: false,        // screens and modals as browser history entries; by default only when the app is the page, not in an iframe
 });
-player.run(await (await fetch("./bundle.js")).text());
+player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 ```
 
-`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, and `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`; `player.run(code, { release: true, capabilities })` runs a bundle as a release under the capabilities it declares (the default is development settings). The page `nsh package --target web` writes uses all three.
+`assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, and `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`; `player.run(code, { release: true, capabilities })` runs a bundle as a release under the capabilities it declares (the default is development settings); with bytecode, a release also takes the hardening's bytecode (`harden`, the bytes of `harden.<digest>.nshc`). The page `nsh package --target web` writes uses all of them.
 
 `run(code, { chunks, chunkBase })` also takes where the chunks of a [split bundle](#split-bundles) are.
 
@@ -195,7 +196,7 @@ The page reports the rest of the environment, and keeps it current:
 
 ## Split bundles
 
-A web app does not need to download all of its code before the first screen shows. `nsh package --target web` publishes apps split, with each chunk as `chunks/<name>.<digest>.js` and the page mapping chunks to those files. To split a bundle yourself, `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
+A web app does not need to download all of its code before the first screen shows. `nsh package --target web` publishes apps split, with each chunk as `chunks/<name>.<digest>.nshc` and the page mapping chunks to those files (a bundle run as bytecode loads its chunks as bytecode: `Screen.nshc` next to `Screen.js`). To split a bundle yourself, `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
 
 ```sh
 nsh build --release --split -o site/app

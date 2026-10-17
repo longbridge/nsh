@@ -1,8 +1,9 @@
 // `astro dev` only: serves the player from its sources, so edits show on
-// reload without `cargo xtask web` again. A demo (`play/demos/<name>.js`) is
-// bundled from `demos/<name>.tsx` on request by the nsh CLI the player build
+// reload without `cargo xtask web` again. A demo (`play/demos/<name>.nshc`) is
+// compiled from `demos/<name>.tsx` on request by the nsh CLI the player build
 // made; `nsh.js` and `index.html` come from `crates/nsh-platform-web/web`.
-// `nsh.wasm` is the one built by `bun run dev` (rebuilt on the next start),
+// `nsh.wasm` is the one built by `bun run dev` (rebuilt on the next start:
+// the runtime of published apps, `nsh.wasm` next to the build's output),
 // read from the target directory (the built site's player loads the
 // gallery's copy, `play/gallery/nsh.<digest>.wasm`).
 import { spawnSync } from 'node:child_process';
@@ -38,11 +39,11 @@ export function playDev(base) {
           return send(rest.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8', readFileSync(file));
         }
         if (rest === 'nsh.wasm') {
-          const file = join(root, 'target/wasm32-unknown-unknown/web/nsh_platform_web.wasm');
+          const file = join(root, 'target/wasm32-unknown-unknown/web/nsh.wasm');
           if (!existsSync(file)) return next();
           return send('application/wasm', readFileSync(file));
         }
-        const demo = /^demos\/([\w-]+)\.js$/.exec(rest);
+        const demo = /^demos\/([\w-]+)\.nshc$/.exec(rest);
         if (!demo || !existsSync(nsh)) return next();
         const entry = join(website, 'demos', `${demo[1]}.tsx`);
         if (!existsSync(entry)) return next();
@@ -53,7 +54,7 @@ export function playDev(base) {
             res.statusCode = 500;
             return send('text/plain; charset=utf-8', built.stderr || built.stdout || 'nsh build failed');
           }
-          return send('text/javascript; charset=utf-8', readFileSync(join(out, 'bundle.js')));
+          return send('application/octet-stream', readFileSync(join(out, 'bundle.nshc')));
         } finally {
           rmSync(out, { recursive: true, force: true });
         }
