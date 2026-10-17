@@ -37,12 +37,21 @@ const activeSection = rest.replace(/^zh-CN(\/|$)/, '').split('/')[0];
       </summary>
       <div class="site-nav__projects-menu">
         <a href={home} class="is-current" aria-current="true">
-          <strong>Native Shell</strong>
-          <span>{isZh ? '由 AI 生成、原生渲染的 UI' : 'AI-generated UI, rendered natively'}</span>
+          <Logo class="site-nav__project-logo" />
+          <div class="site-nav__project-copy">
+            <strong>Native Shell</strong>
+            <span>{isZh ? '由 AI 生成、原生渲染的 UI' : 'AI-generated UI, rendered natively'}</span>
+          </div>
         </a>
         <a href={GPUI_KIT_URL} target="_blank" rel="noopener noreferrer">
-          <strong>GPUI Kit</strong>
-          <span>{isZh ? 'GPUI 桌面应用的组件与工具集' : 'Components and tools for GPUI desktop apps'}</span>
+          <svg class="site-nav__project-logo site-nav__gpui-kit-logo" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M4 4h24v5H10v14h18v5H4V4Z" fill="currentColor" />
+            <path d="M16 13h12v10h-5v-5h-7v-5Z" fill="#3B82F6" />
+          </svg>
+          <div class="site-nav__project-copy">
+            <strong>GPUI Kit</strong>
+            <span>{isZh ? 'GPUI 桌面应用的组件与工具集' : 'Components and tools for GPUI desktop apps'}</span>
+          </div>
         </a>
       </div>
     </details>

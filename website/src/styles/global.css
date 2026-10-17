@@ -395,9 +395,11 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
 }
 .site-nav__projects-menu a {
-  display: flex; flex-direction: column; gap: 0.1rem; padding: 0.5rem 0.65rem; border-radius: 8px;
+  display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.65rem; border-radius: 8px;
   color: var(--foreground); text-decoration: none; font-size: 0.8125rem;
 }
+.site-nav__project-logo { display: block; flex-shrink: 0; width: 1.75rem; height: 1.75rem; }
+.site-nav__project-copy { display: flex; flex-direction: column; gap: 0.1rem; }
 .site-nav__projects-menu a span { color: var(--muted-foreground); font-size: 0.75rem; }
 .site-nav__projects-menu a:hover, .site-nav__projects-menu a.is-current { background: var(--nav-hover); }
 
