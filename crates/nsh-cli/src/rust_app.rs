@@ -7,8 +7,8 @@
 //! The prebuilt toolchain cannot know such components, so `nsh` builds the
 //! app its own: a Cargo workspace in `.nsh/rust` with the command line
 //! (`nsh_cli::main_with` of the mobile UI and the app's set), the iOS,
-//! macOS, Linux and Windows development hosts and release runners, and the
-//! Android library,
+//! macOS, Linux, Windows and GPUI development hosts and release runners,
+//! and the Android library,
 //! each linking the app's crate. A command on the app runs again in the
 //! app's command line ([`reexec`]), which builds the hosts it needs
 //! ([`RustApp::runtime`], [`RustApp::android`]) instead of taking the prebuilt
@@ -125,7 +125,7 @@ pub(crate) fn reexec(entry: Option<&Path>) -> anyhow::Result<Option<std::process
     let mut restarted = false;
     loop {
         let what = format!("the Rust crate {}", app.package);
-        let cli = match app.build(&app.bin("cli"), None, false, &[], &what) {
+        let cli = match app.build(&app.workspace, &app.bin("cli"), None, false, &[], &what) {
             Ok(cli) => cli,
             Err(e) if restarted => {
                 app.wait_after(&e)?;
@@ -298,6 +298,9 @@ impl RustApp {
              [workspace]
 resolver = \"3\"
 members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"linux-host\", \"linux-app\", \"windows-host\", \"windows-app\", \"android\"]
+# GPUI's hosts are a workspace of their own, written when they are built
+# (`RustApp::gpui_workspace`): other builds never resolve GPUI's crates.
+exclude = [\"gpui\"]
 ",
         )?;
         write(
@@ -312,7 +315,9 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
         // The same versions as nsh's own build.
         let lock = ws.join("Cargo.lock");
         if !lock.exists() {
-            fs::copy(self.source.join("Cargo.lock"), &lock).context("copy nsh's Cargo.lock")?;
+            // The GPUI workspace's own lock (`crates/gpui`).
+            fs::copy(self.source.join("crates/gpui/Cargo.lock"), &lock)
+                .context("copy the GPUI workspace's Cargo.lock")?;
         }
         write(
             &ws.join("cli/Cargo.toml"),
@@ -343,59 +348,7 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
             ("windows-host", "nsh-windows-host", "development host"),
             ("windows-app", "nsh-windows-app", "release runner"),
         ] {
-            let (os, name, platform, exit) = if dir.starts_with("ios") {
-                ("ios", "iOS", "nsh-platform-ios", "")
-            } else if dir.starts_with("macos") {
-                (
-                    "macos",
-                    "macOS",
-                    "nsh-platform-macos",
-                    " -> std::process::ExitCode",
-                )
-            } else if dir.starts_with("windows") {
-                (
-                    "windows",
-                    "Windows",
-                    "nsh-platform-windows",
-                    " -> std::process::ExitCode",
-                )
-            } else {
-                (
-                    "linux",
-                    "Linux",
-                    "nsh-platform-linux",
-                    " -> std::process::ExitCode",
-                )
-            };
-            write(
-                &ws.join(dir).join("Cargo.toml"),
-                &format!(
-                    "{}\n[[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {}\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
-                     [target.'cfg(target_os = \"{os}\")'.dependencies]\n{platform} = {}\n",
-                    package(dir),
-                    self.bin(dir),
-                    src(lib),
-                    src("nsh-core"),
-                    src("nsh-ui-mobile"),
-                    src(platform),
-                ),
-            )?;
-            let lib = lib.replace('-', "_");
-            let platform = platform.replace('-', "_");
-            // A windowed program: no console opens with the app.
-            let subsystem = if dir == "windows-app" {
-                "\n#![cfg_attr(windows, windows_subsystem = \"windows\")]\n"
-            } else {
-                ""
-            };
-            write(
-                &ws.join(dir).join("main.rs"),
-                &format!(
-                    "//! The {name} {what} with the mobile UI and the app's Rust components.\n{subsystem}\n\
-                     fn main(){exit} {{\n    #[cfg(target_os = \"{os}\")]\n    {platform}::set_ui_sets({sets});\n    {lib}::main()\n}}\n{}",
-                    app_set(&format!("#[cfg(target_os = \"{os}\")]\n"))
-                ),
-            )?;
+            self.write_host(ws, dir, lib, what)?;
         }
         write(
             &ws.join("android/Cargo.toml"),
@@ -419,18 +372,110 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
         Ok(())
     }
 
+    /// The workspace of the app's GPUI development host and release
+    /// runner (`<workspace>/gpui`), written when one of them is built: GPUI
+    /// pulls in crates (wry, GStreamer, ...) the other targets never need,
+    /// and a member of the main workspace would make every build resolve
+    /// them. It has its own copy of nsh's `Cargo.lock` and shares the
+    /// target directory.
+    fn gpui_workspace(&self) -> anyhow::Result<PathBuf> {
+        let ws = self.workspace.join("gpui");
+        write(
+            &ws.join("Cargo.toml"),
+            "# Generated by nsh for the app's Rust crate (nsh.json \"rust\"): do not edit.\n\
+             [workspace]\nresolver = \"3\"\nmembers = [\"gpui-host\", \"gpui-app\"]\n",
+        )?;
+        let lock = ws.join("Cargo.lock");
+        if !lock.exists() {
+            // The GPUI workspace's own lock (`crates/gpui`).
+            fs::copy(self.source.join("crates/gpui/Cargo.lock"), &lock)
+                .context("copy the GPUI workspace's Cargo.lock")?;
+        }
+        self.write_host(&ws, "gpui-host", "nsh-gpui-host", "development host")?;
+        self.write_host(&ws, "gpui-app", "nsh-gpui-app", "release runner")?;
+        Ok(ws)
+    }
+
+    /// Writes the crate `<ws>/<dir>`: the development host or release runner
+    /// `lib` (`nsh-linux-host`, ...) with the mobile UI and the app's set.
+    fn write_host(&self, ws: &Path, dir: &str, lib: &str, what: &str) -> anyhow::Result<()> {
+        let src = |c: &str| {
+            let path = nsh_crate(&self.source, c);
+            format!("{{ path = {:?} }}", path.to_string_lossy())
+        };
+        let app = format!(
+            "app = {{ package = {:?}, path = {:?} }}",
+            self.package,
+            self.crate_dir.to_string_lossy()
+        );
+        let sets = "vec![nsh_ui_mobile::registry(), app_set()]";
+        let exit = " -> std::process::ExitCode";
+        let (os, name, platform, exit) = if dir.starts_with("ios") {
+            ("target_os = \"ios\"", "iOS", "nsh-platform-ios", "")
+        } else if dir.starts_with("macos") {
+            ("target_os = \"macos\"", "macOS", "nsh-platform-macos", exit)
+        } else if dir.starts_with("windows") {
+            (
+                "target_os = \"windows\"",
+                "Windows",
+                "nsh-platform-windows",
+                exit,
+            )
+        } else if dir.starts_with("gpui") {
+            (
+                "any(target_os = \"linux\", target_os = \"macos\", windows)",
+                "GPUI",
+                "nsh-platform-gpui",
+                exit,
+            )
+        } else {
+            ("target_os = \"linux\"", "Linux", "nsh-platform-linux", exit)
+        };
+        write(
+            &ws.join(dir).join("Cargo.toml"),
+            &format!(
+                "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n{lib} = {}\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
+                 [target.'cfg({os})'.dependencies]\n{platform} = {}\n",
+                self.bin(dir),
+                self.bin(dir),
+                src(lib),
+                src("nsh-core"),
+                src("nsh-ui-mobile"),
+                src(platform),
+            ),
+        )?;
+        let lib = lib.replace('-', "_");
+        let platform = platform.replace('-', "_");
+        // A windowed program: no console opens with the app.
+        let subsystem = if dir == "windows-app" || dir == "gpui-app" {
+            "\n#![cfg_attr(windows, windows_subsystem = \"windows\")]\n"
+        } else {
+            ""
+        };
+        write(
+            &ws.join(dir).join("main.rs"),
+            &format!(
+                "//! The {name} {what} with the mobile UI and the app's Rust components.\n{subsystem}\n\
+                 fn main(){exit} {{\n    #[cfg({os})]\n    {platform}::set_ui_sets({sets});\n    {lib}::main()\n}}\n{}",
+                app_set(&format!("#[cfg({os})]\n"))
+            ),
+        )
+    }
+
     /// The target directory: nsh's own (its dependencies are built there
     /// already).
     fn target_dir(&self) -> PathBuf {
         self.source.join("target")
     }
 
-    /// `cargo build`s package `package` (for `triple`, else the host), the
-    /// step "building <what>", and returns its binary (named as the
-    /// package, with the executable suffix of this machine when built for
-    /// it).
+    /// `cargo build`s package `package` of the workspace `workspace` (for
+    /// `triple`, else the host), the step "building <what>", and returns its
+    /// binary (named as the package, with the executable suffix of this
+    /// machine when built for it).
     fn build(
         &self,
+        workspace: &Path,
         package: &str,
         triple: Option<&str>,
         release: bool,
@@ -444,6 +489,7 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
         };
         let artifact = format!("{package}{suffix}");
         let build = Build {
+            workspace,
             package,
             triple,
             release,
@@ -456,6 +502,7 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
 
     fn build_with(&self, mut cmd: Command, build: &Build<'_>) -> anyhow::Result<PathBuf> {
         let Build {
+            workspace,
             package,
             triple,
             release,
@@ -465,7 +512,7 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
         } = *build;
         cmd.arg("build")
             .arg("--manifest-path")
-            .arg(self.workspace.join("Cargo.toml"))
+            .arg(workspace.join("Cargo.toml"))
             .args(["-p", package])
             .args(extra)
             .env("CARGO_TARGET_DIR", self.target_dir());
@@ -503,11 +550,18 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
             (Platform::MacOs, true) => "macos-app",
             (Platform::Windows, false) => "windows-host",
             (Platform::Windows, true) => "windows-app",
+            (Platform::Gpui, false) => "gpui-host",
+            (Platform::Gpui, true) => "gpui-app",
             (_, false) => "ios-host",
             (_, true) => "ios-app",
         };
         let what = platform.host(runner);
-        self.build(&self.bin(name), platform.triple(), runner, &[], &what)
+        let workspace = match platform {
+            Platform::Gpui => self.gpui_workspace()?,
+            _ => self.workspace.clone(),
+        };
+        let package = self.bin(name);
+        self.build(&workspace, &package, platform.triple(), runner, &[], &what)
     }
 
     /// The Android runtime of the app: the prebuilt runtime's `classes.dex`
@@ -532,6 +586,7 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
             };
             let features: &[&str] = if dev { &["--features", "dev"] } else { &[] };
             let build = Build {
+                workspace: &self.workspace,
                 package: &self.bin("android"),
                 triple: Some(triple),
                 release: !dev,
@@ -551,6 +606,8 @@ members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"
 /// A `cargo build` of a package of the workspace ([`RustApp::build_with`]).
 #[derive(Clone, Copy)]
 struct Build<'a> {
+    /// The workspace it is a package of.
+    workspace: &'a Path,
     package: &'a str,
     /// The target (`None`: the host).
     triple: Option<&'a str>,
@@ -591,6 +648,17 @@ fn install(from: &Path, to: &Path) -> anyhow::Result<()> {
 /// The cargo to run.
 fn cargo() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
+}
+
+/// The directory of nsh's crate `name` in the checkout at `source`: the GPUI
+/// backend's crates are a workspace of their own, in `crates/gpui`.
+fn nsh_crate(source: &Path, name: &str) -> PathBuf {
+    match name {
+        "nsh-platform-gpui" | "nsh-gpui-host" | "nsh-gpui-app" => {
+            source.join("crates/gpui").join(name)
+        }
+        _ => source.join("crates").join(name),
+    }
 }
 
 #[cfg(test)]
@@ -642,6 +710,15 @@ mod tests {
         };
         app.write_workspace().unwrap();
         let read = |file: &str| std::fs::read_to_string(app.workspace.join(file)).unwrap();
+        // GPUI's hosts are written only for a GPUI build, in a workspace of
+        // their own, so other builds never resolve GPUI's crates.
+        let manifest = read("Cargo.toml");
+        assert!(!manifest.contains("gpui-"), "{manifest}");
+        assert!(manifest.contains("exclude = [\"gpui\"]"), "{manifest}");
+        assert!(!app.workspace.join("gpui").exists());
+        assert_eq!(app.gpui_workspace().unwrap(), app.workspace.join("gpui"));
+        assert!(read("gpui/Cargo.toml").contains("members = [\"gpui-host\", \"gpui-app\"]"));
+        assert!(app.workspace.join("gpui/Cargo.lock").exists());
         for (file, cfg) in [
             ("cli/main.rs", ""),
             ("ios-host/main.rs", "#[cfg(target_os = \"ios\")]\n"),
@@ -652,6 +729,14 @@ mod tests {
             ("macos-app/main.rs", "#[cfg(target_os = \"macos\")]\n"),
             ("windows-host/main.rs", "#[cfg(target_os = \"windows\")]\n"),
             ("windows-app/main.rs", "#[cfg(target_os = \"windows\")]\n"),
+            (
+                "gpui/gpui-host/main.rs",
+                "#[cfg(any(target_os = \"linux\", target_os = \"macos\", windows))]\n",
+            ),
+            (
+                "gpui/gpui-app/main.rs",
+                "#[cfg(any(target_os = \"linux\", target_os = \"macos\", windows))]\n",
+            ),
             ("android/lib.rs", "#[cfg(target_os = \"android\")]\n"),
         ] {
             let code = read(file);
@@ -677,6 +762,8 @@ mod tests {
             "macos-app",
             "windows-host",
             "windows-app",
+            "gpui/gpui-host",
+            "gpui/gpui-app",
             "android",
         ] {
             assert!(

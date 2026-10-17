@@ -9,7 +9,9 @@
 /// Runs the release runner (until its window closes).
 #[cfg(target_os = "linux")]
 pub fn main() -> std::process::ExitCode {
-    use nsh_platform_linux::{AppOptions, AppSource, Appearance, AssetBase, Bundle, run_app};
+    use nsh_platform_linux::{
+        AppOptions, AppSource, Appearance, AssetBase, Bundle, Limits, run_app,
+    };
 
     struct Logger;
     impl log::Log for Logger {
@@ -44,6 +46,8 @@ pub fn main() -> std::process::ExitCode {
     };
     let mut options = AppOptions {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
+        // An app on its own, not a module embedded in another app.
+        limits: Limits::standalone_desktop(),
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))

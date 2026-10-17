@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "examples/gallery-rs/native"]
+# The GPUI backend is a workspace of its own (`crates/gpui/Cargo.toml`).
+exclude = ["crates/gpui"]
 # `cargo run` runs the gallery (`crates/xtask/src/run.rs`).
 default-members = ["crates/xtask"]
 
@@ -8,6 +10,11 @@ default-members = ["crates/xtask"]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+homepage = "https://native-shell.com"
+readme = "README.md"
+repository = "https://github.com/longbridge/native-shell"
+# The crates published to crates.io (the libraries embedders and apps depend
+# on) do not inherit this; they set `homepage`, `readme` and `repository` instead.
 publish = false
 
 [workspace.lints.rust]
@@ -16,20 +23,20 @@ unreachable_pub = "deny"
 private_interfaces = "deny"
 
 [workspace.dependencies]
-nsh-animation = { path = "crates/nsh-animation" }
-nsh-core = { path = "crates/nsh-core" }
-nsh-package = { path = "crates/nsh-package" }
-nsh-ui-mobile = { path = "crates/nsh-ui-mobile" }
-nsh-macros = { path = "crates/nsh-macros" }
-nsh-js = { path = "crates/nsh-js" }
-nsh-engine = { path = "crates/nsh-engine", default-features = false }
-nsh-bundler = { path = "crates/nsh-bundler", default-features = false }
-nsh-platform-ios = { path = "crates/nsh-platform-ios", default-features = false }
-nsh-platform-android = { path = "crates/nsh-platform-android", default-features = false }
-nsh-platform-linux = { path = "crates/nsh-platform-linux", default-features = false }
-nsh-platform-macos = { path = "crates/nsh-platform-macos", default-features = false }
-nsh-platform-windows = { path = "crates/nsh-platform-windows", default-features = false }
-nsh-dev = { path = "crates/nsh-dev" }
+nsh-animation = { version = "0.1.0", path = "crates/nsh-animation" }
+nsh-core = { version = "0.1.0", path = "crates/nsh-core" }
+nsh-package = { version = "0.1.0", path = "crates/nsh-package" }
+nsh-ui-mobile = { version = "0.1.0", path = "crates/nsh-ui-mobile" }
+nsh-macros = { version = "0.1.0", path = "crates/nsh-macros" }
+nsh-js = { version = "0.1.0", path = "crates/nsh-js" }
+nsh-engine = { version = "0.1.0", path = "crates/nsh-engine", default-features = false }
+nsh-bundler = { version = "0.1.0", path = "crates/nsh-bundler", default-features = false }
+nsh-platform-ios = { version = "0.1.0", path = "crates/nsh-platform-ios", default-features = false }
+nsh-platform-android = { version = "0.1.0", path = "crates/nsh-platform-android", default-features = false }
+nsh-platform-linux = { version = "0.1.0", path = "crates/nsh-platform-linux", default-features = false }
+nsh-platform-macos = { version = "0.1.0", path = "crates/nsh-platform-macos", default-features = false }
+nsh-platform-windows = { version = "0.1.0", path = "crates/nsh-platform-windows", default-features = false }
+nsh-dev = { version = "0.1.0", path = "crates/nsh-dev" }
 
 anyhow = "1"
 thiserror = "2"

@@ -3946,6 +3946,69 @@ mod components {
         assert_eq!(background(&batch), Some(Color(0xff0000ff)));
     }
 
+    #[test]
+    fn the_host_theme_wins_over_the_apps_until_cleared() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Swatch>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Swatch>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let background = |batch: &MountBatch| {
+            batch.items.iter().find_map(|i| match i {
+                MountItem::ViewStyle { id: 2, style } => Some(style.background_color),
+                _ => None,
+            })
+        };
+        let themed = |hex: &str| {
+            crate::ui::Theme::from_json(&format!(
+                r#"{{ "themes": [{{ "colors": {{ "primary.background": "{hex}" }} }}] }}"#
+            ))
+            .unwrap()
+        };
+        c.commit().unwrap();
+        c.set_host_theme(Some(themed("#00ff00")));
+        assert_eq!(
+            c.commit().as_ref().and_then(background),
+            Some(rgb(0x00ff00))
+        );
+        // The app's own theme (`uiTheme`) waits behind the host's.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::UiTheme(
+                    r##"{ "themes": [{ "colors": { "primary.background": "#0000ff" } }] }"##.into(),
+                ),
+            }],
+        );
+        assert_eq!(c.commit().as_ref().and_then(background), None);
+        c.set_host_theme(None);
+        assert_eq!(
+            c.commit().as_ref().and_then(background),
+            Some(rgb(0x0000ff))
+        );
+        // Setting the same theme again renders nothing.
+        c.set_theme(themed("#0000ff"));
+        assert_eq!(c.commit().as_ref().and_then(background), None);
+    }
+
     /// Wraps each JS child in a padded row.
     #[derive(Default)]
     struct Rows;

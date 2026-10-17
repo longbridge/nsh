@@ -1,0 +1,26 @@
+[package]
+name = "embed-gpui"
+description = "A GPUI Kit app embedding nsh apps (AppView): host widgets around several surfaces, the host's theme in them."
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Its own workspace: GPUI Kit (and the GPUI it builds on) stays out of nsh's
+# workspace builds. Build it with nsh's target directory to share what is
+# built: `CARGO_TARGET_DIR=../../target cargo run`.
+[workspace]
+
+[dependencies]
+nsh-platform-gpui = { path = "../../crates/gpui/nsh-platform-gpui" }
+# `gpui-fast`: GPUI Kit drawn by the same `gpui_fast` crate as nsh.
+gpui-kit = { version = "0.7.3", features = ["gpui-fast"] }
+gpui_platform = { package = "gpui-fast-platform", version = "0.1.7", default-features = false, features = ["font-kit", "wayland", "x11"] }
+serde_json = "1"
+env_logger = "0.11"
+log = "0.4"
+
+[profile.dev.package.rquickjs-sys]
+opt-level = 3
+[profile.dev.package.taffy]
+opt-level = 3

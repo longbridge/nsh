@@ -1,0 +1,22 @@
+[package]
+name = "nsh-gpui-app"
+description = "Release app runner on GPUI (macOS, Windows, Linux): the executable of packaged nsh apps (no development features)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+log.workspace = true
+
+# What packaged apps use: JS apps and web views; videos on Linux (GStreamer).
+# Never `dev` or `shot` (GPUI's test support) in the release runner.
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+nsh-platform-gpui = { workspace = true, features = ["js", "webview"] }
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-platform-gpui = { workspace = true, features = ["js", "webview", "video"] }

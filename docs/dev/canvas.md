@@ -48,7 +48,9 @@ hand). The scan falls back to a full redraw (`Damage::All`) for a clip that read
 operation that reads one under a composite operation other than `source-over` (`copy`, `source-in`, ... change pixels
 outside the shape), an image at its natural size and bounds that are not finite. A scan allocates nothing (its save
 stack is kept); two per changed frame cost microseconds next to the replay. Linux (GTK 4 redraws whole widgets:
-`queue_draw` takes no area), Android and the web runtime still redraw the whole canvas. Numbers:
+`queue_draw` takes no area), Android, the web runtime and the GPUI backend (which rasterizes the drawing, text outlines
+included, with tiny-skia into a pixmap in device pixels: `nsh-platform-gpui` `canvas.rs`) still redraw the
+whole canvas. Numbers:
 `docs/dev/performance.md`.
 
 Rust components record drawings with `ui::Painter` (the same operations; `docs/dev/components.md`), measure text

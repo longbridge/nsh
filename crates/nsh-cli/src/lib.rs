@@ -159,8 +159,9 @@ enum Command {
     Package(Box<PackageArgs>),
     /// Like `dev`, and also run the app in a development host: the Mac
     /// Catalyst app (default on macOS), the macOS (AppKit) app, the Linux
-    /// app (default on Linux), the Windows app (default on Windows), an iOS
-    /// simulator, an Android device or emulator, or a browser.
+    /// app (default on Linux), the Windows app (default on Windows), the
+    /// GPUI app (on any of the three), an iOS simulator, an Android device
+    /// or emulator, or a browser.
     Run {
         /// The entry module, or the app's directory (default: the current one),
         /// whose `App.tsx` is the entry.

@@ -15,7 +15,7 @@
 
 use std::{
     borrow::Cow,
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io::Write,
     rc::{Rc, Weak},
     sync::{
@@ -480,6 +480,7 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
         title: title.to_owned(),
         message: clean_message(message).into_owned(),
         prose,
+        copied: Cell::new(false),
         layout: RefCell::new(None),
     }));
     let size = root_size(&state);
@@ -500,7 +501,11 @@ const WHITE: Color = Color::rgba(255, 255, 255, 255);
 /// The status line's pill.
 const STATUS_BACKGROUND: Color = Color::rgba(26, 26, 26, 217);
 /// The error overlay's panel.
-const ERROR_BACKGROUND: Color = Color::rgba(140, 20, 20, 247);
+const ERROR_BACKGROUND: Color = Color::rgba(30, 31, 34, 250);
+/// The error's title: it alone says it is an error.
+const ERROR_TITLE: Color = Color::rgba(255, 107, 107, 255);
+/// The Copy button's fill.
+const COPY_BACKGROUND: Color = Color::rgba(255, 255, 255, 31);
 const HINT: Color = Color::rgba(255, 255, 255, 179);
 
 /// The status line's padding (points): sideways, then up and down.
@@ -513,6 +518,9 @@ const ERROR_TOP: f32 = 20.0;
 const ERROR_BOTTOM: f32 = 24.0;
 const ERROR_SIDE: f32 = 16.0;
 const ERROR_GAP: f32 = 12.0;
+/// The Copy button's size and its distance from the top and the right.
+const COPY_SIZE: (f32, f32) = (76.0, 28.0);
+const COPY_MARGIN: (f32, f32) = (14.0, 24.0);
 /// Longest message shown (UTF-16 units are counted by DirectWrite; this
 /// caps the characters handed to it): a runaway log stays cheap.
 const MAX_MESSAGE_CHARS: usize = 20_000;
@@ -678,10 +686,22 @@ struct ErrorLayout {
     message: Option<IDWriteTextLayout>,
     hint: Option<IDWriteTextLayout>,
     hint_height: f32,
+    /// The Copy button's labels: before and after a click.
+    copy: [Option<IDWriteTextLayout>; 2],
 }
 
-/// A red panel over the whole app with an error's title and message; a
-/// click dismisses it.
+/// The Copy button's frame (x, y, width, height) in an overlay of `size`.
+fn copy_rect(size: (f32, f32)) -> (f32, f32, f32, f32) {
+    (
+        size.0 - COPY_MARGIN.1 - COPY_SIZE.0,
+        COPY_MARGIN.0,
+        COPY_SIZE.0,
+        COPY_SIZE.1,
+    )
+}
+
+/// A panel over the whole app with an error's title and message; a click
+/// dismisses it, one on its Copy button copies the error.
 struct ErrorOverlay {
     /// The session it belongs to (read by `pointer`, which goes unused
     /// until the input module routes pointers to hosted items).
@@ -690,14 +710,22 @@ struct ErrorOverlay {
     title: String,
     message: String,
     prose: bool,
+    /// Whether the Copy button was clicked (it says "Copied" then).
+    copied: Cell<bool>,
     layout: RefCell<Option<ErrorLayout>>,
 }
 
 impl ErrorOverlay {
     fn lay_out(&self, size: (f32, f32)) -> ErrorLayout {
         let width = (size.0 - 2.0 * ERROR_SIDE).max(1.0);
+        // Clear of the Copy button.
+        let title_width = (copy_rect(size).0 - ERROR_SIDE - ERROR_GAP).max(1.0);
         let title = text_format("Segoe UI", 16.0, DWRITE_FONT_WEIGHT_BOLD)
-            .and_then(|f| layout(&self.title, &f, width, size.1));
+            .and_then(|f| layout(&self.title, &f, title_width, size.1));
+        let copy = ["Copy", "Copied"].map(|label| {
+            text_format("Segoe UI", 13.0, DWRITE_FONT_WEIGHT_SEMI_BOLD)
+                .and_then(|f| layout(label, &f, COPY_SIZE.0, COPY_SIZE.1))
+        });
         let title_height = title.as_ref().map_or(0.0, |l| measure(l).1);
         let hint = text_format("Segoe UI", 11.0, DWRITE_FONT_WEIGHT_NORMAL)
             .and_then(|f| layout("Click to dismiss · Ctrl+R to reload", &f, width, size.1));
@@ -755,6 +783,7 @@ impl ErrorOverlay {
             message,
             hint,
             hint_height,
+            copy,
         }
     }
 }
@@ -773,9 +802,24 @@ impl Hosted for ErrorOverlay {
                 cx.solid(ERROR_BACKGROUND),
             )
         };
+        let (bx, by, bw, bh) = copy_rect(size);
+        let button = D2D1_ROUNDED_RECT {
+            rect: rect_f(bx, by, bw, bh),
+            radiusX: 6.0,
+            radiusY: 6.0,
+        };
+        // SAFETY: a COM call between BeginDraw and EndDraw.
+        unsafe {
+            cx.dc
+                .FillRoundedRectangle(&button, cx.solid(COPY_BACKGROUND))
+        };
+        if let Some(label) = &l.copy[usize::from(self.copied.get())] {
+            let (w, h) = measure(label);
+            draw_layout(cx, label, bx + (bw - w) / 2.0, by + (bh - h) / 2.0, WHITE);
+        }
         let mut y = ERROR_TOP;
         if let Some(title) = &l.title {
-            draw_layout(cx, title, ERROR_SIDE, y, WHITE);
+            draw_layout(cx, title, ERROR_SIDE, y, ERROR_TITLE);
         }
         y += l.title_height + ERROR_GAP;
         let bottom = size.1 - ERROR_BOTTOM - l.hint_height - ERROR_GAP;
@@ -804,6 +848,25 @@ impl Hosted for ErrorOverlay {
         if event.kind == PointerKind::Up {
             // Not while input still walks the root's items.
             let key = self.key;
+            let size = self.layout.borrow().as_ref().map(|l| l.size);
+            if let Some(size) = size {
+                let (x, y, w, h) = copy_rect(size);
+                if (x..=x + w).contains(&event.x) && (y..=y + h).contains(&event.y) {
+                    let error = format!("{}\n\n{}", self.title, self.message);
+                    if !crate::system::set_clipboard_text(&error) {
+                        log::debug!("windows: cannot set the clipboard");
+                    }
+                    self.copied.set(true);
+                    // Drawn again with its new label.
+                    crate::window::invoke(move || {
+                        if let Some(ui) = session(key) {
+                            let ui = ui.borrow();
+                            place(&ui, root_size(&ui));
+                        }
+                    });
+                    return true;
+                }
+            }
             crate::window::invoke(move || {
                 if let Some(ui) = session(key) {
                     hide_error(&ui);
@@ -999,6 +1062,7 @@ mod tests {
             title: "Build failed".to_owned(),
             message,
             prose: false,
+            copied: Cell::new(false),
             layout: RefCell::new(None),
         };
         let l = overlay.lay_out((320.0, 200.0));

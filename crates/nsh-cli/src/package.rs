@@ -2,7 +2,9 @@
 //! app bundle and its assets. Needs no Rust; iOS packaging uses Xcode's
 //! command line tools (`codesign`, and `actool` for icons), macOS packaging
 //! `codesign` and `sips`, Linux packaging `tar`; Windows packaging needs
-//! nothing (`windows.rs`), nor does the web's (`web.rs`).
+//! nothing (`windows.rs`), nor does the web's (`web.rs`). GPUI packages are
+//! made as the native backend's of the machine they are made on, with the
+//! GPUI release runner.
 
 use std::{
     fs,
@@ -38,6 +40,25 @@ pub(crate) enum PackageTarget {
     /// The web: a static site (`index.html` and files named by their
     /// content) for any web server or CDN.
     Web,
+    /// GPUI, for this machine's OS: packaged as `linux`, `macos` or
+    /// `windows` are, with the GPUI release runner.
+    Gpui,
+}
+
+impl PackageTarget {
+    /// The desktop package `nsh package --target gpui` makes on this
+    /// machine, by its OS (`None` off macOS, Windows and Linux).
+    fn gpui_layout() -> Option<PackageTarget> {
+        if cfg!(target_os = "macos") {
+            Some(PackageTarget::Macos)
+        } else if cfg!(windows) {
+            Some(PackageTarget::Windows)
+        } else if cfg!(target_os = "linux") {
+            Some(PackageTarget::Linux)
+        } else {
+            None
+        }
+    }
 }
 
 /// App metadata: `nsh.json` next to the entry, overridden by flags.
@@ -143,24 +164,49 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
     let built = compile(&entry, true).map_err(|e| e.into_error(&entry))?;
     ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
-    let platform = match options.target {
+    // GPUI apps are packaged as this OS's native ones, with another runner.
+    let (target, runner) = match options.target {
+        PackageTarget::Gpui => (
+            PackageTarget::gpui_layout()
+                .context("GPUI apps are packaged on macOS, Windows or Linux")?,
+            Platform::Gpui,
+        ),
+        PackageTarget::Linux => (PackageTarget::Linux, Platform::Linux),
+        PackageTarget::Macos => (PackageTarget::Macos, Platform::MacOs),
+        PackageTarget::Windows => (PackageTarget::Windows, Platform::Windows),
+        other => (other, Platform::IphoneOs),
+    };
+    let platform = match target {
         PackageTarget::Ios => Platform::IphoneOs,
         PackageTarget::IosSimulator => Platform::IphoneSimulator,
         PackageTarget::Android => {
             return package_android(&options, config, &name, &id, &built);
         }
         PackageTarget::Linux => {
-            return package_linux(&options, config, &name, &id, &executable, &built);
+            let app = App {
+                name: &name,
+                id: &id,
+                executable: &executable,
+                runner,
+            };
+            return package_linux(&options, config, &app, &built);
         }
         PackageTarget::Macos => {
-            return package_macos(&options, config, &name, &id, &executable, &built);
+            let app = App {
+                name: &name,
+                id: &id,
+                executable: &executable,
+                runner,
+            };
+            return package_macos(&options, config, &app, &built);
         }
         PackageTarget::Windows => {
-            return crate::windows::package(&options, config, &name, &id, &built);
+            return crate::windows::package(&options, config, &name, &id, runner, &built);
         }
         PackageTarget::Web => {
             return crate::web::package(&options, config, &name, &id, &built);
         }
+        PackageTarget::Gpui => unreachable!("packaged as this OS's apps are"),
     };
     let runner = runtime::file(platform, true)?;
 
@@ -192,7 +238,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Linux
         | PackageTarget::Macos
         | PackageTarget::Windows
-        | PackageTarget::Web => "iphonesimulator",
+        | PackageTarget::Web
+        | PackageTarget::Gpui => "iphonesimulator",
     };
     let mut info = info_plist(&name, &id, &executable, config, sdk);
     if let Some(icon) = &config.icon {
@@ -219,7 +266,8 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         | PackageTarget::Linux
         | PackageTarget::Macos
         | PackageTarget::Windows
-        | PackageTarget::Web => {
+        | PackageTarget::Web
+        | PackageTarget::Gpui => {
             unreachable!("packaged above")
         }
         PackageTarget::Ios => {
@@ -245,6 +293,16 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// A desktop app to package: its name, id, executable file name and
+/// release runner (the native backend's or GPUI's).
+#[derive(Clone, Copy)]
+struct App<'a> {
+    name: &'a str,
+    id: &'a str,
+    executable: &'a str,
+    runner: Platform,
 }
 
 /// An APK with the release runtime: `AppActivity` runs `assets/nsh/bundle.nshc`.
@@ -331,12 +389,16 @@ fn package_android(
 fn package_linux(
     options: &PackageOptions<'_>,
     config: &AppConfig,
-    name: &str,
-    id: &str,
-    executable: &str,
+    app: &App<'_>,
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
-    let runner = runtime::file(Platform::Linux, true)?;
+    let App {
+        name,
+        id,
+        executable,
+        runner,
+    } = *app;
+    let runner = runtime::file(runner, true)?;
     let dir = options.out.join(name);
     let step = ui::Step::start(format!("packaging {}", ui::path(&dir)));
     if dir.exists() {
@@ -415,12 +477,16 @@ fn package_linux(
 fn package_macos(
     options: &PackageOptions<'_>,
     config: &AppConfig,
-    name: &str,
-    id: &str,
-    executable: &str,
+    app: &App<'_>,
     built: &crate::build::Built,
 ) -> anyhow::Result<()> {
-    let runner = runtime::file(Platform::MacOs, true)?;
+    let App {
+        name,
+        id,
+        executable,
+        runner,
+    } = *app;
+    let runner = runtime::file(runner, true)?;
     let app = options.out.join(format!("{name}.app"));
     let step = ui::Step::start(format!("packaging {}", ui::path(&app)));
     if app.exists() {
@@ -837,6 +903,27 @@ mod tests {
         ));
         assert!(!profile_allows("ABCDE12345.com.other.*", "com.example.app"));
         assert!(!profile_allows("", "com.example.app"));
+    }
+
+    #[test]
+    fn gpui_packages_are_laid_out_as_this_oss_apps() {
+        use clap::ValueEnum as _;
+
+        use super::PackageTarget;
+        assert_eq!(
+            PackageTarget::from_str("gpui", false).unwrap(),
+            PackageTarget::Gpui
+        );
+        let expected = if cfg!(target_os = "macos") {
+            Some(PackageTarget::Macos)
+        } else if cfg!(windows) {
+            Some(PackageTarget::Windows)
+        } else if cfg!(target_os = "linux") {
+            Some(PackageTarget::Linux)
+        } else {
+            None
+        };
+        assert_eq!(PackageTarget::gpui_layout(), expected);
     }
 
     #[test]

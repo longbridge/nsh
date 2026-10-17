@@ -4,7 +4,9 @@ description = "QuickJS host: runtime setup, host APIs, op decoding and bytecode.
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-publish.workspace = true
+homepage.workspace = true
+readme.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
@@ -29,6 +31,8 @@ url.workspace = true
 # rquickjs' pregenerated ones (its bindgen run misses `JS_ToCStringLen2` there).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rquickjs = { workspace = true, features = ["bindgen"] }
+# The heap's allocator: the system's `malloc` (as QuickJS's own).
+libc.workspace = true
 
 [dev-dependencies]
 nsh-ui-mobile.workspace = true

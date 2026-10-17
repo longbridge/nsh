@@ -379,6 +379,18 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (EventKind::LongPress, on::ALL, "() => void", ""),
     (EventKind::PressIn, on::ALL, "() => void", ""),
     (EventKind::PressOut, on::ALL, "() => void", ""),
+    (
+        EventKind::HoverIn,
+        on::ALL,
+        "() => void",
+        "The mouse came over the view or a view inside it (macOS and Linux; never on touches).",
+    ),
+    (
+        EventKind::HoverOut,
+        on::ALL,
+        "() => void",
+        "The mouse left the view and the views inside it, or the window (macOS and Linux).",
+    ),
     (EventKind::Layout, on::ALL, "(e: LayoutEvent) => void", ""),
     (EventKind::PanStart, on::ALL, "(e: PanEvent) => void", ""),
     (

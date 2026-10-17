@@ -54,8 +54,10 @@ Documentation, guides and live demos: **[native-shell.com](https://native-shell.
 | macOS | AppKit, Core Animation, CoreText | `AppView` (Rust, `nsh-platform-macos`) | macOS 14+ |
 | Windows | Win32, Direct2D, DirectWrite | `AppView` (Rust, `nsh-platform-windows`) | Windows 10 1809+ |
 | Linux | GTK 4, Pango | `AppView` (Rust, `nsh-platform-linux`) | GTK 4.14+ |
+| GPUI (macOS, Windows, Linux; in development) | GPUI (GPUI Fast) | `AppView` (Rust, a GPUI view, `nsh-platform-gpui`) | macOS, Windows; Linux with Vulkan |
 
-A WebAssembly build runs the website's live demos. A GPUI desktop backend is in development.
+A WebAssembly build runs the website's live demos. The GPUI backend (`nsh run --target gpui`, `nsh package --target gpui`)
+draws apps with GPUI on all three desktops and embeds in GPUI and GPUI Kit apps; it is in development.
 
 ## Quick start
 

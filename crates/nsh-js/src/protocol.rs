@@ -410,6 +410,11 @@ fn decode_style<'js>(
     let mut style = Box::<Style>::default();
     let mut patch = StylePatch::default();
     for (key, value) in entries {
+        // `undefined` sets nothing (`color: active ? c : undefined`): the
+        // class's value, or the default, stays, as in a spread object.
+        if value.is_undefined() {
+            continue;
+        }
         if key == "transform" {
             decode_transform(&value, &mut style, &mut patch, warnings)?;
             continue;
@@ -953,6 +958,32 @@ mod tests {
         with_value(source, |v| {
             <LayoutAnimation as HostValue>::decode(&v, &mut HostCx::default()).unwrap()
         })
+    }
+
+    /// The declarations a style applies over class styles.
+    fn style(source: &str) -> StylePatch {
+        with_value(source, |v| {
+            let mut entries = Vec::new();
+            style_entries(&v.0, &mut entries).unwrap();
+            decode_style(entries, &mut Warnings::default()).unwrap().1
+        })
+    }
+
+    #[test]
+    fn undefined_style_values_set_nothing() {
+        // Nothing recorded: a class's background shows through.
+        assert_eq!(
+            style("{ backgroundColor: undefined, opacity: 0.5 }"),
+            style("{ opacity: 0.5 }")
+        );
+        // A later style's `undefined` drops an earlier one's value.
+        assert_eq!(
+            style("[{ backgroundColor: 'red' }, { backgroundColor: undefined }]"),
+            style("{}")
+        );
+        assert_eq!(style("{ transform: undefined }"), style("{}"));
+        // `null` still sets the default over classes.
+        assert_ne!(style("{ backgroundColor: null }"), style("{}"));
     }
 
     #[test]

@@ -21,11 +21,12 @@ use nsh_engine::{BYTECODE_VERSION, Bundle, Policy};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
 };
-use objc2_core_foundation::{CGFloat, CGSize};
-use objc2_foundation::{NSObject, NSString};
+use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_foundation::{NSMutableAttributedString, NSObject, NSRange, NSString};
 use objc2_ui_kit::{
-    NSTextAlignment, UIColor, UIDevice, UIEdgeInsets, UIFont, UIFontWeightRegular,
-    UIFontWeightSemibold, UILabel, UITapGestureRecognizer, UITextView, UIView, UIViewAutoresizing,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSTextAlignment, UIColor, UIDevice,
+    UIEdgeInsets, UIFont, UIFontWeightRegular, UIFontWeightSemibold, UILabel,
+    UITapGestureRecognizer, UITextView, UIView, UIViewAutoresizing,
 };
 
 use crate::view::Inner;
@@ -167,10 +168,13 @@ struct DevUi {
     status: Option<Retained<UILabel>>,
     overlay: Option<Retained<UIView>>,
     target: Option<Retained<DismissTarget>>,
+    /// The overlay's Copy button and the text it copies.
+    copy: Option<(Retained<UILabel>, String)>,
 }
 
 define_class!(
-    /// Dismisses the error overlay on tap.
+    /// Handles taps on the error overlay: one on its Copy button copies the
+    /// error, any other dismisses it.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[ivars = std::rc::Weak<RefCell<DevUi>>]
@@ -178,10 +182,18 @@ define_class!(
 
     impl DismissTarget {
         #[unsafe(method(dismiss:))]
-        fn dismiss(&self, _sender: &UITapGestureRecognizer) {
-            if let Some(ui) = self.ivars().upgrade() {
-                hide_error(&ui);
+        fn dismiss(&self, sender: &UITapGestureRecognizer) {
+            let Some(ui) = self.ivars().upgrade() else { return };
+            if let Some((button, text)) = &ui.borrow().copy {
+                let at = sender.locationInView(Some(button));
+                let size = button.bounds().size;
+                if (0.0..=size.width).contains(&at.x) && (0.0..=size.height).contains(&at.y) {
+                    crate::system::set_clipboard(text);
+                    button.setText(Some(&NSString::from_str("Copied")));
+                    return;
+                }
             }
+            hide_error(&ui);
         }
     }
 );
@@ -368,7 +380,7 @@ fn show_error(
         UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
     );
     overlay.setBackgroundColor(Some(&UIColor::colorWithRed_green_blue_alpha(
-        0.55, 0.08, 0.08, 0.97,
+        0.118, 0.122, 0.133, 0.98,
     )));
 
     let text = UITextView::new(mtm);
@@ -392,9 +404,7 @@ fn show_error(
         bottom: safe.bottom + 24.0,
         right: safe.right + 16.0,
     });
-    text.setText(Some(&NSString::from_str(&format!(
-        "{title}\n\n{message}\n\n(tap to dismiss)"
-    ))));
+    text.setAttributedText(Some(&error_text(title, message)));
     if !prose {
         // Keep code frames intact: no wrapping, scroll sideways instead.
         let container_text = text.textContainer();
@@ -402,6 +412,7 @@ fn show_error(
         container_text.setSize(CGSize::new(4000.0, CGFloat::MAX));
     }
     overlay.addSubview(&text);
+    let copy = copy_button(mtm, &overlay, safe);
 
     {
         let target = DismissTarget::new(mtm, std::rc::Rc::downgrade(ui));
@@ -418,7 +429,69 @@ fn show_error(
         container.addSubview(&overlay);
         ui.overlay = Some(overlay);
         ui.target = Some(target);
+        ui.copy = Some((copy, format!("{title}\n\n{message}")));
     }
+}
+
+/// The overlay's text: the title alone in a soft red (it says it is an
+/// error), the rest white.
+fn error_text(title: &str, message: &str) -> Retained<NSMutableAttributedString> {
+    let all = format!("{title}\n\n{message}\n\n(tap to dismiss)");
+    let text = NSMutableAttributedString::from_nsstring(&NSString::from_str(&all));
+    let units = |s: &str| s.encode_utf16().count();
+    // SAFETY: UIKit's attribute name and font weight constants; attribute
+    // values of the types those names take.
+    unsafe {
+        let font = UIFont::monospacedSystemFontOfSize_weight(12.0, UIFontWeightRegular);
+        text.addAttribute_value_range(NSFontAttributeName, &font, NSRange::new(0, units(&all)));
+        text.addAttribute_value_range(
+            NSForegroundColorAttributeName,
+            &UIColor::whiteColor(),
+            NSRange::new(0, units(&all)),
+        );
+        text.addAttribute_value_range(
+            NSForegroundColorAttributeName,
+            &UIColor::colorWithRed_green_blue_alpha(1.0, 0.42, 0.42, 1.0),
+            NSRange::new(0, units(title)),
+        );
+    }
+    text
+}
+
+/// The error overlay's Copy button, in its top right corner (clear of the
+/// safe area). The overlay's tap handler copies when a tap lands on it.
+fn copy_button(mtm: MainThreadMarker, overlay: &UIView, safe: UIEdgeInsets) -> Retained<UILabel> {
+    let label = UILabel::new(mtm);
+    label.setTextAlignment(NSTextAlignment::Center);
+    label.setText(Some(&NSString::from_str("Copy")));
+    // SAFETY: non-null values for null-resettable properties, and an
+    // immutable UIKit font weight constant.
+    unsafe {
+        label.setTextColor(Some(&UIColor::whiteColor()));
+        label.setFont(Some(&UIFont::systemFontOfSize_weight(
+            13.0,
+            UIFontWeightSemibold,
+        )));
+    }
+    label.setBackgroundColor(Some(&UIColor::colorWithRed_green_blue_alpha(
+        1.0, 1.0, 1.0, 0.18,
+    )));
+    let layer = label.layer();
+    layer.setCornerRadius(6.0);
+    layer.setMasksToBounds(true);
+    let (width, height) = (76.0, 30.0);
+    label.setFrame(CGRect::new(
+        CGPoint::new(
+            overlay.bounds().size.width - safe.right - 16.0 - width,
+            safe.top + 12.0,
+        ),
+        CGSize::new(width, height),
+    ));
+    label.setAutoresizingMask(
+        UIViewAutoresizing::FlexibleLeftMargin | UIViewAutoresizing::FlexibleBottomMargin,
+    );
+    overlay.addSubview(&label);
+    label
 }
 
 fn hide_error(ui: &RefCell<DevUi>) {

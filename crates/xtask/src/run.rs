@@ -29,9 +29,9 @@ pub(crate) struct RunArgs {
     #[arg(default_value = "examples/gallery")]
     entry: String,
     /// Where to run: `macos` (the AppKit host), `catalyst`, `ios` (a
-    /// simulator), `android`, `linux` or `windows`; default: the machine's
-    /// own backend (`macos` on macOS, `linux` on Linux, `windows` on
-    /// Windows), else `android`.
+    /// simulator), `android`, `linux`, `windows` or `gpui` (the GPUI host);
+    /// default: the machine's own backend (`macos` on macOS, `linux` on
+    /// Linux, `windows` on Windows), else `android`.
     #[arg(long)]
     target: Option<String>,
     /// iOS simulator to use (name or UDID).

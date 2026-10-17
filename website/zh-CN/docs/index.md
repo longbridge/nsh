@@ -122,7 +122,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 | Linux | 已支持（GTK 4.14+） | GTK 4 | 独立应用；通过 `AppView` 嵌入（[Linux](./linux.md)） |
 | Mac Catalyst | 仅用于开发 | UIKit | `nsh run` 在 Mac 上打开的 iPhone 尺寸窗口 |
 | Web（WebAssembly） | 仅用于演示 | DOM | 运行本站的示例，用 DOM 而不是原生视图绘制（[Web](./web.md)）；不是可发布的目标平台 |
-| GPUI（桌面） | 规划中 | GPUI | 用 [GPUI](https://gpui-kit.com) 绘制的桌面后端，正在开发，尚不可用 |
+| GPUI（macOS、Windows、Linux） | 开发中 | GPUI | 用 [GPUI](https://gpui-kit.com) 绘制；通过 `AppView` 嵌入 GPUI 和 GPUI Kit 应用，`--target gpui`（[GPUI](./gpui.md)）；与原生桌面后端的功能对齐正在进行 |
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="一个模块，多种宿主：同一个 bundle 和 Rust 运行时，运行在 iOS、Android、Linux、macOS AppKit 和 Windows Win32 / Direct2D（已支持）和 Web（WebAssembly 渲染到 DOM，仅用于本站演示）。">

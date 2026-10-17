@@ -23,6 +23,8 @@ public final class DevActivity extends Activity {
         super.onCreate(state);
         edgeToEdge(this);
         view = new NshView(this, getIntent().getBooleanExtra("trace", false));
+        // An app on its own, not a module embedded in another app: a 512 MB JS heap.
+        view.setLimits(512, 0, 0, 0, 0);
         setContentView(view);
         String pkg = getIntent().getStringExtra("package");
         if (pkg != null) {

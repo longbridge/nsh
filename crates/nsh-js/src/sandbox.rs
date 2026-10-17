@@ -2,7 +2,8 @@
 //! hardening.
 //!
 //! Every surface runs its own QuickJS runtime, so the limits are per VM. The
-//! heap and stack ceilings are runtime settings. Time is budgeted per call
+//! heap's allocator ([`HeapAllocator`]) enforces its ceiling and records
+//! reaching it; the stack's is a runtime setting. Time is budgeted per call
 //! from Rust into JS (a bundle evaluation, an event, a timer, the microtask
 //! drain, ...): QuickJS calls the interrupt handler periodically while it
 //! interprets, and returning `true` unwinds the call with an exception no
@@ -14,10 +15,168 @@
 //! nothing in JS is trusted: limits and checks are enforced here, in Rust,
 //! never in JS.
 
-use std::{cell::Cell, ffi::c_int, rc::Rc};
+use std::{
+    cell::Cell,
+    ffi::c_int,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use nsh_core::{js::Limits, time::Instant};
-use rquickjs::{Ctx, qjs};
+use rquickjs::{Ctx, allocator::Allocator, qjs};
+
+/// The VM's allocator: enforces the heap limit itself and records a refused
+/// allocation. QuickJS reports running out in several ways (an
+/// `InternalError`, a `null` exception when even that cannot be allocated,
+/// or an exception the app catches), so the record, not the error, tells
+/// that the heap is full.
+///
+/// It allocates as QuickJS does without one (the system's `malloc`, sizes
+/// from the allocator): no header per allocation, many of which are a few
+/// dozen bytes. WebAssembly has no such `malloc`; it uses Rust's.
+pub(crate) struct HeapAllocator {
+    /// Bytes allocated, as `usable_size` counts them.
+    used: usize,
+    /// Most bytes allocated at once (0: no limit).
+    limit: usize,
+    exhausted: Arc<AtomicBool>,
+    #[cfg(target_arch = "wasm32")]
+    inner: rquickjs::allocator::RustAllocator,
+}
+
+impl HeapAllocator {
+    /// An allocator of at most `limit` bytes (0: no limit) and the flag it
+    /// sets when it refuses an allocation.
+    pub(crate) fn new(limit: usize) -> (Self, Arc<AtomicBool>) {
+        let exhausted = Arc::new(AtomicBool::new(false));
+        let allocator = Self {
+            used: 0,
+            limit,
+            exhausted: exhausted.clone(),
+            #[cfg(target_arch = "wasm32")]
+            inner: rquickjs::allocator::RustAllocator,
+        };
+        (allocator, exhausted)
+    }
+
+    /// Whether `size` more bytes fit; records a refusal.
+    fn fits(&self, size: usize) -> bool {
+        let fits = self.limit == 0 || self.used.saturating_add(size) <= self.limit;
+        if !fits {
+            self.exhausted.store(true, Ordering::Relaxed);
+        }
+        fits
+    }
+
+    /// Counts an allocation just made (null: none).
+    fn counted(&mut self, ptr: *mut u8) -> *mut u8 {
+        if !ptr.is_null() {
+            // SAFETY: an allocation of this allocator.
+            self.used += unsafe { <Self as Allocator>::usable_size(ptr) };
+        }
+        ptr
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod system {
+    use std::ffi::c_void;
+
+    pub(super) use libc::{calloc, free, malloc, realloc};
+
+    /// The usable size of a live `malloc` allocation.
+    pub(super) unsafe fn usable_size(ptr: *mut c_void) -> usize {
+        // SAFETY: guaranteed by the caller.
+        unsafe {
+            #[cfg(target_vendor = "apple")]
+            return libc::malloc_size(ptr);
+            #[cfg(windows)]
+            return _msize(ptr);
+            #[cfg(not(any(target_vendor = "apple", windows)))]
+            return libc::malloc_usable_size(ptr);
+        }
+    }
+
+    #[cfg(windows)]
+    unsafe extern "C" {
+        fn _msize(ptr: *mut c_void) -> usize;
+    }
+}
+
+// SAFETY: allocations come from the system's `malloc` (aligned for any
+// type, `usable_size` from it) or from `RustAllocator`, which meets the
+// trait's requirements; this only refuses some (returning null, as
+// allowed) and counts what it hands out.
+unsafe impl Allocator for HeapAllocator {
+    fn alloc(&mut self, size: usize) -> *mut u8 {
+        if !self.fits(size) {
+            return std::ptr::null_mut();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        // SAFETY: a plain allocation.
+        let ptr = unsafe { system::malloc(size) }.cast();
+        #[cfg(target_arch = "wasm32")]
+        let ptr = self.inner.alloc(size);
+        self.counted(ptr)
+    }
+
+    fn calloc(&mut self, count: usize, size: usize) -> *mut u8 {
+        let Some(total) = count.checked_mul(size) else {
+            return std::ptr::null_mut();
+        };
+        if !self.fits(total) {
+            return std::ptr::null_mut();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        // SAFETY: a plain allocation.
+        let ptr = unsafe { system::calloc(count, size) }.cast();
+        #[cfg(target_arch = "wasm32")]
+        let ptr = self.inner.calloc(count, size);
+        self.counted(ptr)
+    }
+
+    unsafe fn dealloc(&mut self, ptr: *mut u8) {
+        // SAFETY: the caller hands back an allocation of this allocator.
+        unsafe {
+            self.used -= Self::usable_size(ptr);
+            #[cfg(not(target_arch = "wasm32"))]
+            system::free(ptr.cast());
+            #[cfg(target_arch = "wasm32")]
+            self.inner.dealloc(ptr);
+        }
+    }
+
+    unsafe fn realloc(&mut self, ptr: *mut u8, new_size: usize) -> *mut u8 {
+        // SAFETY: the caller hands over an allocation of this allocator.
+        let old = unsafe { Self::usable_size(ptr) };
+        if new_size > old && !self.fits(new_size - old) {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: as above; on failure the old allocation stays.
+        #[cfg(not(target_arch = "wasm32"))]
+        let new: *mut u8 = unsafe { system::realloc(ptr.cast(), new_size) }.cast();
+        // SAFETY: as above.
+        #[cfg(target_arch = "wasm32")]
+        let new = unsafe { self.inner.realloc(ptr, new_size) };
+        if !new.is_null() {
+            self.used -= old;
+        }
+        self.counted(new)
+    }
+
+    unsafe fn usable_size(ptr: *mut u8) -> usize {
+        // SAFETY: the caller hands over an allocation of this allocator.
+        unsafe {
+            #[cfg(not(target_arch = "wasm32"))]
+            return system::usable_size(ptr.cast());
+            #[cfg(target_arch = "wasm32")]
+            return rquickjs::allocator::RustAllocator::usable_size(ptr);
+        }
+    }
+}
 
 /// The kind of call into JS, which decides its budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

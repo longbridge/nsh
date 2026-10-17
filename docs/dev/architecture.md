@@ -23,13 +23,15 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   `layout` at the final size after layout (Apple: CTFrame). `MountItem::Text` hands the immutable result to the main thread, which only draws it
   (`CTFrameDraw` in `TextView`'s `drawRect`); the main thread never lays out text. Android's counterpart is `StaticLayout` (like RN's PreparedLayout),
   Linux's Pango (glyph runs as plain data, drawn as `gsk::TextNode`s with the main thread's fonts), Windows' DirectWrite
-  (glyph runs recorded through a text renderer of nsh's own, drawn with Direct2D's `DrawGlyphRun`).
+  (glyph runs recorded through a text renderer of nsh's own, drawn with Direct2D's `DrawGlyphRun`), GPUI's text
+  system (each style run shaped with a `WindowTextSystem` of the engine thread's own, lines broken by nsh, glyphs
+  painted with `paint_glyph`).
   Implementations must not touch main-thread-only UI objects.
 - Measure cache: one content-addressed LRU per engine (`MeasureCache`, two generations of hash maps, ≤1024 entries), keyed by a hash of the
   layout-relevant content (`AttributedText::layout_hash`, colors excluded) + the width constraint; nodes also cache `Prepared` and the final layout.
   A color-only change does not trigger layout, only a new final layout.
 - One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so nsh can be embedded in
-  existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window) wraps a surface for embedding and owns its dev session; a standalone app is
+  existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
   just "one AppView filling the window".
 - **Android**: the engine thread typesets with `StaticLayout` through JNI; each commit is one `byte[]` plus an object
   table handed to `Mounter.java` on the UI thread, and animation items stay in Rust (the flow, the units and the JNI
@@ -44,6 +46,10 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   with Direct2D into a flip-model swap chain (no child windows but web views and components' own windows); each
   commit is one `WM_NSH_WAKE` posted to the window; native animations run on a ticker paced by the compositor
   (`DwmFlush`).
+- **GPUI** (macOS, Windows, Linux; `gpui.md`): the Windows backend's retained `NshView` tree, painted by one GPUI
+  element per surface with GPUI's primitives (`DrawCx` keeps the transform and opacity GPUI lacks); each commit is one
+  closure on GPUI's main thread (`rt::invoke`), and every main-thread entry point ends with `rt::flush`, which
+  notifies the views of changed surfaces; native animations run on the window's frames.
 - **Web APIs** (TS apps only; Rust code uses crates of its choice): `fetch` with `Headers` / `Request` / `Response`, the
   Streams API (readable streams with byte streams and BYOB readers, writable and transform streams, `pipeTo` /
   `pipeThrough`, `TextEncoderStream` / `TextDecoderStream`), `Blob` / `File` / `FormData`, `URL` / `URLSearchParams`,
@@ -61,8 +67,8 @@ Input                        native gestures -> EngineControl::dispatch_event ->
 
 ## Crates
 
-Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ← `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-ui-mobile` (the mobile components, `components.md`) depends on `nsh-core` only. `nsh-core` must not depend on any platform or JS crate.
+Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ← `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host` / `nsh-gpui-app`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-ui-mobile` (the mobile components, `components.md`) depends on `nsh-core` only. `nsh-core` must not depend on any platform or JS crate.
 
-The CoreText, StaticLayout, Pango and DirectWrite text engines are documented in `crates/nsh-platform-ios/src/text.rs`,
-`crates/nsh-platform-android/src/text.rs`, `crates/nsh-platform-linux/src/text.rs` and
-`crates/nsh-platform-windows/src/text.rs`, the measure cache in `crates/nsh-core/src/text.rs` (`MeasureCache`).
+The CoreText, StaticLayout, Pango, DirectWrite and GPUI text engines are documented in
+`crates/nsh-platform-ios/src/text.rs`, `crates/nsh-platform-android/src/text.rs`, `crates/nsh-platform-linux/src/text.rs`,
+`crates/nsh-platform-windows/src/text.rs` and `crates/gpui/nsh-platform-gpui/src/text.rs`, the measure cache in `crates/nsh-core/src/text.rs` (`MeasureCache`).

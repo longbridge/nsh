@@ -90,6 +90,29 @@ start first.
 
 `active:` Tailwind classes also apply while a view is pressed, with no JS round trip.
 
+### Hover
+
+On macOS, Linux and the GPUI backend, JS can hear the mouse come over a view and leave it (other platforms do not raise these events
+yet; `hover:` classes style hovered views everywhere the platform tracks hover).
+
+| Prop | Type | Description |
+|---|---|---|
+| `onHoverIn` | `() => void` | The mouse came over the view or a view inside it. |
+| `onHoverOut` | `() => void` | The mouse left the view and the views inside it, or the window. |
+
+Like CSS `:hover`, a view counts as hovered while the mouse is over it or over anything inside it, so the views around
+the one under the mouse hear `onHoverIn` too (from the outside in; `onHoverOut` from the inside out). The events come
+after the fact and never on touches. A view removed from under the mouse hears `onHoverOut`, on Linux at the next mouse
+move.
+
+```tsx
+const hovered = signal<string | null>(null);
+
+<View onHoverIn={() => hovered.set(file.path)} onHoverOut={() => hovered.set(null)} class="hover:bg-zinc-100">
+  <Text>{file.name}</Text>
+</View>
+```
+
 ### Layout and identity
 
 | Prop | Type | Description |

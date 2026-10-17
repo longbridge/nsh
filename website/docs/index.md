@@ -122,7 +122,7 @@ Because JavaScript only describes the UI and handles events, the work done in th
 | Linux | Supported (GTK 4.14+) | GTK 4 | Standalone apps; embedded with `AppView` ([Linux](./linux.md)) |
 | Mac Catalyst | Development only | UIKit | The iPhone-sized window `nsh run` opens on a Mac |
 | Web (WebAssembly) | Demos only | DOM | Runs the examples on this site, drawn with the DOM rather than native views ([Web](./web.md)); not a target to ship to |
-| GPUI (desktops) | Planned | GPUI | A desktop backend drawn with [GPUI](https://gpui-kit.com), in development; not available yet |
+| GPUI (macOS, Windows, Linux) | In development | GPUI | Drawn with [GPUI](https://gpui-kit.com); embedded with `AppView` in GPUI and GPUI Kit apps, `--target gpui` ([GPUI](./gpui.md)); parity with the native desktop backends is being worked on |
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/platforms-light.svg" alt="One module, many hosts: the same bundle and Rust runtime on iOS, Android, Linux, macOS with AppKit and Windows with Win32 / Direct2D (supported), and the web (WebAssembly to the DOM, for this site's demos only).">

@@ -71,6 +71,30 @@ pub struct Limits {
     pub max_nodes: usize,
 }
 
+impl Limits {
+    /// The limits of an app nsh runs on its own on a desktop (the macOS,
+    /// Windows and Linux hosts and runners): a 1 GB heap, as a desktop app
+    /// may hold much more data than a module embedded in a host app.
+    pub fn standalone_desktop() -> Self {
+        Self {
+            memory_bytes: 1 << 30,
+            ..Self::default()
+        }
+    }
+
+    /// The limits of an app nsh runs on its own on a phone or tablet (the
+    /// iOS and Android hosts and runners): a 512 MB heap, well below where
+    /// the systems end apps for their memory.
+    pub fn standalone_mobile() -> Self {
+        Self {
+            memory_bytes: 512 << 20,
+            ..Self::default()
+        }
+    }
+}
+
+/// The limits of an app embedded in a host app (`NshAppView`, `NshView`,
+/// `AppView`): a 256 MB heap; the embedder may set others.
 impl Default for Limits {
     fn default() -> Self {
         Self {

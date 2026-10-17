@@ -241,6 +241,11 @@ pub(super) struct Components {
     /// registry), one per type.
     specs: FxHashMap<&'static str, Arc<ComponentSpec>>,
     theme: Arc<Theme>,
+    /// The app's theme (`nsh.json`, a Rust app's root): rendered with while
+    /// the embedding app sets none ([`Core::set_host_theme`]).
+    app_theme: Arc<Theme>,
+    /// The embedding app's theme: wins over [`Self::app_theme`].
+    host_theme: Option<Arc<Theme>>,
     /// Boxed: a render takes its instance out of the map and back.
     pub(super) instances: FxHashMap<NodeId, Box<Instance>>,
     /// Expanded node -> the host of the component that rendered it.
@@ -299,6 +304,8 @@ impl Default for Components {
             registry: Registry::default(),
             specs: FxHashMap::default(),
             theme: Arc::new(Theme::default()),
+            app_theme: Arc::new(Theme::default()),
+            host_theme: None,
             instances: FxHashMap::default(),
             owners: FxHashMap::default(),
             slot_names: FxHashMap::default(),
@@ -435,9 +442,34 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The theme components render with; every component renders again.
+    /// The app's theme; components render with it unless the embedding
+    /// app set one ([`Core::set_host_theme`]).
     pub fn set_theme(&mut self, theme: Theme) {
-        self.components.theme = Arc::new(theme);
+        self.components.app_theme = Arc::new(theme);
+        self.theme_changed();
+    }
+
+    /// The embedding app's theme (`None`: the app's again): an app
+    /// embedded in a native app looks like it, whatever theme the app
+    /// itself sets.
+    pub fn set_host_theme(&mut self, theme: Option<Theme>) {
+        self.components.host_theme = theme.map(Arc::new);
+        self.theme_changed();
+    }
+
+    /// The theme components render with now: every component renders
+    /// again when it changed.
+    fn theme_changed(&mut self) {
+        let theme = self
+            .components
+            .host_theme
+            .clone()
+            .unwrap_or_else(|| self.components.app_theme.clone());
+        if *theme == *self.components.theme {
+            self.components.theme = theme;
+            return;
+        }
+        self.components.theme = theme;
         let hosts: Vec<NodeId> = self.components.instances.keys().copied().collect();
         for host in hosts {
             self.components.mark(host);

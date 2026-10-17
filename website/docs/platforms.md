@@ -21,19 +21,19 @@ On every platform, nsh's main use is the same: modules embedded in a native app 
 | [Windows](./windows.md) | Win32 windows drawn with Direct2D; DirectWrite | Windows 10 1809+, Windows 11 | `nsh run` (the default on Windows) | a directory and a `.zip` |
 | [Linux](./linux.md) | GTK 4 widgets; Pango | GTK 4.14+ | `nsh run` (the default on Linux) | a directory and a `.tar.gz` |
 
-Two more targets exist for development and for this site, not for shipping, and one is planned:
+Desktops have a second backend, and two more targets exist for development and for this site, not for shipping:
 
 - **Mac Catalyst** runs the iOS backend in an iPhone-sized window (390×844) on a Mac. It is `nsh run`'s default target on macOS, because it is the quickest way to see how a module looks on a phone, without booting a simulator.
 - **Web** ([WebAssembly](./web.md)) runs the same engine in a browser and draws with the DOM. It powers the live demos and the [playground](/playground) on this site; it is not a target to ship apps to.
-- **GPUI** is a planned desktop backend drawn with [GPUI](https://gpui-kit.com), the framework of the sibling project GPUI Kit. It is in development and not part of nsh yet; the native macOS, Windows and Linux backends above are what desktops run today.
+- **[GPUI](./gpui.md)** draws modules with [GPUI](https://gpui-kit.com), the framework of the sibling project GPUI Kit, on macOS, Windows and Linux alike, for embedding in GPUI and GPUI Kit apps (`nsh run --target gpui`, `nsh package --target gpui`). It is in development: it has every element and module of the native backends above, some drawn differently ([Differences](./gpui.md#differences)), and has only been tried on Linux so far; ship desktop apps with the native backends today.
 
 ## Develop and package
 
 `nsh run` picks the machine's own platform when you give no `--target`: Mac Catalyst on macOS, the GTK window on Linux and the Win32 window on Windows. Phones are reached from a computer: iOS from a Mac with Xcode, Android from macOS, Linux or Windows with the Android SDK ([Installation](./installation.md#what-works-where)).
 
 ```sh
-nsh run my-app --target macos      # or ios, android, windows, linux, catalyst
-nsh package my-app --target macos  # or ios, ios-simulator, android, windows, linux
+nsh run my-app --target macos      # or ios, android, windows, linux, gpui, catalyst
+nsh package my-app --target macos  # or ios, ios-simulator, android, windows, linux, gpui
 ```
 
 Desktop backends build for the machine they run on: package a Mac app on a Mac, a Windows app on Windows and a Linux app on Linux. [Packaging](./packaging.md) covers every target's output, signing and icons.
@@ -47,6 +47,7 @@ Desktop backends build for the machine they run on: package a Mac app on a Mac, 
 | macOS | `AppView` (an `NSView`) | the `nsh-platform-macos` crate | Rust |
 | Windows | `AppView` (a child window) | the `nsh-platform-windows` crate | Rust |
 | Linux | `AppView` (a GTK widget) | the `nsh-platform-linux` crate | Rust |
+| GPUI (macOS, Windows, Linux) | `AppView` (a GPUI view) | the `nsh-platform-gpui` crate | Rust |
 
 Each view is one engine with its own VM, and an app can show several. The host registers its own native views for modules to use on every platform ([Native components](./native-components.md)).
 
@@ -63,7 +64,7 @@ Most of an app needs no platform checks: elements, styles, layout and modules be
 
 The components of [`nsh/ui/mobile`](../components/index.md) are drawn by nsh, so they also run on desktops, looking as they do on phones. There is no desktop UI set yet: a desktop layout is built from the primitives (`View`, `Text`, `Scroll`, `List`, …) and `Platform.select({ desktop: … })`, as the gallery's desktop layout is.
 
-Each backend lists what it does not support yet: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux).
+Each backend lists what it does not support yet: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences).
 
 ## See also
 

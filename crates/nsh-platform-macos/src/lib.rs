@@ -49,7 +49,7 @@ mod view;
 mod visual;
 
 pub use nsh_core::platform::Appearance;
-pub use nsh_engine::{App, Bundle, Root, perf};
+pub use nsh_engine::{App, Bundle, Limits, Root, perf};
 pub use objc2;
 pub use objc2_app_kit;
 pub use objc2_foundation;

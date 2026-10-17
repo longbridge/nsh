@@ -14,6 +14,8 @@
 //! runtime/macos/nsh-macos-app                release runner (macOS)
 //! runtime/windows/nsh-windows-host.exe       development host (Windows)
 //! runtime/windows/nsh-windows-app.exe        release runner (Windows)
+//! runtime/gpui/nsh-gpui-host[.exe]           development host (GPUI, this OS)
+//! runtime/gpui/nsh-gpui-app[.exe]            release runner (GPUI, this OS)
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support
 //! runtime/web/nsh.wasm                 the web runtime (`nsh-platform-web`)
@@ -21,15 +23,14 @@
 //! ```
 //!
 //! In a cargo checkout, the same files come from `target/<triple>/<profile>`
-//! (with the profile of this CLI; Linux's, macOS's and Windows' from
-//! `target/<profile>`, as they are built for this machine), and are built
-//! with cargo first, so a run
-//! never uses a missing or stale host. The web runtime is always built with
-//! the `web` profile (a debug build is several times larger and slower), into
+//! (with the profile of this CLI; Linux's, macOS's, Windows' and GPUI's
+//! from `target/<profile>`, as they are built for this machine), and are
+//! built with cargo first, so a run never uses a missing or stale host.
+//! The web runtime is always built with the `web` profile (a debug build is
+//! several times larger and slower), into
 //! `target/wasm32-unknown-unknown/web/`, its `nsh.js` read from the crate.
-//! `NSH_RUNTIME` overrides the root.
-//! An app with a Rust crate of its own gets hosts built for it instead
-//! (`rust_app.rs`).
+//! `NSH_RUNTIME` overrides the root. An app with a Rust crate of its own
+//! gets hosts built for it instead (`rust_app.rs`).
 
 use std::{
     env,
@@ -56,6 +57,8 @@ pub(crate) enum Platform {
     MacOs,
     /// Windows (Win32), on this machine.
     Windows,
+    /// GPUI, on this machine (macOS, Windows or Linux).
+    Gpui,
 }
 
 impl Platform {
@@ -67,6 +70,7 @@ impl Platform {
             Platform::Linux => "linux",
             Platform::MacOs => "macos",
             Platform::Windows => "windows",
+            Platform::Gpui => "gpui",
         }
     }
 
@@ -76,7 +80,7 @@ impl Platform {
             Platform::IphoneOs => Some("aarch64-apple-ios"),
             Platform::IphoneSimulator => Some("aarch64-apple-ios-sim"),
             Platform::MacCatalyst => Some("aarch64-apple-ios-macabi"),
-            Platform::Linux | Platform::MacOs | Platform::Windows => None,
+            Platform::Linux | Platform::MacOs | Platform::Windows | Platform::Gpui => None,
         }
     }
 
@@ -90,6 +94,8 @@ impl Platform {
             (Platform::MacOs, true) => "nsh-macos-app",
             (Platform::Windows, false) => "nsh-windows-host",
             (Platform::Windows, true) => "nsh-windows-app",
+            (Platform::Gpui, false) => "nsh-gpui-host",
+            (Platform::Gpui, true) => "nsh-gpui-app",
             (_, false) => "nsh-ios-host",
             (_, true) => "nsh-ios-app",
         }
@@ -121,6 +127,7 @@ impl Platform {
             Platform::Linux => "Linux",
             Platform::MacOs => "macOS",
             Platform::Windows => "Windows",
+            Platform::Gpui => "GPUI",
         };
         format!("the {what} for {platform}")
     }
@@ -337,6 +344,16 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     let profile = bin.file_name().context("cli profile dir")?;
     if let Some(root) = checkout(bin) {
         let mut args = vec!["build", "-p", name];
+        // The GPUI backend is a workspace of its own, built into the same
+        // `target/` (cargo reads `crates/gpui/.cargo/config.toml` only when
+        // run from there).
+        let manifest = root.join("crates/gpui/Cargo.toml");
+        let manifest = manifest.to_string_lossy();
+        let target_dir = root.join("target");
+        let target_dir = target_dir.to_string_lossy();
+        if matches!(platform, Platform::Gpui) {
+            args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
+        }
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
         }
@@ -396,4 +413,22 @@ fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<Pat
         platform.dir(),
         path.display(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Platform;
+
+    #[test]
+    fn gpui_runtimes_are_built_for_this_machine() {
+        assert_eq!(Platform::Gpui.dir(), "gpui");
+        assert_eq!(Platform::Gpui.triple(), None);
+        assert_eq!(Platform::Gpui.binary(false), "nsh-gpui-host");
+        assert_eq!(Platform::Gpui.binary(true), "nsh-gpui-app");
+        assert_eq!(
+            Platform::Gpui.file_name(true),
+            format!("nsh-gpui-app{}", std::env::consts::EXE_SUFFIX)
+        );
+        assert_eq!(Platform::Gpui.host(false), "the development host for GPUI");
+    }
 }

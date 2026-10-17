@@ -6,9 +6,13 @@ import android.content.ContextWrapper;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.util.TypedValue;
 import android.view.Choreographer;
 import android.view.Gravity;
@@ -613,9 +617,9 @@ public class NshView extends FrameLayout {
         });
     }
 
-    /** Development: the error screen (tap to dismiss), or none. With {@code prose} the
-     * message wraps to the screen; otherwise its lines are kept (code frames, stack traces)
-     * and it scrolls sideways. */
+    /** Development: the error screen (tap to dismiss; its Copy button copies the error), or
+     * none. With {@code prose} the message wraps to the screen; otherwise its lines are kept
+     * (code frames, stack traces) and it scrolls sideways. */
     void devError(String title, String message, boolean prose) {
         main.post(() -> {
             if (errorView != null) removeView(errorView);
@@ -625,28 +629,55 @@ public class NshView extends FrameLayout {
             text.setTextColor(Color.WHITE);
             text.setTypeface(Typeface.MONOSPACE);
             text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            text.setText(title + "\n\n" + message + "\n\n(tap to dismiss)");
+            // The title alone says it is an error, in a soft red.
+            SpannableString all = new SpannableString(title + "\n\n" + message + "\n\n(tap to dismiss)");
+            all.setSpan(new ForegroundColorSpan(0xffff6b6b), 0, title.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            text.setText(all);
             int pad = Math.round(16 * density);
             text.setPadding(pad, topInset() + pad, pad, pad);
-            ScrollView view = new ScrollView(getContext());
-            view.setBackgroundColor(0xf78c1414);
+            ScrollView scroll = new ScrollView(getContext());
             if (prose) {
-                view.addView(text);
+                scroll.addView(text);
             } else {
                 HorizontalScrollView sideways = new HorizontalScrollView(getContext());
                 sideways.addView(text);
-                view.addView(sideways);
+                scroll.addView(sideways);
             }
+            TextView copy = new TextView(getContext());
+            copy.setText("Copy");
+            copy.setTextColor(Color.WHITE);
+            copy.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            copy.setTypeface(Typeface.DEFAULT_BOLD);
+            copy.setGravity(Gravity.CENTER);
+            GradientDrawable pill = new GradientDrawable();
+            pill.setColor(0x2effffff);
+            pill.setCornerRadius(6 * density);
+            copy.setBackground(pill);
+            String error = title + "\n\n" + message;
+            copy.setOnClickListener(v -> {
+                SystemUi.setClipboard(getContext(), error);
+                copy.setText("Copied");
+            });
+            LayoutParams at = new LayoutParams(Math.round(76 * density), Math.round(30 * density));
+            at.gravity = Gravity.TOP | Gravity.END;
+            at.topMargin = topInset() + Math.round(12 * density);
+            at.rightMargin = pad;
+            FrameLayout view = new FrameLayout(getContext());
+            view.setBackgroundColor(0xfa1e1f22);
+            view.addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+            view.addView(copy, at);
             // Clear of the status and navigation bars, also when the screen shows
             // before the window has its insets.
             view.setOnApplyWindowInsetsListener((v, insets) -> {
-                int[] at = new int[2];
-                getLocationInWindow(at);
-                int top = Math.max(0, insets.getSystemWindowInsetTop() - at[1]);
+                int[] where = new int[2];
+                getLocationInWindow(where);
+                int top = Math.max(0, insets.getSystemWindowInsetTop() - where[1]);
                 text.setPadding(pad, top + pad, pad, insets.getSystemWindowInsetBottom() + pad);
+                at.topMargin = top + Math.round(12 * density);
+                copy.setLayoutParams(at);
                 return insets;
             });
-            view.setOnClickListener(v -> devError(null, null, false));
+            scroll.setOnClickListener(v -> devError(null, null, false));
             text.setOnClickListener(v -> devError(null, null, false));
             errorView = view;
             addView(view, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));

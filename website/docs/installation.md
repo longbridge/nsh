@@ -18,6 +18,7 @@ On top of `nsh`, each platform needs its own tools:
 | macOS | macOS | Xcode's command line tools; apps run on macOS 14+ |
 | Windows | Windows | Windows 10 1809+; the WebView2 Runtime for web views |
 | Linux | Linux | GTK 4.14+ (and its development packages to build the runtime) |
+| [GPUI](./gpui.md) | macOS, Windows or Linux, for that OS | A GPU (Metal, DirectX or Vulkan); on Linux, Wayland or X11 |
 
 Mac Catalyst, `nsh run`'s default on macOS, needs Xcode like iOS. Details are under [Platform tools](#platform-tools).
 
@@ -77,6 +78,7 @@ dist/nsh/runtime/android/{release,dev}/                      # classes.dex, lib/
 dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        # the macOS (AppKit) development host and release runner
 dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        # the Linux development host and release runner
 dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  # the Windows development host and release runner
+dist/nsh/runtime/gpui/{nsh-gpui-host,nsh-gpui-app}[.exe]     # the GPUI development host and release runner, for this OS
 dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          # the web runtimes (nsh package / run --target web)
 dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS apps
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
@@ -89,7 +91,7 @@ export PATH="$PWD/dist/nsh/bin:$PATH"
 nsh --version
 ```
 
-The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. All include the Android runtime (on Windows only when the Android SDK is found).
+The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) runtime, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
 
 ## Building from a checkout
 
@@ -110,6 +112,7 @@ cargo xtask android --dev                                       # nsh run --targ
 cargo build -p nsh-macos-host                                   # nsh run --target macos (built for you in a checkout)
 cargo build -p nsh-linux-host                                   # nsh run on Linux (built for you in a checkout)
 cargo build -p nsh-windows-host                                 # nsh run on Windows (built for you in a checkout)
+cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-host   # nsh run --target gpui (built for you in a checkout)
 cargo build --profile web -p nsh-platform-web --target wasm32-unknown-unknown   # nsh run --target web (built for you in a checkout)
 ```
 
@@ -122,10 +125,11 @@ cargo xtask android                                             # nsh package --
 cargo build -p nsh-macos-app                                    # nsh package --target macos
 cargo build -p nsh-linux-app                                    # nsh package --target linux
 cargo build -p nsh-windows-app                                  # nsh package --target windows
+cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-app    # nsh package --target gpui
 # nsh package --target web uses the same web runtime as nsh run --target web
 ```
 
-A CLI built from a checkout looks for the runtimes in `target/<triple>/<profile>` (the macOS, Linux and Windows ones, built for this machine, in `target/<profile>`) and `target/android/<profile>[-dev]`, using its own profile: `./target/debug/nsh` uses debug runtimes, `./target/release/nsh` release ones. Build both with the same profile (add `--release` to all of them for faster apps).
+A CLI built from a checkout looks for the runtimes in `target/<triple>/<profile>` (the macOS, Linux, Windows and GPUI ones, built for this machine, in `target/<profile>`) and `target/android/<profile>[-dev]`, using its own profile: `./target/debug/nsh` uses debug runtimes, `./target/release/nsh` release ones. Build both with the same profile (add `--release` to all of them for faster apps).
 
 > [!TIP]
 > `NSH_RUNTIME=/path/to/runtime` makes `nsh` use a runtime directory laid out like the distribution's `runtime/`, wherever the CLI itself lives.
@@ -185,6 +189,7 @@ Building the Android runtime from a checkout (`cargo xtask android`) additionall
 | `nsh run --target macos`, `nsh package --target macos` | Yes | No | No |
 | `nsh run --target linux` (the default on Linux), `nsh package --target linux` | No | Yes | No |
 | `nsh run --target windows` (the default on Windows), `nsh package --target windows` | No | No | Yes |
+| `nsh run --target gpui`, `nsh package --target gpui` (a package for the OS it is made on) | Yes | Yes | Yes |
 | `nsh run --target ios`, `nsh package --target ios` / `ios-simulator` | Yes, with Xcode | No | No |
 | `nsh run --target android`, `nsh package --target android` | Yes | Yes, from a checkout | Yes, with the Android runtime |
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | Yes | Yes | Yes |

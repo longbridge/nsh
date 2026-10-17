@@ -546,6 +546,8 @@ enum Message {
     /// not be loaded (its id and the message).
     Chunk(Result<Chunk, (String, String)>),
     Perf(Option<Arc<perf::PerfMonitor>>),
+    /// The embedding app's theme.
+    Theme(Option<Box<Theme>>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -674,6 +676,14 @@ impl EngineControl {
     pub fn set_perf_monitor(&self, monitor: Option<Arc<perf::PerfMonitor>>) {
         let _ = self.tx.send(Message::Perf(monitor));
     }
+
+    /// Sets the embedding app's theme, which the UI sets' components
+    /// render with instead of the app's own (`None`: the app's again;
+    /// [`Core::set_host_theme`]). Sent from [`Engine::start_with`]'s
+    /// `setup`, it is in the first frame.
+    pub fn set_theme(&self, theme: Option<Theme>) {
+        let _ = self.tx.send(Message::Theme(theme.map(Box::new)));
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -694,7 +704,25 @@ impl Engine {
         F: FnOnce() -> M + Send + 'static,
         S: MountSink,
     {
+        Self::start_with(config, make_text_engine, sink, |_| {})
+    }
+
+    /// [`Engine::start`], with `setup` sending input before the engine
+    /// starts: what it sends (a theme, the environment) is applied before
+    /// the first frame.
+    pub fn start_with<M, F, S>(
+        config: EngineConfig,
+        make_text_engine: F,
+        sink: S,
+        setup: impl FnOnce(&EngineControl),
+    ) -> io::Result<Engine>
+    where
+        M: TextEngine + 'static,
+        F: FnOnce() -> M + Send + 'static,
+        S: MountSink,
+    {
         let (tx, rx) = crossbeam_channel::unbounded();
+        setup(&EngineControl { tx: tx.clone() });
         let engine_tx = tx.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let engine_stop = stop.clone();
@@ -750,7 +778,7 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     stop: Arc<std::sync::atomic::AtomicBool>,
 ) {
     raise_thread_priority();
-    let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, stop) else {
+    let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
     loop {
@@ -802,7 +830,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let control = EngineControl { tx: tx.clone() };
-        let driver = Driver::start(config, text_engine, Rc::new(sink), tx, stop)?;
+        let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
         Some(LocalEngine {
             driver,
             rx,
@@ -856,6 +884,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         text_engine: M,
         sink: Rc<dyn MountSink>,
         tx: Sender<Message>,
+        rx: &Receiver<Message>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
         let text_engine = Rc::new(text_engine);
@@ -977,6 +1006,13 @@ impl<M: TextEngine + 'static> Driver<M> {
             ..
         } = &mut driver;
         let script = script.as_ref();
+        // What was sent before the start (`Engine::start_with`) is in the
+        // first frame.
+        while let Ok(message) = rx.try_recv() {
+            if !handle(script, state, message) {
+                return None;
+            }
+        }
         state.load_fonts(script, assets.as_deref(), &**sink);
         if let Some(batch) = state.commit(script) {
             if state.trace {
@@ -1627,6 +1663,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();
         }
+        Message::Theme(theme) => state.core.set_host_theme(theme.map(|t| *t)),
         Message::Shutdown => return false,
     }
     true

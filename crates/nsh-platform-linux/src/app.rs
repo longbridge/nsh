@@ -74,6 +74,11 @@ pub struct AppOptions {
     /// first frame, the window opens in it rather than flashing the
     /// system's.
     pub appearance: Appearance,
+    /// The VM limits of the apps it runs: [`Limits::default`] (an app
+    /// embedded in a host app) unless set; the development host and the
+    /// release runner run apps on their own, with
+    /// [`Limits::standalone_desktop`].
+    pub limits: Limits,
 }
 
 impl Default for AppOptions {
@@ -87,6 +92,7 @@ impl Default for AppOptions {
             script: None,
             components: Default::default(),
             appearance: Appearance::System,
+            limits: Limits::default(),
         }
     }
 }
@@ -185,7 +191,7 @@ impl AppView {
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
             header_heights: crate::navigation::HEADER_HEIGHTS,
-            limits: Limits::default(),
+            limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
         };

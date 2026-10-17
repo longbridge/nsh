@@ -52,7 +52,7 @@ mod view;
 mod window;
 
 pub use nsh_core::platform::Appearance;
-pub use nsh_engine::{App, Bundle, Root};
+pub use nsh_engine::{App, Bundle, Limits, Root};
 pub use windows;
 
 pub use crate::{

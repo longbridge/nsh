@@ -9,7 +9,9 @@
 /// Runs the release runner (until its window closes).
 #[cfg(windows)]
 pub fn main() -> std::process::ExitCode {
-    use nsh_platform_windows::{AppOptions, AppSource, Appearance, AssetBase, Bundle, run_app};
+    use nsh_platform_windows::{
+        AppOptions, AppSource, Appearance, AssetBase, Bundle, Limits, run_app,
+    };
 
     // A GUI program has no console: warnings go to the debugger
     // (`OutputDebugString`), where DebugView and Visual Studio show them.
@@ -51,6 +53,8 @@ pub fn main() -> std::process::ExitCode {
     };
     let mut options = AppOptions {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
+        // An app on its own, not a module embedded in another app.
+        limits: Limits::standalone_desktop(),
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))

@@ -49,7 +49,7 @@ A style expression that reads signals is rebuilt when they change, and nsh sends
 <View style={{ backgroundColor: selected() ? "#ddf4ff" : "#ffffff", padding: 12 }} />
 ```
 
-When an element has both, `style` wins over `class`: classes are applied first, then the inline style on top.
+When an element has both, `style` wins over `class`: classes are applied first, then the inline style on top. A key set to `undefined` sets nothing (`backgroundColor: active ? accent : undefined` keeps the class color when inactive); `null` sets the default.
 
 ## Units and values
 

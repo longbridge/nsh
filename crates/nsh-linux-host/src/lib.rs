@@ -22,11 +22,15 @@
 pub fn main() -> std::process::ExitCode {
     use std::{env, path::PathBuf};
 
-    use nsh_platform_linux::{AppOptions, AppSource, AssetBase, Bundle, dev, run_app};
+    use nsh_platform_linux::{AppOptions, AppSource, AssetBase, Bundle, Limits, dev, run_app};
 
     dev::init_logging();
     let mut source = None;
-    let mut options = AppOptions::default();
+    // As the release runner runs the app: on its own.
+    let mut options = AppOptions {
+        limits: Limits::standalone_desktop(),
+        ..AppOptions::default()
+    };
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {

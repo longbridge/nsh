@@ -10,7 +10,8 @@
 //! The status line ("Connecting…", "Building…") and the error overlay are
 //! AppKit views above the surface in [`AppView`]'s container. The status
 //! line lets the pointer through; the overlay takes it, and a click that
-//! selects no text dismisses it. Cmd+R loads the latest build again.
+//! selects no text dismisses it; its Copy button puts the error on the
+//! pasteboard. Cmd+R loads the latest build again.
 
 use std::{
     cell::RefCell,
@@ -32,12 +33,13 @@ use nsh_dev::{
 use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::AnyObject,
+    runtime::AnyObject, sel,
 };
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSColor, NSEvent, NSEventMask, NSEventModifierFlags, NSFont,
-    NSFontAttributeName, NSFontWeightRegular, NSFontWeightSemibold, NSForegroundColorAttributeName,
-    NSLineBreakMode, NSResponder, NSScrollView, NSText, NSTextField, NSTextView, NSView,
+    NSAutoresizingMaskOptions, NSBezelStyle, NSButton, NSColor, NSControl, NSEvent, NSEventMask,
+    NSEventModifierFlags, NSFont, NSFontAttributeName, NSFontWeightRegular, NSFontWeightSemibold,
+    NSForegroundColorAttributeName, NSLineBreakMode, NSPasteboard, NSPasteboardTypeString,
+    NSResponder, NSScrollView, NSText, NSTextField, NSTextView, NSView,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRange, NSRect, NSSize, NSString};
 use rustc_hash::FxHashMap;
@@ -575,6 +577,71 @@ define_class!(
     }
 );
 
+define_class!(
+    /// The error overlay's Copy button: puts the title and message on the
+    /// pasteboard (selecting a long stack trace by hand is error-prone).
+    #[unsafe(super(NSButton, NSControl, NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = String]
+    #[name = "NshDevErrorCopy"]
+    struct CopyButton;
+
+    unsafe impl NSObjectProtocol for CopyButton {}
+
+    impl CopyButton {
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+
+        #[unsafe(method(copyError:))]
+        fn copy_error(&self, _sender: Option<&AnyObject>) {
+            let pasteboard = NSPasteboard::generalPasteboard();
+            pasteboard.clearContents();
+            // SAFETY: an immutable AppKit constant.
+            pasteboard.setString_forType(&NSString::from_str(self.ivars()), unsafe {
+                NSPasteboardTypeString
+            });
+            self.setTitle(&NSString::from_str("Copied"));
+        }
+    }
+);
+
+/// Adds the Copy button for `text` to the top right corner of `overlay`.
+fn add_copy_button(overlay: &NSView, text: String, mtm: MainThreadMarker) {
+    let button = CopyButton::alloc(mtm).set_ivars(text);
+    // SAFETY: NSButton's designated initializer.
+    let button: Retained<CopyButton> =
+        unsafe { msg_send![super(button), initWithFrame: NSRect::ZERO] };
+    button.setTitle(&NSString::from_str("Copy"));
+    button.setBezelStyle(NSBezelStyle::Push);
+    // SAFETY: the button is its own target (controls do not retain their
+    // target) and implements the action.
+    unsafe {
+        button.setTarget(Some(&button));
+        button.setAction(Some(sel!(copyError:)));
+    }
+    button.sizeToFit();
+    // Wide enough for "Copied" too, so the button keeps its size.
+    let size = NSSize::new(
+        button.frame().size.width.max(84.0),
+        button.frame().size.height,
+    );
+    let bounds = overlay.bounds();
+    // Unflipped: the top is the high y. Clear of the vertical scroller.
+    button.setFrame(NSRect::new(
+        NSPoint::new(
+            bounds.size.width - size.width - 28.0,
+            bounds.size.height - size.height - 14.0,
+        ),
+        size,
+    ));
+    button.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewMinXMargin | NSAutoresizingMaskOptions::ViewMinYMargin,
+    );
+    overlay.addSubview(&button);
+}
+
 /// Shows `title` and `message` over the whole app; a click dismisses it
 /// (unless it selected text to copy). `prose` wraps the message to the
 /// view; otherwise its lines are kept (code frames, stack traces) and it
@@ -600,8 +667,8 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
     overlay.setWantsLayer(true);
     if let Some(layer) = overlay.layer() {
         // Opaque: the app's own text must not show through the message.
-        let red = NSColor::colorWithSRGBRed_green_blue_alpha(0.55, 0.08, 0.08, 1.0);
-        layer.setBackgroundColor(Some(&red.CGColor()));
+        let dark = NSColor::colorWithSRGBRed_green_blue_alpha(0.118, 0.122, 0.133, 1.0);
+        layer.setBackgroundColor(Some(&dark.CGColor()));
     }
 
     let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), overlay.bounds());
@@ -669,6 +736,12 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
             for (range, font) in ranges {
                 storage.addAttribute_value_range(NSFontAttributeName, &font, range);
             }
+            // The title alone says it is an error, in a soft red.
+            storage.addAttribute_value_range(
+                NSForegroundColorAttributeName,
+                &NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 0.42, 0.42, 1.0),
+                NSRange::new(0, title_len),
+            );
             storage.addAttribute_value_range(
                 NSForegroundColorAttributeName,
                 &NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 1.0, 1.0, 0.7),
@@ -679,6 +752,7 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
     text.sizeToFit();
     scroll.setDocumentView(Some(&text));
     overlay.addSubview(&scroll);
+    add_copy_button(&overlay, format!("{title}\n\n{message}"), mtm);
     container.addSubview(&overlay);
     ui.borrow_mut().error = Some(overlay);
     // The status line stays above the overlay.

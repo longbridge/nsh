@@ -18,6 +18,7 @@ nsh 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、
 | macOS | macOS | Xcode 命令行工具；应用运行在 macOS 14+ |
 | Windows | Windows | Windows 10 1809+；网页视图需要 WebView2 Runtime |
 | Linux | Linux | GTK 4.14+（构建运行时还需要它的开发包） |
+| [GPUI](./gpui.md) | macOS、Windows 或 Linux，为该系统打包 | GPU（Metal、DirectX 或 Vulkan）；Linux 上需要 Wayland 或 X11 |
 
 macOS 上 `nsh run` 的默认目标 Mac Catalyst 和 iOS 一样需要 Xcode。详见[平台工具](#平台工具)。
 
@@ -77,6 +78,7 @@ dist/nsh/runtime/android/{release,dev}/                      # classes.dex, lib/
 dist/nsh/runtime/macos/{nsh-macos-host,nsh-macos-app}        # the macOS (AppKit) development host and release runner
 dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        # the Linux development host and release runner
 dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  # the Windows development host and release runner
+dist/nsh/runtime/gpui/{nsh-gpui-host,nsh-gpui-app}[.exe]     # the GPUI development host and release runner, for this OS
 dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          # the web runtimes (nsh package / run --target web)
 dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  # embedding in iOS apps
 dist/nsh/embed/android/{nsh,nsh-dev}.aar                     # embedding in Android apps
@@ -89,7 +91,7 @@ export PATH="$PWD/dist/nsh/bin:$PATH"
 nsh --version
 ```
 
-发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。它们都包含
+发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 运行时。它们都包含
 Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）。
 
 ## 从源码构建
@@ -111,6 +113,7 @@ cargo xtask android --dev                                       # nsh run --targ
 cargo build -p nsh-macos-host                                   # nsh run --target macos (built for you in a checkout)
 cargo build -p nsh-linux-host                                   # nsh run on Linux (built for you in a checkout)
 cargo build -p nsh-windows-host                                 # nsh run on Windows (built for you in a checkout)
+cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-host   # nsh run --target gpui (built for you in a checkout)
 cargo build --profile web -p nsh-platform-web --target wasm32-unknown-unknown   # nsh run --target web (built for you in a checkout)
 ```
 
@@ -123,10 +126,11 @@ cargo xtask android                                             # nsh package --
 cargo build -p nsh-macos-app                                    # nsh package --target macos
 cargo build -p nsh-linux-app                                    # nsh package --target linux
 cargo build -p nsh-windows-app                                  # nsh package --target windows
+cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-app    # nsh package --target gpui
 # nsh package --target web uses the same web runtime as nsh run --target web
 ```
 
-从源码构建的 CLI 会按自身的 profile 在 `target/<triple>/<profile>`（macOS、Linux 和 Windows 运行时为本机构建，位于 `target/<profile>`）和 `target/android/<profile>[-dev]` 中查找运行时：`./target/debug/nsh` 使用 debug 运行时，`./target/release/nsh` 使用 release 运行时。请用相同的 profile 构建两者（若希望应用更快，给所有命令都加上 `--release`）。
+从源码构建的 CLI 会按自身的 profile 在 `target/<triple>/<profile>`（macOS、Linux、Windows 和 GPUI 运行时为本机构建，位于 `target/<profile>`）和 `target/android/<profile>[-dev]` 中查找运行时：`./target/debug/nsh` 使用 debug 运行时，`./target/release/nsh` 使用 release 运行时。请用相同的 profile 构建两者（若希望应用更快，给所有命令都加上 `--release`）。
 
 > [!TIP]
 > 设置 `NSH_RUNTIME=/path/to/runtime` 后，无论 CLI 位于何处，`nsh` 都会使用这个目录作为运行时，其结构与发行包的 `runtime/` 相同。
@@ -186,6 +190,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 | `nsh run --target macos`, `nsh package --target macos` | 可以 | 不可以 | 不可以 |
 | `nsh run --target linux`（Linux 上的默认目标）, `nsh package --target linux` | 不可以 | 可以 | 不可以 |
 | `nsh run --target windows`（Windows 上的默认目标）, `nsh package --target windows` | 不可以 | 不可以 | 可以 |
+| `nsh run --target gpui`, `nsh package --target gpui`（为打包所在的系统打包） | 可以 | 可以 | 可以 |
 | `nsh run --target ios`, `nsh package --target ios` / `ios-simulator` | 可以，需要 Xcode | 不可以 | 不可以 |
 | `nsh run --target android`, `nsh package --target android` | 可以 | 可以，需从源码构建 | 可以，需有 Android 运行时 |
 | `nsh keygen`, `certify`, `publish`, `verify`, `revoke` | 可以 | 可以 | 可以 |

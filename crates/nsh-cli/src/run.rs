@@ -30,6 +30,9 @@ pub(crate) enum Target {
     /// The web development host, in the browser (the dev server serves its
     /// page).
     Web,
+    /// The GPUI development host, in a window on this machine (macOS,
+    /// Windows or Linux).
+    Gpui,
 }
 
 impl Target {
@@ -54,6 +57,7 @@ impl Target {
             Target::Linux => crate::runtime::Platform::Linux,
             Target::Macos => crate::runtime::Platform::MacOs,
             Target::Windows => crate::runtime::Platform::Windows,
+            Target::Gpui => crate::runtime::Platform::Gpui,
             Target::Ios | Target::Android | Target::Web => {
                 crate::runtime::Platform::IphoneSimulator
             }
@@ -107,7 +111,8 @@ pub(crate) fn run(
         | Target::Linux
         | Target::Macos
         | Target::Windows
-        | Target::Web => None,
+        | Target::Web
+        | Target::Gpui => None,
     };
     let session = DevSession::start(entry, port, release)?;
     session.print_urls();
@@ -157,6 +162,13 @@ pub(crate) fn run(
             let mut command = Command::new(&host);
             command.args(&args);
             run_local(&session, &mut command, "the Windows host")
+        }
+        // In place on every OS: GPUI makes the process a regular app (on
+        // macOS too) without an app bundle around it.
+        Target::Gpui => {
+            let mut command = Command::new(&host);
+            command.args(&args);
+            run_local(&session, &mut command, "the GPUI host")
         }
         Target::Ios => {
             let app = package_ios(&work, &host)?;
@@ -577,7 +589,8 @@ fn info_plist(target: Target) -> String {
         | Target::Linux
         | Target::Macos
         | Target::Windows
-        | Target::Web => {
+        | Target::Web
+        | Target::Gpui => {
             "<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>\n    \
              <key>MinimumOSVersion</key><string>15.0</string>\n    \
              <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>\n    \
@@ -602,4 +615,18 @@ fn info_plist(target: Target) -> String {
 </plist>
 "#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::ValueEnum as _;
+
+    use super::Target;
+
+    #[test]
+    fn gpui_is_a_target_with_its_own_host() {
+        let target = Target::from_str("gpui", false).unwrap();
+        assert_eq!(target, Target::Gpui);
+        assert_eq!(target.platform().binary(false), "nsh-gpui-host");
+    }
 }

@@ -380,9 +380,13 @@ fn install_css() {
     provider.load_from_string(
         ".nsh-dev-status { background: rgba(26, 26, 26, 0.85); color: white; font-size: 12px; \
          font-weight: 600; padding: 6px 14px; border-radius: 999px; }
-         .nsh-dev-error { background: rgba(140, 20, 20, 0.97); color: white; }
+         .nsh-dev-error { background: rgba(30, 31, 34, 0.98); color: white; }
          .nsh-dev-error label { color: white; }
-         .nsh-dev-error .nsh-dev-title { font-size: 16px; font-weight: 700; }
+         .nsh-dev-error .nsh-dev-title { font-size: 16px; font-weight: 700; color: #ff6b6b; }
+         .nsh-dev-error .nsh-dev-copy { background: rgba(255, 255, 255, 0.12); background-image: none; \
+         border: none; box-shadow: none; color: white; font-size: 13px; font-weight: 600; \
+         padding: 4px 14px; border-radius: 6px; min-width: 52px; }
+         .nsh-dev-error .nsh-dev-copy:hover { background: rgba(255, 255, 255, 0.2); }
          .nsh-dev-error .nsh-dev-message { font-family: monospace; font-size: 12px; }
          .nsh-dev-error .nsh-dev-hint { font-size: 11px; opacity: 0.7; }
          .nsh-dev-error .nsh-dev-message selection { background: rgba(255, 255, 255, 0.35); }",
@@ -425,7 +429,7 @@ fn hide_status(ui: &RefCell<DevUi>) {
 }
 
 /// Shows `title` and `message` over the whole app; a click dismisses it
-/// (unless it selected text to copy). `prose` wraps the message to the
+/// (unless it selected text to copy), its Copy button copies them. `prose` wraps the message to the
 /// view; otherwise its lines are kept (code frames, stack traces) and it
 /// scrolls sideways.
 fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) {
@@ -468,7 +472,6 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
         gtk::PolicyType::Automatic,
     );
     scroll.set_child(Some(&content));
-    scroll.add_css_class("nsh-dev-error");
     scroll.set_hexpand(true);
     scroll.set_vexpand(true);
 
@@ -488,8 +491,28 @@ fn show_error(ui: &Rc<RefCell<DevUi>>, title: &str, message: &str, prose: bool) 
     });
     scroll.add_controller(click);
 
-    view.overlay().add_overlay(&scroll);
-    ui.borrow_mut().error = Some(scroll.upcast());
+    // Beside the text, not in it: its clicks do not reach the dismissing
+    // gesture above.
+    let copy = gtk::Button::with_label("Copy");
+    copy.add_css_class("nsh-dev-copy");
+    copy.set_halign(gtk::Align::End);
+    copy.set_valign(gtk::Align::Start);
+    copy.set_margin_top(14);
+    copy.set_margin_end(24);
+    let error = format!("{title}\n\n{message}");
+    copy.connect_clicked(move |button| {
+        if let Some(display) = gdk::Display::default() {
+            display.clipboard().set_text(&error);
+        }
+        button.set_label("Copied");
+    });
+
+    let layer = gtk::Overlay::new();
+    layer.add_css_class("nsh-dev-error");
+    layer.set_child(Some(&scroll));
+    layer.add_overlay(&copy);
+    view.overlay().add_overlay(&layer);
+    ui.borrow_mut().error = Some(layer.upcast());
 }
 
 fn hide_error(ui: &RefCell<DevUi>) {

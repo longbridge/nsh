@@ -16,7 +16,7 @@ back. One implementation draws the same on iOS and Android, is laid out in the s
 | `nsh_engine::EngineConfig::ui_sets` | The registries a surface serves (the platforms' `set_ui_sets`, by default `nsh_ui_mobile::registry()`; an app's own set: `docs/dev/tooling.md`) |
 
 A desktop set is planned as a crate of its own (`nsh-ui-desktop`), not an abstraction over both; like every UI set it runs
-on every backend (macOS, Windows, Linux, and GPUI, a separate platform backend that is planned too). It does not exist
+on every backend (macOS, Windows, Linux, and GPUI, a separate platform backend in development, `gpui.md`). It does not exist
 yet: on macOS, Windows and Linux apps use `nsh/ui/mobile`, whose components render there as on phones, or their own
 layouts from the primitives.
 
@@ -304,9 +304,12 @@ parse and no `.class()`.
 use) plus `radius`, `radius_lg` and `font_size`, and derefs to its colors (`theme.primary`). The default
 (`default-theme.json`) is gpui-kit's default theme with mobile radii. An app sets its own in `nsh.json`: `"theme":
 "brand.json"` (a gpui-kit theme file, relative to `nsh.json`) or the same JSON inline. Keys only desktop components
-use are ignored; a pressed color the theme leaves out is derived from its base; colors are CSS colors or Tailwind
-palette names. The bundler checks the theme; the entry hands it to the renderer (`nsh:rt` `setup`), which
-sends it to the root (`uiTheme`) before anything renders; a new theme renders every component again.
+use are ignored; a pressed color the theme leaves out is derived from its base; null colors (gpui-kit serializes unset
+ones so) are left as they are; colors are CSS colors or Tailwind palette names. The bundler checks the theme; the entry
+hands it to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before anything renders; a new
+theme renders every component again. An embedding app can give a surface its own theme (`Core::set_host_theme`,
+`EngineControl::set_theme`; sent from `Engine::start_with`'s `setup` it is in the first frame): it wins over the app's
+until cleared, so an embedded app looks like its host (`embedding.md`, "GPUI and GPUI Kit apps").
 
 ## The host node and ids
 

@@ -181,6 +181,14 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
         SurfaceOptions {
             trace: options.trace,
             asset_base: options.asset_base,
+            // An app on its own (the development host, the release runner),
+            // not a module embedded in another app; on a Mac (Catalyst) it
+            // may hold as much as a desktop app.
+            limits: if cfg!(target_abi = "macabi") {
+                nsh_engine::Limits::standalone_desktop()
+            } else {
+                nsh_engine::Limits::standalone_mobile()
+            },
             ..SurfaceOptions::default()
         },
     );

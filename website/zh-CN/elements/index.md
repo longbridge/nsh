@@ -82,6 +82,25 @@ mount(App);
 
 视图被按下时，`active:` Tailwind 类同样会生效，无需经过 JS。
 
+### 悬停
+
+在 macOS、Linux 和 GPUI 后端上，JS 可以得知鼠标移到视图上和离开视图（其他平台暂不触发这两个事件；凡是平台跟踪悬停的地方，`hover:` 类都会为悬停的视图设置样式）。
+
+| 属性 | 类型 | 说明 |
+|---|---|---|
+| `onHoverIn` | `() => void` | 鼠标移到视图或其内部的视图上。 |
+| `onHoverOut` | `() => void` | 鼠标离开视图及其内部的视图，或离开窗口。 |
+
+与 CSS 的 `:hover` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onHoverIn`（由外向内；`onHoverOut` 由内向外）。事件在发生之后才通知 JS，触摸从不触发。从鼠标下方移除的视图会收到 `onHoverOut`，在 Linux 上要等到鼠标下一次移动。
+
+```tsx
+const hovered = signal<string | null>(null);
+
+<View onHoverIn={() => hovered.set(file.path)} onHoverOut={() => hovered.set(null)} class="hover:bg-zinc-100">
+  <Text>{file.name}</Text>
+</View>
+```
+
 ### 布局与标识
 
 | 属性 | 类型 | 说明 |

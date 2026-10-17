@@ -22,6 +22,7 @@ For people working on native-shell itself (`AGENTS.md` at the root is the short 
 | [macos.md](macos.md) | The macOS backend (AppKit): building, how each area maps to AppKit, `--script` checks, what differs |
 | [linux.md](linux.md) | The Linux backend (GTK 4): building, how each area maps to GTK, `--script` checks, what differs |
 | [windows.md](windows.md) | The Windows backend (Win32, Direct2D): building, how each area maps to Windows, `--script` checks, what differs |
+| [gpui.md](gpui.md) | The GPUI backend (macOS, Windows, Linux): building, the surface element and `DrawCx`, embedding as a GPUI view, what differs |
 | [web.md](web.md) | The WebAssembly runtime of the website's demos: `LocalEngine`, the clock, the DOM protocol |
 | [performance.md](performance.md) | Baselines |
 | [pitfalls.md](pitfalls.md) | Verified constraints and pitfalls, by area |

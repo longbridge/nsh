@@ -21,19 +21,19 @@ nsh 同时运行在手机和桌面上：iOS、Android、macOS、Windows 和 Linu
 | [Windows](./windows.md) | 用 Direct2D 绘制的 Win32 窗口；DirectWrite | Windows 10 1809+、Windows 11 | `nsh run`（Windows 上的默认目标） | 一个目录和一个 `.zip` |
 | [Linux](./linux.md) | GTK 4 控件；Pango | GTK 4.14+ | `nsh run`（Linux 上的默认目标） | 一个目录和一个 `.tar.gz` |
 
-另外还有两个目标用于开发和本站、不用于发布，还有一个在规划中：
+桌面还有第二个后端，另外还有两个目标用于开发和本站、不用于发布：
 
 - **Mac Catalyst** 在 Mac 上用 iPhone 尺寸的窗口（390×844）运行 iOS 后端。它是 macOS 上 `nsh run` 的默认目标，因为不用启动模拟器，就能最快看到模块在手机上的样子。
 - **Web**（[WebAssembly](./web.md)）在浏览器里运行同一个引擎，用 DOM 绘制。本站的在线示例和 [Playground](/playground) 都由它驱动；它不是用来发布应用的目标。
-- **GPUI** 是规划中的桌面后端，用姊妹项目 GPUI Kit 所基于的 [GPUI](https://gpui-kit.com) 绘制。它正在开发，还不是 nsh 的一部分；目前桌面上运行的是上面 macOS、Windows 和 Linux 的原生后端。
+- **[GPUI](./gpui.md)** 用姊妹项目 GPUI Kit 所基于的 [GPUI](https://gpui-kit.com) 绘制模块，在 macOS、Windows 和 Linux 上表现一致，用于嵌入 GPUI 和 GPUI Kit 应用（`nsh run --target gpui`、`nsh package --target gpui`）。它正在开发：上面原生后端的元素和模块它都已具备，部分绘制效果不同（见[差异](./gpui.md#差异)），目前只在 Linux 上试过；目前发布桌面应用请使用原生后端。
 
 ## 开发与打包
 
 不传 `--target` 时，`nsh run` 选择本机的平台：macOS 上是 Mac Catalyst，Linux 上是 GTK 窗口，Windows 上是 Win32 窗口。手机要从电脑上连接：iOS 需要装有 Xcode 的 Mac，Android 可以在装有 Android SDK 的 macOS、Linux 或 Windows 上开发（[安装](./installation.md#各平台可用的命令)）。
 
 ```sh
-nsh run my-app --target macos      # 或 ios、android、windows、linux、catalyst
-nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows、linux
+nsh run my-app --target macos      # 或 ios、android、windows、linux、gpui、catalyst
+nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows、linux、gpui
 ```
 
 桌面后端只为运行它的机器构建：Mac 应用在 Mac 上打包，Windows 应用在 Windows 上打包，Linux 应用在 Linux 上打包。各目标的输出、签名和图标见[打包](./packaging.md)。
@@ -47,6 +47,7 @@ nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows
 | macOS | `AppView`（一个 `NSView`） | `nsh-platform-macos` crate | Rust |
 | Windows | `AppView`（一个子窗口） | `nsh-platform-windows` crate | Rust |
 | Linux | `AppView`（一个 GTK 控件） | `nsh-platform-linux` crate | Rust |
+| GPUI（macOS、Windows、Linux） | `AppView`（一个 GPUI 视图） | `nsh-platform-gpui` crate | Rust |
 
 每个视图都是一个拥有独立虚拟机的引擎，一个应用可以同时显示多个。在每个平台上，宿主都可以注册自己的原生视图给模块使用（[原生组件](./native-components.md)）。
 
@@ -63,7 +64,7 @@ nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows
 
 [`nsh/ui/mobile`](../components/index.md) 的组件由 nsh 绘制，所以在桌面上也能运行，样子和在手机上一样。目前还没有桌面 UI 套件：桌面布局用基础元素（`View`、`Text`、`Scroll`、`List` 等）和 `Platform.select({ desktop: … })` 搭建，示例应用 gallery 的桌面布局就是这样做的。
 
-每个后端都列出了它尚不支持的内容：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)。
+每个后端都列出了它尚不支持的内容：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)、[GPUI](./gpui.md#差异)。
 
 ## 另请参阅
 

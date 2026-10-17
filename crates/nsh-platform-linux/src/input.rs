@@ -113,7 +113,8 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
-    /// Views that track `HOVERED` (hover is only tested while there are).
+    /// Views that track `HOVERED` or listen to hover events (hover is only
+    /// tested while there are).
     hover_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views that are hovered now.
     hovered: RefCell<Vec<NshView>>,
@@ -380,7 +381,7 @@ pub(crate) fn reset(surface: &Surface) {
 
 /// `TrackStates`.
 pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
-    let id = {
+    {
         let mut s = view.state_mut();
         s.tracked = states;
         // The core keeps the states still tracked and forgets the rest
@@ -388,15 +389,28 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
         // about (the pointer leaving a view whose hover was tracked
         // throughout) would never reach it.
         s.states &= states;
-        s.id
-    };
+    }
+    update_hover_tracking(surface, view);
+}
+
+/// Whether hovering `view` matters: for its `hover:` styles (the
+/// `HOVERED` state) or its `onHoverIn` / `onHoverOut`.
+fn hoverable(view: &NshView) -> bool {
+    let s = view.state();
+    s.tracked & HOVERED != 0
+        || s.events.contains(EventKind::HoverIn)
+        || s.events.contains(EventKind::HoverOut)
+}
+
+fn update_hover_tracking(surface: &Surface, view: &NshView) {
+    let id = view.state().id;
     let mut tracked = surface.input.hover_tracked.borrow_mut();
-    if states & HOVERED != 0 {
+    if hoverable(view) {
         tracked.insert(id);
     } else {
         tracked.remove(&id);
-        // Not hovered as far as anyone knows: picked again if it tracks
-        // hovers again under the pointer.
+        // Not hovered as far as anyone knows: picked again if hovering it
+        // matters again under the pointer.
         surface.input.hovered.borrow_mut().retain(|v| v != view);
     }
 }
@@ -430,8 +444,10 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
     }
 }
 
-/// The view's events changed.
-pub(crate) fn events_changed(_surface: &Rc<Surface>, view: &NshView) {
+/// The view's events changed (hover handlers have it hovered, from the
+/// next mouse move).
+pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
+    update_hover_tracking(surface, view);
     update_cursor(view);
 }
 
@@ -1826,29 +1842,43 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
 
 // --- Hover --------------------------------------------------------------------------
 
-/// The mouse moved to `(x, y)`: updates `HOVERED` along the views under it.
+/// The mouse moved to `(x, y)`: updates `HOVERED` and raises `onHoverIn` /
+/// `onHoverOut` along the views under it.
 fn hover(surface: &Surface, x: f32, y: f32) {
     let input = &surface.input;
     if input.hover_tracked.borrow().is_empty() && input.hovered.borrow().is_empty() {
         return;
     }
     let views = match pick(&surface.root, x, y) {
-        Some(hit) => chain(&hit.view)
-            .into_iter()
-            .filter(|v| v.state().tracked & HOVERED != 0)
-            .collect(),
+        Some(hit) => chain(&hit.view).into_iter().filter(hoverable).collect(),
         None => Vec::new(),
     };
     set_hovered(surface, views);
 }
 
+/// The views under the mouse are `views` (innermost first): those it left
+/// hear so from the inside out, then those it came over from the outside
+/// in, as with the DOM's `pointerleave` / `pointerenter`.
 fn set_hovered(surface: &Surface, views: Vec<NshView>) {
     let old = std::mem::replace(&mut *surface.input.hovered.borrow_mut(), views.clone());
     for v in old.iter().filter(|v| !views.contains(v)) {
         set_state(surface, v, HOVERED, false);
+        hover_event(surface, v, EventKind::HoverOut);
     }
-    for v in views.iter().filter(|v| !old.contains(v)) {
+    for v in views.iter().rev().filter(|v| !old.contains(v)) {
         set_state(surface, v, HOVERED, true);
+        hover_event(surface, v, EventKind::HoverIn);
+    }
+}
+
+/// `onHoverIn` / `onHoverOut` of `view`, if it listens.
+fn hover_event(surface: &Surface, view: &NshView, kind: EventKind) {
+    let (id, listens) = {
+        let s = view.state();
+        (s.id, s.events.contains(kind))
+    };
+    if listens {
+        surface.event(id, kind, EventPayload::None);
     }
 }
 

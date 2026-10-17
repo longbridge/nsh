@@ -49,7 +49,7 @@ const styles = {
 <View style={{ backgroundColor: selected() ? "#ddf4ff" : "#ffffff", padding: 12 }} />
 ```
 
-元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。
+元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。值为 `undefined` 的键不设置任何东西（`backgroundColor: active ? accent : undefined` 在未激活时保留类名的颜色）；`null` 则设为默认值。
 
 ## 单位与取值
 

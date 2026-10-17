@@ -277,9 +277,10 @@ impl Theme {
             let Some(JsonValue::Object(colors)) = entry.get("colors") else {
                 continue;
             };
-            // A pressed color the theme leaves out follows its base color.
+            // A pressed color the theme leaves out (or null) follows its
+            // base color.
             for (base, active, field) in PRESSED {
-                if !colors.contains_key(*active)
+                if colors.get(*active).is_none_or(JsonValue::is_null)
                     && let Some(c) = colors.get(*base).and_then(color)
                 {
                     let field = field(&mut self.colors);
@@ -296,6 +297,10 @@ impl Theme {
                 let Some(field) = self.colors.by_key(key) else {
                     continue;
                 };
+                // gpui-kit writes the colors a theme leaves unset as null.
+                if value.is_null() {
+                    continue;
+                }
                 let c = color(value)
                     .ok_or_else(|| ThemeError(format!("`{key}`: not a color: {value}")))?;
                 if dark {
@@ -344,5 +349,25 @@ mod tests {
         assert_eq!(theme.radius, 8.0);
         assert_eq!(theme.secondary, Theme::default().secondary);
         assert!(Theme::from_json(r#"{ "themes": [{ "colors": { "ring": 3 } }] }"#).is_err());
+    }
+
+    #[test]
+    fn colors_a_gpui_kit_theme_leaves_unset_keep_their_value() {
+        // gpui-kit serializes unset colors (and numbers) as null.
+        let theme = Theme::from_json(
+            r##"{ "themes": [{ "mode": "dark", "radius": null, "colors": {
+                "primary.background": null, "primary.active.background": null,
+                "danger.background": "#ff0000", "danger.active.background": null,
+                "ring": "#ff0000", "sidebar.background": null } }] }"##,
+        )
+        .unwrap();
+        let default = Theme::default();
+        assert_eq!(theme.primary, default.primary);
+        assert_eq!(theme.primary_active, default.primary_active);
+        assert_eq!(theme.radius, default.radius);
+        assert_eq!(theme.ring.dark, rgb(0xff0000));
+        assert_eq!(theme.ring.light, default.ring.light);
+        // A null pressed color follows its base color.
+        assert_eq!(theme.danger_active.dark, mix(rgb(0xff0000), 0xff, 0.12));
     }
 }

@@ -1,0 +1,100 @@
+name: GPUI
+
+# Builds, lints and tests the GPUI backend (the workspace in `crates/gpui`) on
+# macOS, Windows and Linux. The main workspace's CI covers the CLI that runs
+# it (`nsh run --target gpui`, `nsh package --target gpui`).
+
+on:
+  # Only the GPUI workspace's own changes run it; a daily run catches what
+  # changes to the crates it shares with the main workspace break.
+  push:
+    branches: [main]
+    paths:
+      - "crates/gpui/**"
+      - ".github/workflows/gpui.yml"
+  pull_request:
+    paths:
+      - "crates/gpui/**"
+      - ".github/workflows/gpui.yml"
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpui-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Temporary directories (tests) outside the checkout.
+      - name: Set up the environment
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          echo "TMPDIR=$RUNNER_TEMP/tmp" >> "$GITHUB_ENV"
+
+      # QuickJS is C (bindgen needs libclang); GPUI links X11, Wayland,
+      # xkbcommon, fontconfig and FreeType, and draws with Vulkan (GPUI
+      # Fast's CI list); web views (feature `webview`, wry) need GTK 3 and
+      # WebKitGTK 4.1, videos (feature `video`) GStreamer 1.20+.
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang libclang-dev build-essential pkg-config \
+            libasound2-dev libfontconfig-dev libfreetype-dev libssl-dev \
+            libvulkan1 libwayland-dev libx11-xcb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libzstd-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - name: Set up Windows
+        if: runner.os == 'Windows'
+        run: |
+          # QuickJS is C: bindgen needs libclang, which the image's LLVM has.
+          echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+          # rustc can overflow its default stack on the `windows` crate.
+          echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-cargo-${{ hashFiles('crates/gpui/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gpui-cargo-
+
+      # The GPUI workspace builds into the repository's `target/`
+      # (`crates/gpui/.cargo/config.toml`).
+      - name: Clippy
+        working-directory: crates/gpui
+        run: cargo clippy --all-targets --features nsh-platform-gpui/dev -- -D warnings
+
+      # Tests need no display: they open no window.
+      - name: Test
+        working-directory: crates/gpui
+        run: cargo test

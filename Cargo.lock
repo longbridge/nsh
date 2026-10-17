@@ -2191,6 +2191,7 @@ dependencies = [
 name = "nsh-js"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "nsh-animation",
  "nsh-core",

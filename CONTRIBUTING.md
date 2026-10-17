@@ -69,8 +69,9 @@ Commit subjects and pull request titles name the area first, then say what chang
   `js`, `engine`, `package`, `bundler`, `dev`, `cli`, `xtask`, `ui-mobile` for the `nsh/ui/mobile` set), a platform (`ios`,
   `android`, `macos`, `windows`, `linux`), a JS layer or module (`runtime`, `list`, `animated`), or `tailwind`, `text`,
   `docs`, `examples`, `gallery`, `ci`. A change to all the desktop backends (macOS, Windows and Linux) is `desktop`, one
-  to both mobile platforms (iOS and Android) is `mobile`. Name two or three areas separated by commas when a change
-  spans them (`core, desktop: …`); a change everywhere names its subject instead (`signed packages: …`).
+  to both mobile platforms (iOS and Android) is `mobile`. Name one area only, never several separated by commas: when a
+  change spans several, look at it as a whole and name the part it is mostly about. A feature the core adds and the
+  platforms carry out is `core`, not `core, desktop`; a change everywhere names its subject (`signed packages: …`).
 - The sentence starts with a capital letter, uses the imperative mood, has no trailing period and fits in about 72
   characters with its area. It says what the change does for a user of nsh, not which files moved: `list: Keep the
   visible rows in place when items are inserted above them`, not `list: Update list.rs`.

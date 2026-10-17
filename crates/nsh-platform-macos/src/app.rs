@@ -84,6 +84,11 @@ pub struct AppOptions {
     /// Shows the performance monitor over the app (frame rate, frame and
     /// commit costs, CPU, GPU, memory): see [`AppView::set_fps_monitor`].
     pub fps: bool,
+    /// The VM limits of the apps it runs: [`Limits::default`] (an app
+    /// embedded in a host app) unless set; the development host and the
+    /// release runner run apps on their own, with
+    /// [`Limits::standalone_desktop`].
+    pub limits: Limits,
 }
 
 impl Default for AppOptions {
@@ -97,6 +102,7 @@ impl Default for AppOptions {
             components: Default::default(),
             appearance: Appearance::System,
             fps: false,
+            limits: Limits::default(),
         }
     }
 }
@@ -191,7 +197,7 @@ impl AppView {
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
             header_heights: crate::navigation::HEADER_HEIGHTS,
-            limits: Limits::default(),
+            limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
         };

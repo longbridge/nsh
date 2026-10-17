@@ -3,14 +3,18 @@
 Each surface is one QuickJS VM. A bundle holds only the app's code (nsh's runtime is native), so nothing in JS is
 trusted: every limit and check is enforced in Rust, never in JS.
 
-- **Limits** (`nsh_js::Limits`, `EngineConfig::limits`, per VM): the QuickJS heap (256 MB by default) and stack, a
+- **Limits** (`nsh_js::Limits`, `EngineConfig::limits`, per VM): the QuickJS heap (`Limits::default`: 256 MB, for apps embedded in another app;
+  `Limits::standalone_desktop`: 1 GB, for the desktop hosts and runners and Catalyst; `Limits::standalone_mobile`: 512 MB, for
+  the iOS and Android hosts and runners) and stack, a
   time budget per call from Rust into JS (`sandbox.rs`: loading the bundle 10 s, any other call 2 s — one event with the
   rendering it causes, one list bind, one timer, one frame's callbacks, the microtask drain; nested calls share the
   outermost budget), and quotas for what the heap limit does not cover: changes at once (the op queue,
   `max_op_values`: ops are Rust memory), ops per canvas drawing, nodes in the core (`Core::set_max_nodes`; each may hold a native view) and dense
   node ids (an id far past the ids in use would grow the id table: `ApplyError::IdOutOfRange`).
 - An overrun call is cut off by the interrupt handler with an exception no `catch` swallows, reported with the budget it
-  exceeded; the VM goes on. Running out of memory or going over a quota **stops the VM** (`Host::fatal`): it is reported
+  exceeded; the VM goes on. Running out of memory or going over a quota **stops the VM** (`Host::fatal`), also when the
+  app catches the error: the heap's allocator (`HeapAllocator`) enforces the limit and records reaching it, since QuickJS
+  reports running out in several ways (an `InternalError`, a `null` exception). It is reported
   once (`MountSink::report_error`, the embedder's error callback), no JS runs after that and the views stay as they were.
 - **Hardening** (`Policy::harden`, on unless the bundle came from a dev server): `eval` is deleted, the `Function`,
   `AsyncFunction` and generator constructors throw, and the shared prototypes (`Object`, `Array`, `Function`, `String`,

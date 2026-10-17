@@ -59,6 +59,8 @@ final class Native {
     static final int NATIVE_EVENT = 47;
     static final int CLIPBOARD = 48;
     static final int KEY_COMMAND = 49;
+    static final int HOVER_IN = 51;
+    static final int HOVER_OUT = 52;
 
     static native long create(NshView view, float density, boolean trace);
 

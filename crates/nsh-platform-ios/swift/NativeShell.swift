@@ -39,7 +39,7 @@ private func check(_ error: UnsafeMutablePointer<CChar>?) throws {
 
 /// The VM limits of an app (`nil`: the default).
 public struct NshLimits: Sendable, Equatable {
-    /// JS heap in MB (default 256). Running out stops the app.
+    /// JS heap in MB (default 256, for an app embedded in another). Running out stops the app.
     public var memoryMB: UInt32?
     /// Interpreter stack in KB (default 4096, also the maximum).
     public var stackKB: UInt32?

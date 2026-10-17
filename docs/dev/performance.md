@@ -103,4 +103,34 @@ draw a panel.
   p50 ~1.9 → ~1.7 ms, CPU ~38–40% both; a test canvas (524×340: a 400-point area and line, 400 bars, a pulsing ring,
   a moving square) presented 86–117 fps before and 92–119 after, `main` p50 ~1.2 → ~1.0 ms, CPU ~17% both.
 
+- GPUI backend (`nsh-platform-gpui`; release with thin LTO, rootful Xwayland at scale 2, a focused 285×315 pt window at
+  60 Hz, against the GTK backend (`GSK_RENDERER=ngl`) on the same display and bundle). `draw` is the surface element's
+  prepaint and paint (the whole view tree, every frame), `frame` GPUI's whole frame with presenting (`ZED_MEASUREMENTS=1`),
+  CPU the process' (both threads):
+
+  | Scenario | GPUI: draw p50 / p95, frame p50 / p95, CPU | GTK: CPU |
+  |---|---|---|
+  | Photos list, three mouse flings (61 fps while gliding) | 0.29 / 0.42 ms, 0.63 / 0.89 ms, 4% | 7% |
+  | Photos list, wheel notches every 30 ms | 0.23 / 0.30 ms, 0.60 / 0.87 ms, 3–4% | 4% |
+  | Animations demo (three native loops) | 0.24 / 0.29 ms, 0.61 / 0.97 ms, 4% | 4% |
+
+  An idle surface draws no frames (frames are requested only while something animates or JS asked for one). GPUI caps
+  unfocused windows at 30 fps by default (`WindowOptions::inactive_frame_interval`), skipping frames in between (gaps of
+  33–50 ms): nsh's own windows turn the cap off (61 fps unfocused); hosts embedding an `AppView` decide for theirs.
+  Debug builds draw the Animations page in 1.5–3.5 ms.
+
+  On the Wayland desktop (Hyprland, 3840×2160 at 144 Hz, scale 1.6; a 1500×900 pt window, unfocused, release with
+  thin LTO, `nsh-gpui-host --fps` with `ZED_MEASUREMENTS=1` (`gpui.md` "Frame statistics"); `paint` is the main
+  thread's per frame, `frame` GPUI's draw and present):
+
+  | Demo | Before: fps, paint p50, frame p50 | After: fps, paint p50, frame p50 |
+  |---|---|---|
+  | Animations (three native loops, ~26 paths a frame) | 26, 0.62 ms, 1.07 ms | 145, 0.42 ms, 0.76 ms |
+  | Stocks (live prices, sparklines, chart) | 25, 18.4 ms, 19.3 ms | 143, 1.9 ms, 2.5 ms |
+  | Gestures (springs, a pulsing ring) | 26, 0.21 ms, 0.52 ms | 145, 0.17 ms, 0.35 ms |
+
+  Before: GPUI's 30 fps cap of unfocused windows (frames 40–42 ms apart) and, in Stocks, canvases rasterized in full
+  on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in nsh's windows, canvases
+  rasterized on two workers and only what animates in place (`canvas.rs`).
+
 The dev profile builds `rquickjs-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.

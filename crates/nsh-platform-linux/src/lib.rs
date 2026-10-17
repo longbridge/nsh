@@ -41,7 +41,7 @@ mod view;
 
 pub use gtk4;
 pub use nsh_core::platform::Appearance;
-pub use nsh_engine::{App, Bundle, Root};
+pub use nsh_engine::{App, Bundle, Limits, Root};
 
 pub use crate::{
     app::{AppOptions, AppSource, AppView, run_app, set_ui_sets},

@@ -216,7 +216,84 @@ function Truncation() {
   );
 }
 
+const CHINESE =
+  "原生文本在引擎线程上一次排版，在主线程上直接绘制。中文在任意两个汉字之间都可以换行，但句号、逗号和右括号不会出现在行首，左括号也不会留在行尾（就像这样）。";
+const JAPANESE = "日本語の文章は、ひらがな・カタカナ・漢字に Latin の単語や数字（2024年）を混ぜて組みます。句読点は行頭に来ません。";
+const ARABIC = "النص الأصلي يُنضَّد مرة واحدة على خيط المحرك ثم يُرسم على الخيط الرئيسي دون أي عمل إضافي في التخطيط.";
+
+function Cjk() {
+  return (
+    <Card icon="text" title="Chinese and Japanese" subtitle="Lines break between characters, never before closing punctuation">
+      <Specimen label="Chinese paragraph" first>
+        <Text style={body()}>{CHINESE}</Text>
+      </Specimen>
+      <Specimen label="Japanese: kana, kanji and Latin">
+        <Text style={body()}>{JAPANESE}</Text>
+      </Specimen>
+      <Specimen label="Two lines, tail" code="numberOfLines={2}">
+        <Text numberOfLines={2} style={body()}>
+          {CHINESE}
+        </Text>
+      </Specimen>
+      <Specimen label="One line, middle" code={`ellipsizeMode="middle"`}>
+        <Text numberOfLines={1} ellipsizeMode="middle" style={body()}>
+          {JAPANESE}
+        </Text>
+      </Specimen>
+    </Card>
+  );
+}
+
+function RightToLeft() {
+  return (
+    <Card icon="text" title="Right to left" subtitle="Arabic and Hebrew, mixed with Latin text and numbers">
+      <Specimen label="Arabic paragraph" code={`writingDirection="rtl"`} first>
+        <Text style={{ ...body(), writingDirection: "rtl" }}>{ARABIC}</Text>
+      </Specimen>
+      <Specimen label="Arabic, English and numbers in one line">
+        <Text style={body()}>تم شحن الطلب رقم 4521 عبر DHL في 12 مارس، والتسليم خلال 3 أيام.</Text>
+      </Specimen>
+      <Specimen label="Hebrew">
+        <Text style={body()}>שלום! הגרסה 2.0 של nsh זמינה עכשיו (גם ב-Linux).</Text>
+      </Specimen>
+      <Specimen label="One line, tail" code="numberOfLines={1}">
+        <Text numberOfLines={1} style={body()}>
+          {ARABIC}
+        </Text>
+      </Specimen>
+    </Card>
+  );
+}
+
+function Alignment() {
+  const sentence = "Short, aligned in its box";
+  const paragraph =
+    "Justified text spreads the spaces of every line across the box, except on the last line of a paragraph, which stays at its start.";
+  return (
+    <Card icon="lists" title="Alignment" subtitle="textAlign in left-to-right and right-to-left text">
+      <Specimen label="Left" code={`textAlign="left"`} first>
+        <Text style={{ ...body(), textAlign: "left" }}>{sentence}</Text>
+      </Specimen>
+      <Specimen label="Center" code={`textAlign="center"`}>
+        <Text style={{ ...body(), textAlign: "center" }}>{sentence}</Text>
+      </Specimen>
+      <Specimen label="Right" code={`textAlign="right"`}>
+        <Text style={{ ...body(), textAlign: "right" }}>{sentence}</Text>
+      </Specimen>
+      <Specimen label="Justify" code={`textAlign="justify"`}>
+        <Text style={{ ...body(), textAlign: "justify" }}>{paragraph}</Text>
+      </Specimen>
+      <Specimen label="Justify, Chinese" code={`textAlign="justify"`}>
+        <Text style={{ ...body(), textAlign: "justify" }}>{CHINESE}</Text>
+      </Specimen>
+      <Specimen label="Left, in Arabic" code={`textAlign="left"`}>
+        <Text style={{ ...body(), textAlign: "left" }}>{ARABIC}</Text>
+      </Specimen>
+    </Card>
+  );
+}
+
 export function TextDemo() {
-  const cards = [Links, Inline, Fonts, Scaling, Truncation];
+  const cards = [Links, Inline, Fonts, Scaling, Truncation, Cjk, RightToLeft, Alignment];
   return <DemoPage cards={cards} />;
 }

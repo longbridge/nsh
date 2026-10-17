@@ -26,7 +26,7 @@ Each VM has these limits:
 
 | Limit | Default | When it is hit |
 |---|---|---|
-| JS heap | 256 MB | The VM stops. |
+| JS heap | 1 GB for an app on its own on macOS, Windows and Linux (Mac Catalyst too); 512 MB on iOS and Android; 256 MB for an app embedded in another app (the embedder may set another) | The VM stops. |
 | Interpreter stack | 4096 KB (also the maximum) | Deep recursion throws a `RangeError`, which the app can catch. |
 | Time to evaluate the bundle | 10 s | The evaluation is cut off. |
 | Time of any other call into JS | 2 s | The call is cut off; the app goes on. |

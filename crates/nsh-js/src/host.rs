@@ -1,4 +1,12 @@
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use nsh_core::{
     EventKind, EventPayload, NodeId, Op, PayloadValue, TouchPhase, js::Limits,
@@ -67,6 +75,8 @@ pub struct Host {
     // Field order matters: the context must drop before the runtime.
     ctx: Context,
     rt: Runtime,
+    /// Set by the heap's allocator when it refuses an allocation.
+    exhausted: Arc<AtomicBool>,
     shared: Rc<Shared>,
     on_error: Option<ErrorHandler>,
     budget: Budget,
@@ -137,12 +147,12 @@ impl Host {
     /// and the op bridge.
     pub fn with_options(options: HostOptions) -> Result<Host, JsError> {
         let limits = options.limits;
-        let rt = Runtime::new()?;
+        // The allocator enforces the heap limit (`set_memory_limit` does
+        // nothing with one) and tells when it was reached.
+        let (allocator, exhausted) = sandbox::HeapAllocator::new(limits.memory_bytes);
+        let rt = Runtime::new_with_alloc(allocator)?;
         // The engine thread is spawned with a larger stack; keep a margin.
         rt.set_max_stack_size(limits.stack_bytes);
-        if limits.memory_bytes > 0 {
-            rt.set_memory_limit(limits.memory_bytes);
-        }
         let budget = Budget::new(limits);
         rt.set_interrupt_handler(Some(budget.interrupt_handler(None)));
         let ctx = new_context(&rt)?;
@@ -170,6 +180,7 @@ impl Host {
         Ok(Host {
             ctx,
             rt,
+            exhausted,
             shared,
             on_error: None,
             budget,
@@ -208,6 +219,11 @@ impl Host {
         let started = self.budget.begin(phase);
         let result = f();
         self.budget.end(started);
+        // The app may have caught running out (it is an `InternalError`):
+        // the VM stops all the same.
+        if self.exhausted.load(Ordering::Relaxed) && self.shared.fatal.borrow().is_none() {
+            self.uncaught(&JsError::new("out of memory".to_owned()));
+        }
         Some(result)
     }
 
@@ -216,21 +232,17 @@ impl Host {
     fn classify(&self, mut err: JsError) -> JsError {
         if let Some(trip) = self.budget.take_trip() {
             err.message = format!("{trip}\n{}", err.message);
-        } else if err.message.contains("out of memory") || (err.null && self.at_memory_limit()) {
+        } else if self.exhausted.load(Ordering::Relaxed) {
             let reason = format!(
-                "the script ran out of memory (limit {} MB) and was stopped",
+                "the script ran out of memory (the JS heap is limited to {} MB) and was stopped. \
+                 Keep large data out of JS: load it in pages, or keep it on the native side \
+                 (a server, a native module) and hand JS only what it shows.",
                 self.budget.limits().memory_bytes >> 20
             );
             self.shared.stop(reason.clone());
             err.message = format!("{reason}\n{}", err.message);
         }
         err
-    }
-
-    /// Whether the heap is (all but) full.
-    fn at_memory_limit(&self) -> bool {
-        let limit = self.budget.limits().memory_bytes as i64;
-        limit > 0 && self.rt.memory_usage().malloc_size + (1 << 20) >= limit
     }
 
     /// The error for a call refused because the VM was stopped.
@@ -1118,11 +1130,7 @@ const report = (v) => text(String(v));
         let err = host
             .eval_source("const keep = []; for (;;) keep.push(new Array(100000).fill(1));")
             .unwrap_err();
-        assert!(
-            err.message.contains("ran out of memory (limit 16 MB)"),
-            "{}",
-            err.message
-        );
+        assert!(err.message.contains("limited to 16 MB"), "{}", err.message);
         assert!(host.fatal().is_some());
         // Nothing runs any more.
         assert!(
@@ -1130,6 +1138,64 @@ const report = (v) => text(String(v));
                 .is_err()
         );
         assert!(ops(&host).is_empty());
+    }
+
+    #[test]
+    fn running_out_of_memory_in_a_timer_stops_the_vm() {
+        let mut host = sandboxed(Limits {
+            memory_bytes: 16 << 20,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        // JSON.parse running out throws a null exception, not the usual
+        // InternalError.
+        host.eval_source(
+            r#"const keep = [];
+            setTimeout(() => {
+                for (let n = 0; ; n++) {
+                    const parts = [];
+                    for (let i = 0; i < 1000; i++) parts.push(`{"path":"/a/b/c-${n}-${i}","children":[]}`);
+                    keep.push(JSON.parse("[" + parts.join(",") + "]"));
+                }
+            }, 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        let errors = errors.borrow().clone();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("limited to 16 MB"), "{}", errors[0]);
+        assert!(host.fatal().is_some());
+    }
+
+    #[test]
+    fn running_out_of_memory_stops_the_vm_even_when_caught() {
+        let mut host = sandboxed(Limits {
+            memory_bytes: 16 << 20,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"setTimeout(() => {
+                try {
+                    const keep = [];
+                    for (;;) keep.push(new Array(100000).fill(1));
+                } catch (e) {}
+            }, 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        let errors = errors.borrow().clone();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("limited to 16 MB") && errors[0].contains("in pages"),
+            "{}",
+            errors[0]
+        );
+        assert!(host.fatal().is_some());
     }
 
     #[test]

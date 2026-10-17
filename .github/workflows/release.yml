@@ -97,10 +97,17 @@ jobs:
           # rustc can overflow its default stack on the `windows` crate.
           echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
 
-      # QuickJS is C (bindgen needs libclang); the Linux runtime links GTK 4.
-      - name: Install clang and GTK 4
+      # QuickJS is C (bindgen needs libclang); the Linux runtime links GTK 4,
+      # the GPUI runtime X11, Wayland, xkbcommon, fontconfig and FreeType,
+      # GTK 3 and WebKitGTK 4.1 (web views) and GStreamer (videos).
+      - name: Install clang, GTK 4 and GPUI's libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev libgtk-4-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev libgtk-4-dev \
+            libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libzstd-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
       # The Android runtime: `javac` + `d8` (Java 17), the SDK's
       # `platforms;android-35` and an NDK (the images have the SDK and NDKs).

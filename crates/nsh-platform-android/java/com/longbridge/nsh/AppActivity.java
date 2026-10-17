@@ -15,6 +15,8 @@ public final class AppActivity extends Activity {
         super.onCreate(state);
         DevActivity.edgeToEdge(this);
         view = new NshView(this);
+        // An app on its own, not a module embedded in another app: a 512 MB JS heap.
+        view.setLimits(512, 0, 0, 0, 0);
         setContentView(view);
         if (rustApp()) view.runRustApp("nsh");
         else view.loadAssetBundle("nsh");
