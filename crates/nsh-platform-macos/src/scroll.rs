@@ -1,4 +1,4 @@
-//! Scroll views: offsets, wheel / trackpad / drag / keyboard scrolling,
+//! Scroll views: offsets, wheel / trackpad / keyboard scrolling,
 //! snapping, sticky cells, the core's scroll requests, scroll events.
 //!
 //! A scroll view only moves along its main axis (zooming is not
@@ -8,26 +8,26 @@
 //! Every change goes through [`moved_to`], which moves the bounds origin,
 //! pins the sticky cells, feeds the native scroll value in the same frame
 //! and queues a report to the engine. Reports are coalesced to one per
-//! frame by the view's frame callback, which also runs glides, animated
+//! frame by the view's frame callback, which also runs animated
 //! scrolls, the indicator's fade and the refresh spinner, and stops when
 //! none of them is left.
 //!
 //! Offsets are reported as UIKit's `contentOffset` (minus the leading
 //! content inset, clamped to the content), so lists see the same numbers
-//! as on iOS. Drag glides decelerate as UIKit does; snapping and paging use
-//! [`ScrollBehavior::snap_target`].
+//! as on iOS. Snapping and paging use [`ScrollBehavior::snap_target`].
 //!
 //! Trackpads follow the system: a gesture (`phase`) rubber-bands past the
 //! edges when `bounces` and springs back when the fingers lift, and the
 //! momentum after it is the system's (`momentumPhase` events), not a glide
 //! of ours; snapping views snap from the release instead. Mouse wheels (no
-//! phases) stop at the edges and settle when the notches stop. Pointer
-//! drags rubber-band as touches do on iOS.
+//! phases) stop at the edges and settle when the notches stop. Mouse drags
+//! never scroll (dragging the content is a touchscreen's way to scroll);
+//! the mouse drags the indicator as a scroll bar.
 //!
 //! Mirrored (right to left) horizontal lists keep their offsets left to
 //! right: [`NshView::place`] puts each child at the mirror image of its
-//! frame, so the bounds origin is the offset negated, and drags, wheels and
-//! the indicator are mirrored here.
+//! frame, so the bounds origin is the offset negated, and wheels and the
+//! indicator are mirrored here.
 
 use std::{f32::consts::PI, rc::Rc};
 
@@ -44,10 +44,6 @@ use crate::{
     view::{NshView, ScrollState, ViewState},
 };
 
-/// Below this release speed (points per ms) a drag does not glide.
-const MIN_GLIDE: f32 = 0.05;
-/// A glide stops below this speed (points per ms).
-const STOP: f32 = 0.01;
 /// A wheel without a gesture (a mouse) has settled after this many ms.
 const WHEEL_IDLE: f64 = 150.0;
 /// After a trackpad gesture ends, the system's momentum begins within this
@@ -82,8 +78,6 @@ enum Phase {
     /// At rest.
     #[default]
     Idle,
-    /// A pointer drag: `start` is the main-axis offset it began at.
-    Drag { start: f32 },
     /// The mouse drags the indicator as a scroll bar's thumb, from offset
     /// `start`.
     Thumb { start: f32 },
@@ -102,8 +96,6 @@ enum Phase {
     AwaitMomentum { since: f64 },
     /// The system's momentum scrolls.
     Momentum,
-    /// Momentum after a drag: `velocity` points per ms at `last` (ms).
-    Glide { velocity: f32, last: f64 },
     /// An eased move from `from` to `to`, started at `start` (ms):
     /// `momentum` for snapping after a fling (momentum events), `end` to
     /// send `onScrollEnd` when it arrives.
@@ -250,13 +242,6 @@ fn rate(behavior: &ScrollBehavior) -> f32 {
     } else {
         0.998
     }
-}
-
-/// One step of a glide: `(distance, new velocity)` after `dt` ms at
-/// velocity `v` (points per ms), decaying exponentially by `rate` per ms.
-fn glide_step(v: f32, rate: f32, dt: f32) -> (f32, f32) {
-    let k = rate.powf(dt);
-    (v * (k - 1.0) / rate.ln(), v * k)
 }
 
 /// Where a glide at `v` from `offset` comes to rest.
@@ -453,13 +438,13 @@ fn emit(surface: &Surface, view: &NshView, kind: EventKind) {
     surface.event(id, kind, EventPayload::Scroll { x, y });
 }
 
-/// Ends a glide or a snap a new input interrupts (`onMomentumScrollEnd`,
+/// Ends momentum or a snap a new input interrupts (`onMomentumScrollEnd`,
 /// as UIKit sends when a drag catches a glide).
 fn interrupt(surface: &Rc<Surface>, view: &NshView) {
     settle(surface, view);
     let momentum = matches!(
         phase(view),
-        Phase::Glide { .. } | Phase::Momentum | Phase::Animate { momentum: true, .. }
+        Phase::Momentum | Phase::Animate { momentum: true, .. }
     );
     set_phase(view, Phase::Idle);
     if momentum {
@@ -629,9 +614,9 @@ fn animate_to(
 }
 
 /// The user let go at `v` points per ms along the main axis (positive:
-/// the offset grows): bounces back, snaps, glides (`glide`) or settles.
-/// Snapping uses `snap_velocity` when it is not 0 (a settled mouse wheel).
-fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32, glide: bool) {
+/// the offset grows): bounces back, snaps or settles. Snapping uses
+/// `snap_velocity` when it is not 0 (a settled mouse wheel).
+fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32) {
     settle(surface, view);
     let (pos, min, max, target) = {
         let state = view.state();
@@ -677,16 +662,6 @@ fn release(surface: &Rc<Surface>, view: &NshView, v: f32, snap_velocity: f32, gl
             emit(surface, view, EventKind::MomentumScrollBegin);
         }
         animate_to(surface, view, target, duration, duration > 0.0, true);
-    } else if glide && v.abs() > MIN_GLIDE && (v > 0.0 && pos < max || v < 0.0 && pos > min) {
-        set_phase(
-            view,
-            Phase::Glide {
-                velocity: v,
-                last: now(),
-            },
-        );
-        emit(surface, view, EventKind::MomentumScrollBegin);
-        ensure_ticking(surface, view);
     } else {
         set_phase(view, Phase::Idle);
         emit(surface, view, EventKind::ScrollEnd);
@@ -745,32 +720,12 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
     if let Some(pos) = sampled {
         moved_to(surface, view, pos);
     }
-    let (phase, pos, rate, (min, max)) = {
+    let (phase, pos, (min, max)) = {
         let state = view.state();
         let Some(s) = &state.scroll else { return false };
-        (s.live.phase, main(s), rate(&s.behavior), limits(&state))
+        (s.live.phase, main(s), limits(&state))
     };
     match phase {
-        Phase::Glide { velocity, last } => {
-            let dt = (now - last).max(0.0) as f32;
-            let (d, v) = glide_step(velocity, rate, dt);
-            let next = pos + d;
-            let stop = v.abs() < STOP || next <= min || next >= max;
-            moved_to(surface, view, next.clamp(min, max.max(min)));
-            if stop {
-                set_phase(view, Phase::Idle);
-                emit(surface, view, EventKind::MomentumScrollEnd);
-                emit(surface, view, EventKind::ScrollEnd);
-            } else {
-                set_phase(
-                    view,
-                    Phase::Glide {
-                        velocity: v,
-                        last: now,
-                    },
-                );
-            }
-        }
         Phase::Animate {
             from,
             to,
@@ -811,7 +766,7 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
                 } else {
                     0.0
                 };
-                release(surface, view, 0.0, v, false);
+                release(surface, view, 0.0, v);
             } else {
                 emit(surface, view, EventKind::ScrollEnd);
             }
@@ -832,7 +787,6 @@ fn tick(surface: &Rc<Surface>, view: &NshView, now: f64) -> bool {
         let mut busy = !matches!(
             s.live.phase,
             Phase::Idle
-                | Phase::Drag { .. }
                 | Phase::Thumb { .. }
                 | Phase::Momentum
                 | Phase::Wheel { gesture: true, .. }
@@ -1206,7 +1160,6 @@ pub(crate) fn scroll_by(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32)
         let d = if s.horizontal { dx } else { dy };
         // A gesture or animation in flight moves along.
         s.live.phase = match s.live.phase {
-            Phase::Drag { start } => Phase::Drag { start: start + d },
             Phase::Thumb { start } => Phase::Thumb { start: start + d },
             Phase::Wheel {
                 last,
@@ -1286,12 +1239,7 @@ pub(crate) fn behavior(_surface: &Rc<Surface>, view: &NshView, behavior: &Scroll
         };
         let inset = s.behavior.content_inset != behavior.content_inset;
         s.behavior = behavior.clone();
-        if !behavior.enabled
-            && matches!(
-                s.live.phase,
-                Phase::Drag { .. } | Phase::Thumb { .. } | Phase::Wheel { .. }
-            )
-        {
+        if !behavior.enabled && matches!(s.live.phase, Phase::Thumb { .. } | Phase::Wheel { .. }) {
             s.live.phase = Phase::Idle;
         }
         inset
@@ -1316,10 +1264,7 @@ pub(crate) fn refreshing(surface: &Rc<Surface>, view: &NshView, refreshing: bool
         s.live.refreshing = refreshing;
         (
             main(s),
-            matches!(
-                s.live.phase,
-                Phase::Drag { .. } | Phase::Wheel { gesture: true, .. }
-            ),
+            matches!(s.live.phase, Phase::Wheel { gesture: true, .. }),
         )
     };
     update_overlays(view);
@@ -1374,56 +1319,15 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
 
 // Pointer drags.
 
-/// The mouse went down in `view`: a glide (or a snap after a fling) stops
-/// where it is, as a finger catches one on iOS. Whether it caught one.
+/// The mouse went down in `view`: a snap after a fling stops where it is,
+/// as a finger catches one on iOS. Whether it caught one.
 pub(crate) fn catch(surface: &Rc<Surface>, view: &NshView) -> bool {
-    let moving = matches!(
-        phase(view),
-        Phase::Glide { .. } | Phase::Animate { momentum: true, .. }
-    );
+    let moving = matches!(phase(view), Phase::Animate { momentum: true, .. });
     if moving {
         interrupt(surface, view);
         emit(surface, view, EventKind::ScrollEnd);
     }
     moving
-}
-
-/// A pointer drag on `view` began (touch-style scrolling).
-pub(crate) fn drag_begin(surface: &Rc<Surface>, view: &NshView) {
-    if !enabled(view) {
-        return;
-    }
-    interrupt(surface, view);
-    let start = view.state().scroll.as_ref().map_or(0.0, main);
-    set_phase(view, Phase::Drag { start });
-    emit(surface, view, EventKind::ScrollBeginDrag);
-}
-
-/// The drag moved by `(dx, dy)` points since it began.
-pub(crate) fn drag_move(surface: &Rc<Surface>, view: &NshView, dx: f32, dy: f32) {
-    let Phase::Drag { start } = phase(view) else {
-        return;
-    };
-    let pos = {
-        let state = view.state();
-        let Some(s) = &state.scroll else { return };
-        let (min, max) = limits(&state);
-        let d = if !s.horizontal {
-            -dy
-        } else if s.mirrored {
-            dx
-        } else {
-            -dx
-        };
-        dragged(
-            start + d,
-            min,
-            max.max(min),
-            viewport(&state, s.horizontal),
-            s.behavior.bounces,
-        )
-    };
-    moved_to(surface, view, pos);
 }
 
 /// Whether a release of `view` at its offset starts a refresh (pulled far
@@ -1445,28 +1349,6 @@ fn pulled_to_refresh(surface: &Surface, view: &NshView) -> bool {
         surface.event(view.id(), EventKind::Refresh, EventPayload::None);
     }
     refresh
-}
-
-/// The drag ended at velocity `(vx, vy)` points per second.
-pub(crate) fn drag_end(surface: &Rc<Surface>, view: &NshView, vx: f32, vy: f32) {
-    if !matches!(phase(view), Phase::Drag { .. }) {
-        return;
-    }
-    let v = {
-        let state = view.state();
-        let Some(s) = &state.scroll else { return };
-        if !s.horizontal {
-            -vy
-        } else if s.mirrored {
-            vx
-        } else {
-            -vx
-        }
-    } / 1000.0;
-    set_phase(view, Phase::Idle);
-    emit(surface, view, EventKind::ScrollEndDrag);
-    pulled_to_refresh(surface, view);
-    release(surface, view, v, 0.0, true);
 }
 
 /// Whether a mouse press at `(x, y)` (view coordinates) grabs `view`'s
@@ -1547,7 +1429,7 @@ pub(crate) fn thumb_end(surface: &Rc<Surface>, view: &NshView) {
     }
     ensure_ticking(surface, view);
     emit(surface, view, EventKind::ScrollEndDrag);
-    release(surface, view, 0.0, 0.0, false);
+    release(surface, view, 0.0, 0.0);
 }
 
 // Wheels and trackpads.
@@ -1684,7 +1566,7 @@ pub(crate) fn wheel_end(surface: &Rc<Surface>, view: &NshView, vx: f32, vy: f32)
     } else {
         0.0
     };
-    release(surface, view, v, snap, false);
+    release(surface, view, v, snap);
 }
 
 /// The system's momentum after a trackpad gesture began on `view`: whether
@@ -1957,19 +1839,6 @@ mod tests {
         assert_eq!(dragged(-100.0, 0.0, 100.0, 400.0, false), 0.0);
         assert_eq!(dragged(300.0, 0.0, 100.0, 400.0, false), 100.0);
         assert!(dragged(150.0, 0.0, 100.0, 400.0, true) > 100.0);
-    }
-
-    #[test]
-    fn glide_integrates_to_projection() {
-        let rate = 0.998;
-        let (mut pos, mut v) = (0.0f32, 2.0f32);
-        for _ in 0..2000 {
-            let (d, nv) = glide_step(v, rate, 16.0);
-            pos += d;
-            v = nv;
-        }
-        let end = projected(0.0, 2.0, rate);
-        assert!((pos - end).abs() < 1.0, "{pos} vs {end}");
     }
 
     #[test]

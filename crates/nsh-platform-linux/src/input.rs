@@ -26,8 +26,10 @@
 //! the pointer); `activeOpacity` fades the view natively; inside scroll
 //! views a touch reports `onPressIn` only after ~130 ms, as it may start a
 //! scroll. A move beyond 6 pt starts the innermost pan or scroll view that
-//! takes that direction (mouse drags scroll too, as in Mac Catalyst: apps
-//! are written for fingers); beyond 10 pt the press is over.
+//! takes that direction (only touches drag scroll views: the mouse scrolls
+//! with the wheel, the touchpad, the keyboard and the indicator, and its
+//! drags go to pans, responders and text selection); beyond 10 pt the
+//! press is over.
 //!
 //! A view with a `panActivation` around the first pointer gates it
 //! ([`PanActivation::decide`] on every move): the scroll views around the
@@ -91,7 +93,7 @@ enum Key {
     Mouse,
     /// A touchscreen finger, by its event sequence.
     Touch(usize),
-    /// A scripted pointer ([`simulate`]); behaves like a finger.
+    /// A scripted finger ([`simulate`]).
     Simulated,
 }
 
@@ -735,12 +737,12 @@ fn scroll_event(
 /// A simulated pointer action ([`crate::script`]), in root coordinates.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Simulated {
-    /// Press at `(x, y)`.
-    Down(f32, f32),
+    /// Press at `(x, y)`, with the mouse when `true`, else a finger.
+    Down(f32, f32, bool),
     /// Move to `(x, y)` while pressed.
-    Move(f32, f32),
+    Move(f32, f32, bool),
     /// Release at `(x, y)`.
-    Up(f32, f32),
+    Up(f32, f32, bool),
     /// A wheel / touchpad scroll at `(x, y)` by `(dx, dy)` points.
     Wheel(f32, f32, f32, f32),
     /// The pointer moved to `(x, y)` without a button (hover).
@@ -748,14 +750,15 @@ pub(crate) enum Simulated {
 }
 
 /// Feeds a simulated pointer action through the same path as real input.
-/// The simulated pointer is a finger: its drags scroll.
+/// A simulated finger's drags scroll, the mouse's do not.
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
+    let key = |mouse| if mouse { Key::Mouse } else { Key::Simulated };
     match action {
-        Simulated::Down(x, y) => down(surface, Key::Simulated, x, y, time),
-        Simulated::Move(x, y) => motion(surface, Key::Simulated, x, y, time),
-        Simulated::Up(x, y) => {
-            up(surface, Key::Simulated, x, y, time, false);
+        Simulated::Down(x, y, mouse) => down(surface, key(mouse), x, y, time),
+        Simulated::Move(x, y, mouse) => motion(surface, key(mouse), x, y, time),
+        Simulated::Up(x, y, mouse) => {
+            up(surface, key(mouse), x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
             if let Some(native) = pick(&surface.root, x, y).and_then(|hit| hit.native) {
@@ -977,7 +980,7 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     let touch = key != Key::Mouse;
     let native = hit.native.is_some();
     // Mouse drags over selectable text select it (`text.rs`) rather than
-    // scroll or pan.
+    // pan.
     let selects = !touch && !native && crate::text::selectable(&hit.view.state());
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
@@ -1050,9 +1053,9 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
         }
         if let Some(scroll) = &s.scroll {
             in_scroll = true;
-            // Mouse drags scroll too, as in Mac Catalyst (the other
-            // desktop host): apps are written for fingers.
-            if !native && !selects {
+            // Dragging the content is a touchscreen's way to scroll; on the
+            // desktop the mouse's drags are the app's.
+            if touch && !native && !selects {
                 candidates.push((
                     v.clone(),
                     Candidate::Scroll {

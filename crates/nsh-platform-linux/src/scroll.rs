@@ -1,4 +1,4 @@
-//! Scroll views: offsets, wheel / touchpad / drag / keyboard scrolling with
+//! Scroll views: offsets, wheel / touchpad / touch / keyboard scrolling with
 //! momentum, snapping, sticky cells, the core's scroll requests, scroll
 //! events.
 //!
@@ -934,7 +934,7 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
 
 // Input.
 
-/// A pointer drag on `view` began (touch-style scrolling).
+/// A touchscreen drag on `view` began (the mouse never drags content).
 pub(crate) fn drag_begin(surface: &Rc<Surface>, view: &NshView) {
     if !enabled(view) {
         return;

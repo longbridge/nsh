@@ -4,10 +4,11 @@
 //! - `wait <ms>`: waits.
 //! - `shot <file.png>`: renders the window's content to a PNG (offscreen,
 //!   at scale 1), whatever covers the window on screen.
-//! - `tap <x> <y>`: presses and releases at a point (points, root
+//! - `tap <x> <y>`: presses and releases a finger at a point (points, root
 //!   coordinates).
-//! - `drag <x0> <y0> <x1> <y1> [ms]`: presses, moves in steps over `ms`
-//!   (default 300), releases.
+//! - `drag <x0> <y0> <x1> <y1> [ms]`: presses the mouse, moves in steps
+//!   over `ms` (default 300), releases; `touch` the same with a finger
+//!   (whose drags scroll).
 //! - `wheel <x> <y> <dx> <dy>`: a wheel / touchpad scroll.
 //! - `hover <x> <y>`: moves the pointer.
 //! - `type <text>`: types into the focused field.
@@ -62,27 +63,28 @@ fn next(window: gtk::ApplicationWindow, surface: Rc<Surface>, steps: Rc<Vec<Stri
             return;
         }
         "tap" => {
-            crate::input::simulate(&surface, Simulated::Down(num(0), num(1)));
+            crate::input::simulate(&surface, Simulated::Down(num(0), num(1), false));
             let surface = surface.clone();
             let (x, y) = (num(0), num(1));
             glib::timeout_add_local_once(Duration::from_millis(60), move || {
-                crate::input::simulate(&surface, Simulated::Up(x, y))
+                crate::input::simulate(&surface, Simulated::Up(x, y, false))
             });
             delay = 120;
         }
-        "drag" => {
+        "drag" | "touch" => {
+            let mouse = cmd == "drag";
             let (x0, y0, x1, y1) = (num(0), num(1), num(2), num(3));
             let ms = if args.len() > 4 { num(4) } else { 300.0 };
             let n = (ms / 16.0).max(1.0) as u32;
-            crate::input::simulate(&surface, Simulated::Down(x0, y0));
+            crate::input::simulate(&surface, Simulated::Down(x0, y0, mouse));
             for k in 1..=n {
                 let t = k as f32 / n as f32;
                 let surface = surface.clone();
                 glib::timeout_add_local_once(Duration::from_millis(k as u64 * 16), move || {
-                    let p = Simulated::Move(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+                    let p = Simulated::Move(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, mouse);
                     crate::input::simulate(&surface, p);
                     if k == n {
-                        crate::input::simulate(&surface, Simulated::Up(x1, y1));
+                        crate::input::simulate(&surface, Simulated::Up(x1, y1, mouse));
                     }
                 });
             }

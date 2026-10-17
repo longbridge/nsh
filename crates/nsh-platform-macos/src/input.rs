@@ -1,13 +1,12 @@
 //! Pointer and keyboard input of a surface: hit testing, touches for the
 //! JS responder system, presses, hover / pressed states, cursors, native
-//! pan / pinch / rotation values, and routing mouse wheel, trackpad,
-//! mouse drag and keyboard scrolling to the scroll views.
+//! pan / pinch / rotation values, and routing mouse wheel, trackpad and
+//! keyboard scrolling to the scroll views.
 //!
 //! The root view takes every mouse event inside it (its `hitTest:`
 //! returns itself) and hands it to [`event`], except where nsh's own hit
 //! testing lands on a hosted AppKit view (text fields, web views): those
-//! get their own events, so presses, pans and scroll drags never start on
-//! them. AppKit's hit testing does not decide: it would hand a web view
+//! get their own events, so presses and pans never start on them. AppKit's hit testing does not decide: it would hand a web view
 //! clicks meant for a menu outside its parent's frame or a transformed
 //! view nsh draws over it, and clicks on web views whose layers are
 //! hidden, that animate out or that are under `pointerEvents: "none"`.
@@ -25,15 +24,16 @@
 //! Presses follow React Native and the other backends: the innermost view
 //! listening to press events gets them (or the pressable text span under
 //! the pointer); `activeOpacity` fades the view natively. A move beyond
-//! 6 pt starts the innermost pan or scroll view that takes that direction
-//! (mouse drags scroll, as in Mac Catalyst: apps are written for fingers);
-//! beyond 10 pt the press is over. Mouse drags on selectable text select
-//! it ([`crate::text`]) instead.
+//! 6 pt starts the innermost pan that takes that direction; beyond 10 pt
+//! the press is over. Mouse drags never scroll: dragging the content is a
+//! touchscreen's way to scroll, the mouse scrolls with the wheel, the
+//! trackpad, the keyboard and the indicator, and its drags are the app's
+//! (pans, responders). Mouse drags on selectable text select it
+//! ([`crate::text`]) instead.
 //!
 //! A view with a `panActivation` around the pointer gates it
-//! ([`PanActivation::decide`] on every move): the scroll views around the
-//! view wait until its pan fails, and never take the drag once it
-//! activates; the activation goes to JS with the move's touches
+//! ([`PanActivation::decide`] on every move): the pans around the view
+//! wait until its pan fails, and never take the drag once it activates; the activation goes to JS with the move's touches
 //! (`TouchEvent::activated`), where the view becomes the responder.
 //!
 //! A scroll stays on the scroll view it began in (a trackpad gesture and
@@ -140,19 +140,16 @@ pub(crate) struct Input {
 enum Candidate {
     /// A pan with these values (both when it only has listeners).
     Pan { x: bool, y: bool },
-    /// A scroll view.
-    Scroll { horizontal: bool },
 }
 
 impl Candidate {
-    /// Whether a drag by `(dx, dy)` starts it: single-axis pans and scroll
-    /// views take mostly-along-their-axis movements, so a horizontal pan
-    /// coexists with a vertical scroll view around it.
+    /// Whether a drag by `(dx, dy)` starts it: single-axis pans take
+    /// mostly-along-their-axis movements, so a horizontal pan coexists
+    /// with a vertical one around it.
     fn accepts(self, dx: f32, dy: f32) -> bool {
         let horizontal = dx.abs() > dy.abs();
         match self {
             Candidate::Pan { x, y } => (x && y) || (x && horizontal) || (y && !horizontal),
-            Candidate::Scroll { horizontal: h } => h == horizontal,
         }
     }
 }
@@ -166,8 +163,6 @@ enum Mode {
     Free,
     /// Dragging a pan view.
     Pan(NshView),
-    /// Scrolling a scroll view, from where the drag began.
-    Scroll(NshView, (f32, f32)),
     /// Dragging a scroll view's indicator as a scroll bar's thumb, from
     /// where the drag began.
     Thumb(NshView, (f32, f32)),
@@ -1071,19 +1066,6 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
             };
             candidates.push((v.clone(), Candidate::Pan { x, y }));
         }
-        // Mouse drags scroll, as in Mac Catalyst: apps are written for
-        // fingers.
-        if let Some(scroll) = &s.scroll
-            && !native
-            && selecting.is_none()
-        {
-            candidates.push((
-                v.clone(),
-                Candidate::Scroll {
-                    horizontal: scroll.horizontal,
-                },
-            ));
-        }
         if gate.is_none()
             && !native
             && let Some(activation) = s.props.pan_activation
@@ -1229,26 +1211,13 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
                 .find(|(_, c)| c.accepts(tx, ty))
                 .cloned()
         };
-        match started {
-            Some((view, Candidate::Pan { .. })) => {
-                p.gate = None;
-                pan_start(surface, &view, &p);
-                p.mode = Mode::Pan(view);
-            }
-            Some((view, Candidate::Scroll { .. })) => {
-                // The scroll view takes the touches over from JS.
-                if p.reporting {
-                    report(surface, TouchPhase::Cancel, &p, None);
-                    p.reporting = false;
-                }
-                p.gate = None;
-                crate::scroll::drag_begin(surface, &view);
-                p.mode = Mode::Scroll(view, (x, y));
-            }
-            None => {}
+        if let Some((view, Candidate::Pan { .. })) = started {
+            p.gate = None;
+            pan_start(surface, &view, &p);
+            p.mode = Mode::Pan(view);
         }
     }
-    if matches!(p.mode, Mode::Pan(_) | Mode::Scroll(..)) || distance > PRESS_SLOP {
+    if matches!(p.mode, Mode::Pan(_)) || distance > PRESS_SLOP {
         cancel_press(surface, &mut p);
         release_pressed(surface, &mut p);
     }
@@ -1256,9 +1225,6 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
         Mode::Pan(view) => {
             let view = view.clone();
             pan_move(surface, &view, tx, ty);
-        }
-        Mode::Scroll(view, origin) => {
-            crate::scroll::drag_move(surface, view, x - origin.0, y - origin.1);
         }
         Mode::Thumb(view, origin) => {
             crate::scroll::thumb_move(surface, view, x - origin.0, y - origin.1);
@@ -1303,10 +1269,6 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         Mode::Pan(view) => {
             pan_move(surface, &view, p.x - p.start.0, p.y - p.start.1);
             pan_end(surface, &view, &p, true);
-        }
-        Mode::Scroll(view, _) => {
-            let (vx, vy) = p.velocity.velocity();
-            crate::scroll::drag_end(surface, &view, vx, vy);
         }
         Mode::Thumb(view, _) => crate::scroll::thumb_end(surface, &view),
         Mode::Idle | Mode::Free | Mode::Select(_) => {
@@ -2174,7 +2136,7 @@ mod tests {
         let horizontal = Candidate::Pan { x: true, y: false };
         assert!(horizontal.accepts(8.0, 2.0));
         assert!(!horizontal.accepts(2.0, 8.0));
-        let vertical = Candidate::Scroll { horizontal: false };
+        let vertical = Candidate::Pan { x: false, y: true };
         assert!(vertical.accepts(1.0, -7.0));
         assert!(!vertical.accepts(-7.0, 1.0));
     }
