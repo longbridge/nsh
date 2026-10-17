@@ -123,6 +123,8 @@ player.run(await (await fetch("./bundle.js")).text());
 
 `assets`（从 `asset:/` 路径到 URL 的映射）可代替 `assetBase`，`readAsset(uri)` 返回引擎需要立即读取的资源（字体）的字节，或 `null`；`player.run(code, { release: true, capabilities })` 以发布模式、在应用声明的能力下运行应用包（默认是开发模式）。`nsh package --target web` 写出的页面三者都用到了。
 
+`run(code, { chunks, chunkBase })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
+
 使用 `nsh-playground.wasm` 时，`player.runSource(tsx)` 会先编译 TSX，返回编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
@@ -139,6 +141,27 @@ player.run(await (await fetch("./bundle.js")).text());
 - **Cookie**（以及 HTTP 认证信息）只发送给页面自己的源（`credentials: "same-origin"`），浏览器禁止的请求头（`Cookie`、`User-Agent`、`Host` 等）会被丢弃。
 - **重定向**由浏览器跟随。不应跟随重定向的请求遇到重定向时会失败：`redirect: "manual"` 和 `"error"`，以及能力声明限制了 `network` 的应用发出的请求（nsh 要逐跳检查，而浏览器在跟随之前不会透露重定向的目标）。
 - 作为 `ReadableStream` 的**请求体**会先收齐再一次发出；响应体则随到随读，以流的形式交给应用。
+
+## 拆分 bundle
+
+Web 应用不必在第一个界面出现之前下载全部代码。`nsh build --split` 把 `import()` 加载的模块放进各自的 chunk，放在 `bundle.js` 旁边：
+
+```sh
+nsh build --release --split -o site/app
+# bundle.js        应用到第一个界面为止的代码
+# Screen.js        import("./Screen") 以及只有它用到的代码
+# detail.js        两个 chunk 共用的代码（如果有，由打包器生成）
+```
+
+第一次 `import("./Screen")` 会一次性下载 `Screen.js` 和它导入的 chunk，然后执行它们；之后再导入会立即兑现。页面负责告诉运行时 chunk 在哪里：默认在页面旁边（`chunkBase`），也可以为每个 chunk 指定一个 URL，例如带内容摘要的文件名，便于 CDN 永久缓存：
+
+```js
+player.run(code, {
+  chunks: { "Screen.js": "/app.3f2a9c.js", "detail.js": "/app.81bb07.js" },
+});
+```
+
+无法下载的 chunk 会让 `import()` 以一个指明该 chunk 的 `TypeError` 拒绝；下一次 `import()` 会重新尝试。chunk 名称是 bundle 中固定的文件名：应用无法让页面下载其他任何东西。
 
 ## 限制
 

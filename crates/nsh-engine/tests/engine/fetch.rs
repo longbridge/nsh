@@ -108,6 +108,7 @@ fn fetch_round_trips_through_the_platform_network() {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
+        split: false,
         ui_sets: vec![nsh_ui_mobile::registry()],
     })
     .unwrap();
@@ -207,6 +208,7 @@ fn fetch_stays_within_the_capabilities() {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
+        split: false,
         ui_sets: vec![nsh_ui_mobile::registry()],
     })
     .unwrap();

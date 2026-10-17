@@ -31,8 +31,8 @@ use std::cell::{Cell, RefCell};
 
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size};
 use nsh_engine::{
-    App, Assets, Bundle, ColorScheme, EngineConfig, EngineControl, Environment, HotUpdate, Idiom,
-    Limits, LocalEngine, MountSink, Os, Policy,
+    App, Assets, Bundle, Chunk, ColorScheme, EngineConfig, EngineControl, Environment, HotUpdate,
+    Idiom, Limits, LocalEngine, MountSink, Os, Policy,
 };
 
 pub use crate::net::{
@@ -98,6 +98,11 @@ impl MountSink for Sink {
 
     fn hot_update_failed(&self) {
         HOT_FAILED.with(|f| f.set(true));
+    }
+
+    fn load_chunk(&self, id: &str) -> bool {
+        ffi::load_chunk(id);
+        true
     }
 }
 
@@ -350,6 +355,29 @@ pub unsafe extern "C" fn nsh_hot_update(
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_hot_failed() -> u32 {
     HOT_FAILED.with(|f| f.replace(false)) as u32
+}
+
+/// Hands over chunk `id` of a split bundle that the page fetched after
+/// `load_chunk` (`ok` 1: `code` is its source; 0: `code` says why it could
+/// not be loaded). Returns the pump delay.
+///
+/// # Safety
+///
+/// Both ranges are memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_chunk(
+    id: *const u8,
+    id_len: usize,
+    code: *const u8,
+    code_len: usize,
+    ok: u32,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let (id, code) = unsafe { (string(id, id_len), string(code, code_len)) };
+    send(|app| match ok {
+        0 => app.control.chunk_failed(id, code),
+        _ => app.control.chunk_loaded(Chunk::source(id, code)),
+    })
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the

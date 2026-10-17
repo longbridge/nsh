@@ -23,7 +23,7 @@ mod imp {
     use nsh_js::{Host, HostOptions, JsError, NetworkQueue, RequestId};
 
     use crate::{
-        Bundle, BundleCode, Environment, FetchEvent, HotUpdate, Limits, MountSink,
+        Bundle, BundleCode, Chunk, Environment, FetchEvent, HotUpdate, Limits, MountSink,
         symbolicate::Symbolicator,
     };
 
@@ -83,6 +83,11 @@ mod imp {
                 symbolicator,
                 stop,
             };
+            // The chunks that come with the bundle: the entry may import
+            // them statically, `import()` without waiting.
+            for chunk in bundle.chunks.iter() {
+                script.chunk(Ok(chunk.clone()));
+            }
             let start = Instant::now();
             let loaded: Result<(), JsError> = match &bundle.code {
                 BundleCode::Bytecode(bytes) => script.host.eval_bytecode(bytes),
@@ -103,6 +108,30 @@ mod imp {
             let message = self.symbolicator.borrow_mut().rewrite(message);
             log::error!(target: "js", "{what}: {message}");
             sink.report_error(&message);
+        }
+
+        /// Gives the VM a chunk it imports, or tells it the chunk could not
+        /// be loaded.
+        pub(crate) fn chunk(&self, chunk: Result<Chunk, (String, String)>) {
+            match chunk {
+                Ok(chunk) => {
+                    if let Some(map) = chunk.source_map {
+                        self.symbolicator.borrow_mut().add(&chunk.id, map);
+                    }
+                    match chunk.code {
+                        BundleCode::Source(code) => self.host.add_chunk_source(&chunk.id, code),
+                        // SAFETY: `Chunk::bytecode` requires trusted bytecode.
+                        BundleCode::Bytecode(bytes) => unsafe {
+                            self.host.add_chunk_bytecode(&chunk.id, bytes)
+                        },
+                    }
+                }
+                Err((id, message)) => self.host.chunk_failed(&id, &message),
+            }
+        }
+
+        pub(crate) fn take_chunk_requests(&self, out: &mut Vec<String>) {
+            self.host.take_chunk_requests(out);
         }
 
         /// Applies a development update in place.
@@ -191,7 +220,7 @@ mod stub {
 
     use nsh_core::{EventKind, EventPayload, NodeId, Op, TextEngine, time::Instant};
 
-    use crate::{Bundle, Environment, HotUpdate, Limits, MountSink};
+    use crate::{Bundle, Chunk, Environment, HotUpdate, Limits, MountSink};
 
     /// No JS in this build: never made.
     pub(crate) enum Script {}
@@ -223,6 +252,14 @@ mod stub {
         }
 
         pub(crate) fn hot_update(&self, _: HotUpdate, _: &dyn MountSink) {
+            match *self {}
+        }
+
+        pub(crate) fn chunk(&self, _: Result<Chunk, (String, String)>) {
+            match *self {}
+        }
+
+        pub(crate) fn take_chunk_requests(&self, _: &mut Vec<String>) {
             match *self {}
         }
 

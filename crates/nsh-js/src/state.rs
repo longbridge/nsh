@@ -32,6 +32,7 @@ pub(crate) struct State {
     pub(crate) web: crate::web::Web,
     pub(crate) hot: crate::hot::Hot,
     pub(crate) keymap: crate::keymap::Keymap,
+    pub(crate) chunks: crate::chunks::Chunks,
     /// The native modules the context serves (the loader reads it).
     pub(crate) modules: ModuleTable,
 }
@@ -80,6 +81,7 @@ pub(crate) fn install(ctx: &Ctx<'_>, shared: Rc<Shared>, ui_sets: &[Registry]) {
             web: Default::default(),
             hot: Default::default(),
             keymap: Default::default(),
+            chunks: Default::default(),
             modules: ModuleTable::new(ui_sets),
         }));
         qjs::JS_SetContextOpaque(raw, state as *mut c_void);
@@ -107,6 +109,7 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         qjs::JS_SetContextOpaque(raw, ptr::null_mut());
         let mut state = Box::from_raw(p);
         state.hot.free_all();
+        state.chunks.free_all();
         state.keymap.free_all();
         state.web.free_all();
         state.canvases.free_all(raw);

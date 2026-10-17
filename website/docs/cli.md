@@ -150,7 +150,7 @@ Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> -
 ## nsh build
 
 ```sh
-nsh build [ENTRY] [-o <OUT>] [--release]
+nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
 Bundles the app and compiles it to QuickJS bytecode, for apps that embed nsh and ship the bundle themselves.
@@ -159,6 +159,7 @@ Bundles the app and compiles it to QuickJS bytecode, for apps that embed nsh and
 |---|---|---|
 | `-o, --out <OUT>` | `out` | Output directory. |
 | `--release` | | Minify and strip debug info. |
+| `--split` | | Put what `import()` loads into chunk files of its own, downloaded when first imported (web apps, see [Split bundles](./web.md#split-bundles)). Without it, the bundle holds the whole app. |
 
 It writes:
 
@@ -167,6 +168,7 @@ It writes:
 | `bundle.js` | The bundle as JavaScript |
 | `bundle.js.map` | Its source map (stack traces are mapped back to your sources) |
 | `bundle.nshc` | The bundle as compiled bytecode: what apps load |
+| `<Chunk>.js`, `<Chunk>.js.map`, `<Chunk>.nshc` | With `--split`: each chunk, its source map and its bytecode (`Screen.js` for `import("./Screen")`) |
 | `capabilities.json` | The `capabilities` of `nsh.json`, if declared (removed otherwise) |
 | `assets/` | Every imported image and font, at its path relative to the app root |
 

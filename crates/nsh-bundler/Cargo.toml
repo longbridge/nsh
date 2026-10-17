@@ -20,6 +20,7 @@ bundle = [
   "dep:rolldown_common",
   "dep:rolldown_error",
   "dep:rolldown_sourcemap",
+  "dep:string_wizard",
   "dep:imagesize",
   "dep:ttf-parser",
   "dep:tokio",
@@ -33,6 +34,7 @@ rolldown = { workspace = true, optional = true }
 rolldown_common = { workspace = true, optional = true }
 rolldown_error = { version = "=1.2.13", optional = true }
 rolldown_sourcemap = { version = "=1.2.13", optional = true }
+string_wizard = { workspace = true, optional = true }
 oxc_sourcemap.workspace = true
 imagesize = { workspace = true, optional = true }
 ttf-parser = { workspace = true, optional = true }

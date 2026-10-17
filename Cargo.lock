@@ -2086,6 +2086,7 @@ dependencies = [
  "rolldown_error",
  "rolldown_sourcemap",
  "serde_json",
+ "string_wizard",
  "tokio",
  "ttf-parser",
 ]

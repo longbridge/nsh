@@ -271,6 +271,53 @@ impl Host {
         .unwrap_or_else(|| Err(self.stopped()))
     }
 
+    /// Gives the VM chunk `id` of a split bundle (an ES module as
+    /// `nsh-bundler` makes it), before the bundle is evaluated or when it
+    /// was asked for ([`Host::take_chunk_requests`]); the imports waiting
+    /// for it continue.
+    pub fn add_chunk_source(&self, id: &str, source: String) {
+        self.add_chunk(id, crate::modules::ChunkCode::Source(source));
+    }
+
+    /// [`Host::add_chunk_source`] for a chunk compiled with
+    /// [`crate::compile_chunk_bytecode`].
+    ///
+    /// # Safety
+    ///
+    /// As [`Host::eval_bytecode`]: bytecode from this QuickJS build, from a
+    /// trusted source (QuickJS does not validate it).
+    pub unsafe fn add_chunk_bytecode(&self, id: &str, bytecode: Vec<u8>) {
+        self.add_chunk(id, crate::modules::ChunkCode::Bytecode(bytecode));
+    }
+
+    fn add_chunk(&self, id: &str, code: crate::modules::ChunkCode) {
+        self.guarded(Phase::Call, || {
+            self.ctx
+                .with(|ctx| crate::chunks::add(ctx.as_raw().as_ptr(), id, code));
+            self.run_jobs();
+        });
+    }
+
+    /// Chunk `id` could not be loaded: the imports waiting for it reject
+    /// with `message`. A later import asks for it again.
+    pub fn chunk_failed(&self, id: &str, message: &str) {
+        self.guarded(Phase::Call, || {
+            self.ctx
+                .with(|ctx| crate::chunks::failed(ctx.as_raw().as_ptr(), id, message));
+            self.run_jobs();
+        });
+    }
+
+    /// Moves the ids of the chunks the app imports and the VM does not have
+    /// (since the last call) into `out`: the host loads each and hands it
+    /// over with [`Host::add_chunk_source`] or [`Host::chunk_failed`].
+    pub fn take_chunk_requests(&self, out: &mut Vec<String>) {
+        self.ctx.with(|ctx| {
+            // SAFETY: the context's state, for this call.
+            unsafe { &(*crate::state::state(ctx.as_raw().as_ptr())).chunks }.take_requests(out)
+        });
+    }
+
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
         self.guarded(Phase::Call, || {
@@ -741,6 +788,7 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     console::install(ctx)?;
     web::install(ctx.as_raw().as_ptr())?;
+    crate::chunks::install(ctx.as_raw().as_ptr()).map_err(|_| rquickjs::Error::Exception)?;
     crate::dom::install_globals(ctx.as_raw().as_ptr());
 
     for (name, repeat) in [("setTimeout", false), ("setInterval", true)] {

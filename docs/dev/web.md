@@ -96,6 +96,12 @@ borders) so they never move the content the core placed. Native animation items 
 of the Android animator); bound properties go out as `["a", id, prop, value]` after each batch and each
 `requestAnimationFrame` tick.
 
+A split bundle's chunks (`native-pipeline.md`) are fetched by the page: the engine asks through the `load_chunk`
+import (`Sink::load_chunk`), `nsh.js` fetches `chunks[id]` or `id` relative to `chunkBase` (`player.run(code,
+{ chunks, chunkBase })`) and hands the source to `nsh_chunk(id, code, ok)` (`ok` 0: `code` is the error), which
+pumps. A chunk that arrives after `run` started another app is dropped. Chunks are source; the engine also takes
+bytecode chunks (`Chunk::bytecode`), which the page does not send yet.
+
 Text (`src/text.rs`) is broken into lines here, with widths and font metrics from the `measure_text`,
 `font_ascent` and `font_descent` imports (canvas `measureText`, cached per font and string); runs are drawn at the
 positions computed here with a line height equal to the font's ascent + descent, so the baseline lands where layout

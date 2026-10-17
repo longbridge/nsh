@@ -13,7 +13,13 @@
 // `asset:/<path>` is served) or `assets` (a map from `<path>` to its URL,
 // as `nsh package --target web` writes it), `readAsset(uri)` (the bytes
 // of an asset the engine needs at once, a font: a `Uint8Array` or null),
-// `dark`, `overlay` (false: no error box), `onError`, `onLog`.
+// `chunks` / `chunkBase` (see `run`), `dark`, `overlay` (false: no error box), `onError`, `onLog`.
+//
+// A split bundle (`nsh build --split`) loads its chunks on demand: from
+// `chunks[id]` when given (`app.<digest>.js` on a CDN), else `id` relative
+// to `chunkBase` (default: the page):
+//
+//   player.run(code, { chunks: { "Screen.js": "/app.3f2a.js" }, chunkBase });
 
 const ROOT_ID = 1;
 const PRESSED = 1;
@@ -161,6 +167,7 @@ class Player {
         fetch_finish: (id) => this.requests.get(id)?.finish?.(),
         fetch_pause: (id, paused) => this.fetchPause(id, paused !== 0),
         fetch_cancel: (id) => this.fetchCancel(id),
+        load_chunk: (p, l) => this.loadChunk(this.str(p, l)),
       },
     };
     const response = () => (typeof url === "string" || url instanceof URL ? fetch(url) : url);
@@ -231,12 +238,20 @@ class Player {
   /**
    * Runs `code` (a bundle from `nsh build`), replacing what ran. Options:
    * `release` (hardened, as packaged apps run; default: development
-   * settings), `capabilities` (the app's `capabilities.json`) and
-   * `sourceMap` (JSON).
+   * settings), `capabilities` (the app's `capabilities.json`),
+   * `sourceMap` (JSON), and where a split bundle's chunks are: `chunks[id]`
+   * (a URL), else `id` relative to `chunkBase` (default: the page).
    */
-  run(code, { release = false, capabilities = "", sourceMap = "" } = {}) {
+  run(code, {
+    release = false,
+    capabilities = "",
+    sourceMap = "",
+    chunks = this.options.chunks,
+    chunkBase = this.options.chunkBase,
+  } = {}) {
     this.stop();
     this.app = (this.app ?? 0) + 1;
+    this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI };
     const root = this.root;
     root.textContent = "";
     this.views.clear();
@@ -252,6 +267,25 @@ class Player {
       this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
     this.call(() => this.withStrings([code], (p, l) =>
       this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1)));
+  }
+
+  /** Fetches chunk `id` of the running bundle and hands it to the engine. */
+  async loadChunk(id) {
+    const { map, base } = this.chunks;
+    const app = this.app;
+    let code;
+    let ok = 1;
+    try {
+      const response = await fetch(new URL(map[id] ?? id, base));
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      code = await response.text();
+    } catch (err) {
+      code = `${err.message ?? err} (${map[id] ?? id})`;
+      ok = 0;
+    }
+    // A chunk of an app that was replaced meanwhile is dropped.
+    if (app !== this.app) return;
+    this.call((w) => this.withStrings([id, code], (ip, il, cp, cl) => w.nsh_chunk(ip, il, cp, cl, ok)));
   }
 
   /**

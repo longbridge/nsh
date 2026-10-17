@@ -16,6 +16,8 @@ mod jsx;
 #[cfg(feature = "bundle")]
 mod plugin;
 #[cfg(feature = "bundle")]
+mod split;
+#[cfg(feature = "bundle")]
 mod types;
 
 #[cfg(feature = "bundle")]

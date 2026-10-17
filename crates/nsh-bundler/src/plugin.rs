@@ -9,8 +9,9 @@ use oxc::span::SourceType;
 use rolldown::{
     ModuleType,
     plugin::{
-        HookLoadArgs, HookLoadOutput, HookLoadReturn, HookResolveIdArgs, HookResolveIdOutput,
-        HookResolveIdReturn, HookTransformArgs, HookTransformOutput, HookTransformReturn,
+        HookLoadArgs, HookLoadOutput, HookLoadReturn, HookRenderChunkArgs, HookRenderChunkOutput,
+        HookRenderChunkReturn, HookResolveIdArgs, HookResolveIdOutput, HookResolveIdReturn,
+        HookTransformArgs, HookTransformOutput, HookTransformOutputMap, HookTransformReturn,
         HookUsage, Plugin, PluginContext, SharedLoadPluginContext, SharedTransformPluginContext,
     },
 };
@@ -39,6 +40,9 @@ pub(crate) struct NshPlugin {
     pub(crate) natives: Arc<Mutex<std::collections::BTreeSet<String>>>,
     /// The native modules there are.
     pub(crate) modules: Arc<NativeModules>,
+    /// A split bundle: dynamic imports of chunks call the runtime's chunk
+    /// loader (`split.rs`).
+    pub(crate) split: bool,
 }
 
 /// The `"tailwind"` and `"theme"` of the app's `nsh.json`.
@@ -145,7 +149,37 @@ impl Plugin for NshPlugin {
     }
 
     fn register_hook_usage(&self) -> HookUsage {
-        HookUsage::ResolveId | HookUsage::Load | HookUsage::Transform
+        let usage = HookUsage::ResolveId | HookUsage::Load | HookUsage::Transform;
+        if self.split {
+            usage | HookUsage::RenderChunk
+        } else {
+            usage
+        }
+    }
+
+    async fn render_chunk(
+        &self,
+        _ctx: &PluginContext,
+        args: &HookRenderChunkArgs<'_>,
+    ) -> HookRenderChunkReturn {
+        // What each chunk imports statically, by file name.
+        let imports: std::collections::HashMap<&str, Vec<String>> = args
+            .chunks
+            .values()
+            .map(|c| {
+                let own = c.filename.as_str();
+                let imports =
+                    crate::bundle::chunk_imports(c.imports.iter().map(|i| i.as_str()), own);
+                (own, imports)
+            })
+            .collect();
+        let rewritten = crate::split::rewrite_imports(&args.code, &args.chunk.filename, |id| {
+            imports.get(id).map(Vec::as_slice)
+        });
+        Ok(rewritten.map(|(code, map)| HookRenderChunkOutput {
+            code,
+            map: HookTransformOutputMap::Sourcemap(Box::new(map)),
+        }))
     }
 
     async fn resolve_id(

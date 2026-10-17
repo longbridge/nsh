@@ -36,6 +36,17 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/keymap",
 ];
 
+/// The module name of an app's bundle (its entry chunk): stack traces show
+/// `bundle.js:LINE:COL`, and the chunks of a split bundle import it as
+/// `./bundle.js`.
+pub const ENTRY_CHUNK: &str = "bundle.js";
+
+/// The global function a split bundle's dynamic imports call (the bundler
+/// rewrites `import("./Screen.js")` into `__nsh_import("Screen.js",
+/// ["shared.js"])`): it makes the chunk and the chunks it imports
+/// statically available (on the web, fetched), then imports the first.
+pub const IMPORT_CHUNK: &str = "__nsh_import";
+
 /// Resource limits of one VM.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Limits {

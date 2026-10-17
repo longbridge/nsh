@@ -77,6 +77,10 @@ enum Command {
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
+        /// Split what `import()` loads into chunk files next to the bundle
+        /// (`Screen.js`, ...), loaded on demand: how web apps are published.
+        #[arg(long)]
+        split: bool,
     },
     /// Run an app headless and print the mount instructions and timings.
     Trace {
@@ -393,7 +397,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             entry,
             out,
             release,
-        } => build::build(&entry, &out, release),
+            split,
+        } => build::build(&entry, &out, release, split),
         Command::Trace {
             entry,
             taps,

@@ -33,6 +33,7 @@ fn bytecode(entry: &str) -> Vec<u8> {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: false,
+        split: false,
         ui_sets: vec![nsh_ui_mobile::registry()],
     })
     .unwrap();

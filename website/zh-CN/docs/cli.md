@@ -130,7 +130,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 ## nsh build
 
 ```sh
-nsh build [ENTRY] [-o <OUT>] [--release]
+nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
 打包应用并编译为 QuickJS 字节码，供嵌入 nsh、自行分发 bundle 的应用使用。
@@ -139,6 +139,7 @@ nsh build [ENTRY] [-o <OUT>] [--release]
 |---|---|---|
 | `-o, --out <OUT>` | `out` | 输出目录。 |
 | `--release` | | 压缩代码并去掉调试信息。 |
+| `--split` | | 把 `import()` 加载的代码放进独立的 chunk 文件，第一次导入时才下载（Web 应用，见[拆分 bundle](./web.md#拆分-bundle)）。不加时，bundle 包含整个应用。 |
 
 输出内容：
 
@@ -147,6 +148,7 @@ nsh build [ENTRY] [-o <OUT>] [--release]
 | `bundle.js` | JavaScript 形式的 bundle |
 | `bundle.js.map` | 它的 source map（堆栈会映射回你的源码） |
 | `bundle.nshc` | 编译后的字节码 bundle：应用实际加载的就是它 |
+| `<Chunk>.js`、`<Chunk>.js.map`、`<Chunk>.nshc` | 使用 `--split` 时：每个 chunk、它的 source map 和字节码（`import("./Screen")` 对应 `Screen.js`） |
 | `capabilities.json` | `nsh.json` 中声明的 `capabilities`（未声明时删除） |
 | `assets/` | 所有被导入的图片和字体，保持相对于应用根目录的路径 |
 

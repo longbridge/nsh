@@ -83,6 +83,52 @@ pub struct Bundle {
     /// What relative request URLs resolve against (the page's URL on the
     /// web); `None`: they are invalid.
     pub base_url: Option<String>,
+    /// The chunks of a split bundle that come with it (`import()` loads
+    /// them without asking the platform); those missing are asked of
+    /// [`MountSink::load_chunk`]. Shared by the bundle's clones.
+    pub chunks: Arc<Vec<Chunk>>,
+}
+
+/// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
+/// `import()` loads on demand.
+#[derive(Debug, Clone)]
+pub struct Chunk {
+    /// Its id (`Screen.js`), as the bundle imports it.
+    pub id: String,
+    /// The code.
+    pub code: BundleCode,
+    /// Source map (JSON), for stack traces.
+    pub source_map: Option<Arc<str>>,
+}
+
+impl Chunk {
+    /// A chunk as JS source.
+    pub fn source(id: impl Into<String>, code: String) -> Self {
+        Self {
+            id: id.into(),
+            code: BundleCode::Source(code),
+            source_map: None,
+        }
+    }
+
+    /// A chunk as bytecode (`nsh_js::compile_chunk_bytecode`).
+    ///
+    /// # Safety
+    ///
+    /// As [`Bundle::bytecode`].
+    pub unsafe fn bytecode(id: impl Into<String>, bytes: Vec<u8>) -> Self {
+        Self {
+            id: id.into(),
+            code: BundleCode::Bytecode(bytes),
+            source_map: None,
+        }
+    }
+
+    /// Attaches a source map.
+    pub fn with_source_map(mut self, map: impl Into<Arc<str>>) -> Self {
+        self.source_map = Some(map.into());
+        self
+    }
 }
 
 /// What a bundle's code may do.
@@ -155,6 +201,7 @@ impl Bundle {
             source_map: None,
             policy: Policy::default(),
             base_url: None,
+            chunks: Arc::default(),
         }
     }
 
@@ -165,6 +212,7 @@ impl Bundle {
             source_map: None,
             policy: Policy::default(),
             base_url: None,
+            chunks: Arc::default(),
         }
     }
 
@@ -183,6 +231,12 @@ impl Bundle {
     /// Replaces the policy.
     pub fn with_policy(mut self, policy: Policy) -> Self {
         self.policy = policy;
+        self
+    }
+
+    /// Adds chunks of a split bundle (see [`Bundle::chunks`]).
+    pub fn with_chunks(mut self, chunks: impl IntoIterator<Item = Chunk>) -> Self {
+        Arc::make_mut(&mut self.chunks).extend(chunks);
         self
     }
 
@@ -342,6 +396,15 @@ pub trait MountSink: Send + 'static {
     /// latest size. A platform that waits for the layout at a new size, to
     /// show it in the frame the window takes the size, stops waiting here.
     fn resized(&self, _size: Size) {}
+
+    /// The app imports chunk `id` of a split bundle (`import()`), which its
+    /// [`Bundle`] does not hold: load it and hand it over with
+    /// [`EngineControl::chunk_loaded`] (or [`EngineControl::chunk_failed`]),
+    /// from any thread, and return true. False (the default): this host
+    /// has no chunks to load, and the import fails.
+    fn load_chunk(&self, _id: &str) -> bool {
+        false
+    }
 }
 
 /// Receives what happens to a request started by [`Network::fetch`], in
@@ -460,6 +523,9 @@ enum Message {
     /// engine left are dropped).
     Fetch(RequestId, u64, FetchEvent),
     Hot(HotUpdate),
+    /// A chunk [`MountSink::load_chunk`] was asked for, or why it could
+    /// not be loaded (its id and the message).
+    Chunk(Result<Chunk, (String, String)>),
     Perf(Option<Arc<perf::PerfMonitor>>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -549,6 +615,18 @@ impl EngineControl {
     /// [`MountSink::hot_update_failed`] asks the platform to reload.
     pub fn hot_update(&self, update: HotUpdate) {
         let _ = self.tx.send(Message::Hot(update));
+    }
+
+    /// Hands over the chunk [`MountSink::load_chunk`] asked for: the
+    /// dynamic imports waiting for it continue.
+    pub fn chunk_loaded(&self, chunk: Chunk) {
+        let _ = self.tx.send(Message::Chunk(Ok(chunk)));
+    }
+
+    /// Chunk `id` could not be loaded: the dynamic imports waiting for it
+    /// fail with `message` (a later import asks for it again).
+    pub fn chunk_failed(&self, id: String, message: String) {
+        let _ = self.tx.send(Message::Chunk(Err((id, message))));
     }
 
     /// A display frame began, after [`MountSink::request_frame`]: runs the
@@ -885,6 +963,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             sink.submit(batch);
         }
         state.net.pump(script);
+        state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         driver.check_stopped();
         Some(driver)
@@ -959,6 +1038,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             sink.resized(size);
         }
         state.net.pump(script);
+        state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         self.check_stopped();
     }
@@ -1232,6 +1312,19 @@ impl<M: TextEngine> State<M> {
         }
     }
 
+    /// Asks the platform for the chunks JS imports and does not have.
+    fn load_chunks(&mut self, script: Option<&Script>, sink: &dyn MountSink) {
+        let Some(script) = script else { return };
+        let mut ids = Vec::new();
+        script.take_chunk_requests(&mut ids);
+        for id in ids {
+            if !sink.load_chunk(&id) {
+                let message = "this host does not load chunks (the app was built split)".to_owned();
+                let _ = self.net.tx.send(Message::Chunk(Err((id, message))));
+            }
+        }
+    }
+
     /// Asks the platform for a frame when JS or a component's task waits
     /// for one.
     fn request_frame(&mut self, script: Option<&Script>, sink: &dyn MountSink) {
@@ -1496,6 +1589,11 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::Hot(update) => state.hot.push(update),
+        Message::Chunk(chunk) => {
+            if let Some(script) = script {
+                script.chunk(chunk);
+            }
+        }
         Message::Perf(monitor) => {
             state.perf = monitor;
             state.perf_commit = perf::CommitTiming::default();

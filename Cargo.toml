@@ -129,6 +129,7 @@ rquickjs = { version = "=0.14.0", default-features = false, features = ["std"] }
 
 rolldown = "=1.2.13"
 rolldown_common = "=1.2.13"
+string_wizard = { version = "=1.2.13", features = ["sourcemap"] }
 oxc = { version = "=0.153.0", features = ["transformer", "codegen", "semantic", "ast_visit"] }
 
 # Apple bindings: default features off. The defaults pull in every header

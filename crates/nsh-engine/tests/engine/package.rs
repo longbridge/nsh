@@ -16,6 +16,7 @@ fn counter(build_number: u64, bytecode_version: &str) -> Contents {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify: true,
+        split: false,
         ui_sets: vec![nsh_ui_mobile::registry()],
     })
     .unwrap();

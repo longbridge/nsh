@@ -1,7 +1,7 @@
 # How apps are compiled and run: nsh's JSX compiler and native modules
 
 An app is TSX importing nsh's modules. The bundler compiles each module with nsh's JSX compiler and rolldown bundles
-them into one ES module holding only the app's code: imports of nsh's modules stay imports, and `nsh-js` serves them
+them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of nsh's modules stay imports, and `nsh-js` serves them
 natively. The reactive graph, the renderer and every API apps import are Rust; nothing of nsh is JS. Apps cannot
 import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...).
 
@@ -152,6 +152,31 @@ declared as global functions in `nsh/globals.d.ts`). The bundler's part is only 
 
 TypeScript's import elision runs after the JSX is compiled (`plugin.rs` `elide_unused_imports`): an import only
 primitives' tags use (`View` for `<View>`, made in place) goes, as does one only types use (even without `type`).
+
+## Split bundles (`import()`)
+
+A release bundle holds the whole app: rolldown inlines what `import()` loads (`code_splitting: false`), so
+`import("./Screen")` resolves at once, and native packages (`.nshpkg`, `nsh package`) are one bundle as before.
+`BundleOptions::split` (`nsh build --split`, the web) makes chunks instead: the entry is `bundle.js`
+(`nsh_core::js::ENTRY_CHUNK`, also the module name the runtime evaluates it under), every other chunk is `[name].js`
+with no digest (`Bundle::chunks`: id, code, source map, the chunks it imports statically), so ids stay stable and
+packagers add digests (`app.<digest>.js`) with a map from id to URL. Chunks import each other and the entry statically
+by relative name (`import { t } from "./bundle.js"`), which QuickJS resolves to the modules already loaded.
+
+QuickJS's module loader is synchronous (it resolves a module's imports while compiling it), so the page could not fetch
+a chunk on the way. The plugin's `render_chunk` (`split.rs`) rewrites each dynamic import of a chunk into
+`__nsh_import("Screen.js", ["detail.js"])` (`nsh_core::js::IMPORT_CHUNK`): the chunk and, transitively, the chunks
+it imports statically (string_wizard keeps the source map). The runtime (`nsh-js` `chunks.rs`) asks the host for the
+missing ones in one go (`Host::take_chunk_requests` → `MountSink::load_chunk`; the web page fetches them), and once
+all are there imports the first with QuickJS's own `JS_LoadModule` in a job: the loader (`modules.rs`) compiles each
+chunk from the code given (source or bytecode, `compile_chunk_bytecode`), modules are evaluated once and in order, the
+promise is QuickJS's. A chunk that cannot be loaded rejects the imports that need it (`Host::chunk_failed`); a later
+import asks again. Ids are checked to be plain file names before anything is asked for: the app's code (untrusted)
+cannot make the web page fetch another URL. Chunks a `nsh_engine::Bundle` carries (`Bundle::chunks`) are given before
+the entry runs, so hosts that have them all (tests, native) never ask; `MountSink::load_chunk` defaults to refusing.
+
+Development bundles (CommonJS, one chunk per module) need nothing: rolldown renders `import("./Screen")` as
+`Promise.resolve().then(() => require("./Screen.js"))`, served by the hot runtime.
 
 ## Hot module replacement
 

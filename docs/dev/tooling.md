@@ -162,6 +162,12 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 - Stacks are symbolicated with source maps: bundling produces a hidden source map (the TSX→JSX→JS maps are composed with
   `rolldown_sourcemap::collapse_sourcemaps`), sent along with the bundle; the engine rewrites `bundle.js:L:C` to `App.tsx:L:C` before reporting.
 
+## `nsh build --split`
+
+Writes a split bundle (`native-pipeline.md`, "Split bundles"): `bundle.js` / `.map` / `.nshc` and, per chunk,
+`<id>`, `<id>.map` and `<stem>.nshc` (`build::compile_split`, `Built::chunks`). Without `--split` (and for `nsh
+package`, `publish`, the dev server) the bundle holds the whole app.
+
 ## `nsh trace`
 
 `crates/nsh-cli/src/trace.rs` runs the app in the CLI's process (`ApproxTextEngine`, a channel as the mount sink, 60 Hz

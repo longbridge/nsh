@@ -11,7 +11,7 @@ use rolldown::{
     Bundler, BundlerOptions, InputItem, OutputFormat, Platform, RawMinifyOptions, SourceMapType,
     plugin::Pluginable,
 };
-use rolldown_common::Output;
+use rolldown_common::{ChunkFilenamesOutputOption, CodeSplittingMode, Output};
 
 use crate::{compile, compile::strip_ansi, plugin};
 
@@ -22,6 +22,11 @@ pub struct BundleOptions {
     pub entry: PathBuf,
     /// Minify the output (release builds).
     pub minify: bool,
+    /// Split what `import()` loads into chunks of their own
+    /// ([`Bundle::chunks`]), loaded on demand (published web apps);
+    /// otherwise the bundle holds the whole app, dynamically imported
+    /// modules included.
+    pub split: bool,
     /// The UI sets the hosts serve (`nsh_ui_mobile::registry()`, the app's
     /// own): their modules stay imports.
     pub ui_sets: Vec<nsh_core::ui::Registry>,
@@ -72,10 +77,14 @@ impl BundleError {
 /// A bundled app.
 #[derive(Debug, Clone)]
 pub struct Bundle {
-    /// The bundle: an ES module importing the native modules.
+    /// The bundle (the entry chunk, [`nsh_core::js::ENTRY_CHUNK`]): an ES
+    /// module importing the native modules.
     pub code: String,
     /// Source map (JSON) from `code` back to the app sources.
     pub source_map: Option<String>,
+    /// The chunks `import()` loads, with [`BundleOptions::split`] (else
+    /// none), in a stable order.
+    pub chunks: Vec<Chunk>,
     /// Asset files the app imports, relative to the entry directory
     /// (`asset:/<path>` URIs refer to them).
     pub assets: Vec<PathBuf>,
@@ -88,6 +97,28 @@ pub struct Bundle {
     pub capabilities: Option<nsh_core::access::Capabilities>,
     /// Wall time spent bundling, in milliseconds.
     pub elapsed_ms: f64,
+}
+
+/// A chunk of a split bundle: modules that `import()` loads (with what
+/// they share with other such chunks), an ES module of its own.
+///
+/// Chunks import each other and the entry chunk statically, by relative
+/// file name (`import { x } from "./bundle.js"`); a dynamic import becomes
+/// `__nsh_import("Screen.js", ["shared.js"])` ([`nsh_core::js::IMPORT_CHUNK`]):
+/// the chunk and the chunks it imports statically, which the runtime makes
+/// available (fetched on the web) before it imports the first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chunk {
+    /// Its id: its file name (`Screen.js`), stable from build to build while
+    /// the app's modules keep their names. Packagers map ids to files or URLs
+    /// (`app.<digest>.js`); the runtime asks for chunks by id.
+    pub id: String,
+    /// The chunk: an ES module.
+    pub code: String,
+    /// Source map (JSON) from `code` back to the app sources.
+    pub source_map: Option<String>,
+    /// The chunks it imports statically (ids, the entry chunk left out).
+    pub imports: Vec<String>,
 }
 
 /// The `"capabilities"` of the `nsh.json` next to the entry, checked.
@@ -193,9 +224,20 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
             minify: Some(RawMinifyOptions::Bool(options.minify)),
             // Kept out of the code; used to symbolicate stack traces.
             sourcemap: Some(SourceMapType::Hidden),
+            // Split: the entry is the module every chunk imports as
+            // `./bundle.js`, chunks keep their names (packagers add
+            // digests). Else dynamic imports are inlined.
+            entry_filenames: options
+                .split
+                .then(|| ChunkFilenamesOutputOption::String(nsh_core::js::ENTRY_CHUNK.into())),
+            chunk_filenames: options
+                .split
+                .then(|| ChunkFilenamesOutputOption::String("[name].js".into())),
+            code_splitting: (!options.split).then_some(CodeSplittingMode::Bool(false)),
             ..Default::default()
         },
         vec![Pluginable::new_shared(plugin::NshPlugin {
+            split: options.split,
             root: cwd_for_errors,
             error: plugin_error.clone(),
             assets: assets.clone(),
@@ -215,17 +257,27 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
             None => BundleError::new(e.into_vec()),
         }
     })?;
-    let (code, source_map) = output
-        .assets
-        .into_iter()
-        .find_map(|asset| match asset {
-            Output::Chunk(chunk) if chunk.is_entry => Some((
-                chunk.code.clone(),
-                chunk.map.as_ref().map(|m| m.to_json_string()),
-            )),
-            _ => None,
-        })
-        .ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?;
+    let mut entry_chunk = None;
+    let mut chunks = Vec::new();
+    for asset in output.assets {
+        let Output::Chunk(chunk) = asset else {
+            continue;
+        };
+        let map = chunk.map.as_ref().map(|m| m.to_json_string());
+        if chunk.is_entry {
+            entry_chunk = Some((chunk.code.clone(), map));
+        } else {
+            chunks.push(Chunk {
+                id: chunk.filename.to_string(),
+                code: chunk.code.clone(),
+                source_map: map,
+                imports: chunk_imports(chunk.imports.iter().map(|i| i.as_str()), &chunk.filename),
+            });
+        }
+    }
+    let (code, source_map) =
+        entry_chunk.ok_or_else(|| BundleError::other("bundle produced no entry chunk"))?;
+    chunks.sort_by(|a, b| a.id.cmp(&b.id));
     let mut assets: Vec<PathBuf> = std::mem::take(&mut *assets.lock().expect("assets lock"))
         .into_iter()
         .filter_map(|p| p.strip_prefix(&cwd_root).ok().map(PathBuf::from))
@@ -236,11 +288,21 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     Ok(Bundle {
         code,
         source_map,
+        chunks,
         assets,
         natives: natives.into_iter().collect(),
         capabilities,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
+}
+
+/// The chunks of `imports` (the files a chunk imports statically; native
+/// modules are not files), the entry chunk left out.
+pub(crate) fn chunk_imports<'a>(imports: impl Iterator<Item = &'a str>, own: &str) -> Vec<String> {
+    imports
+        .filter(|i| i.ends_with(".js") && *i != nsh_core::js::ENTRY_CHUNK && *i != own)
+        .map(str::to_owned)
+        .collect()
 }
 
 /// A development bundle with hot module replacement: the app's modules,
@@ -447,6 +509,7 @@ pub async fn bundle_hot_async(
             entry: entry.clone(),
             natives: natives.clone(),
             modules: Arc::new(compile::NativeModules::new(ui_sets)),
+            split: false,
         })],
     )
     .map_err(|e| BundleError::new(e.into_vec()))?;
@@ -492,4 +555,141 @@ pub async fn bundle_hot_async(
         capabilities,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An app whose screens are imported on demand: the first imports what
+    /// only the screens share, the second is also imported by the first.
+    fn app(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-split-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let files = [
+            (
+                "App.tsx",
+                "import { mount, signal, Text, View } from \"nsh\";\n\
+                 import { label } from \"./shared\";\n\
+                 function App() {\n\
+                   const screen = signal<any>(null);\n\
+                   const open = (m: any) => screen.set(() => m.default);\n\
+                   return <View>\n\
+                     <Text onPress={() => import(\"./Screen\").then(open)}>{label(\"home\")}</Text>\n\
+                     <Text onPress={() => import(\"./Settings\").then(open)}>settings</Text>\n\
+                     {screen() && screen()()}\n\
+                   </View>;\n\
+                 }\n\
+                 mount(App);\n",
+            ),
+            (
+                "Screen.tsx",
+                "import { Text } from \"nsh\";\n\
+                 import { label } from \"./shared\";\n\
+                 import { detail } from \"./detail\";\n\
+                 export default function Screen() { return <Text onPress={() => import(\"./Settings\")}>{label(detail)}</Text>; }\n",
+            ),
+            (
+                "Settings.tsx",
+                "import { Text } from \"nsh\";\n\
+                 import { detail } from \"./detail\";\n\
+                 export default function Settings() { return <Text>{detail}</Text>; }\n",
+            ),
+            (
+                "shared.ts",
+                "export const label = (s: string) => `[${s}]`;\n",
+            ),
+            ("detail.ts", "export const detail = \"second screen\";\n"),
+        ];
+        for (file, code) in files {
+            std::fs::write(dir.join(file), code).unwrap();
+        }
+        dir
+    }
+
+    fn bundle_app(dir: &std::path::Path, split: bool) -> Bundle {
+        bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: true,
+            split,
+            ui_sets: Vec::new(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn split_bundles_load_dynamic_imports_as_chunks() {
+        let dir = app("chunks");
+        let bundle = bundle_app(&dir, true);
+        let chunks: Vec<(&str, &[String])> = bundle
+            .chunks
+            .iter()
+            .map(|c| (c.id.as_str(), c.imports.as_slice()))
+            .collect();
+        let detail = ["detail.js".to_owned()];
+        assert_eq!(
+            chunks,
+            [
+                ("Screen.js", &detail[..]),
+                ("Settings.js", &detail[..]),
+                ("detail.js", &[][..]),
+            ]
+        );
+        // Each import names the chunks it needs.
+        let code = &bundle.code;
+        assert!(
+            code.contains("__nsh_import(`Screen.js`,[`detail.js`])"),
+            "{code}"
+        );
+        assert!(
+            code.contains("__nsh_import(`Settings.js`,[`detail.js`])"),
+            "{code}"
+        );
+        assert!(
+            !code.replace("__nsh_import(", "").contains("import("),
+            "{code}"
+        );
+        let screen = &bundle.chunks[0];
+        assert!(
+            screen.code.contains("from\"./bundle.js\""),
+            "{}",
+            screen.code
+        );
+        assert!(
+            screen
+                .code
+                .contains("__nsh_import(`Settings.js`,[`detail.js`])"),
+            "{}",
+            screen.code
+        );
+        // Source maps still lead to the app's modules.
+        let map = oxc_sourcemap::SourceMap::from_json_string(bundle.source_map.as_deref().unwrap())
+            .unwrap();
+        assert!(map.get_sources().any(|s| s.ends_with("App.tsx")));
+        let map = oxc_sourcemap::SourceMap::from_json_string(screen.source_map.as_deref().unwrap())
+            .unwrap();
+        assert!(map.get_sources().any(|s| s.ends_with("Screen.tsx")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bundles_not_split_hold_what_they_import_dynamically() {
+        let dir = app("inline");
+        let bundle = bundle_app(&dir, false);
+        assert!(bundle.chunks.is_empty());
+        assert!(!bundle.code.contains("import("), "{}", bundle.code);
+        assert!(!bundle.code.contains("__nsh_import"), "{}", bundle.code);
+        assert!(bundle.code.contains("second screen"), "{}", bundle.code);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn development_bundles_require_what_they_import_dynamically() {
+        let dir = app("hot");
+        let (code, _) = bundle_hot(&dir.join("App.tsx"), &[]).unwrap().script();
+        assert!(code.contains("require(\"./Screen.js\")"), "{code}");
+        assert!(!code.contains("import("), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

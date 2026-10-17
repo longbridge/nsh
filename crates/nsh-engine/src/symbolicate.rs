@@ -1,6 +1,6 @@
 //! Maps `script:LINE:COL` locations in JS stack traces back to the app
-//! sources with source maps: the bundle's (`bundle.js`) and, during
-//! development, those of hot updates.
+//! sources with source maps: the bundle's (`bundle.js`), its chunks'
+//! (`Screen.js`) and, during development, those of hot updates.
 
 use nsh_js::BUNDLE_NAME;
 use oxc_sourcemap::SourceMap;
@@ -67,7 +67,12 @@ fn rewrite(script: &mut Script, text: &str) -> String {
     while let Some(at) = rest.find(needle) {
         out.push_str(&rest[..at]);
         let after = &rest[at + needle.len()..];
-        match parse_position(after) {
+        // The end of a longer name (`bundle.js:` for chunk `e.js`).
+        let inside = rest[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || "_-.".contains(c));
+        match parse_position(after).filter(|_| !inside) {
             Some((line, col, used)) => {
                 // Stack positions are 1-based; source maps are 0-based.
                 let token = map.lookup_token(&table, line.saturating_sub(1), col.saturating_sub(1));
@@ -109,6 +114,18 @@ mod tests {
     fn parses_positions() {
         assert_eq!(parse_position("12:7)"), Some((12, 7, 4)));
         assert_eq!(parse_position("12)"), None);
+    }
+
+    #[test]
+    fn maps_only_whole_script_names() {
+        // `e.js:1:1` -> `e.ts:1:1`.
+        let map = r#"{"version":3,"sources":["e.ts"],"names":[],"mappings":"AAAA"}"#;
+        let mut s = Symbolicator::new(None);
+        s.add("e.js", map.into());
+        assert_eq!(
+            s.rewrite("at f (e.js:1:1)\nat g (bundle.js:1:1)"),
+            "at f (e.ts:1:1)\nat g (bundle.js:1:1)"
+        );
     }
 
     #[test]

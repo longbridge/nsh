@@ -137,6 +137,8 @@ player.run(await (await fetch("./bundle.js")).text());
 
 `assets` (a map from `asset:/` paths to URLs) replaces `assetBase`, and `readAsset(uri)` returns the bytes of an asset the engine needs at once (a font) or `null`; `player.run(code, { release: true, capabilities })` runs a bundle as a release under the capabilities it declares (the default is development settings). The page `nsh package --target web` writes uses all three.
 
+`run(code, { chunks, chunkBase })` also takes where the chunks of a [split bundle](#split-bundles) are.
+
 With `nsh-playground.wasm`, `player.runSource(tsx)` compiles TSX first and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
@@ -153,6 +155,27 @@ The container's size is the app's window (`windowSize()`); resizing the containe
 - **Cookies** (and HTTP authentication) are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
 - **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (nsh checks every hop, and browsers do not reveal a redirect before following it).
 - **Request bodies** that are a `ReadableStream` are collected first and sent in one piece; response bodies stream as they arrive.
+
+## Split bundles
+
+A web app does not need to download all of its code before the first screen shows. `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
+
+```sh
+nsh build --release --split -o site/app
+# bundle.js        the app up to its first screen
+# Screen.js        import("./Screen") and what only it uses
+# detail.js        what two chunks share, when they do (made by the bundler)
+```
+
+The first `import("./Screen")` downloads `Screen.js` and the chunks it imports, all at once, then evaluates them; later imports of it resolve at once. The page says where the chunks are: by default next to the page (`chunkBase`), or one URL per chunk, for files renamed with a content digest so a CDN can cache them forever:
+
+```js
+player.run(code, {
+  chunks: { "Screen.js": "/app.3f2a9c.js", "detail.js": "/app.81bb07.js" },
+});
+```
+
+A chunk that cannot be downloaded rejects the `import()` with a `TypeError` naming it; the next `import()` tries again. Chunk names are fixed file names from the bundle: the app cannot make the page download anything else.
 
 ## Limits
 

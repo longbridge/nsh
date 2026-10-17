@@ -10,8 +10,13 @@
 //! resolves imports when it compiles a module, so the bytecode compiler
 //! installs the same loader (a module then only declares its export names;
 //! nothing runs).
+//!
+//! The loader also compiles the chunks of a split bundle (`chunks.rs`): the
+//! code the host gave for a name that is not a native module.
 
 use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
     ffi::{CStr, CString, c_char, c_int, c_void},
     sync::Arc,
 };
@@ -321,16 +326,45 @@ enum Made {
 }
 
 /// The modules a VM (or the bytecode compiler) serves: nsh's own, the
-/// runtime's registries and the host's UI sets.
+/// runtime's registries and the host's UI sets, and the chunks of a split
+/// bundle.
 pub(crate) struct ModuleTable {
     registries: Vec<Registry>,
+    pub(crate) chunks: RefCell<ChunkCodes>,
+}
+
+/// The code of a chunk.
+pub(crate) enum ChunkCode {
+    Source(String),
+    /// From `compile_bytecode`, trusted (as `Host::eval_bytecode`'s).
+    Bytecode(Vec<u8>),
+}
+
+/// The chunks of a split bundle a VM knows of, by id (module name).
+#[derive(Default)]
+pub(crate) struct ChunkCodes {
+    /// Given, not imported yet: the loader compiles them (and drops the
+    /// code).
+    pub(crate) code: HashMap<String, ChunkCode>,
+    /// Compiled (QuickJS has the modules).
+    pub(crate) loaded: HashSet<String>,
+}
+
+impl ChunkCodes {
+    /// Whether chunk `id` can be imported now.
+    pub(crate) fn has(&self, id: &str) -> bool {
+        id == nsh_core::js::ENTRY_CHUNK || self.loaded.contains(id) || self.code.contains_key(id)
+    }
 }
 
 impl ModuleTable {
     pub(crate) fn new(ui_sets: &[Registry]) -> ModuleTable {
         let mut registries: Vec<Registry> = nsh_core::runtime::registries().to_vec();
         registries.extend(ui_sets.iter().filter(|r| r.specifier().is_some()).cloned());
-        ModuleTable { registries }
+        ModuleTable {
+            registries,
+            chunks: RefCell::default(),
+        }
     }
 
     /// The exports of module `name`, if it is one.
@@ -415,6 +449,20 @@ unsafe extern "C" fn load(
     // one `set_loader` was given.
     let (cname, table) = unsafe { (CStr::from_ptr(name), &*(opaque as *const ModuleTable)) };
     let exports = cname.to_str().ok().and_then(|n| table.exports(n));
+    // Taken first: compiling it loads its imports, here again.
+    let chunk = match (&exports, cname.to_str()) {
+        (None, Ok(id)) => table.chunks.borrow_mut().code.remove(id).map(|c| (id, c)),
+        _ => None,
+    };
+    if let Some((id, code)) = chunk {
+        // SAFETY: a live context; `code` is trusted as the host's API
+        // requires.
+        let m = unsafe { compile_chunk(ctx, name, code) };
+        if !m.is_null() {
+            table.chunks.borrow_mut().loaded.insert(id.to_owned());
+        }
+        return m;
+    }
     let Some(exports) = exports else {
         // SAFETY: throws on a live context; `%s` keeps the name literal.
         unsafe {
@@ -437,6 +485,57 @@ unsafe extern "C" fn load(
             let export = CString::new(export.as_str()).unwrap_or_default();
             qjs::JS_AddModuleExport(ctx, m, export.as_ptr());
         }
+        m
+    }
+}
+
+/// Compiles chunk `name` (its imports resolved by the loader, recursively);
+/// null with the exception pending when it does not compile.
+///
+/// # Safety
+///
+/// `ctx` is live; bytecode is trusted.
+unsafe fn compile_chunk(
+    ctx: *mut JsContext,
+    name: *const c_char,
+    code: ChunkCode,
+) -> *mut qjs::JSModuleDef {
+    // SAFETY: per the contract; QuickJS reads source up to the NUL it
+    // requires after it.
+    let module = unsafe {
+        match code {
+            ChunkCode::Source(mut source) => {
+                let len = source.len();
+                source.push('\0');
+                qjs::JS_Eval(
+                    ctx,
+                    source.as_ptr() as *const c_char,
+                    len as _,
+                    name,
+                    (qjs::JS_EVAL_TYPE_MODULE | qjs::JS_EVAL_FLAG_COMPILE_ONLY) as c_int,
+                )
+            }
+            ChunkCode::Bytecode(bytes) => qjs::JS_ReadObject(
+                ctx,
+                bytes.as_ptr(),
+                bytes.len() as _,
+                qjs::JS_READ_OBJ_BYTECODE as c_int,
+            ),
+        }
+    };
+    // SAFETY: inspecting and freeing the value just made.
+    unsafe {
+        if qjs::JS_IsException(module) {
+            return std::ptr::null_mut();
+        }
+        if qjs::JS_VALUE_GET_TAG(module) != qjs::JS_TAG_MODULE {
+            qjs::JS_FreeValue(ctx, module);
+            qjs::JS_ThrowTypeError(ctx, c"chunk '%s' is not a module".as_ptr(), name);
+            return std::ptr::null_mut();
+        }
+        let m = qjs::JS_VALUE_GET_PTR(module) as *mut qjs::JSModuleDef;
+        // The context keeps the module: the value is one more reference.
+        qjs::JS_FreeValue(ctx, module);
         m
     }
 }

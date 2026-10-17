@@ -51,6 +51,8 @@ unsafe extern "C" {
     fn js_fetch_pause(id: u32, paused: u32);
     #[link_name = "fetch_cancel"]
     fn js_fetch_cancel(id: u32);
+    #[link_name = "load_chunk"]
+    fn js_load_chunk(id: *const u8, id_len: usize);
 }
 
 /// The width of `text` in CSS `font`, in points.
@@ -180,4 +182,11 @@ pub(crate) fn fetch_pause(id: u32, paused: bool) {
 pub(crate) fn fetch_cancel(id: u32) {
     // SAFETY: no pointers.
     unsafe { js_fetch_cancel(id) }
+}
+
+/// Asks the page for chunk `id` of a split bundle; it hands it over later
+/// with `nsh_chunk`.
+pub(crate) fn load_chunk(id: &str) {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_load_chunk(id.as_ptr(), id.len()) }
 }

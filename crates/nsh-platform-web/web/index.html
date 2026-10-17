@@ -57,7 +57,8 @@
         }),
       ]);
       status.style.display = "none";
-      p.run(code);
+      // A demo built split loads its chunks from next to it.
+      p.run(code, { chunkBase: new URL("demos/", location.href).href });
     } catch (err) {
       status.textContent = String(err.message ?? err);
     }

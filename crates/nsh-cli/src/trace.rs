@@ -101,6 +101,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,
+        split: false,
         ui_sets: crate::ui_sets().to_vec(),
     })
     .map_err(|e| BuildError::from(e).into_error(entry))?;

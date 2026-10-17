@@ -58,6 +58,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: dir.join("App.tsx"),
         minify: false,
+        split: false,
         ui_sets: vec![nsh_ui_mobile::registry()],
     })
     .unwrap();

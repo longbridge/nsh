@@ -12,7 +12,7 @@ pub const BYTECODE_VERSION: &str = "rquickjs-0.14.0/quickjs-ng-0.16.2/le64";
 
 /// Module name every bundle is evaluated under; JS stack frames reference
 /// it as `bundle.js:LINE:COL`.
-pub const BUNDLE_NAME: &str = "bundle.js";
+pub const BUNDLE_NAME: &str = nsh_core::js::ENTRY_CHUNK;
 
 /// Compiles a bundle to QuickJS bytecode.
 ///
@@ -31,19 +31,62 @@ pub fn compile_bytecode_with(
     strip: bool,
     ui_sets: &[nsh_core::ui::Registry],
 ) -> Result<Vec<u8>, JsError> {
-    // Outlives the runtime (dropped after it).
-    let modules = crate::modules::ModuleTable::new(ui_sets);
+    compile(
+        BUNDLE_NAME,
+        source,
+        crate::modules::ModuleTable::new(ui_sets),
+        strip,
+    )
+}
+
+/// Compiles the chunks of a split bundle (`nsh-bundler` `Bundle::chunks`:
+/// `(id, source)`) to bytecode, in their order, for
+/// [`crate::Host::add_chunk_bytecode`]. A chunk's imports resolve while it
+/// compiles, so `entry` (the bundle's code) and the other chunks are
+/// compiled with it (each chunk's bytecode holds only its own module).
+pub fn compile_chunk_bytecode(
+    entry: &str,
+    chunks: &[(&str, &str)],
+    strip: bool,
+    ui_sets: &[nsh_core::ui::Registry],
+) -> Result<Vec<Vec<u8>>, JsError> {
+    chunks
+        .iter()
+        .map(|&(id, source)| {
+            let table = crate::modules::ModuleTable::new(ui_sets);
+            {
+                let mut code = table.chunks.borrow_mut();
+                let others = chunks.iter().filter(|(other, _)| *other != id);
+                for (other, source) in std::iter::once(&(BUNDLE_NAME, entry)).chain(others) {
+                    let source = crate::modules::ChunkCode::Source((*source).to_owned());
+                    code.code.insert((*other).to_owned(), source);
+                }
+            }
+            compile(id, source, table, strip)
+                .map_err(|e| JsError::new(format!("chunk {id}: {}", e.message)))
+        })
+        .collect()
+}
+
+/// Compiles module `name` with the loader of `modules`.
+fn compile(
+    name: &str,
+    source: &str,
+    modules: crate::modules::ModuleTable,
+    strip: bool,
+) -> Result<Vec<u8>, JsError> {
     let rt = Runtime::new()?;
     let ctx = Context::full(&rt)?;
     ctx.with(|ctx| {
         // Imports resolve while compiling: the native modules declare
         // their exports.
-        // SAFETY: the context's own runtime.
+        // SAFETY: the context's own runtime; the table outlives it (the
+        // runtime is dropped at the end of this function, before it).
         crate::modules::set_loader(
             unsafe { rquickjs::qjs::JS_GetRuntime(ctx.as_raw().as_ptr()) },
             &modules,
         );
-        let module = Module::declare(ctx.clone(), BUNDLE_NAME, source)
+        let module = Module::declare(ctx.clone(), name, source)
             .catch(&ctx)
             .map_err(JsError::caught)?;
         let options = WriteOptions {

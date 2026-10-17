@@ -42,6 +42,8 @@ pub(crate) struct Built {
     pub(crate) bytecode: Vec<u8>,
     /// Source map of `code`.
     pub(crate) source_map: Option<String>,
+    /// The chunks `import()` loads, for a split build ([`compile_split`]).
+    pub(crate) chunks: Vec<BuiltChunk>,
     /// The files the app ships: those it imports and those its UI sets'
     /// crates ship ([`crate_assets`]).
     pub(crate) assets: Vec<Asset>,
@@ -51,6 +53,20 @@ pub(crate) struct Built {
     pub(crate) ui_sets: Vec<String>,
     /// How long bundling and compiling took.
     pub(crate) elapsed: Duration,
+}
+
+/// A chunk of a split build: app code `import()` loads on demand.
+pub(crate) struct BuiltChunk {
+    /// Its id (`Screen.js`): the name the app's code imports it by, stable
+    /// while the app's modules keep their names. Packagers map it to the
+    /// chunk's file or URL.
+    pub(crate) id: String,
+    /// The chunk as JS source (an ES module).
+    pub(crate) code: String,
+    /// The chunk as QuickJS bytecode.
+    pub(crate) bytecode: Vec<u8>,
+    /// Source map of `code`.
+    pub(crate) source_map: Option<String>,
 }
 
 /// A file an app ships.
@@ -117,10 +133,15 @@ impl Built {
         self.capabilities.as_ref().map(|c| c.to_json().to_string())
     }
 
-    /// `(3.2 KB js, 9.8 KB bytecode<more>, 21ms)`, dimmed.
+    /// `(3.2 KB js, 9.8 KB bytecode<, 2 chunks><more>, 21ms)`, dimmed.
     pub(crate) fn summary(&self, more: &str) -> String {
+        let chunks = match self.chunks.len() {
+            0 => String::new(),
+            1 => ", 1 chunk".to_owned(),
+            n => format!(", {n} chunks"),
+        };
         ui::dim(format!(
-            "({} js, {} bytecode{more}, {})",
+            "({} js, {} bytecode{chunks}{more}, {})",
             ui::bytes(self.code.len()),
             ui::bytes(self.bytecode.len()),
             ui::duration(self.elapsed)
@@ -135,22 +156,53 @@ impl BuildError {
     }
 }
 
-/// Bundles `entry` and compiles it to bytecode.
+/// Bundles `entry` and compiles it to bytecode: one bundle, holding what
+/// `import()` loads too (native packages).
 pub(crate) fn compile(entry: &Path, release: bool) -> Result<Built, BuildError> {
+    compile_with(entry, release, false)
+}
+
+/// [`compile`], with what `import()` loads split into chunks
+/// ([`Built::chunks`]) loaded on demand (web apps).
+pub(crate) fn compile_split(entry: &Path, release: bool) -> Result<Built, BuildError> {
+    compile_with(entry, release, true)
+}
+
+fn compile_with(entry: &Path, release: bool, split: bool) -> Result<Built, BuildError> {
     let start = Instant::now();
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: release,
+        split,
         ui_sets: crate::ui_sets().to_vec(),
     })?;
     let dir = dunce::canonicalize(entry)
         .ok()
         .and_then(|e| e.parent().map(Path::to_path_buf));
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, release, crate::ui_sets())?;
+    let sources: Vec<(&str, &str)> = bundle
+        .chunks
+        .iter()
+        .map(|c| (c.id.as_str(), c.code.as_str()))
+        .collect();
+    let chunk_bytecode =
+        nsh_js::compile_chunk_bytecode(&bundle.code, &sources, release, crate::ui_sets())?;
+    let chunks = bundle
+        .chunks
+        .into_iter()
+        .zip(chunk_bytecode)
+        .map(|(c, bytecode)| BuiltChunk {
+            id: c.id,
+            code: c.code,
+            bytecode,
+            source_map: c.source_map,
+        })
+        .collect();
     Ok(Built {
         code: bundle.code,
         bytecode,
         source_map: bundle.source_map,
+        chunks,
         assets: assets(dir.as_deref(), &bundle.assets),
         capabilities: bundle.capabilities,
         ui_sets: imported_sets(&bundle.natives),
@@ -172,6 +224,7 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
         code,
         bytecode,
         source_map,
+        chunks: Vec::new(),
         assets: assets(dir.as_deref(), &hot.assets),
         capabilities: hot.capabilities.clone(),
         ui_sets: imported_sets(hot.natives()),
@@ -181,16 +234,26 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
 }
 
 /// Bundles `entry` into `out/bundle.js`, `out/bundle.js.map` and
-/// `out/bundle.nshc`.
-pub(crate) fn build(entry: &Path, out: &Path, release: bool) -> anyhow::Result<()> {
+/// `out/bundle.nshc`; `split`: with each chunk next to them
+/// (`Screen.js`, `Screen.js.map`, `Screen.nshc`).
+pub(crate) fn build(entry: &Path, out: &Path, release: bool, split: bool) -> anyhow::Result<()> {
+    let compile = if split { compile_split } else { compile };
     let built = compile(entry, release).map_err(|e| e.into_error(entry))?;
     fs::create_dir_all(out).with_context(|| format!("create {}", out.display()))?;
     let map = built.source_map.as_deref().unwrap_or_default();
-    for (name, bytes) in [
-        ("bundle.js", built.code.as_bytes()),
-        ("bundle.js.map", map.as_bytes()),
-        ("bundle.nshc", &built.bytecode),
-    ] {
+    let mut files = vec![
+        ("bundle.js".to_owned(), built.code.as_bytes()),
+        ("bundle.js.map".to_owned(), map.as_bytes()),
+        ("bundle.nshc".to_owned(), &built.bytecode[..]),
+    ];
+    for chunk in &built.chunks {
+        let stem = chunk.id.strip_suffix(".js").unwrap_or(&chunk.id);
+        let map = chunk.source_map.as_deref().unwrap_or_default();
+        files.push((chunk.id.clone(), chunk.code.as_bytes()));
+        files.push((format!("{}.map", chunk.id), map.as_bytes()));
+        files.push((format!("{stem}.nshc"), &chunk.bytecode[..]));
+    }
+    for (name, bytes) in files {
         let path = out.join(name);
         fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
     }

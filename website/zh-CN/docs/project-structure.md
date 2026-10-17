@@ -157,6 +157,19 @@ import strings from "./strings.json";
 
 它们都会被打包进同一个脚本。JSON 文件导入后就是解析后的值。
 
+### 按需加载代码
+
+对应用自己的模块调用 `import()`，会得到一个兑现为其导出的 promise，和浏览器里一样：
+
+```tsx
+const open = async () => {
+  const { Settings } = await import("./screens/Settings");
+  screen.set(() => Settings);
+};
+```
+
+设备上的应用只分发一个 bundle，模块已经在里面，promise 会立即兑现。以拆分方式发布的 Web 应用（`nsh build --split`）会把这个模块以及只有它用到的代码放进单独的文件，在 `import()` 第一次请求时才下载（[Web](./web.md#拆分-bundle)）。参数必须是字面量相对路径：打包器需要知道导入的是哪个模块。
+
 ### nsh 的模块
 
 对 `nsh` 和 `nsh/...` 的导入不会被打包：运行时以原生方式提供它们。

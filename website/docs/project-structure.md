@@ -158,6 +158,19 @@ import strings from "./strings.json";
 
 All of them are bundled into one script. JSON files import as their parsed value.
 
+### Loading code on demand
+
+`import()` of one of the app's modules returns a promise of its exports, as in a browser:
+
+```tsx
+const open = async () => {
+  const { Settings } = await import("./screens/Settings");
+  screen.set(() => Settings);
+};
+```
+
+Apps on devices ship one bundle, so the module is already there and the promise resolves at once. A web app published split (`nsh build --split`) gets the module, and what only it uses, as a separate file that is downloaded the first time `import()` asks for it ([Web](./web.md#split-bundles)). The specifier must be a literal relative path: the bundler has to see which module is meant.
+
 ### nsh's modules
 
 Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them natively.
