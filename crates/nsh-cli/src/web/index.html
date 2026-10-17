@@ -13,6 +13,8 @@
     justify-content: center; gap: 10px; padding: 24px; box-sizing: border-box; text-align: center;
     font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; pointer-events: none; }
   #status[hidden] { display: none; }
+  #nojs { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 15px system-ui, sans-serif; }
   /* Shown only when loading takes a while: no flash on a fast load. */
   .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(128,128,128,.25);
     border-top-color: rgba(128,128,128,.85); animation: spin .8s linear infinite, appear .2s .4s both; }
@@ -26,7 +28,7 @@
 <body>
 <div id="app"></div>
 <div id="status" role="status" aria-live="polite"><div class="spinner" aria-label="Loading"></div></div>
-<noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif">{{title}} needs JavaScript.</div></noscript>
+<noscript><div id="nojs">{{title}} needs JavaScript.</div></noscript>
 <script type="module">
   // Written by `nsh package --target web`: loads the runtime, the app's
   // code (bytecode, with the hardening it runs first) and its fonts in
