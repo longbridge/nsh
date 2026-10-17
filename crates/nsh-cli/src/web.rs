@@ -10,7 +10,7 @@
 //! nsh.<digest>.js                  the DOM runtime
 //! nsh.<digest>.wasm                the engine, the core, the components and QuickJS
 //! app.<digest>.js                  the app's bundle
-//! chunks/<name>.<digest>.js        (reserved for code split bundles)
+//! chunks/<name>.<digest>.js        what `import()` loads, fetched when first imported
 //! assets/<path>.<digest>.<ext>     `asset:/<path>`, loaded from its URL when used
 //! icons/<size>.<digest>.png        favicon, apple-touch-icon, the manifest's
 //! ```
@@ -99,6 +99,13 @@ pub(crate) fn package(
         &fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?,
     )?;
     let code = site.add(&format!("{}.{}", CODE.0, CODE.1), built.code.as_bytes())?;
+    // Chunk id -> URL: the page hands the map to the runtime, which fetches
+    // a chunk the first time the app imports it (nothing is preloaded).
+    let mut chunks = serde_json::Map::new();
+    for chunk in &built.chunks {
+        let url = site.add(&format!("chunks/{}", chunk.id), chunk.code.as_bytes())?;
+        chunks.insert(chunk.id.clone(), url.into());
+    }
     let mut assets = serde_json::Map::new();
     let mut fonts = Vec::new();
     for asset in &built.assets {
@@ -125,6 +132,7 @@ pub(crate) fn package(
         "capabilities": built.capabilities_json(),
         "assets": assets,
         "fonts": fonts,
+        "chunks": chunks,
     });
     let html = page(&PageParts {
         name,

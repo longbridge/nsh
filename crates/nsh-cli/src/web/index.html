@@ -74,7 +74,7 @@
     ]);
     player = loaded;
     status.hidden = true;
-    player.run(code, { release: true, capabilities: app.capabilities ?? "" });
+    player.run(code, { release: true, capabilities: app.capabilities ?? "", chunks: app.chunks });
   } catch (err) {
     fail("This app could not be loaded.", String(err?.message ?? err));
   }

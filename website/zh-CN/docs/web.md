@@ -42,7 +42,8 @@ nsh package App.tsx --target web --run     # 并在本机提供服务，在浏�
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
 | `nsh.<digest>.js` | DOM 运行时 |
 | `nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB） |
-| `app.<digest>.js` | 应用本身，构建方式与 `nsh build --release` 相同 |
+| `app.<digest>.js` | 应用本身，构建方式与 `nsh build --release --split` 相同 |
+| `chunks/<name>.<digest>.js` | `import()` 加载的代码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
 | `assets/<path>.<digest>.<ext>` | 应用导入的每个资源，用到时才从其 URL 加载（字体在应用启动前加载：文本要用它们测量） |
 | `icons/<size>.<digest>.png` | `nsh.json` 中的图标，尺寸为 32（favicon）、180（`apple-touch-icon`）、192 和 512 像素 |
 
@@ -144,7 +145,7 @@ player.run(await (await fetch("./bundle.js")).text());
 
 ## 拆分 bundle
 
-Web 应用不必在第一个界面出现之前下载全部代码。`nsh build --split` 把 `import()` 加载的模块放进各自的 chunk，放在 `bundle.js` 旁边：
+Web 应用不必在第一个界面出现之前下载全部代码。`nsh package --target web` 以拆分方式发布应用：每个 chunk 写成 `chunks/<name>.<digest>.js`，由页面把 chunk 映射到这些文件。要自己拆分 bundle，可以用 `nsh build --split`，它把 `import()` 加载的模块放进各自的 chunk，放在 `bundle.js` 旁边：
 
 ```sh
 nsh build --release --split -o site/app

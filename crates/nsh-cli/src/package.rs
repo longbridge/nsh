@@ -135,7 +135,13 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         executable
     };
 
-    let built = crate::build::compile(&entry, true).map_err(|e| e.into_error(&entry))?;
+    // Web apps load what `import()` brings in when it is used; native
+    // packages are one bundle.
+    let compile = match options.target {
+        PackageTarget::Web => crate::build::compile_split,
+        _ => crate::build::compile,
+    };
+    let built = compile(&entry, true).map_err(|e| e.into_error(&entry))?;
     ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,

@@ -43,7 +43,8 @@ page and files named after their content.
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
 | `nsh.<digest>.js` | The DOM runtime |
 | `nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli) |
-| `app.<digest>.js` | The app, built as `nsh build --release` builds it |
+| `app.<digest>.js` | The app, built as `nsh build --release --split` builds it |
+| `chunks/<name>.<digest>.js` | What `import()` loads, downloaded the first time it is imported ([split bundles](#split-bundles)) |
 | `assets/<path>.<digest>.<ext>` | Every asset the app imports, loaded from its URL when it is used (fonts before the app starts: text is measured with them) |
 | `icons/<size>.<digest>.png` | The icon of `nsh.json` at 32 (favicon), 180 (`apple-touch-icon`), 192 and 512 pixels |
 
@@ -158,7 +159,7 @@ The container's size is the app's window (`windowSize()`); resizing the containe
 
 ## Split bundles
 
-A web app does not need to download all of its code before the first screen shows. `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
+A web app does not need to download all of its code before the first screen shows. `nsh package --target web` publishes apps split, with each chunk as `chunks/<name>.<digest>.js` and the page mapping chunks to those files. To split a bundle yourself, `nsh build --split` puts the modules that `import()` loads into chunks of their own, next to `bundle.js`:
 
 ```sh
 nsh build --release --split -o site/app

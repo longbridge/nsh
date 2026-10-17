@@ -31,12 +31,13 @@ several times larger and slower; `AR_wasm32_unknown_unknown` defaults to `llvm-a
   hashed `nsh.js`, preloads the wasm, the app's code and its fonts, and passes `createPlayer` the wasm URL, `assets`
   (each `asset:/<path>` to its hashed URL: images and videos load from there on demand) and `readAsset` (the fonts'
   bytes, fetched before the app starts: the engine reads fonts synchronously, `Assets::read`, to measure text with
-  them). It runs the bundle with `run(code, { release: true, capabilities })`; an app whose capabilities restrict `network`
+  them). It runs the bundle with `run(code, { release: true, capabilities, chunks })`; an app whose capabilities restrict `network`
   gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
   `host:*`), as the browser follows redirects before nsh could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as JS source
-  (`web::CODE`; the web build's QuickJS is 32-bit, so the CLI's bytecode would not load there); code-split chunks are
-  meant for `chunks/<name>.<digest>.js`. Apps with a Rust crate of their own are refused: the prebuilt wasm has only
+  (`web::CODE`; the web build's QuickJS is 32-bit, so the CLI's bytecode would not load there). The app is built split
+  (`build::compile_split`): each chunk is written as `chunks/<name>.<digest>.js` and the page's `chunks` maps its id to
+  that URL; nothing preloads them, the runtime fetches one the first time `import()` needs it. Apps with a Rust crate of their own are refused: the prebuilt wasm has only
   `nsh/ui/mobile`. `--run` serves the directory with `nsh_dev::SiteServer` (the cache headers a CDN should send) and
   opens the browser.
 - **The development host** is a page the dev server serves (`DevServer::serve_web`: the page at `/`, `nsh.js` and
