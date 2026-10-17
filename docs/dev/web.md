@@ -225,6 +225,10 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   200 ms fade for `animation: "fade"` (and for every screen with reduced motion), nothing for `"none"`, easing out
   cubically (`cubic-bezier(.333,1,.667,1)` is exactly 1 − (1 − t)³). Screens a batch removes stay until the stack is
   reconciled after it (`reconcileStacks`): the top one slides out when the app popped it.
+- **Removed content stays while its container leaves**: views a batch removes leave the page at its end
+  (`finishRemovals`), unless they are inside a modal being dismissed, a screen sliding out or a view disappearing,
+  which takes them along (dropped when it is gone): an app removes a modal's or screen's content in the batch that
+  removes the modal or screen, and the content must still show while it slides out (Linux keeps an image of it).
 - **Press feedback** (`activeOpacity`) fades to that fraction of the view's opacity in 100 ms and back in 250 ms,
   easing out quadratically, as an animation over the style (the style's own opacity is kept).
 - **Release velocities** of drags (`nsh_pan`) are measured over the last 100 ms of pointer samples (zero after a

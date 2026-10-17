@@ -345,6 +345,8 @@ class Player {
     this.appearing = [];
     this.disappearing = [];
     this.changedStacks = new Set();
+    // Views removed by the batch being applied (`finishRemovals`).
+    this.removals = [];
     this.images = new Map();
     this.pointers = new Map();
     this.requests = new Map();
@@ -809,6 +811,24 @@ class Player {
     }
     this.endLayoutAnimation();
     if (this.changedStacks.size) this.reconcileStacks();
+    if (this.removals.length) this.finishRemovals();
+  }
+
+  /** The batch is applied: views it removed leave the page, unless they
+   * are inside a modal, screen or view that is animating out, which takes
+   * them along (an app removes the content with its container, and the
+   * content must still show while the container leaves). */
+  finishRemovals() {
+    const removals = this.removals;
+    this.removals = [];
+    for (const el of removals) {
+      if (!el._removing) continue;
+      el._removing = false;
+      let up = el.parentNode;
+      while (up && up !== this.root && !(up._leaving || up._popping || up._removedFrom || up._dying)) up = up.parentNode;
+      if (up && up !== this.root) el._leftWith = up;
+      else el.remove();
+    }
   }
 
   view(id) {
@@ -890,6 +910,8 @@ class Player {
     // Back before its removal finished animating.
     if (child._dying) this.revive(child);
     child._removedFrom = null;
+    child._removing = false;
+    child._leftWith = null;
     const host = parent._layer ?? parent;
     host.insertBefore(child, before && before.parentNode === host ? before : null);
     if (parent._kind === "stack") {
@@ -924,7 +946,8 @@ class Player {
       el.style.pointerEvents = "none";
       this.disappearing.push(el);
     } else {
-      el.remove();
+      el._removing = true;
+      this.removals.push(el);
     }
   }
 
@@ -2215,6 +2238,7 @@ class Player {
             if (old._removedFrom === stack) {
               old._removedFrom = null;
               old.remove();
+              this.dropLeftWith(old);
             }
           });
         }
@@ -2224,6 +2248,7 @@ class Player {
           screen._removedFrom = null;
           screen._popping = false;
           screen.remove();
+          this.dropLeftWith(screen);
         }
       }
     }
@@ -2505,6 +2530,7 @@ class Player {
   present(el) {
     const motion = this.modalMotion(el);
     el._leaving = false;
+    this.dropLeftWith(el);
     el._closed = false;
     el._reported = null;
     // The focus leaves the views under it, and comes back when it closes.
@@ -2547,7 +2573,10 @@ class Player {
     const restore = el._restoreFocus;
     if (restore?.isConnected && !this.topModal()) restore.focus({ preventScroll: true });
     setTimeout(() => {
-      if (el._leaving) el.remove();
+      if (el._leaving) {
+        el.remove();
+        this.dropLeftWith(el);
+      }
       scrim?.remove();
       if (!reported) this.event(el._id, "onDismiss");
     }, motion === "none" ? 0 : 350);
