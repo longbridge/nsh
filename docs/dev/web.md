@@ -251,10 +251,13 @@ browsers' touches into what phones report:
   vertical wheel scrolls a horizontal view when no vertical one can) and stay on it while events come within 200 ms;
   notches glide, touchpads follow the fingers; snapping views move one snap point per scroll. Nothing to scroll: the
   event goes on to the page around (an embedding page scrolls). Ctrl + wheel (a touchpad's pinch) pinches the view
-  under the pointer and never zooms the page. Mouse drags scroll as before, with momentum, and snapping views settle
-  on the next snap point along a flick. Scroll events follow the desktop backends: drags send `onScrollBeginDrag` /
-  `EndDrag`, glides and snaps `onMomentumScrollBegin` / `End`, every scroll ends with one `onScrollEnd` (the browser's
-  `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
+  under the pointer and never zooms the page. Scroll events follow the desktop backends: touch drags send
+  `onScrollBeginDrag` / `EndDrag`, glides and snaps `onMomentumScrollBegin` / `End`, every scroll ends with one
+  `onScrollEnd` (the browser's `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
+- **Mouse drags never scroll**, in every idiom, as on the desktop backends: dragging the content is a touchscreen's
+  way to scroll, the mouse has the wheel, the keyboard and the scroll bar. Its drags go to pans, the responder system
+  and selectable text (`pointerDown` only takes touches and pens in zoomable views, which pan themselves; a press
+  elsewhere has its `mousedown` prevented, so it selects no page text).
 - **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
   passed as the character they type without modifiers, else the US layout's character of their `code`; `mod` was
@@ -286,8 +289,8 @@ browsers' touches into what phones report:
 - **Text selection**: text is selectable when `selectable` is true (`nsh-selectable`), and with the desktop idiom also
   when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
   or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
-  page; phones and tablets select only what asks for it. `editable` / `textAt` tell `pointerDown` (a mouse drag there
-  selects instead of scrolling) and `mousedown` (not prevented there); a mouse press elsewhere clears the selection,
+  page; phones and tablets select only what asks for it. `editable` / `textAt` tell `pointerDown` (a drag there
+  selects instead of panning a zoomable view) and `mousedown` (not prevented there); a mouse press elsewhere clears the selection,
   which the browser would not, since presses outside select nothing. Copying (`copyText`) writes the selected runs in
   DOM order, each followed by its line's break when its end is selected (`Run::after`, the run tuple's fifth element:
   a newline, or the spaces a wrap dropped) and a newline between texts: the browser would run the absolutely placed
@@ -314,11 +317,11 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
 
 - **Pull to refresh** (vertical views with `onRefresh` or `refreshing`): past the top, a drag moves the content down
   at half speed over an 8-spoke spinner; released past 64 points it fires `onRefresh` and keeps 56 points for the
-  turning spinner until `refreshing` turns false (the Linux and macOS backends' numbers). Mouse drags go through the
-  pointer handling (which scrolls mouse drags anyway); touches through non-passive touch events on the view, since
-  the browser scrolls touches itself: a move past the top is prevented while it can be, and a gesture the browser
+  turning spinner until `refreshing` turns false (the Linux and macOS backends' numbers). Only touches pull (mouse
+  drags never scroll), through non-passive touch events on the view, since the browser scrolls touches itself: a move past the top is prevented while it can be, and a gesture the browser
   already scrolls stays the browser's.
-- **Zooming**: a zoomable view is `touch-action: none` and pans (both axes, with a glide) and pinches itself, keeping
+- **Zooming**: a zoomable view is `touch-action: none` and pans touches (both axes, with a glide; the mouse does not
+  drag it) and pinches itself, keeping
   the content point between the fingers between them (rubber band past the limits with `bouncesZoom`, a spring back
   after). Ctrl+wheel over it zooms around the pointer instead of pinching (Chromium and Firefox send touchpad pinches
   as that; a mouse notch is 1.25×), Safari's touchpad pinches come as `gesture*` events. `zoomTo` and `zoomScale` animate or jump with the

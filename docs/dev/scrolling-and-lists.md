@@ -6,6 +6,11 @@
   `EndDrag`, `onMomentumScrollBegin` / `End` (a glide caught by a new drag ends with `onMomentumScrollEnd`). Snapping is decided
   by `ScrollBehavior::snap_target` (core) on iOS and its Java port on Android, from the release offset, the projected glide and
   the velocity. Lists keep the visible rows in place when items are inserted above them (`splice`).
+- **Input**: fingers (and pens) drag scroll views; on the desktop backends and the web the mouse never does (dragging
+  the content is a touchscreen's way to scroll): it scrolls with the wheel, the touchpad, the keyboard and the
+  indicator (a scroll bar), and its drags are the app's (pans, responders, text selection). So with a mouse alone,
+  pull to refresh needs a touchpad that rubber-bands (macOS) and horizontal lists need a horizontal wheel, Shift +
+  wheel or the keyboard.
 - **Content container** (`<Scroll>`): `contentContainerStyle` / `contentContainerClass` are the renderer's
   (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in

@@ -62,6 +62,8 @@ A horizontal scroll view takes `horizontal` and a row as its child:
 
 Right to left (see [Device and environment](./device-and-environment.md#right-to-left)), a horizontal scroll view starts at its right end and keeps its distance from it.
 
+Fingers drag scroll views. On the desktop (macOS, Windows, Linux) and in the browser, dragging with the mouse does not scroll, as in desktop apps: the mouse scrolls with its wheel (Shift + wheel scrolls horizontally), the touchpad, the keyboard and the scroll indicator, which it drags as a scroll bar, and its drags go to the app's pans, responders and text selection. Touchscreens on desktops still drag. Give a horizontal carousel without an indicator another way to move on the desktop (arrow buttons, for instance) if mouse users without a horizontal wheel need it.
+
 ### Behavior props
 
 | Prop | Type | Default | Description |
@@ -251,7 +253,7 @@ const reload = async () => {
 <Scroll style={{ flex: 1 }} refreshing={refreshing()} onRefresh={reload}>…</Scroll>
 ```
 
-On iOS the control is UIRefreshControl; in the Mac idiom of Mac Catalyst, which has no UIRefreshControl, nsh shows its own spinner with the same behavior. `List` takes the same two props.
+On iOS the control is UIRefreshControl; in the Mac idiom of Mac Catalyst, which has no UIRefreshControl, nsh shows its own spinner with the same behavior. `List` takes the same two props. Since the mouse does not drag scroll views, on the desktop and in the browser the pull needs a touchscreen (or a macOS trackpad, which pulls past the top); offer another way to refresh there, such as a button or a keyboard shortcut.
 
 ## Zooming
 

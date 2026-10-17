@@ -52,6 +52,8 @@ mount(App);
 
 在从右到左布局中（见[设备与环境](./device-and-environment.md#从右到左)），横向滚动视图从最右端开始，并保持与右端的距离。
 
+手指拖动滚动视图。在桌面（macOS、Windows、Linux）和浏览器中，和桌面应用一样，用鼠标拖动不会滚动：鼠标用滚轮（Shift + 滚轮横向滚动）、触控板、键盘和滚动指示条（可以像滚动条一样拖动）滚动，鼠标拖动交给应用的拖拽手势、响应者和文字选择。桌面上的触摸屏仍然可以拖动。没有指示条的横向轮播如果要让没有横向滚轮的鼠标用户也能翻动，请在桌面上另给一种方式（比如左右箭头按钮）。
+
 ### 行为属性
 
 | 属性 | 类型 | 默认值 | 说明 |
@@ -241,7 +243,7 @@ const reload = async () => {
 <Scroll style={{ flex: 1 }} refreshing={refreshing()} onRefresh={reload}>…</Scroll>
 ```
 
-iOS 上的控件是 UIRefreshControl；Mac Catalyst 的 Mac 界面风格没有 UIRefreshControl，nsh 会显示自己的加载指示器，行为相同。`List` 也接受这两个属性。
+iOS 上的控件是 UIRefreshControl；Mac Catalyst 的 Mac 界面风格没有 UIRefreshControl，nsh 会显示自己的加载指示器，行为相同。`List` 也接受这两个属性。由于鼠标拖不动滚动视图，在桌面和浏览器中下拉需要触摸屏（或 macOS 的触控板，它能拉过顶部）；请在这些地方另外提供刷新方式，比如按钮或键盘快捷键。
 
 ## 缩放
 

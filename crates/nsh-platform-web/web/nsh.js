@@ -1356,10 +1356,6 @@ class Player {
     el._ownEnd = null;
     if (own && own[0] === el.scrollLeft && own[1] === el.scrollTop) return;
     el._released = 0;
-    if (el._restoreSnap) {
-      el._restoreSnap = false;
-      this.snapMarkers(el);
-    }
     if (el._momentum) {
       el._momentum = false;
       this.scrollEvent(el, "onMomentumScrollEnd");
@@ -1533,9 +1529,9 @@ class Player {
   // Pull to refresh (vertical scroll views with `onRefresh`, and
   // `refreshing`): dragged past the top, the content moves down over a
   // spinner; released far enough, it refreshes and keeps room for the
-  // spinner until `refreshing` turns false. Mouse drags go through the
-  // pointer handling, touches through touch events here (the browser
-  // scrolls them otherwise).
+  // spinner until `refreshing` turns false. Only touches pull (mouse drags
+  // never scroll), through touch events here (the browser scrolls them
+  // otherwise).
 
   op_ref([, id, refreshing]) {
     const el = this.view(id);
@@ -2806,7 +2802,7 @@ class Player {
     window.addEventListener("pointermove", (e) => this.pointerMove(e), { passive: false });
     window.addEventListener("pointerup", (e) => this.pointerUp(e, false));
     window.addEventListener("pointercancel", (e) => this.pointerUp(e, true));
-    // A drag that scrolls must not also select or drag images.
+    // A drag never drags images or text out of the app.
     root.addEventListener("dragstart", (e) => e.preventDefault());
     // A click leaves the keyboard focus where it is (in a field, too) and
     // selects nothing, as in native apps; fields, selectable text and
@@ -3171,8 +3167,9 @@ class Player {
     }, 150);
   }
 
-  /** Counts what drives `el`'s scrolling here (mouse drags, glides, wheels,
-   * keys): meanwhile the browser's `scrollend` is not the end. */
+  /** Counts what drives `el`'s scrolling here (zoomable views' pans,
+   * glides, wheels, keys): meanwhile the browser's `scrollend` is not the
+   * end. */
   drive(el, n) {
     el._driven = Math.max(0, (el._driven ?? 0) + n);
   }
@@ -3217,7 +3214,8 @@ class Player {
     this.lastPointer = e.pointerType;
     Player.active = this;
     if (e.button > 0) return;
-    // A mouse drag selects in selectable text and fields instead of scrolling.
+    // A drag selects in selectable text and fields instead of panning a
+    // zoomable view.
     const selects = this.editable(e.target);
     // A press elsewhere clears a selection in text, as on a web page (the
     // browser does not, as presses here select nothing).
@@ -3230,15 +3228,17 @@ class Player {
     const isField = e.target.classList?.contains("nsh-field");
     const chain = this.ancestors(target);
     const [x, y] = this.point(e);
-    // Mouse drags scroll here (browsers only scroll touches), and so do
-    // touches in zoomable views, which pan and pinch here.
+    // Mouse drags never scroll (the wheel, the touchpad, the keyboard and
+    // the scroll bar do: dragging the content is a touchscreen's way);
+    // touches scroll natively, except in zoomable views, which pan and
+    // pinch here.
     const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const p = {
       x, y, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       pan: chain.find((v) => v._gestures?.pan || v._events.has("onPanStart") || v._events.has("onPanEnd")) ?? null,
-      scroll: !selects && scrollView && (e.pointerType === "mouse" || this.zooms(scrollView)) ? scrollView : null,
+      scroll: !selects && scrollView && e.pointerType !== "mouse" && this.zooms(scrollView) ? scrollView : null,
       // Touch scrolling is the browser's, reported from here (`touchScroll`).
       scrolls: e.pointerType === "touch" ? chain.filter((v) => v._kind === "scroll") : null,
       zoom: chain.find((v) => this.zooms(v) && v._behavior.pinch) ?? null,
@@ -3318,10 +3318,8 @@ class Player {
         this.call((w) => w.nsh_pan(p.pan._id, 0, 0, 0, 0, 0));
       } else if (p.scroll && !gated) {
         p.mode = "scroll";
-        p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop - (p.scroll._pull ?? 0)];
-        cancelAnimationFrame(p.scroll._pullAnimation);
+        p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop];
         cancelAnimationFrame(p.scroll._zoomAnimation);
-        p.scroll._pulling = this.refreshable(p.scroll);
         this.drive(p.scroll, 1);
         this.scrollEvent(p.scroll, "onScrollBeginDrag");
       }
@@ -3336,11 +3334,8 @@ class Player {
     } else if (p.mode === "scroll") {
       e.preventDefault();
       const s = p.scroll;
-      s.style.scrollSnapType = "none";
-      const both = this.zooms(s);
-      s.scrollLeft = p.scrollStart[0] - (s._horizontal || both ? tx : 0);
-      if (s._pulling) this.dragPull(s, p.scrollStart[1] - ty);
-      else s.scrollTop = p.scrollStart[1] - (s._horizontal && !both ? 0 : ty);
+      s.scrollLeft = p.scrollStart[0] - tx;
+      s.scrollTop = p.scrollStart[1] - ty;
     }
     void dx;
   }
@@ -3375,25 +3370,8 @@ class Player {
     if (p.mode === "pan") {
       this.call((w) => w.nsh_pan(p.pan._id, 2, p.x - p.startX, p.y - p.startY, p.vx, p.vy));
     } else if (p.mode === "scroll") {
-      const s = p.scroll;
-      this.scrollEvent(s, "onScrollEndDrag");
-      if (s._pulling) {
-        s._pulling = false;
-        if (s._pull > 0) {
-          this.drive(s, -1);
-          this.releasePull(s);
-          return;
-        }
-      }
-      const v = s._horizontal ? -p.vx : -p.vy;
-      if (this.zooms(s)) this.glide(s, -p.vy, -p.vx);
-      else if (s._snapPoints) {
-        // Snapping views settle on the next snap point along a flick, else
-        // on the nearest one; snapping comes back once they are there.
-        this.drive(s, -1);
-        s._restoreSnap = true;
-        if (!this.snapTo(s, this.snapPoint(s, Math.abs(v) > 300 ? Math.sign(v) : 0))) this.scrollEnded(s);
-      } else this.glide(s, v);
+      this.scrollEvent(p.scroll, "onScrollEndDrag");
+      this.glide(p.scroll, -p.vx, -p.vy);
     } else if (p.press) {
       const rect = p.press.getBoundingClientRect();
       const inside = e.clientX >= rect.left - 8 && e.clientX <= rect.right + 8 && e.clientY >= rect.top - 8 && e.clientY <= rect.bottom + 8;
@@ -3428,10 +3406,11 @@ class Player {
     }
   }
 
-  /** Momentum after a mouse drag (touch scrolling is the browser's); `across`: a zoomable view's other axis. */
-  glide(s, velocity, across) {
-    let v = Math.abs(velocity) > 80 ? velocity / 1000 : 0;
-    let w = across != null && Math.abs(across) > 80 ? across / 1000 : 0;
+  /** Momentum after a touch panned a zoomable view (other touch scrolling
+   * is the browser's), at `(vx, vy)` points per second. */
+  glide(s, vx, vy) {
+    let w = Math.abs(vx) > 80 ? vx / 1000 : 0;
+    let v = Math.abs(vy) > 80 ? vy / 1000 : 0;
     let last = performance.now();
     const momentum = v !== 0 || w !== 0;
     const end = () => {
@@ -3448,11 +3427,8 @@ class Player {
     const step = (now) => {
       const dt = now - last;
       last = now;
-      if (across != null) {
-        s.scrollTop += v * dt;
-        s.scrollLeft += w * dt;
-      } else if (s._horizontal) s.scrollLeft += v * dt;
-      else s.scrollTop += v * dt;
+      s.scrollTop += v * dt;
+      s.scrollLeft += w * dt;
       v *= Math.pow(0.995, dt);
       w *= Math.pow(0.995, dt);
       if (Math.abs(v) > 0.02 || Math.abs(w) > 0.02) requestAnimationFrame(step);
