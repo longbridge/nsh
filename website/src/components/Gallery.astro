@@ -13,7 +13,9 @@ export interface Props {
 
 const { lang = 'en' } = Astro.props;
 const zh = lang === 'zh-CN';
-const src = `${BASE}play/gallery/`;
+// `index.html` named: the site has `trailingSlash: 'never'`, so `astro dev`
+// does not serve a directory's page for its path.
+const src = `${BASE}play/gallery/index.html`;
 const built = existsSync(join(process.cwd(), 'public', 'play', 'gallery', 'index.html'));
 const link = (path: string) => url(zh ? `zh-CN/${path}` : path);
 const t = zh
