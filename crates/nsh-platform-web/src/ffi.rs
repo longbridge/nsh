@@ -29,6 +29,28 @@ unsafe extern "C" {
     fn js_log(level: u32, message: *const u8, len: usize);
     #[link_name = "read_asset"]
     fn js_read_asset(uri: *const u8, uri_len: usize) -> u32;
+    #[link_name = "fetch_start"]
+    fn js_fetch_start(
+        id: u32,
+        method: *const u8,
+        method_len: usize,
+        url: *const u8,
+        url_len: usize,
+        headers: *const u8,
+        headers_len: usize,
+        body: *const u8,
+        body_len: usize,
+        body_kind: u32,
+        follow: u32,
+    );
+    #[link_name = "fetch_send"]
+    fn js_fetch_send(id: u32, chunk: *const u8, len: usize);
+    #[link_name = "fetch_finish"]
+    fn js_fetch_finish(id: u32);
+    #[link_name = "fetch_pause"]
+    fn js_fetch_pause(id: u32, paused: u32);
+    #[link_name = "fetch_cancel"]
+    fn js_fetch_cancel(id: u32);
 }
 
 /// The width of `text` in CSS `font`, in points.
@@ -97,4 +119,65 @@ pub(crate) fn read_asset(uri: &str) -> Option<Vec<u8>> {
         return None;
     }
     crate::ASSET.with(|a| a.borrow_mut().take())
+}
+
+/// [`fetch_start`]'s `body_kind`: no body.
+pub(crate) const BODY_EMPTY: u32 = 0;
+/// [`fetch_start`]'s `body_kind`: the bytes passed.
+pub(crate) const BODY_BYTES: u32 = 1;
+/// [`fetch_start`]'s `body_kind`: chunks to come ([`fetch_send`],
+/// [`fetch_finish`]).
+pub(crate) const BODY_STREAM: u32 = 2;
+
+/// Starts request `id` (`headers`: JSON `[name, value]` pairs); what
+/// happens to it comes back through the `nsh_fetch_*` exports.
+pub(crate) fn fetch_start(
+    id: u32,
+    method: &str,
+    url: &str,
+    headers: &str,
+    body: &[u8],
+    body_kind: u32,
+    follow: bool,
+) {
+    // SAFETY: the slices are valid for the call; JS copies them.
+    unsafe {
+        js_fetch_start(
+            id,
+            method.as_ptr(),
+            method.len(),
+            url.as_ptr(),
+            url.len(),
+            headers.as_ptr(),
+            headers.len(),
+            body.as_ptr(),
+            body.len(),
+            body_kind,
+            follow as u32,
+        )
+    }
+}
+
+/// The next chunk of request `id`'s streamed body.
+pub(crate) fn fetch_send(id: u32, chunk: &[u8]) {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_fetch_send(id, chunk.as_ptr(), chunk.len()) }
+}
+
+/// Request `id`'s streamed body is complete: JS sends the request.
+pub(crate) fn fetch_finish(id: u32) {
+    // SAFETY: no pointers.
+    unsafe { js_fetch_finish(id) }
+}
+
+/// Stops (`true`) or resumes reading request `id`'s response body.
+pub(crate) fn fetch_pause(id: u32, paused: bool) {
+    // SAFETY: no pointers.
+    unsafe { js_fetch_pause(id, paused as u32) }
+}
+
+/// Aborts request `id` (nothing if it ended).
+pub(crate) fn fetch_cancel(id: u32) {
+    // SAFETY: no pointers.
+    unsafe { js_fetch_cancel(id) }
 }

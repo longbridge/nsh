@@ -108,6 +108,7 @@ class Player {
     this.layoutAnimation = null;
     this.images = new Map();
     this.pointers = new Map();
+    this.requests = new Map();
     this.dark = options.dark ?? matchMedia("(prefers-color-scheme: dark)").matches;
   }
 
@@ -142,6 +143,13 @@ class Player {
           this.options.onLog?.(level <= 1 ? "error" : level === 2 ? "warn" : "log", message);
         },
         read_asset: () => 0,
+        fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow) =>
+          this.fetchStart(id, this.str(mp, ml), this.str(up, ul), JSON.parse(this.str(hp, hl)),
+            kind === 1 ? this.bytes(bp, bl).slice() : null, kind === 2, follow !== 0),
+        fetch_send: (id, p, l) => this.fetchSend(id, this.bytes(p, l).slice()),
+        fetch_finish: (id) => this.requests.get(id)?.finish?.(),
+        fetch_pause: (id, paused) => this.fetchPause(id, paused !== 0),
+        fetch_cancel: (id) => this.fetchCancel(id),
       },
     };
     const response = () => (typeof url === "string" || url instanceof URL ? fetch(url) : url);
@@ -210,6 +218,7 @@ class Player {
   /** Runs `code` (a bundle from `nsh build`), replacing what ran. */
   run(code) {
     this.stop();
+    this.app = (this.app ?? 0) + 1;
     const root = this.root;
     root.textContent = "";
     this.views.clear();
@@ -245,6 +254,7 @@ class Player {
   }
 
   stop() {
+    for (const id of [...this.requests.keys()]) this.fetchCancel(id);
     clearTimeout(this.timer);
     cancelAnimationFrame(this.frame);
     this.frame = 0;
@@ -1211,6 +1221,7 @@ class Player {
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "setClipboard": navigator.clipboard?.writeText(args[0]).catch(() => {}); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
+      case "imageInfo": this.imageInfo(args[0], args[1]); break;
       default: break;
     }
   }
@@ -1226,6 +1237,124 @@ class Player {
     const payload = { id: request, has: text.length > 0 };
     if (!hasOnly && text) payload.text = text;
     this.event(ROOT_ID, "onClipboard", payload);
+  }
+
+  /** `Image.getSize` / `prefetch`: loads the image (the browser keeps it cached for the views that show it). */
+  imageInfo(request, uri) {
+    const img = new Image();
+    // Answers for an app that was replaced meanwhile are dropped.
+    const app = this.app;
+    const answer = (payload) => app === this.app && this.event(ROOT_ID, "onImageInfo", { id: request, ...payload });
+    img.onload = () => answer({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => answer({ error: `failed to load ${uri}` });
+    img.src = this.asset(uri);
+  }
+
+  // Network -------------------------------------------------------------
+
+  /**
+   * Request `id` from the engine's `fetch` (`net.rs`): made with the
+   * browser's `fetch`, its head and body chunks reported back as they come.
+   * A streamed body (`streamed`) is collected until `fetch_finish`.
+   */
+  fetchStart(id, method, url, headers, body, streamed, follow) {
+    const request = { controller: new AbortController(), paused: false, resume: null, reader: null, done: false };
+    this.requests.set(id, request);
+    const report = (f) => {
+      if (this.requests.get(id) === request) this.call(f);
+    };
+    const fail = (message) => {
+      report((w) => this.withStrings([message], (p, l) => w.nsh_fetch_failed(id, p, l)));
+      this.requests.delete(id);
+    };
+    const send = async (body) => {
+      const init = { method, headers: new Headers(), body, redirect: follow ? "follow" : "manual", signal: request.controller.signal };
+      for (const [name, value] of headers) {
+        try {
+          init.headers.append(name, value);
+        } catch {
+          // A name or value the browser refuses.
+        }
+      }
+      let response;
+      try {
+        response = await fetch(url, init);
+      } catch (e) {
+        if (request.controller.signal.aborted) return;
+        fail(`fetch ${method} ${url} failed: ${e?.message ?? e} (a network error, or a cross-origin server that does not allow this page's origin)`);
+        return;
+      }
+      if (response.type === "opaqueredirect") {
+        // Browsers hide a redirect that is not followed: neither its status
+        // nor its Location can be delivered (`redirect: "manual"`) or
+        // checked against the app's capabilities before the next hop.
+        fail(`fetch ${method} ${url} was redirected: on the web a redirect is only followed by the browser, not delivered or checked hop by hop`);
+        return;
+      }
+      const list = [];
+      response.headers.forEach((value, name) => list.push([name, value]));
+      report((w) => this.withStrings([response.url || url, response.statusText, JSON.stringify(list)], (up, ul, tp, tl, hp, hl) =>
+        w.nsh_fetch_head(id, response.status, up, ul, tp, tl, hp, hl, response.redirected ? 1 : 0)));
+      if (!response.body) {
+        report((w) => w.nsh_fetch_end(id));
+        this.requests.delete(id);
+        return;
+      }
+      request.reader = response.body.getReader();
+      try {
+        for (;;) {
+          while (request.paused) await new Promise((resolve) => (request.resume = resolve));
+          if (this.requests.get(id) !== request) return;
+          const { done, value } = await request.reader.read();
+          if (done) break;
+          report((w) => this.withStrings([value], (p, l) => w.nsh_fetch_data(id, p, l)));
+        }
+      } catch (e) {
+        if (!request.controller.signal.aborted) fail(`fetch ${method} ${url}: the body broke off: ${e?.message ?? e}`);
+        return;
+      }
+      report((w) => w.nsh_fetch_end(id));
+      this.requests.delete(id);
+    };
+    if (streamed) {
+      // Chromium streams uploads only over HTTP/2, other browsers not at
+      // all: the chunks are collected and sent as one body.
+      request.chunks = [];
+      request.wanted = () => report((w) => w.nsh_fetch_body_wanted(id));
+      request.finish = () => {
+        const chunks = request.chunks;
+        request.chunks = null;
+        if (chunks) send(new Blob(chunks));
+      };
+      request.wanted();
+    } else {
+      send(body ?? undefined);
+    }
+  }
+
+  fetchSend(id, chunk) {
+    const request = this.requests.get(id);
+    if (!request?.chunks) return;
+    request.chunks.push(chunk);
+    request.wanted();
+  }
+
+  fetchPause(id, paused) {
+    const request = this.requests.get(id);
+    if (!request) return;
+    request.paused = paused;
+    if (!paused && request.resume) {
+      request.resume();
+      request.resume = null;
+    }
+  }
+
+  fetchCancel(id) {
+    const request = this.requests.get(id);
+    if (!request) return;
+    this.requests.delete(id);
+    request.controller.abort();
+    request.resume?.();
   }
 
   dialog(dialogId, title, message, buttons) {

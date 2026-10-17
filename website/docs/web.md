@@ -76,11 +76,19 @@ The container's size is the app's window (`windowSize()`); resizing the containe
 > [!NOTE]
 > The web build reports `Platform.OS` as `"ios"`, so apps render their iOS look. It exists to show apps, not as a third target platform.
 
+## Networking
+
+`fetch` (with streams, `AbortController` and `FormData`) and `<Image>` URLs go through the browser's own network stack, after nsh has checked the app's [capabilities](./sandbox-and-capabilities.md). Since the requests are the browser's, the browser's rules apply:
+
+- **CORS.** A request to another origin than the page's only succeeds if that server allows the page's origin (`Access-Control-Allow-Origin`); otherwise `fetch` rejects with a network error. Only the response headers the server exposes are visible.
+- **Cookies** are sent to the page's own origin only (`credentials: "same-origin"`), and headers browsers forbid (`Cookie`, `User-Agent`, `Host`, ...) are dropped.
+- **Redirects** are followed by the browser. A redirected request that must not follow it fails: `redirect: "manual"` and `"error"`, and requests of an app whose capabilities restrict `network` (nsh checks every hop, and browsers do not reveal a redirect before following it).
+- **Request bodies** that are a `ReadableStream` are collected first and sent in one piece; response bodies stream as they arrive.
+
 ## Limits
 
 The web runtime is for demos and documentation. It does not have:
 
-- **Networking**: `fetch` fails with "this host has no network stack".
 - **Web views, videos and native components**: `WebView` maps to an `<iframe>` and `Video` to `<video>` only in the simplest form; registered native components render an empty box.
 - **Platform services**: the status bar, toasts and the Android back button do nothing, and there is no software keyboard to avoid (`keyboard()` stays 0).
 - **Custom fonts loaded before first use**: imported fonts are registered with `FontFace`, which loads asynchronously, so the first frame may be measured with a fallback font.

@@ -11,8 +11,10 @@
 //!   run by run ([`text`]); native animations run here on
 //!   `requestAnimationFrame` ([`animation`]).
 //!
-//! There is no network stack (`fetch` fails), no web view and no native
-//! components; scroll views use the browser's scrolling. Off WebAssembly
+//! - `fetch` runs on the browser's `fetch` ([`net`]).
+//!
+//! There is no web view and no native components; scroll views use the
+//! browser's scrolling. Off WebAssembly
 //! this crate is empty.
 
 #![cfg(target_arch = "wasm32")]
@@ -21,6 +23,7 @@ mod animation;
 mod canvas;
 mod encode;
 mod ffi;
+mod net;
 mod text;
 
 use std::cell::{Cell, RefCell};
@@ -31,6 +34,9 @@ use nsh_engine::{
     LocalEngine, MountSink, Os, Policy,
 };
 
+pub use crate::net::{
+    nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head,
+};
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
 
 thread_local! {
@@ -199,7 +205,7 @@ pub unsafe extern "C" fn nsh_start(
         app: App::Js(bundle),
         viewport: Size::new(width, height),
         trace: false,
-        network: None,
+        network: Some(std::sync::Arc::new(net::WebNetwork)),
         assets: Some(std::sync::Arc::new(PageAssets)),
         environment,
         header_heights: (44.0, 96.0),
@@ -455,6 +461,7 @@ pub unsafe extern "C" fn nsh_event(
                             "left" => "left",
                             "text" => "text",
                             "has" => "has",
+                            "error" => "error",
                             _ => return None,
                         };
                         let v = match v {

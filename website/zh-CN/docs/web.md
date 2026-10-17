@@ -76,11 +76,19 @@ player.run(await (await fetch("./bundle.js")).text());
 > [!NOTE]
 > Web 版把 `Platform.OS` 报告为 `"ios"`，所以应用呈现的是 iOS 外观。它的用途是展示应用，而不是第三个目标平台。
 
+## 网络
+
+`fetch`（包括流、`AbortController` 和 `FormData`）以及 `<Image>` 的 URL 都走浏览器自己的网络栈，在此之前 nsh 已按应用的[能力声明](./sandbox-and-capabilities.md)做过检查。请求是浏览器发出的，所以遵循浏览器的规则：
+
+- **CORS。** 发往页面所在源以外的请求，只有对方服务器允许页面的源（`Access-Control-Allow-Origin`）才会成功，否则 `fetch` 以网络错误拒绝。只能读到服务器公开的响应头。
+- **Cookie** 只发送给页面自己的源（`credentials: "same-origin"`），浏览器禁止的请求头（`Cookie`、`User-Agent`、`Host` 等）会被丢弃。
+- **重定向**由浏览器跟随。不应跟随重定向的请求遇到重定向时会失败：`redirect: "manual"` 和 `"error"`，以及能力声明限制了 `network` 的应用发出的请求（nsh 要逐跳检查，而浏览器在跟随之前不会透露重定向的目标）。
+- 作为 `ReadableStream` 的**请求体**会先收齐再一次发出；响应体则随到随读，以流的形式交给应用。
+
 ## 限制
 
 Web 运行时用于演示和文档，下列能力不提供：
 
-- **网络**：`fetch` 会以 "this host has no network stack" 失败。
 - **Web 视图、视频和原生组件**：`WebView` 只以最简单的方式映射为 `<iframe>`，`Video` 映射为 `<video>`；注册的原生组件渲染为空盒子。
 - **平台服务**：状态栏、Toast 和 Android 返回键不起作用，也没有需要避让的软键盘（`keyboard()` 始终为 0）。
 - **首次使用前加载好的自定义字体**：导入的字体通过 `FontFace` 注册，它是异步加载的，所以第一帧可能用后备字体测量。

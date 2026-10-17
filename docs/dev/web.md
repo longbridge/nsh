@@ -1,7 +1,7 @@
 # The web runtime (WebAssembly)
 
 `crates/nsh-platform-web` runs nsh apps in a browser page, rendering to the DOM. It exists for the website's live
-demos (`website/demos/*.tsx`), not as a target platform: it reports `Platform.OS` as `"ios"` and has no network stack.
+demos (`website/demos/*.tsx`), not as a target platform: it reports `Platform.OS` as `"ios"`.
 User-facing page: `website/docs/web.md`.
 
 ## Building
@@ -66,7 +66,27 @@ Text (`src/text.rs`) is broken into lines here, with widths and font metrics fro
 positions computed here with a line height equal to the font's ascent + descent, so the baseline lands where layout
 put it.
 
+## Networking
+
+`fetch` runs on the browser's `fetch` (`src/net.rs`, the `fetch_*` imports and `fetchStart` in `nsh.js`), behind the
+engine's `Net` like every platform's stack, so the app's capabilities are checked in Rust before a request reaches
+the browser. JS reports each request's head, body chunks (read from the response's `ReadableStream`), end or failure
+through the `nsh_fetch_*` exports, which hand them to the request's `FetchEvents` and pump; `pause` stops reading the
+reader (back pressure), dropping or cancelling the task aborts its `AbortController`. Streamed request bodies are
+collected and sent as one `Blob`: Chromium streams uploads only over HTTP/2 (`duplex: "half"`), other browsers not at
+all.
+
+The browser stays in charge of what it enforces: CORS (cross-origin servers must allow the page's origin, and only
+CORS-exposed response headers are visible), cookies (`credentials: "same-origin"`: sent to the page's own origin
+only), forbidden request headers (`Cookie`, `User-Agent`, ... are dropped). Browsers do not expose a redirect they
+do not follow (`redirect: "manual"` gives an opaque response without status or `Location`), so a hop with
+`follow_redirects` off fails when it is redirected: JS `redirect: "manual"` / `"error"`, and the hops the engine
+follows itself to check each one against restricted capabilities (`access.rs`).
+
+`Image.getSize` / `prefetch` (`Command::ImageInfo`) load an `Image` in the page and answer with `onImageInfo` on
+the root; `<Image>` elements are `<img>` elements, loaded by the browser.
+
 ## Not implemented
 
-Networking, refresh controls, zooming scroll views, registered native components, the status bar and other
+Refresh controls, zooming scroll views, registered native components, the status bar and other
 platform services, fonts that are usable before `FontFace` finishes loading.

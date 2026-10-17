@@ -1000,6 +1000,14 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .bool(*has_only)
                 .end();
         }
+        Command::ImageInfo { id: request, uri } => {
+            out.item("cmd")
+                .num(id)
+                .str("imageInfo")
+                .num(*request)
+                .str(uri)
+                .end();
+        }
         other => log::debug!("web: command {other:?} is not supported"),
     }
 }
