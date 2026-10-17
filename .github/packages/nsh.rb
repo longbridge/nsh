@@ -1,9 +1,9 @@
 # The formula of longbridge/homebrew-tap, written by packages.yml for each
-# published release of longbridge/native-shell. The whole distribution
+# published release of longbridge/nsh. The whole distribution
 # goes in libexec, since nsh finds its runtimes next to bin/nsh.
 class Nsh < Formula
   desc "Native UI from TSX modules: the nsh command line and its prebuilt runtimes"
-  homepage "https://native-shell.com"
+  homepage "https://nsh.dev"
   version "${NSH_VERSION}"
   license "Apache-2.0"
 

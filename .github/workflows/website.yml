@@ -1,7 +1,7 @@
 name: Website
 
 # Builds the documentation site with its live demos (the WebAssembly runtime,
-# `cargo xtask web`) and publishes it to GitHub Pages at native-shell.com
+# `cargo xtask web`) and publishes it to GitHub Pages at nsh.dev
 # (`website/public/CNAME`).
 
 on:

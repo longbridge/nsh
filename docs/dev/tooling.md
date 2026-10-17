@@ -256,7 +256,7 @@ skipped, so a run stopped by crates.io's rate limit on new crates can simply be 
 
 How users get it (`website/docs/installation.md`):
 
-- `website/public/install.sh` and `install.ps1` (served at `native-shell.com/install.sh`, `/install.ps1`, and
+- `website/public/install.sh` and `install.ps1` (served at `nsh.dev/install.sh`, `/install.ps1`, and
   attached to each release) download the latest archive or `NSH_VERSION`, check its `.sha256` and replace
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports

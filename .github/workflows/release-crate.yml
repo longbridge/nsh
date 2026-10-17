@@ -106,7 +106,7 @@ jobs:
           for name in $(cargo metadata --no-deps --format-version 1 \
               | jq -r '.packages[] | select(.publish != []) | .name'); do
             status=$(curl -s -o /dev/null -w '%{http_code}' \
-              -A "native-shell release (https://github.com/longbridge/native-shell)" \
+              -A "nsh release (https://github.com/longbridge/nsh)" \
               "https://crates.io/api/v1/crates/$name/$VERSION")
             if [[ "$status" == 200 ]]; then
               echo "$name $VERSION is on crates.io, skipped" >&2

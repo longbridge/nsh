@@ -23,7 +23,7 @@ function App() {
 mount(App);
 ```
 
-Documentation, guides and live demos: **[native-shell.com](https://native-shell.com)**.
+Documentation, guides and live demos: **[nsh.dev](https://nsh.dev)**.
 
 ## Features
 
@@ -38,7 +38,7 @@ Documentation, guides and live demos: **[native-shell.com](https://native-shell.
   static website, with one `nsh package` command.
 - **AI-friendly: TSX + Tailwind.** A module is one TSX file of components, signals and Tailwind classes, the format models
   write best. Every element, prop and module has TypeScript declarations generated from the Rust sources, the docs are
-  served to models as [llms.txt](https://native-shell.com/llms.txt), and `nsh trace` runs a module headless to check
+  served to models as [llms.txt](https://nsh.dev/llms.txt), and `nsh trace` runs a module headless to check
   it without a device.
 - **Sandboxed and signed.** Each view runs its module in its own QuickJS VM, with memory, call-time and node limits,
   reaching only the capabilities the host grants. Packages are signed with Ed25519 by release keys an offline root
@@ -63,11 +63,11 @@ as static sites and runs the website's live demos.
 
 ## Quick start
 
-Install the `nsh` command ([other ways](https://native-shell.com/docs/installation)):
+Install the `nsh` command ([other ways](https://nsh.dev/docs/installation)):
 
 ```sh
-curl -fsSL https://native-shell.com/install.sh | sh     # macOS, Linux
-irm https://native-shell.com/install.ps1 | iex          # Windows (PowerShell)
+curl -fsSL https://nsh.dev/install.sh | sh     # macOS, Linux
+irm https://nsh.dev/install.ps1 | iex          # Windows (PowerShell)
 brew install longbridge/tap/nsh                         # Homebrew
 ```
 
@@ -86,7 +86,7 @@ nsh run my-app --target web        # in the browser
 `nsh init` writes `App.tsx`, `nsh.json` and a `tsconfig.json`, and keeps type declarations in `.nsh/types`, so any
 TypeScript editor checks the app on its own. On every save only the edited components render again; the
 rest of the app keeps its state. Logs and errors show in the terminal. What each platform needs:
-[Installation](https://native-shell.com/docs/installation#platform-tools).
+[Installation](https://nsh.dev/docs/installation#platform-tools).
 
 ## Embed it in your app
 
@@ -113,9 +113,9 @@ if (BuildConfig.DEBUG) nsh.connectDevServer("ws://127.0.0.1:8790/ws") else nsh.l
 ```
 
 `nsh build my-app --release` writes the bundle a release build loads. More:
-[iOS](https://native-shell.com/docs/embedding-ios), [Android](https://native-shell.com/docs/embedding-android),
-[desktops](https://native-shell.com/docs/platforms), [native components](https://native-shell.com/docs/native-components),
-[sandbox and capabilities](https://native-shell.com/docs/sandbox-and-capabilities).
+[iOS](https://nsh.dev/docs/embedding-ios), [Android](https://nsh.dev/docs/embedding-android),
+[desktops](https://nsh.dev/docs/platforms), [native components](https://nsh.dev/docs/native-components),
+[sandbox and capabilities](https://nsh.dev/docs/sandbox-and-capabilities).
 
 ## Ship updates
 
@@ -126,7 +126,7 @@ nsh publish my-app --key keys/release.secret --cert keys/release.cert --build 2 
 ```
 
 The app trusts the root's public key and loads what it downloads with `loadPackage`
-([Signed packages](https://native-shell.com/docs/signed-packages)). To ship the module as an app of its own instead:
+([Signed packages](https://nsh.dev/docs/signed-packages)). To ship the module as an app of its own instead:
 
 ```sh
 nsh package my-app --target ios-simulator --run        # also ios, android, macos, windows, linux, gpui, web
@@ -153,14 +153,14 @@ nsh run examples/gallery
 With Rust ([rustup](https://rustup.rs); `rust-toolchain.toml` picks the toolchain):
 
 ```sh
-git clone https://github.com/longbridge/native-shell.git && cd native-shell
+git clone https://github.com/longbridge/nsh.git && cd nsh
 cargo run                              # the gallery on this machine's backend, with hot reload
 cargo run -- examples/counter          # another app
 cargo run -- --target ios              # or catalyst, android
 cargo xtask dist                       # the distribution (CLI, runtimes, SDKs) in dist/nsh
 ```
 
-[Installation](https://native-shell.com/docs/installation#building-from-a-checkout) lists the hosts and runtimes each
+[Installation](https://nsh.dev/docs/installation#building-from-a-checkout) lists the hosts and runtimes each
 target needs.
 
 ## Contributing

@@ -18,8 +18,8 @@ the look of the UI nsh draws.
    load (a tool call and a streamed Markdown reply, fictional content) and
    stays interactive. Documentation pages run their demos in a frame at
    phone width; the code shown is always the source of what runs.
-   The product is written "Native Shell" where it is a name; `nsh` and
-   `native-shell` stay as they are in code, commands and URLs.
+   The product is written "Native Shell" in formal places and "NSH" in
+   prose; `nsh` stays as it is in code, commands and URLs.
 3. **Specifics over adjectives.** Every capability card names something a
    reader can check in the repository: a crate, an element, a module, a
    command (`Taffy`, `<List>`, `nsh/animated`, `nsh publish`). Claims track

@@ -1,6 +1,6 @@
 # Native Shell website
 
-The documentation site for nsh, published at <https://native-shell.com>
+The documentation site for nsh, published at <https://nsh.dev>
 (`src/lib/site.ts`). Astro (static output), Tailwind 4, Pagefind search,
 Shiki highlighting; [Bun](https://bun.com) runs everything.
 
@@ -106,7 +106,7 @@ lists every page and `/llms-full.txt` holds all English pages.
 
 `.github/workflows/website.yml` builds the site on every push to `main` that
 touches the website or the crates, and publishes `dist/` to GitHub Pages at
-<https://native-shell.com> (`public/CNAME`; `SITE_URL` in `src/lib/site.ts`).
+<https://nsh.dev> (`public/CNAME`; `SITE_URL` in `src/lib/site.ts`).
 CI sets `NSH_REQUIRE_PLAY=1`, so a failed player build fails the deployment
 instead of publishing pages without their live demos. Pull requests build and
 test without deploying.

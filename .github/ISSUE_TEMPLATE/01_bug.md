@@ -7,7 +7,7 @@ assignees:
 
 ## Description
 
-Use English with a clear and concise description of the bug. If you just have a question or need help, please submit it to [Discussions](https://github.com/longbridge/native-shell/discussions).
+Use English with a clear and concise description of the bug. If you just have a question or need help, please submit it to [Discussions](https://github.com/longbridge/nsh/discussions).
 
 ## Environment
 

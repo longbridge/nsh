@@ -15,7 +15,7 @@ const configuredBase = process.env.PUBLIC_SITE_BASE || '/';
 const BASE = configuredBase === '/' ? '/' : `/${configuredBase.replace(/^\/+|\/+$/g, '')}/`;
 
 export default defineConfig({
-  site: 'https://native-shell.com',
+  site: 'https://nsh.dev',
   base: BASE,
   output: 'static',
   trailingSlash: 'never',

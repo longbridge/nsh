@@ -1,7 +1,7 @@
 {
     "version": "${NSH_VERSION}",
     "description": "Native UI from TSX modules: the nsh command line and its prebuilt runtimes",
-    "homepage": "https://native-shell.com",
+    "homepage": "https://nsh.dev",
     "license": "Apache-2.0",
     "notes": "Scoop updates nsh from the latest release's manifest: scoop update nsh",
     "architecture": {

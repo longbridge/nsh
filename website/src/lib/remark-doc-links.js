@@ -19,7 +19,7 @@ function isExternal(url) {
   return /^[a-z][a-z\d+.-]*:/i.test(url) || url.startsWith('//');
 }
 
-export function remarkDocLinks({ base = '/', repo = 'https://github.com/longbridge/native-shell' } = {}) {
+export function remarkDocLinks({ base = '/', repo = 'https://github.com/longbridge/nsh' } = {}) {
   const prefix = base.replace(/\/+$/, '');
 
   return (tree, file) => {

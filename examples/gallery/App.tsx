@@ -209,7 +209,7 @@ function Sidebar() {
         <Image src={logo} style={{ width: 32, height: 32, borderRadius: 8 }} />
         <View style={{ flex: 1, gap: 1 }}>
           <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
-          <Text style={{ fontSize: 12, color: colors.muted }}>native-shell · {Platform.OS}</Text>
+          <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {Platform.OS}</Text>
         </View>
       </View>
       <Scroll style={{ flex: 1 }}>

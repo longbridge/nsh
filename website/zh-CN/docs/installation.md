@@ -24,12 +24,12 @@ macOS 上 `nsh run` 的默认目标 Mac Catalyst 和 iOS 一样需要 Xcode。�
 
 ## 安装发布版本
 
-每个 [GitHub release](https://github.com/longbridge/native-shell/releases) 都附带 macOS（Apple silicon）、Linux x86_64 和 Windows x86_64 的预构建发行包（见下文）。无论用哪种方式安装，`PATH` 上得到的都是同一个 `nsh` 命令。
+每个 [GitHub release](https://github.com/longbridge/nsh/releases) 都附带 macOS（Apple silicon）、Linux x86_64 和 Windows x86_64 的预构建发行包（见下文）。无论用哪种方式安装，`PATH` 上得到的都是同一个 `nsh` 命令。
 
 **macOS 和 Linux**，使用安装脚本：
 
 ```sh
-curl -fsSL https://native-shell.com/install.sh | sh
+curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
 它把发行包安装到 `~/.nsh`，并把 `~/.local/bin/nsh` 链接过去；再次运行即可更新。`NSH_VERSION=v0.1.0` 指定版本，`NSH_INSTALL_DIR` 指定其他目录。
@@ -37,7 +37,7 @@ curl -fsSL https://native-shell.com/install.sh | sh
 **Windows**，在 PowerShell 中：
 
 ```powershell
-irm https://native-shell.com/install.ps1 | iex
+irm https://nsh.dev/install.ps1 | iex
 ```
 
 它安装到 `%LOCALAPPDATA%\nsh`，并把其中的 `bin` 加入用户 `PATH`（之后打开新的终端）。`$env:NSH_VERSION` 和 `$env:NSH_INSTALL_DIR` 的用法同上。
@@ -51,16 +51,16 @@ brew install longbridge/tap/nsh
 **Scoop**（Windows）：
 
 ```powershell
-scoop install https://github.com/longbridge/native-shell/releases/latest/download/nsh.json
+scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.json
 ```
 
 **mise**（三个平台）：
 
 ```sh
-mise use -g github:longbridge/native-shell
+mise use -g github:longbridge/nsh
 ```
 
-压缩包（`nsh-macos-arm64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-windows-x86_64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/native-shell/releases/latest/download/<压缩包>` 总是下载最新版本。嵌入用的 SDK 也单独发布，供不需要 CLI 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
+压缩包（`nsh-macos-arm64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-windows-x86_64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/nsh/releases/latest/download/<压缩包>` 总是下载最新版本。嵌入用的 SDK 也单独发布，供不需要 CLI 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
 
 > [!NOTE]
 > 二进制文件暂未签名。macOS 会隔离浏览器下载的文件；安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。目前没有 Intel Mac 和 arm64 Linux / Windows 的构建，请从源码构建。
@@ -98,8 +98,8 @@ Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）�
 你需要通过 [rustup](https://rustup.rs) 安装 Rust。仓库中的 `rust-toolchain.toml` 会选择 stable 工具链，并在首次使用时安装 iOS 和 Android 目标。
 
 ```sh
-git clone https://github.com/longbridge/native-shell.git
-cd native-shell
+git clone https://github.com/longbridge/nsh.git
+cd nsh
 cargo build -p nsh-cli          # ./target/debug/nsh
 ```
 

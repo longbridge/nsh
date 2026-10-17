@@ -9,9 +9,9 @@ Please submit **one PR that does one thing**. It makes your change easier to rev
 Before writing code, read [AGENTS.md](AGENTS.md) (the project rules, commands and conventions) and the page of
 [docs/dev](docs/dev/README.md) for the area you change.
 
-## native-shell and React Native
+## NSH and React Native
 
-NSH is not a React Native implementation. React Native is a reference for which capabilities a mobile UI framework
+NSH has a design of its own, and React Native is a reference for which capabilities a mobile UI framework
 needs, not an API to be compatible with: names follow React Native where the behavior is the same, and differ where
 NSH's design differs (SolidJS instead of React, Tailwind classes resolved natively, primitives instead of
 platform-styled widgets). A change that only adds React Native compatibility, such as a wrapper or an alias, is not

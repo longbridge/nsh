@@ -1,6 +1,6 @@
 # Developer documentation
 
-For people working on native-shell itself (`AGENTS.md` at the root is the short version agents read first).
+For people working on NSH itself (`AGENTS.md` at the root is the short version agents read first).
 
 | Page | What |
 |---|---|
