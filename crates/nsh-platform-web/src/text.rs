@@ -49,6 +49,13 @@ pub(crate) struct WebTextEngine {
 }
 
 impl WebTextEngine {
+    /// Forgets the measurements: a font finished loading, so what was
+    /// measured with a fallback font is stale.
+    pub(crate) fn clear_caches(&self) {
+        self.widths.borrow_mut().clear();
+        self.metrics.borrow_mut().clear();
+    }
+
     fn width(&self, font: &Arc<str>, text: &str) -> f32 {
         if text.is_empty() {
             return 0.0;
@@ -589,9 +596,9 @@ impl TextEngine for WebTextEngine {
             .or_else(|| name(ttf_parser::name_id::FAMILY))
             .ok_or("the font has no family name")?;
         ffi::register_font(&family, data, face.weight().to_number(), face.is_italic());
-        // Widths measured with a fallback font are stale now.
-        self.widths.borrow_mut().clear();
-        self.metrics.borrow_mut().clear();
+        // Widths measured with a fallback font are stale now (and again
+        // when the face finishes loading: `nsh_fonts_loaded`).
+        self.clear_caches();
         Ok(())
     }
 }

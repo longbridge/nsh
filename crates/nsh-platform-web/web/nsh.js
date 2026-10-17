@@ -34,6 +34,10 @@ const ARIA_ROLES = {
   search: "searchbox", text: null, summary: "status", togglebutton: "button", dropdownlist: "combobox",
 };
 
+/** How far a refreshable scroll view is pulled to refresh, and the room its spinner takes while refreshing (as on Linux and macOS). */
+const REFRESH_PULL = 64;
+const REFRESH_SPACE = 56;
+
 const KEYFRAMES = `
 @keyframes nsh-spin { to { transform: rotate(360deg); } }
 @keyframes nsh-ping { 75%, 100% { transform: scale(2); opacity: 0; } }
@@ -96,6 +100,77 @@ const KEYFRAMES = `
 .nsh-dialog p { margin: 0 16px 18px; }
 .nsh-dialog button { display: block; width: 100%; border: 0; border-top: 0.5px solid rgba(0,0,0,.2); background: none;
   font: 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; padding: 11px; cursor: pointer; }
+/* Dialogs on desktop browsers: the in-surface cards of the Linux and macOS backends. */
+.nsh-desktop .nsh-dialog-backdrop { background: rgba(0,0,0,.4); }
+.nsh-desktop .nsh-dialog { width: min(340px, calc(100% - 64px)); border-radius: 12px; padding: 20px; text-align: left;
+  background: #fff; color: #0a0a0a; border: 1px solid #e5e5e5; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.nsh-desktop .nsh-dialog h3 { margin: 0 0 6px; font-size: 17px; }
+.nsh-desktop .nsh-dialog p { margin: 0; font-size: 14px; color: #737373; overflow-wrap: anywhere; }
+.nsh-desktop .nsh-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.nsh-desktop .nsh-dialog-actions.column { flex-direction: column; }
+.nsh-desktop .nsh-dialog button { display: block; width: auto; padding: 7px 16px; border-radius: 8px; border: 1px solid #e5e5e5;
+  background: #fff; color: #0a0a0a; font: 500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.nsh-desktop .nsh-dialog-actions.column button { width: 100%; }
+.nsh-desktop .nsh-dialog button:hover { background: #f5f5f5; }
+.nsh-desktop .nsh-dialog button:active { background: #e5e5e5; }
+.nsh-desktop .nsh-dialog button.default { background: #171717; color: #fafafa; border-color: #171717; }
+.nsh-desktop .nsh-dialog button.default:hover { background: #262626; }
+.nsh-desktop .nsh-dialog button.destructive { background: #ef4444; color: #fff; border-color: #ef4444; }
+.nsh-desktop .nsh-dialog button.destructive:hover { background: #dc2626; }
+.nsh-desktop.nsh-dark .nsh-dialog { background: #171717; color: #fafafa; border-color: #262626; }
+.nsh-desktop.nsh-dark .nsh-dialog p { color: #a3a3a3; }
+.nsh-desktop.nsh-dark .nsh-dialog button { background: #171717; color: #fafafa; border-color: #262626; }
+.nsh-desktop.nsh-dark .nsh-dialog button:hover { background: #262626; }
+.nsh-desktop.nsh-dark .nsh-dialog button.default { background: #fafafa; color: #171717; border-color: #fafafa; }
+.nsh-desktop.nsh-dark .nsh-dialog button.default:hover { background: #e5e5e5; }
+.nsh-desktop.nsh-dark .nsh-dialog button.destructive { background: #f87171; color: #0a0a0a; border-color: #f87171; }
+/* Phones: an iOS alert. */
+.nsh-dialog-actions.row { display: flex; }
+.nsh-dialog-actions.row button + button { border-left: 0.5px solid rgba(0,0,0,.2); }
+.nsh-dialog button.cancel { font-weight: 600; }
+.nsh-desktop .nsh-dialog button.cancel { font-weight: 500; }
+.nsh-dialog button.destructive { color: #ff3b30; }
+.nsh-dark .nsh-dialog { background: rgba(44,44,46,.97); color: #fff; }
+.nsh-dark .nsh-dialog button { border-top-color: rgba(255,255,255,.15); color: #0a84ff; }
+.nsh-dark .nsh-dialog button.destructive { color: #ff453a; }
+.nsh-dark .nsh-dialog-actions.row button + button { border-left-color: rgba(255,255,255,.15); }
+/* Action sheets: cards at the bottom. */
+.nsh-sheet-backdrop { align-items: flex-end; }
+.nsh-sheet { width: min(420px, calc(100% - 16px)); margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px;
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.nsh-sheet > div { border-radius: 14px; background: rgba(245,245,245,.97); color: #000; overflow: hidden; text-align: center; }
+.nsh-sheet .nsh-sheet-head { padding: 12px 16px; color: #8a8a8e; border-bottom: 0.5px solid rgba(0,0,0,.2); }
+.nsh-sheet .nsh-sheet-head b { display: block; font-weight: 600; }
+.nsh-sheet button { display: block; width: 100%; border: 0; background: none; padding: 16px; cursor: pointer;
+  font: 19px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #007aff; }
+.nsh-sheet button + button { border-top: 0.5px solid rgba(0,0,0,.2); }
+.nsh-sheet button.cancel { font-weight: 600; }
+.nsh-sheet button.destructive { color: #ff3b30; }
+.nsh-dark .nsh-sheet > div { background: rgba(44,44,46,.97); color: #fff; }
+.nsh-dark .nsh-sheet button { color: #0a84ff; border-top-color: rgba(255,255,255,.15); }
+.nsh-dark .nsh-sheet button.destructive { color: #ff453a; }
+.nsh-desktop .nsh-sheet > div { border-radius: 12px; padding: 6px; background: #fff; color: #0a0a0a; border: 1px solid #e5e5e5;
+  box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.nsh-desktop .nsh-sheet .nsh-sheet-head { color: #737373; border-bottom: 1px solid #e5e5e5; margin-bottom: 4px; padding: 8px 12px 12px; }
+.nsh-desktop .nsh-sheet button { border: 0; border-radius: 8px; padding: 11px 16px; font-size: 16px; color: inherit; }
+.nsh-desktop .nsh-sheet button:hover { background: rgba(128,128,128,.12); }
+.nsh-desktop .nsh-sheet button.destructive { color: #ef4444; }
+.nsh-desktop.nsh-dark .nsh-sheet > div { background: #171717; color: #fafafa; border-color: #262626; }
+.nsh-desktop.nsh-dark .nsh-sheet .nsh-sheet-head { color: #a3a3a3; border-bottom-color: #262626; }
+.nsh-desktop.nsh-dark .nsh-sheet button.destructive { color: #f87171; }
+.nsh-toast { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); max-width: min(480px, calc(100% - 32px));
+  width: max-content; padding: 9px 16px; border-radius: 18px; background: rgba(23,23,23,.92); color: #fafafa; text-align: center;
+  font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; pointer-events: none; z-index: 1500;
+  overflow-wrap: anywhere; transition: opacity .2s; }
+.nsh-dark .nsh-toast { background: rgba(250,250,250,.92); color: #0a0a0a; }
+.nsh-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.nsh-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+.nsh-spinner { position: absolute; left: 50%; width: 20px; height: 20px; margin-left: -10px; pointer-events: none; z-index: 5; }
+.nsh-spinner i { position: absolute; left: 8.75px; top: 0; width: 2.5px; height: 5.5px; border-radius: 1.25px;
+  background: #404040; transform-origin: 1.25px 10px; }
+.nsh-dark .nsh-spinner i { background: #fff; }
+.nsh-spinner.spin { animation: nsh-spin .8s steps(8) infinite; }
 .nsh-error { position: absolute; left: 8px; right: 8px; bottom: 8px; max-height: 45%; overflow: auto; z-index: 2000;
   background: #b42318; color: #fff; font: 12px/1.4 ui-monospace, Menlo, monospace; padding: 10px 12px;
   border-radius: 10px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
@@ -136,6 +211,31 @@ function keyCode(e) {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+
+/**
+ * The script a web view's HTML starts with: the first message from the
+ * player carrying `token` hands it the port `ReactNativeWebView.postMessage`
+ * writes to, and which runs `injectJavaScript` and history steps. The
+ * page's own `message` listeners never see that message.
+ */
+function webBridge(token) {
+  return `(() => {
+  let port = null;
+  const queue = [];
+  window.ReactNativeWebView = { postMessage(data) { data = String(data); port ? port.postMessage(data) : queue.push(data); } };
+  addEventListener("message", (e) => {
+    if (port || e.source !== parent || e.data !== ${JSON.stringify(token)} || !e.ports[0]) return;
+    e.stopImmediatePropagation();
+    port = e.ports[0];
+    port.onmessage = (m) => {
+      const d = m.data;
+      if (d && d.eval != null) { try { (0, eval)(String(d.eval)); } catch (err) { console.error(err); } }
+      else if (d && d.go) history.go(d.go);
+    };
+    for (const data of queue.splice(0)) port.postMessage(data);
+  });
+})();`;
+}
 
 function measureContext() {
   const canvas = typeof OffscreenCanvas !== "undefined"
@@ -218,7 +318,7 @@ class Player {
           const data = this.bytes(dp, dl).slice();
           const face = new FontFace(family, data, { weight: String(weight), style: italic ? "italic" : "normal" });
           document.fonts.add(face);
-          face.load().catch(() => {});
+          this.fontLoading(face.load());
         },
         submit: (p, l) => {
           const batch = JSON.parse(this.str(p, l));
@@ -311,6 +411,39 @@ class Player {
     return m;
   }
 
+  /**
+   * A face registered from data loads asynchronously: text is measured
+   * again once it can be drawn. Faces registered while the app starts hide
+   * it until they load, so its first frame shows the right fonts.
+   */
+  fontLoading(loading) {
+    const pending = (this.fontsPending ??= []);
+    pending.push(loading.catch((err) => console.warn("[nsh] font failed to load:", err)));
+    if (this.starting && this.root.style.visibility !== "hidden") {
+      this.root.style.visibility = "hidden";
+      // A face that never settles must not keep the app hidden.
+      clearTimeout(this.fontTimer);
+      this.fontTimer = setTimeout(() => { this.root.style.visibility = ""; }, 3000);
+    }
+    if (pending.length > 1) return;
+    const settle = () => {
+      const waiting = this.fontsPending;
+      Promise.all(waiting).then(() => {
+        if (this.fontsPending.length > waiting.length) {
+          this.fontsPending = this.fontsPending.slice(waiting.length);
+          settle();
+          return;
+        }
+        this.fontsPending = [];
+        this.metricsCache.clear();
+        this.call((w) => w.nsh_fonts_loaded());
+        clearTimeout(this.fontTimer);
+        this.root.style.visibility = "";
+      });
+    };
+    settle();
+  }
+
   // Running -------------------------------------------------------------
 
   /**
@@ -347,11 +480,18 @@ class Player {
       this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
     this.idiom = this.options.idiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
-    this.call(() => {
-      this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
-      return this.withStrings([code], (p, l) =>
-        this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
-    });
+    this.updateRootClasses();
+    // Fonts registered while it starts hold its first frame back (`fontLoading`).
+    this.starting = true;
+    try {
+      this.call(() => {
+        this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
+        return this.withStrings([code], (p, l) =>
+          this.wasm.nsh_start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
+      });
+    } finally {
+      this.starting = false;
+    }
   }
 
   /** Fetches chunk `id` of the running bundle and hands it to the engine. */
@@ -558,6 +698,7 @@ class Player {
 
   setDark(dark) {
     this.dark = dark;
+    this.updateRootClasses();
     this.call((w) => w.nsh_set_dark(dark ? 1 : 0));
   }
 
@@ -619,6 +760,7 @@ class Player {
       frame.style.cssText = "position:absolute;inset:0;width:100%;height:100%;border:0";
       el.append(frame);
       el._frameEl = frame;
+      frame.addEventListener("load", () => this.webLoaded(el));
     } else if (kind === "video") {
       el = document.createElement("div");
       const video = document.createElement("video");
@@ -626,6 +768,7 @@ class Player {
       video.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
       el.append(video);
       el._video = video;
+      this.wireVideo(el, video);
     } else {
       el = document.createElement("div");
     }
@@ -674,7 +817,8 @@ class Player {
       child._headerParent = parent;
       return;
     }
-    parent.insertBefore(child, before && before.parentNode === parent ? before : null);
+    const host = parent._layer ?? parent;
+    host.insertBefore(child, before && before.parentNode === host ? before : null);
     if (parent._kind === "stack") this.stackChanged(parent, child);
   }
 
@@ -696,6 +840,13 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     this.views.delete(id);
+    if (el._video) {
+      // A removed media element keeps playing until it is collected.
+      clearInterval(el._progressTimer);
+      el._video.pause();
+      el._video.removeAttribute("src");
+      el._video.load();
+    }
     if (el._kind === "modal") {
       this.dismiss(el);
       return;
@@ -833,6 +984,7 @@ class Player {
     el._pressable = pressable;
     this.updateFocusable(el);
     this.updateTouchAction(el);
+    if (el._kind === "scroll" && el._events.has("onRefresh")) this.installPull(el);
   }
 
   op_ts([, id, states]) {
@@ -957,6 +1109,7 @@ class Player {
   op_appearance([, appearance]) {
     this.appearance = appearance;
     this.root.style.colorScheme = appearance === 1 ? "light" : appearance === 2 ? "dark" : "";
+    this.updateRootClasses();
   }
 
   /** Dark appearance as shown: the app's, else the system's. */
@@ -966,19 +1119,50 @@ class Player {
 
   // Images
 
-  op_img([, id, uri, mode, placeholder]) {
+  /**
+   * `source`, `resizeMode`, `defaultSource` (shown until the image loads,
+   * then faded out over `fadeDuration`) and `blurRadius` (a CSS blur).
+   * Any URL the browser loads works: `asset:/`, http(s), data: and blob:.
+   */
+  op_img([, id, uri, mode, placeholder, blur, fade]) {
     const el = this.view(id);
     if (!el?._img) return;
-    el._img.style.objectFit = mode;
-    const src = this.asset(uri ?? placeholder ?? "");
+    const img = el._img;
+    img.style.objectFit = mode;
+    img.style.filter = blur > 0 ? `blur(${blur}px)` : "";
+    el._fade = fade;
+    const ph = placeholder ? this.asset(placeholder) : "";
+    if (ph && !el._ph) {
+      el._ph = document.createElement("img");
+      el._ph.draggable = false;
+      el._ph.style.cssText = img.style.cssText;
+      el.insertBefore(el._ph, img);
+    }
+    if (el._ph) {
+      el._ph.style.objectFit = mode;
+      el._ph.style.filter = img.style.filter;
+      if (ph) {
+        if (el._ph.getAttribute("src") !== ph) el._ph.src = ph;
+      } else {
+        el._ph.remove();
+        el._ph = null;
+      }
+    }
+    const src = this.asset(uri ?? "");
     if (el._src === src) return;
     el._src = src;
+    el._failed = false;
+    if (el._ph) el._ph.style.visibility = "";
     if (!src) {
-      el._img.removeAttribute("src");
+      img.removeAttribute("src");
       return;
     }
-    if (el._events.has("onLoadStart")) this.event(id, "onLoadStart");
-    el._img.src = src;
+    // After the batch: its events may come after its props.
+    queueMicrotask(() => el._events.has("onLoadStart") && this.event(id, "onLoadStart"));
+    // Shown when it loaded: faded in over the placeholder, or at once.
+    img.style.transition = "";
+    img.style.opacity = fade > 0 ? "0" : "";
+    img.src = src;
     this.applyTint(el);
   }
 
@@ -987,20 +1171,34 @@ class Player {
     if (el._tint && el._src) {
       el._img.style.visibility = "hidden";
       el.style.backgroundColor = el._tint;
-      const mask = `url("${el._src}") center / ${el._img.style.objectFit === "fill" ? "100% 100%" : el._img.style.objectFit || "cover"} no-repeat`;
+      const fit = el._img.style.objectFit;
+      const size = fit === "fill" ? "100% 100%" : fit === "scale-down" ? "contain" : fit || "cover";
+      const mask = `url("${el._src}") center / ${size} no-repeat`;
       el.style.mask = mask;
       el.style.webkitMask = mask;
     } else {
-      el._img.style.visibility = "";
+      el._img.style.visibility = el._failed ? "hidden" : "";
     }
   }
 
   imageLoaded(el, img) {
+    if (el._fade > 0) {
+      img.style.transition = `opacity ${el._fade}ms`;
+      img.style.opacity = "";
+    }
+    if (el._ph) {
+      const ph = el._ph;
+      clearTimeout(el._phTimer);
+      el._phTimer = setTimeout(() => { if (el._ph === ph) ph.style.visibility = "hidden"; }, el._fade > 0 ? el._fade : 0);
+    }
     if (el._events.has("onLoad")) this.event(el._id, "onLoad", { width: img.naturalWidth, height: img.naturalHeight });
     if (el._events.has("onLoadEnd")) this.event(el._id, "onLoadEnd");
   }
 
   imageFailed(el) {
+    // No broken-image icon: the placeholder, or nothing, shows.
+    el._failed = true;
+    el._img.style.visibility = "hidden";
     if (el._events.has("onError")) this.event(el._id, "onError", { message: `failed to load ${el._src}` });
     if (el._events.has("onLoadEnd")) this.event(el._id, "onLoadEnd");
   }
@@ -1019,8 +1217,7 @@ class Player {
     const el = this.view(id);
     if (!el?._spacer) return;
     el._content = [w, h];
-    el._spacer.style.width = `${w}px`;
-    el._spacer.style.height = `${h}px`;
+    this.placeLayer(el);
     this.snapMarkers(el);
   }
 
@@ -1036,6 +1233,11 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._behavior = behavior;
+    if (this.zooms(el)) {
+      this.ensureLayer(el);
+      el._zoom = Math.min(Math.max(el._zoom, behavior.minZoom), behavior.maxZoom);
+      this.placeLayer(el);
+    }
     this.scrollOverflow(el);
     this.snapMarkers(el);
   }
@@ -1046,10 +1248,13 @@ class Player {
    * Kept in `_base` so that restyling (`op_s`) keeps it. */
   scrollOverflow(el) {
     const scroll = el._behavior?.enabled === false ? "hidden" : "auto";
-    const [x, y] = el._horizontal ? [scroll, "hidden"] : ["hidden", scroll];
-    el._base = `overflow-x:${x};overflow-y:${y};`;
+    // Zoomable content scrolls both ways, panned and pinched here (touch-action none).
+    const zooms = this.zooms(el);
+    const [x, y] = zooms ? [scroll, scroll] : el._horizontal ? [scroll, "hidden"] : ["hidden", scroll];
+    el._base = `overflow-x:${x};overflow-y:${y};${zooms ? "touch-action:none;" : ""}`;
     el.style.overflowX = x;
     el.style.overflowY = y;
+    el.style.touchAction = zooms ? "none" : "";
   }
 
   snapMarkers(el) {
@@ -1111,7 +1316,8 @@ class Player {
       el._momentum = true;
       this.scrollEvent(el, "onMomentumScrollBegin");
     }
-    this.call((w) => w.nsh_scroll(el._id, el.scrollLeft, el.scrollTop, el._applied));
+    // Pulled to refresh, the offset is negative, as on the native backends.
+    this.call((w) => w.nsh_scroll(el._id, el.scrollLeft, el.scrollTop - (el._pull ?? 0), el._applied));
   }
 
   /** The browser's scrolling stopped: the end, unless the scroll is driven
@@ -1134,7 +1340,303 @@ class Player {
     this.scrollEvent(el, "onScrollEnd");
   }
 
-  op_ref() {}
+  // Content layers: the children of a zoomable or refreshable scroll view
+  // go into a layer that scales them (zoom) and moves them down (pull to
+  // refresh); the core's frames stay the unzoomed ones.
+
+  ensureLayer(el) {
+    if (el._layer) return el._layer;
+    const layer = document.createElement("div");
+    layer.className = "nsh-layer";
+    for (const child of [...el.children]) if (child._id !== undefined) layer.append(child);
+    el.insertBefore(layer, el._spacer.nextSibling);
+    el._layer = layer;
+    el._zoom = 1;
+    el._pull = 0;
+    return layer;
+  }
+
+  zooms(el) {
+    const b = el._behavior;
+    return el._kind === "scroll" && !!b && b.maxZoom > b.minZoom;
+  }
+
+  /** Where the zoomed content starts in the scrolled area: centered while smaller than the viewport (`centerContent`). */
+  layerOffset(el) {
+    if (!el._behavior?.centerContent || !el._frame || !el._content) return [0, 0];
+    const z = el._zoom ?? 1;
+    return [Math.max(0, (el._frame[2] - el._content[0] * z) / 2), Math.max(0, (el._frame[3] - el._content[1] * z) / 2)];
+  }
+
+  /** Places the layer and sizes the scrolled area for the zoom and the pull. */
+  placeLayer(el) {
+    const [w, h] = el._content ?? [1, 1];
+    const z = el._zoom ?? 1;
+    const pull = el._pull ?? 0;
+    el._spacer.style.width = `${w * z}px`;
+    el._spacer.style.height = `${h * z + pull}px`;
+    if (!el._layer) return;
+    const [ox, oy] = this.layerOffset(el);
+    el._layer.style.transform = `translate(${ox}px, ${oy + pull}px)${z !== 1 ? ` scale(${z})` : ""}`;
+  }
+
+  /** The zoom the content of `el` is shown at (its zoomable scroll views', multiplied). */
+  zoomOf(el) {
+    let z = 1;
+    for (let e = el.parentNode; e && e !== this.root; e = e.parentNode) if (e._layer && e._zoom) z *= e._zoom;
+    return z;
+  }
+
+  /** Zooms `el` to `scale` with content point (cx, cy) (unzoomed) at (fx, fy) in its viewport. */
+  zoomContent(el, scale, cx, cy, fx, fy) {
+    el._zoom = scale;
+    this.placeLayer(el);
+    const [ox, oy] = this.layerOffset(el);
+    el.scrollLeft = cx * scale + ox - fx;
+    el.scrollTop = cy * scale + oy - fy;
+    this.call((w) => w.nsh_zoom(el._id, scale));
+    this.scrolled(el);
+  }
+
+  /** The content point (unzoomed) at (fx, fy) in the viewport of `el`. */
+  contentPoint(el, fx, fy) {
+    const [ox, oy] = this.layerOffset(el);
+    const z = el._zoom ?? 1;
+    return [(el.scrollLeft + fx - ox) / z, (el.scrollTop + fy - oy) / z];
+  }
+
+  /** The zoom limits; past them by a rubber band while pinching when `bouncesZoom`. */
+  limitZoom(el, scale, rubber) {
+    const b = el._behavior;
+    const min = b.minZoom;
+    const max = Math.max(b.maxZoom, min);
+    if (scale > max) return rubber && b.bouncesZoom ? max * Math.pow(scale / max, 0.3) : max;
+    if (scale < min) return rubber && b.bouncesZoom ? min * Math.pow(scale / min, 0.3) : min;
+    return scale;
+  }
+
+  /** Animates the zoom to `scale` with content point (cx, cy) moving to (fx, fy). */
+  animateZoom(el, scale, cx, cy, fx, fy, done) {
+    cancelAnimationFrame(el._zoomAnimation);
+    const z0 = el._zoom;
+    const [x0, y0] = this.contentPoint(el, fx, fy);
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / 250);
+      const k = 1 - Math.pow(1 - t, 3);
+      this.zoomContent(el, z0 + (scale - z0) * k, x0 + (cx - x0) * k, y0 + (cy - y0) * k, fx, fy);
+      if (t < 1) el._zoomAnimation = requestAnimationFrame(step);
+      else done?.();
+    };
+    el._zoomAnimation = requestAnimationFrame(step);
+  }
+
+  /** A zoom ended: back within the limits, and canvases drawn again at the new resolution. */
+  zoomEnded(el, fx, fy) {
+    const settled = () => {
+      for (const canvas of el._layer?.querySelectorAll("canvas") ?? []) {
+        const view = this.viewOf(canvas);
+        if (view) this.drawSoon(view);
+      }
+    };
+    const target = this.limitZoom(el, el._zoom, false);
+    if (Math.abs(target - el._zoom) > 1e-3) {
+      const [cx, cy] = this.contentPoint(el, fx, fy);
+      this.animateZoom(el, target, cx, cy, fx, fy, settled);
+    } else settled();
+  }
+
+  /** `zoomTo({ scale, x, y, animated })`: content point (x, y) to the middle of the viewport, or the point there now. */
+  zoomCommand(el, scale, x, y, animated) {
+    if (!this.zooms(el) || !el._frame) return;
+    el._applied++;
+    const target = this.limitZoom(el, scale, false);
+    const fx = el._frame[2] / 2;
+    const fy = el._frame[3] / 2;
+    const [px, py] = this.contentPoint(el, fx, fy);
+    const cx = x ?? px;
+    const cy = y ?? py;
+    if (animated) this.animateZoom(el, target, cx, cy, fx, fy, () => this.zoomEnded(el, fx, fy));
+    else {
+      this.zoomContent(el, target, cx, cy, fx, fy);
+      this.zoomEnded(el, fx, fy);
+    }
+  }
+
+  /** Ctrl+wheel (and touchpad pinches, which browsers send as one) zooms the zoomable scroll view under the pointer; whether there was one. */
+  wheelZoom(e) {
+    const el = this.ancestors(this.viewOf(e.target)).find((v) => this.zooms(v) && v._behavior.pinch);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    const fx = e.clientX - r.left;
+    const fy = e.clientY - r.top;
+    // A mouse wheel's notches are large deltas, a touchpad pinch's small ones.
+    const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    const factor = Math.abs(dy) >= 50 ? Math.pow(1.25, -Math.sign(dy)) : Math.exp(-dy * 0.01);
+    const [cx, cy] = this.contentPoint(el, fx, fy);
+    cancelAnimationFrame(el._zoomAnimation);
+    this.zoomContent(el, this.limitZoom(el, el._zoom * factor, false), cx, cy, fx, fy);
+    clearTimeout(el._wheelZoomTimer);
+    el._wheelZoomTimer = setTimeout(() => this.zoomEnded(el, fx, fy), 200);
+    return true;
+  }
+
+  /** Safari's touchpad pinches (gesture events; it sends no ctrl+wheel). */
+  gestureZoom(e, phase) {
+    const el = phase === 0
+      ? this.ancestors(this.viewOf(e.target)).find((v) => this.zooms(v) && v._behavior.pinch)
+      : this.gesture;
+    if (!el) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect();
+    const fx = (e.clientX ?? r.left + r.width / 2) - r.left;
+    const fy = (e.clientY ?? r.top + r.height / 2) - r.top;
+    if (phase === 0) {
+      this.gesture = el;
+      el._gestureStart = el._zoom;
+    }
+    const [cx, cy] = this.contentPoint(el, fx, fy);
+    this.zoomContent(el, this.limitZoom(el, el._gestureStart * e.scale, true), cx, cy, fx, fy);
+    if (phase === 2) {
+      this.gesture = null;
+      this.zoomEnded(el, fx, fy);
+    }
+  }
+
+  // Pull to refresh (vertical scroll views with `onRefresh`, and
+  // `refreshing`): dragged past the top, the content moves down over a
+  // spinner; released far enough, it refreshes and keeps room for the
+  // spinner until `refreshing` turns false. Mouse drags go through the
+  // pointer handling, touches through touch events here (the browser
+  // scrolls them otherwise).
+
+  op_ref([, id, refreshing]) {
+    const el = this.view(id);
+    if (!el || el._kind !== "scroll" || el._horizontal) return;
+    this.ensureLayer(el);
+    el._refreshing = refreshing;
+    if (!el._pulling) {
+      if (refreshing && el.scrollTop <= 0.5) this.animatePull(el, REFRESH_SPACE);
+      else if (!refreshing && el._pull > 0) this.animatePull(el, 0);
+    }
+    this.updateSpinner(el);
+  }
+
+  refreshable(el) {
+    return el._kind === "scroll" && !el._horizontal && !this.zooms(el) && (el._events.has("onRefresh") || el._refreshing);
+  }
+
+  installPull(el) {
+    this.ensureLayer(el);
+    if (el._pullTouch) return;
+    el._pullTouch = true;
+    let start = null;
+    el.addEventListener("touchstart", (e) => {
+      start = e.touches.length === 1 && this.refreshable(el) && el._behavior?.enabled !== false
+        ? { y: e.touches[0].clientY, v: el.scrollTop - el._pull, pulling: false }
+        : null;
+    }, { passive: true });
+    el.addEventListener("touchmove", (e) => {
+      if (!start || e.touches.length !== 1) return;
+      const v = start.v - (e.touches[0].clientY - start.y);
+      if (v >= 0 && el._pull <= 0) return;
+      // Once the browser scrolls, the gesture is its own.
+      if (!e.cancelable) {
+        start = null;
+        return;
+      }
+      e.preventDefault();
+      if (!start.pulling) {
+        start.pulling = true;
+        el._pulling = true;
+        cancelAnimationFrame(el._pullAnimation);
+      }
+      this.dragPull(el, v);
+    }, { passive: false });
+    const end = () => {
+      if (start?.pulling) {
+        el._pulling = false;
+        this.releasePull(el);
+      }
+      start = null;
+    };
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+  }
+
+  /** A drag to offset `v` (negative: pulled past the top by that much). */
+  dragPull(el, v) {
+    if (v >= 0) {
+      this.setPull(el, 0);
+      el.scrollTop = v;
+      return;
+    }
+    el.scrollTop = 0;
+    const over = -v;
+    // Refreshing, the spinner's room is the pull's start.
+    this.setPull(el, el._refreshing ? Math.min(over, REFRESH_SPACE) + Math.max(0, over - REFRESH_SPACE) * 0.5 : over * 0.5);
+  }
+
+  releasePull(el) {
+    if (!el._refreshing && el._events.has("onRefresh") && el._pull >= REFRESH_PULL) {
+      // Shown right away, as UIRefreshControl does; JS turns it off.
+      el._refreshing = true;
+      this.event(el._id, "onRefresh");
+    }
+    this.animatePull(el, el._refreshing && el._pull > 0 ? REFRESH_SPACE : 0);
+  }
+
+  setPull(el, pull) {
+    if (pull === el._pull) return;
+    el._pull = pull;
+    this.placeLayer(el);
+    this.updateSpinner(el);
+    this.scrolled(el);
+  }
+
+  animatePull(el, target) {
+    cancelAnimationFrame(el._pullAnimation);
+    const from = el._pull ?? 0;
+    if (from === target) return;
+    const t0 = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / 250);
+      this.setPull(el, from + (target - from) * (1 - Math.pow(1 - t, 3)));
+      if (t < 1) el._pullAnimation = requestAnimationFrame(step);
+    };
+    el._pullAnimation = requestAnimationFrame(step);
+  }
+
+  /** The spinner above the content: its spokes appear as it is pulled, and turn while refreshing. */
+  updateSpinner(el) {
+    const shown = el._pull > 0;
+    let spinner = el._spinner;
+    if (!shown) {
+      if (spinner) spinner.style.display = "none";
+      return;
+    }
+    if (!spinner) {
+      spinner = el._spinner = document.createElement("div");
+      spinner.className = "nsh-spinner";
+      for (let i = 0; i < 8; i++) {
+        const spoke = document.createElement("i");
+        spoke.style.transform = `rotate(${i * 45}deg)`;
+        spinner.append(spoke);
+      }
+      el.append(spinner);
+    }
+    spinner.style.display = "";
+    spinner.style.top = `${el._pull - REFRESH_SPACE / 2 - 10}px`;
+    const progress = el._refreshing ? 1 : Math.min(1, el._pull / REFRESH_PULL);
+    const count = Math.min(8, Math.ceil(progress * 8));
+    [...spinner.children].forEach((spoke, i) => {
+      spoke.style.visibility = i < count ? "" : "hidden";
+      // Turning, the spokes fade behind the lead one.
+      spoke.style.opacity = progress < 1 ? "0.8" : String(1 - ((8 - i) % 8) / 8 * 0.85);
+    });
+    spinner.classList.toggle("spin", !!el._refreshing);
+  }
+
 
   // Canvas
 
@@ -1157,7 +1659,8 @@ class Player {
   draw(el) {
     const canvas = el._canvas;
     if (!canvas || !el._frame || !el._ops) return;
-    const ratio = devicePixelRatio || 1;
+    // Zoomed in, drawn at the resolution it is shown at.
+    const ratio = (devicePixelRatio || 1) * Math.min(4, this.zoomOf(el));
     const [, , w, h] = el._frame;
     const pw = Math.max(1, Math.round(w * ratio));
     const ph = Math.max(1, Math.round(h * ratio));
@@ -1710,18 +2213,100 @@ class Player {
 
   // Web views and videos
 
-  op_web([, id, url, html]) {
-    const frame = this.view(id)?._frameEl;
+  /**
+   * A web view is an <iframe>. HTML (`source={{ html }}`) loads as
+   * `srcdoc` in a sandbox with an origin of its own (it never reaches the
+   * player's page), with a bridge script first: the page's
+   * `window.ReactNativeWebView.postMessage(data)` reaches `onMessage`
+   * through a `MessageChannel`, and `injectJavaScript` runs through it.
+   * `injectedJavaScriptBeforeContentLoaded` / `injectedJavaScript` are
+   * scripts at the document's start and end. A URL loads as it is
+   * (sandboxed without its origin when it is the player's own); the browser
+   * hides what such a page does, so it only gets `postMessage` and load
+   * events, with the URL it was given.
+   */
+  op_web([, id, url, html, base, before, after, scroll, js]) {
+    const el = this.view(id);
+    const frame = el?._frameEl;
     if (!frame) return;
-    if (html != null) frame.srcdoc = html;
-    else if (url && frame.src !== url) frame.src = url;
+    const key = JSON.stringify([url, html, base, before, after, scroll, js]);
+    if (el._web === key) return;
+    el._web = key;
+    el._port?.close();
+    el._port = null;
+    el._token = html != null && js ? Math.random().toString(36).slice(2) : null;
+    const sandbox = ["allow-forms", "allow-popups", "allow-popups-to-escape-sandbox", "allow-modals", "allow-downloads"];
+    if (js) sandbox.push("allow-scripts");
+    let same = false;
+    if (html == null && url) {
+      try {
+        same = new URL(url, location.href).origin === location.origin;
+      } catch {
+        // Not a URL the frame can load anyway.
+      }
+      // Pages of other sites keep their own origin (their storage works); one of the player's own must not reach it.
+      if (!same) sandbox.push("allow-same-origin");
+    }
+    frame.setAttribute("sandbox", sandbox.join(" "));
+    if (html != null) {
+      let head = "";
+      if (base) head += `<base href="${base.replace(/"/g, "&quot;")}">`;
+      if (el._token) head += `<script>${webBridge(el._token)}</script>`;
+      if (!scroll) head += "<style>html,body{overflow:hidden!important}</style>";
+      if (before) head += `<script>${before.replace(/<\/script/gi, "<\\/script")}</script>`;
+      const tail = after ? `<script>${after.replace(/<\/script/gi, "<\\/script")}</script>` : "";
+      // After a doctype, which must stay first (quirks mode otherwise).
+      const doctype = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? "";
+      el._webUrl = base ?? "about:srcdoc";
+      el._webTitle = new DOMParser().parseFromString(html, "text/html").title;
+      frame.removeAttribute("src");
+      frame.removeAttribute("scrolling");
+      frame.srcdoc = doctype + head + html.slice(doctype.length) + tail;
+    } else {
+      el._webUrl = url ?? "";
+      el._webTitle = "";
+      frame.removeAttribute("srcdoc");
+      if (scroll) frame.removeAttribute("scrolling");
+      else frame.setAttribute("scrolling", "no");
+      if (url) frame.src = url;
+      else frame.removeAttribute("src");
+    }
+    // After the batch: its events may come after its props.
+    if (html != null || url) queueMicrotask(() => this.webNavigation(el, "onLoadStart", true));
   }
 
-  op_video([, id, src, paused, muted, volume, rate, repeat, fit, controls]) {
+  webNavigation(el, name, loading) {
+    const state = { url: el._webUrl ?? "", title: el._webTitle ?? "", loading, canGoBack: false, canGoForward: false };
+    if (el._events.has(name)) this.event(el._id, name, state);
+    if (el._events.has("onNavigationStateChange")) this.event(el._id, "onNavigationStateChange", state);
+  }
+
+  webLoaded(el) {
+    const frame = el._frameEl;
+    if (!frame.getAttribute("src") && !frame.hasAttribute("srcdoc")) return;
+    if (el._token) {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (e) => {
+        if (el._events.has("onMessage")) this.event(el._id, "onMessage", { data: String(e.data) });
+      };
+      el._port?.close();
+      el._port = channel.port1;
+      frame.contentWindow?.postMessage(el._token, "*", [channel.port2]);
+    }
+    this.webNavigation(el, "onLoad", false);
+  }
+
+  op_video([, id, src, paused, muted, volume, rate, repeat, fit, controls, progressInterval]) {
     const el = this.view(id);
     const video = el?._video;
     if (!video) return;
-    if (src && video.src !== this.asset(src)) video.src = this.asset(src);
+    const url = src ? this.asset(src) : "";
+    if (url !== el._src) {
+      el._src = url;
+      if (url) video.src = url;
+      else video.removeAttribute("src");
+    }
+    el._progressInterval = progressInterval > 0 ? progressInterval : 250;
     video.muted = muted;
     video.volume = Math.min(1, Math.max(0, volume));
     video.playbackRate = rate;
@@ -1729,7 +2314,57 @@ class Player {
     video.controls = controls;
     video.style.objectFit = fit;
     if (paused) video.pause();
-    else video.play().catch(() => {});
+    else if (url && video.paused) {
+      video.play().catch((err) => {
+        // Browsers only start sound on their own after a user gesture.
+        if (err?.name === "NotAllowedError" && !el._autoplayWarned) {
+          el._autoplayWarned = true;
+          console.warn("[nsh] the browser did not let the video play before a user gesture (muted videos can)");
+        }
+      });
+    }
+  }
+
+  /** `<Video>`'s events from the media element's. */
+  wireVideo(el, video) {
+    const emit = (name, payload) => el._events.has(name) && this.event(el._id, name, payload);
+    const progress = () => emit("onProgress", { currentTime: video.currentTime, duration: video.duration || 0 });
+    const stopProgress = () => {
+      clearInterval(el._progressTimer);
+      el._progressTimer = 0;
+    };
+    let buffering = false;
+    const buffer = (on) => {
+      if (buffering === on) return;
+      buffering = on;
+      emit("onBuffer", { isBuffering: on });
+    };
+    video.addEventListener("loadstart", () => {
+      if (video.getAttribute("src")) emit("onLoadStart");
+    });
+    video.addEventListener("loadedmetadata", () =>
+      emit("onLoad", { duration: video.duration || 0, width: video.videoWidth, height: video.videoHeight }));
+    video.addEventListener("playing", () => {
+      buffer(false);
+      stopProgress();
+      if (el._events.has("onProgress")) el._progressTimer = setInterval(progress, el._progressInterval ?? 250);
+    });
+    video.addEventListener("pause", () => {
+      stopProgress();
+      progress();
+    });
+    video.addEventListener("waiting", () => buffer(true));
+    video.addEventListener("canplay", () => buffer(false));
+    video.addEventListener("ended", () => {
+      stopProgress();
+      progress();
+      emit("onEnd");
+    });
+    video.addEventListener("error", () => {
+      stopProgress();
+      const e = video.error;
+      if (e && video.getAttribute("src")) emit("onError", { message: e.message || `media error ${e.code}` });
+    });
   }
 
   // Commands
@@ -1753,10 +2388,30 @@ class Player {
         el._applied++;
         el.scrollTo({ left: el._horizontal ? el.scrollWidth : 0, top: el._horizontal ? 0 : el.scrollHeight, behavior: args[0] ? "smooth" : "instant" });
         break;
-      case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true); break;
-      case "reload": el?._frameEl?.contentWindow?.location.reload(); break;
+      case "zoomTo": if (el) this.zoomCommand(el, ...args); break;
+      case "dialog": this.dialog(args[0], args[1], args[2], args[3], args[4] ?? [], args[5] ?? true, args[6] ?? false); break;
+      case "toast": this.toast(args[0], args[1]); break;
+      case "reload": {
+        const frame = el?._frameEl;
+        if (!frame) break;
+        // The frame is another origin: it is loaded again rather than told to.
+        if (frame.hasAttribute("srcdoc")) frame.srcdoc = frame.srcdoc;
+        else if (frame.getAttribute("src")) frame.src = frame.getAttribute("src");
+        this.webNavigation(el, "onLoadStart", true);
+        break;
+      }
+      case "postMessage": el?._frameEl?.contentWindow?.postMessage(args[0], "*"); break;
+      case "injectJavaScript":
+      case "goBack":
+      case "goForward":
+        if (el?._port) el._port.postMessage(name === "injectJavaScript" ? { eval: args[0] } : { go: name === "goBack" ? -1 : 1 });
+        else if (el?._frameEl && !el._noBridgeWarned) {
+          el._noBridgeWarned = true;
+          console.warn(`[nsh] web view: ${name} only reaches HTML sources (a page of another site is the browser's own)`);
+        }
+        break;
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
-      case "setClipboard": navigator.clipboard?.writeText(args[0]).catch(() => {}); break;
+      case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "statusBar": this.setThemeColor(args[0]); break;
@@ -1796,7 +2451,34 @@ class Player {
     else meta.content = meta._nshOriginal;
   }
 
-  /** `Clipboard.getString` / `hasString`: browsers only tell by reading (which may ask the user). */
+  /**
+   * `Clipboard.setString`. The async Clipboard API needs a secure context
+   * (and, in some browsers, a user gesture); a copy command is the fallback.
+   */
+  writeClipboard(text) {
+    const copy = () => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+      document.body.append(area);
+      area.select();
+      try {
+        document.execCommand("copy");
+      } catch {
+        // Nothing left to try.
+      }
+      area.remove();
+    };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(copy);
+    else copy();
+  }
+
+  /**
+   * `Clipboard.getString` / `hasString`: browsers only tell by reading,
+   * which may ask the user (Chromium asks once per site; Safari and Firefox
+   * show a paste button), and fails in an insecure context. `hasString`
+   * reads too: there is no way to ask without reading.
+   */
   async readClipboard(request, hasOnly) {
     let text = "";
     try {
@@ -1927,56 +2609,154 @@ class Player {
     request.resume?.();
   }
 
-  dialog(dialogId, title, message, buttons, styles, cancelable) {
+  /**
+   * `Alert.alert` / action sheets, drawn inside the surface: with the
+   * desktop idiom as the Linux and macOS backends' cards (up to three
+   * buttons in a row, the last regular one the default), otherwise as
+   * iOS's alert and action sheet. Answers the button's index, -1 when
+   * dismissed (a click beside it, or Escape, when cancelable); Escape
+   * presses the cancel button if any (`keyDown`, `_cancel`).
+   */
+  dialog(dialogId, title, message, buttons, styles, cancelable, sheet) {
+    const list = buttons.length ? buttons : ["OK"];
+    const style = (i) => styles[i] ?? "default";
+    const desktop = this.desktopUI;
     const backdrop = document.createElement("div");
-    backdrop.className = "nsh-dialog-backdrop";
-    const box = document.createElement("div");
-    box.className = "nsh-dialog";
-    if (title) {
-      const h = document.createElement("h3");
-      h.textContent = title;
-      box.append(h);
-    }
-    if (message) {
-      const p = document.createElement("p");
-      p.textContent = message;
-      box.append(p);
-    }
-    box.setAttribute("role", "alertdialog");
-    box.setAttribute("aria-modal", "true");
-    box.setAttribute("aria-label", title ?? message ?? "");
-    const focus = document.activeElement;
-    const restore = focus !== document.body && this.root.contains(focus) ? focus : null;
+    backdrop.className = sheet ? "nsh-dialog-backdrop nsh-sheet-backdrop" : "nsh-dialog-backdrop";
+    const focused = document.activeElement;
+    const restore = focused !== document.body && this.root.contains(focused) ? focused : null;
+    let answered = false;
+    // A tap's compatibility click lands after the press that opened the
+    // dialog: only clicks pressed inside it (or from the keyboard) count.
+    let down = null;
+    backdrop.addEventListener("pointerdown", (e) => { down = e.target; }, true);
+    const pressed = (e, el) => e.detail === 0 || (down !== null && el.contains(down));
     const close = (index) => {
+      if (answered) return;
+      answered = true;
       backdrop.remove();
       this.dialogs = this.dialogs.filter((d) => d !== backdrop);
       this.scopeFocus();
       if (restore?.isConnected) restore.focus({ preventScroll: true });
       this.event(ROOT_ID, "onDialog", { id: dialogId, index });
     };
-    // Escape (`keyDown`) presses the cancel button, else answers as a
-    // click beside the box does.
-    const cancel = styles.indexOf("cancel");
+    const cancel = list.findIndex((_, i) => style(i) === "cancel");
     backdrop._cancel = () => (cancel >= 0 ? close(cancel) : cancelable && close(-1));
-    const list = buttons.length ? buttons : ["OK"];
-    // The last regular button is the default action (Return).
-    let preferred = null;
-    list.forEach((text, index) => {
+    const button = (index) => {
       const b = document.createElement("button");
-      b.textContent = text;
-      b.addEventListener("click", () => close(index));
-      box.append(b);
-      if ((styles[index] ?? "default") === "default") preferred = b;
-    });
-    backdrop.addEventListener("click", (e) => e.target === backdrop && cancelable && close(-1));
+      b.textContent = list[index];
+      if (style(index) !== "default") b.classList.add(style(index));
+      b.addEventListener("click", (e) => pressed(e, b) && close(index));
+      return b;
+    };
+    let focus = null;
+    const box = document.createElement("div");
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", title ?? message ?? "");
+    if (sheet) {
+      box.className = "nsh-sheet";
+      const options = document.createElement("div");
+      if (title || message) {
+        const head = document.createElement("div");
+        head.className = "nsh-sheet-head";
+        if (title) {
+          const b = document.createElement("b");
+          b.textContent = title;
+          head.append(b);
+        }
+        if (message) head.append(message);
+        options.append(head);
+      }
+      list.forEach((_, i) => {
+        if (i === cancel) return;
+        const b = button(i);
+        focus ??= b;
+        options.append(b);
+      });
+      if (options.firstChild) box.append(options);
+      if (cancel >= 0) {
+        const card = document.createElement("div");
+        const b = button(cancel);
+        focus ??= b;
+        card.append(b);
+        box.append(card);
+      }
+    } else {
+      box.className = "nsh-dialog";
+      if (title) {
+        const h = document.createElement("h3");
+        h.textContent = title;
+        box.append(h);
+      }
+      if (message) {
+        const p = document.createElement("p");
+        p.textContent = message;
+        box.append(p);
+      }
+      const actions = document.createElement("div");
+      // Desktop: up to three in a row; iOS: two side by side.
+      const row = desktop ? list.length <= 3 : list.length === 2;
+      actions.className = `nsh-dialog-actions ${row ? "row" : "column"}`;
+      // The last regular button is the default action (Return).
+      let preferred = -1;
+      for (let i = list.length - 1; i >= 0 && preferred < 0; i--) if (style(i) === "default") preferred = i;
+      list.forEach((_, i) => {
+        const b = button(i);
+        if (i === preferred) {
+          if (desktop) b.classList.add("default");
+          focus = b;
+        }
+        actions.append(b);
+      });
+      focus ??= actions.firstChild;
+      box.append(actions);
+    }
+    backdrop.addEventListener("click", (e) => e.target === backdrop && down === backdrop && cancelable && close(-1));
     backdrop.append(box);
     this.root.append(backdrop);
     (this.dialogs ??= []).push(backdrop);
     this.scopeFocus();
-    (preferred ?? box.querySelector("button")).focus({ preventScroll: true });
+    focus?.focus({ preventScroll: true });
   }
 
-  op_comp() {}
+  /** Dialogs and other system UI look as the desktop backends' with the desktop idiom, else as on phones. */
+  get desktopUI() {
+    return this.idiom === "desktop";
+  }
+
+  /** Classes system UI (dialogs, toasts, spinners) styles itself with. */
+  updateRootClasses() {
+    this.root.classList.toggle("nsh-dark", this.shownDark);
+    this.root.classList.toggle("nsh-desktop", this.desktopUI);
+  }
+
+  /** A short message at the bottom (`Toast.show`), as the desktop backends show it; one at a time. */
+  toast(text, long) {
+    this.root.querySelector(":scope > .nsh-toast")?.remove();
+    const el = document.createElement("div");
+    el.className = "nsh-toast";
+    el.textContent = text;
+    el.style.opacity = "0";
+    this.root.append(el);
+    // Read out as `announce` does.
+    this.live.textContent = "";
+    setTimeout(() => { this.live.textContent = text; }, 50);
+    requestAnimationFrame(() => { el.style.opacity = ""; });
+    setTimeout(() => {
+      el.style.opacity = "0";
+      setTimeout(() => el.remove(), 200);
+    }, long ? 3500 : 2000);
+  }
+
+  /** Registered native components are the native apps' own: the web has none, so the box stays empty (said once per name). */
+  op_comp([, , name]) {
+    if (this.missingComponents?.has(name)) return;
+    (this.missingComponents ??= new Set()).add(name);
+    const message = `native component "${name}" is not available on the web: its view stays empty`;
+    console.warn("[nsh]", message);
+    this.options.onLog?.("warn", message);
+  }
 
   // Input ---------------------------------------------------------------
 
@@ -2014,6 +2794,10 @@ class Player {
     // and selectable text keep theirs.
     root.addEventListener("contextmenu", (e) => this.editable(e.target) || e.preventDefault());
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
+    // Safari's touchpad pinches (it sends no ctrl+wheel).
+    root.addEventListener("gesturestart", (e) => this.gestureZoom(e, 0));
+    root.addEventListener("gesturechange", (e) => this.gesture && this.gestureZoom(e, 1));
+    root.addEventListener("gestureend", (e) => this.gesture && this.gestureZoom(e, 2));
     root.addEventListener("pointermove", (e) => {
       if (e.pointerType === "mouse") this.hover = [e.clientX, e.clientY];
     });
@@ -2180,7 +2964,8 @@ class Player {
   wheel(e) {
     if (e.ctrlKey) {
       e.preventDefault();
-      this.wheelPinch(e);
+      // Over a zoomable scroll view it zooms that, else it pinches.
+      if (!this.wheelZoom(e)) this.wheelPinch(e);
       return;
     }
     const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? this.size[1] : 1;
@@ -2367,14 +3152,18 @@ class Player {
     const selects = this.editable(e.target);
     const chain = this.ancestors(target);
     const [x, y] = this.point(e);
+    // Mouse drags scroll here (browsers only scroll touches), and so do
+    // touches in zoomable views, which pan and pinch here.
+    const scrollView = isField ? null : chain.find((v) => v._kind === "scroll") ?? null;
     const p = {
       x, y, startX: x, startY: y, t: performance.now(), vx: 0, vy: 0,
       touchPath: chain.filter((v) => v._events.has("onTouch")).map((v) => v._id),
       press: isField ? null : chain.find((v) => PRESS_EVENTS.some((n) => v._events.has(n)) && !v._props?.disabled) ?? null,
       pan: chain.find((v) => v._gestures?.pan || v._events.has("onPanStart") || v._events.has("onPanEnd")) ?? null,
-      scroll: e.pointerType === "mouse" && !selects ? chain.find((v) => v._kind === "scroll") ?? null : null,
+      scroll: !selects && scrollView && (e.pointerType === "mouse" || this.zooms(scrollView)) ? scrollView : null,
       // Touch scrolling is the browser's, reported from here (`touchScroll`).
       scrolls: e.pointerType === "touch" ? chain.filter((v) => v._kind === "scroll") : null,
+      zoom: chain.find((v) => this.zooms(v) && v._behavior.pinch) ?? null,
       pinch: chain.find((v) => v._gestures?.pinch || v._gestures?.rotation) ?? null,
       // `panActivation`: decided here as the pointer moves (PanActivation::decide).
       gate: chain.find((v) => v._props?.panActivation) ?? null,
@@ -2451,7 +3240,10 @@ class Player {
         this.call((w) => w.nsh_pan(p.pan._id, 0, 0, 0, 0, 0));
       } else if (p.scroll && !gated) {
         p.mode = "scroll";
-        p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop];
+        p.scrollStart = [p.scroll.scrollLeft, p.scroll.scrollTop - (p.scroll._pull ?? 0)];
+        cancelAnimationFrame(p.scroll._pullAnimation);
+        cancelAnimationFrame(p.scroll._zoomAnimation);
+        p.scroll._pulling = this.refreshable(p.scroll);
         this.drive(p.scroll, 1);
         this.scrollEvent(p.scroll, "onScrollBeginDrag");
       }
@@ -2467,8 +3259,10 @@ class Player {
       e.preventDefault();
       const s = p.scroll;
       s.style.scrollSnapType = "none";
-      s.scrollLeft = p.scrollStart[0] - (s._horizontal ? tx : 0);
-      s.scrollTop = p.scrollStart[1] - (s._horizontal ? 0 : ty);
+      const both = this.zooms(s);
+      s.scrollLeft = p.scrollStart[0] - (s._horizontal || both ? tx : 0);
+      if (s._pulling) this.dragPull(s, p.scrollStart[1] - ty);
+      else s.scrollTop = p.scrollStart[1] - (s._horizontal && !both ? 0 : ty);
     }
     void dx;
   }
@@ -2505,8 +3299,17 @@ class Player {
     } else if (p.mode === "scroll") {
       const s = p.scroll;
       this.scrollEvent(s, "onScrollEndDrag");
+      if (s._pulling) {
+        s._pulling = false;
+        if (s._pull > 0) {
+          this.drive(s, -1);
+          this.releasePull(s);
+          return;
+        }
+      }
       const v = s._horizontal ? -p.vx : -p.vy;
-      if (s._snapPoints) {
+      if (this.zooms(s)) this.glide(s, -p.vy, -p.vx);
+      else if (s._snapPoints) {
         // Snapping views settle on the next snap point along a flick, else
         // on the nearest one; snapping comes back once they are there.
         this.drive(s, -1);
@@ -2547,18 +3350,19 @@ class Player {
     }
   }
 
-  /** Momentum after a mouse drag (touch scrolling is the browser's). */
-  glide(s, velocity) {
+  /** Momentum after a mouse drag (touch scrolling is the browser's); `across`: a zoomable view's other axis. */
+  glide(s, velocity, across) {
     let v = Math.abs(velocity) > 80 ? velocity / 1000 : 0;
+    let w = across != null && Math.abs(across) > 80 ? across / 1000 : 0;
     let last = performance.now();
-    const momentum = v !== 0;
+    const momentum = v !== 0 || w !== 0;
     const end = () => {
       this.drive(s, -1);
       this.snapMarkers(s);
       if (momentum) this.scrollEvent(s, "onMomentumScrollEnd");
       this.ownEnd(s);
     };
-    if (!v) {
+    if (!v && !w) {
       end();
       return;
     }
@@ -2566,10 +3370,14 @@ class Player {
     const step = (now) => {
       const dt = now - last;
       last = now;
-      if (s._horizontal) s.scrollLeft += v * dt;
+      if (across != null) {
+        s.scrollTop += v * dt;
+        s.scrollLeft += w * dt;
+      } else if (s._horizontal) s.scrollLeft += v * dt;
       else s.scrollTop += v * dt;
       v *= Math.pow(0.995, dt);
-      if (Math.abs(v) > 0.02) requestAnimationFrame(step);
+      w *= Math.pow(0.995, dt);
+      if (Math.abs(v) > 0.02 || Math.abs(w) > 0.02) requestAnimationFrame(step);
       else end();
     };
     requestAnimationFrame(step);
@@ -2578,7 +3386,11 @@ class Player {
   startTwoFinger() {
     const [a, b] = [...this.pointers.values()];
     const el = a.pinch ?? b.pinch;
-    if (!el) return;
+    if (!el) {
+      const zoom = a.zoom ?? b.zoom;
+      if (zoom) this.startPinchZoom(zoom, a, b);
+      return;
+    }
     for (const p of [a, b]) this.pressOut(p, false);
     this.twoFinger = { el, dist: Math.hypot(a.x - b.x, a.y - b.y), angle: Math.atan2(b.y - a.y, b.x - a.x) };
     if (el._gestures?.pinch) this.call((w) => w.nsh_transform_gesture(el._id, 0, 0, 1));
@@ -2596,8 +3408,29 @@ class Player {
     return [scale, rotation];
   }
 
+  /** Two fingers on a zoomable scroll view: the content point between them stays between them as they spread and move. */
+  startPinchZoom(el, a, b) {
+    for (const p of [a, b]) this.pressOut(p, false);
+    cancelAnimationFrame(el._zoomAnimation);
+    const r = el.getBoundingClientRect();
+    const root = this.root.getBoundingClientRect();
+    const fx = (a.x + b.x) / 2 + root.left - r.left;
+    const fy = (a.y + b.y) / 2 + root.top - r.top;
+    this.twoFinger = { zoom: el, dist: Math.hypot(a.x - b.x, a.y - b.y), scale: el._zoom, point: this.contentPoint(el, fx, fy) };
+  }
+
   moveTwoFinger() {
     const t = this.twoFinger;
+    if (t.zoom) {
+      const [a, b] = [...this.pointers.values()];
+      if (!a || !b) return;
+      const r = t.zoom.getBoundingClientRect();
+      const root = this.root.getBoundingClientRect();
+      t.focus = [(a.x + b.x) / 2 + root.left - r.left, (a.y + b.y) / 2 + root.top - r.top];
+      const scale = this.limitZoom(t.zoom, (t.scale * Math.hypot(a.x - b.x, a.y - b.y)) / Math.max(1, t.dist), true);
+      this.zoomContent(t.zoom, scale, t.point[0], t.point[1], t.focus[0], t.focus[1]);
+      return;
+    }
     const [scale, rotation] = this.twoFingerAmounts();
     if (t.el._gestures?.pinch) this.call((w) => w.nsh_transform_gesture(t.el._id, 0, 1, scale));
     if (t.el._gestures?.rotation) this.call((w) => w.nsh_transform_gesture(t.el._id, 1, 1, rotation));
@@ -2606,6 +3439,12 @@ class Player {
   endTwoFinger() {
     const t = this.twoFinger;
     this.twoFinger = null;
+    if (t.zoom) {
+      const f = t.focus ?? [t.zoom.clientWidth / 2, t.zoom.clientHeight / 2];
+      this.zoomEnded(t.zoom, f[0], f[1]);
+      this.pointers.clear();
+      return;
+    }
     const scale = t.scale ?? 1;
     const rotation = t.rotation ?? 0;
     if (t.el._gestures?.pinch) this.call((w) => w.nsh_transform_gesture(t.el._id, 0, 2, scale));

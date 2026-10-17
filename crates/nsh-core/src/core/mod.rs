@@ -857,6 +857,14 @@ impl<M: TextEngine> Core<M> {
     /// engine. Text measured before is measured again.
     pub fn register_font(&mut self, data: &[u8]) -> Result<(), String> {
         self.text_engine.register_font(data)?;
+        self.fonts_changed();
+        Ok(())
+    }
+
+    /// The text engine's fonts changed (a font the platform loads
+    /// asynchronously became usable): text measured before is measured
+    /// again.
+    pub fn fonts_changed(&mut self) {
         self.measure_cache = MeasureCache::default();
         let blocks: Vec<Key> = self
             .nodes
@@ -881,7 +889,6 @@ impl<M: TextEngine> Core<M> {
                 self.mark(key, dirty::INPUT);
             }
         }
-        Ok(())
     }
 
     /// The user edited input `id` (before JS sees the edit): keeps the text

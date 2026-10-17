@@ -16,9 +16,8 @@
 //!
 //! - `fetch` runs on the browser's `fetch` ([`net`]).
 //!
-//! There is no web view and no native components; scroll views use the
-//! browser's scrolling. Off WebAssembly
-//! this crate is empty.
+//! There are no native components; web views are `<iframe>`s and scroll
+//! views use the browser's scrolling. Off WebAssembly this crate is empty.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -29,7 +28,10 @@ mod ffi;
 mod net;
 mod text;
 
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, PayloadValue, ROOT_ID, Size,
@@ -84,7 +86,10 @@ struct BundleOptions {
 }
 
 struct Running {
-    engine: LocalEngine<WebTextEngine>,
+    engine: LocalEngine<Rc<WebTextEngine>>,
+    /// The core's text engine, whose measurements go stale when a font
+    /// finishes loading.
+    text: Rc<WebTextEngine>,
     control: EngineControl,
     animation: UiAnimation,
     /// JS asked for a display frame (`requestAnimationFrame`).
@@ -355,13 +360,15 @@ pub unsafe extern "C" fn nsh_start(
         ui_sets: vec![nsh_ui_mobile::registry()],
         runtime: None,
     };
-    let Some(engine) = LocalEngine::start(config, WebTextEngine::default(), Sink) else {
+    let text = Rc::new(WebTextEngine::default());
+    let Some(engine) = LocalEngine::start(config, text.clone(), Sink) else {
         return -1.0;
     };
     let control = engine.control();
     APP.with(|a| {
         *a.borrow_mut() = Some(Running {
             engine,
+            text,
             control,
             animation: UiAnimation::default(),
             js_frame: false,
@@ -679,10 +686,13 @@ pub unsafe extern "C" fn nsh_event(
             x: num("x"),
             y: num("y"),
         },
-        EventKind::Load => EventPayload::Image {
-            width: num("width"),
-            height: num("height"),
-        },
+        // A video's and a web view's loads carry more than an image's.
+        EventKind::Load if value.get("duration").is_none() && value.get("url").is_none() => {
+            EventPayload::Image {
+                width: num("width"),
+                height: num("height"),
+            }
+        }
         EventKind::Error => EventPayload::Error {
             message: text("message"),
         },
@@ -716,6 +726,13 @@ pub unsafe extern "C" fn nsh_event(
                             "text" => "text",
                             "has" => "has",
                             "error" => "error",
+                            "url" => "url",
+                            "title" => "title",
+                            "loading" => "loading",
+                            "canGoBack" => "canGoBack",
+                            "canGoForward" => "canGoForward",
+                            "loaded" => "loaded",
+                            "total" => "total",
                             _ => return None,
                         };
                         let v = match v {
@@ -888,6 +905,13 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// The user zoomed zoomable scroll view `id` to `scale` (reported before
+/// the offset it scrolled to).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_zoom(id: u32, scale: f32) -> f64 {
+    send(|app| app.control.zoom(id, scale))
+}
+
 /// A drag on a view with native pan values (`phase`: 0 start, 1 move, 2
 /// end), translated `(tx, ty)` since it began, at velocity `(vx, vy)`
 /// points per second.
@@ -1003,6 +1027,17 @@ pub extern "C" fn nsh_resize(width: f32, height: f32) -> f64 {
         app.environment.window = (width, height);
         app.control.resize(Size::new(width, height));
         app.control.set_environment(app.environment);
+    })
+}
+
+/// Fonts registered with `register_font` finished loading (`FontFace`
+/// loads asynchronously): text measured with a fallback font before is
+/// measured again.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_fonts_loaded() -> f64 {
+    send(|app| {
+        app.text.clear_caches();
+        app.control.fonts_changed();
     })
 }
 

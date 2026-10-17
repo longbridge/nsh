@@ -463,7 +463,8 @@ fn resize_mode(m: ResizeMode) -> &'static str {
         ResizeMode::Cover => "cover",
         ResizeMode::Contain => "contain",
         ResizeMode::Stretch => "fill",
-        ResizeMode::Center => "none",
+        // Centered, scaled down to fit when larger.
+        ResizeMode::Center => "scale-down",
     }
 }
 
@@ -654,7 +655,7 @@ fn input_json(c: &InputConfig) -> String {
 fn behavior_json(b: &ScrollBehavior) -> String {
     let offsets: Vec<String> = b.snap_offsets.iter().map(|o| o.to_string()).collect();
     format!(
-        "{{\"paging\":{},\"snapInterval\":{},\"snapOffsets\":[{}],\"snapAlignment\":{},\"enabled\":{},\"bounces\":{},\"inset\":[{},{},{},{}],\"minZoom\":{},\"maxZoom\":{}}}",
+        "{{\"paging\":{},\"snapInterval\":{},\"snapOffsets\":[{}],\"snapAlignment\":{},\"enabled\":{},\"bounces\":{},\"inset\":[{},{},{},{}],\"minZoom\":{},\"maxZoom\":{},\"bouncesZoom\":{},\"pinch\":{},\"centerContent\":{}}}",
         b.paging,
         b.snap_interval,
         offsets.join(","),
@@ -666,7 +667,10 @@ fn behavior_json(b: &ScrollBehavior) -> String {
         b.content_inset.bottom,
         b.content_inset.left,
         b.min_zoom,
-        b.max_zoom
+        b.max_zoom,
+        b.bounces_zoom,
+        b.pinch,
+        b.center_content
     )
 }
 
@@ -928,12 +932,23 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         }
         MountItem::NativeProps { id, props } => match props {
             NativeProps::WebView(w) => {
-                let (url, html) = match &w.source {
-                    WebSource::Uri(u) => (Some(&**u), None),
-                    WebSource::Html { html, .. } => (None, Some(&**html)),
-                    _ => (None, None),
+                let (url, html, base) = match &w.source {
+                    WebSource::Uri(u) => (Some(&**u), None, None),
+                    WebSource::Html { html, base_url } => {
+                        (None, Some(&**html), base_url.as_deref())
+                    }
+                    _ => (None, None, None),
                 };
-                out.item("web").num(*id).opt_str(url).opt_str(html).end();
+                out.item("web")
+                    .num(*id)
+                    .opt_str(url)
+                    .opt_str(html)
+                    .opt_str(base)
+                    .opt_str(w.injected_js_before.as_deref())
+                    .opt_str(w.injected_js.as_deref())
+                    .bool(w.scroll_enabled)
+                    .bool(w.javascript_enabled)
+                    .end();
             }
             NativeProps::Video(v) => {
                 out.item("video")
@@ -946,6 +961,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     .bool(v.repeat)
                     .str(resize_mode(v.resize_mode))
                     .bool(v.controls)
+                    .num(v.progress_interval_ms)
                     .end();
             }
         },
@@ -1008,7 +1024,7 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 push_str(&mut out.s, &kebab(&format!("{:?}", b.style)));
             }
             out.s.push(']');
-            out.bool(d.cancelable).end();
+            out.bool(d.cancelable).bool(d.sheet).end();
         }
         Command::SetJsResponder { block } => {
             out.item("cmd")
@@ -1029,6 +1045,26 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
         Command::Announce(text) => out.item("cmd").num(id).str("announce").str(text).end(),
         Command::AccessibilityFocus => out.item("cmd").num(id).str("a11yFocus").end(),
         Command::Seek(t) => out.item("cmd").num(id).str("seek").num(*t).end(),
+        Command::ZoomTo {
+            scale,
+            center,
+            animated,
+        } => {
+            out.item("cmd").num(id).str("zoomTo").num(*scale);
+            match center {
+                Some((x, y)) => out.num(*x).num(*y),
+                None => out.raw("null").raw("null"),
+            };
+            out.bool(*animated).end();
+        }
+        Command::Toast { text, long } => {
+            out.item("cmd")
+                .num(id)
+                .str("toast")
+                .str(text)
+                .bool(*long)
+                .end();
+        }
         Command::SetClipboard(text) => out.item("cmd").num(id).str("setClipboard").str(text).end(),
         Command::ReadClipboard {
             id: request,

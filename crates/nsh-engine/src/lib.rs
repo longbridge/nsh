@@ -519,6 +519,7 @@ enum Message {
     ScreenHeader(NodeId, Option<f32>),
     Frame,
     States(NodeId, u8),
+    FontsChanged,
     /// An event of a request (by the hop it is for: events of a hop the
     /// engine left are dropped).
     Fetch(RequestId, u64, FetchEvent),
@@ -641,6 +642,13 @@ impl EngineControl {
     /// (`active:`, `hover:`, `focus:`) update without JS.
     pub fn set_states(&self, id: NodeId, states: u8) {
         let _ = self.tx.send(Message::States(id, states));
+    }
+
+    /// Fonts the platform loads asynchronously became usable (on the web,
+    /// a `FontFace` finished loading): text measured with a fallback font
+    /// is measured again.
+    pub fn fonts_changed(&self) {
+        let _ = self.tx.send(Message::FontsChanged);
     }
 
     /// Records the engine's commits into `monitor` from now on (`None`:
@@ -1583,6 +1591,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::States(id, states) => state.core.set_states(id, states),
+        Message::FontsChanged => state.core.fonts_changed(),
         Message::Fetch(id, hop, event) => {
             if let Some(event) = state.net.event(id, hop, event)
                 && let Some(script) = script

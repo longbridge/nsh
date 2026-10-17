@@ -229,8 +229,64 @@ browsers' touches into what phones report:
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.
 
+## Fonts
+
+`register_font` adds a `FontFace`, which loads asynchronously even from bytes: until it has, `measureText` measures
+with a fallback font. When the faces settle, `nsh.js` calls `nsh_fonts_loaded`, which clears `WebTextEngine`'s caches
+(the core's text engine is an `Rc` the app keeps) and `EngineControl::fonts_changed` (`Core::fonts_changed`: every
+text is measured and laid out again, as after `register_font`). Faces registered while the app starts (its imports'
+fonts, in `nsh_start`) keep the root hidden until they load (at most 3 s), so the first frame shows the right fonts.
+
+## Scroll views: pull to refresh and zooming
+
+A zoomable (`maximumZoomScale` above `minimumZoomScale`) or refreshable scroll view moves its children into a layer
+(`ensureLayer`) that is translated (the pull, `centerContent`) and scaled (the zoom), so the core's frames stay the
+unzoomed ones; the spacer that gives the browser its scroll range is the zoomed content size plus the pull. Offsets
+reported to the core are the zoomed ones (as UIKit's), minus the pull (negative while pulled, as on the native
+backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offset.
+
+- **Pull to refresh** (vertical views with `onRefresh` or `refreshing`): past the top, a drag moves the content down
+  at half speed over an 8-spoke spinner; released past 64 points it fires `onRefresh` and keeps 56 points for the
+  turning spinner until `refreshing` turns false (the Linux and macOS backends' numbers). Mouse drags go through the
+  pointer handling (which scrolls mouse drags anyway); touches through non-passive touch events on the view, since
+  the browser scrolls touches itself: a move past the top is prevented while it can be, and a gesture the browser
+  already scrolls stays the browser's.
+- **Zooming**: a zoomable view is `touch-action: none` and pans (both axes, with a glide) and pinches itself, keeping
+  the content point between the fingers between them (rubber band past the limits with `bouncesZoom`, a spring back
+  after). Ctrl+wheel over it zooms around the pointer instead of pinching (Chromium and Firefox send touchpad pinches
+  as that; a mouse notch is 1.25×), Safari's touchpad pinches come as `gesture*` events. `zoomTo` and `zoomScale` animate or jump with the
+  content point to the middle. Canvases inside are drawn again at the zoomed resolution when a zoom ends (up to 4×).
+
+## Platform services
+
+- **Dialogs** (`Alert`, `ActionSheet`) are drawn in the root: with the `desktop` idiom as the Linux and macOS
+  backends' cards (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert and
+  action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
+  compatibility click, which lands after the press that opened it, must not dismiss it.
+- **Toasts** (`Toast.show` from `nsh/android`, which the desktop backends also show) are a pill at the bottom of the
+  root for 2 or 3.5 s, also read out through the live region `Command::Announce` writes into.
+- **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
+  `hasString`, since browsers cannot tell without reading) needs a secure context and may ask the user.
+- **Images**: `<img>` with `object-fit` (`center` is `scale-down`), `defaultSource` as a second image until the load
+  (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden (`Image.getSize` / `prefetch`:
+  under Networking). `onProgress` is not reported.
+- **Web views** are `<iframe>`s. HTML loads as `srcdoc` in a sandbox without `allow-same-origin` (an origin of its
+  own: it cannot reach the player's page), after a bridge script (`webBridge`): the first message from the player
+  carrying a random token hands it a `MessageChannel` port, over which `ReactNativeWebView.postMessage` reaches
+  `onMessage` and `injectJavaScript` and `goBack` / `goForward` run; the page's own `message` listeners never see that
+  message. The injected scripts are `<script>`s at the start and end (after a doctype). A URL loads as it is, keeping
+  its origin unless it is the player's own (which must not reach it either); the browser hides what such a page
+  does, so it only gets `postMessage` (`window.onmessage`) and load events with the URL it was given. `reload` loads
+  the frame again. Navigations inside a frame are not checked against the `webview` capability (the core checks the
+  source it is given).
+- **Videos** are `<video>`s: `onLoadStart`, `onLoad` (`loadedmetadata`), `onProgress` on a timer at
+  `progressUpdateInterval` while playing, `onBuffer` (`waiting` / `playing` / `canplay`), `onEnd`, `onError`; a
+  deleted video is stopped (a detached media element plays on). Browsers only start a video with sound after a user
+  gesture (a warning says so).
+- **Registered native components** are the native apps' own: their view stays empty, with a warning once per name.
+
 ## Not implemented
 
-Refresh controls, zooming scroll views, registered native components, platform services other than the theme color,
-fonts that are usable before `FontFace` finishes loading. A published app ships JS source, not bytecode, and no source
-map.
+Platform services other than the theme color, toasts, dialogs and the clipboard; image download progress; a web
+view's events and commands for pages of other sites (beyond `postMessage` and loads), user agents. A published app
+ships JS source, not bytecode, and no source map.
