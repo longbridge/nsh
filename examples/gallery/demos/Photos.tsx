@@ -5,7 +5,7 @@ import { Image } from "nsh/image";
 import { List } from "nsh/list";
 import logo from "../logo@2x.png";
 import { Icon } from "../icons";
-import { Badge, colors, columnsFor, desktop, finish, paneWidth, Press, radius, Stat, type Tone, toneColor } from "../ui";
+import { Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, paneWidth, Press, radius, Stat, type Tone, toneColor } from "../ui";
 
 type Photo = { id: number; title: string; author: string; tone: Tone; views: number };
 
@@ -122,6 +122,7 @@ export function Photos() {
       refreshing.set(false);
     }, 800);
   };
+  const refreshKey = bindRefresh(refresh);
   const loadMore = () => {
     const current = photos();
     console.log("loading more after", current.length);
@@ -188,10 +189,16 @@ export function Photos() {
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 12 }}>
         <Icon name="arrow-down" size={14} tint={colors.faint} />
         {Platform.isDesktop ? (
-          <Text style={{ flex: 1, fontSize: 13, color: colors.faint }}>Scrolling to the end loads {PAGE} more.</Text>
+          <Text style={{ flex: 1, fontSize: 13, color: colors.faint }}>
+            {refreshKey ? `${refreshKey} refreshes. ` : ""}Scrolling to the end loads {PAGE} more.
+          </Text>
         ) : (
           <Text style={{ flex: 1, fontSize: 13, color: colors.faint }}>Pull to refresh. Scrolling to the end loads {PAGE} more.</Text>
         )}
+        {/* The mouse does not pull scroll views down: desktops refresh here. */}
+        <If when={Platform.isDesktop}>
+          <Button label={refreshing() ? "Refreshing…" : "Refresh"} variant="secondary" disabled={refreshing()} onPress={refresh} />
+        </If>
       </View>
     </View>
   );
