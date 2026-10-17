@@ -1,12 +1,12 @@
-# Embedding nsh in an iOS app
+# Embedding NSH in an iOS app
 
-`main.swift` is an existing UIKit app that shows a nsh app below its own
+`main.swift` is an existing UIKit app that shows a NSH app below its own
 native views.
 
 1. Add `dist/nsh/embed/ios/NativeShell.xcframework` (or `NativeShellDev.xcframework` for
    development builds) to the app target (`cargo xtask ios-embed` builds both). Swift code then
    `import NativeShell`.
-2. Build the nsh bundle and add the output folder to the app's resources as
+2. Build the NSH bundle and add the output folder to the app's resources as
    `nsh`: `nsh build ../embedded --release --out nsh`.
 3. Create an `NshAppView` (a `UIView`), add it to a view hierarchy and call
    `try app.loadBundle(at:)` with the URL of `nsh/bundle.nshc`. The app stops when the view is deallocated.

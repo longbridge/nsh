@@ -1,13 +1,13 @@
 ---
 title: iOS
-description: Run nsh apps on iOS with UIKit views, in the simulator or on devices, package them as .app and .ipa, and embed them in an existing iOS app with NativeShell.xcframework and NshAppView.
+description: Run NSH apps on iOS with UIKit views, in the simulator or on devices, package them as .app and .ipa, and embed them in an existing iOS app with NativeShell.xcframework and NshAppView.
 order: 11
 group: platforms
 ---
 
 # iOS
 
-nsh apps run on iOS with UIKit views and CoreText text, on devices and in the simulator, from iOS 15.0. The main use is
+NSH apps run on iOS with UIKit views and CoreText text, on devices and in the simulator, from iOS 15.0. The main use is
 embedding: an existing app shows modules in an `NshAppView` and loads signed packages it downloads, under limits and
 capabilities it sets. Running and packaging whole apps work too, as on the other platforms. On iOS,
 `Platform.OS` is `"ios"` and the `ios={{…}}` props apply.
@@ -42,12 +42,12 @@ profiles and icons: [Packaging](./packaging.md#ios-devices).
 
 ## Embedding in an iOS app
 
-An existing iOS app can show nsh apps inside its own UI. The runtime ships as `NativeShell.xcframework`, a static
+An existing iOS app can show NSH apps inside its own UI. The runtime ships as `NativeShell.xcframework`, a static
 framework with a Swift module: you create an `NshAppView` (a `UIView`), add it anywhere in your view hierarchy and load
-an app into it. Your native screens, navigation and the nsh app live side by side in one UIKit hierarchy.
+an app into it. Your native screens, navigation and the NSH app live side by side in one UIKit hierarchy.
 
 Each `NshAppView` is one independent engine with its own JS VM; there are no global singletons, so an app can show
-several nsh apps at once, for example one per tab.
+several NSH apps at once, for example one per tab.
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="One host app with two NshAppView regions: each is its own engine with its own thread, VM, limits and capabilities; the host grants capabilities, sets limits and registers native components such as a map.">
@@ -63,7 +63,7 @@ dist/nsh/embed/ios/NativeShell.xcframework      release: bundles and signed pack
 dist/nsh/embed/ios/NativeShellDev.xcframework   also connects to a `nsh dev` server
 ```
 
-From a checkout of nsh you can build just the frameworks:
+From a checkout of NSH you can build just the frameworks:
 
 ```sh
 cargo xtask ios-embed    # writes dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework
@@ -85,7 +85,7 @@ compiler versions can import it, and the framework links everything it needs: yo
 
 ## Ship a bundle with the app
 
-Build the nsh app into a folder and add that folder to the app's resources as a folder reference named `nsh`:
+Build the NSH app into a folder and add that folder to the app's resources as a folder reference named `nsh`:
 
 ```sh
 nsh build App.tsx --release --out MyApp/nsh
@@ -139,10 +139,10 @@ final class EmbedController: UIViewController {
 }
 ```
 
-The view's size is the app's window: nsh lays the app out at the view's bounds and again whenever they change. Loading
+The view's size is the app's window: NSH lays the app out at the view's bounds and again whenever they change. Loading
 again replaces the running app; the app stops when the view is deallocated.
 
-The complete sample, a UIKit app that shows a nsh app below its own native header, is `examples/embed-ios/main.swift`.
+The complete sample, a UIKit app that shows an NSH app below its own native header, is `examples/embed-ios/main.swift`.
 
 ## `NshAppView`
 

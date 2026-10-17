@@ -1,13 +1,13 @@
 ---
 title: Project structure
-description: The files of an nsh app, every key of nsh.json, the TypeScript setup in .nsh/types, assets, and how modules and packages are imported.
+description: The files of an NSH app, every key of nsh.json, the TypeScript setup in .nsh/types, assets, and how modules and packages are imported.
 order: 5
 group: start
 ---
 
 # Project structure
 
-An nsh app is a directory with an entry module and an optional `nsh.json`. Everything else (more modules, images, fonts, JSON files) is found by following the entry's imports, so there is no file list to maintain.
+An NSH app is a directory with an entry module and an optional `nsh.json`. Everything else (more modules, images, fonts, JSON files) is found by following the entry's imports, so there is no file list to maintain.
 
 ```text
 my-app/
@@ -103,11 +103,11 @@ Without a `capabilities` key, an app may use the network, web views and the stat
 }
 ```
 
-`network` covers `fetch`, remote images and video sources; local assets are always allowed. An app that embeds nsh may grant less than an app declares. The details are in [Sandbox and capabilities](./sandbox-and-capabilities.md).
+`network` covers `fetch`, remote images and video sources; local assets are always allowed. An app that embeds NSH may grant less than an app declares. The details are in [Sandbox and capabilities](./sandbox-and-capabilities.md).
 
 ## tsconfig.json and .nsh/types
 
-nsh does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `trace`, `dev`, `run`, `package`, `publish`) writes the TypeScript declarations of everything nsh provides into `.nsh/types`, and `tsconfig.json` points the `nsh` imports there:
+NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `trace`, `dev`, `run`, `package`, `publish`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and `tsconfig.json` points the `nsh` imports there:
 
 ```json
 {
@@ -144,7 +144,7 @@ nsh does not need `node_modules`. Instead, every command that builds the app (`i
 
 `lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh trace App.tsx`.
 
-`jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: nsh compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
+`jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
 
 ## Modules
 
@@ -158,7 +158,7 @@ import strings from "./strings.json";
 
 All of them are bundled into one script. JSON files import as their parsed value.
 
-### nsh's modules
+### NSH's modules
 
 Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them natively.
 
@@ -177,11 +177,11 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/native` | Components the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |
 
-The [modules reference](../modules/index.md) documents each one. Importing a module nsh does not have (`nsh/foo`) is a build error.
+The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error.
 
 ### npm packages
 
-nsh needs nothing from npm, but the bundler resolves bare imports from a `node_modules` directory if you install packages with a package manager. Packages resolve their browser builds, because the runtime provides web APIs (`fetch`, streams, `URL`, `TextEncoder`, ...) and not Node's (`fs`, `Buffer`, `process`). Packages that touch the DOM do not work: there is none.
+NSH needs nothing from npm, but the bundler resolves bare imports from a `node_modules` directory if you install packages with a package manager. Packages resolve their browser builds, because the runtime provides web APIs (`fetch`, streams, `URL`, `TextEncoder`, ...) and not Node's (`fs`, `Buffer`, `process`). Packages that touch the DOM do not work: there is none.
 
 `solid-js` cannot be imported: the bundler refuses it and points to `nsh`'s own `signal`, `computed` and `effect`, which replace it.
 

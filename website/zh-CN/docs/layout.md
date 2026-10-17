@@ -8,7 +8,7 @@ demo: guide-layout
 
 # 布局
 
-nsh 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局。Taffy 是 CSS flexbox、网格和块布局的 Rust 实现，nsh 对它做了配置，让子元素默认纵向排列且不收缩。布局在核心中运行，发生在每一轮 JavaScript 执行之后，只有发生变化的 frame 会被发送到原生视图。文字由平台的文本引擎在同一线程上测量，因此布局从不需要等待主线程。
+NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局。Taffy 是 CSS flexbox、网格和块布局的 Rust 实现，NSH 对它做了配置，让子元素默认纵向排列且不收缩。布局在核心中运行，发生在每一轮 JavaScript 执行之后，只有发生变化的 frame 会被发送到原生视图。文字由平台的文本引擎在同一线程上测量，因此布局从不需要等待主线程。
 
 下面的布局属性都是样式属性，每个都有对应的 [Tailwind](./tailwind.md) 写法（`flex-row`、`gap-4`、`grid-cols-3`、`absolute inset-0` 等）。
 
@@ -16,7 +16,7 @@ nsh 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局
 
 视图用 flexbox 排列子元素。默认值与 Web 不同：
 
-| 属性 | nsh 默认值 | Web 默认值 |
+| 属性 | NSH 默认值 | Web 默认值 |
 |---|---|---|
 | `flexDirection` | `"column"` | `row` |
 | `flexShrink` | `0` | `1` |
@@ -171,7 +171,7 @@ import { I18nManager } from "nsh/device";
 </View>
 ```
 
-`I18nManager.isRTL` 是响应式的，修改会立即生效，无需重启。`direction` 样式（`"inherit"`、`"ltr"`、`"rtl"`）可以为单个视图及其子元素覆盖方向。在 Android 上，嵌入 nsh 的应用需要在 manifest 中设置 `android:supportsRtl="true"`，原生控件才会镜像。
+`I18nManager.isRTL` 是响应式的，修改会立即生效，无需重启。`direction` 样式（`"inherit"`、`"ltr"`、`"rtl"`）可以为单个视图及其子元素覆盖方向。在 Android 上，嵌入 NSH 的应用需要在 manifest 中设置 `android:supportsRtl="true"`，原生控件才会镜像。
 
 ## 相关内容
 

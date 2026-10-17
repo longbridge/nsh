@@ -2,7 +2,7 @@
 
 The components and modules of `nsh/ui/mobile`: buttons, cards, lists, safe areas, the keyboard, the status bar,
 system dialogs and the like, written in Rust.
-One implementation draws the same on iOS and Android: a component renders nsh's elements with typed styles and theme
+One implementation draws the same on iOS and Android: a component renders NSH's elements with typed styles and theme
 colors, the core lays it out in the same pass as everything else, and its interaction (press feedback, drags, state)
 stays native. JS only gets the events the component emits.
 

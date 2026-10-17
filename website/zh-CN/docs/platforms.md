@@ -1,15 +1,15 @@
 ---
 title: 平台概览
-description: "nsh 在哪些平台上运行：iOS、Android、macOS、Windows、Linux、GPUI 和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入，以及各自需要什么。"
+description: "NSH 在哪些平台上运行：iOS、Android、macOS、Windows、Linux、GPUI 和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入，以及各自需要什么。"
 order: 10
 group: platforms
 ---
 
 # 平台概览
 
-nsh 运行在手机、桌面和网页上：iOS、Android、macOS、Windows、Linux、GPUI 和 Web。每个平台都有自己的后端，用平台自己的界面技术绘制：同一个模块在 iPhone 上是 UIKit 视图，在 Mac 上是 AppKit 视图，在 Linux 上是 GTK 4 控件，在 GPUI 应用里是 GPUI 元素，在浏览器里是 HTML，文本、输入、无障碍和深色模式都是平台自己的。后端之上的部分全部共享：QuickJS、响应式图、渲染器、Taffy 布局和组件在每个平台上都是同一份 Rust 代码，所以一个 bundle 可以在所有平台上运行。
+NSH 运行在手机、桌面和网页上：iOS、Android、macOS、Windows、Linux、GPUI 和 Web。每个平台都有自己的后端，用平台自己的界面技术绘制：同一个模块在 iPhone 上是 UIKit 视图，在 Mac 上是 AppKit 视图，在 Linux 上是 GTK 4 控件，在 GPUI 应用里是 GPUI 元素，在浏览器里是 HTML，文本、输入、无障碍和深色模式都是平台自己的。后端之上的部分全部共享：QuickJS、响应式图、渲染器、Taffy 布局和组件在每个平台上都是同一份 Rust 代码，所以一个 bundle 可以在所有平台上运行。
 
-在每个平台上，nsh 的主要用途都一样：把模块嵌入你自己的原生应用，由它在运行时加载。开发时借助热更新（`nsh run`）；同样的模块也可以打包成可安装的应用（`nsh package`），这是受支持的第二种用法。
+在每个平台上，NSH 的主要用途都一样：把模块嵌入你自己的原生应用，由它在运行时加载。开发时借助热更新（`nsh run`）；同样的模块也可以打包成可安装的应用（`nsh package`），这是受支持的第二种用法。
 
 ## 一览
 
@@ -53,17 +53,17 @@ nsh package my-app --target macos  # 或 ios、ios-simulator、android、windows
 每个视图都是一个拥有独立虚拟机的引擎，一个应用可以同时显示多个。在每个平台上，宿主都可以注册自己的原生视图给模块使用（[原生组件](./native-components.md)）。
 
 > [!NOTE]
-> 桌面宿主通过 nsh 仓库里的 Rust crate 嵌入 nsh；它们的 `AppView` 从应用自己的文件（或源代码）加载 bundle，使用默认限制。iOS 和 Android SDK 还能用 `NshTrust` 加载[签名包](./signed-packages.md)，并为每个视图设置限制和能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
+> 桌面宿主通过 NSH 仓库里的 Rust crate 嵌入 NSH；它们的 `AppView` 从应用自己的文件（或源代码）加载 bundle，使用默认限制。iOS 和 Android SDK 还能用 `NshTrust` 加载[签名包](./signed-packages.md)，并为每个视图设置限制和能力（[沙箱与能力](./sandbox-and-capabilities.md)）。
 
 ## 为每个平台编写
 
-应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，nsh 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：
+应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，NSH 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：
 
 - **平台专属属性**放在 `ios={{…}}`、`android={{…}}`、`web={{…}}` 或 `desktop={{…}}`（macOS、Windows、Linux 和桌面浏览器）里。
 - **`Platform.select`** 按操作系统取值，也可以按 `mobile` 和 `desktop` 整体取值；`Platform.OS` 是 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。
 - **输入跟随平台。** 手机上是触摸和软键盘；桌面上是鼠标、触控板和键盘。
 
-[`nsh/ui/mobile`](../components/index.md) 的组件由 nsh 绘制，所以在桌面上也能运行，样子和在手机上一样。桌面布局用基础元素（`View`、`Text`、`Scroll`、`List` 等）和 `Platform.select({ desktop: … })` 搭建，示例应用 gallery 的桌面布局就是这样做的；桌面 UI 套件也在路上。
+[`nsh/ui/mobile`](../components/index.md) 的组件由 NSH 绘制，所以在桌面上也能运行，样子和在手机上一样。桌面布局用基础元素（`View`、`Text`、`Scroll`、`List` 等）和 `Platform.select({ desktop: … })` 搭建，示例应用 gallery 的桌面布局就是这样做的；桌面 UI 套件也在路上。
 
 每个后端都列出了它尚不支持的内容：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、[Linux](./linux.md#linux-上的差异)、[GPUI](./gpui.md#差异)。
 

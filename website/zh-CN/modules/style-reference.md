@@ -1,6 +1,6 @@
 ---
 title: 样式参考
-description: nsh 支持的全部样式属性，按 LayoutStyle、ViewStyle、TextStyle 和 ImageStyle 分组，列出类型与含义。
+description: NSH 支持的全部样式属性，按 LayoutStyle、ViewStyle、TextStyle 和 ImageStyle 分组，列出类型与含义。
 order: 16
 ---
 
@@ -396,7 +396,7 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 ## 看起来像样式的属性
 
-有些设置在 nsh 中是属性而不是样式键。它们有对应的 Tailwind class，但显式设置的属性优先于 class：
+有些设置在 NSH 中是属性而不是样式键。它们有对应的 Tailwind class，但显式设置的属性优先于 class：
 
 | 设置 | 属性 | Class |
 |---|---|---|

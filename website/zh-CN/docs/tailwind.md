@@ -80,15 +80,15 @@ demo: guide-tailwind
 </View>
 ```
 
-断点比较的是窗口（nsh 渲染所在的表面）而不是设备：在 iPad 分屏或可调整大小的窗口中，它们跟随窗口宽度变化。
+断点比较的是窗口（NSH 渲染所在的表面）而不是设备：在 iPad 分屏或可调整大小的窗口中，它们跟随窗口宽度变化。
 
 ## 与 Web 上的 Tailwind 的差异
 
 - **单位是点（point）。** `p-4` 是 16 点（1 个间距步长 = 4pt，1rem = 16pt）。以 `px` 写的任意值也按点计算：`p-[13px]` 就是 13pt。
-- **`flex` 是横向排列**，与 CSS 一致：`class="flex"` 会让子元素横向排列，除非有方向类另行指定（在字符串中的任何位置都可以：`flex-col flex` 是纵向）。没有 `flex` 或 `inline-flex` 的视图保持 nsh 默认的纵向排列。`block` 和 `flow-root` 使用块布局；`inline` 和 `inline-block` 按视图布局（没有行内格式化上下文）。
+- **`flex` 是横向排列**，与 CSS 一致：`class="flex"` 会让子元素横向排列，除非有方向类另行指定（在字符串中的任何位置都可以：`flex-col flex` 是纵向）。没有 `flex` 或 `inline-flex` 的视图保持 NSH 默认的纵向排列。`block` 和 `flow-root` 使用块布局；`inline` 和 `inline-block` 按视图布局（没有行内格式化上下文）。
 - **视图上的文字类会被继承。** 视图上的 `text-*`、`font-*`、`leading-*`、`tracking-*` 等文字工具类会像 CSS 继承那样传给其内部的 `<Text>` 和 `<Input>` 元素：`<View class="text-white">` 会让其中的标签变成白色。
 - **`space-x-*` / `space-y-*` 是间距**（等同 `gap-x` / `gap-y`）。
-- **在 nsh 中属于属性的设置，以类的形式也可用**：`line-clamp-*`、`truncate`、`whitespace-nowrap`、`pointer-events-*`、`object-*`（图片缩放模式）、`select-text`、`caret-*` 和 `placeholder:text-*` 都能使用；若同时设置了对应的显式属性（`numberOfLines`、`pointerEvents`、`resizeMode` 等），以属性为准。
+- **在 NSH 中属于属性的设置，以类的形式也可用**：`line-clamp-*`、`truncate`、`whitespace-nowrap`、`pointer-events-*`、`object-*`（图片缩放模式）、`select-text`、`caret-*` 和 `placeholder:text-*` 都能使用；若同时设置了对应的显式属性（`numberOfLines`、`pointerEvents`、`resizeMode` 等），以属性为准。
 - **不支持**：`peer-*` 变体、伪元素（`before:`、`after:`）、任意属性（`[mask-type:luminance]`）。原生无需处理的纯 Web 工具类（`antialiased`、`will-change-*`、`touch-*`、`scroll-*`、`snap-*`、`overscroll-*`、`box-border` 等）会被接受并忽略。
 
 其余部分都与 Tailwind 4 文档一致：调色板、透明度修饰符（`bg-black/40`）、任意值（`bg-[#34c759]`、`w-[72px]`、`grid-cols-[1fr_2fr]`）、分数（`w-1/2`、`translate-x-1/2`）、阴影和 ring、渐变（`bg-linear-to-r`、`bg-radial`、`bg-conic` 配合 `from-` / `via-` / `to-`）、滤镜、`backdrop-blur-*`、`mix-blend-*`、变换、`transition-*` 和 `duration-*`、`animate-spin` / `ping` / `pulse` / `bounce`，以及网格。[滤镜与混合](./styling.md) 的平台限制对类名同样适用。

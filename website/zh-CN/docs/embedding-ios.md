@@ -1,13 +1,13 @@
 ---
 title: iOS
-description: 在 iOS 上用 UIKit 视图运行 nsh 应用（模拟器或真机），打包成 .app 和 .ipa，并通过 NativeShell.xcframework 和 NshAppView 嵌入现有 iOS 应用。
+description: 在 iOS 上用 UIKit 视图运行 NSH 应用（模拟器或真机），打包成 .app 和 .ipa，并通过 NativeShell.xcframework 和 NshAppView 嵌入现有 iOS 应用。
 order: 11
 group: platforms
 ---
 
 # iOS
 
-nsh 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和模拟器，要求 iOS 15.0 及以上。主要用途是嵌入：现有应用在
+NSH 应用在 iOS 上用 UIKit 视图和 CoreText 文本运行，支持真机和模拟器，要求 iOS 15.0 及以上。主要用途是嵌入：现有应用在
 `NshAppView` 中显示模块，加载它下载的签名包，并按自己设定的限制和能力运行它们。也可以运行和打包完整应用，方式与其他平台相同。在 iOS
 上，`Platform.OS` 是 `"ios"`，`ios={{…}}` 属性生效。
 
@@ -38,11 +38,11 @@ nsh package my-app --target ios --sign "Apple Distribution: Example Inc (ABCDE12
 
 ## 嵌入 iOS 应用
 
-现有的 iOS 应用可以在自己的界面中显示 nsh 应用。运行时以 `NativeShell.xcframework` 的形式提供，这是一个带 Swift
+现有的 iOS 应用可以在自己的界面中显示 NSH 应用。运行时以 `NativeShell.xcframework` 的形式提供，这是一个带 Swift
 模块的静态 framework：创建一个 `NshAppView`（一个 `UIView`），把它加到视图层级的任意位置，再往里加载一个应用即可。你的原生页面、导航和
-nsh 应用共处同一个 UIKit 视图层级。
+NSH 应用共处同一个 UIKit 视图层级。
 
-每个 `NshAppView` 都是一个独立的引擎，拥有自己的 JS VM；没有全局单例，所以一个应用可以同时显示多个 nsh 应用，比如每个标签页一个。
+每个 `NshAppView` 都是一个独立的引擎，拥有自己的 JS VM；没有全局单例，所以一个应用可以同时显示多个 NSH 应用，比如每个标签页一个。
 
 <div class="diagram-scroll">
 <img class="diagram diagram-light" src="/diagrams/host-app-light.svg" alt="一个宿主应用里有两个 NshAppView 区域：每个都是独立的引擎，有自己的线程、虚拟机、限制和能力；宿主授予能力、设置限制，并注册地图这样的原生组件。">
@@ -58,7 +58,7 @@ dist/nsh/embed/ios/NativeShell.xcframework      release: bundles and signed pack
 dist/nsh/embed/ios/NativeShellDev.xcframework   also connects to a `nsh dev` server
 ```
 
-如果你有 nsh 的源码，可以只构建这两个 framework：
+如果你有 NSH 的源码，可以只构建这两个 framework：
 
 ```sh
 cargo xtask ios-embed    # writes dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework
@@ -78,7 +78,7 @@ cargo xtask ios-embed    # writes dist/nsh/embed/ios/{NativeShell,NativeShellDev
 
 ## 随应用附带 bundle
 
-把 nsh 应用构建到一个文件夹里，再以名为 `nsh` 的文件夹引用（folder reference）把它加入应用资源：
+把 NSH 应用构建到一个文件夹里，再以名为 `nsh` 的文件夹引用（folder reference）把它加入应用资源：
 
 ```sh
 nsh build App.tsx --release --out MyApp/nsh
@@ -132,9 +132,9 @@ final class EmbedController: UIViewController {
 }
 ```
 
-视图的尺寸就是应用的窗口：nsh 按视图的 bounds 布局应用，bounds 变化时重新布局。再次加载会替换正在运行的应用；视图被释放时应用随之停止。
+视图的尺寸就是应用的窗口：NSH 按视图的 bounds 布局应用，bounds 变化时重新布局。再次加载会替换正在运行的应用；视图被释放时应用随之停止。
 
-完整示例是 `examples/embed-ios/main.swift`：一个在自己的原生标题栏下方显示 nsh 应用的 UIKit 应用。
+完整示例是 `examples/embed-ios/main.swift`：一个在自己的原生标题栏下方显示 NSH 应用的 UIKit 应用。
 
 ## `NshAppView`
 

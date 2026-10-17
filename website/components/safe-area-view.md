@@ -101,8 +101,8 @@ function BottomBar() {
 ## Platform notes
 
 - **iOS**: the insets come from UIKit's safe area (status bar, notch or Dynamic Island, home indicator).
-- **Android**: nsh reports only the parts of the system bars and the display cutout that overlap the nsh view. When
-  nsh is [embedded](../docs/embedding-android.md) below a native toolbar, the view gets no top inset.
+- **Android**: NSH reports only the parts of the system bars and the display cutout that overlap the NSH view. When
+  NSH is [embedded](../docs/embedding-android.md) below a native toolbar, the view gets no top inset.
 - **Mac Catalyst**: the top inset is the window's title bar.
 
 ## Related

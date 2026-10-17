@@ -1,10 +1,10 @@
 # The GPUI backend (macOS, Windows, Linux)
 
-`crates/gpui/nsh-platform-gpui` renders nsh apps with GPUI (GPUI Fast: crates.io `gpui-fast` 0.1.x, aliased as `gpui` in
+`crates/gpui/nsh-platform-gpui` renders NSH apps with GPUI (GPUI Fast: crates.io `gpui-fast` 0.1.x, aliased as `gpui` in
 its workspace), on macOS, Windows and Linux alike. `crates/gpui/nsh-gpui-host` is its development host (`nsh run --target
 gpui`), `crates/gpui/nsh-gpui-app` the release runner of `nsh package --target gpui`. Its main purpose is embedding: an
-`AppView` is a GPUI view, so GPUI and GPUI Kit apps (`gpui_component`) show nsh modules anywhere in their element tree.
-The crate started as a port of the Windows backend (`windows.md`): one retained view per node, nsh draws every view
+`AppView` is a GPUI view, so GPUI and GPUI Kit apps (`gpui_component`) show NSH modules anywhere in their element tree.
+The crate started as a port of the Windows backend (`windows.md`): one retained view per node, NSH draws every view
 itself, and the input, scrolling, transition, keymap and editing logic is the Windows backend's, platform-free. Only
 drawing, text, the main-thread queue, events and the window are GPUI's. User-facing page: `website/docs/gpui.md`.
 
@@ -91,7 +91,7 @@ import -window root -display :170 whole.png        # the display, if the window'
   items (`view::Hosted`: text editors, headers, dialogs) and the scroll indicator, then the border. Each node is an
   `NshView` (`view.rs`), a retained view the core placed at its frame, as on Windows.
 - **`DrawCx`** (`render.rs`) is the drawing state GPUI does not keep: GPUI paints primitives (quads, paths, glyphs,
-  images) in window coordinates (logical pixels, which are nsh's points) with no world transform and no group
+  images) in window coordinates (logical pixels, which are NSH's points) with no world transform and no group
   opacity, so `DrawCx` keeps the current transform (`geom::Mat4`) and applies opacity and color filters
   (`push_color_matrix`) to every color, as GPUI's own element opacity does. Axis-aligned rectangles are GPUI's quads,
   exact; under a rotation, skew or perspective they are filled as paths whose points are mapped one by one
@@ -138,7 +138,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 
 | Area | Module | GPUI |
 |---|---|---|
-| Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by nsh, glyphs painted on the main thread (above). `selectable` text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place) |
+| Text | `text.rs` | GPUI's text system on the engine thread, lines broken and ordered by NSH, glyphs painted on the main thread (above). `selectable` text has the desktop range selection of Windows and Linux (Cmd instead of Ctrl on macOS) and a right-click menu (Copy, Select All). A blurred text shadow is the glyphs painted faintly around the blur radius. GPUI loads variable fonts at their default weight only: on Linux the UI font is the first of a list GPUI can set in bold (Adwaita Sans is variable; Noto Sans or DejaVu Sans take its place) |
 | Decoration | `decor.rs` | CSS painting order. Axis-aligned views: GPUI's blurred rounded-box shadows (`paint_drop_shadows`, `paint_inset_shadows`), quads for the background and one-color borders (per-side widths, per-corner radii, dashes), gradients (`decor/gradient.rs`). Paths of polygons for what quads cannot draw: borders whose sides differ in color, dotted lines, and every decoration of a rotated, skewed or projected view (a rotated view's shadow is a stack of translucent outlines). React Native's content shadow is the shadows of the filled descendants' boxes and the glyphs. Color filters are color matrices on every color the subtree draws |
 | Images | `image.rs` | Loaded and decoded (the `image` crate: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, EXIF orientation) on worker threads into `RenderImage`s (straight BGRA, a frame per animation frame), cached per location by bytes, drawn with `paint_image`. GPUI has no color matrix, blur, mipmaps or sprite opacity: a picture keeps variants made on the workers (halved when drawn small, blurred, filtered, tinted, opacity in 16 steps) and draws the closest ready one meanwhile. Animated GIF / WebP advance on timers at their delays, paused while not drawn |
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
@@ -147,7 +147,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Text inputs | `text_input.rs` | The editor shared with the Windows backend (`text_input/model.rs`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the caret blinks on a timer; Cmd on macOS where Ctrl is used elsewhere |
 | Navigation, modals | `navigation.rs` | As on Windows: screens slide in and out, headers drawn natively as hosted items with a fixed height reported to the core, back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button), sheets as cards over a scrim. GPUI has no offscreen pictures, so a departing screen or modal keeps its views (their detaching deferred) in a layer drawn moving out |
 | Dialogs, toasts | `system.rs` | Drawn in the surface as items the root hosts (the Windows backend's content dialogs), so they stay with an embedded surface and never block the main loop |
-| Video | `native/video.rs` | Feature `video` (Linux): GStreamer `playbin` with an `appsink` of BGRA frames, each frame a `RenderImage` painted as view content (clipped, transformed at its bounds, covered like any view); `controls` draws nsh's own bar |
+| Video | `native/video.rs` | Feature `video` (Linux): GStreamer `playbin` with an `appsink` of BGRA frames, each frame a `RenderImage` painted as view content (clipped, transformed at its bounds, covered like any view); `controls` draws NSH's own bar |
 | Web views | `native/web.rs` | Feature `webview`: wry. Linux: WebKitGTK 4.1 on GTK 3 (X11 only: GPUI must run on X11 or Xwayland) in a GPUI Fast native composition surface (an X11 child window) sized to the visible part of its view, GTK's loop pumped from GPUI's; macOS / Windows: wry's `WKWebView` / WebView2 child at the view's box |
 | Native components | `native.rs` | `AppView::register_component`; a component renders any GPUI or GPUI Kit element, laid out and prepainted at its box every frame, clipped to its clipping ancestors, painted where the tree draws its box; its hitboxes take the pointer there (`embedding.md`) |
 | Accessibility | `access.rs` | AccessKit nodes in GPUI's accessibility tree (NSAccessibility, UI Automation, AT-SPI through AccessKit's adapters), rebuilt while an assistive technology is attached: the views as synthetic children of the surface element, folded as on Windows and Linux, with roles, names, states, values and actions; the accessibility focus is a real element tracking the view's focus handle; announcements are live nodes |
@@ -200,7 +200,7 @@ shots of macOS and Windows.
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored.
 - **Video** needs feature `video`, which is built on Linux only (GStreamer); on macOS and Windows a video is a neutral
   placeholder reporting `onError`. Rounded clips do not cut the picture; audio-only sources show nothing.
-- **Web views** sit above everything GPUI draws at their place (nsh content drawn over one is under it) and are
+- **Web views** sit above everything GPUI draws at their place (NSH content drawn over one is under it) and are
   missing from the offscreen shots of macOS and Windows. On Linux they need X11 (a Wayland window shows a placeholder,
   logged once) and may need `WEBKIT_DISABLE_DMABUF_RENDERER=1`; on macOS and Windows clipping ancestors do not cut
   them. `source.baseUrl` for HTML, `scrollEnabled` and `allowsBackForwardNavigationGestures` are not supported; failed

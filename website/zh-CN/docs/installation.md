@@ -1,13 +1,13 @@
 ---
 title: 安装
-description: 从预构建的发行包或源码仓库获取 nsh 命令，以及每个平台（iOS、Android、macOS、Windows 和 Linux）所需的工具。
+description: 从预构建的发行包或源码仓库获取 NSH 命令，以及每个平台（iOS、Android、macOS、Windows 和 Linux）所需的工具。
 order: 3
 group: start
 ---
 
 # 安装
 
-nsh 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、运行开发服务器、启动开发宿主、打包可安装的应用。你可以使用无需 Rust 的预构建发行包，也可以从仓库源码构建。
+NSH 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、运行开发服务器、启动开发宿主、打包可安装的应用。你可以使用无需 Rust 的预构建发行包，也可以从仓库源码构建。
 
 除了 `nsh` 本身，每个平台还需要自己的工具：
 
@@ -143,7 +143,7 @@ cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gp
 ### Android
 
 - **Android SDK**，通过 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或 Android Studio 的默认位置（`~/Library/Android/sdk`，Windows 上为 `%LOCALAPPDATA%\Android\Sdk`）查找，需包含：
-  - `platforms;android-35` 和较新的 `build-tools`（nsh 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）；
+  - `platforms;android-35` 和较新的 `build-tools`（NSH 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）；
   - `platform-tools`（`adb`）。
 - **JDK**（首次打包时 `keytool` 会在 `~/.android/debug.keystore` 创建调试密钥库，`apksigner` 也需要 Java）。
 - 一个正在运行的模拟器，或通过 `adb` 连接的设备。应用要求 Android 9（API 28）及以上。
@@ -196,7 +196,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 ## 编辑器配置
 
-nsh 无需 NPM。`nsh init` 会写入 `tsconfig.json`，并把 nsh 提供的所有内容的类型声明写入 `.nsh/types`，之后每个构建应用的命令都会让它们保持最新。任何使用 TypeScript 语言服务的编辑器（VS Code、Zed、Neovim、WebStorm）都能借此对应用做类型检查。参见 [项目结构](./project-structure.md)。
+NSH 无需 NPM。`nsh init` 会写入 `tsconfig.json`，并把 NSH 提供的所有内容的类型声明写入 `.nsh/types`，之后每个构建应用的命令都会让它们保持最新。任何使用 TypeScript 语言服务的编辑器（VS Code、Zed、Neovim、WebStorm）都能借此对应用做类型检查。参见 [项目结构](./project-structure.md)。
 
 ## 下一步
 

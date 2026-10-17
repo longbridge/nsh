@@ -59,7 +59,7 @@ dismissed when it becomes `false`, and it gives its content the modal's safe-are
 
 ## Controlled by default
 
-A modal is controlled: when the user swipes a sheet down or presses back, nsh asks with `onRequestClose` and the modal
+A modal is controlled: when the user swipes a sheet down or presses back, NSH asks with `onRequestClose` and the modal
 stays until you set `visible` to `false`. This lets you confirm before closing. Since the main thread never waits for
 JS, the decision cannot be made in the handler; `dismissible` tells the platform beforehand that it may close the
 modal by itself:

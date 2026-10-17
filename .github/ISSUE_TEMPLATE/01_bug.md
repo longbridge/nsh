@@ -11,7 +11,7 @@ Use English with a clear and concise description of the bug. If you just have a 
 
 ## Environment
 
-- nsh: [e.g., `nsh --version`, or the commit]
+- NSH: [e.g., `nsh --version`, or the commit]
 - Platform: [e.g., iOS 26 on iPhone 17 Pro, iOS simulator, Mac Catalyst, Android 16 on Pixel 9, Android emulator]
 - How it runs: [e.g., `nsh run`, `nsh package`, embedded in an app]
 

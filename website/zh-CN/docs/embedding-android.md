@@ -1,13 +1,13 @@
 ---
 title: Android
-description: 在 Android 上用 Android 视图运行 nsh 应用（模拟器或真机），打包成 .apk，并通过 nsh.aar 和 NshView 嵌入现有 Android 应用。
+description: 在 Android 上用 Android 视图运行 NSH 应用（模拟器或真机），打包成 .apk，并通过 nsh.aar 和 NshView 嵌入现有 Android 应用。
 order: 12
 group: platforms
 ---
 
 # Android
 
-nsh 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`
+NSH 应用在 Android 上用普通的 Android 视图和 `StaticLayout` 文本运行，要求 Android 9（API 28）及以上，支持 `arm64-v8a`
 和 `x86_64`。现有应用在 `NshView` 中嵌入模块，加载它下载的签名包，并按自己设定的限制和能力运行它们，这是主要用途。也可以运行和打包完整应用，方式与其他平台相同。在
 Android 上，`Platform.OS` 是 `"android"`，`android={{…}}` 属性生效。
 
@@ -23,7 +23,7 @@ Android 上，`Platform.OS` 是 `"android"`，`android={{…}}` 属性生效。
 nsh run my-app --target android
 ```
 
-先启动模拟器或连接设备（`adb devices` 会列出它们；nsh 使用第一个）。`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
+先启动模拟器或连接设备（`adb devices` 会列出它们；NSH 使用第一个）。`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过
 `adb reverse` 转发开发服务器的端口，因此通过 USB 即可工作，无需共享网络；你保存时应用会更新，日志显示在终端中。
 
 ## 打包
@@ -36,8 +36,8 @@ APK 用 SDK 的 build tools 构建，不需要 Gradle；除非传入发布用的
 
 ## 嵌入 Android 应用
 
-现有的 Android 应用可以在自己的界面中显示 nsh 应用。运行时以 Android 库 `nsh.aar` 的形式提供：创建一个
-`com.longbridge.nsh.NshView`（一个 `FrameLayout`），把它加到任意布局中，再往里加载一个应用即可。nsh 应用用普通的 Android
+现有的 Android 应用可以在自己的界面中显示 NSH 应用。运行时以 Android 库 `nsh.aar` 的形式提供：创建一个
+`com.longbridge.nsh.NshView`（一个 `FrameLayout`），把它加到任意布局中，再往里加载一个应用即可。NSH 应用用普通的 Android
 视图渲染，与你自己的视图并列。
 
 每个 `NshView` 都是一个独立的引擎，拥有自己的 JS VM；没有全局单例，所以可以同时运行多个。
@@ -71,7 +71,7 @@ dependencies {
 
 ## 随应用附带 bundle
 
-把 nsh 应用构建到应用的 assets 中：
+把 NSH 应用构建到应用的 assets 中：
 
 ```sh
 nsh build App.tsx --release --out app/src/main/assets/nsh
@@ -139,7 +139,7 @@ column.addView(nsh, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_P
 setContentView(column);
 ```
 
-视图的尺寸就是应用的窗口：nsh 按视图的尺寸布局应用，尺寸变化时重新布局。再次加载会替换正在运行的应用。完整示例见
+视图的尺寸就是应用的窗口：NSH 按视图的尺寸布局应用，尺寸变化时重新布局。再次加载会替换正在运行的应用。完整示例见
 `examples/embed-android/src/com/longbridge/nsh/embeddemo/MainActivity.java`。
 
 ## `NshView`
@@ -245,14 +245,14 @@ adb reverse tcp:8790 tcp:8790
   }
   ```
 
-  如需在 Android 13+ 上支持预测性返回，请像打包出的 nsh 应用那样，在 `<application>` 上设置
+  如需在 Android 13+ 上支持预测性返回，请像打包出的 NSH 应用那样，在 `<application>` 上设置
   `android:enableOnBackInvokedCallback="true"`。
 - **键盘。** `NshView` 会自行滚动，让获得焦点的输入框不被键盘遮挡。请不要设置 `android:windowSoftInputMode`，或使用
   `adjustResize`；若使用 `adjustPan`，系统会改为平移整个窗口。
 - **安全区域。** 视图只把与它重叠的系统栏和键盘部分作为 insets 上报，所以位于工具栏下方的 `NshView` 不会有顶部
   inset。如需全面屏（edge-to-edge）内容，请在系统栏后方绘制，并让应用使用 `SafeAreaView` / `useSafeAreaInsets()`。
 - **配置变更。** 旋转屏幕或切换主题时，Activity 被重建会销毁该视图，应用随之从头启动。若要让它保持运行，请声明由
-  Activity 自行处理的配置变更；打包出的 nsh 应用使用的是：
+  Activity 自行处理的配置变更；打包出的 NSH 应用使用的是：
 
   ```xml
   <activity android:name=".MainActivity"

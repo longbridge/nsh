@@ -123,7 +123,7 @@ Things that were found the hard way. Read the section of the area you change bef
   lights, the title is gone (or is the window's) and the header's colors do not apply. Stacks' bars (and the bar measuring
   the header height) set `preferredBehavioralStyle = .pad` (iOS 16+) to stay in the window, and standalone apps hide the
   window's title and toolbar (`UITitlebar`, which objc2 does not declare: `app.rs` sends its setters by name), so the title
-  bar is a transparent strip over the in-window header, like iOS's status bar; apps embedding nsh on Catalyst should hide
+  bar is a transparent strip over the in-window header, like iOS's status bar; apps embedding NSH on Catalyst should hide
   theirs the same way. The core's estimate of a header (the bar's height plus the safe area's top) can still miss what UIKit
   lays out, which showed the screen's root view in a band under the bar: screens report the top of their controller view's
   safe area (the bottom of whatever bar UIKit shows) as their header (`Core::set_screen_header`), and the stack's bar gets
@@ -207,7 +207,7 @@ Things that were found the hard way. Read the section of the area you change bef
   the web view.
 - **WebKitGTK's `decide-policy` does not say which frame a navigation is for** (`WebKitNavigationAction` has no main
   frame flag, and subframe navigations come through it too): a policy decided there applies to frames as well.
-- **GTK delivers pointer events by allocation**, ignoring nsh's clipping (`overflow: hidden` in `snapshot`), `hidden`
+- **GTK delivers pointer events by allocation**, ignoring NSH's clipping (`overflow: hidden` in `snapshot`), `hidden`
   and `pointerEvents`: a hosted widget (a web view's page) gets clicks and wheels outside what is drawn of it unless
   the root's capture controller stops them (`input.rs`'s `shields_page`).
 - **Tiling window managers ignore the host's `--size`** (the window's default size): scripted screenshots have the size
@@ -240,8 +240,8 @@ Things that were found the hard way. Read the section of the area you change bef
   `NSVisualEffectView` with within-window blending; it needs `wantsLayer` set when created, or it has no layer to order
   and clip until AppKit makes one.
 - `NSView.hitTest:` works on frames: it ignores layer transforms and hidden layers, and does not look into subviews
-  outside their superview's frame. The root's `hitTest:` lets nsh's own picking decide inside the surface
-  (`input.rs` `native_at`), or a hosted web view gets clicks on what nsh draws over it.
+  outside their superview's frame. The root's `hitTest:` lets NSH's own picking decide inside the surface
+  (`input.rs` `native_at`), or a hosted web view gets clicks on what NSH draws over it.
 - In `define_class!` methods, an early `return` of a `bool` or `Option<Retained<_>>` does not compile (the macro wraps
   the return type): write the body as one expression.
 - In-process screenshots (`cacheDisplayInRect:`, `renderInContext:`) ignore `maskedCorners`, `shadowPath`, Core Image
@@ -267,7 +267,7 @@ Things that were found the hard way. Read the section of the area you change bef
   `wait`s need slack.
 - **Child windows cover everything a window draws** (the "airspace" limit): web views are WebView2 composition
   controllers in the window's DirectComposition tree for this reason (`compose.rs`); native components that bring an
-  `HWND` of their own still cover nsh content. Offscreen screenshots (`--script`'s `shot`) have no web views:
+  `HWND` of their own still cover NSH content. Offscreen screenshots (`--script`'s `shot`) have no web views:
   `screen` captures them (`PrintWindow` with `PW_RENDERFULLCONTENT`).
 - **`IDCompositionVisual::AddVisual(visual, TRUE, NULL)` puts the visual below all its siblings**, not on top: to
   stack bottom to top, insert each one above the one added before it (`compose.rs`).

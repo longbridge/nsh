@@ -7,13 +7,13 @@ modals, the status bar, system dialogs, and its components, one look on every pl
 and does not exist yet.
 Shared vs one form factor decides the layer, not JS vs native.
 
-Every module is native: `nsh-js` serves it (`modules.rs`: nsh's own modules by `nsh_core::js::NATIVE_MODULES`, then the
+Every module is native: `nsh-js` serves it (`modules.rs`: NSH's own modules by `nsh_core::js::NATIVE_MODULES`, then the
 registries: the runtime's `nsh_core::runtime::registries()` and the UI sets a host serves), and the bundler keeps
 imports of them as imports (`plugin.rs`; how apps are compiled: `native-pipeline.md`). A module can be both: the
 hand-written exports of `nsh/android` and `nsh/accessibility` are joined by their registry's. There is no JS file of
-nsh's and no internal module apps could reach.
+NSH's and no internal module apps could reach.
 
-Declarations: each export of a module of nsh's own carries its TypeScript declaration in its table (`modules::Item`:
+Declarations: each export of a module of NSH's own carries its TypeScript declaration in its table (`modules::Item`:
 `signal`'s signatures next to `reactive::signal`), each module its own interfaces (`types`); a registry's components
 and modules are declared from their specs (`nsh_core::ui::declarations`, `docs/dev/components.md`), the styles, the
 host elements' props and events, the easings and the canvas methods from the core's tables. `nsh-js`'s
@@ -67,7 +67,7 @@ globals.
 
 ## Where new things go
 
-- A primitive or environment both UI sets need: a module of nsh's own (`nsh/<module>`), natives in `crates/nsh-js`
+- A primitive or environment both UI sets need: a module of NSH's own (`nsh/<module>`), natives in `crates/nsh-js`
   listed in `modules.rs` and `nsh_core::js::NATIVE_MODULES`, each export with its declaration (`Ts`) and the
   module's interfaces in its `types`. Functions that only ask the platform (a command, a request answered by an event)
   are a Rust `#[module]` in `crates/nsh-core/src/runtime/`, registered in `runtime::registries()` under the module's

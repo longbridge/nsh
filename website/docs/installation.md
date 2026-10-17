@@ -1,13 +1,13 @@
 ---
 title: Installation
-description: Get the nsh command, from a prebuilt distribution or a source checkout, and the tools each platform needs - iOS, Android, macOS, Windows and Linux.
+description: Get the NSH command, from a prebuilt distribution or a source checkout, and the tools each platform needs - iOS, Android, macOS, Windows and Linux.
 order: 3
 group: start
 ---
 
 # Installation
 
-Everything nsh does goes through one command, `nsh`. It bundles and compiles apps, runs the dev server, launches development hosts and packages installable apps. You can use it from a prebuilt distribution, which needs no Rust, or build it from a checkout of the repository.
+Everything NSH does goes through one command, `nsh`. It bundles and compiles apps, runs the dev server, launches development hosts and packages installable apps. You can use it from a prebuilt distribution, which needs no Rust, or build it from a checkout of the repository.
 
 On top of `nsh`, each platform needs its own tools:
 
@@ -142,7 +142,7 @@ A CLI built from a checkout looks for the runtimes in `target/<triple>/<profile>
 ### Android
 
 - **The Android SDK**, found through `ANDROID_HOME`, `ANDROID_SDK_ROOT` or Android Studio's default place (`~/Library/Android/sdk`, `%LOCALAPPDATA%\Android\Sdk` on Windows), with:
-  - `platforms;android-35` and a recent `build-tools` (nsh uses `aapt2`, `zipalign` and `apksigner` from it, no Gradle);
+  - `platforms;android-35` and a recent `build-tools` (NSH uses `aapt2`, `zipalign` and `apksigner` from it, no Gradle);
   - `platform-tools` (`adb`).
 - **A JDK** (`keytool` creates the debug keystore in `~/.android/debug.keystore` the first time you package, `apksigner` needs Java).
 - A running emulator or a device connected over `adb`. Apps need Android 9 (API 28) or later.
@@ -195,7 +195,7 @@ On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p
 
 ## Editor setup
 
-nsh needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything nsh provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
+NSH needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything NSH provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
 
 ## Next steps
 

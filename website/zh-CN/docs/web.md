@@ -1,6 +1,6 @@
 ---
 title: Web（WebAssembly）
-description: 用 WebAssembly 版运行时在浏览器里运行 nsh 应用，渲染到 DOM；本站的实时演示都由它驱动。
+description: 用 WebAssembly 版运行时在浏览器里运行 NSH 应用，渲染到 DOM；本站的实时演示都由它驱动。
 order: 16
 group: platforms
 demo: counter
@@ -8,7 +8,7 @@ demo: counter
 
 # Web（WebAssembly）
 
-nsh 运行时也能编译成 WebAssembly。同一个引擎跑在浏览器页面里，只是渲染目标从 UIKit 或 Android 视图换成了 DOM：核心、响应式图、渲染器、Taffy 布局、`nsh/ui/mobile` 组件，以及 QuickJS 本身，全都一样。本站每一个实时演示，都是 `nsh build` 打出的应用包运行在这个运行时上。
+NSH 运行时也能编译成 WebAssembly。同一个引擎跑在浏览器页面里，只是渲染目标从 UIKit 或 Android 视图换成了 DOM：核心、响应式图、渲染器、Taffy 布局、`nsh/ui/mobile` 组件，以及 QuickJS 本身，全都一样。本站每一个实时演示，都是 `nsh build` 打出的应用包运行在这个运行时上。
 
 ## 各部分在哪里运行
 
@@ -39,7 +39,7 @@ cargo xtask web --out target/play     # 输出到其他目录
 | 文件 | 内容 |
 |---|---|
 | `nsh.wasm` | 引擎、核心、移动端组件和 QuickJS（约 4.6 MB，gzip 后 1.5 MB） |
-| `nsh-playground.wasm` | 同上，另含 nsh 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
+| `nsh-playground.wasm` | 同上，另含 NSH 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
 | `nsh.js` | DOM 运行时：加载 `nsh.wasm`，应用批次，把输入转成事件 |
 | `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.js` |
 | `demos/<name>.js` | 用 `nsh build --release` 打包的各个演示 |
@@ -48,9 +48,9 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 ## 在线试用
 
-[在线试用](/zh-CN/playground)页面可以在浏览器里编辑并运行应用：页面用 nsh 自己的 JSX 编译器（编进 `nsh-playground.wasm`，不需要 rolldown）编译 TSX，每次停止输入后立即运行。本站每个演示都有「在线编辑」链接；「分享」会把代码直接放进链接里，不经过任何服务器存储。
+[在线试用](/zh-CN/playground)页面可以在浏览器里编辑并运行应用：页面用 NSH 自己的 JSX 编译器（编进 `nsh-playground.wasm`，不需要 rolldown）编译 TSX，每次停止输入后立即运行。本站每个演示都有「在线编辑」链接；「分享」会把代码直接放进链接里，不经过任何服务器存储。
 
-在线试用的应用只有一个模块：可以导入 nsh 的模块（`nsh`、`nsh/*`、`nsh/ui/mobile`），但不能导入其他文件或包。`console.log` 的输出和错误显示在手机下方。
+在线试用的应用只有一个模块：可以导入 NSH 的模块（`nsh`、`nsh/*`、`nsh/ui/mobile`），但不能导入其他文件或包。`console.log` 的输出和错误显示在手机下方。
 
 编译器也是一个 Rust 函数：`nsh_bundler::compile_module(name, source, ui_sets)`，不开启该 crate 的 `bundle` 特性也能使用。
 

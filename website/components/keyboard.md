@@ -48,7 +48,7 @@ mount(App);
 keyboard: Accessor<{ height: number; duration: number }>
 ```
 
-`keyboard()` returns the height of the software keyboard over the nsh surface, in points (0 while it is hidden), and
+`keyboard()` returns the height of the software keyboard over the NSH surface, in points (0 while it is hidden), and
 the duration of the keyboard's show or hide animation, in seconds. It is reactive: an effect or JSX expression that
 reads it runs again when the keyboard shows, hides or changes height.
 
@@ -73,8 +73,8 @@ function MessageBar() {
 }
 ```
 
-The height is the part of the keyboard that overlaps the nsh surface. When the window itself shrinks for the keyboard
-(an Android activity that resizes), or when nsh is embedded in a view that ends above the keyboard, the height is 0.
+The height is the part of the keyboard that overlaps the NSH surface. When the window itself shrinks for the keyboard
+(an Android activity that resizes), or when NSH is embedded in a view that ends above the keyboard, the height is 0.
 
 > [!NOTE]
 > To keep content above the keyboard, [KeyboardAvoidingView](./keyboard-avoiding-view.md) is usually simpler than

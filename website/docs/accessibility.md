@@ -7,7 +7,7 @@ group: ui
 
 # Accessibility
 
-nsh renders with native views, so the platforms' assistive technologies (VoiceOver on iOS and Mac Catalyst, TalkBack on Android, Switch Control, Voice Control, ...) see your app's real view hierarchy. What you add are the descriptions those technologies cannot infer: what an element is, what it says, what state it is in and what it can do. Every element accepts the props below.
+NSH renders with native views, so the platforms' assistive technologies (VoiceOver on iOS and Mac Catalyst, TalkBack on Android, Switch Control, Voice Control, ...) see your app's real view hierarchy. What you add are the descriptions those technologies cannot infer: what an element is, what it says, what state it is in and what it can do. Every element accepts the props below.
 
 ## What you get without doing anything
 
@@ -206,7 +206,7 @@ See [Device and environment](./device-and-environment.md#text-size).
 
 ## Reduced motion
 
-`reduceMotion()` is `true` when the user turned on iOS's Reduce Motion or Android's remove animations setting. nsh does not disable your animations by itself. Use it, or the `motion-reduce:` and `motion-safe:` Tailwind variants, to replace large movement with a fade or an instant change:
+`reduceMotion()` is `true` when the user turned on iOS's Reduce Motion or Android's remove animations setting. NSH does not disable your animations by itself. Use it, or the `motion-reduce:` and `motion-safe:` Tailwind variants, to replace large movement with a fade or an instant change:
 
 ```tsx
 import { View } from "nsh";

@@ -81,7 +81,7 @@ StatusBar.setHidden(false);
 
 ## 平台说明
 
-- **iOS**：隐藏和显示以淡入淡出呈现，`"slide"` 同样是淡入淡出。在[嵌入](../docs/embedding-ios.md)原生应用的场景下，状态栏的外观由宿主应用的视图控制器决定。宿主可以在其视图控制器中返回 `NshAppView.preferredStatusBarStyle`、`NshAppView.prefersStatusBarHidden` 和 `NshAppView.preferredStatusBarUpdateAnimation`，以应用 nsh 的设置。
+- **iOS**：隐藏和显示以淡入淡出呈现，`"slide"` 同样是淡入淡出。在[嵌入](../docs/embedding-ios.md)原生应用的场景下，状态栏的外观由宿主应用的视图控制器决定。宿主可以在其视图控制器中返回 `NshAppView.preferredStatusBarStyle`、`NshAppView.prefersStatusBarHidden` 和 `NshAppView.preferredStatusBarUpdateAnimation`，以应用 NSH 的设置。
 - **Android**：`android={{ backgroundColor }}` 为状态栏着色。它只在 edge-to-edge 之前生效（Android 15，即 API 35 起，应用会绘制到状态栏之下）。
 - **Mac Catalyst** 没有状态栏。
 

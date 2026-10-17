@@ -7,7 +7,7 @@ order: 9
 # WebView
 
 A web view shows a web page, or HTML you pass in, inside the app: WKWebView on iOS and Mac Catalyst,
-`android.webkit.WebView` on Android. Because nsh renders with native views, a web view sits in the layout like any other
+`android.webkit.WebView` on Android. Because NSH renders with native views, a web view sits in the layout like any other
 view: no overlay, no layering problems with views around it.
 
 ```tsx

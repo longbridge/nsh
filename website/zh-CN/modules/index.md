@@ -1,12 +1,12 @@
 ---
 title: 模块
-description: nsh 应用可以导入的模块、各模块导出的内容以及它们的组织方式。
+description: NSH 应用可以导入的模块、各模块导出的内容以及它们的组织方式。
 order: 1
 ---
 
 # 模块
 
-nsh 应用用到的一切都从一小组模块导入。这些模块全部是原生的：响应式图、渲染器和每个模块都在运行时内部用 Rust 实现，打包器会把 `import ... from "nsh/..."` 原样保留为导入，而不会把代码复制进你的 bundle。你的 bundle 里只有你自己的代码。
+NSH 应用用到的一切都从一小组模块导入。这些模块全部是原生的：响应式图、渲染器和每个模块都在运行时内部用 Rust 实现，打包器会把 `import ... from "nsh/..."` 原样保留为导入，而不会把代码复制进你的 bundle。你的 bundle 里只有你自己的代码。
 
 ```tsx
 import { mount, signal } from "nsh";
@@ -20,7 +20,7 @@ import { Button, SafeAreaView } from "nsh/ui/mobile";
 - **`nsh` 和 `nsh/<module>`** 是基础能力和运行环境：响应式、列表、画布、动画、手势、设备信息。所有 UI 套件都构建在它们之上。
 - **`nsh/ui/<set>`** 是面向某一种设备形态的完整 UI。目前只有 `nsh/ui/mobile`：导航、模态框、状态栏、系统对话框，以及 `Button`、`TextField` 等组件（见[组件](../components/index.md)）。
 
-nsh 没有“大而全”的汇总模块：每个 API 只存在于一个地方。平台专有的 API 位于 `nsh/ios`、`nsh/android` 和 `nsh/desktop`（macOS、Windows、Linux）；这些模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行（在其他平台上调用它们什么也不做，`isAvailable` 告诉你当前是否在该平台上）。
+NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方。平台专有的 API 位于 `nsh/ios`、`nsh/android` 和 `nsh/desktop`（macOS、Windows、Linux）；这些模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行（在其他平台上调用它们什么也不做，`isAvailable` 告诉你当前是否在该平台上）。
 
 类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh trace` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
 

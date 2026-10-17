@@ -1,6 +1,6 @@
 ---
 title: Native Components
-description: Use views of the host app (maps, players, any UIView or Android View) inside a nsh app, with props, events, commands and sizing.
+description: Use views of the host app (maps, players, any UIView or Android View) inside an NSH app, with props, events, commands and sizing.
 order: 18
 group: platforms
 ---
@@ -9,15 +9,15 @@ group: platforms
 
 A native component is a view the **embedding app** registers by name: a map, a camera preview, a chart library, any
 `UIView` on iOS, `android.view.View` on Android, `NSView` on macOS, `gtk::Widget` on Linux, or Direct2D drawing or a
-child `HWND` on Windows. The nsh app declares it with `nativeComponent()` from
-[`nsh/native`](../modules/nsh-native.md) and uses it like any other component. nsh lays it out with the rest of the
+child `HWND` on Windows. The NSH app declares it with `nativeComponent()` from
+[`nsh/native`](../modules/nsh-native.md) and uses it like any other component. NSH lays it out with the rest of the
 app, sends it props, delivers its events to handlers and forwards commands from a `ref`.
 
-Because nsh renders with the system's own views, a native component is just one more subview in the same hierarchy:
+Because NSH renders with the system's own views, a native component is just one more subview in the same hierarchy:
 there is no layering problem, it clips, scrolls and receives touches like a `<View>`.
 
 > [!NOTE]
-> Native components exist only where an app embeds nsh ([iOS](./embedding-ios.md), [Android](./embedding-android.md),
+> Native components exist only where an app embeds NSH ([iOS](./embedding-ios.md), [Android](./embedding-android.md),
 > [macOS](./macos.md#embedding-in-a-mac-app), [Linux](./linux.md#embedding-in-a-gtk-app),
 > [Windows](./windows.md#embedding-in-a-win32-app)).
 > A packaged standalone app (`nsh package`) or a development host registers none, so the element renders an empty
@@ -27,8 +27,8 @@ there is no layering problem, it clips, scrolls and receives touches like a `<Vi
 
 1. The host app registers a factory under a name, such as `"embed.badge"`, on its `NshAppView` (iOS) or `NshView`
    (Android). Each view has its own registry; there is nothing global.
-2. The nsh app declares a component for that name with the props and events it uses.
-3. When the element is created, nsh creates a container view (decorated, framed and hit-tested like any view), then
+2. The NSH app declares a component for that name with the props and events it uses.
+3. When the element is created, NSH creates a container view (decorated, framed and hit-tested like any view), then
    asks the factory for a component and puts the component's view inside the container, filling it.
 4. The component receives every prop right after it is made, then each prop again when it changes.
 5. The component emits events and may report its own size; JS calls its commands through a `ref`.
@@ -95,7 +95,7 @@ The type parameters describe the props (`P`) and the payload of each event (`E`)
 - a handler per event: event `tap` is handled by `onTap`, `regionChange` by `onRegionChange` (the first letter is
   capitalized and `on` prepended);
 - everything a `<View>` takes except children: `style`, `class` / `classList` ([Tailwind](./tailwind.md)), layout,
-  accessibility props, `testID`, `onLayout`, `ref`. These belong to the container nsh draws, not to the component.
+  accessibility props, `testID`, `onLayout`, `ref`. These belong to the container NSH draws, not to the component.
 
 A native component is a leaf: it takes no children.
 
@@ -115,7 +115,7 @@ Values that are not JSON (functions, class instances, `NativeValue`s) cannot cro
 
 ## Events
 
-The component emits an event by name with an optional JSON payload. nsh delivers it to the engine thread and calls the
+The component emits an event by name with an optional JSON payload. NSH delivers it to the engine thread and calls the
 matching handler with the payload:
 
 ```tsx
@@ -389,7 +389,7 @@ fn register(app: &AppView, mtm: MainThreadMarker) {
 }
 ```
 
-The view fills the container nsh lays out; `ComponentContext::emit` and `set_size` (points) work from any thread, as
+The view fills the container NSH lays out; `ComponentContext::emit` and `set_size` (points) work from any thread, as
 on iOS. Register before `AppView::load`; a registry belongs to one `AppView` (and the views made from the same
 `AppOptions`).
 
@@ -436,13 +436,13 @@ fn register(app: &AppView) {
 }
 ```
 
-The widget fills the container nsh lays out; `ComponentContext::emit` and `set_size` (points) work from any thread,
+The widget fills the container NSH lays out; `ComponentContext::emit` and `set_size` (points) work from any thread,
 as on iOS. Register before `AppView::load`. A registry belongs to one `AppView` (and the views made from the same
 `AppOptions`, whose `components` field it is).
 
 ## Registering on Windows (Rust)
 
-On Windows nsh draws every view itself with Direct2D, so a component either draws into its container with Direct2D
+On Windows NSH draws every view itself with Direct2D, so a component either draws into its container with Direct2D
 (`draw`) or brings a window of its own (`window`: a map control, a third-party view), registered on the
 [`AppView`](./windows.md#embedding-in-a-win32-app) of `nsh-platform-windows`:
 
@@ -505,7 +505,7 @@ fn register(app: &AppView) {
 `draw` runs with every frame of the window, in the view's coordinates (points), clipped to its bounds; call
 `ComponentContext::redraw` when what it shows changes. A drawn component is covered, clipped and transformed like any
 view, and its container gets the touches. A component that returns a child window from `window` is moved, clipped and
-hidden with its view, receives its own input, and sits above everything nsh draws (nsh content over it is hidden, as
+hidden with its view, receives its own input, and sits above everything NSH draws (NSH content over it is hidden, as
 with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work from any thread. Register before
 `AppView::load`; a registry belongs to one `AppView` (and the views made from the same `AppOptions`).
 
@@ -514,7 +514,7 @@ with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work
 - **Register before loading.** Factories apply to elements created after the registration. Register every name before
   `loadBundle` / `loadAssetBundle` / `run`, so the first frame finds them.
 - **The container owns decoration and touches.** Background, borders, corner radius, shadows, opacity, transforms and
-  `overflow: "hidden"` apply to the container nsh draws. Your view fills it and receives the touches that land inside.
+  `overflow: "hidden"` apply to the container NSH draws. Your view fills it and receives the touches that land inside.
 - **Capabilities do not apply.** A registered component is the host app's own code; the
   [capabilities](./sandbox-and-capabilities.md) an app declares do not restrict what it does. If you embed apps you
   do not trust, only register components that are safe for them to use.

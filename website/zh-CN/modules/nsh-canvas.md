@@ -1,6 +1,6 @@
 ---
 title: nsh/canvas
-description: Canvas、2D 绘图上下文、Path2D 与渐变，以及 nsh 支持的 HTML Canvas 2D 子集。
+description: Canvas、2D 绘图上下文、Path2D 与渐变，以及 NSH 支持的 HTML Canvas 2D 子集。
 order: 5
 demo: mod-canvas
 ---

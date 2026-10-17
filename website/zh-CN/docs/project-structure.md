@@ -1,13 +1,13 @@
 ---
 title: 项目结构
-description: nsh 应用包含的文件、nsh.json 的每个键、.nsh/types 中的 TypeScript 配置、资源，以及模块和包的导入方式。
+description: NSH 应用包含的文件、nsh.json 的每个键、.nsh/types 中的 TypeScript 配置、资源，以及模块和包的导入方式。
 order: 5
 group: start
 ---
 
 # 项目结构
 
-一个 nsh 应用就是一个目录，包含一个入口模块和一个可选的 `nsh.json`。其他一切（更多模块、图片、字体、JSON 文件）都通过跟随入口的导入找到，因此不需要维护文件清单。
+一个 NSH 应用就是一个目录，包含一个入口模块和一个可选的 `nsh.json`。其他一切（更多模块、图片、字体、JSON 文件）都通过跟随入口的导入找到，因此不需要维护文件清单。
 
 ```text
 my-app/
@@ -102,11 +102,11 @@ nsh.json: tailwind: unknown theme key `colours`
 }
 ```
 
-`network` 涵盖 `fetch`、远程图片和视频源；本地资源始终允许访问。嵌入 nsh 的应用可以授予比应用声明更少的权限。详情见 [沙箱与权限](./sandbox-and-capabilities.md)。
+`network` 涵盖 `fetch`、远程图片和视频源；本地资源始终允许访问。嵌入 NSH 的应用可以授予比应用声明更少的权限。详情见 [沙箱与权限](./sandbox-and-capabilities.md)。
 
 ## tsconfig.json 与 .nsh/types
 
-nsh 不需要 `node_modules`。取而代之的是，每个构建应用的命令（`init`、`build`、`trace`、`dev`、`run`、`package`、`publish`）都会把 nsh 提供的所有内容的 TypeScript 声明写入 `.nsh/types`，并由 `tsconfig.json` 把 `nsh` 的导入指向那里：
+NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令（`init`、`build`、`trace`、`dev`、`run`、`package`、`publish`）都会把 NSH 提供的所有内容的 TypeScript 声明写入 `.nsh/types`，并由 `tsconfig.json` 把 `nsh` 的导入指向那里：
 
 ```json
 {
@@ -143,7 +143,7 @@ nsh 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 
 `lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。这些文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交；`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh trace App.tsx`。
 
-`jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，nsh 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）；`nsh` 只剥离类型，不做检查。
+`jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，NSH 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）；`nsh` 只剥离类型，不做检查。
 
 ## 模块
 
@@ -157,7 +157,7 @@ import strings from "./strings.json";
 
 它们都会被打包进同一个脚本。JSON 文件导入后就是解析后的值。
 
-### nsh 的模块
+### NSH 的模块
 
 对 `nsh` 和 `nsh/...` 的导入不会被打包：运行时以原生方式提供它们。
 
@@ -176,11 +176,11 @@ import strings from "./strings.json";
 | `nsh/native` | 嵌入应用注册的组件 |
 | `nsh/ios`, `nsh/android` | 平台专属 API |
 
-[模块参考](../modules/index.md) 逐一介绍了它们。导入 nsh 没有的模块（`nsh/foo`）会导致构建错误。
+[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。
 
 ### npm 包
 
-nsh 本身不依赖 npm 上的任何东西，但如果你用包管理器安装了包，打包器会从 `node_modules` 目录解析裸导入。包会解析到它们的浏览器版本，因为运行时提供的是 Web API（`fetch`、streams、`URL`、`TextEncoder` 等），而不是 Node 的 API（`fs`、`Buffer`、`process`）。依赖 DOM 的包无法工作：这里没有 DOM。
+NSH 本身不依赖 npm 上的任何东西，但如果你用包管理器安装了包，打包器会从 `node_modules` 目录解析裸导入。包会解析到它们的浏览器版本，因为运行时提供的是 Web API（`fetch`、streams、`URL`、`TextEncoder` 等），而不是 Node 的 API（`fs`、`Buffer`、`process`）。依赖 DOM 的包无法工作：这里没有 DOM。
 
 `solid-js` 不能被导入：打包器会拒绝它，并提示改用 `nsh` 自己的 `signal`、`computed` 和 `effect`，它们取代了 Solid。
 

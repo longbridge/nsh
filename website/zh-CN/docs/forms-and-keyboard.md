@@ -8,7 +8,7 @@ demo: guide-forms
 
 # 表单与键盘
 
-文本输入使用 `<Input>` 元素：iOS 上是 UITextField 或 UITextView，Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理；应用通过事件拿到文本，也可以控制文本。nsh 还会自动让获得焦点的输入框保持在软键盘上方，并把键盘高度作为响应式的值提供给你，用于它自己处理不了的情况。
+文本输入使用 `<Input>` 元素：iOS 上是 UITextField 或 UITextView，Android 上是 EditText。输入、光标、选区、自动更正和自动填充都由平台自己处理；应用通过事件拿到文本，也可以控制文本。NSH 还会自动让获得焦点的输入框保持在软键盘上方，并把键盘高度作为响应式的值提供给你，用于它自己处理不了的情况。
 
 如果需要符合移动端 UI 套件外观、带标签和清除按钮的输入框，见 [`TextField`](../components/text-field.md)。本页介绍底层的元素。
 
@@ -158,7 +158,7 @@ mount(SignIn);
 
 第一个字段上的 `blurOnSubmit={false}` 让键盘在焦点切换时保持弹出，不会先收起再弹起。按回车发送并保持焦点的聊天输入框使用 `submitBehavior="submit"`（见[下面](#滚动视图之外的内容keyboardavoidingview)的输入栏）。
 
-`maxLength` 和 `submitBehavior` 都在原生端执行：用户输入时，平台会询问"能否再加这个字符？"和"回车是否结束编辑？"，nsh 根据属性直接回答，不等待 JS。
+`maxLength` 和 `submitBehavior` 都在原生端执行：用户输入时，平台会询问"能否再加这个字符？"和"回车是否结束编辑？"，NSH 根据属性直接回答，不等待 JS。
 
 ## 从代码控制焦点
 
@@ -219,7 +219,7 @@ const height = signal(0);
 
 ### 滚动视图内：自动处理
 
-当键盘弹出、而获得焦点的输入框位于 `<Scroll>` 或 `List` 中时，nsh 会给滚动视图加上与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，不需要任何代码。长表单就是一个装满输入框的滚动视图：
+当键盘弹出、而获得焦点的输入框位于 `<Scroll>` 或 `List` 中时，NSH 会给滚动视图加上与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，不需要任何代码。长表单就是一个装满输入框的滚动视图：
 
 ```tsx
 <Scroll style={{ flex: 1 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">

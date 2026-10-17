@@ -7,7 +7,7 @@ group: platforms
 
 # Platform-specific code
 
-One nsh bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst). Most of an app needs no platform checks at all: elements, styles, layout, components and modules behave the same everywhere, and the components of `nsh/ui/mobile` are drawn by nsh rather than borrowed from each platform, so they look the same everywhere. When something really is specific to one platform, nsh gives it a clear place, so platform code stays visible and contained:
+One NSH bundle runs on iOS, Android, macOS, Windows and Linux (and in Mac Catalyst). Most of an app needs no platform checks at all: elements, styles, layout, components and modules behave the same everywhere, and the components of `nsh/ui/mobile` are drawn by NSH rather than borrowed from each platform, so they look the same everywhere. When something really is specific to one platform, NSH gives it a clear place, so platform code stays visible and contained:
 
 | Where | For |
 |---|---|

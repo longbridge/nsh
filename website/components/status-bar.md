@@ -88,7 +88,7 @@ has no events.
 
 - **iOS**: hiding and showing animate with a fade; `"slide"` also fades. In an app
   [embedded](../docs/embedding-ios.md) in a native one, the host app's view controller decides how the status bar
-  looks. The host applies nsh's setting by returning `NshAppView.preferredStatusBarStyle`,
+  looks. The host applies NSH's setting by returning `NshAppView.preferredStatusBarStyle`,
   `NshAppView.prefersStatusBarHidden` and `NshAppView.preferredStatusBarUpdateAnimation` from its view controller.
 - **Android**: `android={{ backgroundColor }}` colors the bar. It only applies before edge-to-edge (Android 15, API 35,
   draws apps behind the status bar).

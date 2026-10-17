@@ -1,15 +1,15 @@
 ---
 title: Platform overview
-description: "Where nsh runs: iOS, Android, macOS, Windows, Linux, GPUI and the web, each with its own backend; how to run, package and embed on each, and what each needs."
+description: "Where NSH runs: iOS, Android, macOS, Windows, Linux, GPUI and the web, each with its own backend; how to run, package and embed on each, and what each needs."
 order: 10
 group: platforms
 ---
 
 # Platform overview
 
-nsh runs on phones, desktops and the web: iOS, Android, macOS, Windows, Linux, GPUI and web pages. Each has a backend of its own that draws with the platform's own UI, so a module is UIKit views on an iPhone, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: QuickJS, the reactive graph, the renderer, Taffy layout and the components are the same Rust code everywhere, so one bundle runs on all of them.
+NSH runs on phones, desktops and the web: iOS, Android, macOS, Windows, Linux, GPUI and web pages. Each has a backend of its own that draws with the platform's own UI, so a module is UIKit views on an iPhone, AppKit views on a Mac, GTK 4 widgets on Linux, GPUI elements in a GPUI app and HTML in a browser, with the platform's text, input, accessibility and dark mode. Everything above the backend is shared: QuickJS, the reactive graph, the renderer, Taffy layout and the components are the same Rust code everywhere, so one bundle runs on all of them.
 
-On every platform, nsh's main use is the same: modules embedded in a native app of your own, which loads them at run time. You develop them with hot reload (`nsh run`), and the same modules can also be packaged as an installable app (`nsh package`), a supported second use.
+On every platform, NSH's main use is the same: modules embedded in a native app of your own, which loads them at run time. You develop them with hot reload (`nsh run`), and the same modules can also be packaged as an installable app (`nsh package`), a supported second use.
 
 ## At a glance
 
@@ -53,17 +53,17 @@ Desktop backends build for the machine they run on: package a Mac app on a Mac, 
 Each view is one engine with its own VM, and an app can show several. The host registers its own native views for modules to use on every platform ([Native components](./native-components.md)).
 
 > [!NOTE]
-> Desktop hosts embed nsh with Rust crates from the nsh repository; their `AppView` loads bundles from the app's own files (or source code), with the default limits. The iOS and Android SDKs also load [signed packages](./signed-packages.md) with `NshTrust` and set limits and capabilities per view ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
+> Desktop hosts embed NSH with Rust crates from the NSH repository; their `AppView` loads bundles from the app's own files (or source code), with the default limits. The iOS and Android SDKs also load [signed packages](./signed-packages.md) with `NshTrust` and set limits and capabilities per view ([Sandbox and capabilities](./sandbox-and-capabilities.md)).
 
 ## Writing for every platform
 
-Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, nsh gives the difference one place ([Platform-specific code](./platform-specific.md)):
+Most of an app needs no platform checks: elements, styles, layout and modules behave the same everywhere. Where platforms differ, NSH gives the difference one place ([Platform-specific code](./platform-specific.md)):
 
 - **Platform-only props** go in `ios={{…}}`, `android={{…}}`, `web={{…}}` or `desktop={{…}}` (macOS, Windows, Linux and desktop browsers).
 - **`Platform.select`** takes a value per OS, or for `mobile` and `desktop` as a whole; `Platform.OS` is `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"`.
 - **Input follows the platform.** Phones get touches and the software keyboard; desktops get the mouse, the trackpad and the keyboard.
 
-The components of [`nsh/ui/mobile`](../components/index.md) are drawn by nsh, so they also run on desktops, looking as they do on phones. A desktop layout is built from the primitives (`View`, `Text`, `Scroll`, `List`, …) and `Platform.select({ desktop: … })`, as the gallery's desktop layout is; a desktop UI set is on the way.
+The components of [`nsh/ui/mobile`](../components/index.md) are drawn by NSH, so they also run on desktops, looking as they do on phones. A desktop layout is built from the primitives (`View`, `Text`, `Scroll`, `List`, …) and `Platform.select({ desktop: … })`, as the gallery's desktop layout is; a desktop UI set is on the way.
 
 Each backend lists what it does not support yet: [macOS](./macos.md#what-differs-on-macos), [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux), [GPUI](./gpui.md#differences).
 

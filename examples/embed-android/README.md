@@ -1,11 +1,11 @@
-# Embedding nsh in an Android app
+# Embedding NSH in an Android app
 
-`MainActivity.java` is an existing Android app that shows a nsh app below
+`MainActivity.java` is an existing Android app that shows a NSH app below
 its own native views.
 
 1. Add `dist/nsh/embed/android/nsh.aar` (or `nsh-dev.aar` for development
    builds) to the app, e.g. in Gradle: `implementation(files("libs/nsh.aar"))`.
-2. Build the nsh bundle into the app's assets:
+2. Build the NSH bundle into the app's assets:
    `nsh build ../embedded --release --out app/src/main/assets/nsh`.
 3. Create a `com.longbridge.nsh.NshView`, add it to a layout and call
    `loadAssetBundle("nsh")`. Call `destroy()` when the activity goes away.

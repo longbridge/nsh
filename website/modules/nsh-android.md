@@ -77,7 +77,7 @@ function Editor() {
 ```
 
 > [!NOTE]
-> The listener runs after the system has delivered the press: the main thread never waits for JS. While at least one listener is registered, nsh takes back presses that modals and stacks leave, and exits the app itself when no listener returns `true`.
+> The listener runs after the system has delivered the press: the main thread never waits for JS. While at least one listener is registered, NSH takes back presses that modals and stacks leave, and exits the app itself when no listener returns `true`.
 
 ## setStatusBarBackgroundColor
 

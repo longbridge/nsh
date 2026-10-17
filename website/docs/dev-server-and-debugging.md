@@ -7,7 +7,7 @@ group: tools
 
 # Dev Server and Debugging
 
-During development, nsh builds your app on every save and pushes it to every connected host, which updates in place.
+During development, NSH builds your app on every save and pushes it to every connected host, which updates in place.
 Two commands do this:
 
 - `nsh run` starts the dev server **and** launches a development host: a Mac Catalyst or AppKit window, a GTK window on
@@ -54,7 +54,7 @@ What each target does:
 When `nsh run` ends, however it ends, it stops the host it started: it quits the Catalyst app or closes the macOS, Linux or Windows host, terminates the
 development host in the simulator, or force-stops it on the device.
 
-The hosts are generic: they run any nsh app the server sends, so there is nothing to build per app.
+The hosts are generic: they run any NSH app the server sends, so there is nothing to build per app.
 
 ## `nsh dev`
 
@@ -91,7 +91,7 @@ installs the app's host.
 
 ## Hot module replacement
 
-Development builds keep one module per source file. When you save, nsh rebuilds, compares the modules with the last
+Development builds keep one module per source file. When you save, NSH rebuilds, compares the modules with the last
 good build and sends a **patch** with only the modules that changed. The host applies it in place in well under a
 millisecond; from saving a file to seeing the change takes roughly 120 ms.
 
@@ -119,7 +119,7 @@ What happens to your app:
 
 The host **reloads the whole app** instead of patching when:
 
-- the change imports an nsh module the running app did not import yet (for example the first `import … from "nsh/list"`);
+- the change imports an NSH module the running app did not import yet (for example the first `import … from "nsh/list"`);
 - the app's `capabilities` in `nsh.json` changed;
 - the host is not running the build the patch is based on (it just connected, or a previous load failed);
 - a patch cannot be applied.
@@ -152,7 +152,7 @@ objects and arrays as JSON. When the host is not connected, logs go to the platf
 unified log on iOS, `adb logcat` on Android).
 
 The rest of the terminal is one line per step (`✓` done, `→` where to connect, `•` what a device did); the output of
-the tools nsh runs (cargo, the hosts themselves) is only printed when one fails. `nsh run -v` (or `NSH_VERBOSE=1`)
+the tools NSH runs (cargo, the hosts themselves) is only printed when one fails. `nsh run -v` (or `NSH_VERBOSE=1`)
 prints everything: every log line with its level and source, cargo's output and the hosts' own.
 
 `--trace` adds the cost of every commit:

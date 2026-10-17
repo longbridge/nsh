@@ -1,13 +1,13 @@
 ---
 title: 元素
-description: 构成每个 nsh 应用的宿主元素，以及它们共有的属性、事件和 ref 方法。
+description: 构成每个 NSH 应用的宿主元素，以及它们共有的属性、事件和 ref 方法。
 order: 1
 ---
 
 # 元素
 
-宿主元素是构成每个界面的原语：`<View>`、`<Text>`、`<Image>` 等，从 nsh 的模块导入。每个元素都对应一个原生视图（iOS 和 Mac Catalyst 上是
-UIView 子类，Android 上是 `View`），由 nsh 运行时创建并布局。应用显示的一切都由它们组成：
+宿主元素是构成每个界面的原语：`<View>`、`<Text>`、`<Image>` 等，从 NSH 的模块导入。每个元素都对应一个原生视图（iOS 和 Mac Catalyst 上是
+UIView 子类，Android 上是 `View`），由 NSH 运行时创建并布局。应用显示的一切都由它们组成：
 [`nsh/ui/mobile`](../components/index.md) 的组件同样是用这些元素绘制的。
 
 ```tsx
@@ -213,4 +213,4 @@ let input!: YNode;
 
 ## 为什么处理函数不会阻塞 UI
 
-主线程从不等待 JS。当系统需要立即得到答复时（这段文本能否修改、返回键能否返回上一页、这个 sheet 能否关闭），nsh 会根据事先设置好的属性（`maxLength`、`preventBack`、`dismissible`、`pointerEvents` 等）在原生侧作答，事件随后才送达 JS。正因如此，这类行为都是属性，而不是处理函数的返回值。
+主线程从不等待 JS。当系统需要立即得到答复时（这段文本能否修改、返回键能否返回上一页、这个 sheet 能否关闭），NSH 会根据事先设置好的属性（`maxLength`、`preventBack`、`dismissible`、`pointerEvents` 等）在原生侧作答，事件随后才送达 JS。正因如此，这类行为都是属性，而不是处理函数的返回值。

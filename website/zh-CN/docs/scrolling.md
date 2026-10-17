@@ -241,7 +241,7 @@ const reload = async () => {
 <Scroll style={{ flex: 1 }} refreshing={refreshing()} onRefresh={reload}>…</Scroll>
 ```
 
-iOS 上的控件是 UIRefreshControl；Mac Catalyst 的 Mac 界面风格没有 UIRefreshControl，nsh 会显示自己的加载指示器，行为相同。`List` 也接受这两个属性。
+iOS 上的控件是 UIRefreshControl；Mac Catalyst 的 Mac 界面风格没有 UIRefreshControl，NSH 会显示自己的加载指示器，行为相同。`List` 也接受这两个属性。
 
 ## 缩放
 
@@ -286,7 +286,7 @@ function Photo() {
 mount(Photo);
 ```
 
-在 iOS 上，缩放结束后，缩放视图里的文字和画布会按新的分辨率重新绘制，保持清晰。Android 没有自带可缩放的滚动视图：nsh 会把滚动视图切换为自己的实现，围绕捏合焦点缩放，支持任意手指数平移、惯性滑动，并在边缘和缩放极限处产生橡皮筋效果。与系统的手势检测一致，Android 要等两指间距达到约 27 mm 才开始捏合。
+在 iOS 上，缩放结束后，缩放视图里的文字和画布会按新的分辨率重新绘制，保持清晰。Android 没有自带可缩放的滚动视图：NSH 会把滚动视图切换为自己的实现，围绕捏合焦点缩放，支持任意手指数平移、惯性滑动，并在边缘和缩放极限处产生橡皮筋效果。与系统的手势检测一致，Android 要等两指间距达到约 27 mm 才开始捏合。
 
 ## 从代码滚动
 
@@ -308,7 +308,7 @@ let scroll!: YNode;
 
 ## 滚动视图与键盘
 
-nsh 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。只有滚动视图之外的内容（例如固定在底部的消息栏）才需要 [`KeyboardAvoidingView`](./forms-and-keyboard.md#滚动视图之外的内容keyboardavoidingview)。
+NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入框所在的滚动视图会得到与键盘等高的底部 inset，并把输入框滚动到可见位置。这是原生完成的，应用中不需要任何代码。只有滚动视图之外的内容（例如固定在底部的消息栏）才需要 [`KeyboardAvoidingView`](./forms-and-keyboard.md#滚动视图之外的内容keyboardavoidingview)。
 
 有两个属性决定滚动和点击如何与键盘交互：
 

@@ -134,9 +134,9 @@ changes; their children are mirrored.
 
 ## Platform notes
 
-- Android: pull to refresh is drawn by nsh (overscroll stays native), `contentInset` is applied as padding, and
+- Android: pull to refresh is drawn by NSH (overscroll stays native), `contentInset` is applied as padding, and
   `decelerationRate` only shapes snapping glides.
-- Android has no zooming scroll view: nsh switches to its own, which scales the content around its top left and scrolls
+- Android has no zooming scroll view: NSH switches to its own, which scales the content around its top left and scrolls
   both ways. Pinches start after Android's minimum span between the fingers (about 27 mm).
-- Mac Catalyst (Mac idiom) has no system refresh control; nsh detects the pull and shows a spinner.
+- Mac Catalyst (Mac idiom) has no system refresh control; NSH detects the pull and shows a spinner.
 - iOS redraws texts and canvases at the zoomed resolution when a zoom ends.

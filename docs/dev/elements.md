@@ -42,7 +42,7 @@ in one of them.
 
 ## Primitives only
 
-nsh's runtime provides the basic capabilities. Components are the UI sets' (Rust, `crates/nsh-ui-mobile`,
+NSH's runtime provides the basic capabilities. Components are the UI sets' (Rust, `crates/nsh-ui-mobile`,
 `docs/dev/components.md`), drawn with views, classes, canvases and native animations so they look the same on every platform. Do not
 add platform-styled widgets (UISwitch / SeekBar wrappers and the like), and do not add compositions of existing
 primitives to the runtime (section lists, touchables, drawers, ...): they belong to a UI set. React Native is a

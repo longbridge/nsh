@@ -7,16 +7,16 @@ group: start
 
 # 简介
 
-Native Shell（简称 nsh）是为**由 AI 生成、动态下发的原生界面**而设计的。模型用 TSX 写出一个小模块，原生应用在运行时加载它，用平台自己的原生界面显示，并运行在应用掌控的沙箱里。同一套机制也让原生应用整体具备扩展能力——插件、功能、整个页面都可以在发布之后下发。
+Native Shell（简称 NSH）是为**由 AI 生成、动态下发的原生界面**而设计的。模型用 TSX 写出一个小模块，原生应用在运行时加载它，用平台自己的原生界面显示，并运行在应用掌控的沙箱里。同一套机制也让原生应用整体具备扩展能力——插件、功能、整个页面都可以在发布之后下发。
 
-nsh 同时运行在手机和桌面上：iOS（UIKit）、Android（Android 视图）、macOS（AppKit）、Windows（用 Direct2D 绘制的 Win32 窗口）和 Linux（GTK 4）。每个平台都有自己的原生后端，同一个模块可以在所有这些平台上运行（[平台](./platforms.md)）。
+NSH 同时运行在手机和桌面上：iOS（UIKit）、Android（Android 视图）、macOS（AppKit）、Windows（用 Direct2D 绘制的 Win32 窗口）和 Linux（GTK 4）。每个平台都有自己的原生后端，同一个模块可以在所有这些平台上运行（[平台](./platforms.md)）。
 
 > [!IMPORTANT]
-> nsh 是嵌在应用里的一层，负责那些在发布之后才生成、修改或新增的界面。无论在手机还是桌面上，应用仍然是原生应用，照原来的方式构建和发布。
+> NSH 是嵌在应用里的一层，负责那些在发布之后才生成、修改或新增的界面。无论在手机还是桌面上，应用仍然是原生应用，照原来的方式构建和发布。
 
-## 为什么做 nsh
+## 为什么做 NSH
 
-**首要目标：由 AI 生成的界面。** 应用里的助手可以用一个界面而不是一段文字来回答。模型写出一个小的 TSX 模块（一个表单、一张图表、一张预订卡片），服务器检查、构建并签名后，应用下载并在 `NshAppView` 中显示：是原生界面，运行在沙箱里，只能做你授予的事，而且不需要更新应用。nsh 围绕这个场景设计，整体架构都是 AI 友好的：
+**首要目标：由 AI 生成的界面。** 应用里的助手可以用一个界面而不是一段文字来回答。模型写出一个小的 TSX 模块（一个表单、一张图表、一张预订卡片），服务器检查、构建并签名后，应用下载并在 `NshAppView` 中显示：是原生界面，运行在沙箱里，只能做你授予的事，而且不需要更新应用。NSH 围绕这个场景设计，整体架构都是 AI 友好的：
 
 - **模型擅长的格式。** 一个模块就是一个 TSX 文件，用到信号、少量宿主元素和 Tailwind 类——都是模型在 Web 上早已熟悉的词汇，不需要构建配置，也无需 NPM。
 - **精确的、自动生成的契约。** 每个元素、属性、样式键和模块都有从 Rust 源码生成的 TypeScript 声明（`.nsh/types`），生成的代码可以做类型检查，也可以把准确的 API 交给模型，而不是让它去猜。本文档也以纯文本形式提供给模型（[`llms.txt`](/llms.txt)、[`llms-full.txt`](/llms-full.txt)）。
@@ -29,22 +29,22 @@ nsh 同时运行在手机和桌面上：iOS（UIKit）、Android（Android 视�
 <img class="diagram diagram-dark" src="/diagrams/ai-flow-dark.svg" alt="从提示词到原生界面：模型写出 TSX 模块；服务器构建、检查并签名；跨过信任边界后，应用校验包，在设定了限制和能力的沙箱里运行，并用平台自己的界面显示。">
 </div>
 
-**其次：扩展原生应用，动态下发界面。** 同一套机制适用于任何模块，不只是生成的模块。应用在需要显示模块的地方嵌入一个 `NshAppView`（iOS）、`NshView`（Android）或 `AppView`（macOS、Windows、Linux），nsh 在其中运行模块：
+**其次：扩展原生应用，动态下发界面。** 同一套机制适用于任何模块，不只是生成的模块。应用在需要显示模块的地方嵌入一个 `NshAppView`（iOS）、`NshView`（Android）或 `AppView`（macOS、Windows、Linux），NSH 在其中运行模块：
 
 - **发布之后再下发。** 模块是应用在运行时下载的签名包（`.nshpkg`）。应用在运行它之前，会用自己信任的密钥校验签名，并检查吊销列表（[签名包](./signed-packages.md)）。改动无需发新版本，也无需重新提交应用商店审核。
 - **宿主始终掌控。** 每个模块运行在独立的沙箱虚拟机中，受内存、时间和节点数限制，只能访问宿主授予的能力：网络主机、网页、状态栏（[沙箱与能力](./sandbox-and-capabilities.md)）。多个模块可以同时运行，没有全局单例。
 - **与应用其余部分浑然一体。** 模块用平台自己的界面渲染，文本、输入、无障碍和滚动都是系统自己的。宿主还可以注册自己的原生视图——地图、播放器、设计系统组件——供模块使用（[原生组件](./native-components.md)）。
 
-**再次：独立应用。** 同样的模块也可以组成一个完整的应用。`nsh package` 用预编译的运行时把它们打成可安装的 iOS、Android、macOS、Windows 或 Linux 应用，这也是试用 nsh 最快的方式：[快速上手](./getting-started.md)就是这样做的。这是受支持的用法，但不是 nsh 设计的出发点。
+**再次：独立应用。** 同样的模块也可以组成一个完整的应用。`nsh package` 用预编译的运行时把它们打成可安装的 iOS、Android、macOS、Windows 或 Linux 应用，这也是试用 NSH 最快的方式：[快速上手](./getting-started.md)就是这样做的。这是受支持的用法，但不是 NSH 设计的出发点。
 
 ## 为什么在 GPUI Shell 之外还要做 Native Shell
 
-[长桥（Longbridge）](https://longbridge.com)把 nsh 作为手机客户端的插件层来建设，桌面客户端也需要同样的一层。[GPUI Shell](https://gpui-kit.com/shell) 让 [GPUI](https://gpui-kit.com) 桌面应用可以用 JavaScript 扩展，最初的想法也是把它用到手机上。但它并不适合，因为它的模块由 GPUI 自己在 GPU 上绘制，而不是使用平台的视图：
+[长桥（Longbridge）](https://longbridge.com)把 NSH 作为手机客户端的插件层来建设，桌面客户端也需要同样的一层。[GPUI Shell](https://gpui-kit.com/shell) 让 [GPUI](https://gpui-kit.com) 桌面应用可以用 JavaScript 扩展，最初的想法也是把它用到手机上。但它并不适合，因为它的模块由 GPUI 自己在 GPU 上绘制，而不是使用平台的视图：
 
 - **系统能力都得重新实现。** 嵌在原生页面里的自绘界面，没有平台的文本选区，也没有选区弹出的菜单（拷贝、分享、翻译、查询、全选），更没有系统输入法、无障碍，以及每一代 iOS 带来的新系统视觉效果。在 GPU 渲染器里复刻这些是一项永远做不完的大工程，而且复刻品总会和真正的系统行为走样。
 - **手机团队得接手一套新的 UI 技术栈。** 要在现有手机客户端里大规模运营一层自绘界面，iOS 和 Android 团队就得接手一个陌生的渲染器，以及它在各种系统版本和设备上的兼容性问题和缺陷。
 
-因此 nsh 用每个平台自己的界面来渲染模块：[iOS](./embedding-ios.md) 上用 UIKit，[Android](./embedding-android.md) 上用 Android 视图，[macOS](./macos.md) 上用 AppKit，[Windows](./windows.md) 上用 Direct2D 绘制的 Win32 窗口，[Linux](./linux.md) 上用 GTK 4。同一种模块格式和同一个运行时可以运行在所有这些宿主上。
+因此 NSH 用每个平台自己的界面来渲染模块：[iOS](./embedding-ios.md) 上用 UIKit，[Android](./embedding-android.md) 上用 Android 视图，[macOS](./macos.md) 上用 AppKit，[Windows](./windows.md) 上用 Direct2D 绘制的 Win32 窗口，[Linux](./linux.md) 上用 GTK 4。同一种模块格式和同一个运行时可以运行在所有这些宿主上。
 
 两者的定位不同：GPUI Shell 用于扩展 GPUI 桌面应用；Native Shell 面向每个平台上的原生应用，手机和桌面一视同仁。
 
@@ -108,7 +108,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 - **原生视图。** 嵌入原生地图、WebView 或视频播放器没有层级问题，无障碍使用平台自己的树，文本输入是系统的输入。
 - **细粒度响应式。** 与 Solid 类似的[信号](./reactivity.md)，在原生层实现。组件只运行一次，只有读取了变化信号的表达式会重新执行。
 - **样式与 Tailwind**，在原生层解析：flexbox、CSS grid、阴影、渐变、滤镜、过渡（[样式](./styling.md)、[Tailwind](./tailwind.md)）。
-- **移动端 UI 组件集**（`nsh/ui/mobile`），组件用 Rust 编写、由 nsh 绘制，在每个平台上外观一致：[Button](../components/button.md)、[Card](../components/card.md)、[ListView](../components/list-view.md)、[导航](../components/navigation.md) 等。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)），桌面 UI 套件也在路上。
+- **移动端 UI 组件集**（`nsh/ui/mobile`），组件用 Rust 编写、由 NSH 绘制，在每个平台上外观一致：[Button](../components/button.md)、[Card](../components/card.md)、[ListView](../components/list-view.md)、[导航](../components/navigation.md) 等。桌面布局用基础元素加上 `desktop={{…}}` 属性和 `Platform.select` 搭建（[平台特定代码](./platform-specific.md)），桌面 UI 套件也在路上。
 - **单一可执行文件的工具链。** 一个 `nsh` 可执行文件负责构建模块、生成类型声明、以热模块替换的方式提供开发服务、打包和签名。
 
 ## 运行平台
@@ -131,7 +131,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 
 ## 与其他方案的比较
 
-在应用里显示发布之后才到来的界面，常见做法有 WebView、用 JSON 描述的服务端驱动 UI，以及小程序容器；构建完整应用则有 React Native、Flutter、Electron 和 Tauri 这类跨平台框架。WebView 渲染的是网页，nsh 模块渲染的是原生界面；服务端驱动的协议只能重新组合内置组件，nsh 模块有自己的状态和逻辑；而且它运行在宿主用代码配置的沙箱里。[方案对比](./comparison.md)逐一做了比较。
+在应用里显示发布之后才到来的界面，常见做法有 WebView、用 JSON 描述的服务端驱动 UI，以及小程序容器；构建完整应用则有 React Native、Flutter、Electron 和 Tauri 这类跨平台框架。WebView 渲染的是网页，NSH 模块渲染的是原生界面；服务端驱动的协议只能重新组合内置组件，NSH 模块有自己的状态和逻辑；而且它运行在宿主用代码配置的沙箱里。[方案对比](./comparison.md)逐一做了比较。
 
 ## 下一步
 

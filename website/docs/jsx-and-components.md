@@ -1,6 +1,6 @@
 ---
 title: JSX and components
-description: How nsh compiles JSX, what a component is, how props, children, control flow, refs and spreads work, and how tags name elements and components.
+description: How NSH compiles JSX, what a component is, how props, children, control flow, refs and spreads work, and how tags name elements and components.
 order: 30
 group: ui
 demo: guide-components
@@ -8,11 +8,11 @@ demo: guide-components
 
 # JSX and components
 
-nsh apps describe their UI with JSX, but there is no React and no virtual DOM. nsh's compiler turns each JSX element into direct calls of the native renderer, and a component is a plain function that runs once to build its part of the tree. What keeps the UI up to date afterwards is [reactivity](./reactivity.md): expressions in JSX that read signals are followed natively, and only they run again.
+NSH apps describe their UI with JSX, but there is no React and no virtual DOM. NSH's compiler turns each JSX element into direct calls of the native renderer, and a component is a plain function that runs once to build its part of the tree. What keeps the UI up to date afterwards is [reactivity](./reactivity.md): expressions in JSX that read signals are followed natively, and only they run again.
 
 ## Elements
 
-Every tag is PascalCase and names something in scope. The **host elements**, each backed by a native view, are components you import from nsh's modules; only `If` and `Each` are globals that need no import:
+Every tag is PascalCase and names something in scope. The **host elements**, each backed by a native view, are components you import from NSH's modules; only `If` and `Each` are globals that need no import:
 
 | Tag | Import from | Native view | Page |
 |---|---|---|---|
@@ -243,7 +243,7 @@ Components are typed by their own declarations, like any TypeScript function: th
 
 ## Mounting and the root
 
-`mount(App)` renders the root component; `mount(App, props)` passes it props. The root view fills the surface (the window, or the view an app embeds nsh in). Give the root `flex: 1` so it fills the screen, and a background color: the surface's own background depends on the platform.
+`mount(App)` renders the root component; `mount(App, props)` passes it props. The root view fills the surface (the window, or the view an app embeds NSH in). Give the root `flex: 1` so it fills the screen, and a background color: the surface's own background depends on the platform.
 
 ```tsx
 mount(() => (

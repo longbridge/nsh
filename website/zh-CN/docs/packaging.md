@@ -8,7 +8,7 @@ group: platforms
 # 打包
 
 `nsh package` 把应用变成可以安装的产物：用于 iOS 模拟器的 `.app`、用于 iOS 真机的已签名 `.ipa`、用于 Android 的已签名
-`.apk`、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`，或用于 Windows 的目录和 `.zip`；`--target gpui` 生成本机的桌面包，只是换成 GPUI 运行器。它把应用的 release 构建与 nsh 自带的**预构建运行时**组合在一起，因此不需要 Rust 工具链，不需要 Xcode 项目，也不需要 Gradle。
+`.apk`、用于 macOS 的 ad hoc 签名 `.app`、用于 Linux 的目录和 `.tar.gz`，或用于 Windows 的目录和 `.zip`；`--target gpui` 生成本机的桌面包，只是换成 GPUI 运行器。它把应用的 release 构建与 NSH 自带的**预构建运行时**组合在一起，因此不需要 Rust 工具链，不需要 Xcode 项目，也不需要 Gradle。
 
 ```sh
 nsh package App.tsx --target ios-simulator --run     # build, install and launch in the simulator
@@ -23,7 +23,7 @@ nsh package App.tsx --target ios --sign "Apple Development: Jane Doe (ABCDE12345
 `out/`。
 
 > [!NOTE]
-> 如果想把 nsh 放*进*现有的原生应用，请参阅[平台](./platforms.md#嵌入原生应用)。如果想发布由应用下载并验证的更新，请参阅[签名包](./signed-packages.md)。
+> 如果想把 NSH 放*进*现有的原生应用，请参阅[平台](./platforms.md#嵌入原生应用)。如果想发布由应用下载并验证的更新，请参阅[签名包](./signed-packages.md)。
 
 ## 应用元数据：`nsh.json`
 
@@ -92,7 +92,7 @@ nsh package App.tsx --target ios \
 写出 `out/<Name>.ipa`，可用于 TestFlight、App Store 上传工具或直接安装（取决于描述文件）。具体过程如下：
 
 - 描述文件以 `embedded.mobileprovision` 的名称复制进应用。
-- entitlements 取自描述文件。nsh 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
+- entitlements 取自描述文件。NSH 会检查描述文件的 application identifier 是否覆盖应用的 `id`（`TEAMID.*` 或
   `TEAMID.com.example.*` 这样的通配描述文件也可以），不覆盖则报错退出。
 - 用 `codesign` 以指定身份签名应用，再压缩成 `.ipa`（`Payload/<Name>.app`）。
 
@@ -102,7 +102,7 @@ nsh package App.tsx --target ios \
 security find-identity -v -p codesigning
 ```
 
-如果没有传 `--sign` 和 `--profile`，nsh 会写出一个未签名的 `out/<Name>.app` 并给出提示；它无法直接安装到真机上。
+如果没有传 `--sign` 和 `--profile`，NSH 会写出一个未签名的 `out/<Name>.app` 并给出提示；它无法直接安装到真机上。
 
 应用支持 iPhone 和 iPad，支持竖屏和横屏（倒置竖屏仅限 iPad），要求 iOS 15.0 或更高版本。
 
@@ -115,14 +115,14 @@ nsh package App.tsx --target android --run
 写出 `out/<Name>.apk`。APK 直接用 SDK 的构建工具（`aapt2`、`zipalign`、`apksigner`）组装，不经过 Gradle。要求：
 
 - Android SDK，通过 `ANDROID_HOME`（或 `ANDROID_SDK_ROOT`，或 `~/Library/Android/sdk`）查找，需要安装 build tools 和
-  `platforms;android-35` 包。缺少时 nsh 会告诉你对应的 `sdkmanager` 命令。
+  `platforms;android-35` 包。缺少时 NSH 会告诉你对应的 `sdkmanager` 命令。
 - 一个 JDK，用于首次创建 debug keystore。
 
 应用的目标 API 为 35，要求 API 28（Android 9）或更高版本；包含适用于 `arm64-v8a` 和 `x86_64` 的原生代码。
 
 ### 发布签名
 
-不传 `--keystore` 时，APK 使用标准的 debug 密钥（`~/.android/debug.keystore`，不存在时自动创建）签名，nsh
+不传 `--keystore` 时，APK 使用标准的 debug 密钥（`~/.android/debug.keystore`，不存在时自动创建）签名，NSH
 会警告它不能用于应用商店发布。正式发布时，先创建一次 keystore，然后传入：
 
 ```sh
@@ -200,11 +200,11 @@ Linux 上的 GPUI 包动态链接 WebKitGTK 4.1（Web 视图）和 GStreamer（�
 | Windows | `nsh-windows-app.exe` 可执行文件，重命名为 `<Name>.exe` | `<Name>\nsh\bundle.nshc`、`nsh\assets\…` |
 | GPUI | `nsh-gpui-app` 可执行文件，按本机操作系统的方式重命名 | 与本机操作系统相同 |
 
-打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 nsh 嵌入你自己的应用。
+打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 
 ## 查找运行时
 
-`nsh package` 会在 CLI 旁边查找预构建运行时（发行包中的 `bin/../runtime`）。在 nsh 的源码仓库中，它使用
+`nsh package` 会在 CLI 旁边查找预构建运行时（发行包中的 `bin/../runtime`）。在 NSH 的源码仓库中，它使用
 `target/<triple>/<profile>` 和 `target/android/<profile>`，profile 与 CLI 自身一致（debug 版 CLI 使用 debug 版运行时）：用
 `cargo build -p nsh-ios-app --target aarch64-apple-ios-sim`（真机用 `aarch64-apple-ios`）和 `cargo xtask android`
 构建它们（release 版 CLI 需加上 `--release`）；`nsh-macos-app`（在 macOS 上）、`nsh-linux-app`（在 Linux 上）、`nsh-windows-app`（在 Windows 上）和 `nsh-gpui-app`（在三者任一上）为本机构建，位于 `target/<profile>`（`cargo build -p nsh-macos-app`、`cargo build -p nsh-linux-app`、`cargo build -p nsh-windows-app`、`cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-app`）。环境变量 `NSH_RUNTIME` 可以让 CLI 改用另一个目录，其结构与发行包的

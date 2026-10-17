@@ -1,13 +1,13 @@
 ---
 title: Windows
-description: 在 Windows 上用 Direct2D 绘制的 Win32 窗口运行 nsh 应用、打包应用、用 AppView 嵌入 Win32 应用，以及 Windows 上的差异。
+description: 在 Windows 上用 Direct2D 绘制的 Win32 窗口运行 NSH 应用、打包应用、用 AppView 嵌入 Win32 应用，以及 Windows 上的差异。
 order: 14
 group: platforms
 ---
 
 # Windows
 
-nsh 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Direct2D 绘制应用，用 DirectWrite 排版文字；核心、响应式图、
+NSH 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Direct2D 绘制应用，用 DirectWrite 排版文字；核心、响应式图、
 渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Windows 上，
 `Platform.OS` 为 `"windows"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
@@ -17,7 +17,7 @@ nsh 应用也能在 Windows 上运行。Windows 后端在 Win32 窗口中用 Dir
 - **Windows 10 1809** 及以上，或 Windows 11。
 - Web 视图需要 **WebView2 Runtime**。Windows 11 自带，Windows 10 上随 Microsoft Edge 安装；没有它时 `WebView` 显示一个占位视图。
 - 应用要播放的视频格式对应的 **Media Foundation 解码器**（视频通过 Windows 自带的媒体栈播放）。
-- 构建 nsh 的 Windows 运行时（从源码构建，或在 Windows 上运行 `cargo xtask dist`）需要带 C++ 工作负载的 Visual Studio
+- 构建 NSH 的 Windows 运行时（从源码构建，或在 Windows 上运行 `cargo xtask dist`）需要带 C++ 工作负载的 Visual Studio
   Build Tools、Windows SDK 和 LLVM（用于生成 QuickJS 的绑定）。
 
 ## 运行应用
@@ -61,7 +61,7 @@ out\<Name>.zip
 
 ## 嵌入 Win32 应用
 
-`nsh-platform-windows` crate（位于 nsh 仓库中）为 Rust 编写的 Win32 应用提供 `AppView`：一个在你的窗口的子窗口中运行的 nsh
+`nsh-platform-windows` crate（位于 NSH 仓库中）为 Rust 编写的 Win32 应用提供 `AppView`：一个在你的窗口的子窗口中运行的 NSH
 引擎。每个 `AppView` 相互独立，可以同时运行多个。
 
 ```rust
@@ -129,7 +129,7 @@ QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加
 不同之处或不支持的功能：
 
 - **`WebView`**：位于 3D 变换（透视）视图内的网页不显示；网页上方的 `backdropFilter` 不会模糊网页。`source.baseUrl`
-  只接受 `http(s)` 地址。自带窗口的原生组件始终位于 nsh 绘制的所有内容之上。
+  只接受 `http(s)` 地址。自带窗口的原生组件始终位于 NSH 绘制的所有内容之上。
 - **视频**：只能播放已安装解码器支持的格式；没有封面图（poster）；开启 `controls` 时控制栏始终显示。
 - **可缩放的滚动视图**（`zoomTo`、缩放相关属性）；滚动条不能拖动。
 - **`mixBlendMode` 和 `backdropFilter`** 会绘制，但在带 `filter` 或 3D 变换的视图内部不生效；`borderCurve: "continuous"`

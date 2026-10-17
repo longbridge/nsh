@@ -200,7 +200,7 @@ function EditNote() {
 开启 `preventBack` 后，侧滑返回被禁用，返回按钮（标题栏中的、Android 返回键和返回手势）调用 `onBackRequest` 而不是返回。从代码调用 `nav.pop()` 仍然会返回。
 
 > [!IMPORTANT]
-> `preventBack` 是一个属性，而不是返回 true 或 false 的回调，因为主线程从不等待 JS。用户开始侧滑或按下返回时，系统会立即询问页面能否离开，nsh 根据已有的属性在原生端直接回答。所以要在有内容可能丢失时就设置 `preventBack`（像上面那样根据文本决定），而不是等用户试图离开时才设置。
+> `preventBack` 是一个属性，而不是返回 true 或 false 的回调，因为主线程从不等待 JS。用户开始侧滑或按下返回时，系统会立即询问页面能否离开，NSH 根据已有的属性在原生端直接回答。所以要在有内容可能丢失时就设置 `preventBack`（像上面那样根据文本决定），而不是等用户试图离开时才设置。
 
 `gestureEnabled={false}` 是较轻的选择：它只关闭交互式手势（iOS 侧滑返回、Android 预测性返回动画），返回按钮仍会返回。
 

@@ -1,12 +1,12 @@
 ---
 title: Modules
-description: The modules an nsh app imports, what each one exports, and how they are organized.
+description: The modules an NSH app imports, what each one exports, and how they are organized.
 order: 1
 ---
 
 # Modules
 
-An nsh app imports everything it uses from a small set of modules. They are all native: the reactive graph, the renderer and every module are implemented in Rust inside the runtime, and the bundler keeps `import ... from "nsh/..."` as imports instead of copying code into your bundle. Your bundle only holds your own code.
+An NSH app imports everything it uses from a small set of modules. They are all native: the reactive graph, the renderer and every module are implemented in Rust inside the runtime, and the bundler keeps `import ... from "nsh/..."` as imports instead of copying code into your bundle. Your bundle only holds your own code.
 
 ```tsx
 import { mount, signal } from "nsh";

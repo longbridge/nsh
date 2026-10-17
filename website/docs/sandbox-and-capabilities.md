@@ -1,13 +1,13 @@
 ---
 title: Sandbox and Capabilities
-description: The limits every nsh app runs under (memory, time, nodes), the language hardening of release builds, and capabilities declared in nsh.json and granted by host apps.
+description: The limits every NSH app runs under (memory, time, nodes), the language hardening of release builds, and capabilities declared in nsh.json and granted by host apps.
 order: 21
 group: delivery
 ---
 
 # Sandbox and Capabilities
 
-Every nsh app runs in its own QuickJS VM, and everything an app can do outside that VM goes through nsh's native
+Every NSH app runs in its own QuickJS VM, and everything an app can do outside that VM goes through NSH's native
 runtime. That makes it possible to run code you did not write, such as third-party mini apps or downloaded updates,
 under rules the host app controls:
 
@@ -66,7 +66,7 @@ Host apps can change the limits per view: `NshAppView.limits` on [iOS](./embeddi
 Release builds (everything not loaded from a dev server) are hardened when they load:
 
 - `eval` is removed, and the `Function`, `AsyncFunction`, `GeneratorFunction` and `AsyncGeneratorFunction`
-  constructors throw. nsh runs no code made from strings:
+  constructors throw. NSH runs no code made from strings:
 
   ```text
   TypeError: the Function constructor is disabled: nsh runs no code from strings (development builds allow it)
@@ -77,7 +77,7 @@ Release builds (everything not loaded from a dev server) are hardened when they 
   `Error.prototype` stays writable, so error subclasses can set `this.name`.
 
 Freezing prototypes would normally break a common pattern, the "override mistake": assigning
-`Sub.prototype.constructor = Sub` or `obj.toString = …` throws when the inherited property is frozen. nsh turns the
+`Sub.prototype.constructor = Sub` or `obj.toString = …` throws when the inherited property is frozen. NSH turns the
 commonly overridden members (`constructor`, `toString`, `valueOf`, `toJSON`, ...) into accessors whose setter defines
 the property on the object assigned to, so such code (and libraries like axios that use it) keeps working.
 
@@ -166,7 +166,7 @@ Each refusal is logged once, saying which key to add:
 fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to capabilities.network in nsh.json
 ```
 
-Redirects are followed by nsh, not by the platform's HTTP stack, so every hop is checked against the capabilities. (A
+Redirects are followed by NSH, not by the platform's HTTP stack, so every hop is checked against the capabilities. (A
 streamed request body is not sent twice, so a `307` / `308` redirect of a streamed upload fails.)
 
 ### Where capabilities travel
@@ -180,7 +180,7 @@ The declaration goes with the app wherever it goes:
 
 ## Grants: what a host app allows
 
-A host app that embeds nsh can grant **at most** some capabilities, in the same JSON form:
+A host app that embeds NSH can grant **at most** some capabilities, in the same JSON form:
 
 ```swift
 // iOS

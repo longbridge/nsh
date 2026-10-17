@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: "How an nsh app runs: the build pipeline, the engine and main threads, the path from a signal change to native views, the native reactive graph, text layout and the crates."
+description: "How an NSH app runs: the build pipeline, the engine and main threads, the path from a signal change to native views, the native reactive graph, text layout and the crates."
 order: 63
 group: tools
 ---
@@ -8,7 +8,7 @@ group: tools
 # Architecture
 
 This page is for app developers who want to know what happens between `count.set(1)` and a label changing on screen.
-You do not need it to write apps, but it explains why nsh behaves the way it does: why components run once, why
+You do not need it to write apps, but it explains why NSH behaves the way it does: why components run once, why
 animations stay smooth while JS is busy, why the main thread never waits for your code.
 
 ## The big picture
@@ -23,10 +23,10 @@ animations stay smooth while JS is busy, why the main thread never waits for you
 `nsh build`, `nsh dev` and the other commands bundle your app with a toolchain written in Rust (no Node.js):
 
 1. **Oxc** removes the TypeScript types.
-2. **nsh's JSX compiler** turns JSX into direct calls to the native renderer, in the same pass. Static props and
+2. **NSH's JSX compiler** turns JSX into direct calls to the native renderer, in the same pass. Static props and
    children are set once; expressions that can change (they call a function or read a property) become bindings the
    renderer follows. Components become plain function calls with a props object whose changing props are getters.
-3. **rolldown** bundles your modules into one ES module. Imports of nsh's modules (`nsh`, `nsh/list`,
+3. **rolldown** bundles your modules into one ES module. Imports of NSH's modules (`nsh`, `nsh/list`,
    `nsh/ui/mobile`, ...) stay imports: those modules are native, served by the runtime. **The bundle contains only your
    app's code**; the counter example is under 1 KB of JS.
 4. The bundle is compiled to **bytecode** (`bundle.nshc`), which loads faster than source, and a **source map**
@@ -96,7 +96,7 @@ Three properties follow from this design:
 
 ## Text: laid out once, off the main thread
 
-Text is often the most expensive part of a UI. nsh lays it out on the engine thread with the platform's own text
+Text is often the most expensive part of a UI. NSH lays it out on the engine thread with the platform's own text
 engine, so it looks exactly like native text:
 
 1. **prepare**: a `<Text>` and its nested spans become one attributed string (CoreText on Apple platforms,
@@ -125,7 +125,7 @@ sticky headers, and recycles cells. When a cell needs a different item, the runt
 
 ## The crates
 
-nsh is a Rust workspace. You never build it to write apps (the distribution ships the CLI and prebuilt runtimes), but
+NSH is a Rust workspace. You never build it to write apps (the distribution ships the CLI and prebuilt runtimes), but
 the names show up in logs and docs:
 
 | Crate | What it is |
@@ -133,10 +133,10 @@ the names show up in logs and docs:
 | `nsh-core` | The platform-independent core: shadow tree, styles, Taffy layout, text merging, list virtualization, mount items; CSS values and Tailwind; the Rust components' framework and theme. |
 | `nsh-ui-mobile` | The components and modules of `nsh/ui/mobile` (`Button`, `Card`, `SafeAreaView`, `Alert`, ...), written in Rust. |
 | `nsh-animation` | The native animation graph: values, interpolation, timing / spring / decay. |
-| `nsh-js` | The QuickJS host and nsh's runtime: the reactive graph, the renderer, every native module, the global APIs, hot module replacement, limits; and the TypeScript declarations of all of it. |
+| `nsh-js` | The QuickJS host and NSH's runtime: the reactive graph, the renderer, every native module, the global APIs, hot module replacement, limits; and the TypeScript declarations of all of it. |
 | `nsh-engine` | The engine thread: drives `nsh-js` and `nsh-core` and hands one batch per frame to the platform. |
 | `nsh-package` | Signed packages: keys, certificates, revocation, the trust store. |
-| `nsh-bundler` | The bundler: rolldown, Oxc, nsh's JSX compiler, source maps, Tailwind class checks. |
+| `nsh-bundler` | The bundler: rolldown, Oxc, NSH's JSX compiler, source maps, Tailwind class checks. |
 | `nsh-dev` | The dev server and its client. |
 | `nsh-platform-ios` | The UIKit backend (iOS, simulator, Mac Catalyst): view mounting, the CoreText text engine, input; the embedding SDK. |
 | `nsh-platform-android` | The Android backend: `libnsh.so` and the Java runtime (`NshView`, the views, images, networking). |

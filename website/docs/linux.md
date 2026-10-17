@@ -1,20 +1,20 @@
 ---
 title: Linux
-description: Run nsh apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
+description: Run NSH apps on Linux in GTK 4 windows, package them, embed them in a GTK app with AppView, and what differs on Linux.
 order: 15
 group: platforms
 ---
 
 # Linux
 
-nsh apps also run on Linux. The Linux backend renders them with GTK 4 widgets and lays out text with Pango; the core,
+NSH apps also run on Linux. The Linux backend renders them with GTK 4 widgets and lays out text with Pango; the core,
 the reactive graph, the renderer, Taffy layout and the `nsh/ui/mobile` components are the same as on iOS and Android,
 so one bundle runs everywhere. On Linux, `Platform.OS` is `"linux"` and the `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
 [`nsh/desktop`](../modules/nsh-desktop.md).
 
 ## Requirements
 
-- **GTK 4.14** or later. To build nsh's Linux runtime (from a checkout, or `cargo xtask
+- **GTK 4.14** or later. To build NSH's Linux runtime (from a checkout, or `cargo xtask
   dist` on Linux) you need their development packages and clang: `libgtk-4-dev clang` on Debian and Ubuntu (24.04 or
   later), `gtk4 clang` on Arch, `gtk4-devel clang` on Fedora.
 - **WebKitGTK 6.0** (2.40 or later) for web views: `libwebkitgtk-6.0-dev` on Debian and Ubuntu, `webkitgtk-6.0` on
@@ -70,7 +70,7 @@ the app after packaging it.
 
 ## Embedding in a GTK app
 
-The `nsh-platform-linux` crate (from the nsh repository) gives a Rust GTK app `AppView`: one nsh engine as a GTK widget.
+The `nsh-platform-linux` crate (from the NSH repository) gives a Rust GTK app `AppView`: one NSH engine as a GTK widget.
 Each `AppView` is independent; several can run at once.
 
 ```rust
@@ -133,7 +133,7 @@ Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Ctrl+C is t
 A return that commits an input method's composition (Chinese, Japanese, ...) never submits. `onKeyPress` reports
 what React Native reports: the typed text, `"Enter"`, `"Backspace"`, and `"Escape"`; pasted text is not reported.
 
-Web views are WebKitGTK pages, drawn inside nsh's views: sheets, dialogs, toasts and views after them draw over a page,
+Web views are WebKitGTK pages, drawn inside NSH's views: sheets, dialogs, toasts and views after them draw over a page,
 and parents clip it and fade it. Their website data (cookies, storage, the cache) is kept per app, under
 `~/.local/share/<app id>/webkit` and `~/.cache/<app id>/webkit`. The `webview` capability also applies to the pages of
 frames: an `iframe` of a host your app was not granted stays empty. Escape in a page leaves it, as in a text field

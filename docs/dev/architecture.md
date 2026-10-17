@@ -15,7 +15,7 @@ Input                        native gestures -> EngineControl::dispatch_event ->
 - **Reactivity is native**: signals, memos, effects, owners and context are a graph in Rust (`crates/nsh-js/src/reactive.rs`,
   scheduled by Solid 1.9's algorithm) whose nodes are QuickJS objects of native classes, so the QuickJS GC sees the
   cycles through them. Apps reach it through `nsh` (`signal`, `computed`, `effect`, ...).
-- **The runtime is native** (`native-pipeline.md`): a bundle is one ES module of the app's code importing nsh's native
+- **The runtime is native** (`native-pipeline.md`): a bundle is one ES module of the app's code importing NSH's native
   modules (`nsh`, `nsh:rt`, `nsh/*`, `js-modules.md`). The renderer pushes ops straight into the host's queue; one JS
   turn's ops become one `Core::commit`. Events reach handlers held on the nodes, list cells are bound natively, and
   animations settle natively.
@@ -23,14 +23,14 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   `layout` at the final size after layout (Apple: CTFrame). `MountItem::Text` hands the immutable result to the main thread, which only draws it
   (`CTFrameDraw` in `TextView`'s `drawRect`); the main thread never lays out text. Android's counterpart is `StaticLayout` (like RN's PreparedLayout),
   Linux's Pango (glyph runs as plain data, drawn as `gsk::TextNode`s with the main thread's fonts), Windows' DirectWrite
-  (glyph runs recorded through a text renderer of nsh's own, drawn with Direct2D's `DrawGlyphRun`), GPUI's text
-  system (each style run shaped with a `WindowTextSystem` of the engine thread's own, lines broken by nsh, glyphs
+  (glyph runs recorded through a text renderer of NSH's own, drawn with Direct2D's `DrawGlyphRun`), GPUI's text
+  system (each style run shaped with a `WindowTextSystem` of the engine thread's own, lines broken by NSH, glyphs
   painted with `paint_glyph`).
   Implementations must not touch main-thread-only UI objects.
 - Measure cache: one content-addressed LRU per engine (`MeasureCache`, two generations of hash maps, ≤1024 entries), keyed by a hash of the
   layout-relevant content (`AttributedText::layout_hash`, colors excluded) + the width constraint; nodes also cache `Prepared` and the final layout.
   A color-only change does not trigger layout, only a new final layout.
-- One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so nsh can be embedded in
+- One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so NSH can be embedded in
   existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
   just "one AppView filling the window".
 - **Android**: the engine thread typesets with `StaticLayout` through JNI; each commit is one `byte[]` plus an object

@@ -8,7 +8,7 @@ demo: guide-animation
 
 # Animation
 
-Every animation in nsh runs on the UI thread. You describe it from JS, once, and the platform plays it frame by frame (Core Animation and a display link on iOS, the UI-thread animator on Android) without calling back into JS. A busy JS thread cannot make an animation stutter, and an animation costs no JS while it runs.
+Every animation in NSH runs on the UI thread. You describe it from JS, once, and the platform plays it frame by frame (Core Animation and a display link on iOS, the UI-thread animator on Android) without calling back into JS. A busy JS thread cannot make an animation stutter, and an animation costs no JS while it runs.
 
 There are four tools, from the simplest to the most flexible:
 
@@ -336,7 +336,7 @@ Reach for `requestAnimationFrame` (a global, following the display) only for wha
 
 ## Reduced motion
 
-When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduceMotion()` from `nsh/accessibility` is `true` and the `motion-reduce:` / `motion-safe:` Tailwind variants apply. nsh does not turn your animations off by itself; use them to choose a calmer alternative:
+When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduceMotion()` from `nsh/accessibility` is `true` and the `motion-reduce:` / `motion-safe:` Tailwind variants apply. NSH does not turn your animations off by itself; use them to choose a calmer alternative:
 
 ```tsx
 import { View } from "nsh";

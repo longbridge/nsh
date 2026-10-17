@@ -85,7 +85,7 @@ Context calls only record: nothing is drawn while `draw` runs, so you cannot rea
 | `globalCompositeOperation` | How it combines: `"source-over"`, `"destination-out"`, `"multiply"`, `"screen"`, ... |
 | `shadowColor`, `shadowBlur`, `shadowOffsetX`, `shadowOffsetY` | Shadows. |
 | `font` | CSS `font` shorthand: `"600 14px Inter"` (sizes in px, pt or rem); `small-caps` and the number forms `tabular-nums`, `oldstyle-nums`, ... may come before the size. |
-| `fontVariantNumeric` | `"tabular-nums"` makes every figure the same width, so changing numbers (counters, prices, axis labels) do not jitter; also `"proportional-nums"`, `"oldstyle-nums"`, `"lining-nums"`, `"normal"`. An nsh addition (CSS's `font-variant-numeric`); setting `font` keeps it. Browsers ignore it. |
+| `fontVariantNumeric` | `"tabular-nums"` makes every figure the same width, so changing numbers (counters, prices, axis labels) do not jitter; also `"proportional-nums"`, `"oldstyle-nums"`, `"lining-nums"`, `"normal"`. An NSH addition (CSS's `font-variant-numeric`); setting `font` keeps it. Browsers ignore it. |
 | `textAlign`, `textBaseline` | Text placement. |
 
 **Transforms**: `translate(x, y)`, `scale(x, y)`, `rotate(angle)` (radians, clockwise), `transform(a, b, c, d, e, f)`, `setTransform(a, b, c, d, e, f)`, `resetTransform()`.

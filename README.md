@@ -1,4 +1,4 @@
-# Native Shell (nsh)
+# Native Shell (NSH)
 
 **AI-generated UI, native in your app.** Native Shell renders UI written in TSX and Tailwind with each platform's
 own UI: native views on iOS, Android, macOS, Windows and Linux, GPUI in GPUI apps and HTML on the web. Apps load these modules at run time,
@@ -30,7 +30,7 @@ Documentation, guides and live demos: **[native-shell.com](https://native-shell.
 - **Real native UI.** Every element is a platform view (UIKit, Android views, AppKit, Win32 drawn with Direct2D,
   GTK 4), a GPUI element or HTML, laid out with flexbox and grid ([Taffy](https://github.com/DioxusLabs/taffy)). The
   system's text, input, scrolling and accessibility just work, and native components such as maps and web views layer
-  naturally with nsh's views.
+  naturally with NSH's views.
 - **Plugins, or standalone apps.** Put an `NshAppView` (iOS), `NshView` (Android) or `AppView` (desktop and GPUI) on
   any screen of an existing app, or `createPlayer` in a web page, and load modules into it at run time, from a bundle,
   the dev server or a downloaded signed package: features ship on your own schedule, next to the host's own native
@@ -79,10 +79,12 @@ nsh run my-app                     # a window on this machine (on macOS, an iPho
 nsh run my-app --target ios        # iOS simulator (needs Xcode)
 nsh run my-app --target android    # Android emulator or device (needs the Android SDK)
 nsh run my-app --target macos      # an AppKit window
+nsh run my-app --target gpui       # a GPUI window (macOS, Windows, Linux)
+nsh run my-app --target web        # in the browser
 ```
 
 `nsh init` writes `App.tsx`, `nsh.json` and a `tsconfig.json`, and keeps type declarations in `.nsh/types`, so any
-TypeScript editor checks the app without `node_modules`. On every save only the edited components render again; the
+TypeScript editor checks the app on its own. On every save only the edited components render again; the
 rest of the app keeps its state. Logs and errors show in the terminal. What each platform needs:
 [Installation](https://native-shell.com/docs/installation#platform-tools).
 
@@ -127,19 +129,19 @@ The app trusts the root's public key and loads what it downloads with `loadPacka
 ([Signed packages](https://native-shell.com/docs/signed-packages)). To ship the module as an app of its own instead:
 
 ```sh
-nsh package my-app --target ios-simulator --run        # also ios, android, macos, windows, linux
+nsh package my-app --target ios-simulator --run        # also ios, android, macos, windows, linux, gpui, web
 ```
 
 ## Examples
 
 | Example | What it shows |
 |---|---|
-| [`examples/gallery`](examples/gallery) | A tour of what nsh supports: lists, navigation, forms, controls, gestures, animation, images, styles, text, web view and video, `fetch` |
+| [`examples/gallery`](examples/gallery) | A tour of what NSH supports: lists, navigation, forms, controls, gestures, animation, images, styles, text, web view and video, `fetch` |
 | [`examples/counter`](examples/counter) | The smallest app |
 | [`examples/hopper`](examples/hopper) | A dark, tabbed dashboard built only from primitives: interactive canvas charts, sliders, menus, animation |
 | [`examples/desktop`](examples/desktop) | A desktop app with a title bar and menus of its own (`nsh/desktop`) |
 | [`examples/gallery-rs`](examples/gallery-rs) | The gallery with its own components written in Rust |
-| [`examples/embed-ios`](examples/embed-ios), [`examples/embed-android`](examples/embed-android) | nsh inside existing native apps, with a native component the app registers |
+| [`examples/embed-ios`](examples/embed-ios), [`examples/embed-android`](examples/embed-android) | NSH inside existing native apps, with a native component the app registers |
 | [`examples/bench`](examples/bench) | Rust components against the same components in TSX |
 
 ```sh
@@ -167,8 +169,8 @@ target needs.
 rules and conventions; [docs/dev](docs/dev/README.md) the architecture and internals. The website's sources are in
 [website/](website/README.md).
 
-[GPUI Kit](https://gpui-kit.com) is a sibling project: components and tools for desktop apps built with GPUI. nsh's
-theme colors follow its fields, and nsh's GPUI backend builds on it.
+[GPUI Kit](https://gpui-kit.com) is a sibling project: components and tools for desktop apps built with GPUI. NSH's
+theme colors follow its fields, and NSH's GPUI backend builds on it.
 
 ## License
 

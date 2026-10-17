@@ -6,7 +6,7 @@ order: 1
 
 # 移动端 UI
 
-`nsh/ui/mobile` 是 nsh 面向手机和平板的 UI 套件，包含按钮、卡片、列表、文本输入框、底部面板、安全区域、键盘、状态栏、系统对话框和导航。按需导入即可：
+`nsh/ui/mobile` 是 NSH 面向手机和平板的 UI 套件，包含按钮、卡片、列表、文本输入框、底部面板、安全区域、键盘、状态栏、系统对话框和导航。按需导入即可：
 
 ```tsx
 import { Button, Card, Group, Sheet, Stack, Screen, createNavigator } from "nsh/ui/mobile";
@@ -18,7 +18,7 @@ import { Button, Card, Group, Sheet, Stack, Screen, createNavigator } from "nsh/
 
 这些组件用 Rust 编写，而不是 JavaScript。在应用里，`<Button>` 依然只是一个 JSX 节点：它的 props 传给原生核心，由核心用宿主元素渲染出按钮，并与界面其余部分在同一轮布局中完成排版；它的事件再回到你的处理函数。由此带来几点实际影响：
 
-- **iOS 和 Android 外观一致。** 组件用 nsh 自己的视图绘制，而不是 UIKit 或 Android 控件，所以 `Button` 在两个平台上看起来一样。例外是 [Alert](./alert.md) 和 [ActionSheet](./action-sheet.md)，它们显示的是平台的系统对话框。
+- **iOS 和 Android 外观一致。** 组件用 NSH 自己的视图绘制，而不是 UIKit 或 Android 控件，所以 `Button` 在两个平台上看起来一样。例外是 [Alert](./alert.md) 和 [ActionSheet](./action-sheet.md)，它们显示的是平台的系统对话框。
 - **交互保持原生。** 按压反馈、[Sheet](./sheet.md) 的拖动、长按 [Stepper](./stepper.md) 按钮时的连续步进，都在核心或 UI 线程上运行。JS 只接收事件（`onPress`、`onChange`、`onClose` 等）。
 - **类型由源码生成。** `.nsh/types/nsh/ui/mobile.d.ts` 中的 TypeScript 声明是从 Rust 的 props 生成的，编辑器能显示每个 prop 及其文档。
 - **你的内容仍归你所有。** 插槽（`header`、`footer`）、子元素和列表行都是你的 JSX。组件只负责摆放，从不创建或修改它们，因此其中的 signal、事件处理函数和 ref 都照常工作。
@@ -103,7 +103,7 @@ import { Button, Card, Group, Sheet, Stack, Screen, createNavigator } from "nsh/
 - 你的主题叠加在默认主题之上，只需列出要改的部分。
 - 颜色可以是 CSS 颜色（`#7c3aed`、`rgb(…)`、`white`），也可以是 Tailwind 默认调色板中的名称（`neutral-900`、`red-500`）。`nsh.json` 中 `tailwind` 键定义的自定义颜色在这里不可用。
 - `radius` 是控件（按钮、输入框、步进器按钮）的圆角半径，`radius.lg` 是大面积表面（卡片、分组、inset 列表、底部面板）的圆角半径，`font.size` 是按钮文字、卡片标题和步进器的基础字号。单位均为 pt。
-- 如果省略了按下状态的颜色（`primary.active.background`、`secondary.active.background`、`danger.active.background` 等），nsh 会从基础颜色推导：浅色模式下加深 12%，深色模式下提亮 12%。
+- 如果省略了按下状态的颜色（`primary.active.background`、`secondary.active.background`、`danger.active.background` 等），NSH 会从基础颜色推导：浅色模式下加深 12%，深色模式下提亮 12%。
 - 只有 gpui-kit 桌面组件使用的键（侧边栏、标题栏等）会被忽略，因此 gpui-kit 的主题文件可以直接拿来用。
 - 打包器在构建时检查主题。文件缺失、JSON 无效、`mode` 未知或某个值不是颜色，都会以 `nsh.json: theme: …` 错误使构建失败。
 

@@ -1,13 +1,13 @@
 ---
 title: 架构
-description: nsh 应用是如何运行的：构建流程、引擎线程与主线程、从 signal 变化到原生视图的路径、原生响应式图、文本布局以及各个 crate。
+description: NSH 应用是如何运行的：构建流程、引擎线程与主线程、从 signal 变化到原生视图的路径、原生响应式图、文本布局以及各个 crate。
 order: 63
 group: tools
 ---
 
 # 架构
 
-本页面向想了解从 `count.set(1)` 到屏幕上标签变化之间发生了什么的应用开发者。编写应用并不需要读它，但它解释了 nsh
+本页面向想了解从 `count.set(1)` 到屏幕上标签变化之间发生了什么的应用开发者。编写应用并不需要读它，但它解释了 NSH
 为什么会有现在的行为：为什么组件只运行一次，为什么 JS 繁忙时动画依然流畅，为什么主线程从不等待你的代码。
 
 ## 全局概览
@@ -22,10 +22,10 @@ group: tools
 `nsh build`、`nsh dev` 以及其他命令使用一套用 Rust 编写的工具链（无需 Node.js）打包你的应用：
 
 1. **Oxc** 去掉 TypeScript 类型。
-2. **nsh 的 JSX 编译器**在同一遍处理中把 JSX 转换为对原生渲染器的直接调用。静态的 prop 和子节点只设置一次；可能变化的
+2. **NSH 的 JSX 编译器**在同一遍处理中把 JSX 转换为对原生渲染器的直接调用。静态的 prop 和子节点只设置一次；可能变化的
    表达式（调用了函数或读取了属性）会成为渲染器跟踪的绑定。组件变成普通的函数调用，传入一个 props 对象，其中会变化的
    prop 是 getter。
-3. **rolldown** 把你的模块打包成一个 ES 模块。对 nsh 模块（`nsh`、`nsh/list`、`nsh/ui/mobile` 等）的导入保持为导入：
+3. **rolldown** 把你的模块打包成一个 ES 模块。对 NSH 模块（`nsh`、`nsh/list`、`nsh/ui/mobile` 等）的导入保持为导入：
    这些模块是原生的，由运行时提供。**bundle 只包含你的应用代码**；计数器示例的 JS 不到 1 KB。
 4. bundle 被编译为 **字节码**（`bundle.nshc`），加载比源码更快；同时会跨所有步骤合成一份 **source map**，
    让堆栈跟踪指向你的 `.tsx` 代码行。
@@ -86,7 +86,7 @@ group: tools
 
 ## 文本：在主线程之外只布局一次
 
-文本往往是 UI 中开销最大的部分。nsh 在引擎线程上使用平台自己的文本引擎布局文本，因此它看起来与原生文本完全一致：
+文本往往是 UI 中开销最大的部分。NSH 在引擎线程上使用平台自己的文本引擎布局文本，因此它看起来与原生文本完全一致：
 
 1. **prepare**：一个 `<Text>` 及其嵌套的 span 合并成一个属性字符串（Apple 平台上用 CoreText，Android 上用
    `PrecomputedText` / `StaticLayout`）；
@@ -110,7 +110,7 @@ group: tools
 
 ## crate 一览
 
-nsh 是一个 Rust workspace。编写应用时你永远不需要构建它（发行版附带 CLI 和预构建的运行时），但这些名字会出现在日志和
+NSH 是一个 Rust workspace。编写应用时你永远不需要构建它（发行版附带 CLI 和预构建的运行时），但这些名字会出现在日志和
 文档中：
 
 | Crate | 说明 |
@@ -118,10 +118,10 @@ nsh 是一个 Rust workspace。编写应用时你永远不需要构建它（发�
 | `nsh-core` | 平台无关的核心：影子树、样式、Taffy 布局、文本合并、列表虚拟化、mount item；CSS 值和 Tailwind；Rust 组件的框架和主题。 |
 | `nsh-ui-mobile` | `nsh/ui/mobile` 的组件和模块（`Button`、`Card`、`SafeAreaView`、`Alert` 等），用 Rust 编写。 |
 | `nsh-animation` | 原生动画图：值、插值、timing / spring / decay。 |
-| `nsh-js` | QuickJS 宿主和 nsh 的运行时：响应式图、渲染器、所有原生模块、全局 API、热模块替换、限制；以及这一切的 TypeScript 声明。 |
+| `nsh-js` | QuickJS 宿主和 NSH 的运行时：响应式图、渲染器、所有原生模块、全局 API、热模块替换、限制；以及这一切的 TypeScript 声明。 |
 | `nsh-engine` | 引擎线程：驱动 `nsh-js` 和 `nsh-core`，每帧向平台交付一个 batch。 |
 | `nsh-package` | 签名包：密钥、证书、吊销、信任库。 |
-| `nsh-bundler` | 打包器：rolldown、Oxc、nsh 的 JSX 编译器、source map、Tailwind 类名检查。 |
+| `nsh-bundler` | 打包器：rolldown、Oxc、NSH 的 JSX 编译器、source map、Tailwind 类名检查。 |
 | `nsh-dev` | 开发服务器及其客户端。 |
 | `nsh-platform-ios` | UIKit 后端（iOS、模拟器、Mac Catalyst）：视图挂载、CoreText 文本引擎、输入；嵌入 SDK。 |
 | `nsh-platform-android` | Android 后端：`libnsh.so` 和 Java 运行时（`NshView`、各类视图、图片、网络）。 |

@@ -1,13 +1,13 @@
 ---
 title: 命令行
-description: nsh 的全部子命令与参数：init、build、trace、dev、run、package，以及签名相关的 keygen、certify、publish、verify 和 revoke。
+description: NSH 的全部子命令与参数：init、build、trace、dev、run、package，以及签名相关的 keygen、certify、publish、verify 和 revoke。
 order: 6
 group: start
 ---
 
 # 命令行
 
-`nsh` 是 nsh 应用唯一需要的工具。所有构建应用的子命令都接受 `[ENTRY]`：入口模块，或应用目录（以其中的 `App.tsx` 为入口；默认为当前目录，所以 `cd my-app && nsh run` 即可）。命令会读取入口旁边的 `nsh.json`，并刷新 `.nsh/types` 中的类型声明。
+`nsh` 是 NSH 应用唯一需要的工具。所有构建应用的子命令都接受 `[ENTRY]`：入口模块，或应用目录（以其中的 `App.tsx` 为入口；默认为当前目录，所以 `cd my-app && nsh run` 即可）。命令会读取入口旁边的 `nsh.json`，并刷新 `.nsh/types` 中的类型声明。
 
 ```text
 nsh <COMMAND>
@@ -44,7 +44,7 @@ warn iOS Simulator: image failed: An SSL error has occurred and a secure connect
 
 `✓` 表示完成的步骤，`→` 是连接地址，`•` 是设备的动态；`warn` 和 `error` 行是问题，不带符号的行是应用自己的输出
 （`console.log`）。在终端里，正在进行的步骤会显示一个转动的指示符，各行带颜色（设置了 `NO_COLOR` 时不带）；重定向到
-文件时只写入结果行，不带颜色。nsh 调用的工具（应用 Rust crate 的 cargo 构建、开发宿主）出错时，它们的输出打印在
+文件时只写入结果行，不带颜色。NSH 调用的工具（应用 Rust crate 的 cargo 构建、开发宿主）出错时，它们的输出打印在
 `error` 行下面。
 
 `-v, --verbose`（所有命令都可用；也可以设置 `NSH_VERBOSE=1`）原样打印全部内容：每条日志及其级别和来源、cargo 的
@@ -131,7 +131,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh build [ENTRY] [-o <OUT>] [--release]
 ```
 
-打包应用并编译为 QuickJS 字节码，供嵌入 nsh、自行分发 bundle 的应用使用。
+打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
@@ -154,7 +154,7 @@ nsh build [ENTRY] [-o <OUT>] [--release]
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|gpui [-o <OUT>] [flags]
 ```
 
-用预构建的运行时以 release 模式构建可安装的应用。整个过程不涉及 Rust，也不需要 Xcode 工程或 Gradle 构建：nsh 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个 ad hoc 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；GPUI 则按本机操作系统的方式打包，只是换成 GPUI 运行器。元数据来自 `nsh.json`，可被参数覆盖。
+用预构建的运行时以 release 模式构建可安装的应用。整个过程不涉及 Rust，也不需要 Xcode 工程或 Gradle 构建：NSH 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个 ad hoc 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；GPUI 则按本机操作系统的方式打包，只是换成 GPUI 运行器。元数据来自 `nsh.json`，可被参数覆盖。
 
 | 参数 | 说明 |
 |---|---|
@@ -186,7 +186,7 @@ nsh package App.tsx --target gpui
 
 ## 签名命令
 
-这些命令用于生成和校验签名包（`.nshpkg`）：嵌入 nsh 的应用会下载这些应用包，并在运行前进行校验。[签名包](./signed-packages.md)介绍了整个模型（由离线保存的根密钥为某些应用 id 认证 release 密钥）。
+这些命令用于生成和校验签名包（`.nshpkg`）：嵌入 NSH 的应用会下载这些应用包，并在运行前进行校验。[签名包](./signed-packages.md)介绍了整个模型（由离线保存的根密钥为某些应用 id 认证 release 密钥）。
 
 ### nsh keygen
 

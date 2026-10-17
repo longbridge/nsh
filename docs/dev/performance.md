@@ -116,7 +116,7 @@ draw a panel.
 
   An idle surface draws no frames (frames are requested only while something animates or JS asked for one). GPUI caps
   unfocused windows at 30 fps by default (`WindowOptions::inactive_frame_interval`), skipping frames in between (gaps of
-  33–50 ms): nsh's own windows turn the cap off (61 fps unfocused); hosts embedding an `AppView` decide for theirs.
+  33–50 ms): NSH's own windows turn the cap off (61 fps unfocused); hosts embedding an `AppView` decide for theirs.
   Debug builds draw the Animations page in 1.5–3.5 ms.
 
   On the Wayland desktop (Hyprland, 3840×2160 at 144 Hz, scale 1.6; a 1500×900 pt window, unfocused, release with
@@ -130,7 +130,7 @@ draw a panel.
   | Gestures (springs, a pulsing ring) | 26, 0.21 ms, 0.52 ms | 145, 0.17 ms, 0.35 ms |
 
   Before: GPUI's 30 fps cap of unfocused windows (frames 40–42 ms apart) and, in Stocks, canvases rasterized in full
-  on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in nsh's windows, canvases
+  on the main thread (18 ms of every frame: ~190 new drawings a second). After: no cap in NSH's windows, canvases
   rasterized on two workers and only what animates in place (`canvas.rs`).
 
 The dev profile builds `rquickjs-sys` and `taffy` with `opt-level = 3`, so debug timings are meaningful too; release uses fat LTO.

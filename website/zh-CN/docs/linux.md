@@ -1,20 +1,20 @@
 ---
 title: Linux
-description: 在 Linux 上用 GTK 4 窗口运行 nsh 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
+description: 在 Linux 上用 GTK 4 窗口运行 NSH 应用、打包应用、用 AppView 嵌入 GTK 应用，以及 Linux 上的差异。
 order: 15
 group: platforms
 ---
 
 # Linux
 
-nsh 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局和
+NSH 应用也能在 Linux 上运行。Linux 后端用 GTK 4 控件渲染应用，用 Pango 排版文字；核心、响应式图、渲染器、Taffy 布局和
 `nsh/ui/mobile` 组件与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 Linux 上，`Platform.OS` 为
 `"linux"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
 ## 环境要求
 
-- **GTK 4.14** 及以上。构建 nsh 的 Linux 运行时（从源码构建，或在 Linux 上运行 `cargo xtask dist`）
+- **GTK 4.14** 及以上。构建 NSH 的 Linux 运行时（从源码构建，或在 Linux 上运行 `cargo xtask dist`）
   还需要它们的开发包和 clang：Debian 与 Ubuntu（24.04 及以上）为 `libgtk-4-dev clang`，Arch 为 `gtk4 clang`，Fedora 为
   `gtk4-devel clang`。
 - Web 视图需要 **WebKitGTK 6.0**（2.40 及以上）：构建运行时需要 Debian 与 Ubuntu 上的 `libwebkitgtk-6.0-dev`、Arch 上的
@@ -66,7 +66,7 @@ Pango 和 WebKitGTK 6.0。要让应用出现在桌面的启动器中，把可执
 
 ## 嵌入 GTK 应用
 
-`nsh-platform-linux` crate（位于 nsh 仓库中）为 Rust 编写的 GTK 应用提供 `AppView`：一个作为 GTK 控件的 nsh 引擎。每个
+`nsh-platform-linux` crate（位于 NSH 仓库中）为 Rust 编写的 GTK 应用提供 `AppView`：一个作为 GTK 控件的 NSH 引擎。每个
 `AppView` 相互独立，可以同时运行多个。
 
 ```rust
@@ -126,7 +126,7 @@ fn main() -> gtk::glib::ExitCode {
 快捷键适用于任何键盘布局（在西里尔或希腊字母布局下，Ctrl+C 是美式布局中输入 C 的那个键）。确认输入法组合文字（中文、日文等）的回车
 不会提交。`onKeyPress` 报告的与 React Native 一致：输入的文字、`"Enter"`、`"Backspace"` 和 `"Escape"`；粘贴的文字不报告。
 
-Web 视图是绘制在 nsh 视图之内的 WebKitGTK 页面：sheet、对话框、toast 以及排在它后面的视图会绘制在页面之上，父视图会裁剪它、改变它的透明度。
+Web 视图是绘制在 NSH 视图之内的 WebKitGTK 页面：sheet、对话框、toast 以及排在它后面的视图会绘制在页面之上，父视图会裁剪它、改变它的透明度。
 它的网站数据（cookie、存储、缓存）按应用分别保存在 `~/.local/share/<app id>/webkit` 和 `~/.cache/<app id>/webkit` 下。
 `webview` 权限同样作用于框架中的页面：应用未获授权的主机的 `iframe` 保持空白。在页面中按 Escape 会离开页面，与文本框中一样
 （除非页面自己用了它）；页面有历史记录时，Alt+Left 和鼠标的后退键在页面中后退。

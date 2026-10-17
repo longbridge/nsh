@@ -6,7 +6,7 @@ order: 9
 
 # nsh/native
 
-`nsh/native` 把你的应用与宿主应用提供的原生视图连接起来。嵌入了 nsh 的 iOS 或 Android 应用可以按名称注册自己的视图（地图、图表、相机预览等）；`nativeComponent` 为其中一个视图生成带类型的组件。由于 nsh 使用真正的原生视图渲染，这样的组件和其他视图一样位于视图层级中：由 nsh 布局，随父视图裁剪和滚动，层叠关系也正确。
+`nsh/native` 把你的应用与宿主应用提供的原生视图连接起来。嵌入了 NSH 的 iOS 或 Android 应用可以按名称注册自己的视图（地图、图表、相机预览等）；`nativeComponent` 为其中一个视图生成带类型的组件。由于 NSH 使用真正的原生视图渲染，这样的组件和其他视图一样位于视图层级中：由 NSH 布局，随父视图裁剪和滚动，层叠关系也正确。
 
 ```ts
 import { nativeComponent } from "nsh/native";
@@ -59,7 +59,7 @@ map.command("zoomTo", { level: 3 });
 
 ## 示例
 
-这里的徽标是宿主应用的原生视图，注册名为 `embed.badge`。nsh 负责布局，向它发送 `text` 和 `color`，接收它的 `tap` 事件，并调用它的 `pulse` 命令：
+这里的徽标是宿主应用的原生视图，注册名为 `embed.badge`。NSH 负责布局，向它发送 `text` 和 `color`，接收它的 `tap` 事件，并调用它的 `pulse` 命令：
 
 ```tsx
 import { mount, signal, type YNode } from "nsh";
@@ -94,4 +94,4 @@ mount(App);
 ```
 
 > [!NOTE]
-> 属性、事件和命令参数都以 JSON 形式传到原生侧。注册的组件是宿主应用自己的代码：nsh 的[沙箱限制与权限](../docs/sandbox-and-capabilities.md)不约束它们的行为。
+> 属性、事件和命令参数都以 JSON 形式传到原生侧。注册的组件是宿主应用自己的代码：NSH 的[沙箱限制与权限](../docs/sandbox-and-capabilities.md)不约束它们的行为。

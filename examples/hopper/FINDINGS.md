@@ -1,6 +1,6 @@
 # Findings from building Hopper Lab
 
-Hopper Lab was written against nsh as it is, without changing the runtime, to see what an app of this kind needs.
+Hopper Lab was written against NSH as it is, without changing the runtime, to see what an app of this kind needs.
 These are the gaps it ran into, each with what the app does instead. Fix them in the runtime and delete the
 workaround here in the same change.
 

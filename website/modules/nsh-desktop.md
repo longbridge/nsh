@@ -92,7 +92,7 @@ The hidden title bar's area, in points (reactive): its `height`, and the widths 
 | Windows | `height`, else 32 | 0 | The three caption buttons (138) |
 | Linux | `height`, else the header bar's | The window buttons at the start (the desktop's button layout) | The window buttons at the end |
 
-On Windows the caption buttons are drawn by nsh in Windows 11's style and follow the app's appearance; hovering the maximize button shows Windows 11's snap layouts. The window keeps its resize borders, shadow and rounded corners on every platform.
+On Windows the caption buttons are drawn by NSH in Windows 11's style and follow the app's appearance; hovering the maximize button shows Windows 11's snap layouts. The window keeps its resize borders, shadow and rounded corners on every platform.
 
 ## Menu
 
@@ -161,7 +161,7 @@ Roles:
 
 A role's item has the platform's label and shortcut unless it sets its own (macOS adds the app's name to `about`, `hide` and `quit`).
 
-Menu shortcuts come first, as in native apps: a key an item takes never reaches the focused text field or nsh's own keys. Only a binding of [`nsh/keymap`](./nsh-keymap) of the same keystroke comes before them. So give the editing shortcuts (`mod+c`, `mod+v`, `mod+x`, `mod+a`, `mod+z`) only to the edit roles, which pass them to the text field, and avoid keys without a modifier (`escape`, the arrows, letters), which would take them from text fields and from back navigation.
+Menu shortcuts come first, as in native apps: a key an item takes never reaches the focused text field or NSH's own keys. Only a binding of [`nsh/keymap`](./nsh-keymap) of the same keystroke comes before them. So give the editing shortcuts (`mod+c`, `mod+v`, `mod+x`, `mod+a`, `mod+z`) only to the edit roles, which pass them to the text field, and avoid keys without a modifier (`escape`, the arrows, letters), which would take them from text fields and from back navigation.
 
 ```tsx
 import { effect, signal } from "nsh";

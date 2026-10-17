@@ -1,6 +1,6 @@
 # The Linux backend (GTK 4)
 
-`crates/nsh-platform-linux` renders nsh apps with GTK 4 widgets and lays text out with Pango. `crates/nsh-linux-host`
+`crates/nsh-platform-linux` renders NSH apps with GTK 4 widgets and lays text out with Pango. `crates/nsh-linux-host`
 is its development host (`nsh run --target linux`, the default on Linux), `crates/nsh-linux-app` the release runner of
 `nsh package --target linux`. Like the macOS and Windows backends, it follows the mobile backends' design (one native
 view per node, the core lays everything out); the GPUI backend (`gpui.md`) is a separate effort. User-facing page: `website/docs/linux.md`.
@@ -30,7 +30,7 @@ server client, log forwarding, the error overlay: `dev.rs`) and `webview` (web v
 crate: `native/web.rs`; without it a `WebView` shows a placeholder). `webview` is off in `nsh-platform-linux` itself,
 so an embedding GTK app decides whether it links WebKitGTK, and on by default in `nsh-linux-host` and `nsh-linux-app`
 (their own feature `webview`): `nsh run`, `nsh package --target linux` and the generated crates of Rust apps build
-those two crates with their default features, so web views work wherever nsh runs apps, as on the other platforms.
+those two crates with their default features, so web views work wherever NSH runs apps, as on the other platforms.
 The price is that the release runner links `libwebkitgtk-6.0.so.4`, so every packaged app needs WebKitGTK 6.0
 installed to start (`libwebkitgtk-6.0-4` on Debian / Ubuntu; GNOME desktops have it), whether or not it shows a
 web view: WebKitGTK cannot be loaded on demand the way iOS and macOS load WebKit, as the `webkit6` bindings link
@@ -77,7 +77,7 @@ works and its runner only needs GTK.
 | Modals | `navigation.rs` | Children of the root above the app's views, sliding up or fading in; page and form sheets are centered cards (720 / 540 points wide at most) over a scrim that dims the window, and clicking the scrim asks them to close; the views under the newest modal cannot take the focus (`can-focus` off), and the widget that had it when a modal opened gets it back when it closes |
 | Dialogs, toasts | `system.rs` | GTK widgets the root hosts over the app's views (not separate windows: they stay with an embedded surface and never block the main loop) |
 | Video | `native.rs` | `gtk::MediaFile` (GStreamer) in a `gtk::Picture`, or `gtk::Video` with `controls` |
-| Web views | `native/web.rs` | `WebKitWebView` (WebKitGTK 6.0, feature `webview`) hosted in the node's view like a video (mapped only while the view has a size, and loading only once mapped: with WebKit's DMA-BUF renderer a page loaded before its view is mapped sometimes stays blank for good), so it stacks, clips, fades and transforms with nsh content (sheets, scrims, dialogs, toasts and later siblings draw over it; departing screens keep its last frame in their `WidgetPaintable`): no composition surfaces. iOS's bridge (`ReactNativeWebView.postMessage` through a script message handler), injected scripts as top-frame user scripts, `javaScriptEnabled` as `enable-javascript-markup`, `scrollEnabled: false` as a user style sheet hiding the top document's overflow, `allowsBackForwardNavigationGestures`, user agent; the `webview` capability decided in `decide-policy` (for frames too: WebKitGTK does not tell them apart); responses it cannot show are refused, not downloaded; website data per app id in a `NetworkSession` (`$XDG_DATA_HOME/<app id>/webkit`, cache in `$XDG_CACHE_HOME`); the page's `prefers-color-scheme` follows GTK's settings, which follow the app. Pointer events GTK would send to a clipped-off part of a page are kept from it (`input.rs`); Escape a focused page does not use leaves it, Alt+Left / Alt+Right / Back / Forward and the mouse's side buttons move in the page's history first |
+| Web views | `native/web.rs` | `WebKitWebView` (WebKitGTK 6.0, feature `webview`) hosted in the node's view like a video (mapped only while the view has a size, and loading only once mapped: with WebKit's DMA-BUF renderer a page loaded before its view is mapped sometimes stays blank for good), so it stacks, clips, fades and transforms with NSH content (sheets, scrims, dialogs, toasts and later siblings draw over it; departing screens keep its last frame in their `WidgetPaintable`): no composition surfaces. iOS's bridge (`ReactNativeWebView.postMessage` through a script message handler), injected scripts as top-frame user scripts, `javaScriptEnabled` as `enable-javascript-markup`, `scrollEnabled: false` as a user style sheet hiding the top document's overflow, `allowsBackForwardNavigationGestures`, user agent; the `webview` capability decided in `decide-policy` (for frames too: WebKitGTK does not tell them apart); responses it cannot show are refused, not downloaded; website data per app id in a `NetworkSession` (`$XDG_DATA_HOME/<app id>/webkit`, cache in `$XDG_CACHE_HOME`); the page's `prefers-color-scheme` follows GTK's settings, which follow the app. Pointer events GTK would send to a clipped-off part of a page are kept from it (`input.rs`); Escape a focused page does not use leaves it, Alt+Left / Alt+Right / Back / Forward and the mouse's side buttons move in the page's history first |
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s widget fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
 | Accessibility | `access.rs` | `GtkAccessible` (AT-SPI): roles from `accessibilityRole` / text / press handlers / labelled images, labels, descriptions, values, states; `testID` as the widget name; live regions emulated with `gtk_accessible_announce` |
 | Environment | `system.rs` | Color scheme: the app's appearance (`nsh.json` `"appearance"`, `setColorScheme`) when it forces one, else the XDG settings portal's (`org.freedesktop.appearance color-scheme`, live); hosted GTK widgets, dialogs and the root's background follow it, and a packaged app's window opens in it (`nsh/app.json`). The locale (`Intl`) from `LC_ALL` / `LC_TIME` / `LC_NUMERIC` / `LC_MESSAGES` / `LANG`, else GLib's language names. Font scale from `gtk-xft-dpi`, reduce motion from `gtk-enable-animations`, the surface's (fractional) scale, GTK's text direction, AT-SPI's `ScreenReaderEnabled`; `Platform.OS` `"linux"`, idiom `desktop`, OS version the kernel's major.minor; safe area and keyboard height 0 |
@@ -89,7 +89,7 @@ works and its runner only needs GTK.
 ## Keyboard
 
 A key goes through the window's controllers in GTK's order: capture from the window down to the focus widget, then
-bubble back up. What nsh adds:
+bubble back up. What NSH adds:
 
 - **Window shortcuts** (`app.rs`, standalone apps only, not an embedded `AppView`): Ctrl+Q quits, Ctrl+W closes the
   window (GtkWindow's `window.close`, a bubble-phase shortcut of the window rather than an application accelerator,

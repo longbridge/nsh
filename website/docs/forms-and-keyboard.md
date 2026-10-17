@@ -8,7 +8,7 @@ demo: guide-forms
 
 # Forms and the keyboard
 
-Text entry is the `<Input>` element: a UITextField or UITextView on iOS, an EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own; your app gets the text through events and can control it. nsh also keeps focused inputs above the software keyboard on its own, and gives you the keyboard's height as a reactive value for the cases it cannot handle by itself.
+Text entry is the `<Input>` element: a UITextField or UITextView on iOS, an EditText on Android. Typing, the caret, selection, autocorrection and autofill are the platform's own; your app gets the text through events and can control it. NSH also keeps focused inputs above the software keyboard on its own, and gives you the keyboard's height as a reactive value for the cases it cannot handle by itself.
 
 For a labeled field with a clear button in the mobile UI set's look, see [`TextField`](../components/text-field.md). This page covers the underlying element.
 
@@ -158,7 +158,7 @@ mount(SignIn);
 
 `blurOnSubmit={false}` on the first field keeps the keyboard up while focus moves, so it does not drop and rise again. A chat input that sends on return and stays focused uses `submitBehavior="submit"` (see the composer [below](#content-outside-scroll-views-keyboardavoidingview)).
 
-Both `maxLength` and `submitBehavior` are enforced natively: the platform asks "may this character be added?" and "should return end editing?" as the user types, and nsh answers from the props without waiting for JS.
+Both `maxLength` and `submitBehavior` are enforced natively: the platform asks "may this character be added?" and "should return end editing?" as the user types, and NSH answers from the props without waiting for JS.
 
 ## Focus from code
 
@@ -219,7 +219,7 @@ The reported height is the text's (at the input's width), so add the vertical pa
 
 ### Inside scroll views: automatic
 
-When the keyboard appears over a focused input that is inside a `<Scroll>` or `List`, nsh gives the scroll view a bottom inset as tall as the keyboard and scrolls the input into view. This is native and needs no code. A long form is simply a scroll view of inputs:
+When the keyboard appears over a focused input that is inside a `<Scroll>` or `List`, NSH gives the scroll view a bottom inset as tall as the keyboard and scrolls the input into view. This is native and needs no code. A long form is simply a scroll view of inputs:
 
 ```tsx
 <Scroll style={{ flex: 1 }} keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled">

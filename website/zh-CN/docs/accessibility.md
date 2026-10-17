@@ -7,7 +7,7 @@ group: ui
 
 # 无障碍
 
-nsh 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst 上的 VoiceOver、Android 上的 TalkBack、切换控制、语音控制等）看到的是应用真实的视图层级。你需要补充的是这些技术无法推断的描述：元素是什么、说什么、处于什么状态、能做什么。所有元素都接受下面的属性。
+NSH 用原生视图渲染，所以平台的辅助技术（iOS 和 Mac Catalyst 上的 VoiceOver、Android 上的 TalkBack、切换控制、语音控制等）看到的是应用真实的视图层级。你需要补充的是这些技术无法推断的描述：元素是什么、说什么、处于什么状态、能做什么。所有元素都接受下面的属性。
 
 ## 无需任何操作就能得到的
 
@@ -206,7 +206,7 @@ function Upload() {
 
 ## 减少动态效果
 
-当用户打开 iOS 的"减弱动态效果"或 Android 的"移除动画"时，`reduceMotion()` 为 `true`。nsh 不会自行关闭你的动画。用它，或 Tailwind 的 `motion-reduce:` 和 `motion-safe:` 变体，把大幅度的运动替换为淡入淡出或直接切换：
+当用户打开 iOS 的"减弱动态效果"或 Android 的"移除动画"时，`reduceMotion()` 为 `true`。NSH 不会自行关闭你的动画。用它，或 Tailwind 的 `motion-reduce:` 和 `motion-safe:` 变体，把大幅度的运动替换为淡入淡出或直接切换：
 
 ```tsx
 import { View } from "nsh";

@@ -2,9 +2,9 @@
 
 ## TypeScript
 
-- Every command that builds an app writes `.nsh/types` next to its entry (only changed files; files nsh no longer writes
+- Every command that builds an app writes `.nsh/types` next to its entry (only changed files; files NSH no longer writes
   are removed). None of it is checked in, and nothing in it depends on the app's code: `nsh_js::type_definitions(ui_sets)`
-  makes the declarations of everything nsh serves (`nsh-js` `declarations.rs`), and `nsh_bundler::type_definitions()`
+  makes the declarations of everything NSH serves (`nsh-js` `declarations.rs`), and `nsh_bundler::type_definitions()`
   the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/list.d.ts`, `nsh/ui/mobile.d.ts`,
   ...), `nsh/types.d.ts` (the styles, the elements' props and events, `YNode`, the JSX namespace; `nsh` exports them),
   `nsh/jsx-runtime.d.ts` (where `jsxImportSource` finds `JSX`: no intrinsic elements, so every tag is checked as the
@@ -45,7 +45,7 @@ running TypeScript itself. The options were:
 `tsc -p <app dir> --noEmit` (arguments after `--` are passed on). The compiler is a pinned release (`TYPESCRIPT`),
 downloaded from the npm registry's tarball URL the first time (ureq, no npm client), checked against the
 `dist.integrity` (SHA-512) recorded in the source for each host it supports (macOS, Linux and Windows, arm64 and x64; on Windows the compiler is
-`package/lib/tsc.exe`), unpacked into nsh's cache (`NSH_CACHE`, else `~/Library/Caches/nsh` / `$XDG_CACHE_HOME/nsh` /
+`package/lib/tsc.exe`), unpacked into NSH's cache (`NSH_CACHE`, else `~/Library/Caches/nsh` / `$XDG_CACHE_HOME/nsh` /
 `%LOCALAPPDATA%\nsh`) and kept there. `--tsc <path>` /
 `NSH_TSC` run another `tsc` (a TypeScript 5 / 6 one, an offline copy). Updating TypeScript is a change of the version
 and the integrities (`npm view @typescript/typescript-<os>-<arch>@<version> dist.integrity`). The distribution
@@ -69,7 +69,7 @@ step, the details only when something fails. Every command prints through it:
 - Log lines (`logger.rs`): the library crates and the devices log through `log`; normally warnings and errors are shown
   without targets (a device's after its name: `warn iOS Simulator: …`), `js` lines and a device's lines from other
   crates (the app's Rust code) plainly (with the device's name when several are connected), `nsh::perf` as `perf …`;
-  nsh's own info lines (a device's "loading build 3") are not shown: the CLI's steps say what happens. The dev server
+  NSH's own info lines (a device's "loading build 3") are not shown: the CLI's steps say what happens. The dev server
   reports hosts connecting and leaving (`nsh_dev::ClientEvent`) rather than logging it, so the CLI prints
   `• Mac Catalyst connected, build 1`, and a host that cannot run the app as one `warn` line
   (`warn Android Emulator: its host has no gallery/native (it was built for another app): nsh run examples/gallery-rs
@@ -194,7 +194,7 @@ The attribute (`nsh-macros` `native_module.rs`) checks the specifier at compile 
 fails as that name defined twice; one outside the crate's root fails at the attribute (a glob of `crate::*` in a
 block finds the entry or a stand-in whose bound reports where it goes: `#[diagnostic::on_unimplemented]`). A crate
 without one fails the generated workspace's build with what to add, the same way: the generated code glob-imports
-the app's crate in a block, which shadows its import of nsh's stand-in (`nsh_core::ui::__private`). The prebuilt
+the app's crate in a block, which shadows its import of NSH's stand-in (`nsh_core::ui::__private`). The prebuilt
 toolchain cannot know the set, so `nsh` builds the app its own (`crates/nsh-cli/src/rust_app.rs`):
 
 - A Cargo workspace in `<app>/.nsh/rust`, written on every command (files only when they change): `cli` (the
@@ -207,7 +207,7 @@ toolchain cannot know the set, so `nsh` builds the app its own (`crates/nsh-cli/
   `cfg(any(target_os = "linux", target_os = "macos", windows))`; `gpui-app` is a windowed program on Windows too) are
   a workspace of their own in `.nsh/rust/gpui` (excluded from the main one), written only when a GPUI host or runner is
   built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates. They
-  build against nsh's sources (the checkout the running `nsh` was built in, or `NSH_SOURCE`) with nsh's `Cargo.lock`
+  build against NSH's sources (the checkout the running `nsh` was built in, or `NSH_SOURCE`) with NSH's `Cargo.lock`
   and target directory, so only the app's code and what links it compile; the binaries are named after the app
   (`nsh-app-<package>-cli`).
 - A command on the app (`build`, `trace`, `dev`, `run`, `package`, `publish`) builds `cli` and runs again in it

@@ -1,12 +1,12 @@
 ---
 title: 全局 API
-description: 每个 nsh 应用无需 import 就能使用的全局对象——fetch、流、URL、文本编码、Blob 与 FormData、事件与中止信号、Intl、定时器和 console——都用 Rust 原生实现。
+description: 每个 NSH 应用无需 import 就能使用的全局对象——fetch、流、URL、文本编码、Blob 与 FormData、事件与中止信号、Intl、定时器和 console——都用 Rust 原生实现。
 order: 15
 ---
 
 # 全局 API
 
-除了 ECMAScript 标准库，nsh 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
+除了 ECMAScript 标准库，NSH 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
 
 本页列出了应用拥有的全部全局对象。界面用[元素](../elements/index.md)和[组件](../components/index.md)搭建，其余能力来自应用导入的[模块](./index.md)。
 
@@ -624,7 +624,7 @@ for await (const line of res.body!.pipeThrough(new TextDecoderStream()).pipeThro
 
 ## 数字与日期格式化
 
-QuickJS 自身没有 `Intl`；nsh 补上了一个，在 Rust 中格式化：`Intl.NumberFormat`、`Intl.DateTimeFormat` 和 `Intl.getCanonicalLocales`，以及数字和 BigInt 的 `toLocaleString`、日期的 `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString`，它们接受相同的 `locales` 和 `options`。它们的声明来自 TypeScript 自带的 `ES2023` 库，所以不在 `globals.d.ts` 中。
+QuickJS 自身没有 `Intl`；NSH 补上了一个，在 Rust 中格式化：`Intl.NumberFormat`、`Intl.DateTimeFormat` 和 `Intl.getCanonicalLocales`，以及数字和 BigInt 的 `toLocaleString`、日期的 `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString`，它们接受相同的 `locales` 和 `options`。它们的声明来自 TypeScript 自带的 `ES2023` 库，所以不在 `globals.d.ts` 中。
 
 ```ts
 (1234567.891).toLocaleString();                                              // "1,234,567.891"（en-US）

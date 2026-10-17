@@ -1,9 +1,9 @@
 # The macOS backend (AppKit)
 
-`crates/nsh-platform-macos` renders nsh apps with AppKit views, Core Animation and CoreText. `crates/nsh-macos-host` is
+`crates/nsh-platform-macos` renders NSH apps with AppKit views, Core Animation and CoreText. `crates/nsh-macos-host` is
 its development host (`nsh run --target macos`), `crates/nsh-macos-app` the release runner of `nsh package --target
-macos`. It follows the Linux backend's desktop design (`linux.md`: nsh picks views itself, scroll views keep offsets of
-their own, nsh draws screens, headers and modals, sheets are centered cards, `desktop={{…}}` props apply) with the iOS
+macos`. It follows the Linux backend's desktop design (`linux.md`: NSH picks views itself, scroll views keep offsets of
+their own, NSH draws screens, headers and modals, sheets are centered cards, `desktop={{…}}` props apply) with the iOS
 backend's Apple drawing (CoreText, Core Graphics, Core Animation layers, ImageIO, `NSURLSession`, AVFoundation, WebKit).
 Mac Catalyst (`nsh-platform-ios` on `aarch64-apple-ios-macabi`) stays the default `nsh run` target on macOS: it is
 UIKit, phone-style. In a checkout, `cargo run` runs the gallery here (`--target catalyst` for Catalyst). User-facing page: `website/docs/macos.md`.
@@ -40,7 +40,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
   draws into is composited by Core Animation with the rest. What is above it in the view tree draws over it (later
   siblings, modals and sheets with their scrim, toasts; the dev status line, error overlay and FPS HUD are above the
   root), and its ancestors' clipping (corner radii, masks), opacity, transforms, hiding and scroll offsets apply to
-  it. AppKit's input and in-process rendering do not follow the layers: the root's `hitTest:` decides with nsh's
+  it. AppKit's input and in-process rendering do not follow the layers: the root's `hitTest:` decides with NSH's
   picking (Input, below), a page under a transformed ancestor is drawn transformed but gets mouse positions as if it
   were not, and `renderInContext:` leaves pages and videos out (leaving screens and modals take the live views
   along; `--script`'s `shot` shows pages, which WebKit draws for `cacheDisplayInRect:`, but not videos). `NSAlert` sheets are windows of their own, above everything.
@@ -48,7 +48,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
   `visual.rs`, `image.rs`, the iOS backend's design). Text and canvas views draw into a **content layer** of their own
   (`NshView::redraw`: a plain `CALayer` sublayer whose delegate draws in `drawLayer:inContext:`, above the decoration
   behind the view and below its children); no view uses `drawRect:`, every view uses `updateLayer` and gets no backing
-  store. Implicit animations are off for every change nsh makes (`surface::quiet`; the content layer's delegate
+  store. Implicit animations are off for every change NSH makes (`surface::quiet`; the content layer's delegate
   answers no action).
 - **Why not `drawRect:`**: scrolling moves a container's bounds origin, and `setBoundsOrigin:` walks the subtree
   (`NSViewHierarchyInvalidateVisibleRect`) and marks every `drawRect:` view's layer for display
@@ -122,7 +122,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 | Images | `image.rs`, `blur.rs` | ImageIO decoding off the main thread, downsampled to the view; an LRU cache (128 MB); `asset:/`, http(s) (`NSURLSession`), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
 | Scroll views | `scroll.rs` | Offsets of their own, shown by the container's bounds origin; trackpad scrolls follow the system's phases and momentum (rubber banding while the fingers are down, a spring back after), notched wheels move 10 points per line and stay on their view for 200 ms; mouse drags scroll as on Catalyst; snapping and paging glide from where the fingers lift; sticky cells; the indicator and refresh spinner in an overlay view that lets the mouse through (the root still lets the mouse drag the indicator as a scroll bar, as on Linux); the keyboard scrolls as on Linux; a field that gets the focus is scrolled into view |
-| Input | `input.rs` | The root's `hitTest:` takes every mouse event inside it, and nsh picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where nsh's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what nsh draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onHoverIn` / `onHoverOut`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back |
+| Input | `input.rs` | The root's `hitTest:` takes every mouse event inside it, and NSH picks the view itself (transforms inverted, `overflow`, `pointerEvents`, hit slop, hidden screens, views animating out); a hosted view gets the event from AppKit only where NSH's picking lands on it, even below `pointerEvents: none` overlays (`native_at`): AppKit's own picking would give a web view the clicks on what NSH draws over it (a menu outside its parent's frame, transformed views) and on web views that are hidden, animating out or under `pointerEvents: none`. Touches for the responder system, `panActivation` gates, presses, long presses, pressed and hovered states, `onHoverIn` / `onHoverOut`, cursors (`NSCursor`), native pans, trackpad pinch and rotation (Control + wheel pinches), the mouse's back button goes back |
 | Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
 | Navigation | `navigation.rs` | Screens are child views, only the top one (and the one below during a transition) visible; headers are AppKit views (an `NSButton` back button with `chevron.left`, `NSTextField` titles, large titles, header items) of a fixed height reported to the core; a screen the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a modal; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button pop natively (a stack inside the newest modal first, else that modal is asked to close; without a modal, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
 | Modals | `navigation.rs` | Children of the root above the app's views, sliding up or fading in; page and form sheets are centered cards (720 / 540 points wide at most) over a scrim that dims the window, and clicking the scrim asks them to close |
@@ -174,7 +174,7 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   window itself. The key is read as `Keystroke`: virtual key codes for named and function keys, else the character
   without modifiers (`charactersByApplyingModifiers:` with none when Shift is held, so Shift+/ is `shift+/`), the US
   layout's (`input::us_key`) when that is not ASCII. The monitor is removed when the table empties or the app stops.
-- Shortcuts nsh matches itself (Cmd+A / C / [ / R) read `input::shortcut_key`: the character without modifiers, or on
+- Shortcuts NSH matches itself (Cmd+A / C / [ / R) read `input::shortcut_key`: the character without modifiers, or on
   a layout that types none in ASCII the US layout's key, as menus do.
 
 `onKeyPress` reports what React Native's does: the inserted text (`"Enter"` for a line break), `"Backspace"` for a

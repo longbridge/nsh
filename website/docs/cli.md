@@ -1,13 +1,13 @@
 ---
 title: CLI
-description: Every nsh subcommand and flag - init, build, trace, check, dev, run, package, and the signing commands keygen, certify, publish, verify and revoke.
+description: Every NSH subcommand and flag - init, build, trace, check, dev, run, package, and the signing commands keygen, certify, publish, verify and revoke.
 order: 6
 group: start
 ---
 
 # CLI
 
-`nsh` is the only tool an nsh app needs. Every subcommand that builds an app takes `[ENTRY]`: the entry module, or the app's directory, whose `App.tsx` is the entry (default: the current directory, so `cd my-app && nsh run` works). It reads `nsh.json` next to the entry and refreshes the type declarations in `.nsh/types`.
+`nsh` is the only tool an NSH app needs. Every subcommand that builds an app takes `[ENTRY]`: the entry module, or the app's directory, whose `App.tsx` is the entry (default: the current directory, so `cd my-app && nsh run` works). It reads `nsh.json` next to the entry and refreshes the type declarations in `.nsh/types`.
 
 ```text
 nsh <COMMAND>
@@ -46,7 +46,7 @@ warn iOS Simulator: image failed: An SSL error has occurred and a secure connect
 `✓` is a finished step, `→` where to connect, `•` what a device did; `warn` and `error` lines are problems, and
 plain lines are your app's own output (`console.log`). On a terminal a spinner shows the step that is running, and
 lines are colored (unless `NO_COLOR` is set); redirected to a file, only the result lines are written, without colors.
-The output of the tools nsh runs (cargo for an app's Rust crate, the development hosts) is printed below an `error`
+The output of the tools NSH runs (cargo for an app's Rust crate, the development hosts) is printed below an `error`
 line when one of them fails.
 
 `-v, --verbose` (any command; also `NSH_VERBOSE=1`) prints everything as it comes: every log line with its level and
@@ -138,7 +138,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh check [ENTRY] [--tsc <TSC>] [-- <TSC ARGS>...]
 ```
 
-Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum nsh records, and keeps it in nsh's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code.
+Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum NSH records, and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code.
 
 | Flag | Description |
 |---|---|
@@ -151,7 +151,7 @@ Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> -
 nsh build [ENTRY] [-o <OUT>] [--release]
 ```
 
-Bundles the app and compiles it to QuickJS bytecode, for apps that embed nsh and ship the bundle themselves.
+Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -174,7 +174,7 @@ It writes:
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|gpui [-o <OUT>] [flags]
 ```
 
-Builds an installable app from the prebuilt runtime, in release mode. No Rust and no Xcode project or Gradle build are involved: nsh assembles the app bundle itself and uses Xcode's `actool` and `codesign` (iOS) or the SDK's `aapt2`, `zipalign` and `apksigner` (Android); for macOS it assembles an ad hoc signed `.app` with `codesign` (and `sips` for the icon); for Linux it copies the runner and writes a `.tar.gz` with `tar`; for Windows it copies the runner, embeds the icon and writes a `.zip`, with no tools; for GPUI it does what it does for this machine's OS, with the GPUI runner. Metadata comes from `nsh.json`, overridden by the flags.
+Builds an installable app from the prebuilt runtime, in release mode. No Rust and no Xcode project or Gradle build are involved: NSH assembles the app bundle itself and uses Xcode's `actool` and `codesign` (iOS) or the SDK's `aapt2`, `zipalign` and `apksigner` (Android); for macOS it assembles an ad hoc signed `.app` with `codesign` (and `sips` for the icon); for Linux it copies the runner and writes a `.tar.gz` with `tar`; for Windows it copies the runner, embeds the icon and writes a `.zip`, with no tools; for GPUI it does what it does for this machine's OS, with the GPUI runner. Metadata comes from `nsh.json`, overridden by the flags.
 
 | Flag | Description |
 |---|---|
@@ -206,7 +206,7 @@ See [Packaging](./packaging.md).
 
 ## Signing commands
 
-These commands make and check signed packages (`.nshpkg`): app bundles that apps embedding nsh download and verify before running them. [Signed packages](./signed-packages.md) explains the model (an offline root key certifies release keys for some app ids).
+These commands make and check signed packages (`.nshpkg`): app bundles that apps embedding NSH download and verify before running them. [Signed packages](./signed-packages.md) explains the model (an offline root key certifies release keys for some app ids).
 
 ### nsh keygen
 

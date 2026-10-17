@@ -1,14 +1,14 @@
 ---
 title: Elements
-description: The host elements every nsh app is built from, and the props, events and ref methods they all share.
+description: The host elements every NSH app is built from, and the props, events and ref methods they all share.
 order: 1
 ---
 
 # Elements
 
-Host elements are the primitives every screen is made of: `<View>`, `<Text>`, `<Image>` and the rest, imported from nsh's
+Host elements are the primitives every screen is made of: `<View>`, `<Text>`, `<Image>` and the rest, imported from NSH's
 modules. Each one is a native view (a UIView subclass on iOS and Mac Catalyst, an Android `View`), created and laid out
-by the nsh runtime. Everything an app shows is
+by the NSH runtime. Everything an app shows is
 made of them: the components of [`nsh/ui/mobile`](../components/index.md) are drawn with the same elements.
 
 ```tsx
@@ -231,6 +231,6 @@ let input!: YNode;
 ## Why handlers never block the UI
 
 The main thread never waits for JS. When the system needs an answer on the spot (may this text change, may the back
-button pop, may this sheet close), nsh answers it natively from props set beforehand (`maxLength`, `preventBack`,
+button pop, may this sheet close), NSH answers it natively from props set beforehand (`maxLength`, `preventBack`,
 `dismissible`, `pointerEvents`, …), and the event reaches JS afterwards. This is why such behavior is a prop, not a
 return value of a handler.

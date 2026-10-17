@@ -46,7 +46,7 @@ mount(App);
 keyboard: Accessor<{ height: number; duration: number }>
 ```
 
-`keyboard()` 返回软键盘覆盖在 nsh 界面上的高度（单位为 pt，键盘隐藏时为 0），以及键盘弹出或收起动画的时长（单位为秒）。它是响应式的：读取它的 effect 或 JSX 表达式会在键盘弹出、收起或高度变化时重新运行。
+`keyboard()` 返回软键盘覆盖在 NSH 界面上的高度（单位为 pt，键盘隐藏时为 0），以及键盘弹出或收起动画的时长（单位为秒）。它是响应式的：读取它的 effect 或 JSX 表达式会在键盘弹出、收起或高度变化时重新运行。
 
 ```tsx
 import { Input, View } from "nsh";
@@ -69,7 +69,7 @@ function MessageBar() {
 }
 ```
 
-这个高度是键盘与 nsh 界面重叠的部分。如果窗口本身会为键盘缩小（会调整窗口大小的 Android Activity），或者 nsh 嵌入的视图本来就在键盘上方结束，高度为 0。
+这个高度是键盘与 NSH 界面重叠的部分。如果窗口本身会为键盘缩小（会调整窗口大小的 Android Activity），或者 NSH 嵌入的视图本来就在键盘上方结束，高度为 0。
 
 > [!NOTE]
 > 要让内容保持在键盘上方，使用 [KeyboardAvoidingView](./keyboard-avoiding-view.md) 通常比自己读取 `keyboard()` 更简单：它会以原生方式随键盘同步动画。

@@ -37,7 +37,7 @@ const copy = zh
       replay: '重播',
       capKicker: 'AI 友好',
       capTitle: '为模型编写、为宿主把关而设计',
-      capLead: '生成的界面要是真正的原生界面，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。nsh 的每一层都围绕这几点设计。',
+      capLead: '生成的界面要是真正的原生界面，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。NSH 的每一层都围绕这几点设计。',
       usesKicker: '三种用法',
       usesTitle: '同一个模块，三种用法',
       usesLead: '首要用途是 AI 生成的界面；同一套机制也让原生应用可以扩展，或者直接组成一个独立应用。',
@@ -74,10 +74,10 @@ const copy = zh
       replay: 'Replay',
       capKicker: 'AI friendly',
       capTitle: 'Designed for models to write and hosts to trust.',
-      capLead: 'Generated UI has to be truly native, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of nsh is built around that.',
+      capLead: 'Generated UI has to be truly native, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of NSH is built around that.',
       usesKicker: 'Three uses',
       usesTitle: 'One module, three ways to use it.',
-      usesLead: 'AI-generated UI is what nsh is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
+      usesLead: 'AI-generated UI is what NSH is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
       howKicker: 'How it works',
       howTitle: 'Generated on the server, trusted on the device.',
       howLead: 'The server generates, checks and signs; the device verifies, confines and renders. The trust boundary stays explicit.',
@@ -110,12 +110,12 @@ const caps = zh
 
 const uses = zh
   ? [
-      { tag: '设计初衷', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里原生地显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '为什么做 nsh', href: 'docs' },
+      { tag: '设计初衷', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里原生地显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '为什么做 NSH', href: 'docs' },
       { tag: '', label: '原生应用插件', title: '发布之后再扩展应用', body: '在任意页面嵌入 NshAppView（iOS）、NshView（Android）、AppView（macOS、Windows、Linux 与 GPUI 应用）或在网页里用 createPlayer，承载团队、合作方或用户之后编写的功能。', code: 'host', checks: ['一个页面可以放多个模块', '宿主注册自己的原生组件', '更新随时下发'], cta: '各平台的嵌入方式', href: 'docs/platforms' },
       { tag: '', label: '独立应用', title: '也能组成完整的应用', body: '同样的模块可以用 nsh package 打成可安装的 iOS、Android、macOS、Windows、Linux 应用，用 GPUI 运行的桌面应用，或一个静态网站，适合试用和小工具。', code: 'app', checks: ['使用预编译的运行时', '一条命令打出安装包', '保存即热更新开发'], cta: '打包', href: 'docs/packaging' },
     ]
   : [
-      { tag: 'Designed for', label: 'AI-generated UI', title: 'Answer with an interface', body: 'A model writes a module per request, your server checks and signs it, and the app shows it natively, in a sandbox.', code: 'ai', checks: ['One TSX file per answer', 'Type-checked and traced before it ships', 'Only the capabilities the host grants'], cta: 'Why nsh exists', href: 'docs' },
+      { tag: 'Designed for', label: 'AI-generated UI', title: 'Answer with an interface', body: 'A model writes a module per request, your server checks and signs it, and the app shows it natively, in a sandbox.', code: 'ai', checks: ['One TSX file per answer', 'Type-checked and traced before it ships', 'Only the capabilities the host grants'], cta: 'Why NSH exists', href: 'docs' },
       { tag: '', label: 'Plugins for native apps', title: 'Extend the app after release', body: 'Embed an NshAppView (iOS), NshView (Android), AppView (macOS, Windows, Linux and GPUI apps) or createPlayer (a web page) on any screen and host features your team, partners or users write later.', code: 'host', checks: ['Several modules on one screen', 'The host’s own native components', 'Updates delivered whenever you choose'], cta: 'Embedding, per platform', href: 'docs/platforms' },
       { tag: '', label: 'Standalone apps', title: 'Or a whole app', body: 'The same modules can become an installable iOS, Android, macOS, Windows or Linux app, a desktop app running on GPUI, or a static website with nsh package — for trying nsh and for small tools.', code: 'app', checks: ['The prebuilt runtime', 'One command builds the app', 'Hot reload while you develop'], cta: 'Packaging', href: 'docs/packaging' },
     ];

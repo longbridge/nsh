@@ -8,10 +8,10 @@ demo: guide-getting-started
 
 # 快速开始
 
-nsh 的主要用途是在原生应用里承载模块（见[简介](./index.md)）。本指南沿着这条路线走：编写一个模块，在你面向的平台上借助热重载开发，在你的应用里显示它，再以签名包下发一次更新。前提是已经安装 `nsh` 并加入 `PATH`（[安装](./installation.md)）；在源码仓库中请改用 `./target/debug/nsh`。
+NSH 的主要用途是在原生应用里承载模块（见[简介](./index.md)）。本指南沿着这条路线走：编写一个模块，在你面向的平台上借助热重载开发，在你的应用里显示它，再以签名包下发一次更新。前提是已经安装 `nsh` 并加入 `PATH`（[安装](./installation.md)）；在源码仓库中请改用 `./target/debug/nsh`。
 
 > [!TIP]
-> 手头没有应用工程？前两节都不需要：`nsh run` 会在 nsh 自带的开发宿主里显示模块：你电脑上的一个窗口、iOS 模拟器或 Android 设备。你可以到此为止，或者把它[打包成独立应用](#或者作为独立应用发布)。
+> 手头没有应用工程？前两节都不需要：`nsh run` 会在 NSH 自带的开发宿主里显示模块：你电脑上的一个窗口、iOS 模拟器或 Android 设备。你可以到此为止，或者把它[打包成独立应用](#或者作为独立应用发布)。
 
 ## 创建模块
 
@@ -27,7 +27,7 @@ nsh init my-app
 | `nsh.json` | 应用的名称、id、版本和构建号（[项目结构](./project-structure.md#nshjson)） |
 | `tsconfig.json` | TypeScript 设置，把 `nsh` 解析到 `.nsh/types` 中的声明 |
 | `.gitignore` | 忽略 `.nsh/` 和 `out/` |
-| `.nsh/types/` | 生成的所有 nsh 模块的声明，供编辑器使用 |
+| `.nsh/types/` | 生成的所有 NSH 模块的声明，供编辑器使用 |
 
 显示名称默认是目录名；可以用 `--name "My App"` 指定其他名称。id 会是 `com.example.<name>`：发布前请在 `nsh.json` 中修改。已存在的文件会被保留，所以你可以在已经有部分文件的目录里运行 `nsh init`。
 
@@ -63,7 +63,7 @@ mount(App);
 - **`import { SafeAreaView } from "nsh/ui/mobile"`**：移动端 UI 组件集。[`SafeAreaView`](../components/safe-area-view.md) 会为内容加上内边距，使其避开刘海、状态栏和 Home 指示条；桌面上安全区域为 0，它不会加内边距。
 - **`function App()`** 是一个组件：返回 JSX 的函数。它只运行**一次**。`signal(0)` 创建一个会随时间变化的值。
 - **`{count()}`** 在 JSX 中读取 signal。编译器看到这是一次调用，就让这段文本跟随该 signal：`count` 变化时，运行时只更新这一段文本，其他什么都不动。
-- **`<View onPress>`** 是一个响应按压的原生视图；`activeOpacity` 让它在按下时以原生方式变淡。`View`、`Text`、`Image`、`Scroll`、`Input` 等[宿主元素](../elements/index.md)和其他组件一样从 nsh 的模块导入；只有 `If` 和 `Each` 无需导入。
+- **`<View onPress>`** 是一个响应按压的原生视图；`activeOpacity` 让它在按下时以原生方式变淡。`View`、`Text`、`Image`、`Scroll`、`Input` 等[宿主元素](../elements/index.md)和其他组件一样从 NSH 的模块导入；只有 `If` 和 `Each` 无需导入。
 - **`style={{ … }}`** 接受由 camelCase 样式属性组成的对象，数字的单位是点。布局是 flexbox，子元素默认按列排列（[布局](./layout.md)）。
 - **`mount(App)`** 把组件渲染到应用的界面上。
 
@@ -102,7 +102,7 @@ nsh run my-app/App.tsx --target ios --device "iPhone 16 Pro"
 nsh run my-app/App.tsx --target android
 ```
 
-先启动模拟器或连接设备（`adb devices` 会列出它们；nsh 使用第一个）。`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过 `adb reverse` 把开发服务器的端口转发到设备上，因此通过 USB 即可工作，无需共享网络。
+先启动模拟器或连接设备（`adb devices` 会列出它们；NSH 使用第一个）。`nsh` 会安装一个开发宿主 APK（只在运行时变化时重新构建），并通过 `adb reverse` 把开发服务器的端口转发到设备上，因此通过 USB 即可工作，无需共享网络。
 
 #### macOS（AppKit）
 
@@ -160,7 +160,7 @@ function TapButton(props: { onPress: () => void }) {
 
 在 `App` 中使用 `<TapButton onPress={() => count.update((c) => c + 1)} />`，点几下，然后修改 `TapButton` 的颜色：按钮会更新，计数保持不变。
 
-热替换以顶层组件为单位：名称首字母大写、函数体中包含 JSX 的函数。组件在自身代码变化时，或模块中组件之外的代码（它用到的常量、辅助函数）变化时重新渲染。如果某次编辑无法原地应用（例如导入了运行中的应用尚未导入的 nsh 模块，或修改了 `nsh.json` 中的 capabilities），宿主会重新加载整个应用。
+热替换以顶层组件为单位：名称首字母大写、函数体中包含 JSX 的函数。组件在自身代码变化时，或模块中组件之外的代码（它用到的常量、辅助函数）变化时重新渲染。如果某次编辑无法原地应用（例如导入了运行中的应用尚未导入的 NSH 模块，或修改了 `nsh.json` 中的 capabilities），宿主会重新加载整个应用。
 
 #### 错误
 
@@ -224,7 +224,7 @@ nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*
 nsh publish my-app/App.tsx --key keys/release.secret --cert keys/release.cert --build 2
 ```
 
-应用信任根公钥，并加载下载到的包；nsh 在运行任何代码之前校验签名、证书和吊销列表：
+应用信任根公钥，并加载下载到的包；NSH 在运行任何代码之前校验签名、证书和吊销列表：
 
 ```swift
 let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -247,7 +247,7 @@ nsh package my-app --target linux
 nsh package my-app --target windows
 ```
 
-这在每个平台上都是受支持的用法，也是把模块装到设备或桌面上最快的方式，但 nsh 的设计出发点是在原生应用中承载模块。选项、签名和图标见[打包](./packaging.md)。
+这在每个平台上都是受支持的用法，也是把模块装到设备或桌面上最快的方式，但 NSH 的设计出发点是在原生应用中承载模块。选项、签名和图标见[打包](./packaging.md)。
 
 ## 在终端中试运行
 

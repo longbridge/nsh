@@ -1,6 +1,6 @@
 # AGENTS.md
 
-native-shell (nsh for short: crates, the CLI, the JS module and Java package all use `nsh`) is designed for
+Native Shell (NSH for short in prose; crates, the CLI, the JS module and Java package all use `nsh`) is designed for
 AI-generated, dynamically delivered native UI: native apps embed it (`NshAppView` on iOS, `NshView` on Android,
 `AppView` on macOS, Windows and Linux) and load TSX modules at run time — signed, sandboxed by the host, rendered with
 each platform's own UI. Embedding comes first; plugins for native apps and standalone apps use the same machinery.
@@ -135,8 +135,8 @@ on any platform or JS crate.
 
 Keep them current: a change that alters documented behavior updates its page (or the module doc) in the same commit,
 including the user-facing pages in `website/` (English and `zh-CN`). User-facing pages and the README are written in
-positive terms: what a platform or feature is and does, never what it is not or lacks ("Writing documentation" in
-`website/README.md`).
+positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
+Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
 ## Commands
 
@@ -227,7 +227,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - **The main thread never waits for JS.** Callbacks the system wants answered on the spot (may this text change, may
   the back button pop, may the sheet close, ...) are answered natively from props mounted beforehand; events tell JS
   afterwards (`docs/dev/elements.md`).
-- **One surface / `NshView` is one engine**, with no global singletons (nsh is embedded with several instances).
+- **One surface / `NshView` is one engine**, with no global singletons (NSH is embedded with several instances).
 - **Limits and checks are enforced in Rust, never in JS**: a bundle holds only the app's code, so nothing in JS is
   trusted. QuickJS bytecode is trusted input (`Bundle::bytecode` is `unsafe`): it only loads from the app's own
   resources, the dev server and verified packages (`docs/dev/signed-packages.md`).
@@ -254,7 +254,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
   against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
 - Workspace lints: `missing_docs = warn`, `unreachable_pub = deny`, `private_interfaces = deny`. New crates must set `[lints] workspace = true`.
-  They cover nsh's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with nsh.
+  They cover NSH's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with NSH.
   - Every public API has a doc comment.
   - Items in private modules are `pub(crate)`, never `pub`.
 - Everything is written in English: code comments, docs, logs and this file. Comments explain why, not what the code says.
@@ -275,7 +275,7 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
   `linux`; `desktop` for macOS, Windows and Linux together, `mobile` for iOS and Android together; `runtime`, a module;
   `tailwind`, `text`, `docs`, `examples`, `gallery`). One area only, never several separated by commas: for a change
   that spans parts, judge it as a whole and name the part it is mostly about (a feature the core adds and the platforms
-  carry out is `core`); then an imperative sentence starting with a capital letter, no trailing period, about 72 characters in all. Say what it does for nsh's users, not which
+  carry out is `core`); then an imperative sentence starting with a capital letter, no trailing period, about 72 characters in all. Say what it does for NSH's users, not which
   files changed. Never conventional prefixes (`fix:`, `feat:`); check `git log` and match it.
 - The body explains why (wrapped at 72 columns); hot path changes include their before / after `nsh trace` numbers.
 - One commit / PR does one thing; no unrelated refactors, cleanup or formatting.

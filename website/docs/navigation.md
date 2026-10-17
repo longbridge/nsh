@@ -200,7 +200,7 @@ function EditNote() {
 With `preventBack` on, the swipe back is disabled and the back buttons (in the header, Android's back button and gesture) call `onBackRequest` instead of popping. `nav.pop()` from code still pops.
 
 > [!IMPORTANT]
-> `preventBack` is a prop, not a callback that returns true or false, because the main thread never waits for JS. When the user starts a swipe or presses back, the system asks right away whether the screen may go, and nsh answers natively from the props it already has. Set `preventBack` as soon as there is something to lose (as above, from the text), not when the user tries to leave.
+> `preventBack` is a prop, not a callback that returns true or false, because the main thread never waits for JS. When the user starts a swipe or presses back, the system asks right away whether the screen may go, and NSH answers natively from the props it already has. Set `preventBack` as soon as there is something to lose (as above, from the text), not when the user tries to leave.
 
 `gestureEnabled={false}` is the lighter option: it only turns off the interactive gesture (iOS swipe back, Android's predictive back animation), and the back buttons still pop.
 

@@ -43,7 +43,7 @@ const styles = {
 
 Define shared styles as constants outside components (with `as const`, so TypeScript keeps literal types such as `"row"`). There is no `StyleSheet.create`: a plain object is all it takes, and styles are parsed in Rust each time they are set, from objects nobody needs to register.
 
-A style expression that reads signals is rebuilt when they change, and nsh sends only the properties whose values differ:
+A style expression that reads signals is rebuilt when they change, and NSH sends only the properties whose values differ:
 
 ```tsx
 <View style={{ backgroundColor: selected() ? "#ddf4ff" : "#ffffff", padding: 12 }} />
@@ -60,7 +60,7 @@ When an element has both, `style` wins over `class`: classes are applied first, 
 
 ## Defaults
 
-nsh's defaults differ from the web's:
+NSH's defaults differ from the web's:
 
 | | Default |
 |---|---|

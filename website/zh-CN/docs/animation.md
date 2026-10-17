@@ -8,7 +8,7 @@ demo: guide-animation
 
 # 动画
 
-nsh 中的所有动画都运行在 UI 线程上。你在 JS 中描述一次，平台就逐帧播放（iOS 上是 Core Animation 和 display link，Android 上是 UI 线程的动画器），不再回调 JS。繁忙的 JS 线程不会让动画卡顿，动画运行期间也不消耗任何 JS。
+NSH 中的所有动画都运行在 UI 线程上。你在 JS 中描述一次，平台就逐帧播放（iOS 上是 Core Animation 和 display link，Android 上是 UI 线程的动画器），不再回调 JS。繁忙的 JS 线程不会让动画卡顿，动画运行期间也不消耗任何 JS。
 
 共有四种工具，从最简单到最灵活：
 
@@ -309,7 +309,7 @@ LayoutAnimation.configureNext({
 
 ## 减少动态效果
 
-当用户要求减少动态效果时（iOS 的"减弱动态效果"、Android 的"移除动画"），`nsh/accessibility` 中的 `reduceMotion()` 为 `true`，Tailwind 的 `motion-reduce:` / `motion-safe:` 变体随之生效。nsh 不会自行关闭你的动画；用它们来选择更平和的替代方案：
+当用户要求减少动态效果时（iOS 的"减弱动态效果"、Android 的"移除动画"），`nsh/accessibility` 中的 `reduceMotion()` 为 `true`，Tailwind 的 `motion-reduce:` / `motion-safe:` 变体随之生效。NSH 不会自行关闭你的动画；用它们来选择更平和的替代方案：
 
 ```tsx
 import { View } from "nsh";
