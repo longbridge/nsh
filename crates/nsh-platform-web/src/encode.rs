@@ -14,8 +14,8 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    OriginLen, ResizeMode, ScrollBehavior, Transform, TransformKind, TransitionProps, ViewKind,
-    ViewProps, ViewStyle, WebSource, ui::JsValue,
+    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
+    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource, ui::JsValue,
 };
 use rustc_hash::FxHashMap;
 
@@ -416,7 +416,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         String::new()
     };
     css.push_str(&radius);
-    if s.opacity < 1.0 {
+    if s.animation.is_some() {
+        // Keyframes multiply the view's opacity (`--nsh-ko`, `nsh.js`).
+        let _ = write!(css, "opacity:calc({}*var(--nsh-ko));", s.opacity);
+    } else if s.opacity < 1.0 {
         let _ = write!(css, "opacity:{};", s.opacity);
     }
     // `clip`, not `hidden`: a hidden box is still a scroll container, which
@@ -497,11 +500,12 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
     if cursor != "auto" {
         let _ = write!(css, "cursor:{cursor};");
     }
+    let mut border_transition = String::new();
     if let Some(t) = &s.transition {
         let mut props = Vec::new();
         let p = t.properties;
         if p.has(TransitionProps::COLORS) {
-            props.extend(["background-color", "border-color", "color"]);
+            props.extend(["background-color", "outline-color"]);
         }
         if p.has(TransitionProps::OPACITY) {
             props.push("opacity");
@@ -513,16 +517,26 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             props.push("box-shadow");
         }
         if p.has(TransitionProps::SHAPE) {
-            props.push("border-radius");
+            props.extend(["border-radius", "outline-width"]);
         }
-        let _ = write!(
-            css,
-            "transition-property:{};transition-duration:{}ms;transition-delay:{}ms;transition-timing-function:{};",
-            props.join(","),
+        let timing = format!(
+            "transition-duration:{}ms;transition-delay:{}ms;transition-timing-function:{};",
             t.duration,
             t.delay,
             bezier(t.easing)
         );
+        let _ = write!(css, "transition-property:{};{timing}", props.join(","));
+        // The overlay draws the border.
+        let mut border = Vec::new();
+        if p.has(TransitionProps::COLORS) {
+            border.push("border-color");
+        }
+        if p.has(TransitionProps::SHAPE) {
+            border.extend(["border-width", "border-radius"]);
+        }
+        if !border.is_empty() {
+            border_transition = format!("transition-property:{};{timing}", border.join(","));
+        }
     }
     if let Some(a) = &s.animation {
         let name = match a.keyframes {
@@ -534,9 +548,11 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         let iterations = a
             .iterations
             .map_or("infinite".to_owned(), |n| n.to_string());
+        // Added to the view's own transform, as the native backends
+        // apply keyframes after the style's transform.
         let _ = write!(
             css,
-            "animation:{name} {}ms {} {}ms {iterations};",
+            "animation:{name} {}ms {} {}ms {iterations};animation-composition:add;",
             a.duration,
             bezier(a.easing),
             a.delay
@@ -555,6 +571,7 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             );
         }
         out.push_str(&radius);
+        out.push_str(&border_transition);
         Some(out)
     } else {
         None
@@ -821,16 +838,13 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
     match t {
         None => "null".to_owned(),
         Some(t) => {
+            // UIKit's curves, which CSS's keywords are.
             let easing = match t.curve {
                 LayoutCurve::Linear => "linear".to_owned(),
                 LayoutCurve::EaseIn => "ease-in".to_owned(),
                 LayoutCurve::EaseOut => "ease-out".to_owned(),
                 LayoutCurve::EaseInEaseOut => "ease-in-out".to_owned(),
-                // An overshooting curve stands in for a spring.
-                LayoutCurve::Spring { damping } => {
-                    let over = (1.0 - damping.clamp(0.0, 1.0)) * 0.8 + 1.0;
-                    format!("cubic-bezier(0.34,{over},0.64,1)")
-                }
+                LayoutCurve::Spring { damping } => spring_easing(damping),
             };
             format!(
                 "{{\"duration\":{},\"delay\":{},\"easing\":{},\"property\":{}}}",
@@ -841,6 +855,44 @@ fn transition_json(t: &Option<LayoutTransition>) -> String {
             )
         }
     }
+}
+
+/// A damped spring from 0 to 1 at `x` (the fraction of the duration), its
+/// stiffness chosen so that it settles by the end, as UIKit's
+/// `usingSpringWithDamping` fits a spring into the given duration (the
+/// Linux backend's curve).
+fn spring(damping: f32, x: f32) -> f32 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x >= 1.0 {
+        return 1.0;
+    }
+    // The envelope falls to 1/1000 by the end.
+    const SETTLE: f32 = 6.907_755; // ln(1000)
+    let zeta = damping.clamp(0.05, 1.0);
+    if zeta > 0.999 {
+        // Critically damped: (1 + w x) e^(-w x) reaches 1/1000 at w = 9.23.
+        let w = 9.233;
+        return 1.0 - (1.0 + w * x) * (-w * x).exp();
+    }
+    let w = SETTLE / zeta;
+    let wd = w * (1.0 - zeta * zeta).sqrt();
+    let envelope = (-zeta * w * x).exp();
+    1.0 - envelope * ((wd * x).cos() + zeta * w / wd * (wd * x).sin())
+}
+
+/// Samples of the spring as a CSS `linear()` easing (piecewise linear,
+/// enough points that the overshoot keeps its shape).
+fn spring_easing(damping: f32) -> String {
+    const SAMPLES: usize = 48;
+    let mut out = String::from("linear(0");
+    for i in 1..=SAMPLES {
+        let v = spring(damping, i as f32 / SAMPLES as f32);
+        let _ = write!(out, ",{}", (v * 1000.0).round() / 1000.0);
+    }
+    out.push(')');
+    out
 }
 
 /// Appends `item` (all but the animation items, which the caller keeps).
@@ -1103,7 +1155,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     None => out.raw("null"),
                 };
             }
-            out.end();
+            out.str(match config.animation {
+                ScreenAnimation::Default => "default",
+                ScreenAnimation::Fade => "fade",
+                ScreenAnimation::None => "none",
+            })
+            .end();
         }
         MountItem::ModalConfig { id, config } => {
             out.item("mc")

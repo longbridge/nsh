@@ -40,14 +40,41 @@ const ARIA_ROLES = {
 const REFRESH_PULL = 64;
 const REFRESH_SPACE = 56;
 
+/* Keyframe animations (animate-spin, -ping, -pulse, -bounce) run with
+   animation-composition: add: their transforms follow the view's own (as the
+   native backends apply them), and --nsh-ko is added to 1 to make the factor
+   the view's opacity is multiplied by (opacity: calc(<opacity> * var(--nsh-ko))). */
+/** Screen motion (the Linux backend's): a push or pop slides for SLIDE_MS
+ * while the screen under it moves by PARALLAX of the width, a fade takes
+ * FADE_MS, both easing out cubically (1 - (1 - t)^3, exactly). */
+const SLIDE_MS = 300;
+const FADE_MS = 200;
+const PARALLAX = 0.3;
+const EASE_OUT_CUBIC = "cubic-bezier(0.333,1,0.667,1)";
+/** Press feedback (`activeOpacity`): in and out, easing out
+ * quadratically (1 - (1 - t)^2, exactly), as the Linux backend. */
+const PRESS_IN_MS = 100;
+/** How far back a pointer's velocity is measured (ms). */
+const VELOCITY_WINDOW = 100;
+const PRESS_OUT_MS = 250;
+const EASE_OUT_QUAD = "cubic-bezier(0.333,0.667,0.667,1)";
+
+/** View kinds whose frames, appearing and disappearing are navigation's. */
+const NAVIGATED = new Set(["stack", "screen", "modal", "header", "accessory"]);
+
 const KEYFRAMES = `
-@keyframes nsh-spin { to { transform: rotate(360deg); } }
-@keyframes nsh-ping { 75%, 100% { transform: scale(2); opacity: 0; } }
-@keyframes nsh-pulse { 50% { opacity: .5; } }
+@property --nsh-ko { syntax: "<number>"; inherits: false; initial-value: 1; }
+@keyframes nsh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes nsh-ping { 0% { transform: scale(1); --nsh-ko: 0; } 75%, 100% { transform: scale(2); --nsh-ko: -1; } }
+@keyframes nsh-pulse { 0%, 100% { --nsh-ko: 0; } 50% { --nsh-ko: -.5; } }
 @keyframes nsh-bounce {
   0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
-  50% { transform: none; animation-timing-function: cubic-bezier(0,0,0.2,1); }
+  50% { transform: translateY(0); animation-timing-function: cubic-bezier(0,0,0.2,1); }
 }
+@keyframes nsh-spinner { to { transform: rotate(360deg); } }
+/* Reduced motion: style transitions and keyframes do not run, as on the
+   native backends. */
+.nsh-reduce .nsh-v { transition: none !important; animation: none !important; }
 /* Touches pan only scroll views (the page neither scrolls, zooms nor
    refreshes under the app, and pans and presses get no pointercancel);
    overflow is clipped, never hidden, so that the browser cannot scroll a
@@ -133,7 +160,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-header-back { position: absolute; left: 4px; top: 0; bottom: 0; display: flex; align-items: center;
   padding: 0 8px; font-weight: 400; cursor: pointer; background: none; border: 0; color: inherit; font: inherit; font-weight: 400; }
 .nsh-header-right { position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center; }
-.nsh-screen { transition: transform .35s cubic-bezier(.2,.8,.2,1); isolation: isolate; }
+.nsh-screen { isolation: isolate; }
 .nsh-modal { transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease; z-index: 100; }
 /* Modals: opaque ones cover the root; sheets are cards over a scrim that
    dims what is behind (the desktop backends' and iOS's colors). */
@@ -243,7 +270,7 @@ img.nsh-fill { pointer-events: none; }
 .nsh-spinner.full i:nth-child(7) { opacity: 0.7875; }
 .nsh-spinner.full i:nth-child(8) { opacity: 0.89375; }
 .nsh-dark .nsh-spinner i { background: #fff; }
-.nsh-spinner.spin { animation: nsh-spin .8s steps(8) infinite; }
+.nsh-spinner.spin { animation: nsh-spinner .8s steps(8) infinite; }
 .nsh-error { position: absolute; left: 8px; right: 8px; bottom: 8px; max-height: 45%; overflow: auto; z-index: 2000;
   background: #1e1f22; color: #fff; font: 12px/1.4 ui-monospace, Menlo, monospace; padding: 10px 12px;
   border-left: 3px solid #ff6b6b; border-radius: 10px; white-space: pre-wrap; -webkit-user-select: text; user-select: text; }
@@ -434,6 +461,12 @@ class Player {
     this.measure = measureContext();
     this.metricsCache = new Map();
     this.layoutAnimation = null;
+    // Views created and removed while a layout animation is configured.
+    this.appearing = [];
+    this.disappearing = [];
+    this.changedStacks = new Set();
+    // Views removed by the batch being applied (`finishRemovals`).
+    this.removals = [];
     this.images = new Map();
     this.pointers = new Map();
     this.requests = new Map();
@@ -846,6 +879,7 @@ class Player {
   /** Reports the environment if it changed since it was last reported. */
   environmentChanged() {
     if (!this.reported) return;
+    this.updateRootClasses();
     const json = JSON.stringify(this.environment());
     if (json === this.reported) return;
     this.reported = json;
@@ -902,7 +936,26 @@ class Player {
       const handler = this[`op_${item[0]}`];
       if (handler) handler.call(this, item);
     }
-    this.layoutAnimation = null;
+    this.endLayoutAnimation();
+    if (this.changedStacks.size) this.reconcileStacks();
+    if (this.removals.length) this.finishRemovals();
+  }
+
+  /** The batch is applied: views it removed leave the page, unless they
+   * are inside a modal, screen or view that is animating out, which takes
+   * them along (an app removes the content with its container, and the
+   * content must still show while the container leaves). */
+  finishRemovals() {
+    const removals = this.removals;
+    this.removals = [];
+    for (const el of removals) {
+      if (!el._removing) continue;
+      el._removing = false;
+      let up = el.parentNode;
+      while (up && up !== this.root && !(up._leaving || up._popping || up._removedFrom || up._dying)) up = up.parentNode;
+      if (up && up !== this.root) el._leftWith = up;
+      else el.remove();
+    }
   }
 
   view(id) {
@@ -963,7 +1016,7 @@ class Player {
     if (kind === "screen") el.classList.add("nsh-screen");
     if (kind === "modal") el.classList.add("nsh-modal");
     if (kind === "stack") el.classList.add("nsh-clip");
-    if (this.layoutAnimation?.create) this.animateIn(el, this.layoutAnimation.create);
+    if (this.layoutAnimation?.create) this.appearing.push(el);
     this.views.set(id, el);
   }
 
@@ -980,9 +1033,17 @@ class Player {
       child._headerParent = parent;
       return;
     }
+    // Back before its removal finished animating.
+    if (child._dying) this.revive(child);
+    child._removedFrom = null;
+    child._removing = false;
+    child._leftWith = null;
     const host = parent._layer ?? parent;
     host.insertBefore(child, before && before.parentNode === host ? before : null);
-    if (parent._kind === "stack") this.stackChanged(parent, child);
+    if (parent._kind === "stack") {
+      this.changedStacks.add(parent);
+      this.stackChanged(parent, child);
+    }
   }
 
   op_r([, id]) {
@@ -994,9 +1055,26 @@ class Player {
     }
     const parent = el.parentNode;
     const focused = el.contains(document.activeElement);
-    el.remove();
+    this.detach(el, parent);
     if (parent?._kind === "stack") this.stackChanged(parent);
     this.screenGone(el, focused);
+  }
+
+  /** Takes `el` out of `parent`: a screen once its stack is reconciled
+   * (it may animate out), a view animating its removal when it ends. */
+  detach(el, parent) {
+    if (el._dying || el._removedFrom) return;
+    if (el._kind === "screen" && parent?._kind === "stack") {
+      el._removedFrom = parent;
+      this.changedStacks.add(parent);
+    } else if (this.layoutAnimation?.delete && parent && !this.navigated(el, parent)) {
+      el._dying = true;
+      el.style.pointerEvents = "none";
+      this.disappearing.push(el);
+    } else {
+      el._removing = true;
+      this.removals.push(el);
+    }
   }
 
   op_d([, id]) {
@@ -1016,11 +1094,7 @@ class Player {
     }
     const parent = el.parentNode;
     const focused = el.contains(document.activeElement);
-    if (this.layoutAnimation?.delete && parent) {
-      this.animateOut(el, this.layoutAnimation.delete);
-    } else {
-      el.remove();
-    }
+    this.detach(el, parent);
     if (parent?._kind === "stack") this.stackChanged(parent);
     this.screenGone(el, focused);
   }
@@ -1039,15 +1113,20 @@ class Player {
     // Where a modal sits, and its size, are the platform's (a sheet is a
     // card inside the root): the core lays it out at the size reported.
     if (!el || el._kind === "modal") return;
+    // A view that had a frame moves from where it shows (a running
+    // animation's frame); a new one's first frame does not animate.
     const update = this.layoutAnimation?.update;
-    if (update && el._frame) {
-      const t = `${update.duration}ms ${update.easing} ${update.delay}ms`;
-      el.style.transition = ["left", "top", "width", "height"].map((p) => `${p} ${t}`).join(",");
-      clearTimeout(el._transitionTimer);
-      el._transitionTimer = setTimeout(() => { el.style.transition = ""; }, update.duration + update.delay + 50);
-    }
+    const from = update && el._frame && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
+    el._frameAnimation?.cancel();
+    el._frameAnimation = null;
     el._frame = [x, y, w, h];
     this.placeFrame(el);
+    if (from && from.some((v, i) => v !== el._frame[i])) {
+      const box = (f) => ({ left: `${f[0]}px`, top: `${f[1]}px`, width: `${f[2]}px`, height: `${f[3]}px` });
+      const a = this.animateLayout(el, [box(from), box(el._frame)], update);
+      a.onfinish = () => { if (el._frameAnimation === a) el._frameAnimation = null; };
+      el._frameAnimation = a;
+    }
     if (el._kind === "canvas") this.drawSoon(el);
     if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h);
   }
@@ -1248,23 +1327,106 @@ class Player {
     el.classList.toggle("nsh-pan-y", !pinch && !!vertical);
   }
 
+  // Layout animations (`LayoutAnimation`): frames move, new views appear
+  // and removed ones disappear with Web Animations, which run over the
+  // views' own (inline and class) styles without replacing them, as the
+  // Linux backend does (`transition.rs`). Not for navigation's views, nor
+  // with reduced motion.
+
   op_la([, create, update, del]) {
-    this.layoutAnimation = { create, update, delete: del };
+    this.layoutAnimation = this.reduceMotion() ? null : { create, update, delete: del };
   }
 
-  animateIn(el, t) {
-    el.style.opacity = "0";
-    requestAnimationFrame(() => {
-      el.style.transition = `opacity ${t.duration}ms ${t.easing} ${t.delay}ms`;
-      el.style.opacity = el._animation.opacity ?? "";
-      setTimeout(() => { el.style.transition = ""; }, t.duration + t.delay + 50);
-    });
+  /** Views whose frames, appearing and disappearing belong to navigation. */
+  navigated(el, parent) {
+    return NAVIGATED.has(el._kind) || parent?._kind === "stack";
   }
 
-  animateOut(el, t) {
-    el.style.transition = `opacity ${t.duration}ms ${t.easing} ${t.delay}ms`;
-    el.style.opacity = "0";
-    setTimeout(() => el.remove(), t.duration + t.delay);
+  /** The frame `el` shows: where a running layout animation has it. */
+  shownFrame(el) {
+    if (!el._frameAnimation) return el._frame;
+    const cs = getComputedStyle(el);
+    return [cs.left, cs.top, cs.width, cs.height].map((v) => parseFloat(v) || 0);
+  }
+
+  /** Runs `keyframes` on `el` with layout transition `t`. */
+  animateLayout(el, keyframes, t, fill = "backwards") {
+    const options = { duration: t.duration, delay: t.delay, easing: t.easing, fill };
+    try {
+      return el.animate(keyframes, options);
+    } catch {
+      // A browser without `linear()` easings (a spring).
+      return el.animate(keyframes, { ...options, easing: "ease-out" });
+    }
+  }
+
+  /** The batch is applied: views it created appear, those it removed
+   * disappear. */
+  endLayoutAnimation() {
+    const t = this.layoutAnimation;
+    this.layoutAnimation = null;
+    const appearing = this.appearing;
+    const disappearing = this.disappearing;
+    if (appearing.length) this.appearing = [];
+    if (disappearing.length) this.disappearing = [];
+    if (t?.create) {
+      for (const el of appearing) {
+        if (el.parentNode && !el._dying && !this.navigated(el, el.parentNode)) this.appear(el, t.create);
+      }
+    }
+    for (const el of disappearing) {
+      // A view inside one that disappears goes with it.
+      let up = el.parentNode;
+      while (up && up !== this.root && !up._dying) up = up.parentNode;
+      if (up?._dying) {
+        el._dying = false;
+        el._leftWith = up;
+        continue;
+      }
+      this.disappear(el, t.delete);
+    }
+  }
+
+  appear(el, t) {
+    this.animateLayout(el, t.property === "scale"
+      // Not quite zero: a singular matrix cannot be inverted for picking.
+      ? { transform: ["scale(0.01)", "scale(1)"], composite: "add" }
+      // To the view's own opacity: multiplied by the progress.
+      : [{ opacity: 0, offset: 0 }], t);
+  }
+
+  disappear(el, t) {
+    const opacity = getComputedStyle(el).opacity;
+    const a = this.animateLayout(el, t.property === "scale"
+      ? { transform: ["scale(1)", "scale(0.01)"], composite: "add" }
+      : [{ opacity }, { opacity: 0 }], t, "both");
+    el._dying = a;
+    a.onfinish = () => {
+      if (el._dying !== a) return;
+      el._dying = false;
+      a.cancel();
+      el.style.pointerEvents = "";
+      el.remove();
+      this.dropLeftWith(el);
+    };
+  }
+
+  /** `el` is inserted again before its removal finished animating. */
+  revive(el) {
+    if (el._dying instanceof Animation) el._dying.cancel();
+    el._dying = false;
+    el.style.pointerEvents = "";
+    this.dropLeftWith(el);
+  }
+
+  /** Views removed inside `el` while it disappeared leave it now. */
+  dropLeftWith(el) {
+    for (const child of el.querySelectorAll(".nsh-v")) {
+      if (child._leftWith !== el) continue;
+      child._leftWith = null;
+      child.style.pointerEvents = "";
+      child.remove();
+    }
   }
 
   op_dir([, rtl]) {
@@ -1330,6 +1492,8 @@ class Player {
     img.style.transition = "";
     img.style.opacity = fade > 0 ? "0" : "";
     img.src = src;
+    // Only an image that had to load fades in (the native backends').
+    if (img.complete) img.style.opacity = "";
     this.applyTint(el);
   }
 
@@ -1350,7 +1514,7 @@ class Player {
 
   imageLoaded(el, img) {
     if (el._fade > 0) {
-      img.style.transition = `opacity ${el._fade}ms`;
+      img.style.transition = `opacity ${el._fade}ms linear`;
       img.style.opacity = "";
     }
     if (el._ph) {
@@ -2023,10 +2187,10 @@ class Player {
 
   // Navigation
 
-  op_scr([, id, title, shown, height, background, titleColor, tint, backVisible, preventBack, left, right, titleView]) {
+  op_scr([, id, title, shown, height, background, titleColor, tint, backVisible, preventBack, left, right, titleView, animation]) {
     const el = this.view(id);
     if (!el) return;
-    el._screen = { title, shown, height, background, titleColor, tint, backVisible, preventBack, left, right, titleView };
+    el._screen = { title, shown, height, background, titleColor, tint, backVisible, preventBack, left, right, titleView, animation };
     this.renderHeader(el);
   }
 
@@ -2097,16 +2261,102 @@ class Player {
       below.classList.remove("nsh-hidden");
       below.style.transform = "";
     }
+    stack._top = below ?? null;
     screen._popping = true;
-    screen.style.transform = "translateX(100%)";
-    setTimeout(() => this.event(screen._id, "onDismiss"), 300);
+    // The screen goes, then the app is told (and removes it).
+    const dismissed = () => this.event(screen._id, "onDismiss");
+    if (this.screenMotion(screen)) {
+      this.moveScreens(screen, below, false, dismissed);
+    } else {
+      screen.style.visibility = "hidden";
+      dismissed();
+    }
     this.syncHistorySoon();
   }
 
   /** A stack's screens, without one going back. */
   screensOf(stack) {
-    return [...stack.children].filter((s) => s._kind === "screen" && !s._popping);
+    return [...stack.children].filter((s) => s._kind === "screen" && !s._popping && !s._removedFrom);
   }
+
+  /** How screen `screen` comes and goes: `{ duration, fade }`, or null
+   * for at once (the Linux backend's motion). */
+  screenMotion(screen) {
+    const animation = screen?._screen?.animation ?? "default";
+    if (animation === "none") return null;
+    if (animation === "fade" || this.reduceMotion()) return { duration: FADE_MS, fade: true };
+    return { duration: SLIDE_MS, fade: false };
+  }
+
+  /** Animates a stack's top screen changing from `old` to `top`:
+   * pushed (`pushing`) or popped. Calls `done` when the motion ends. */
+  moveScreens(old, top, pushing, done) {
+    const motion = this.screenMotion(pushing ? top : old);
+    if (!motion) {
+      done?.();
+      return;
+    }
+    const options = { duration: motion.duration, easing: EASE_OUT_CUBIC };
+    const shift = (from, to) => [{ transform: `translateX(${from}%)` }, { transform: `translateX(${to}%)` }];
+    const parallax = -PARALLAX * 100;
+    let a;
+    if (pushing) {
+      a = top.animate(motion.fade ? [{ opacity: 0 }, { opacity: 1 }] : shift(100, 0), options);
+      if (!motion.fade && old) {
+        old.animate(shift(0, parallax), options);
+        old.style.transform = `translateX(${parallax}%)`;
+      }
+    } else {
+      a = old.animate(motion.fade ? [{ opacity: 1 }, { opacity: 0 }] : shift(0, 100), { ...options, fill: "forwards" });
+      old.style.pointerEvents = "none";
+      if (!motion.fade && top) top.animate(shift(parallax, 0), options);
+    }
+    if (done) a.onfinish = done;
+  }
+
+  /** The batch is applied: the stacks it changed animate to their new top
+   * screen, and screens removed from them leave (the top one animating out). */
+  reconcileStacks() {
+    const stacks = this.changedStacks;
+    this.changedStacks = new Set();
+    for (const stack of stacks) {
+      const screens = this.screensOf(stack);
+      const top = screens[screens.length - 1] ?? null;
+      const old = stack._top ?? null;
+      const shown = stack._shown ?? [];
+      stack._top = top;
+      stack._shown = screens;
+      const removed = old?._removedFrom === stack;
+      let leaving = null;
+      if (old && top && old !== top && stack._frame?.[2] > 0) {
+        if (!shown.includes(top)) {
+          this.moveScreens(removed ? null : old, top, true);
+        } else if (removed && !old._popping) {
+          // Popped by the app: it slides out, then leaves.
+          leaving = old;
+          old._popping = true;
+          this.moveScreens(old, top, false, () => {
+            old._popping = false;
+            old.style.pointerEvents = "";
+            if (old._removedFrom === stack) {
+              old._removedFrom = null;
+              old.remove();
+              this.dropLeftWith(old);
+            }
+          });
+        }
+      }
+      for (const screen of [...stack.children]) {
+        if (screen._removedFrom === stack && screen !== leaving) {
+          screen._removedFrom = null;
+          screen._popping = false;
+          screen.remove();
+          this.dropLeftWith(screen);
+        }
+      }
+    }
+  }
+
 
   /** The newest modal that is presented and not leaving. */
   topModal() {
@@ -2245,7 +2495,7 @@ class Player {
   }
 
   stackChanged(stack, added) {
-    const screens = [...stack.children].filter((s) => s._kind === "screen");
+    const screens = this.screensOf(stack);
     clearTimeout(stack._hideTimer);
     // The screen under the top one shows while the top one slides.
     stack._hideTimer = setTimeout(() => {
@@ -2259,11 +2509,9 @@ class Player {
       if (screen === added && i > 0) {
         const focus = document.activeElement;
         if (focus && focus !== document.body && this.root.contains(focus) && !added.contains(focus)) added._restoreFocus = focus;
-        screen.style.transform = "translateX(100%)";
-        requestAnimationFrame(() => requestAnimationFrame(() => { screen.style.transform = ""; }));
-      } else {
-        screen.style.transform = top ? "" : "translateX(-30%)";
       }
+      // A slide leaves the one under it shifted (`moveScreens`).
+      if (top) screen.style.transform = "";
       this.renderHeader(screen);
     });
     if (added && stack._frame) this.reportRoot(added, stack._frame[2], stack._frame[3]);
@@ -2385,6 +2633,7 @@ class Player {
   present(el) {
     const motion = this.modalMotion(el);
     el._leaving = false;
+    this.dropLeftWith(el);
     el._closed = false;
     el._reported = null;
     // The focus leaves the views under it, and comes back when it closes.
@@ -2427,7 +2676,10 @@ class Player {
     const restore = el._restoreFocus;
     if (restore?.isConnected && !this.topModal()) restore.focus({ preventScroll: true });
     setTimeout(() => {
-      if (el._leaving) el.remove();
+      if (el._leaving) {
+        el.remove();
+        this.dropLeftWith(el);
+      }
       scrim?.remove();
       if (!reported) this.event(el._id, "onDismiss");
     }, motion === "none" ? 0 : 350);
@@ -2972,6 +3224,12 @@ class Player {
   updateRootClasses() {
     this.root.classList.toggle("nsh-dark", this.shownDark);
     this.root.classList.toggle("nsh-desktop", this.desktopUI);
+    this.root.classList.toggle("nsh-reduce", this.reduceMotion());
+  }
+
+  /** The user asked for less motion (`Environment::reduce_motion`). */
+  reduceMotion() {
+    return !!this.reducedMotion?.matches;
   }
 
   /** A short message at the bottom (`Toast.show`), as the desktop backends show it; one at a time. */
@@ -3481,10 +3739,7 @@ class Player {
     const el = p.press;
     p.pressed = true;
     const opacity = el._props?.activeOpacity;
-    if (opacity != null && opacity < 1) {
-      el.style.transition = "opacity .05s";
-      el.style.opacity = String(opacity * Number(el._animation.opacity ?? getComputedStyle(el).opacity ?? 1));
-    }
+    if (opacity != null && opacity < 1) this.pressFade(el, opacity);
     if (el._events.has("onPressIn")) this.event(el._id, "onPressIn");
     if (el._events.has("onLongPress")) {
       p.longTimer = setTimeout(() => {
@@ -3494,17 +3749,52 @@ class Player {
     }
   }
 
+  /** Fades pressed view `el` to `opacity` times its own (null: back to
+   * its own), over the view's style, which it leaves alone. */
+  pressFade(el, opacity) {
+    const shown = getComputedStyle(el).opacity;
+    el._pressFade?.cancel();
+    el._pressFade = null;
+    // Its own opacity, without the feedback.
+    const own = Number(getComputedStyle(el).opacity);
+    if (opacity == null) {
+      const a = el.animate([{ opacity: shown, offset: 0 }], { duration: PRESS_OUT_MS, easing: EASE_OUT_QUAD });
+      a.onfinish = () => { if (el._pressFade === a) el._pressFade = null; };
+      el._pressFade = a;
+      return;
+    }
+    el._pressFade = el.animate([{ opacity: shown }, { opacity: own * opacity }], { duration: PRESS_IN_MS, easing: EASE_OUT_QUAD, fill: "forwards" });
+  }
+
   pressOut(p, inside) {
     const el = p.press;
     if (!el || !p.pressed) return;
     p.pressed = false;
     clearTimeout(p.longTimer);
-    if (el._props?.activeOpacity != null) {
-      el.style.transition = "opacity .2s";
-      el.style.opacity = el._animation.opacity ?? "";
-    }
+    if (el._pressFade) this.pressFade(el, null);
     if (el._events.has("onPressOut")) this.event(el._id, "onPressOut");
     if (inside && !p.long && el._events.has("onPress")) this.event(el._id, "onPress");
+  }
+
+  /** Remembers where pointer `p` is at `now` (ms), for its velocity. */
+  track(p, now) {
+    const samples = (p.samples ??= []);
+    samples.push([now, p.x, p.y]);
+    if (samples.length > 16) samples.shift();
+  }
+
+  /** Pointer `p`'s velocity in points per second over its last
+   * VELOCITY_WINDOW ms (zero after a pause), as the Linux backend
+   * measures it: events come at uneven intervals, a pair of them is noise. */
+  velocity(p) {
+    const samples = p.samples ?? [];
+    const newest = samples[samples.length - 1];
+    if (!newest) return [0, 0];
+    let oldest = newest;
+    for (let i = samples.length - 2; i >= 0 && newest[0] - samples[i][0] <= VELOCITY_WINDOW; i--) oldest = samples[i];
+    const dt = newest[0] - oldest[0];
+    if (dt < 1) return [0, 0];
+    return [(newest[1] - oldest[1]) / dt * 1000, (newest[2] - oldest[2]) / dt * 1000];
   }
 
   pointerMove(e) {
@@ -3520,6 +3810,7 @@ class Player {
     p.x = x;
     p.y = y;
     p.t = now;
+    this.track(p, now);
     const tx = x - p.startX;
     const ty = y - p.startY;
     const activated = this.decideGate(p, tx, ty);
@@ -3550,7 +3841,8 @@ class Player {
     }
     if (p.mode === "pan") {
       e.preventDefault();
-      this.call((w) => w.nsh_pan(p.pan._id, 1, tx, ty, p.vx, p.vy));
+      const [vx, vy] = this.velocity(p);
+      this.call((w) => w.nsh_pan(p.pan._id, 1, tx, ty, vx, vy));
     } else if (p.mode === "scroll") {
       e.preventDefault();
       const s = p.scroll;
@@ -3588,7 +3880,10 @@ class Player {
     }
     for (const v of p.states) this.setState(v, PRESSED, false);
     if (p.mode === "pan") {
-      this.call((w) => w.nsh_pan(p.pan._id, 2, p.x - p.startX, p.y - p.startY, p.vx, p.vy));
+      // Released after a pause: no speed left.
+      this.track(p, performance.now());
+      const [vx, vy] = this.velocity(p);
+      this.call((w) => w.nsh_pan(p.pan._id, 2, p.x - p.startX, p.y - p.startY, vx, vy));
     } else if (p.mode === "scroll") {
       this.scrollEvent(p.scroll, "onScrollEndDrag");
       this.glide(p.scroll, -p.vx, -p.vy);
