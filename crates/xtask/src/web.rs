@@ -5,12 +5,18 @@
 //!
 //! ```text
 //! <out>/index.html    the player: runs demos/<name>.js for `#<name>`
-//! <out>/nsh.js        the DOM runtime (crates/nsh-platform-web/web)
-//! <out>/nsh.wasm      the engine, the core and QuickJS
-//! <out>/nsh-playground.wasm   the same plus the TSX compiler (the playground)
+//! <out>/nsh-playground.wasm   the engine plus the TSX compiler (the playground)
 //! <out>/demos/<name>.js
-//! <out>/gallery/      the gallery as `nsh package --target web` writes it
+//! <out>/gallery/      the gallery as `nsh package --target web` writes it,
+//!                     with the runtime the player loads too:
+//! <out>/gallery/nsh.<digest>.js     the DOM runtime (minified)
+//! <out>/gallery/nsh.<digest>.wasm   the engine, the core and QuickJS
 //! ```
+//!
+//! The player and the gallery share one runtime, so the site carries one
+//! `nsh.wasm`: the player's page is written with the gallery's file names.
+//! (`astro dev` serves the player from its sources instead,
+//! `website/src/lib/play-dev.js`.)
 
 use std::{fs, path::Path};
 
@@ -62,21 +68,15 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(out.join("demos"))?;
     copy(
         &root
-            .join("target")
-            .join(WASM)
-            .join("web/nsh_platform_web.wasm"),
-        &out.join("nsh.wasm"),
-    )?;
-    copy(
-        &root
             .join("target/web-playground")
             .join(WASM)
             .join("web/nsh_platform_web.wasm"),
         &out.join("nsh-playground.wasm"),
     )?;
     let web = root.join("crates/nsh-platform-web/web");
-    for file in ["nsh.js", "index.html"] {
-        copy(&web.join(file), &out.join(file))?;
+    // From before the player shared the gallery's runtime.
+    for file in ["nsh.js", "nsh.wasm"] {
+        let _ = fs::remove_file(out.join(file));
     }
 
     let nsh = root.join(format!(
@@ -146,6 +146,22 @@ pub(crate) fn build(out: &Path) -> anyhow::Result<()> {
         .context("nsh package wrote no site")?;
     fs::rename(&site, &gallery).or_else(|_| copy_dir(&site, &gallery))?;
     step.done("packaged the gallery");
+
+    // The player loads the gallery's runtime.
+    let runtime = |ext: &str| -> anyhow::Result<String> {
+        fs::read_dir(&gallery)?
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .find(|name| name.starts_with("nsh.") && name.ends_with(ext))
+            .with_context(|| format!("the gallery has no nsh.<digest>{ext}"))
+    };
+    let mut player = fs::read_to_string(web.join("index.html"))?;
+    for (file, ext) in [("./nsh.js", ".js"), ("./nsh.wasm", ".wasm")] {
+        let quoted = format!("\"{file}\"");
+        anyhow::ensure!(player.contains(&quoted), "the player does not load {file}");
+        player = player.replace(&quoted, &format!("\"./gallery/{}\"", runtime(ext)?));
+    }
+    fs::write(out.join("index.html"), player)?;
     term::note(out.strip_prefix(&root).unwrap_or(&out).display());
     Ok(())
 }

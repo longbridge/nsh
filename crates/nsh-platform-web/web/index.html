@@ -25,6 +25,8 @@
   // after each run (`error` null when it compiled), and `{ type:
   // "runtime-error", message }` / `{ type: "log", level, message }` while
   // the app runs.
+  // `cargo xtask web` writes the website gallery's runtime file names
+  // (nsh.<digest>.js / .wasm) for the two below: the player shares them.
   import { createPlayer } from "./nsh.js";
 
   const status = document.getElementById("status");

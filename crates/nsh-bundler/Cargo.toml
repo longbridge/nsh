@@ -24,6 +24,7 @@ bundle = [
   "dep:imagesize",
   "dep:ttf-parser",
   "dep:tokio",
+  "oxc/minifier",
 ]
 
 [dependencies]

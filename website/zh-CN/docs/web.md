@@ -40,7 +40,7 @@ nsh package App.tsx --target web --run     # 并在本机提供服务，在浏�
 |---|---|
 | `index.html` | 应用的页面：以应用名作为标题，带图标、按 `appearance` 设定的颜色、加载指示，以及应用无法加载或启动时的提示 |
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
-| `nsh.<digest>.js` | DOM 运行时 |
+| `nsh.<digest>.js` | DOM 运行时，已压缩（42 KB，brotli 后 12.6 KB） |
 | `nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB） |
 | `app.<digest>.js` | 应用本身，构建方式与 `nsh build --release --split` 相同 |
 | `chunks/<name>.<digest>.js` | `import()` 加载的代码，第一次导入时才下载（[拆分 bundle](#拆分-bundle)） |
@@ -90,9 +90,9 @@ cargo xtask web --out target/play     # 输出到其他目录
 
 | 文件 | 内容 |
 |---|---|
-| `nsh.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB；用 `web` profile 构建） |
+| `gallery/nsh.<digest>.wasm` | 引擎、核心、移动端组件和 QuickJS（约 3.7 MB，gzip 后 1.3 MB，brotli 后 1.0 MB；用 `web` profile 构建），播放器和示例应用共用 |
 | `nsh-playground.wasm` | 同上，另含 nsh 的 TSX 编译器，供[在线试用](#在线试用)使用（约 8 MB，gzip 后 2.4 MB） |
-| `nsh.js` | DOM 运行时：加载 `nsh.wasm`，应用批次，把输入转成事件 |
+| `gallery/nsh.<digest>.js` | DOM 运行时（已压缩）：加载 wasm，应用批次，把输入转成事件 |
 | `index.html` | 播放器页面：根据 `#<name>` 运行 `demos/<name>.js` |
 | `demos/<name>.js` | 用 `nsh build --release` 打包的各个演示 |
 | `gallery/` | 用 `nsh package --target web` 发布的示例应用 Gallery，显示在[示例应用](/zh-CN/gallery)页面 |
