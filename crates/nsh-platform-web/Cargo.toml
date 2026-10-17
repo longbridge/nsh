@@ -24,6 +24,10 @@ nsh-animation.workspace = true
 nsh-engine = { workspace = true, features = ["js"] }
 nsh-ui-mobile.workspace = true
 nsh-bundler = { workspace = true, optional = true }
+# QuickJS without its internal `assert`s (NDEBUG): 37 KB smaller and a
+# little faster. They check QuickJS' own invariants, not app code; a broken
+# one stays inside the module's sandbox (the native platforms keep them).
+rquickjs = { workspace = true, features = ["disable-assertions"] }
 serde_json.workspace = true
 log.workspace = true
 rustc-hash.workspace = true

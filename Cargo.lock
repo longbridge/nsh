@@ -2367,6 +2367,7 @@ dependencies = [
  "nsh-core",
  "nsh-engine",
  "nsh-ui-mobile",
+ "rquickjs",
  "rustc-hash",
  "serde_json",
  "ttf-parser",

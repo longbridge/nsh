@@ -86,6 +86,18 @@ The website's player (`cargo xtask web`) loads the published gallery's `nsh.<dig
 (`play/gallery/`) rather than copies of its own, so the site deploys one runtime; only the playground has a second
 wasm (`nsh-playground.wasm`, with the compiler).
 
+## Size
+
+`nsh.wasm` is downloaded before anything shows, so the `web` profile builds Rust for size (`opt-level = "z"`, fat LTO,
+`panic = "abort"`, stripped) while QuickJS keeps `-O3`: at `-Os` it is 0.18 MB smaller (50 KB with brotli) but its
+interpreter is about 10% slower, and QuickJS is the slowest link. `nsh-platform-web` turns on rquickjs'
+`disable-assertions` (QuickJS' internal `assert`s, which check its own invariants: 37 KB, and a little faster); the
+native platforms keep them.
+
+Measure with names kept (`CARGO_PROFILE_WEB_STRIP=false`) and `twiggy top` / `twiggy dominators`, or a linker map
+(`RUSTFLAGS="-C link-arg=--Map=map.txt"`, which also sizes the data segment by symbol). Compare raw, `gzip -9` and
+`brotli -q 11` sizes: pages are served compressed, and a change can shrink the raw module and not the compressed one.
+
 ## What WebAssembly changes in the shared crates
 
 - **No threads.** `nsh_engine::LocalEngine` drives the engine from the host's event loop: `pump()` handles what was
