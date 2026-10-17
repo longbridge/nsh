@@ -220,8 +220,9 @@ fn page() -> Environment {
 /// What the page knows about the user and the device, as JSON: `idiom`
 /// (`"phone"`, `"pad"`, `"desktop"`), `locale` (a BCP 47 tag), `rtl`,
 /// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
-/// bottom, left]`) and `keyboard` (the height the on-screen keyboard
-/// covers); missing keys keep their value. Called before [`nsh_start`]
+/// bottom, left]`), `keyboard` (the height the on-screen keyboard
+/// covers) and `appleKeyboard` (the browser runs on an Apple platform: its
+/// shortcuts are Apple's); missing keys keep their value. Called before [`nsh_start`]
 /// and on every change; the idiom is the one at start, as on every
 /// platform. Returns the pump delay.
 ///
@@ -253,6 +254,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         env.locale = locale;
     }
     env.rtl = flag("rtl").unwrap_or(env.rtl);
+    env.apple_keyboard = flag("appleKeyboard").unwrap_or(env.apple_keyboard);
     env.reduce_motion = flag("reduceMotion").unwrap_or(env.reduce_motion);
     if let Some(scale) = num("fontScale").filter(|s| *s > 0.0) {
         env.font_scale = scale;
@@ -279,6 +281,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         let e = &mut app.environment;
         e.locale = env.locale;
         e.rtl = env.rtl;
+        e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
         e.font_scale = env.font_scale;
         e.pixel_ratio = env.pixel_ratio;
@@ -825,42 +828,22 @@ fn key_of(code: u32) -> Option<Key> {
     })
 }
 
-/// Whether bindings resolve `mod` to Command for `os`
-/// (`Keystroke::parse`). The web's OS (`Os::Web`) resolves it to Control:
-/// Apple browsers get Command through [`nsh_key`]'s swap, other browsers
-/// Control as is (a page forcing another OS is swapped likewise).
-fn mod_is_cmd(os: Os) -> bool {
-    matches!(os, Os::Ios | Os::MacOs)
-}
-
 /// Matches a key against the app's shortcuts (`nsh/keymap`) on the spot,
 /// while the browser's key event is handled: `key` as [`key_of`] takes
 /// it, `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta (Command, the
-/// Windows key) and 16 for a browser on an Apple platform, `editing` when
-/// a text field has the focus, `repeat` for an auto-repeat. Returns the binding that fires, -1 for none (the key
+/// Windows key), `editing` when a text field has the focus, `repeat` for
+/// an auto-repeat. Returns the binding that fires, -1 for none (the key
 /// goes on) or -2 for a held key's repeat (consumed, nothing fires). JS
 /// reports a firing binding with [`nsh_key_command`].
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -> i32 {
     let Some(key) = key_of(key) else { return -1 };
-    let (mut ctrl, mut cmd) = (modifiers & 1 != 0, modifiers & 8 != 0);
-    // `mod` is Command for a browser on an Apple platform, Control
-    // elsewhere; bindings were resolved for the app's OS, so where the two
-    // disagree the key users press for `mod` is the other one.
-    let os_mod_is_cmd = APP.with(|a| {
-        a.try_borrow()
-            .ok()
-            .and_then(|a| a.as_ref().map(|app| mod_is_cmd(app.environment.os)))
-    });
-    if os_mod_is_cmd.is_some_and(|os| os != (modifiers & 16 != 0)) {
-        std::mem::swap(&mut ctrl, &mut cmd);
-    }
     let keystroke = Keystroke {
         modifiers: Modifiers {
-            ctrl,
+            ctrl: modifiers & 1 != 0,
             alt: modifiers & 2 != 0,
             shift: modifiers & 4 != 0,
-            cmd,
+            cmd: modifiers & 8 != 0,
         },
         key,
     };

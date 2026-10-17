@@ -1,6 +1,6 @@
 ---
 title: nsh/keymap
-description: "Keyboard shortcuts: bind keystrokes such as mod+k to handlers, on macOS, Windows and Linux."
+description: "Keyboard shortcuts: bind keystrokes such as mod+k to handlers, on macOS, Windows, Linux and the web."
 order: 8.7
 ---
 
@@ -16,6 +16,7 @@ import { keymap } from "nsh/keymap";
 const keymap: {
   bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
   bind(bindings: Record<string, (keystroke: string) => void>, options?: KeyBindingOptions): () => void;
+  label(keystroke: string): string;
 };
 
 interface KeyBindingOptions {
@@ -24,7 +25,7 @@ interface KeyBindingOptions {
 }
 ```
 
-Shortcuts work on macOS, Windows and Linux. On iOS, Android and the web, `bind` keeps the bindings but no key fires them yet, so the same code runs everywhere.
+Shortcuts work on macOS, Windows, Linux and in browsers (the browser's own keys, such as Ctrl+T or Cmd+W, never reach the page). On iOS and Android, `bind` keeps the bindings but no key fires them yet, so the same code runs everywhere.
 
 ## keymap.bind
 
@@ -66,6 +67,20 @@ function Editor() {
 
 With the dev server, editing a module removes the bindings its top-level code made before it runs again, so hot reload never leaves stale shortcuts behind.
 
+## keymap.label
+
+```ts
+label(keystroke: string): string;
+```
+
+Returns `keystroke` as menus and hints show it where the app runs: `"⇧⌘L"` on macOS and iOS (and in a browser on a Mac, iPhone or iPad), `"Ctrl+Shift+L"` on Windows, Linux and other browsers, for `"mod+shift+l"`. Use it to show an app's shortcuts with the keys that work:
+
+```tsx
+<Text>Search {keymap.label("mod+k")}</Text>
+```
+
+It throws a `TypeError` for an invalid keystroke, as `bind` does.
+
 ## Keystrokes
 
 A keystroke is modifiers and a key joined by `+`: `"mod+k"`, `"ctrl+shift+p"`, `"alt+enter"`, `"escape"`, `"f5"`, `"cmd+-"` (Command and minus).
@@ -77,6 +92,8 @@ A keystroke is modifiers and a key joined by `+`: `"mod+k"`, `"ctrl+shift+p"`, `
 | `ctrl` (also `control`) | Control (⌃) | Ctrl | Ctrl |
 | `alt` (also `option`, `opt`) | Option (⌥) | Alt | Alt |
 | `shift` | Shift (⇧) | Shift | Shift |
+
+In a browser, keys follow the platform the browser runs on: `mod` is Command on a Mac, iPhone or iPad and Ctrl elsewhere.
 
 Use `mod` for an app's own shortcuts: it is the key each platform's apps use for them (⌘K on macOS, Ctrl+K on Windows and Linux), so one spelling fits everywhere. The Windows key and Super mostly belong to the system, so `cmd` is rarely right outside macOS.
 
@@ -90,6 +107,7 @@ Shortcuts work with any keyboard layout: on a Cyrillic or Greek layout, `mod+k` 
 |---|---|
 | macOS, iOS | Cmd+Q (quit), Cmd+H (hide), Option+Cmd+H (hide others), Cmd+M (minimize), Ctrl+Cmd+F (full screen) |
 | Linux, Windows, Android | Ctrl+Q (quit), Alt+F4 (close), F11 (full screen) |
+| Web | None (the browser keeps its own keys) |
 
 ## While typing
 

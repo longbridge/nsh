@@ -16,6 +16,7 @@ import { keymap } from "nsh/keymap";
 const keymap: {
   bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
   bind(bindings: Record<string, (keystroke: string) => void>, options?: KeyBindingOptions): () => void;
+  label(keystroke: string): string;
 };
 
 interface KeyBindingOptions {
@@ -24,7 +25,7 @@ interface KeyBindingOptions {
 }
 ```
 
-快捷键在 macOS、Windows 和 Linux 上可用。在 iOS、Android 和 Web 上，`bind` 会保留绑定，但目前没有按键会触发它们，因此同一份代码可以在所有平台上运行。
+快捷键在 macOS、Windows、Linux 和浏览器中可用（浏览器自己的按键，比如 Ctrl+T 或 Cmd+W，不会传给页面）。在 iOS 和 Android 上，`bind` 会保留绑定，但目前没有按键会触发它们，因此同一份代码可以在所有平台上运行。
 
 ## keymap.bind
 
@@ -66,6 +67,20 @@ function Editor() {
 
 使用开发服务器时，修改一个模块会在它重新运行之前移除它顶层代码创建的绑定，因此热重载不会留下过期的快捷键。
 
+## keymap.label
+
+```ts
+label(keystroke: string): string;
+```
+
+返回 `keystroke` 在应用所运行的平台上，菜单和提示中的显示方式：对 `"mod+shift+l"`，在 macOS 和 iOS 上（以及 Mac、iPhone、iPad 上的浏览器里）是 `"⇧⌘L"`，在 Windows、Linux 和其他浏览器里是 `"Ctrl+Shift+L"`。用它来显示应用的快捷键，显示的就是实际可用的按键：
+
+```tsx
+<Text>搜索 {keymap.label("mod+k")}</Text>
+```
+
+按键组合无效时，它和 `bind` 一样抛出 `TypeError`。
+
 ## 按键组合
 
 按键组合由修饰键和一个键用 `+` 连接而成：`"mod+k"`、`"ctrl+shift+p"`、`"alt+enter"`、`"escape"`、`"f5"`、`"cmd+-"`（Command 加减号）。
@@ -77,6 +92,8 @@ function Editor() {
 | `ctrl`（也可写 `control`） | Control（⌃） | Ctrl | Ctrl |
 | `alt`（也可写 `option`、`opt`） | Option（⌥） | Alt | Alt |
 | `shift` | Shift（⇧） | Shift | Shift |
+
+在浏览器里，按键遵循浏览器所在的平台：在 Mac、iPhone 或 iPad 上 `mod` 是 Command，其他地方是 Ctrl。
 
 应用自己的快捷键请用 `mod`：它就是各平台应用习惯使用的那个键（macOS 上是 ⌘K，Windows 和 Linux 上是 Ctrl+K），一种写法到处适用。Windows 键和 Super 基本归系统使用，所以在 macOS 以外很少该用 `cmd`。
 
@@ -90,6 +107,7 @@ function Editor() {
 |---|---|
 | macOS、iOS | Cmd+Q（退出）、Cmd+H（隐藏）、Option+Cmd+H（隐藏其他）、Cmd+M（最小化）、Ctrl+Cmd+F（全屏） |
 | Linux、Windows、Android | Ctrl+Q（退出）、Alt+F4（关闭）、F11（全屏） |
+| Web | 无（浏览器保留它自己的按键） |
 
 ## 输入时
 

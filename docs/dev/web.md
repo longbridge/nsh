@@ -199,13 +199,12 @@ browsers' touches into what phones report:
   `scrollend` after a scroll driven here, `drive` / `ownEnd`, is not another).
 - **Keys** (`keyDown`), in this order: the app's shortcuts (`nsh/keymap`: the mounted `MountItem::Keymap` stays in
   Rust, `nsh_key` matches a key on the spot with `Keymap::find` and `nsh_key_command` reports the binding; keys are
-  passed as the character they type without modifiers, else the US layout's character of their `code`; while the app's
-  OS resolves `mod` otherwise than the browser's platform does (Command on Apple platforms, Control elsewhere: `APPLE`
-  in `nsh.js`, bit 16 of `nsh_key`'s modifiers), Control and Command swap, since bindings resolved `mod` for the app's
-  OS (`mod_is_cmd`; `Os::Web` resolves it to Control)); an open dialog (Escape presses its cancel button); a focused
-  field (Escape leaves it); selectable text with a selection (select all, Escape); a focused pressable (Return presses
-  it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the scroll view around the
-  focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page, Home / End).
+  passed as the character they type without modifiers, else the US layout's character of their `code`; `mod` was
+  resolved by the browser's platform, `appleKeyboard` in the environment JSON); an open dialog (Escape presses its
+  cancel button); a focused field (Escape leaves it); selectable text with a selection (select all, Escape); a focused
+  pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
+  scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
+  Home / End).
 - **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled or hidden,
   so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
   draws a ring inside the view; a popped screen gives the focus back to what had it when the screen was pushed

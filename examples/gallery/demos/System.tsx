@@ -1,7 +1,7 @@
 import { cleanup, signal, Text, View } from "nsh";
 import { createNativeValue, Easing } from "nsh/animated";
 import { Toast } from "nsh/android";
-import { colorScheme, fontScale, Platform, windowSize } from "nsh/device";
+import { colorScheme, fontScale, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { ActionSheet, Alert, keyboard, safeArea, StatusBar } from "nsh/ui/mobile";
 import { Icon, type IconName } from "../icons";
@@ -300,7 +300,6 @@ function FramesAndTimers() {
 
 /** App-level shortcuts: bound while the demo shows (the component's own). */
 function Shortcuts() {
-  const mod = Platform.OS === "macos" || Platform.OS === "ios" ? "⌘" : "Ctrl+";
   const count = signal(0);
   const on = signal(false);
   const last = signal("");
@@ -319,9 +318,9 @@ function Shortcuts() {
     last.set(k);
   }, { when: "notEditing" });
   const keys: [string, string][] = [
-    [`${mod}K`, "Counts"],
-    [`${mod}Shift+L`, "Switches the light"],
-    [`${mod}Backspace`, "Resets (not while typing)"],
+    [keymap.label("mod+k"), "Counts"],
+    [keymap.label("mod+shift+l"), "Switches the light"],
+    [keymap.label("mod+backspace"), "Resets (not while typing)"],
   ];
   return (
     <Card icon="bell" title="Keyboard shortcuts" subtitle="nsh/keymap · desktop">

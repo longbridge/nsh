@@ -18,7 +18,7 @@ use std::{
 
 use nsh_core::{
     EventKind, Op, Prop, ROOT_ID,
-    keymap::{KeyBinding, Keystroke, When},
+    keymap::{KeyBinding, Keystroke, When, apple_keys},
 };
 use rquickjs::qjs;
 
@@ -61,12 +61,20 @@ fn os(ctx: Ctx) -> nsh_core::platform::Os {
     unsafe { &(*crate::state::state(ctx)).dom }.os()
 }
 
+/// Whether shortcuts follow Apple's conventions here (`mod` is Command):
+/// the app's OS, or for a browser the platform it runs on.
+fn apple(ctx: Ctx) -> bool {
+    apple_keys(os(ctx), crate::env::current(ctx).apple_keyboard)
+}
+
 /// The `keymap` object.
 fn make(ctx: Ctx) -> Raw {
     let made = (|| -> R<V> {
         let obj = js::new_object(ctx)?;
         let bind = js::function(ctx, c"bind", bind, 3)?;
         js::define(ctx, obj.raw(), "bind", bind, true)?;
+        let label = js::function(ctx, c"label", label, 1)?;
+        js::define(ctx, obj.raw(), "label", label, true)?;
         Ok(obj)
     })();
     made.map_or(qjs::JS_EXCEPTION, V::take)
@@ -100,6 +108,17 @@ fn parse_options(ctx: Ctx, options: Raw) -> R<(When, bool)> {
 }
 
 native! {
+    /// `label(keystroke)`: the keystroke as hints show it here (`⇧⌘L`,
+    /// `Ctrl+Shift+L`).
+    fn label(ctx, _this, args) {
+        let text = js::to_string(ctx, args.get(0))?;
+        let keystroke = Keystroke::parse_with(&text, apple(ctx))
+            .map_err(|e| type_error(ctx, &format!("keymap.label: {e}")))?;
+        js::string(ctx, &keystroke.label(os(ctx), apple(ctx)))
+    }
+}
+
+native! {
     /// `bind(keystroke, handler, options?)` or `bind({ keystroke: handler },
     /// options?)`: returns a function that removes the bindings.
     fn bind(ctx, _this, args) {
@@ -119,11 +138,11 @@ native! {
             (vec![(text, V::dup(ctx, args.get(1)))], args.get(2))
         };
         let (when, repeat) = parse_options(ctx, options)?;
-        let os = os(ctx);
+        let (os, apple) = (os(ctx), apple(ctx));
         // Every binding is checked before any is made.
         let mut parsed = Vec::with_capacity(pairs.len());
         for (text, handler) in pairs {
-            let keystroke = Keystroke::parse(&text, os)
+            let keystroke = Keystroke::parse_with(&text, apple)
                 .map_err(|e| type_error(ctx, &format!("keymap.bind: {e}")))?;
             if let Some(why) = keystroke.reserved(os) {
                 return Err(type_error(
@@ -274,7 +293,7 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
  * `+`, in any case (lowercase is the recommended style; a capital letter is
  * the same key, not Shift): `"mod+k"`, `"ctrl+shift+p"`, `"alt+enter"`, `"escape"`,
  * `"f5"`, `"mod+plus"`. Modifiers: `mod` (`cmdorctrl`): Command on Apple
- * platforms, Control elsewhere, for the app's own shortcuts; `cmd`
+ * platforms (and in a browser on one), Control elsewhere, for the app's own shortcuts; `cmd`
  * (`command`, `meta`, `super`, `win`), `ctrl` (`control`), `alt` (`option`,
  * `opt`), `shift`. Keys: the character a key types on the US layout without
  * Shift (`k`, `1`, `/`, `[`; `"shift+/"` for `?`), `plus` (`=`), `minus`
@@ -294,5 +313,9 @@ export interface Keymap {
   /** Binds each keystroke of `bindings` to its handler, which gets the
    * keystroke as written; returns a function that removes them all. */
   bind(bindings: Record<string, (keystroke: string) => void>, options?: KeyBindingOptions): () => void;
+  /** `keystroke` as menus and hints show it where the app runs: `"⇧⌘L"` on
+   * Apple platforms (and in a browser on one), `"Ctrl+Shift+L"` elsewhere,
+   * for `"mod+shift+l"`. Throws on an invalid keystroke. */
+  label(keystroke: string): string;
 }
 "#;

@@ -543,6 +543,7 @@ class Player {
       pixelRatio: devicePixelRatio || 1,
       safeArea: this.safeArea(),
       keyboard: this.keyboardHeight(),
+      appleKeyboard: APPLE,
     };
   }
 
@@ -2057,7 +2058,7 @@ class Player {
     // natively against the mounted table, then reported.
     const code = e.isComposing ? -1 : keyCode(e);
     if (code >= 0) {
-      const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0) | (APPLE ? 16 : 0);
+      const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
       const found = this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
       if (found !== -1) {
         e.preventDefault();

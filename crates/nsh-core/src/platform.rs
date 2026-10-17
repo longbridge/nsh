@@ -155,6 +155,11 @@ pub struct Environment {
     pub os_version: (u16, u16),
     /// The kind of device.
     pub idiom: Idiom,
+    /// A browser on an Apple platform (macOS, iOS): its keyboard shortcuts
+    /// follow Apple's conventions ([`crate::keymap::apple_keys`]: `mod` is
+    /// Command, labels use ⌘). Only read for [`Os::Web`]; the other OSes
+    /// imply theirs.
+    pub apple_keyboard: bool,
     /// The user's locale (number and date formats: `Intl`'s default).
     pub locale: Locale,
 }
@@ -185,6 +190,7 @@ impl Default for Environment {
             os: Os::default(),
             os_version: (0, 0),
             idiom: Idiom::Phone,
+            apple_keyboard: false,
             locale: Locale::EN_US,
         }
     }

@@ -157,20 +157,27 @@ impl Keystroke {
     /// `"mod+-"` for Command and minus), in any case (lowercase is the
     /// style; a capital letter is the same key, not Shift). Modifiers:
     /// `ctrl`, `alt` (`option`), `shift`, `cmd` (`super`, `win`) and `mod`,
-    /// which is Command on Apple platforms (`os`) and Control elsewhere.
-    /// Keys: a character of the US layout typed without Shift (`k`, `1`,
+    /// which is Command on Apple platforms (`os`, [`apple_keys`]) and
+    /// Control elsewhere. Keys: a character of the US layout typed without Shift (`k`, `1`,
     /// `/`, `[`, `=`: the plus key is `=`, `shift+=` with Shift), `space`,
     /// `enter`, `escape`, `tab`, `backspace`, `delete`, the arrows `up` /
     /// `down` / `left` / `right`, `home`, `end`, `pageup`, `pagedown`, `f1`
     /// to `f24`.
     pub fn parse(text: &str, os: Os) -> Result<Keystroke, KeystrokeError> {
+        Keystroke::parse_with(text, apple_keys(os, false))
+    }
+
+    /// Parses `text` as [`Keystroke::parse`] does, with Apple's conventions
+    /// (`mod` is Command) or not: a browser decides by the platform it runs
+    /// on ([`apple_keys`]).
+    pub fn parse_with(text: &str, apple: bool) -> Result<Keystroke, KeystrokeError> {
         // Case does not matter (lowercase is the style); messages quote
         // the text as written and suggest lowercase.
         let lower = text.to_ascii_lowercase();
         let (mods, key) = split(text, &lower)?;
         let mut modifiers = Modifiers::default();
         for name in mods {
-            let flag = modifier(&mut modifiers, name, os).map_err(|why| error(text, why))?;
+            let flag = modifier(&mut modifiers, name, apple).map_err(|why| error(text, why))?;
             if *flag {
                 return Err(error(text, format_args!("{name:?} twice")));
             }
@@ -213,7 +220,7 @@ impl Keystroke {
     /// to the dev server client, whatever the app binds.
     pub fn reloads(&self, os: Os) -> bool {
         let m = self.modifiers;
-        let apple = matches!(os, Os::MacOs | Os::Ios);
+        let apple = apple_keys(os, false);
         self.key == Key::Char('r') && !m.shift && !m.alt && m.cmd == apple && m.ctrl != apple
     }
 
@@ -266,8 +273,11 @@ fn split<'a>(text: &str, lower: &'a str) -> Result<(Vec<&'a str>, &'a str), Keys
 }
 
 /// The flag of modifier `name` in `modifiers`, or why it is none.
-fn modifier<'a>(modifiers: &'a mut Modifiers, name: &str, os: Os) -> Result<&'a mut bool, String> {
-    let apple = matches!(os, Os::MacOs | Os::Ios);
+fn modifier<'a>(
+    modifiers: &'a mut Modifiers,
+    name: &str,
+    apple: bool,
+) -> Result<&'a mut bool, String> {
     Ok(match name {
         "ctrl" | "control" => &mut modifiers.ctrl,
         "alt" | "option" | "opt" => &mut modifiers.alt,
@@ -299,7 +309,7 @@ fn parse_key(text: &str, key: &str) -> Result<Key, KeystrokeError> {
     let mut chars = key.chars();
     let (Some(c), None) = (chars.next(), chars.next()) else {
         let hint = if let Some((first, _)) = key.split_once('-')
-            && modifier(&mut Modifiers::default(), first, Os::Linux).is_ok()
+            && modifier(&mut Modifiers::default(), first, false).is_ok()
         {
             // `mod--` is `mod+-`.
             let joined = match key.strip_suffix("--") {
@@ -325,6 +335,75 @@ fn parse_key(text: &str, key: &str) -> Result<Key, KeystrokeError> {
         ));
     }
     Ok(Key::Char(c))
+}
+
+/// Whether keyboard shortcuts on `os` follow Apple's conventions: `mod` is
+/// Command and labels use ⌘ ([`Keystroke::label`]). macOS and iOS do; a
+/// browser does when it runs on an Apple platform (`apple_keyboard`,
+/// [`crate::platform::Environment::apple_keyboard`]).
+pub fn apple_keys(os: Os, apple_keyboard: bool) -> bool {
+    match os {
+        Os::MacOs | Os::Ios => true,
+        Os::Web => apple_keyboard,
+        Os::Android | Os::Windows | Os::Linux => false,
+    }
+}
+
+impl Keystroke {
+    /// The keystroke as menus and hints show it: `⌃⌥⇧⌘K` with Apple's
+    /// conventions ([`apple_keys`]), else `Ctrl+Alt+Shift+K` (the Command
+    /// modifier is `Win` on Windows, `Meta` in a browser, `Super`
+    /// elsewhere).
+    pub fn label(&self, os: Os, apple: bool) -> String {
+        let m = self.modifiers;
+        let mut s = String::new();
+        if apple {
+            for (on, glyph) in [(m.ctrl, '⌃'), (m.alt, '⌥'), (m.shift, '⇧'), (m.cmd, '⌘')] {
+                if on {
+                    s.push(glyph);
+                }
+            }
+        } else {
+            let cmd = match os {
+                Os::Windows => "Win+",
+                Os::Web => "Meta+",
+                _ => "Super+",
+            };
+            for (on, name) in [
+                (m.ctrl, "Ctrl+"),
+                (m.alt, "Alt+"),
+                (m.shift, "Shift+"),
+                (m.cmd, cmd),
+            ] {
+                if on {
+                    s.push_str(name);
+                }
+            }
+        }
+        let named = |mac: &'static str, other: &'static str| if apple { mac } else { other };
+        match self.key {
+            Key::Char(' ') => s.push_str("Space"),
+            Key::Char(c) => s.push(c.to_ascii_uppercase()),
+            Key::F(n) => {
+                let _ = fmt::Write::write_fmt(&mut s, format_args!("F{n}"));
+            }
+            Key::Enter => s.push_str(named("↩", "Enter")),
+            Key::Escape => s.push_str(named("⎋", "Esc")),
+            Key::Tab => s.push_str(named("⇥", "Tab")),
+            Key::Backspace => s.push_str(named("⌫", "Backspace")),
+            Key::Delete => s.push_str(named("⌦", "Del")),
+            Key::Insert => s.push_str(named("Help", "Ins")),
+            Key::Up => s.push('↑'),
+            Key::Down => s.push('↓'),
+            Key::Left => s.push('←'),
+            Key::Right => s.push('→'),
+            Key::Home => s.push_str(named("↖", "Home")),
+            Key::End => s.push_str(named("↘", "End")),
+            Key::PageUp => s.push_str(named("⇞", "PgUp")),
+            Key::PageDown => s.push_str(named("⇟", "PgDn")),
+        }
+        s
+    }
 }
 
 impl fmt::Display for Keystroke {
@@ -542,6 +621,39 @@ mod tests {
             parse("shift+cmd+alt+ctrl+pagedown").unwrap().to_string(),
             "ctrl+alt+shift+cmd+pagedown"
         );
+    }
+
+    #[test]
+    fn follows_the_browsers_platform() {
+        // A browser resolves `mod` by the platform it runs on.
+        assert!(apple_keys(Os::Web, true));
+        assert!(!apple_keys(Os::Web, false));
+        assert!(apple_keys(Os::MacOs, false));
+        assert_eq!(
+            Keystroke::parse_with("mod+k", true),
+            Keystroke::parse("cmd+k", Os::MacOs)
+        );
+        assert_eq!(
+            Keystroke::parse("mod+k", Os::Web),
+            Keystroke::parse("ctrl+k", Os::Web)
+        );
+        // Literal modifiers stay what they say.
+        assert_eq!(
+            Keystroke::parse_with("ctrl+k", true),
+            Keystroke::parse("ctrl+k", Os::Linux)
+        );
+    }
+
+    #[test]
+    fn labels_keystrokes() {
+        let label = |t, os, apple| Keystroke::parse_with(t, apple).unwrap().label(os, apple);
+        assert_eq!(label("mod+shift+l", Os::Web, true), "⇧⌘L");
+        assert_eq!(label("mod+shift+l", Os::Web, false), "Ctrl+Shift+L");
+        assert_eq!(label("mod+backspace", Os::MacOs, true), "⌘⌫");
+        assert_eq!(label("ctrl+alt+enter", Os::Linux, false), "Ctrl+Alt+Enter");
+        assert_eq!(label("cmd+space", Os::Windows, false), "Win+Space");
+        assert_eq!(label("f5", Os::Web, true), "F5");
+        assert_eq!(label("mod+/", Os::Web, false), "Ctrl+/");
     }
 
     #[test]

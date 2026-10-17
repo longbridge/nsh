@@ -350,7 +350,7 @@ pub(crate) fn title_bar(ctx: *mut JsContext) -> JsValue {
     accessor(ctx, Part::TitleBar)
 }
 
-fn current(ctx: *mut JsContext) -> Environment {
+pub(crate) fn current(ctx: *mut JsContext) -> Environment {
     (*env(ctx).current.borrow()).unwrap_or_default()
 }
 
