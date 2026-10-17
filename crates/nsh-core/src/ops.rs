@@ -1364,9 +1364,11 @@ pub enum Prop {
     /// `maxFontSizeMultiplier`: the upper bound of the system scale (0 is none).
     #[prop(js = "maxFontSizeMultiplier", min = 0, on = TEXT | INPUT)]
     MaxFontSizeMultiplier(f32),
-    /// `selectable`: a long press offers to copy the text.
+    /// `selectable`: a long press offers to copy the text; `false` also
+    /// keeps it from being selected where text is by default (desktop
+    /// browsers), unset leaves it to the platform.
     #[prop(js = "selectable", on = TEXT)]
-    Selectable(bool),
+    Selectable(Option<bool>),
     /// `adjustsFontSizeToFit`: shrink the font until the text fits its lines
     /// (`numberOfLines`) and box.
     #[prop(js = "adjustsFontSizeToFit", on = TEXT)]

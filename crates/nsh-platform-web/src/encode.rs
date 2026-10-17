@@ -764,7 +764,12 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 }
                 let _ = write!(out.s, "[{},{},", run.x, run.y);
                 push_str(&mut out.s, &run.text);
-                let _ = write!(out.s, ",{}]", run.style);
+                let _ = write!(out.s, ",{}", run.style);
+                if !run.after.is_empty() {
+                    out.s.push(',');
+                    push_str(&mut out.s, &run.after);
+                }
+                out.s.push(']');
             }
             out.s.push_str("],[");
             for (i, s) in layout.styles.iter().enumerate() {
@@ -781,8 +786,11 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 push_str(&mut out.s, &css);
             }
             out.s.push(']');
-            out.bool(text.selectable)
-                .opt_str(text.selection_color.map(css_color).as_deref())
+            match text.selectable {
+                Some(on) => out.bool(on),
+                None => out.raw("null"),
+            };
+            out.opt_str(text.selection_color.map(css_color).as_deref())
                 .end();
         }
         MountItem::Events { id, events } => {

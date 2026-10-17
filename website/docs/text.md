@@ -154,6 +154,8 @@ Prefer limiting the scale over turning it off: large text is an accessibility se
 
 `selectable` lets the user select and copy the text, as in the system's own text views: a long press selects the word under the finger, the handles move the selection's ends, and the edit menu offers Copy and Select All (iOS adds Look Up, Translate and Share; Android Share). A selection stays inside one text block. `selectionColor` colors the highlight and the handles. The class `select-text` does the same as `selectable`.
 
+In desktop browsers text is selectable by default, as on a web page, except inside interactive elements (views with press or touch handlers, such as buttons and pressable rows); `selectable={false}` or the class `select-none` keeps a text unselectable there. Phone and tablet browsers follow the native rule.
+
 ```tsx
 <Text selectable selectionColor="#7c3aed">{orderNumber}</Text>
 ```

@@ -200,7 +200,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     e.int(l.events.bits() as u32 as i32);
                     e.int((l.events.bits() >> 32) as u32 as i32);
                 }
-                e.bool(text.selectable);
+                e.bool(text.is_selectable());
                 opt_color(&mut e, text.selection_color);
             }
             MountItem::Events { id, events } => {

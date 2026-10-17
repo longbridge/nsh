@@ -154,6 +154,8 @@ Tailwind 类 `truncate` 和 `line-clamp-*` 效果相同；同时设置时以属�
 
 `selectable` 允许用户像在系统自带的文本视图中那样选择和复制文字：长按选中手指下的词，拖动选择柄移动选区两端，编辑菜单提供“拷贝”和“全选”（iOS 还有查询、翻译和共享；Android 还有分享）。选区只在一个文本块之内。`selectionColor` 设置高亮和选择柄的颜色。类 `select-text` 与 `selectable` 效果相同。
 
+在桌面浏览器中，文字默认可以选择，和网页一样，但交互元素（带按压或触摸处理的视图，如按钮和可按压的列表行）里的文字除外；`selectable={false}` 或类 `select-none` 让文字在那里也不可选择。手机和平板浏览器遵循原生规则。
+
 ```tsx
 <Text selectable selectionColor="#7c3aed">{orderNumber}</Text>
 ```

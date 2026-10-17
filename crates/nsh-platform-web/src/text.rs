@@ -157,6 +157,9 @@ pub(crate) struct Run {
     pub(crate) y: f32,
     pub(crate) text: String,
     pub(crate) style: u16,
+    /// What follows the run when the text is copied: the line's break (a
+    /// newline, or the spaces a wrap dropped) after its last run.
+    pub(crate) after: String,
 }
 
 /// A final layout.
@@ -545,10 +548,20 @@ impl TextEngine for WebTextEngine {
                         y: baseline - s.ascent,
                         text,
                         style,
+                        after: String::new(),
                     }),
                 }
                 merge = true;
                 x += w;
+            }
+            if !last && let Some(run) = runs.last_mut() {
+                // An empty line adds its newline to the one before.
+                match atoms.get(line.end) {
+                    Some(a) if a.kind == AtomKind::Newline => run.after.push('\n'),
+                    _ => atoms[end..line.end]
+                        .iter()
+                        .for_each(|a| run.after.push_str(&a.text)),
+                }
             }
             let first = &styles[atoms.get(line.start).map_or(0, |a| a.style) as usize];
             text_lines.push(TextLine {

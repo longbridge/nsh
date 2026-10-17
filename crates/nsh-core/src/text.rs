@@ -173,8 +173,11 @@ pub struct AttributedText {
     /// The block is laid out right to left: `auto` alignment is the right
     /// side.
     pub rtl: bool,
-    /// A long press copies the text (`selectable`; drawing only).
-    pub selectable: bool,
+    /// A long press copies the text (`selectable` or `select-text`;
+    /// drawing only): `Some(false)` when set off, `None` when not set, which
+    /// is not selectable except where text is by default (desktop
+    /// browsers). [`is_selectable`](Self::is_selectable) is whether it is asked for.
+    pub selectable: Option<bool>,
     /// The highlight of the selection of selectable text (`selectionColor`);
     /// the platform's tint when `None`.
     pub selection_color: Option<Color>,
@@ -214,6 +217,11 @@ pub struct TextLink {
 }
 
 impl AttributedText {
+    /// Whether the text was made selectable (`selectable`, `select-text`).
+    pub fn is_selectable(&self) -> bool {
+        self.selectable == Some(true)
+    }
+
     /// Length of the text so far, in UTF-16 units.
     pub fn len_utf16(&self) -> u32 {
         self.spans.last().map_or(0, |s| s.end)

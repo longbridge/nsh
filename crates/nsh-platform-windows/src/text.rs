@@ -1883,9 +1883,9 @@ pub(crate) struct DrawnText {
 /// `Text`: a text view's content changed.
 pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayout, content: Rect) {
     let old = view.state_mut().text.take();
-    let was = old.as_ref().is_some_and(|o| o.text.selectable);
+    let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let selection = match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
-        Some((s, old)) if text.selectable => {
+        Some((s, old)) if text.is_selectable() => {
             // Offsets into other text mean nothing.
             if old.text != text.text {
                 s.range.set(None);
@@ -1896,7 +1896,7 @@ pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayou
             forget_selected(view);
             None
         }
-        None if text.selectable => Some(Rc::new(Selection::default())),
+        None if text.is_selectable() => Some(Rc::new(Selection::default())),
         None => None,
     };
     view.state_mut().text = Some(DrawnText {
@@ -1906,7 +1906,7 @@ pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayou
         selection,
         shadow: RefCell::new(None),
     });
-    if was != text.selectable {
+    if was != text.is_selectable() {
         // The I-beam.
         crate::input::style_changed(view);
     }
@@ -2455,7 +2455,7 @@ fn select(surface: u64, view: &NshView, range: Option<(u32, u32)>) {
 
 /// True when the text can be selected (`selectable`).
 pub(crate) fn selectable(state: &ViewState) -> bool {
-    state.text.as_ref().is_some_and(|t| t.text.selectable)
+    state.text.as_ref().is_some_and(|t| t.text.is_selectable())
 }
 
 /// A press anywhere in the window at `(x, y)` (root coordinates), before

@@ -1905,8 +1905,8 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Selectable(on) => {
-                if node.paragraph.selectable != Some(on) {
-                    node.paragraph.selectable = Some(on);
+                if node.paragraph.selectable != on {
+                    node.paragraph.selectable = on;
                     self.mark_text_block(key);
                 }
             }
@@ -3144,8 +3144,7 @@ impl<M: TextEngine> Core<M> {
             selectable: node
                 .paragraph
                 .selectable
-                .or(class.and_then(|c| c.selectable))
-                .unwrap_or(false),
+                .or(class.and_then(|c| c.selectable)),
             selection_color: node.paragraph.selection_color,
             ..AttributedText::default()
         };

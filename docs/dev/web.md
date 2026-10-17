@@ -194,7 +194,7 @@ The engine is not reentrant: `nsh.js` routes every call through `Player.call`, w
 batch is being applied (a batch arrives inside a wasm call).
 
 A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, css,
-borderCss, tint]`, `["t", id, ...content, runs, styles, selectable]`, and so on; `nsh.js` has one `op_<name>` method per
+borderCss, tint]`, `["t", id, ...content, runs, styles, selectable]` (`selectable` `null` when unset), and so on; `nsh.js` has one `op_<name>` method per
 item. Views are absolutely positioned at the core's frames; borders are an overlay element (as UIKit draws layer
 borders) so they never move the content the core placed. Native animation items stay in Rust (`src/animation.rs`, a port
 of the Android animator); bound properties go out as `["a", id, prop, value]` after each batch and each
@@ -283,6 +283,15 @@ browsers' touches into what phones report:
   to the first entry. Entries carry the page load's id (`nshSession`): a reload keeps the earlier load's entries,
   which going back passes over (`history.back()` again) as if the app had been left from its first screen. In an
   iframe (the website's demos) the app pushes nothing: each entry would be one of the embedding page's history.
+- **Text selection**: text is selectable when `selectable` is true (`nsh-selectable`), and with the desktop idiom also
+  when it is unset (`null` in the `t` item: `nsh-autoselect`, selectable under `.nsh-desktop`) unless a view around it,
+  or the text itself, takes presses, touches, pans or pinches (`nsh-press`, set in `updateTouchAction`), as on a web
+  page; phones and tablets select only what asks for it. `editable` / `textAt` tell `pointerDown` (a mouse drag there
+  selects instead of scrolling) and `mousedown` (not prevented there); a mouse press elsewhere clears the selection,
+  which the browser would not, since presses outside select nothing. Copying (`copyText`) writes the selected runs in
+  DOM order, each followed by its line's break when its end is selected (`Run::after`, the run tuple's fifth element:
+  a newline, or the spaces a wrap dropped) and a newline between texts: the browser would run the absolutely placed
+  runs together.
 - **Elsewhere**: no page context menu or iOS callout outside fields and selectable text; a mouse drag selects only in
   selectable text and fields; overflow is `clip`, never `hidden`, so that the browser cannot scroll a box the core
   laid out to show a focused field.

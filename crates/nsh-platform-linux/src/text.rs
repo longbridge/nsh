@@ -1046,10 +1046,10 @@ pub(crate) struct DrawnText {
 /// A text view's new content.
 pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayout, content: Rect) {
     let old = view.state_mut().text.take();
-    let was = old.as_ref().is_some_and(|o| o.text.selectable);
+    let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let mut selection = None;
     match old.and_then(|o| o.selection.map(|s| (s, o.text))) {
-        Some((s, old)) if text.selectable => {
+        Some((s, old)) if text.is_selectable() => {
             // Offsets into other text mean nothing.
             if old.text != text.text {
                 s.range.set(None);
@@ -1057,7 +1057,7 @@ pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayou
             selection = Some(s);
         }
         Some((s, _)) => s.uninstall(view),
-        None if text.selectable => selection = Some(Selection::install(view)),
+        None if text.is_selectable() => selection = Some(Selection::install(view)),
         None => {}
     }
     view.state_mut().text = Some(DrawnText {
@@ -1067,7 +1067,7 @@ pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayou
         node: OnceCell::new(),
         selection,
     });
-    if was != text.selectable {
+    if was != text.is_selectable() {
         // The I-beam.
         crate::input::style_changed(view);
     }
@@ -1077,7 +1077,7 @@ pub(crate) fn set(view: &NshView, text: &Arc<AttributedText>, layout: &TextLayou
 /// The view draws `selectable` text: mouse drags over it select rather
 /// than scroll, and its pointer is the I-beam.
 pub(crate) fn selectable(state: &ViewState) -> bool {
-    state.text.as_ref().is_some_and(|t| t.text.selectable)
+    state.text.as_ref().is_some_and(|t| t.text.is_selectable())
 }
 
 /// Draws a text view's text.

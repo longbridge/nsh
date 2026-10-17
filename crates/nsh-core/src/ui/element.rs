@@ -1627,7 +1627,7 @@ impl Text {
 
     /// The user can select and copy it.
     pub fn selectable(mut self, selectable: bool) -> Self {
-        super::host::set(&mut self.0, Prop::Selectable(selectable));
+        super::host::set(&mut self.0, Prop::Selectable(Some(selectable)));
         self
     }
 

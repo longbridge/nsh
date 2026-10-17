@@ -17,8 +17,10 @@
   `Layout.getSelectionPath` in `selectionColor` (55% alpha; the theme's `textColorHighlight` by default) and a floating
   action mode offers Copy, Select all and Share. A touch elsewhere in the surface (`Mounter.touchDown`), new text or
   detaching ends it; one selection at a time per surface. Copy leaves attachments' placeholders out on both. Text that is
-  not selectable has no interaction, listener or extra drawing. Web: the browser's own selection, `::selection` in
-  `selectionColor`. Linux (`text.rs`, desktop conventions): a mouse drag selects characters (past a 3 pt slop, 10 pt over a
+  not selectable has no interaction, listener or extra drawing. `selectable` is `Option<bool>` (unset, or `false` from
+  `selectable={false}` / `select-none`) because the web's desktop idiom selects text that is not set off by default, as a
+  web page does, except inside views that take presses or touches. Web: the browser's own selection, `::selection` in
+  `selectionColor`; copying joins the absolutely placed runs with each line's break ([web.md](web.md)). Linux (`text.rs`, desktop conventions): a mouse drag selects characters (past a 3 pt slop, 10 pt over a
   press target, so clicking a link still presses it), a double click words, a triple click the paragraph (drags go on by
   them), Shift+click extends; the highlight is drawn behind the glyphs in `selectionColor` at 30% (the system blue by
   default); the view takes keyboard focus only while it has a selection, for Ctrl+C (and Ctrl+Insert), Ctrl+A and

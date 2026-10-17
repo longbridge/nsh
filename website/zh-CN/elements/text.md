@@ -74,7 +74,7 @@ JSX 文本遵循 React 的规则：除文本首尾外，每行都会去掉首尾
 | `maxFontSizeMultiplier` | `number` | `0` | 系统缩放的上限；`0` 表示不限。 |
 | `adjustsFontSizeToFit` | `boolean` | `false` | 缩小字号，直到文本能放进其行数（`numberOfLines`）和盒子。 |
 | `minimumFontScale` | `number` | | `adjustsFontSizeToFit` 最多缩小到的比例（0..1；至少 0.1）。 |
-| `selectable` | `boolean` | `false` | 用户可以选择文本的任意范围：长按选中一个词，拖动选择柄扩展，编辑菜单复制。 |
+| `selectable` | `boolean` | | 用户可以选择文本的任意范围：长按选中一个词，拖动选择柄扩展，编辑菜单复制。不设置时文字不可选择，但桌面浏览器除外：在那里文字默认可选，交互元素里的除外；设为 `false` 在那里也不可选择。 |
 | `selectionColor` | `ColorValue` | | 可选文本的选区高亮（及选择柄）颜色；默认为平台的强调色。 |
 | `onTextLayout` | `(e: { lines: TextLayoutLine[] }) => void` | | 每次布局后给出排好的各行。 |
 

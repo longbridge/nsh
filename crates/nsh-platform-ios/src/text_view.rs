@@ -529,7 +529,7 @@ impl TextView {
     }
 
     pub(crate) fn set_layout(&self, text: Arc<AttributedText>, layout: TextLayout, content: Rect) {
-        let (selectable, color) = (text.selectable, text.selection_color);
+        let (selectable, color) = (text.is_selectable(), text.selection_color);
         let changed = self
             .ivars()
             .text
@@ -549,7 +549,7 @@ impl TextView {
             .text
             .borrow()
             .as_ref()
-            .is_some_and(|t| t.selectable)
+            .is_some_and(|t| t.is_selectable())
     }
 
     /// Whether the text has pressable spans.

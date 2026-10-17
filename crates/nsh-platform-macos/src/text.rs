@@ -939,20 +939,20 @@ pub(crate) fn set(
     content: nsh_core::Rect,
 ) {
     let old = view.state_mut().text.take();
-    let was = old.as_ref().is_some_and(|o| o.text.selectable);
+    let was = old.as_ref().is_some_and(|o| o.text.is_selectable());
     let selection = match old {
         Some(DrawnText {
             text: old,
             selection: Some(s),
             ..
-        }) if text.selectable => {
+        }) if text.is_selectable() => {
             // Offsets into other text mean nothing.
             if old.text != text.text {
                 s.range.set(None);
             }
             Some(s)
         }
-        _ if text.selectable => Some(Selection::default()),
+        _ if text.is_selectable() => Some(Selection::default()),
         _ => None,
     };
     view.state_mut().text = Some(DrawnText {
@@ -961,7 +961,7 @@ pub(crate) fn set(
         content,
         selection,
     });
-    if was != text.selectable {
+    if was != text.is_selectable() {
         // The I-beam.
         crate::input::style_changed(view);
     }
@@ -972,7 +972,7 @@ pub(crate) fn set(
 /// The view draws `selectable` text: mouse drags over it select rather
 /// than scroll, and its pointer is the I-beam.
 pub(crate) fn selectable(state: &crate::view::ViewState) -> bool {
-    state.text.as_ref().is_some_and(|t| t.text.selectable)
+    state.text.as_ref().is_some_and(|t| t.text.is_selectable())
 }
 
 /// Draws a text view's text (in `drawRect:`; the context is y down).

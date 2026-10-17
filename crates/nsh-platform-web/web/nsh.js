@@ -86,6 +86,13 @@ const KEYFRAMES = `
   resize: none; font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
 .nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .nsh-selectable ::selection { background: var(--nsh-selection, Highlight); }
+/* With the desktop idiom text is selectable as on a web page unless it is
+   set off (selectable={false}) or inside something that takes presses
+   or touches (nsh-press). */
+.nsh-desktop .nsh-autoselect, .nsh-desktop .nsh-autoselect * { -webkit-user-select: text; user-select: text; }
+.nsh-desktop .nsh-press .nsh-autoselect, .nsh-desktop .nsh-press .nsh-autoselect *,
+.nsh-desktop .nsh-autoselect.nsh-press, .nsh-desktop .nsh-autoselect.nsh-press * { -webkit-user-select: none; user-select: none; }
+.nsh-autoselect ::selection { background: var(--nsh-selection, Highlight); }
 .nsh-header { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center;
   justify-content: center; font: 600 17px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   border-bottom: 0.5px solid rgba(0,0,0,.15); z-index: 10; }
@@ -971,19 +978,22 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     const frag = document.createDocumentFragment();
-    for (const [x, y, text, style] of runs) {
+    for (const [x, y, text, style, after] of runs) {
       const span = document.createElement("span");
       span.className = "nsh-run";
       span.style.cssText = styles[style] ?? "";
       span.style.left = `${cx + x}px`;
       span.style.top = `${cy + y}px`;
       span.textContent = text;
+      // The line's break, for copying (`copy`).
+      if (after) span._after = after;
       if (el._animation.color) span.style.color = el._animation.color;
       frag.append(span);
     }
     for (const span of [...el.querySelectorAll(":scope > .nsh-run")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     el.classList.toggle("nsh-selectable", !!selectable);
+    el.classList.toggle("nsh-autoselect", selectable == null);
     if (selectionColor) el.style.setProperty("--nsh-selection", selectionColor);
     else el.style.removeProperty("--nsh-selection");
     el._textLabel = runs.map((r) => r[2]).join("");
@@ -1085,10 +1095,12 @@ class Player {
 
   /** What touches on `el` leave to the browser: nothing on views with
    * native pans, pinches or rotations; a `panActivation` gate along one
-   * axis leaves scrolling along the other. */
+   * axis leaves scrolling along the other. Views that take presses or
+   * touches are marked: text in them is not selected by default. */
   updateTouchAction(el) {
     const pan = el._gestures?.pan || el._events.has("onPanStart") || el._events.has("onPanEnd");
     const pinch = el._gestures?.pinch || el._gestures?.rotation;
+    el.classList.toggle("nsh-press", !!(el._pressable || pan || pinch || el._events.has("onTouch")));
     const gate = el._props?.panActivation;
     const horizontal = gate && gate[0] != null && gate[1] == null;
     const vertical = gate && gate[1] != null && gate[0] == null;
@@ -2808,6 +2820,7 @@ class Player {
     // No page menu over the app (nor iOS's callout on a long press); fields
     // and selectable text keep theirs.
     root.addEventListener("contextmenu", (e) => this.editable(e.target) || e.preventDefault());
+    root.addEventListener("copy", (e) => this.copyText(e));
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
     root.addEventListener("gesturestart", (e) => this.gestureZoom(e, 0));
@@ -2835,7 +2848,15 @@ class Player {
   /** Whether the browser handles presses at `target` itself: fields,
    * selectable text, hosted pages and videos. */
   editable(target) {
-    return !!target?.closest?.(".nsh-field, .nsh-selectable, iframe, video");
+    return !!target?.closest?.(".nsh-field, .nsh-selectable, iframe, video") || !!this.textAt(target);
+  }
+
+  /** The text at `target` that is selectable by default (desktop idiom:
+   * not set off, in nothing that takes presses or touches). */
+  textAt(target) {
+    if (!this.desktopUI) return null;
+    const text = target?.closest?.(".nsh-autoselect");
+    return text && !text.closest(".nsh-press") ? text : null;
   }
 
   /** This player takes the keys: the focus is in it, or it was the last
@@ -2916,12 +2937,48 @@ class Player {
     for (const v of p.states) this.setState(v, PRESSED, false);
   }
 
+  /** The selectable text `el` is in. */
+  selectableText(el) {
+    return el?.closest(".nsh-selectable") ?? this.textAt(el);
+  }
+
+  /** What copying the selection in text gives: its runs in order, each
+   * line's break after its last run (`_after`) and a newline between
+   * texts; absolutely placed runs would each be a line of their own. */
+  copyText(e) {
+    const sel = getSelection();
+    if (e.target.closest?.(".nsh-field")) return;
+    if (!sel?.rangeCount || sel.isCollapsed || !this.root.contains(sel.anchorNode)) return;
+    const range = sel.getRangeAt(0);
+    let out = "";
+    let last = null;
+    let found = false;
+    for (const run of this.root.querySelectorAll(".nsh-run")) {
+      // Text that cannot be selected is not copied, as by the browser.
+      if (!range.intersectsNode(run) || !this.selectableText(run)) continue;
+      const node = run.firstChild;
+      if (!node) continue;
+      const text = node.data;
+      const from = range.startContainer === node ? range.startOffset : 0;
+      const to = range.endContainer === node ? range.endOffset : text.length;
+      if (from >= to) continue;
+      found = true;
+      if (last && last !== run.parentNode && !out.endsWith("\n")) out += "\n";
+      last = run.parentNode;
+      out += text.slice(from, to);
+      if (to === text.length && run._after) out += run._after;
+    }
+    if (!found) return;
+    e.preventDefault();
+    e.clipboardData.setData("text/plain", out.replace(/\s+$/, ""));
+  }
+
   /** Select all and Escape in selectable text with a selection: within it. */
   selectionKey(e) {
     const sel = getSelection();
     const anchor = sel?.anchorNode;
     const text = sel?.rangeCount && !sel.isCollapsed && anchor && this.root.contains(anchor)
-      ? (anchor.nodeType === 1 ? anchor : anchor.parentElement)?.closest(".nsh-selectable")
+      ? this.selectableText(anchor.nodeType === 1 ? anchor : anchor.parentElement)
       : null;
     if (!text) return false;
     if (e.key === "a" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
@@ -3160,11 +3217,17 @@ class Player {
     this.lastPointer = e.pointerType;
     Player.active = this;
     if (e.button > 0) return;
+    // A mouse drag selects in selectable text and fields instead of scrolling.
+    const selects = this.editable(e.target);
+    // A press elsewhere clears a selection in text, as on a web page (the
+    // browser does not, as presses here select nothing).
+    const sel = getSelection();
+    if (!selects && e.pointerType === "mouse" && sel?.rangeCount && !sel.isCollapsed && this.root.contains(sel.anchorNode)) {
+      sel.removeAllRanges();
+    }
     const target = this.viewOf(e.target);
     if (!target) return;
     const isField = e.target.classList?.contains("nsh-field");
-    // A mouse drag selects in selectable text and fields instead of scrolling.
-    const selects = this.editable(e.target);
     const chain = this.ancestors(target);
     const [x, y] = this.point(e);
     // Mouse drags scroll here (browsers only scroll touches), and so do

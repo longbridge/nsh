@@ -937,7 +937,7 @@ fn inputs_and_selectable_text_carry_their_traits() {
             _ => None,
         })
         .expect("the text");
-    assert!(text.selectable);
+    assert!(text.is_selectable());
     assert_eq!(
         text.selection_color,
         Some(nsh_core::Color::rgba(255, 0, 0, 255))
