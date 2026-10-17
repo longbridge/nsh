@@ -253,7 +253,7 @@ const reload = async () => {
 <Scroll style={{ flex: 1 }} refreshing={refreshing()} onRefresh={reload}>…</Scroll>
 ```
 
-On iOS the control is UIRefreshControl; in the Mac idiom of Mac Catalyst, which has no UIRefreshControl, nsh shows its own spinner with the same behavior. `List` takes the same two props. Since the mouse does not drag scroll views, on the desktop and in the browser the pull needs a touchscreen (or a macOS trackpad, which pulls past the top); offer another way to refresh there, such as a button or a keyboard shortcut.
+On iOS the control is UIRefreshControl; in the Mac idiom of Mac Catalyst, which has no UIRefreshControl, NSH shows its own spinner with the same behavior. `List` takes the same two props. Since the mouse does not drag scroll views, on the desktop and in the browser the pull needs a touchscreen (or a macOS trackpad, which pulls past the top); offer another way to refresh there, such as a button or a keyboard shortcut.
 
 ## Zooming
 
@@ -298,7 +298,7 @@ function Photo() {
 mount(Photo);
 ```
 
-Text and canvases inside a zoomed scroll view are drawn again at the new resolution when the zoom ends, so they stay sharp on iOS. Android has no zooming scroll view of its own: nsh switches the scroll view to its own implementation, which scales around the pinch's focal point, pans with any number of fingers, flings and rubber-bands at the edges and zoom limits. Android only starts a pinch once the fingers are about 27 mm apart, as the system's gesture detector does.
+Text and canvases inside a zoomed scroll view are drawn again at the new resolution when the zoom ends, so they stay sharp on iOS. Android has no zooming scroll view of its own: NSH switches the scroll view to its own implementation, which scales around the pinch's focal point, pans with any number of fingers, flings and rubber-bands at the edges and zoom limits. Android only starts a pinch once the fingers are about 27 mm apart, as the system's gesture detector does.
 
 ## Scrolling from code
 
@@ -320,7 +320,7 @@ Lists add `scrollToIndex`, `scrollToOffset` and `scrollToEnd`; see [Lists](./lis
 
 ## Scroll views and the keyboard
 
-nsh keeps a focused input visible on its own: when the keyboard shows, the scroll view around the input gets a bottom inset as tall as the keyboard and scrolls the input into view. This happens natively, with no code in your app. Use [`KeyboardAvoidingView`](./forms-and-keyboard.md#content-outside-scroll-views-keyboardavoidingview) only for content outside scroll views, such as a message bar pinned to the bottom.
+NSH keeps a focused input visible on its own: when the keyboard shows, the scroll view around the input gets a bottom inset as tall as the keyboard and scrolls the input into view. This happens natively, with no code in your app. Use [`KeyboardAvoidingView`](./forms-and-keyboard.md#content-outside-scroll-views-keyboardavoidingview) only for content outside scroll views, such as a message bar pinned to the bottom.
 
 Two props decide how scrolling and taps interact with the keyboard:
 

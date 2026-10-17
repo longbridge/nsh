@@ -1,12 +1,12 @@
 ---
 title: Tailwind reference
-description: Every Tailwind utility and variant nsh resolves natively, the arbitrary value syntax, and how to extend the theme in nsh.json.
+description: Every Tailwind utility and variant NSH resolves natively, the arbitrary value syntax, and how to extend the theme in nsh.json.
 order: 17
 ---
 
 # Tailwind reference
 
-Every element takes Tailwind CSS classes in its `class` prop (and conditional ones in `classList`). nsh resolves them in Rust against Tailwind 4's default theme: JS passes only the string, each distinct string is parsed once and cached, and variants such as `dark:` or `active:` are re-evaluated natively when the appearance, window size or press state changes, without running any JS.
+Every element takes Tailwind CSS classes in its `class` prop (and conditional ones in `classList`). NSH resolves them in Rust against Tailwind 4's default theme: JS passes only the string, each distinct string is parsed once and cached, and variants such as `dark:` or `active:` are re-evaluated natively when the appearance, window size or press state changes, without running any JS.
 
 This page lists what is supported. For an introduction see [Tailwind](../docs/tailwind.md); for the style keys the utilities set, see the [Style reference](./style-reference.md).
 
@@ -23,7 +23,7 @@ This page lists what is supported. For an introduction see [Tailwind](../docs/ta
 - **Variants apply after plain utilities**, in Tailwind's variant order: position (`first:` ...), `group-*:`, `focus-within:`, `hover:`, `focus:`, `active:`, `enabled:`, `disabled:`, motion, `max-*:` breakpoints, then breakpoints ascending, orientation, direction, `dark:`, then platform. So `"active:bg-red-500 bg-blue-500"` is red while pressed.
 - **`style` wins over classes.** The inline `style` is applied on top of the resolved classes. An important utility (`!p-4` or `p-4!`) wins over the inline style too.
 - **Text styles inherit.** Text utilities on a view (`text-white`, `font-bold`, `text-center`, ...) pass to the `<Text>` and `<Input>` elements inside it, as in CSS.
-- **Display is CSS's.** `flex` and `inline-flex` make a row unless a direction utility says otherwise, wherever it is in the string (`flex-col flex` is a column). Views without `flex` keep nsh's column default.
+- **Display is CSS's.** `flex` and `inline-flex` make a row unless a direction utility says otherwise, wherever it is in the string (`flex-col flex` is a column). Views without `flex` keep NSH's column default.
 
 ## Units and the theme
 

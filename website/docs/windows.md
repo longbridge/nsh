@@ -1,13 +1,13 @@
 ---
 title: Windows
-description: Run nsh apps on Windows in Win32 windows drawn with Direct2D, package them, embed them in a Win32 app with AppView, and what the Windows backend does not support.
+description: Run NSH apps on Windows in Win32 windows drawn with Direct2D, package them, embed them in a Win32 app with AppView, and what differs on Windows.
 order: 14
 group: platforms
 ---
 
 # Windows
 
-nsh apps also run on Windows. The Windows backend draws them in Win32 windows with Direct2D and lays out text with
+NSH apps also run on Windows. The Windows backend draws them in Win32 windows with Direct2D and lays out text with
 DirectWrite; the core, the reactive graph, the renderer, Taffy layout and the `nsh/ui/mobile` components are the same
 as on iOS and Android, so one bundle runs everywhere. On Windows, `Platform.OS` is `"windows"` and the
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
@@ -19,7 +19,7 @@ as on iOS and Android, so one bundle runs everywhere. On Windows, `Platform.OS` 
 - The **WebView2 Runtime** for web views. It comes with Windows 11 and with Microsoft Edge on Windows 10; without it a
   `WebView` shows a placeholder.
 - **Media Foundation codecs** for the video formats your app plays (videos play through Windows' own media stack).
-- To build nsh's Windows runtime (from a checkout, or `cargo xtask dist` on Windows): Visual Studio Build Tools with
+- To build NSH's Windows runtime (from a checkout, or `cargo xtask dist` on Windows): Visual Studio Build Tools with
   the C++ workload, the Windows SDK and LLVM (for QuickJS' bindings).
 
 ## Running an app
@@ -67,7 +67,7 @@ certificate (`signtool`) to distribute it.
 
 ## Embedding in a Win32 app
 
-The `nsh-platform-windows` crate (from the nsh repository) gives a Rust Win32 app `AppView`: one nsh engine in a child
+The `nsh-platform-windows` crate (from the NSH repository) gives a Rust Win32 app `AppView`: one NSH engine in a child
 window of a window of yours. Each `AppView` is independent; several can run at once.
 
 ```rust
@@ -141,7 +141,7 @@ Different, or not supported:
 
 - **`WebView`**: a page inside a view with a 3D transform (perspective) is not shown, and a `backdropFilter` over a
   page does not blur it. `source.baseUrl` takes `http(s)` URLs. A native component that brings a window of its own
-  stays above everything nsh draws.
+  stays above everything NSH draws.
 - **Video**: the formats the installed codecs decode; no poster; the control bar always shows with `controls`.
 - **Zooming scroll views** (`zoomTo`, the zoom props); the scroll indicator cannot be dragged.
 - **`mixBlendMode` and `backdropFilter`** are drawn, but not inside a view that has a `filter` or a 3D transform;

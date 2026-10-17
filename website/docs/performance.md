@@ -1,26 +1,26 @@
 ---
 title: Performance
-description: How nsh keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh trace.
+description: How NSH keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh trace.
 order: 62
 group: tools
 ---
 
 # Performance
 
-Performance is nsh's first priority, and most of it is decided by the framework rather than by your app: the runtime
+Performance is NSH's first priority, and most of it is decided by the framework rather than by your app: the runtime
 is native, each update crosses threads once, animations and list virtualization run without JS. This page explains the
-rules nsh follows, what they mean for the code you write, and how to measure.
+rules NSH follows, what they mean for the code you write, and how to measure.
 
 ## The rules
 
 ### 1. JS does as little as possible
 
-QuickJS is an interpreter: small, quick to start, and much slower than native code for heavy work. So in nsh, **only
+QuickJS is an interpreter: small, quick to start, and much slower than native code for heavy work. So in NSH, **only
 your app's code is JS**. The reactive graph (signals, computed values, effects), the renderer your compiled JSX calls,
 the layout engine, the components of `nsh/ui/mobile`, list virtualization, animation and every module you import are
 Rust. Parsing, diffing, layout and string processing happen natively.
 
-The effect is measurable. The same counter app on nsh's earlier JS runtime and on the native runtime (release builds):
+The effect is measurable. The same counter app on NSH's earlier JS runtime and on the native runtime (release builds):
 
 | | Former JS runtime | Native runtime |
 |---|---|---|
@@ -37,7 +37,7 @@ The same holds for components: a `Button` from `nsh/ui/mobile` (Rust) against an
 | First frame (ops) | 1.32 ms / 0.77 ms (1015) | 2.32 ms / 0.70 ms (2415) |
 | Updating all 200 titles (ops) | 0.42 ms / 0.42 ms (200) | 0.77 ms / 0.36 ms (600) |
 
-(Measured on Apple silicon; the second table on the former runtime. Both from nsh's performance baselines.)
+(Measured on Apple silicon; the second table on the former runtime. Both from NSH's performance baselines.)
 
 **For your code:** keep event handlers and computed values light. Heavy computation (parsing large payloads, sorting
 thousands of items on every keystroke) costs more in QuickJS than you may be used to in V8 or JavaScriptCore with a JIT.
@@ -194,7 +194,7 @@ shows the frame rate and what frames and commits cost over the running app, with
 
 ## Reference numbers
 
-From nsh's own baselines (Apple silicon unless noted):
+From NSH's own baselines (Apple silicon unless noted):
 
 | Scenario | Numbers |
 |---|---|
@@ -203,7 +203,7 @@ From nsh's own baselines (Apple silicon unless noted):
 | Gallery photo list, headless (debug) | First frame 653 ops / 224 nodes, ~2.7 ms |
 | Scrolling the photo list, Catalyst (release) | Rebinding one row while scrolling slowly ~0.4 ms; a whole screen of ~32 rows on a fast fling 0.9–1.6 ms |
 | Scrolling the photo list, Android emulator (arm64, release) | Rebinding one row ~0.3–0.4 ms (JS ~60 µs) |
-| Engine startup (release) | ~75–155 µs; the web APIs (`fetch`, `URL`, ...) cost nothing until first used, then ~90 µs |
+| Engine startup (release) | ~75–155 µs; the global APIs (`fetch`, `URL`, ...) cost nothing until first used, then ~90 µs |
 | Hot reload | ~120 ms from saving a file to the new version running; applying the update 0.2–0.5 ms |
 
 ## Checklist

@@ -255,15 +255,15 @@ fn media_talks_to_its_web_views() {
         vec![
             (
                 "url",
-                PayloadValue::Str("https://native-shell.com/docs/".into()),
+                PayloadValue::Str("https://nsh.dev/docs/".into()),
             ),
-            ("title", PayloadValue::Str("native-shell".into())),
+            ("title", PayloadValue::Str("NSH".into())),
             ("loading", PayloadValue::Bool(true)),
             ("canGoBack", PayloadValue::Bool(true)),
             ("canGoForward", PayloadValue::Bool(false)),
         ],
     );
-    for text in ["native-shell", "native-shell.com", "Loading"] {
+    for text in ["NSH", "nsh.dev", "Loading"] {
         assert!(
             shows(&media.screen, text),
             "{text}: {:?}",

@@ -1,6 +1,6 @@
 ---
 title: JSX 与组件
-description: nsh 如何编译 JSX、组件是什么，props、children、控制流、ref 和展开如何工作，以及标签如何对应元素与组件。
+description: NSH 如何编译 JSX、组件是什么，props、children、控制流、ref 和展开如何工作，以及标签如何对应元素与组件。
 order: 30
 group: ui
 demo: guide-components
@@ -8,11 +8,11 @@ demo: guide-components
 
 # JSX 与组件
 
-nsh 应用用 JSX 描述界面，但其中没有 React，也没有虚拟 DOM。nsh 的编译器把每个 JSX 元素转换成对原生渲染器的直接调用，而组件只是一个普通函数，运行一次来构建它负责的那部分树。之后让界面保持最新的是[响应式](./reactivity.md)：JSX 中读取 signal 的表达式由原生层跟踪，变化时只有它们会重新运行。
+NSH 应用用 JSX 描述界面，但其中没有 React，也没有虚拟 DOM。NSH 的编译器把每个 JSX 元素转换成对原生渲染器的直接调用，而组件只是一个普通函数，运行一次来构建它负责的那部分树。之后让界面保持最新的是[响应式](./reactivity.md)：JSX 中读取 signal 的表达式由原生层跟踪，变化时只有它们会重新运行。
 
 ## 元素
 
-每个标签都使用 PascalCase，并指向作用域中的某个绑定。**宿主元素**各自对应一个原生视图，它们是从 nsh 模块导入的组件；只有 `If` 和 `Each` 是无需导入的全局组件：
+每个标签都使用 PascalCase，并指向作用域中的某个绑定。**宿主元素**各自对应一个原生视图，它们是从 NSH 模块导入的组件；只有 `If` 和 `Each` 是无需导入的全局组件：
 
 | 标签 | 导入自 | 原生视图 | 页面 |
 |---|---|---|---|
@@ -243,7 +243,7 @@ import { Button } from "nsh/ui/mobile";
 
 ## 挂载与根视图
 
-`mount(App)` 渲染根组件；`mount(App, props)` 同时向它传入 props。根视图填满整个 surface（窗口，或应用嵌入 nsh 时所用的视图）。给根视图设置 `flex: 1` 让它铺满屏幕，并设置背景色：surface 本身的背景因平台而异。
+`mount(App)` 渲染根组件；`mount(App, props)` 同时向它传入 props。根视图填满整个 surface（窗口，或应用嵌入 NSH 时所用的视图）。给根视图设置 `flex: 1` 让它铺满屏幕，并设置背景色：surface 本身的背景因平台而异。
 
 ```tsx
 mount(() => (

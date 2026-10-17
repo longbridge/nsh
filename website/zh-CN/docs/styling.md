@@ -43,7 +43,7 @@ const styles = {
 
 把共享的样式定义为组件外部的常量（加上 `as const`，让 TypeScript 保留 `"row"` 这样的字面量类型）。没有 `StyleSheet.create`：一个普通对象就够了，样式在每次设置时由 Rust 解析，对象无需事先注册。
 
-读取 signal 的样式表达式会在 signal 变化时重建，nsh 只发送值不同的属性：
+读取 signal 的样式表达式会在 signal 变化时重建，NSH 只发送值不同的属性：
 
 ```tsx
 <View style={{ backgroundColor: selected() ? "#ddf4ff" : "#ffffff", padding: 12 }} />
@@ -60,7 +60,7 @@ const styles = {
 
 ## 默认值
 
-nsh 的默认值与 Web 不同：
+NSH 的默认值与 Web 不同：
 
 | | 默认值 |
 |---|---|

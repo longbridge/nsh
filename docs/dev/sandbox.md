@@ -1,6 +1,6 @@
 # Sandbox and capabilities
 
-Each surface is one QuickJS VM. A bundle holds only the app's code (nsh's runtime is native), so nothing in JS is
+Each surface is one QuickJS VM. A bundle holds only the app's code (NSH's runtime is native), so nothing in JS is
 trusted: every limit and check is enforced in Rust, never in JS.
 
 - **Limits** (`nsh_js::Limits`, `EngineConfig::limits`, per VM): the QuickJS heap (`Limits::default`: 256 MB, for apps embedded in another app;

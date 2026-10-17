@@ -10,9 +10,9 @@ default-members = ["crates/xtask"]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-homepage = "https://native-shell.com"
+homepage = "https://nsh.dev"
 readme = "README.md"
-repository = "https://github.com/longbridge/native-shell"
+repository = "https://github.com/longbridge/nsh"
 # The crates published to crates.io (the libraries embedders and apps depend
 # on) do not inherit this; they set `homepage`, `readme` and `repository` instead.
 publish = false

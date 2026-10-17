@@ -15,7 +15,7 @@ import { KeyboardAvoidingView } from "nsh/ui/mobile";
 ```
 
 > [!TIP]
-> You do not need it for inputs inside a [scroll view](../elements/scroll.md) or a [List](../elements/list.md): nsh
+> You do not need it for inputs inside a [scroll view](../elements/scroll.md) or a [List](../elements/list.md): NSH
 > scrolls the focused input into view natively.
 
 ## Usage
@@ -84,7 +84,7 @@ The padding or margin is added to what the view's own style sets, so your paddin
 
 - **iOS**: the room animates with the keyboard's own duration and an ease-in-ease-out curve.
 - **Android**: where the window shrinks for the keyboard (an activity that resizes), the content already ends above
-  the keyboard, the keyboard does not overlap the nsh view, and KeyboardAvoidingView adds nothing. Where the keyboard
+  the keyboard, the keyboard does not overlap the NSH view, and KeyboardAvoidingView adds nothing. Where the keyboard
   overlaps the view, it makes room as on iOS.
 - **Mac Catalyst** has no software keyboard; the view never moves.
 

@@ -1,6 +1,6 @@
 ---
 title: 原生组件
-description: 在 nsh 应用中使用宿主应用的视图（地图、播放器、任意 UIView 或 Android View），支持 props、事件、命令和尺寸上报。
+description: 在 NSH 应用中使用宿主应用的视图（地图、播放器、任意 UIView 或 Android View），支持 props、事件、命令和尺寸上报。
 order: 18
 group: platforms
 ---
@@ -8,22 +8,22 @@ group: platforms
 # 原生组件
 
 原生组件是由**嵌入方应用**按名称注册的视图：地图、相机预览、图表库，或者 iOS 上任意的 `UIView`、Android 上任意的
-`android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。nsh 应用通过 [`nsh/native`](../modules/nsh-native.md) 提供的 `nativeComponent()` 声明它，然后像使用其他组件一样使用它。nsh
+`android.view.View`、macOS 上任意的 `NSView`、Linux 上任意的 `gtk::Widget`，或者 Windows 上的 Direct2D 绘制或子 `HWND`。NSH 应用通过 [`nsh/native`](../modules/nsh-native.md) 提供的 `nativeComponent()` 声明它，然后像使用其他组件一样使用它。NSH
 会把它和应用的其余部分一起布局，向它发送 props，把它的事件交给对应的处理函数，并转发通过 `ref` 发出的命令。
 
-nsh 本身就用系统原生视图渲染，所以原生组件只是同一视图层级里多出来的一个子视图：不存在层级叠放问题，它会像 `<View>`
+NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图层级里多出来的一个子视图：不存在层级叠放问题，它会像 `<View>`
 一样被裁剪、随内容滚动并接收触摸。
 
 > [!NOTE]
-> 只有在嵌入 nsh 的应用中（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）才有原生组件。
+> 只有在嵌入 NSH 的应用中（[iOS](./embedding-ios.md)、[Android](./embedding-android.md)、[macOS](./macos.md#嵌入-mac-应用)、[Linux](./linux.md#嵌入-gtk-应用)、[Windows](./windows.md#嵌入-win32-应用)）才有原生组件。
 > 打包出的独立应用（`nsh package`）和开发宿主不会注册任何组件，因此在那里该元素会渲染成一个空视图（并记录一次“未知名称”日志）。
 
 ## 整体流程
 
 1. 宿主应用在它的 `NshAppView`（iOS）或 `NshView`（Android）上以某个名称（如 `"embed.badge"`）注册一个工厂。
    每个视图都有自己的注册表，没有任何全局状态。
-2. nsh 应用为这个名称声明一个组件，列出它用到的 props 和事件。
-3. 元素创建时，nsh 先创建一个容器视图（和普通视图一样负责装饰、定位和命中测试），再向工厂请求一个组件，并把组件的视图放进容器、铺满容器。
+2. NSH 应用为这个名称声明一个组件，列出它用到的 props 和事件。
+3. 元素创建时，NSH 先创建一个容器视图（和普通视图一样负责装饰、定位和命中测试），再向工厂请求一个组件，并把组件的视图放进容器、铺满容器。
 4. 组件创建后会立即收到所有 props，之后每当某个 prop 变化时再收到该 prop。
 5. 组件可以发出事件、上报自身尺寸；JS 通过 `ref` 调用它的命令。
 
@@ -89,7 +89,7 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 - 每个事件对应一个处理函数：事件 `tap` 由 `onTap` 处理，`regionChange` 由 `onRegionChange` 处理（首字母大写并加上
   `on` 前缀）；
 - `<View>` 能接受的一切（children 除外）：`style`、`class` / `classList`（[Tailwind](./tailwind.md)）、布局、
-  无障碍 props、`testID`、`onLayout`、`ref`。这些作用于 nsh 绘制的容器，而不是组件本身。
+  无障碍 props、`testID`、`onLayout`、`ref`。这些作用于 NSH 绘制的容器，而不是组件本身。
 
 原生组件是叶子节点：它不接受 children。
 
@@ -108,7 +108,7 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 
 ## 事件
 
-组件按名称发出事件，可附带一个 JSON 负载。nsh 把它投递到引擎线程，并用该负载调用对应的处理函数：
+组件按名称发出事件，可附带一个 JSON 负载。NSH 把它投递到引擎线程，并用该负载调用对应的处理函数：
 
 ```tsx
 const MapView = nativeComponent<
@@ -378,7 +378,7 @@ fn register(app: &AppView, mtm: MainThreadMarker) {
 }
 ```
 
-视图会铺满 nsh 布局出的容器；与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
+视图会铺满 NSH 布局出的容器；与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
 `AppView::load` 之前注册；注册表属于一个 `AppView`（以及用同一个 `AppOptions` 创建的视图）。
 
 ## 在 Linux 上注册（Rust）
@@ -423,12 +423,12 @@ fn register(app: &AppView) {
 }
 ```
 
-控件会铺满 nsh 布局出的容器；与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
+控件会铺满 NSH 布局出的容器；与 iOS 一样，`ComponentContext::emit` 和 `set_size`（单位为点）可在任意线程调用。请在
 `AppView::load` 之前注册。注册表属于一个 `AppView`（以及用同一个 `AppOptions` 创建的视图，注册表就是它的 `components` 字段）。
 
 ## 在 Windows 上注册（Rust）
 
-在 Windows 上，nsh 用 Direct2D 自己绘制所有视图，因此组件要么用 Direct2D 绘制在它的容器里（`draw`），要么提供一个自己的窗口
+在 Windows 上，NSH 用 Direct2D 自己绘制所有视图，因此组件要么用 Direct2D 绘制在它的容器里（`draw`），要么提供一个自己的窗口
 （`window`：地图控件、第三方视图），注册在 `nsh-platform-windows` 的 [`AppView`](./windows.md#嵌入-win32-应用) 上：
 
 ```rust
@@ -489,14 +489,14 @@ fn register(app: &AppView) {
 
 `draw` 在窗口的每一帧都会调用，坐标为视图自身的坐标（点），并裁剪到视图边界；显示的内容变化时调用 `ComponentContext::redraw`。
 绘制出来的组件会像普通视图一样被遮挡、裁剪和变换，触摸由它的容器接收。通过 `window` 返回子窗口的组件会随视图移动、裁剪和隐藏，
-自己接收输入，并位于 nsh 绘制的所有内容之上（绘制在它上方的 nsh 内容会被遮住，和 Web 视图一样）。`ComponentContext::emit`、
+自己接收输入，并位于 NSH 绘制的所有内容之上（绘制在它上方的 NSH 内容会被遮住，和 Web 视图一样）。`ComponentContext::emit`、
 `set_size`（单位为点）和 `redraw` 可以在任意线程调用。请在 `AppView::load` 之前注册；注册表属于一个 `AppView`（以及用同一个
 `AppOptions` 创建的视图）。
 
 ## 规则与限制
 
 - **先注册，再加载。** 工厂只对注册之后创建的元素生效。请在 `loadBundle` / `loadAssetBundle` / `run` 之前注册所有名称，这样第一帧就能找到它们。
-- **装饰和触摸归容器管。** 背景、边框、圆角、阴影、不透明度、变换以及 `overflow: "hidden"` 都作用于 nsh 绘制的容器。你的视图铺满容器，并接收落在其中的触摸。
+- **装饰和触摸归容器管。** 背景、边框、圆角、阴影、不透明度、变换以及 `overflow: "hidden"` 都作用于 NSH 绘制的容器。你的视图铺满容器，并接收落在其中的触摸。
 - **能力声明不适用。** 注册的组件是宿主应用自己的代码；应用声明的[能力](./sandbox-and-capabilities.md)限制不了它做什么。如果你嵌入的是不受信任的应用，就只注册那些可以放心让它们使用的组件。
 - **接口只传数据。** Props、事件负载和命令参数都以 JSON 文本跨越边界；每次变更时传递标识符和小数据，而不是大块数据。
 - **一个 bundle，两个平台。** 在 iOS 和 Android 上用相同的 props 和事件注册相同的名称，同一个 bundle 就能在两个平台上运行。

@@ -127,6 +127,6 @@ None of its own.
 ## Platform notes
 
 - Selection stays inside one text block (one `<Text>` and its spans); it does not run across blocks. iOS shows its edit menu (Copy, Select All, Look Up, Translate, Share), Android a floating toolbar (Copy, Select all, Share).
-- Text decorations other than a solid single line (`double`, `dotted`, `dashed`, `wavy`) are drawn by nsh on iOS.
+- Text decorations other than a solid single line (`double`, `dotted`, `dashed`, `wavy`) are drawn by NSH on iOS.
 - iOS texts draw no gradient backgrounds or inset shadows.
 - `fontScale()` from [`nsh/device`](../modules/nsh-device.md) reports the current system text scale.

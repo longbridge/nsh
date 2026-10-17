@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
-# Installs nsh (the CLI and its prebuilt runtimes) from a GitHub release.
+# Installs NSH (the `nsh` CLI and its prebuilt runtimes) from a GitHub release.
 #
-#   curl -fsSL https://native-shell.com/install.sh | sh
+#   curl -fsSL https://nsh.dev/install.sh | sh
 #
 # NSH_VERSION      a release tag such as v0.1.0 (default: the latest release)
 # NSH_INSTALL_DIR  where the distribution goes (default: ~/.nsh); nsh finds
@@ -10,7 +10,7 @@
 # `nsh` is linked into ~/.local/bin. Running the script again updates it.
 set -eu
 
-repository="longbridge/native-shell"
+repository="longbridge/nsh"
 dir="${NSH_INSTALL_DIR:-$HOME/.nsh}"
 bin="$HOME/.local/bin"
 version="${NSH_VERSION:-latest}"
@@ -23,8 +23,8 @@ fail() {
 case "$(uname -s)/$(uname -m)" in
   Darwin/arm64) platform="macos-arm64" ;;
   Linux/x86_64 | Linux/amd64) platform="linux-x86_64" ;;
-  Darwin/*) fail "no prebuilt nsh for Intel Macs; build it from source: https://native-shell.com/docs/installation" ;;
-  *) fail "no prebuilt nsh for $(uname -s) $(uname -m); see https://native-shell.com/docs/installation" ;;
+  Darwin/*) fail "no prebuilt NSH for Intel Macs; build it from source: https://nsh.dev/docs/installation" ;;
+  *) fail "no prebuilt NSH for $(uname -s) $(uname -m); see https://nsh.dev/docs/installation" ;;
 esac
 
 command -v curl > /dev/null 2>&1 || fail "curl is required"

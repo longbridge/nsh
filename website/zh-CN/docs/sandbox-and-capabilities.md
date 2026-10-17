@@ -1,13 +1,13 @@
 ---
 title: 沙箱与能力
-description: 每个 nsh 应用运行时受到的限制（内存、时间、节点），release 构建的语言加固，以及在 nsh.json 中声明、由宿主应用授予的能力。
+description: 每个 NSH 应用运行时受到的限制（内存、时间、节点），release 构建的语言加固，以及在 nsh.json 中声明、由宿主应用授予的能力。
 order: 21
 group: delivery
 ---
 
 # 沙箱与能力
 
-每个 nsh 应用都运行在自己的 QuickJS VM 中，应用在 VM 之外能做的一切都要经过 nsh 的原生运行时。因此，你可以在宿主应用
+每个 NSH 应用都运行在自己的 QuickJS VM 中，应用在 VM 之外能做的一切都要经过 NSH 的原生运行时。因此，你可以在宿主应用
 制定的规则下运行并非自己编写的代码，例如第三方小程序或下载的更新：
 
 - **限制（Limits）** 约束单个应用可使用的内存、时间和原生资源。
@@ -60,7 +60,7 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 release 构建（所有并非从开发服务器加载的代码）在加载时会被加固：
 
 - 移除 `eval`，`Function`、`AsyncFunction`、`GeneratorFunction` 和 `AsyncGeneratorFunction` 构造函数会抛出异常。
-  nsh 不运行由字符串生成的代码：
+  NSH 不运行由字符串生成的代码：
 
   ```text
   TypeError: the Function constructor is disabled: nsh runs no code from strings (development builds allow it)
@@ -71,7 +71,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
   `this.name`。
 
 冻结原型通常会破坏一种常见写法，即所谓的 “override mistake”：当继承来的属性已被冻结时，赋值
-`Sub.prototype.constructor = Sub` 或 `obj.toString = …` 会抛出异常。nsh 把常被覆盖的成员（`constructor`、`toString`、
+`Sub.prototype.constructor = Sub` 或 `obj.toString = …` 会抛出异常。NSH 把常被覆盖的成员（`constructor`、`toString`、
 `valueOf`、`toJSON` 等）改成访问器，其 setter 会在被赋值的对象上定义该属性，因此这类代码（以及 axios 等使用它的库）
 依然可以正常工作。
 
@@ -156,7 +156,7 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to capabilities.network in nsh.json
 ```
 
-重定向由 nsh 跟随，而不是由平台的 HTTP 栈跟随，因此每一跳都会按能力检查。（流式请求体不会发送两次，所以流式上传遇到
+重定向由 NSH 跟随，而不是由平台的 HTTP 栈跟随，因此每一跳都会按能力检查。（流式请求体不会发送两次，所以流式上传遇到
 `307` / `308` 重定向会失败。）
 
 ### 能力随应用传递
@@ -169,7 +169,7 @@ fetch GET https://evil.example.org/x is not granted: add `evil.example.org` to c
 
 ## 授权：宿主应用允许什么
 
-嵌入 nsh 的宿主应用可以用同样的 JSON 格式授予 **至多** 哪些能力：
+嵌入 NSH 的宿主应用可以用同样的 JSON 格式授予 **至多** 哪些能力：
 
 ```swift
 // iOS

@@ -1,13 +1,13 @@
 ---
 title: Installation
-description: Get the nsh command, from a prebuilt distribution or a source checkout, and the tools each platform needs - iOS, Android, macOS, Windows and Linux.
+description: Get the NSH command, from a prebuilt distribution or a source checkout, and the tools each platform needs - iOS, Android, macOS, Windows and Linux.
 order: 3
 group: start
 ---
 
 # Installation
 
-Everything nsh does goes through one command, `nsh`. It bundles and compiles apps, runs the dev server, launches development hosts and packages installable apps. You can use it from a prebuilt distribution, which needs no Rust, or build it from a checkout of the repository.
+Everything NSH does goes through one command, `nsh`. It bundles and compiles apps, runs the dev server, launches development hosts and packages installable apps. You can use it from a prebuilt distribution, which needs no Rust, or build it from a checkout of the repository.
 
 On top of `nsh`, each platform needs its own tools:
 
@@ -24,12 +24,12 @@ Mac Catalyst, `nsh run`'s default on macOS, needs Xcode like iOS. Details are un
 
 ## Installing a release
 
-Each [GitHub release](https://github.com/longbridge/native-shell/releases) carries the prebuilt distribution (below) for macOS (Apple silicon), Linux x86_64 and Windows x86_64. Every way of installing it puts the same `nsh` command on your `PATH`.
+Each [GitHub release](https://github.com/longbridge/nsh/releases) carries the prebuilt distribution (below) for macOS (Apple silicon), Linux x86_64 and Windows x86_64. Every way of installing it puts the same `nsh` command on your `PATH`.
 
 **macOS and Linux**, with the install script:
 
 ```sh
-curl -fsSL https://native-shell.com/install.sh | sh
+curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
 It installs the distribution to `~/.nsh` and links `~/.local/bin/nsh` to it; running it again updates it. `NSH_VERSION=v0.1.0` pins a release, `NSH_INSTALL_DIR` picks another directory.
@@ -37,7 +37,7 @@ It installs the distribution to `~/.nsh` and links `~/.local/bin/nsh` to it; run
 **Windows**, in PowerShell:
 
 ```powershell
-irm https://native-shell.com/install.ps1 | iex
+irm https://nsh.dev/install.ps1 | iex
 ```
 
 It installs to `%LOCALAPPDATA%\nsh` and adds its `bin` to your user `PATH` (open a new terminal afterwards). `$env:NSH_VERSION` and `$env:NSH_INSTALL_DIR` work as above.
@@ -51,16 +51,16 @@ brew install longbridge/tap/nsh
 **Scoop** (Windows):
 
 ```powershell
-scoop install https://github.com/longbridge/native-shell/releases/latest/download/nsh.json
+scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.json
 ```
 
 **mise** (all three):
 
 ```sh
-mise use -g github:longbridge/native-shell
+mise use -g github:longbridge/nsh
 ```
 
-The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-x86_64.zip`, each with a `.sha256`) carry no version in their names, so `https://github.com/longbridge/native-shell/releases/latest/download/<archive>` always fetches the latest. The embedding SDKs are also released alone, for native apps that need no CLI: `nsh-embed-ios.zip` and `nsh-embed-android.zip`.
+The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-x86_64.zip`, each with a `.sha256`) carry no version in their names, so `https://github.com/longbridge/nsh/releases/latest/download/<archive>` always fetches the latest. The embedding SDKs are also released alone, for native apps that need no CLI: `nsh-embed-ios.zip` and `nsh-embed-android.zip`.
 
 > [!NOTE]
 > The binaries are not signed yet. macOS quarantines files downloaded by a browser; the install script, Homebrew and mise download with `curl` and are not affected, otherwise run `xattr -dr com.apple.quarantine <dir>`. The Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later). There is no Intel Mac or arm64 Linux / Windows build: build those from a checkout.
@@ -98,8 +98,8 @@ The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh
 You need Rust through [rustup](https://rustup.rs). The repository's `rust-toolchain.toml` selects the stable toolchain and installs the iOS and Android targets on first use.
 
 ```sh
-git clone https://github.com/longbridge/native-shell.git
-cd native-shell
+git clone https://github.com/longbridge/nsh.git
+cd nsh
 cargo build -p nsh-cli          # ./target/debug/nsh
 ```
 
@@ -145,7 +145,7 @@ A CLI built from a checkout looks for the runtimes in `target/<triple>/<profile>
 ### Android
 
 - **The Android SDK**, found through `ANDROID_HOME`, `ANDROID_SDK_ROOT` or Android Studio's default place (`~/Library/Android/sdk`, `%LOCALAPPDATA%\Android\Sdk` on Windows), with:
-  - `platforms;android-35` and a recent `build-tools` (nsh uses `aapt2`, `zipalign` and `apksigner` from it, no Gradle);
+  - `platforms;android-35` and a recent `build-tools` (NSH uses `aapt2`, `zipalign` and `apksigner` from it, no Gradle);
   - `platform-tools` (`adb`).
 - **A JDK** (`keytool` creates the debug keystore in `~/.android/debug.keystore` the first time you package, `apksigner` needs Java).
 - A running emulator or a device connected over `adb`. Apps need Android 9 (API 28) or later.
@@ -198,7 +198,7 @@ On Linux, build the CLI and the Android runtime from a checkout (`cargo build -p
 
 ## Editor setup
 
-nsh needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything nsh provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
+NSH needs no NPM. `nsh init` writes a `tsconfig.json` and the type declarations of everything NSH provides into `.nsh/types`, and every command that builds the app keeps them up to date. Any editor that uses the TypeScript language server (VS Code, Zed, Neovim, WebStorm) type-checks the app with them. See [Project structure](./project-structure.md#tsconfigjson-and-nshtypes).
 
 ## Next steps
 

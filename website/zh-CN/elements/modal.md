@@ -55,7 +55,7 @@ function Example() {
 
 ## 默认是受控的
 
-modal 是受控的：用户下滑 sheet 或按返回键时，nsh 通过 `onRequestClose` 询问，modal 会一直保留，直到你把 `visible` 设为 `false`。这样你可以在关闭前先确认。由于主线程从不等待 JS，这个决定无法在事件处理函数里做出；`dismissible` 是事先告诉平台它可以自行关闭 modal：
+modal 是受控的：用户下滑 sheet 或按返回键时，NSH 通过 `onRequestClose` 询问，modal 会一直保留，直到你把 `visible` 设为 `false`。这样你可以在关闭前先确认。由于主线程从不等待 JS，这个决定无法在事件处理函数里做出；`dismissible` 是事先告诉平台它可以自行关闭 modal：
 
 ```tsx
 <Modal visible={open()} dismissible ios={{ presentationStyle: "pageSheet" }} onRequestClose={() => open.set(false)}>

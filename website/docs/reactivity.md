@@ -1,6 +1,6 @@
 ---
 title: Reactivity
-description: Signals, computed values, effects, batch, untracked, cleanup and context - how nsh updates exactly what changed, and the mistakes to avoid.
+description: Signals, computed values, effects, batch, untracked, cleanup and context - how NSH updates exactly what changed, and the mistakes to avoid.
 order: 31
 group: ui
 demo: guide-reactivity
@@ -8,7 +8,7 @@ demo: guide-reactivity
 
 # Reactivity
 
-nsh updates the UI with **signals**: values that know who reads them. When a signal changes, nsh runs again exactly the computations that read it (a text, a style, an effect) and nothing else. Components do not re-render. The model is Solid's, and the reactive graph itself is native: reading a signal is a call into Rust, and the scheduling, dependency tracking and cleanup all happen outside the interpreter.
+NSH updates the UI with **signals**: values that know who reads them. When a signal changes, NSH runs again exactly the computations that read it (a text, a style, an effect) and nothing else. Components do not re-render. The model is Solid's, and the reactive graph itself is native: reading a signal is a call into Rust, and the scheduling, dependency tracking and cleanup all happen outside the interpreter.
 
 Everything on this page is imported from `nsh`:
 
@@ -121,7 +121,7 @@ effect(() => {
 ```
 
 > [!TIP]
-> Do not use effects to keep one signal in sync with another (`effect(() => b.set(a() * 2))`). Use `computed`: it is never out of date and does not cause a second pass. An effect that writes a signal it also reads runs itself again and again until nsh stops it with an error.
+> Do not use effects to keep one signal in sync with another (`effect(() => b.set(a() * 2))`). Use `computed`: it is never out of date and does not cause a second pass. An effect that writes a signal it also reads runs itself again and again until NSH stops it with an error.
 
 ## cleanup
 

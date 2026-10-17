@@ -1,6 +1,6 @@
 {
   "name": "Graphite",
-  "author": "native-shell",
+  "author": "Native Shell",
   "_ref": "The website's look (examples/gallery/ui.tsx): graphite surfaces and one citrus accent, with its light variant; demos follow the page's appearance.",
   "themes": [
     {

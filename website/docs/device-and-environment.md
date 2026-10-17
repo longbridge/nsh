@@ -8,7 +8,7 @@ demo: guide-device
 
 # Device and environment
 
-The environment an app runs in changes while it runs: the window resizes (rotation, split view, a Mac window), the user switches to dark mode or a larger text size, the keyboard comes and goes. nsh exposes each of these as a **reactive accessor**: call it like a signal, and whatever read it (a style, a text, a computed value) updates when it changes. There are no listeners to add or remove.
+The environment an app runs in changes while it runs: the window resizes (rotation, split view, a Mac window), the user switches to dark mode or a larger text size, the keyboard comes and goes. NSH exposes each of these as a **reactive accessor**: call it like a signal, and whatever read it (a style, a text, a computed value) updates when it changes. There are no listeners to add or remove.
 
 | Accessor | Module | Value |
 |---|---|---|
@@ -41,7 +41,7 @@ mount(App);
 
 ## Window size and responsive layout
 
-`windowSize()` is the size of the surface nsh renders into: the screen on a phone, the window on an iPad in split view or on a Mac, the host view when nsh is embedded. Use it to change the layout, not only sizes:
+`windowSize()` is the size of the surface NSH renders into: the screen on a phone, the window on an iPad in split view or on a Mac, the host view when NSH is embedded. Use it to change the layout, not only sizes:
 
 ```tsx
 import { View } from "nsh";
@@ -127,7 +127,7 @@ Read `fontScale()` to adapt layout that does not follow text automatically, such
 
 ## Safe areas
 
-Notches, the home indicator, the status bar, Android's navigation bar and the Mac Catalyst title bar cover parts of the surface. nsh apps draw edge to edge on every platform, and get the covered parts as insets.
+Notches, the home indicator, the status bar, Android's navigation bar and the Mac Catalyst title bar cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets.
 
 - `safeArea()` gives the surface's insets.
 - `useSafeAreaInsets()` gives the insets **where the component renders**: inside a navigation [screen](./navigation.md#safe-areas-under-the-header) they are measured below its header, inside a [modal](./navigation.md#modals) they are the modal's. Prefer it in components that may be shown in several places.
@@ -182,7 +182,7 @@ and minor version (`"6.12"`): distributions number their releases in ways that c
 area and the keyboard height are 0, `colorScheme()` follows the desktop's setting (the XDG settings portal) live,
 `fontScale()` the desktop's text scaling and `PixelRatio.get()` the display's scale, fractional ones included.
 
-On [macOS](./macos.md) (the AppKit backend, not Mac Catalyst), `Platform.OS` is `"macos"`, the idiom `"desktop"` and
+On [macOS](./macos.md) (the AppKit backend), `Platform.OS` is `"macos"`, the idiom `"desktop"` and
 `Platform.Version` the macOS version. The safe area and the keyboard height are 0, `colorScheme()` follows the
 system's appearance live, `fontScale()` is 1 and `PixelRatio.get()` the display's backing scale.
 
@@ -222,7 +222,7 @@ const hairline = 1 / PixelRatio.get();
 
 ## Right to left
 
-When the device language is written right to left (Arabic, Hebrew, Persian, ...), nsh lays the app out right to left: rows run from the right, `left` and `right` style properties swap, text aligns to the right, and native widgets mirror. `I18nManager` from `nsh/device` controls it:
+When the device language is written right to left (Arabic, Hebrew, Persian, ...), NSH lays the app out right to left: rows run from the right, `left` and `right` style properties swap, text aligns to the right, and native widgets mirror. `I18nManager` from `nsh/device` controls it:
 
 | Member | Description |
 |---|---|

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-native-shell (nsh for short: crates, the CLI, the JS module and Java package all use `nsh`) is designed for
+Native Shell (NSH for short in prose; crates, the CLI, the JS module and Java package all use `nsh`) is designed for
 AI-generated, dynamically delivered native UI: native apps embed it (`NshAppView` on iOS, `NshView` on Android,
 `AppView` on macOS, Windows and Linux) and load TSX modules at run time — signed, sandboxed by the host, rendered with
 each platform's own UI. Embedding comes first; plugins for native apps and standalone apps use the same machinery.
@@ -9,10 +9,10 @@ Rust); layout uses Taffy; embedding native components such as maps or web views 
 toolchain is pure Rust and does not need Node.js; app developers get a prebuilt distribution (`cargo xtask dist`) and
 never need Rust either. Every platform has a native backend: iOS with UIKit views (`nsh-platform-ios`), Android with
 Android views (`nsh-platform-android`), macOS with AppKit views (`nsh-platform-macos`), Windows in Win32 windows drawn
-with Direct2D (`nsh-platform-windows`), Linux with GTK 4 widgets (`nsh-platform-linux`). A GPUI backend
-(`nsh-platform-gpui`: macOS, Windows and Linux, embeddable in GPUI / GPUI Kit apps) is in development. The web
-(`nsh-platform-web`, rendering to the DOM) is a publish target too: `nsh package --target web` writes a static site.
-The only UI set is `nsh/ui/mobile` (it renders on every platform); a desktop set is planned.
+with Direct2D (`nsh-platform-windows`), Linux with GTK 4 widgets (`nsh-platform-linux`). The GPUI backend
+(`nsh-platform-gpui`) draws on macOS, Windows and Linux and embeds in GPUI / GPUI Kit apps; the web platform
+(`nsh-platform-web`) renders apps as HTML in a browser page, and `nsh package --target web` publishes them as static
+sites. The only UI set is `nsh/ui/mobile` (it renders on every platform); a desktop set is planned.
 
 This file is the short version. The details are in `docs/dev/` (read the page of the area you change first) and in
 the module docs of the code (`//!`, Javadoc), which are the reference for how a module works inside.
@@ -31,7 +31,7 @@ crates/
   nsh-ui-mobile/       The components and modules of `nsh/ui/mobile` (Button, SafeAreaView, StatusBar, Alert, ...), written in Rust; their JS
                        face is made from their specs (nsh-js `components.rs`), their TypeScript declarations generated
   nsh-animation/       Native animation graph (pure Rust): value / interpolate / math nodes, timing / spring / decay drivers
-  nsh-js/              QuickJS host and nsh's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
+  nsh-js/              QuickJS host and NSH's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
                        the native modules apps import (`modules.rs`: module table and loader; docs/dev/js-modules.md), the
                        renderer of compiled JSX (`dom.rs`, `nsh:rt`), the reactive graph (`reactive.rs`: signals, memos,
                        effects, owners, context), Rust components' and modules' JS face (`components.rs`), navigation,
@@ -42,7 +42,7 @@ crates/
                        (`declarations.rs`, from the declaration next to each export and spec)
   nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
-  nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + nsh's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
+  nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
                        unknown-class check (`classes.rs`);
@@ -76,14 +76,14 @@ crates/
   nsh-macos-app/       Release runner on macOS: the executable of apps built by `nsh package --target macos`
   nsh-platform-windows/ Win32 backend (Windows): one retained `NshView` per node, the tree drawn with Direct2D into a swap chain,
                        DirectWrite text engine (typeset on the engine thread, glyph runs drawn on the main thread), input
-                       (mouse, touch, pen, wheel, precision touchpads), scroll views, nsh's own text editor (IMM32 IME),
+                       (mouse, touch, pen, wheel, precision touchpads), scroll views, NSH's own text editor (IMM32 IME),
                        navigation, video (Media Foundation), web views (WebView2), native components, UI Automation,
                        AppView, standalone app; feature `dev` as above; `--script` steps (docs/dev/windows.md)
   nsh-windows-host/    Development host on Windows (`nsh run --target windows`): connects to a dev server or runs a bundle
   nsh-windows-app/     Release runner on Windows: the executable of apps built by `nsh package --target windows`
   gpui/                The GPUI backend: a workspace of its own (`crates/gpui/Cargo.toml`, its own `Cargo.lock` and GPUI's dependencies),
                        excluded from the main one, so the main workspace's builds, tests and CI never build GPUI:
-  gpui/nsh-platform-gpui/ GPUI backend (macOS, Windows, Linux; in development): the Windows backend's retained `NshView` tree, input,
+  gpui/nsh-platform-gpui/ GPUI backend (macOS, Windows, Linux): the Windows backend's retained `NshView` tree, input,
                        scrolling and editing logic, painted by one GPUI element per surface (`render.rs`: `SurfaceElement`,
                        `DrawCx` with the transform and opacity GPUI lacks), text shaped by GPUI's text system on the engine
                        thread, the main-thread queue (`rt.rs`), GPUI events (`events.rs`, keys as Windows VK codes);
@@ -138,7 +138,9 @@ on any platform or JS crate.
 | components (`nsh/ui/mobile`) | `docs/dev/components.md`, `crates/nsh-ui-mobile/README.md` |
 
 Keep them current: a change that alters documented behavior updates its page (or the module doc) in the same commit,
-including the user-facing pages in `website/` (English and `zh-CN`).
+including the user-facing pages in `website/` (English and `zh-CN`). User-facing pages and the README are written in
+positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
+Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
 ## Commands
 
@@ -231,7 +233,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 - **The main thread never waits for JS.** Callbacks the system wants answered on the spot (may this text change, may
   the back button pop, may the sheet close, ...) are answered natively from props mounted beforehand; events tell JS
   afterwards (`docs/dev/elements.md`).
-- **One surface / `NshView` is one engine**, with no global singletons (nsh is embedded with several instances).
+- **One surface / `NshView` is one engine**, with no global singletons (NSH is embedded with several instances).
 - **Limits and checks are enforced in Rust, never in JS**: a bundle holds only the app's code, so nothing in JS is
   trusted. QuickJS bytecode is trusted input (`Bundle::bytecode` is `unsafe`): it only loads from the app's own
   resources, the dev server and verified packages (`docs/dev/signed-packages.md`).
@@ -258,7 +260,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   their tags in place (`jsx::PRIMITIVES`). Lowercase tags are compile errors: TypeScript checks a lowercase tag
   against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
 - Workspace lints: `missing_docs = warn`, `unreachable_pub = deny`, `private_interfaces = deny`. New crates must set `[lints] workspace = true`.
-  They cover nsh's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with nsh.
+  They cover NSH's own Rust crates only: not the Java / Swift / TS sources, and never the apps built with NSH.
   - Every public API has a doc comment.
   - Items in private modules are `pub(crate)`, never `pub`.
 - Everything is written in English: code comments, docs, logs and this file. Comments explain why, not what the code says.
@@ -279,7 +281,7 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
   `linux`; `desktop` for macOS, Windows and Linux together, `mobile` for iOS and Android together; `runtime`, a module;
   `tailwind`, `text`, `docs`, `examples`, `gallery`). One area only, never several separated by commas: for a change
   that spans parts, judge it as a whole and name the part it is mostly about (a feature the core adds and the platforms
-  carry out is `core`); then an imperative sentence starting with a capital letter, no trailing period, about 72 characters in all. Say what it does for nsh's users, not which
+  carry out is `core`); then an imperative sentence starting with a capital letter, no trailing period, about 72 characters in all. Say what it does for NSH's users, not which
   files changed. Never conventional prefixes (`fix:`, `feat:`); check `git log` and match it.
 - The body explains why (wrapped at 72 columns); hot path changes include their before / after `nsh trace` numbers.
 - One commit / PR does one thing; no unrelated refactors, cleanup or formatting.

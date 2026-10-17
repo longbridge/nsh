@@ -7,7 +7,7 @@ group: delivery
 
 # Signed Packages
 
-A signed package (`.nshpkg`) is how a host app runs nsh code it did not ship with: an update to its own nsh screens,
+A signed package (`.nshpkg`) is how a host app runs NSH code it did not ship with: an update to its own NSH screens,
 or a third-party mini app. `nsh publish` builds the app and signs it; the host app verifies the signature, the
 certificate chain, revocations and the build number before anything runs.
 
@@ -17,14 +17,14 @@ certificate chain, revocations and the build number before anything runs.
 </div>
 
 > [!NOTE]
-> nsh verifies and runs packages; it does not deliver them. Where packages come from (your update server, a CDN, a
+> NSH verifies and runs packages; it does not deliver them. Where packages come from (your update server, a CDN, a
 > store of mini apps) and when the app downloads them is up to the host app.
 
 ## Why packages are signed
 
 The JS a host app runs can reach everything the app [grants](./sandbox-and-capabilities.md), so it must come from
-someone the app trusts. There is a second reason: nsh ships apps as QuickJS bytecode, which loads faster than source,
-but QuickJS does not validate bytecode, and crafted bytecode can corrupt memory. So nsh loads bytecode only from the
+someone the app trusts. There is a second reason: NSH ships apps as QuickJS bytecode, which loads faster than source,
+but QuickJS does not validate bytecode, and crafted bytecode can corrupt memory. So NSH loads bytecode only from the
 app's own (system-signed) resources, from the dev server the developer connected to, and from verified packages.
 Anything else must be JS source.
 

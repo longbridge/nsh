@@ -2,7 +2,7 @@
 // The landing page. Structure and rules follow gpui-kit.com (DESIGN.md):
 // one container per band, hairline separators, restraint, verifiable
 // specifics. The hero runs the gallery's AI chat live (demos/home-chat.tsx
-// on the WebAssembly runtime) in a frame of the site's design.
+// on the web runtime) in a frame of the site's design.
 import { BASE, url, type Lang } from '../lib/site';
 import { hasPlayer } from '../lib/demo.js';
 import HeroField from './HeroField.astro';
@@ -18,7 +18,7 @@ const copy = zh
   ? {
       eyebrow: '为 AI 生成界面而设计',
       title: ['AI 生成的界面，', '原生地运行在你的应用里'],
-      lead: 'Native Shell 让 iOS、Android、macOS、Windows 和 Linux 上的应用在运行时加载用 TSX 编写的模块——由模型或你的团队编写——经过签名校验，运行在宿主配置的沙箱里，并用每个平台自己的原生界面技术绘制。',
+      lead: 'Native Shell 让 iOS、Android、macOS、Windows、Linux 上的应用、GPUI 应用和网页在运行时加载用 TSX 编写的模块——由模型或你的团队编写——经过签名校验，运行在宿主配置的沙箱里，并用每个平台自己的界面技术绘制。',
       start: '阅读简介',
       try: '在线试用',
       gallery: '打开示例应用',
@@ -32,13 +32,13 @@ const copy = zh
         title: 'Chat.tsx',
         badge: '运行中',
         frame: '在线示例：AI 聊天',
-        caption: '示例应用里的 AI 聊天，用 TSX 编写，在这里由 Native Shell 的 WebAssembly 运行时实时运行。回复是本地脚本模拟的流式输出；可以点建议或用 + 重放场景。',
+        caption: '示例应用里的 AI 聊天，用 TSX 编写，在这里由 Native Shell 的 Web 运行时在浏览器中实时运行。回复是本地脚本模拟的流式输出；可以点建议或用 + 重放场景。',
         pending: '在线预览尚未构建：运行 bun run dev（或 cargo xtask web）。',
       },
       replay: '重播',
       capKicker: 'AI 友好',
       capTitle: '为模型编写、为宿主把关而设计',
-      capLead: '生成的界面要是真正的原生界面，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。nsh 的每一层都围绕这几点设计。',
+      capLead: '生成的界面要是真正的原生界面，能作为插件装进已经发布的应用或独立成应用，还要好写、可验证、跑得安全。NSH 的每一层都围绕这几点设计。',
       usesKicker: '三种用法',
       usesTitle: '同一个模块，三种用法',
       usesLead: '首要用途是 AI 生成的界面；同一套机制也让原生应用可以扩展，或者直接组成一个独立应用。',
@@ -46,8 +46,8 @@ const copy = zh
       howTitle: '在服务器上生成，在设备上被信任',
       howLead: '服务器负责生成、检查和签名；设备负责校验、隔离和渲染。信任边界清清楚楚。',
       platKicker: '平台',
-      platTitle: '每个平台，都用它自己的原生界面',
-      platLead: '同一个 bundle 和同一个 Rust 运行时：在每个平台上，模块都可以嵌入已有的原生应用、借助热更新开发，也可以打包成可安装的应用。GPUI 桌面后端正在开发中。',
+      platTitle: '每个平台，都用它自己的界面',
+      platLead: '同一个 bundle 和同一个 Rust 运行时：在每个平台上，模块都可以嵌入已有的应用、借助热更新开发，也可以打包成可安装的应用。GPUI 后端用一套渲染覆盖三个桌面平台，并能嵌入 GPUI 与 GPUI Kit 应用；Web 平台把应用渲染成网页里的 HTML。',
       principleKicker: '原则',
       principle: ['模型负责编写界面，', '宿主决定它能做什么'],
       principleBody: '模块只能看到宿主授予的能力，只占用宿主允许的资源，只在签名校验通过后运行。剩下的——文本、输入、无障碍、动画——交给系统的原生视图。',
@@ -56,7 +56,7 @@ const copy = zh
   : {
       eyebrow: 'Built for AI-generated UI',
       title: ['AI-generated UI,', 'native in your app.'],
-      lead: 'Native Shell lets apps on iOS, Android, macOS, Windows and Linux load modules written in TSX — by a model or by your team — at run time: signature-checked, sandboxed by rules the host sets, and drawn with each platform’s own native UI.',
+      lead: 'Native Shell lets apps on iOS, Android, macOS, Windows and Linux, GPUI apps and web pages load modules written in TSX — by a model or by your team — at run time: signature-checked, sandboxed by rules the host sets, and drawn with each platform’s own UI.',
       start: 'Read the introduction',
       try: 'Try the playground',
       gallery: 'Open the gallery',
@@ -70,22 +70,22 @@ const copy = zh
         title: 'Chat.tsx',
         badge: 'Live',
         frame: 'Live demo: AI chat',
-        caption: 'The gallery’s AI chat, written in TSX and running live here on the Native Shell WebAssembly runtime. Replies are scripted and streamed locally; tap a suggestion or + to replay a scenario.',
+        caption: 'The gallery’s AI chat, written in TSX and running live here in your browser on Native Shell’s web runtime. Replies are scripted and streamed locally; tap a suggestion or + to replay a scenario.',
         pending: 'The live preview is not built yet: run bun run dev (or cargo xtask web).',
       },
       replay: 'Replay',
       capKicker: 'AI friendly',
       capTitle: 'Designed for models to write and hosts to trust.',
-      capLead: 'Generated UI has to be truly native, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of nsh is built around that.',
+      capLead: 'Generated UI has to be truly native, plug into apps that have already shipped or stand alone as an app, and be easy to write, checkable and safe to run. Every layer of NSH is built around that.',
       usesKicker: 'Three uses',
       usesTitle: 'One module, three ways to use it.',
-      usesLead: 'AI-generated UI is what nsh is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
+      usesLead: 'AI-generated UI is what NSH is designed for. The same mechanism makes native apps extensible, or becomes a whole app.',
       howKicker: 'How it works',
       howTitle: 'Generated on the server, trusted on the device.',
       howLead: 'The server generates, checks and signs; the device verifies, confines and renders. The trust boundary stays explicit.',
       platKicker: 'Platforms',
-      platTitle: 'Every platform, in its own native UI.',
-      platLead: 'One bundle and one Rust runtime: on each platform, modules embed in an existing native app, develop with hot reload, and can also be packaged as an installable app. A GPUI desktop backend is in development.',
+      platTitle: 'Every platform, in its own UI.',
+      platLead: 'One bundle and one Rust runtime: on each platform, modules embed in an existing app, develop with hot reload, and can also be packaged as an installable app. The GPUI backend covers the three desktops with one renderer and embeds in GPUI and GPUI Kit apps; the web platform renders apps as HTML in a page.',
       principleKicker: 'Principle',
       principle: ['Models write the interface.', 'The host decides what it may do.'],
       principleBody: 'A module sees only the capabilities the host grants, uses only the resources it allows, and runs only after its signature checks out. Everything else — text, input, accessibility, animation — belongs to the system’s native views.',
@@ -94,36 +94,36 @@ const copy = zh
 
 const caps = zh
   ? [
-      { id: 'native', icon: 'devices', title: '真正的原生界面', body: '模块在手机上由 UIKit 与 Android 视图组成，在桌面上由 AppKit、GTK 4 以及用 Direct2D 绘制的 Win32 窗口呈现。地图、网页视图这类原生组件可以直接嵌入，没有图层问题；系统的文本、输入法和无障碍都原样可用。', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D'] },
-      { id: 'plugin', icon: 'plug', title: '插件，或独立应用', body: '在已有应用的任意页面放一个 NshAppView（iOS）、NshView（Android）或 AppView（桌面），运行时动态加载模块，新功能无需发版；同样的模块也能用 nsh package 打成独立应用。', chips: ['NshAppView', 'NshView', 'nsh package'] },
+      { id: 'native', icon: 'devices', title: '真正的原生界面', body: '模块在手机上由 UIKit 与 Android 视图组成，在桌面上由 AppKit、GTK 4 以及用 Direct2D 绘制的 Win32 窗口呈现，在 GPUI 应用里由 GPUI 绘制，在浏览器里是网页的 HTML。地图、网页视图这类原生组件可以直接嵌入，与界面自然叠放；系统的文本、输入法和无障碍都原样可用。', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D', 'GPUI', 'HTML'] },
+      { id: 'plugin', icon: 'plug', title: '插件，或独立应用', body: '在已有应用的任意页面放一个 NshAppView（iOS）、NshView（Android）、AppView（桌面，以及作为 GPUI 视图放进 GPUI 应用），或在网页里用 createPlayer 加载，运行时动态加载模块，新功能随时上线；同样的模块也能用 nsh package 打成独立应用或静态网站。', chips: ['NshAppView', 'NshView', 'AppView', 'createPlayer', 'nsh package'] },
       { id: 'tsx', icon: 'spark', title: 'AI 友好：TSX + Tailwind', body: '一个模块就是一个 TSX 文件：组件、信号和 Tailwind 类，正是模型最擅长写的格式。每个元素、属性和模块都有从 Rust 源码生成的 TypeScript 声明，文档以 llms.txt 提供给模型。', chips: ['TSX', 'Tailwind', 'llms.txt'] },
-      { id: 'check', icon: 'check', title: '无需设备即可验证', body: 'nsh trace 无界面地运行模块并报告错误；编译器还能在进程内或浏览器里运行。生成、检查、重试。', chips: ['nsh trace', 'compile_module'] },
+      { id: 'check', icon: 'check', title: '在服务器上就能验证', body: 'nsh trace 无界面地运行模块并报告错误；编译器还能在进程内或浏览器里运行。生成、检查、重试。', chips: ['nsh trace', 'compile_module'] },
       { id: 'sandbox', icon: 'lock', title: '不可信，也能安全运行', body: '每个视图一个 QuickJS 虚拟机，内存、调用时长和节点数都有上限，只能使用宿主授予的能力。', chips: ['NshLimits', 'grantCapabilities'] },
       { id: 'signed', icon: 'shield', title: '签名下发，可吊销', body: '模块以 Ed25519 签名的 .nshpkg 到达；发布密钥由离线根密钥认证，设备端检查吊销列表。', chips: ['nsh publish', 'NshTrust'] },
     ]
   : [
-      { id: 'native', icon: 'devices', title: 'Real native UI', body: 'Modules are UIKit and Android views on phones, and AppKit views, GTK 4 widgets and Win32 windows drawn with Direct2D on the desktop. Native components such as maps and web views embed with no layering problems, and the system’s text, input and accessibility just work.', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D'] },
-      { id: 'plugin', icon: 'plug', title: 'Plugins, or standalone apps', body: 'Put an NshAppView (iOS), NshView (Android) or AppView (desktop) on any screen of an existing app and load modules into it at run time: features ship without an app release. The same modules also package into standalone apps with nsh package.', chips: ['NshAppView', 'NshView', 'nsh package'] },
+      { id: 'native', icon: 'devices', title: 'Real native UI', body: 'Modules are UIKit and Android views on phones, AppKit views, GTK 4 widgets and Win32 windows drawn with Direct2D on the desktop, GPUI elements in GPUI apps, and HTML in a web page. Native components such as maps and web views layer in naturally, and the system’s text, input and accessibility just work.', chips: ['UIView', 'android.view.View', 'NSView', 'GtkWidget', 'Direct2D', 'GPUI', 'HTML'] },
+      { id: 'plugin', icon: 'plug', title: 'Plugins, or standalone apps', body: 'Put an NshAppView (iOS), NshView (Android) or AppView (desktop, and as a GPUI view in GPUI apps) on any screen of an existing app, or createPlayer in a web page, and load modules into it at run time: features ship on your own schedule. The same modules also package into standalone apps and static sites with nsh package.', chips: ['NshAppView', 'NshView', 'AppView', 'createPlayer', 'nsh package'] },
       { id: 'tsx', icon: 'spark', title: 'AI-friendly: TSX + Tailwind', body: 'A module is one TSX file of components, signals and Tailwind classes: the format models write best. Every element, prop and module has TypeScript declarations generated from the Rust sources, and the docs are served to models as llms.txt.', chips: ['TSX', 'Tailwind', 'llms.txt'] },
-      { id: 'check', icon: 'check', title: 'Checked without a device', body: 'nsh trace runs a module headless and reports errors; the compiler also runs in-process or in a browser. Generate, check, retry.', chips: ['nsh trace', 'compile_module'] },
+      { id: 'check', icon: 'check', title: 'Checked on the server', body: 'nsh trace runs a module headless and reports errors; the compiler also runs in-process or in a browser. Generate, check, retry.', chips: ['nsh trace', 'compile_module'] },
       { id: 'sandbox', icon: 'lock', title: 'Untrusted, and contained', body: 'One QuickJS VM per view, with memory, call-time and node limits, reaching only the capabilities the host grants.', chips: ['NshLimits', 'grantCapabilities'] },
       { id: 'signed', icon: 'shield', title: 'Signed, revocable delivery', body: 'Modules arrive as Ed25519-signed .nshpkg files; release keys are certified by an offline root and revocations are checked on device.', chips: ['nsh publish', 'NshTrust'] },
     ];
 
 const uses = zh
   ? [
-      { tag: '设计初衷', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里原生地显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '为什么做 nsh', href: 'docs' },
-      { tag: '', label: '原生应用插件', title: '发布之后再扩展应用', body: '在任意页面嵌入 NshAppView（iOS）、NshView（Android）或 AppView（macOS、Windows、Linux），承载团队、合作方或用户之后编写的功能。', code: 'host', checks: ['一个页面可以放多个模块', '宿主注册自己的原生组件', '更新无需发版与审核'], cta: '各平台的嵌入方式', href: 'docs/platforms' },
-      { tag: '', label: '独立应用', title: '也能组成完整的应用', body: '同样的模块可以用 nsh package 打成可安装的 iOS、Android、macOS、Windows 或 Linux 应用，适合试用和小工具。', code: 'app', checks: ['使用预编译的运行时', '不需要 Xcode 工程、Gradle 或 Visual Studio 工程', '保存即热更新开发'], cta: '打包', href: 'docs/packaging' },
+      { tag: '设计初衷', label: 'AI 生成的界面', title: '用界面而不是文字回答', body: '模型为每次请求写一个模块，服务器检查并签名，应用在沙箱里原生地显示它。', code: 'ai', checks: ['每个回答一个 TSX 文件', '下发前完成类型检查与 trace', '只拥有宿主授予的能力'], cta: '为什么做 NSH', href: 'docs' },
+      { tag: '', label: '原生应用插件', title: '发布之后再扩展应用', body: '在任意页面嵌入 NshAppView（iOS）、NshView（Android）、AppView（macOS、Windows、Linux 与 GPUI 应用）或在网页里用 createPlayer，承载团队、合作方或用户之后编写的功能。', code: 'host', checks: ['一个页面可以放多个模块', '宿主注册自己的原生组件', '更新随时下发'], cta: '各平台的嵌入方式', href: 'docs/platforms' },
+      { tag: '', label: '独立应用', title: '也能组成完整的应用', body: '同样的模块可以用 nsh package 打成可安装的 iOS、Android、macOS、Windows、Linux 应用，用 GPUI 运行的桌面应用，或一个静态网站，适合试用和小工具。', code: 'app', checks: ['使用预编译的运行时', '一条命令打出安装包', '保存即热更新开发'], cta: '打包', href: 'docs/packaging' },
     ]
   : [
-      { tag: 'Designed for', label: 'AI-generated UI', title: 'Answer with an interface', body: 'A model writes a module per request, your server checks and signs it, and the app shows it natively, in a sandbox.', code: 'ai', checks: ['One TSX file per answer', 'Type-checked and traced before it ships', 'Only the capabilities the host grants'], cta: 'Why nsh exists', href: 'docs' },
-      { tag: '', label: 'Plugins for native apps', title: 'Extend the app after release', body: 'Embed an NshAppView (iOS), NshView (Android) or AppView (macOS, Windows, Linux) on any screen and host features your team, partners or users write later.', code: 'host', checks: ['Several modules on one screen', 'The host’s own native components', 'Updates without a release or review'], cta: 'Embedding, per platform', href: 'docs/platforms' },
-      { tag: '', label: 'Standalone apps', title: 'Or a whole app', body: 'The same modules can become an installable iOS, Android, macOS, Windows or Linux app with nsh package — for trying nsh and for small tools.', code: 'app', checks: ['The prebuilt runtime', 'No Xcode project, Gradle or Visual Studio build', 'Hot reload while you develop'], cta: 'Packaging', href: 'docs/packaging' },
+      { tag: 'Designed for', label: 'AI-generated UI', title: 'Answer with an interface', body: 'A model writes a module per request, your server checks and signs it, and the app shows it natively, in a sandbox.', code: 'ai', checks: ['One TSX file per answer', 'Type-checked and traced before it ships', 'Only the capabilities the host grants'], cta: 'Why NSH exists', href: 'docs' },
+      { tag: '', label: 'Plugins for native apps', title: 'Extend the app after release', body: 'Embed an NshAppView (iOS), NshView (Android), AppView (macOS, Windows, Linux and GPUI apps) or createPlayer (a web page) on any screen and host features your team, partners or users write later.', code: 'host', checks: ['Several modules on one screen', 'The host’s own native components', 'Updates delivered whenever you choose'], cta: 'Embedding, per platform', href: 'docs/platforms' },
+      { tag: '', label: 'Standalone apps', title: 'Or a whole app', body: 'The same modules can become an installable iOS, Android, macOS, Windows or Linux app, a desktop app running on GPUI, or a static website with nsh package — for trying nsh and for small tools.', code: 'app', checks: ['The prebuilt runtime', 'One command builds the app', 'Hot reload while you develop'], cta: 'Packaging', href: 'docs/packaging' },
     ];
 
-// Platforms in the order the docs list them: phones, then desktops; the
-// web build only runs this site's demos.
+// Platforms in the order the docs list them: phones, desktops, GPUI (all
+// three desktops), then the web.
 const platforms = zh
   ? [
       { name: 'iOS', detail: 'UIKit · iOS 15+', cmd: '--target ios', status: '已支持', kind: 'ok' },
@@ -131,7 +131,8 @@ const platforms = zh
       { name: 'macOS', detail: 'AppKit · macOS 14+', cmd: '--target macos', status: '已支持', kind: 'ok' },
       { name: 'Windows', detail: 'Win32 · Direct2D · Windows 10 1809+', cmd: '--target windows', status: '已支持', kind: 'ok' },
       { name: 'Linux', detail: 'GTK 4.14+', cmd: '--target linux', status: '已支持', kind: 'ok' },
-      { name: 'Web', detail: 'WebAssembly → DOM', cmd: '本站的在线示例', status: '仅用于演示', kind: 'demo' },
+      { name: 'GPUI', detail: 'GPUI · macOS / Windows / Linux', cmd: '--target gpui', status: '已支持', kind: 'ok' },
+      { name: 'Web', detail: 'HTML · 现代浏览器', cmd: '--target web', status: '已支持', kind: 'ok' },
     ]
   : [
       { name: 'iOS', detail: 'UIKit · iOS 15+', cmd: '--target ios', status: 'Supported', kind: 'ok' },
@@ -139,7 +140,8 @@ const platforms = zh
       { name: 'macOS', detail: 'AppKit · macOS 14+', cmd: '--target macos', status: 'Supported', kind: 'ok' },
       { name: 'Windows', detail: 'Win32 · Direct2D · Windows 10 1809+', cmd: '--target windows', status: 'Supported', kind: 'ok' },
       { name: 'Linux', detail: 'GTK 4.14+', cmd: '--target linux', status: 'Supported', kind: 'ok' },
-      { name: 'Web', detail: 'WebAssembly → DOM', cmd: 'this site’s live demos', status: 'Demos only', kind: 'demo' },
+      { name: 'GPUI', detail: 'GPUI · macOS / Windows / Linux', cmd: '--target gpui', status: 'Supported', kind: 'ok' },
+      { name: 'Web', detail: 'HTML · modern browsers', cmd: '--target web', status: 'Supported', kind: 'ok' },
     ];
 
 // Hand-colored snippets: real API, coloured with the site's code tokens.
@@ -164,16 +166,17 @@ const snippets: Record<string, string> = {
     `${k('let')} info = ${k('try await')} app`,
     `  .${fn('loadPackage')}(at: file, trust: trust)`,
     `${cm('// verified, sandboxed, running')}`,
-    `${cm('// NshView on Android, AppView on desktops')}`,
+    `${cm('// NshView on Android, AppView elsewhere')}`,
   ].join('\n'),
   app: [
     `${cm('$')} nsh init my-app`,
     `${cm('$')} nsh run my-app --target macos`,
     `${cm('$')} nsh package my-app --target windows`,
-    `${cm('# ios · android · macos · windows · linux')}`,
+    `${cm('# ios · android · macos · windows')}`,
+    `${cm('# linux · gpui · web')}`,
   ].join('\n'),
 };
-const heroSnippet = `nsh run App.tsx ${k('--target')} ${st('ios | android | macos | windows | linux')}`;
+const heroSnippet = `nsh run App.tsx ${k('--target')} ${st('&lt;platform&gt;')}`;
 
 const icons: Record<string, string> = {
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9.5 13l-2 2 2 2M14.5 13l2 2-2 2"/>',
@@ -569,7 +572,9 @@ const icon = (name: string, size = 16) =>
   .platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--radius-surface); overflow: hidden; background: var(--finish-card-bg); box-shadow: var(--finish-card); }
   .platform { display: grid; align-content: start; gap: 0.35rem; padding: 1.25rem 1.25rem 1.4rem; border-right: 1px solid var(--line); }
   .platform:nth-child(3n) { border-right: 0; }
-  .platform:nth-child(-n + 3) { border-bottom: 1px solid var(--line); }
+  .platform:not(:last-child) { border-bottom: 1px solid var(--line); }
+  /* A last platform alone in its row spans it, as the web does after the six apps. */
+  .platform:last-child { grid-column: 1 / -1; border-right: 0; }
   .platform__name { font-size: 1.05rem; font-weight: 650; }
   .platform__detail { font: 0.75rem/1.4 var(--font-mono); color: var(--muted-foreground); }
   .platform__cmd { font: 0.72rem/1.4 var(--font-mono); color: var(--faint); }
@@ -611,7 +616,7 @@ const icon = (name: string, size = 16) =>
     .platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .platform:nth-child(n) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
     .platform:nth-child(2n) { border-right: 0; }
-    .platform:nth-last-child(-n + 2) { border-bottom: 0; }
+    .platform:last-child { border-bottom: 0; }
     .stage { --w: min(392px, calc(100vw - 2rem)); }
   }
 </style>

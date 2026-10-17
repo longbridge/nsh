@@ -80,16 +80,16 @@ Variants combine: `dark:active:bg-zinc-700`, `md:landscape:flex-row`.
 </View>
 ```
 
-Breakpoints compare against the window (the surface nsh renders into), not the device: in an iPad split view or a resizable window, they follow the window's width.
+Breakpoints compare against the window (the surface NSH renders into), not the device: in an iPad split view or a resizable window, they follow the window's width.
 
 ## What differs from Tailwind on the web
 
 - **Units are points.** `p-4` is 16 points (1 spacing step = 4pt, 1rem = 16pt). Arbitrary values in `px` are points too: `p-[13px]` is 13pt.
-- **`flex` is a row**, as in CSS: `class="flex"` lays out its children in a row unless a direction class says otherwise (anywhere in the string: `flex-col flex` is a column). A view without `flex` or `inline-flex` keeps nsh's default column. `block` and `flow-root` use block layout; `inline` and `inline-block` lay out as views (there is no inline formatting context).
+- **`flex` is a row**, as in CSS: `class="flex"` lays out its children in a row unless a direction class says otherwise (anywhere in the string: `flex-col flex` is a column). A view without `flex` or `inline-flex` keeps NSH's default column. `block` and `flow-root` use block layout; `inline` and `inline-block` lay out as views (there is no inline formatting context).
 - **Text classes on views are inherited.** `text-*`, `font-*`, `leading-*`, `tracking-*` and the other text utilities on a view pass to the `<Text>` and `<Input>` elements inside it, as CSS inheritance does: `<View class="text-white">` makes its labels white.
 - **`space-x-*` / `space-y-*` are gaps** (`gap-x` / `gap-y`).
-- **State backgrounds show over gradients.** In CSS a gradient covers `background-color`, so `active:bg-*` on a `bg-linear-*` surface would never be seen; in nsh a background color from `active:`, `hover:`, `focus:` or `group-*:` replaces the gradient while that state holds (unless the state sets a gradient of its own, such as `active:from-*`). So do `underlayColor` and animated background colors.
-- **Classes for settings that are props in nsh**: `line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*` (image resize mode), `select-text`, `caret-*` and `placeholder:text-*` work, and lose to the explicit props (`numberOfLines`, `pointerEvents`, `resizeMode`, ...) when both are set.
+- **State backgrounds show over gradients.** In CSS a gradient covers `background-color`, so `active:bg-*` on a `bg-linear-*` surface would never be seen; in NSH a background color from `active:`, `hover:`, `focus:` or `group-*:` replaces the gradient while that state holds (unless the state sets a gradient of its own, such as `active:from-*`). So do `underlayColor` and animated background colors.
+- **Classes for settings that are props in NSH**: `line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*` (image resize mode), `select-text`, `caret-*` and `placeholder:text-*` work, and lose to the explicit props (`numberOfLines`, `pointerEvents`, `resizeMode`, ...) when both are set.
 - **Not supported**: `peer-*` variants, pseudo-elements (`before:`, `after:`), arbitrary properties (`[mask-type:luminance]`). Web-only utilities that need nothing natively (`antialiased`, `will-change-*`, `touch-*`, `scroll-*`, `snap-*`, `overscroll-*`, `box-border`, ...) are accepted and ignored.
 
 Everything else works as documented by Tailwind 4: the color palette, opacity modifiers (`bg-black/40`), arbitrary values (`bg-[#34c759]`, `w-[72px]`, `grid-cols-[1fr_2fr]`), fractions (`w-1/2`, `translate-x-1/2`), shadows and rings, gradients (`bg-linear-to-r`, `bg-radial`, `bg-conic` with `from-` / `via-` / `to-`), filters, `backdrop-blur-*`, `mix-blend-*`, transforms, `transition-*` and `duration-*`, `animate-spin` / `ping` / `pulse` / `bounce`, and grid. The platform limits of [filters and blending](./styling.md#filters-and-blending) apply to classes too.

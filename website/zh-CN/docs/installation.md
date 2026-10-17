@@ -1,13 +1,13 @@
 ---
 title: 安装
-description: 从预构建的发行包或源码仓库获取 nsh 命令，以及每个平台（iOS、Android、macOS、Windows 和 Linux）所需的工具。
+description: 从预构建的发行包或源码仓库获取 NSH 命令，以及每个平台（iOS、Android、macOS、Windows 和 Linux）所需的工具。
 order: 3
 group: start
 ---
 
 # 安装
 
-nsh 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、运行开发服务器、启动开发宿主、打包可安装的应用。你可以使用无需 Rust 的预构建发行包，也可以从仓库源码构建。
+NSH 的所有操作都通过一个命令 `nsh` 完成：打包和编译应用、运行开发服务器、启动开发宿主、打包可安装的应用。你可以使用无需 Rust 的预构建发行包，也可以从仓库源码构建。
 
 除了 `nsh` 本身，每个平台还需要自己的工具：
 
@@ -24,12 +24,12 @@ macOS 上 `nsh run` 的默认目标 Mac Catalyst 和 iOS 一样需要 Xcode。�
 
 ## 安装发布版本
 
-每个 [GitHub release](https://github.com/longbridge/native-shell/releases) 都附带 macOS（Apple silicon）、Linux x86_64 和 Windows x86_64 的预构建发行包（见下文）。无论用哪种方式安装，`PATH` 上得到的都是同一个 `nsh` 命令。
+每个 [GitHub release](https://github.com/longbridge/nsh/releases) 都附带 macOS（Apple silicon）、Linux x86_64 和 Windows x86_64 的预构建发行包（见下文）。无论用哪种方式安装，`PATH` 上得到的都是同一个 `nsh` 命令。
 
 **macOS 和 Linux**，使用安装脚本：
 
 ```sh
-curl -fsSL https://native-shell.com/install.sh | sh
+curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
 它把发行包安装到 `~/.nsh`，并把 `~/.local/bin/nsh` 链接过去；再次运行即可更新。`NSH_VERSION=v0.1.0` 指定版本，`NSH_INSTALL_DIR` 指定其他目录。
@@ -37,7 +37,7 @@ curl -fsSL https://native-shell.com/install.sh | sh
 **Windows**，在 PowerShell 中：
 
 ```powershell
-irm https://native-shell.com/install.ps1 | iex
+irm https://nsh.dev/install.ps1 | iex
 ```
 
 它安装到 `%LOCALAPPDATA%\nsh`，并把其中的 `bin` 加入用户 `PATH`（之后打开新的终端）。`$env:NSH_VERSION` 和 `$env:NSH_INSTALL_DIR` 的用法同上。
@@ -51,16 +51,16 @@ brew install longbridge/tap/nsh
 **Scoop**（Windows）：
 
 ```powershell
-scoop install https://github.com/longbridge/native-shell/releases/latest/download/nsh.json
+scoop install https://github.com/longbridge/nsh/releases/latest/download/nsh.json
 ```
 
 **mise**（三个平台）：
 
 ```sh
-mise use -g github:longbridge/native-shell
+mise use -g github:longbridge/nsh
 ```
 
-压缩包（`nsh-macos-arm64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-windows-x86_64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/native-shell/releases/latest/download/<压缩包>` 总是下载最新版本。嵌入用的 SDK 也单独发布，供不需要 CLI 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
+压缩包（`nsh-macos-arm64.tar.gz`、`nsh-linux-x86_64.tar.gz`、`nsh-windows-x86_64.zip`，各带一个 `.sha256`）的文件名不含版本号，所以 `https://github.com/longbridge/nsh/releases/latest/download/<压缩包>` 总是下载最新版本。嵌入用的 SDK 也单独发布，供不需要 CLI 的原生应用使用：`nsh-embed-ios.zip` 和 `nsh-embed-android.zip`。
 
 > [!NOTE]
 > 二进制文件暂未签名。macOS 会隔离浏览器下载的文件；安装脚本、Homebrew 和 mise 用 `curl` 下载，不受影响，否则请运行 `xattr -dr com.apple.quarantine <目录>`。Linux 运行时需要 glibc 2.39 和 GTK 4.14 或更新版本（Ubuntu 24.04 及以后）。目前没有 Intel Mac 和 arm64 Linux / Windows 的构建，请从源码构建。
@@ -99,8 +99,8 @@ Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）�
 你需要通过 [rustup](https://rustup.rs) 安装 Rust。仓库中的 `rust-toolchain.toml` 会选择 stable 工具链，并在首次使用时安装 iOS 和 Android 目标。
 
 ```sh
-git clone https://github.com/longbridge/native-shell.git
-cd native-shell
+git clone https://github.com/longbridge/nsh.git
+cd nsh
 cargo build -p nsh-cli          # ./target/debug/nsh
 ```
 
@@ -146,7 +146,7 @@ cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gp
 ### Android
 
 - **Android SDK**，通过 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或 Android Studio 的默认位置（`~/Library/Android/sdk`，Windows 上为 `%LOCALAPPDATA%\Android\Sdk`）查找，需包含：
-  - `platforms;android-35` 和较新的 `build-tools`（nsh 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）；
+  - `platforms;android-35` 和较新的 `build-tools`（NSH 使用其中的 `aapt2`、`zipalign` 和 `apksigner`，不使用 Gradle）；
   - `platform-tools`（`adb`）。
 - **JDK**（首次打包时 `keytool` 会在 `~/.android/debug.keystore` 创建调试密钥库，`apksigner` 也需要 Java）。
 - 一个正在运行的模拟器，或通过 `adb` 连接的设备。应用要求 Android 9（API 28）及以上。
@@ -199,7 +199,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 ## 编辑器配置
 
-nsh 无需 NPM。`nsh init` 会写入 `tsconfig.json`，并把 nsh 提供的所有内容的类型声明写入 `.nsh/types`，之后每个构建应用的命令都会让它们保持最新。任何使用 TypeScript 语言服务的编辑器（VS Code、Zed、Neovim、WebStorm）都能借此对应用做类型检查。参见 [项目结构](./project-structure.md)。
+NSH 无需 NPM。`nsh init` 会写入 `tsconfig.json`，并把 NSH 提供的所有内容的类型声明写入 `.nsh/types`，之后每个构建应用的命令都会让它们保持最新。任何使用 TypeScript 语言服务的编辑器（VS Code、Zed、Neovim、WebStorm）都能借此对应用做类型检查。参见 [项目结构](./project-structure.md)。
 
 ## 下一步
 

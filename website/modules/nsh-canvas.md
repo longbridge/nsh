@@ -1,6 +1,6 @@
 ---
 title: nsh/canvas
-description: Canvas, the 2D drawing context, Path2D and gradients, with the parts of HTML Canvas 2D that nsh supports.
+description: Canvas, the 2D drawing context, Path2D and gradients, with the parts of HTML Canvas 2D that NSH supports.
 order: 5
 demo: mod-canvas
 ---

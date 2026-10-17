@@ -52,8 +52,8 @@
   On the GPUI backend (`nsh-platform-gpui`, `native.rs`) a component renders a GPUI element
   (`NativeComponent::render(window, cx) -> Option<AnyElement>`, any GPUI / GPUI Kit element or `Entity` view): the
   surface element's prepaint lays it out at the box's window bounds and prepaints it (`prepaint_as_root`, clipped to the
-  clipping ancestors), the tree paints it where it draws the box (nsh content drawn later covers it), and a `BlockMouse`
-  hitbox under it keeps nsh's input away; keys go to it while focus is inside it, and one that returns its widget's
+  clipping ancestors), the tree paints it where it draws the box (NSH content drawn later covers it), and a `BlockMouse`
+  hitbox under it keeps NSH's input away; keys go to it while focus is inside it, and one that returns its widget's
   handle from `NativeComponent::focus_handle` is a Tab stop among the text fields (in tree order, in the newest modal's
   scope). Props and commands reach it with the next frame, before `render`, with the window and `App` (`set_prop(name,
   value, window, cx)`, `command(name, args, window, cx)`), so it can update its entities. `render` is also called while
@@ -71,13 +71,13 @@
 
 ## GPUI and GPUI Kit apps
 
-Desktop apps built with GPUI or GPUI Kit (Longbridge Pro, Allsum Desktop) embed nsh with `nsh-platform-gpui`'s
+Desktop apps built with GPUI or GPUI Kit (Longbridge Pro, Allsum Desktop) embed NSH with `nsh-platform-gpui`'s
 `AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two surfaces
 in a resizable split.
 
-- **One GPUI.** nsh draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
+- **One GPUI.** NSH draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
-  and nsh's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports nsh's.
+  and NSH's views are not the app's elements. `nsh_platform_gpui::gpui` re-exports NSH's.
 - **A view.** `cx.new(|cx| AppView::new(options, window, cx))`, then `view.read(cx).load(App::Js(bundle))` (or a
   Rust app's root); the app puts the entity wherever it wants as a child element. The surface fills the space its
   parent gives it and follows it when resized (each layout reports the size to the engine). Several views run at once,
@@ -94,11 +94,11 @@ in a resizable split.
   backends.
 - **Frame rate.** Open the host window with `inactive_frame_interval: None` in its `WindowOptions`: GPUI draws
   windows without keyboard focus at 30 fps by default, which halves the surfaces' animations whenever the host window
-  is not focused (nsh's own windows set it, `open_app_window`).
+  is not focused (NSH's own windows set it, `open_app_window`).
 - **Overlays.** The surface draws only inside its bounds and takes the mouse only on its hitbox: GPUI Kit's dialogs,
   sheets, popovers and notifications (drawn by `Root` above the content) cover it and take the input, while its app
   keeps running.
-- **The host's theme in nsh.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_core::ui::Theme`
+- **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_core::ui::Theme`
   (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the components of
   the UI sets render with it instead of the app's own theme (`Core::set_host_theme`, which wins until cleared with
   `None`), and the surface is drawn on its `background`. It applies at once and to every app loaded later, in their
@@ -106,20 +106,20 @@ in a resizable split.
   `set_appearance(Appearance::Light | Dark, cx)` is the host's mode, standing in for the system's (`System` follows
   the window again); an app that sets its own appearance still wins, as over the system's. The example's
   `src/theme.rs` converts GPUI Kit's active `Theme`: both modes from its `light_theme` / `dark_theme` configs (gpui-kit
-  theme JSON, unset colors null, which nsh skips), then the current mode's colors as GPUI Kit resolved them, so nsh's
+  theme JSON, unset colors null, which NSH skips), then the current mode's colors as GPUI Kit resolved them, so NSH's
   components match GPUI Kit's widgets; it runs on every change (`cx.observe_global::<Theme>`).
-- **nsh's theme in the host.** An nsh theme file is a gpui-kit theme file (same keys, same `themes` / `mode` /
+- **NSH's theme in the host.** An NSH theme file is a gpui-kit theme file (same keys, same `themes` / `mode` /
   `colors` structure): `ThemeRegistry::global_mut(cx).load_themes_from_str(json)` registers its entries by `name`
   (give each one), and setting `Theme::global_mut(cx).light_theme` / `dark_theme` to them and calling
   `Theme::change(mode, …)` applies them to GPUI Kit (the example's violet theme, `themes/violet.json`). Share hex
-  colors and Tailwind palette names only: nsh also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
-  reads gradients and `blue-500/50` that nsh rejects.
-- **From nsh to the host.** The app talks to the embedding app through the native components the latter registers
+  colors and Tailwind palette names only: NSH also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
+  reads gradients and `blue-500/50` that NSH rejects.
+- **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
   (`AppView::register_component`): their events and commands, as on the other platforms. A component can render GPUI
   Kit widgets in its box (`NativeComponent::render`), which take their own input: the example's "Extended hours" is a
   GPUI Kit `Switch` (`src/switch.rs`, `host.switch`) that reports its natural size (`ComponentContext::set_size`: its
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on
-  Space or Enter while focused (nsh's fields do not see those keys). It returns a focus handle of its own
+  Space or Enter while focused (NSH's fields do not see those keys). It returns a focus handle of its own
   (`NativeComponent::focus_handle`; a wrapper's, since the `Switch` keeps its handle internal), so it is a Tab stop
   among the app's text fields, and a click focuses that handle too. `AppView::on_error` hears
   the app's fatal errors (also logged).

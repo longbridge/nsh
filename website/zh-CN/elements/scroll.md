@@ -124,7 +124,7 @@ scroller.scrollTo({ y: 0, animated: true });
 
 ## 平台说明
 
-- Android：下拉刷新由 nsh 自行绘制（越界回弹效果仍是原生的），`contentInset` 以内边距的方式实现，`decelerationRate` 只影响吸附时的滑动。
-- Android 没有可缩放的滚动视图：nsh 会切换到自己的实现，围绕内容左上角缩放并支持双向滚动。双指间距超过 Android 的最小距离（约 27 mm）后才开始捏合。
-- Mac Catalyst（Mac 界面风格）没有系统刷新控件；nsh 会自行检测下拉并显示加载指示器。
+- Android：下拉刷新由 NSH 自行绘制（越界回弹效果仍是原生的），`contentInset` 以内边距的方式实现，`decelerationRate` 只影响吸附时的滑动。
+- Android 没有可缩放的滚动视图：NSH 会切换到自己的实现，围绕内容左上角缩放并支持双向滚动。双指间距超过 Android 的最小距离（约 27 mm）后才开始捏合。
+- Mac Catalyst（Mac 界面风格）没有系统刷新控件；NSH 会自行检测下拉并显示加载指示器。
 - iOS 在缩放结束后会按缩放后的分辨率重绘文本和画布。

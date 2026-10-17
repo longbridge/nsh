@@ -13,7 +13,7 @@ use crate::ui::{
 };
 
 /// The web site of the second web view.
-const SITE: &str = "https://native-shell.com";
+const SITE: &str = "https://nsh.dev";
 
 /// The video.
 const FLOWER: &str = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";

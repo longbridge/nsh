@@ -1,31 +1,29 @@
 ---
 title: GPUI
-description: Run nsh apps drawn by GPUI on macOS, Windows and Linux, package them, embed them in a GPUI or GPUI Kit app with AppView, and what the GPUI backend does differently.
+description: Run NSH apps drawn by GPUI on macOS, Windows and Linux, package them, embed them in a GPUI or GPUI Kit app with AppView, and what the GPUI backend does differently.
 order: 15.5
 group: platforms
 ---
 
 # GPUI
 
-The GPUI backend draws nsh apps with [GPUI](https://gpui-kit.com) (GPUI Fast), the GPU-accelerated UI framework that
+The GPUI backend draws NSH apps with [GPUI](https://gpui-kit.com) (GPUI Fast), the GPU-accelerated UI framework that
 GPUI Kit is built on, on macOS, Windows and Linux alike. Its main use is embedding: an `AppView` is a GPUI view, so a
-GPUI or GPUI Kit app shows nsh modules anywhere in its own element tree. The core, the reactive graph, the renderer,
+GPUI or GPUI Kit app shows NSH modules anywhere in its own element tree. The core, the reactive graph, the renderer,
 Taffy layout and the `nsh/ui/mobile` components are the same as on every other platform, so one bundle runs
 everywhere. `Platform.OS` is the OS it runs on (`"macos"`, `"windows"` or `"linux"`) and the `desktop={{…}}` props
 apply.
 
-> [!WARNING]
-> The GPUI backend is in development. Every element and module of the native [macOS](./macos.md) (AppKit),
-> [Windows](./windows.md) (Win32) and [Linux](./linux.md) (GTK) backends is there, but some draw differently
-> ([Differences](#differences)), and so far it has been tried on Linux only. For shipping desktop apps today, use the
-> native backends.
+Every element and module of the [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32) and
+[Linux](./linux.md) (GTK) backends is there; where GPUI draws something its own way, [Differences](#differences)
+says how.
 
 ## How it works
 
 - **One element per surface.** A surface is one GPUI element that fills the space its parent gives it and paints the
-  whole view tree with GPUI's primitives: quads, shadows, paths, glyphs and images. nsh keeps one retained view per
+  whole view tree with GPUI's primitives: quads, shadows, paths, glyphs and images. NSH keeps one retained view per
   node, as on Windows, and redraws only when a commit changed something.
-- **Text is shaped on the engine thread** with GPUI's text system (the app's own fonts), broken into lines by nsh;
+- **Text is shaped on the engine thread** with GPUI's text system (the app's own fonts), broken into lines by NSH;
   the main thread only paints the glyphs.
 - **One hop per commit.** The engine runs on its own thread; each commit is one closure sent to GPUI's main thread,
   which notifies the view.
@@ -86,7 +84,7 @@ A Linux package links WebKitGTK 4.1 (web views) and GStreamer (videos) dynamical
 
 ## Embedding in a GPUI app
 
-The `nsh-platform-gpui` crate (from the nsh repository) gives a Rust GPUI app `AppView`: one nsh engine as a GPUI
+The `nsh-platform-gpui` crate (from the NSH repository) gives a Rust GPUI app `AppView`: one NSH engine as a GPUI
 view (`Entity<AppView>`), which fills the space its parent element gives it. Each `AppView` is independent; several
 can run at once.
 
@@ -136,14 +134,13 @@ What draws or behaves differently from the native desktop backends:
   `clearRect` do not apply to it.
 - **Scroll views** do not zoom (`zoomTo` and the zoom props are ignored).
 - **Video** plays on Linux (GStreamer); on macOS and Windows a video shows a placeholder and reports `onError`.
-- **Web views** are native views above everything nsh draws at their place. On Linux they need X11 (see
+- **Web views** are native views above everything NSH draws at their place. On Linux they need X11 (see
   [Requirements](#requirements)); where pages stay black under Xwayland ("Failed to create GBM buffer" in the log),
   run the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`. On macOS and Windows clipping ancestors do not cut them and
   failed loads report no `onError`. `source.baseUrl`, `scrollEnabled` and `allowsBackForwardNavigationGestures` are
   not supported.
 - **Accessibility** goes through AccessKit: screen readers can activate, focus, set values and scroll elements into
   view everywhere; custom actions and the context-menu action are not passed on yet.
-- **Not yet tried on macOS and Windows**: it is built for them, but so far it has run on Linux only.
 
 For comparison, each native backend's own list: [macOS](./macos.md#what-differs-on-macos),
 [Windows](./windows.md#what-differs-on-windows), [Linux](./linux.md#what-differs-on-linux).

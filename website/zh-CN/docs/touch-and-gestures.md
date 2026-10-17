@@ -8,7 +8,7 @@ demo: guide-gestures
 
 # 触摸与手势
 
-nsh 的触摸处理分三个层次。**按压**（`onPress` 等）用于按钮、列表行和链接，按压反馈由原生绘制。**原生手势**（`pan`、`pinch`、`rotation`）在 UI 线程上驱动[原生值](./animation.md#原生值)，即使 JS 正忙，被拖动的卡片也能紧跟手指。**原始触摸与手势响应者系统**（`onTouchStart`、`onResponderMove`、`PanResponder`）把每根手指的位置都交给 JS，用来实现前两者表达不了的交互，例如手写绘图。
+NSH 的触摸处理分三个层次。**按压**（`onPress` 等）用于按钮、列表行和链接，按压反馈由原生绘制。**原生手势**（`pan`、`pinch`、`rotation`）在 UI 线程上驱动[原生值](./animation.md#原生值)，即使 JS 正忙，被拖动的卡片也能紧跟手指。**原始触摸与手势响应者系统**（`onTouchStart`、`onResponderMove`、`PanResponder`）把每根手指的位置都交给 JS，用来实现前两者表达不了的交互，例如手写绘图。
 
 选择能完成任务的最高层次：层次越高，从 UI 线程传到 JS 的工作就越少。
 
@@ -370,7 +370,7 @@ mount(Ball);
 
 ## 为什么有些答案是属性
 
-主线程从不等待 JS。当系统需要立即得到答案时（这个拖动手势能否开始、这个点是否命中视图、这次点击是否应该收起键盘），nsh 根据事先挂载好的属性在原生端直接回答：`pan`（它的轴）、`pinch`、`hitSlop`、`pointerEvents`、`keyboardShouldPersistTaps`、`panActivation`。你的 JS 处理函数事后才得知发生了什么。所以这些是声明式的属性而不是回调；也正因如此，会调用 JS 的响应者协商只在 JS 响应者之间做决定，从不阻塞原生手势。
+主线程从不等待 JS。当系统需要立即得到答案时（这个拖动手势能否开始、这个点是否命中视图、这次点击是否应该收起键盘），NSH 根据事先挂载好的属性在原生端直接回答：`pan`（它的轴）、`pinch`、`hitSlop`、`pointerEvents`、`keyboardShouldPersistTaps`、`panActivation`。你的 JS 处理函数事后才得知发生了什么。所以这些是声明式的属性而不是回调；也正因如此，会调用 JS 的响应者协商只在 JS 响应者之间做决定，从不阻塞原生手势。
 
 ## 相关内容
 

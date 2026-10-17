@@ -1,26 +1,25 @@
 ---
 title: GPUI
-description: 在 macOS、Windows 和 Linux 上运行由 GPUI 绘制的 nsh 应用、打包应用、用 AppView 嵌入 GPUI 或 GPUI Kit 应用，以及 GPUI 后端的不同之处。
+description: 在 macOS、Windows 和 Linux 上运行由 GPUI 绘制的 NSH 应用、打包应用、用 AppView 嵌入 GPUI 或 GPUI Kit 应用，以及 GPUI 后端的不同之处。
 order: 15.5
 group: platforms
 ---
 
 # GPUI
 
-GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 nsh 应用。GPUI 是 GPUI Kit 所基于的 GPU 加速 UI 框架，在 macOS、
+GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GPUI 是 GPUI Kit 所基于的 GPU 加速 UI 框架，在 macOS、
 Windows 和 Linux 上表现一致。它的主要用途是嵌入：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在自己元素树的任意位置
-显示 nsh 模块。核心、响应式图、渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与其他所有平台完全相同，因此同一个 bundle 可以在所有
+显示 NSH 模块。核心、响应式图、渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与其他所有平台完全相同，因此同一个 bundle 可以在所有
 平台上运行。`Platform.OS` 是它所运行的操作系统（`"macos"`、`"windows"` 或 `"linux"`），并会应用 `desktop={{…}}` 属性。
 
-> [!WARNING]
-> GPUI 后端正在开发中。原生 [macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）
-> 后端的元素和模块它都已具备，但部分绘制效果不同（见[差异](#差异)），而且目前只在 Linux 上试过。目前要发布桌面应用，请使用原生后端。
+[macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备；
+GPUI 用自己方式绘制的地方，见[差异](#差异)。
 
 ## 工作方式
 
 - **每个界面一个元素。** 一个界面（surface）是一个 GPUI 元素，它填满父元素给它的空间，用 GPUI 的图元（矩形、阴影、路径、字形和
-  图片）绘制整棵视图树。与 Windows 后端一样，nsh 为每个节点保留一个视图，只在提交改变了内容时才重绘。
-- **文字在引擎线程上排版**，使用 GPUI 的文字系统（应用自己的字体），由 nsh 断行；主线程只绘制字形。
+  图片）绘制整棵视图树。与 Windows 后端一样，NSH 为每个节点保留一个视图，只在提交改变了内容时才重绘。
+- **文字在引擎线程上排版**，使用 GPUI 的文字系统（应用自己的字体），由 NSH 断行；主线程只绘制字形。
 - **每次提交一次跳转。** 引擎运行在自己的线程上；每次提交是发往 GPUI 主线程的一个闭包，由它通知视图重绘。
 - **输入**来自 GPUI 的鼠标、滚动、按键和输入法事件；命中测试、按压、响应者系统、滚动和文本编辑与 Windows 后端是同一套逻辑。
 
@@ -75,8 +74,8 @@ Linux 包动态链接 WebKitGTK 4.1（Web 视图）和 GStreamer（视频），�
 
 ## 嵌入 GPUI 应用
 
-`nsh-platform-gpui` crate（来自 nsh 仓库）为 Rust GPUI 应用提供 `AppView`：一个以 GPUI 视图（`Entity<AppView>`）形式存在的
-nsh 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。
+`nsh-platform-gpui` crate（来自 NSH 仓库）为 Rust GPUI 应用提供 `AppView`：一个以 GPUI 视图（`Entity<AppView>`）形式存在的
+NSH 引擎，填满父元素给它的空间。每个 `AppView` 相互独立，可以同时运行多个。
 
 ```rust
 use gpui::{AppContext, Application, WindowOptions};
@@ -119,13 +118,12 @@ gpui_platform::application().run(|cx| {
   不模糊，合成操作和 `clearRect` 对它不起作用。
 - **滚动视图**不支持缩放（`zoomTo` 和缩放相关属性被忽略）。
 - **视频**在 Linux 上播放（GStreamer）；在 macOS 和 Windows 上显示占位内容并报告 `onError`。
-- **Web 视图**是位于 nsh 在该位置所绘制一切内容之上的原生视图。Linux 上需要 X11（见[环境要求](#环境要求)）；在 Xwayland
+- **Web 视图**是位于 NSH 在该位置所绘制一切内容之上的原生视图。Linux 上需要 X11（见[环境要求](#环境要求)）；在 Xwayland
   下页面一直是黑的（日志中有 "Failed to create GBM buffer"）时，请用 `WEBKIT_DISABLE_DMABUF_RENDERER=1` 运行应用。macOS 和
   Windows 上裁剪祖先不会裁剪它们，加载失败也不会报告 `onError`。不支持 `source.baseUrl`、`scrollEnabled` 和
   `allowsBackForwardNavigationGestures`。
 - **无障碍**通过 AccessKit 实现：读屏软件在所有平台上都能激活、聚焦、设置值并把元素滚动到可见；自定义操作和上下文菜单操作
   尚未传递。
-- **尚未在 macOS 和 Windows 上试过**：已为它们构建，但目前只在 Linux 上运行过。
 
 可对照各原生后端自己的列表：[macOS](./macos.md#macos-上的差异)、[Windows](./windows.md#windows-上的差异)、
 [Linux](./linux.md#linux-上的差异)。

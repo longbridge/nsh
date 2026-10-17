@@ -1,14 +1,14 @@
 ---
-title: Web APIs
-description: The browser-style globals available to every nsh app — fetch, streams, URL, encoding, Blob and FormData, events and abort signals, timers and console — and where they differ from browsers.
+title: Global APIs
+description: The globals every NSH app has without an import — fetch, streams, URL, encoding, Blob and FormData, events and abort signals, Intl, timers and console — implemented natively in Rust.
 order: 15
 ---
 
-# Web APIs
+# Global APIs
 
-Besides the ECMAScript standard library, an nsh app's JS environment has a set of web platform globals: `fetch` with `Headers`, `Request` and `Response`; the Streams Standard; `URL` and `URLSearchParams`; `TextEncoder` / `TextDecoder`; `Blob`, `File` and `FormData`; `EventTarget`, `Event` and `AbortController`; timers, `requestAnimationFrame` and `console`; and `Intl` for number and date formatting, which QuickJS lacks. They are implemented natively in Rust, follow the WHATWG standards, and need no import. Many libraries written for the browser (HTTP clients, URL and encoding helpers, stream utilities) work unchanged.
+Besides the ECMAScript standard library, an NSH app's JS environment has a set of standard globals: `fetch` with `Headers`, `Request` and `Response`; the Streams Standard; `URL` and `URLSearchParams`; `TextEncoder` / `TextDecoder`; `Blob`, `File` and `FormData`; `EventTarget`, `Event` and `AbortController`; timers, `requestAnimationFrame` and `console`; and `Intl` for number and date formatting. They are implemented natively in Rust, follow the WHATWG standards, and need no import, so the many JavaScript libraries built on these standards (HTTP clients, URL and encoding helpers, stream utilities) work unchanged.
 
-There is no DOM: no `window`, `document`, `localStorage`, `XMLHttpRequest`, `WebSocket`, `crypto` or `structuredClone`. UI is built with [elements](../elements/index.md) and [components](../components/index.md), not with HTML.
+This page lists every global an app has. UI is built with [elements](../elements/index.md) and [components](../components/index.md), and everything else an app uses comes from the [modules](./index.md) it imports.
 
 The TypeScript declarations of all of these are generated into `.nsh/types/nsh/globals.d.ts` (see [Project structure](../docs/project-structure.md)).
 
@@ -624,7 +624,7 @@ for await (const line of res.body!.pipeThrough(new TextDecoderStream()).pipeThro
 
 ## Number and date formatting
 
-QuickJS has no `Intl` of its own; nsh adds one, formatting in Rust: `Intl.NumberFormat`, `Intl.DateTimeFormat` and `Intl.getCanonicalLocales`, and the `toLocaleString` of numbers and BigInts and `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString` of dates, which take the same `locales` and `options`. Their declarations are TypeScript's own (the `ES2023` library), so they are not in `globals.d.ts`.
+QuickJS has no `Intl` of its own; NSH adds one, formatting in Rust: `Intl.NumberFormat`, `Intl.DateTimeFormat` and `Intl.getCanonicalLocales`, and the `toLocaleString` of numbers and BigInts and `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString` of dates, which take the same `locales` and `options`. Their declarations are TypeScript's own (the `ES2023` library), so they are not in `globals.d.ts`.
 
 ```ts
 (1234567.891).toLocaleString();                                              // "1,234,567.891" (en-US)

@@ -8,7 +8,7 @@ demo: guide-gestures
 
 # Touch and gestures
 
-nsh has three levels of touch handling. **Presses** (`onPress` and friends) cover buttons, rows and links, with press feedback drawn natively. **Native gestures** (`pan`, `pinch`, `rotation`) move [native values](./animation.md#native-values) on the UI thread, so a dragged card follows the finger even while JS is busy. **Raw touches and the responder system** (`onTouchStart`, `onResponderMove`, `PanResponder`) give you every finger position in JS for anything the other two cannot express, such as drawing.
+NSH has three levels of touch handling. **Presses** (`onPress` and friends) cover buttons, rows and links, with press feedback drawn natively. **Native gestures** (`pan`, `pinch`, `rotation`) move [native values](./animation.md#native-values) on the UI thread, so a dragged card follows the finger even while JS is busy. **Raw touches and the responder system** (`onTouchStart`, `onResponderMove`, `PanResponder`) give you every finger position in JS for anything the other two cannot express, such as drawing.
 
 Pick the highest level that does the job: the higher the level, the less work crosses from the UI thread to JS.
 
@@ -111,7 +111,7 @@ Keep the extended area inside the parent's bounds (give the small view some marg
 
 ## Children outside their parent
 
-A child placed outside its parent's bounds (`position: "absolute"` with `overflow` left visible, such as a dropdown under its field) takes touches where it is drawn, like any other view: nsh hit-tests the descendants that reach outside a view natively. A parent with `overflow: "hidden"` clips them, and then they neither show nor take touches there. The area is computed from the layout, so a child moved out of its parent by a `transform` only takes touches inside the parent's bounds.
+A child placed outside its parent's bounds (`position: "absolute"` with `overflow` left visible, such as a dropdown under its field) takes touches where it is drawn, like any other view: NSH hit-tests the descendants that reach outside a view natively. A parent with `overflow: "hidden"` clips them, and then they neither show nor take touches there. The area is computed from the layout, so a child moved out of its parent by a `transform` only takes touches inside the parent's bounds.
 
 Mind the drawing order: a dropdown is drawn over the siblings of its field only if the field comes after them or has a higher `zIndex`, and touches go to what is drawn on top.
 
@@ -397,7 +397,7 @@ Without active offsets the pan activates after 10 points in any direction. Until
 
 ## Why some answers are props
 
-The main thread never waits for JS. When the system needs an answer on the spot (may this pan gesture begin, does this point hit the view, should this tap dismiss the keyboard), nsh answers natively from props mounted beforehand: `pan` (its axes), `pinch`, `hitSlop`, `pointerEvents`, `keyboardShouldPersistTaps`, `panActivation`. Your JS handlers hear about what happened afterwards. That is why these are declarative props rather than callbacks, and why the responder system's negotiation, which does call JS, only decides between JS responders and never blocks a native gesture.
+The main thread never waits for JS. When the system needs an answer on the spot (may this pan gesture begin, does this point hit the view, should this tap dismiss the keyboard), NSH answers natively from props mounted beforehand: `pan` (its axes), `pinch`, `hitSlop`, `pointerEvents`, `keyboardShouldPersistTaps`, `panActivation`. Your JS handlers hear about what happened afterwards. That is why these are declarative props rather than callbacks, and why the responder system's negotiation, which does call JS, only decides between JS responders and never blocks a native gesture.
 
 ## Related
 

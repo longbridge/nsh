@@ -1,6 +1,6 @@
 ---
 title: 响应式
-description: signal、computed、effect、batch、untracked、cleanup 和 context：nsh 如何只更新真正变化的部分，以及需要避开的常见错误。
+description: signal、computed、effect、batch、untracked、cleanup 和 context：NSH 如何只更新真正变化的部分，以及需要避开的常见错误。
 order: 31
 group: ui
 demo: guide-reactivity
@@ -8,7 +8,7 @@ demo: guide-reactivity
 
 # 响应式
 
-nsh 用 **signal** 更新界面：signal 是知道谁在读取自己的值。signal 变化时，nsh 只重新运行读取了它的那些计算（一段文本、一个样式、一个 effect），其他一概不动。组件不会重新渲染。这套模型来自 Solid，而响应式图本身是原生实现的：读取 signal 是一次对 Rust 的调用，调度、依赖跟踪和清理都在解释器之外完成。
+NSH 用 **signal** 更新界面：signal 是知道谁在读取自己的值。signal 变化时，NSH 只重新运行读取了它的那些计算（一段文本、一个样式、一个 effect），其他一概不动。组件不会重新渲染。这套模型来自 Solid，而响应式图本身是原生实现的：读取 signal 是一次对 Rust 的调用，调度、依赖跟踪和清理都在解释器之外完成。
 
 本页的所有内容都从 `nsh` 导入：
 
@@ -121,7 +121,7 @@ effect(() => {
 ```
 
 > [!TIP]
-> 不要用 effect 让一个 signal 与另一个保持同步（`effect(() => b.set(a() * 2))`）。请使用 `computed`：它永远不会过期，也不会引起第二轮更新。一个 effect 如果写入了它自己读取的 signal，就会反复触发自身，直到 nsh 以错误终止它。
+> 不要用 effect 让一个 signal 与另一个保持同步（`effect(() => b.set(a() * 2))`）。请使用 `computed`：它永远不会过期，也不会引起第二轮更新。一个 effect 如果写入了它自己读取的 signal，就会反复触发自身，直到 NSH 以错误终止它。
 
 ## cleanup
 

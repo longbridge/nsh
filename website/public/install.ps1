@@ -1,6 +1,6 @@
-# Installs nsh (the CLI and its prebuilt runtimes) from a GitHub release.
+# Installs NSH (the `nsh` CLI and its prebuilt runtimes) from a GitHub release.
 #
-#   irm https://native-shell.com/install.ps1 | iex
+#   irm https://nsh.dev/install.ps1 | iex
 #
 # $env:NSH_VERSION      a release tag such as v0.1.0 (default: the latest release)
 # $env:NSH_INSTALL_DIR  where the distribution goes (default: %LOCALAPPDATA%\nsh);
@@ -13,13 +13,13 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$repository = 'longbridge/native-shell'
+$repository = 'longbridge/nsh'
 $dir = if ($env:NSH_INSTALL_DIR) { $env:NSH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'nsh' }
 $version = if ($env:NSH_VERSION) { $env:NSH_VERSION } else { 'latest' }
 
 $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 if ($arch -ne 'AMD64') {
-    throw "nsh: no prebuilt nsh for Windows $arch; see https://native-shell.com/docs/installation"
+    throw "nsh: no prebuilt NSH for Windows $arch; see https://nsh.dev/docs/installation"
 }
 
 $asset = 'nsh-windows-x86_64.zip'

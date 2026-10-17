@@ -7,7 +7,7 @@ group: ui
 
 # 网络
 
-nsh 应用用标准的 `fetch` 发起 HTTP 请求。它运行在平台的网络栈上（iOS 上是 NSURLSession，Android 上是 HttpURLConnection），因此请求使用系统的 TLS、代理和 HTTP/2；而且它双向流式传输：响应体随网络栈的交付以流的形式到达，请求体也可以是一个边生成边发送的流。Fetch API 的配套对象也都具备：`Headers`、`Request`、`Response`、`AbortController`、`FormData`、`Blob`、`File`、`URL`、`URLSearchParams`、`TextEncoder` / `TextDecoder` 以及 Web Streams。
+NSH 应用用标准的 `fetch` 发起 HTTP 请求。它运行在平台的网络栈上（iOS 上是 NSURLSession，Android 上是 HttpURLConnection），因此请求使用系统的 TLS、代理和 HTTP/2；而且它双向流式传输：响应体随网络栈的交付以流的形式到达，请求体也可以是一个边生成边发送的流。Fetch API 的配套对象也都具备：`Headers`、`Request`、`Response`、`AbortController`、`FormData`、`Blob`、`File`、`URL`、`URLSearchParams`、`TextEncoder` / `TextDecoder` 以及 Web Streams。
 
 ## 获取 JSON
 
@@ -73,7 +73,7 @@ const results = await (await fetch(url)).json();
 
 ### 用 FormData 上传文件
 
-`FormData` 请求体以带 boundary 的 `multipart/form-data` 发送。即使某个库事先设置了默认的 `Content-Type`，nsh 也总会为 `FormData` 请求体设置这个类型，因为缺少 boundary 时服务器无法解析。
+`FormData` 请求体以带 boundary 的 `multipart/form-data` 发送。即使某个库事先设置了默认的 `Content-Type`，NSH 也总会为 `FormData` 请求体设置这个类型，因为缺少 boundary 时服务器无法解析。
 
 ```ts
 const form = new FormData();
@@ -217,7 +217,7 @@ try {
 这些检查在 Rust 中、在你的 JS 之外执行，请求到达网络之前就已完成：
 
 - 被拒绝的 `fetch` 会以 `TypeError` 失败，消息中指出需要添加的键，例如 ``Network request failed: fetch GET https://evil.io/ is not granted: add `evil.io` to capabilities.network in nsh.json``。
-- **每次重定向都会再次检查。** nsh 自己跟随重定向（最多 20 次），而不交给平台处理，所以获准的主机无法把应用重定向到未获准的主机。
+- **每次重定向都会再次检查。** NSH 自己跟随重定向（最多 20 次），而不交给平台处理，所以获准的主机无法把应用重定向到未获准的主机。
 - 同样的 `network` 授权也适用于远程图片（包括画布中的图片和 `Image.getSize` / `prefetch`）和视频来源。应用自身包中的 `asset:` URI 始终允许。
 - 主机取最后一个 `@` 之后的部分，所以 `https://ok.com@evil.io` 被视为 `evil.io`。
 
@@ -225,7 +225,7 @@ try {
 
 ## 与浏览器的差异
 
-nsh 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意义的地方有所不同：
+NSH 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意义的地方有所不同：
 
 - **没有 CORS。** 应用可以访问其能力允许的任何主机；没有预检请求，也没有不透明响应。
 - **没有禁止的请求头。** 应用可以设置 `Cookie`、`User-Agent`、`Origin` 等。
@@ -237,7 +237,7 @@ nsh 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 
 ## 相关内容
 
-- [Web API](../modules/web-apis.md)：所有全局对象及其成员。
+- [全局 API](../modules/globals.md)：所有全局对象及其成员。
 - [沙箱与能力声明](./sandbox-and-capabilities.md)：能力、限制以及嵌入应用如何授予它们。
 - [图片与资源](./images-and-assets.md)：远程图片。
 - [列表](./lists.md#加载更多onendreached)：分页加载 API 数据。

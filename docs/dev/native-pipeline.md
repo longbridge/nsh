@@ -1,8 +1,8 @@
-# How apps are compiled and run: nsh's JSX compiler and native modules
+# How apps are compiled and run: NSH's JSX compiler and native modules
 
-An app is TSX importing nsh's modules. The bundler compiles each module with nsh's JSX compiler and rolldown bundles
-them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of nsh's modules stay imports, and `nsh-js` serves them
-natively. The reactive graph, the renderer and every API apps import are Rust; nothing of nsh is JS. Apps cannot
+An app is TSX importing NSH's modules. The bundler compiles each module with NSH's JSX compiler and rolldown bundles
+them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of NSH's modules stay imports, and `nsh-js` serves them
+natively. The reactive graph, the renderer and every API apps import are Rust; nothing of NSH is JS. Apps cannot
 import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...).
 
 ```tsx
@@ -25,7 +25,7 @@ mount(() => <Counter label="Taps" />);
 
 ## Modules
 
-`nsh_core::js::NATIVE_MODULES` names nsh's own, the registries name the rest; the bundler leaves imports of them in the
+`nsh_core::js::NATIVE_MODULES` names NSH's own, the registries name the rest; the bundler leaves imports of them in the
 bundle (`plugin.rs`, an unknown `nsh/…` is an error), `nsh-js` serves them (`modules.rs`, the module table and the
 loader). Where each one is implemented and declared: `js-modules.md`.
 
@@ -46,7 +46,7 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   props sent as `$name` by one render effect, events delivered to `on<Event>` handlers, children and slot holders; a
   module function sends a call to the core and, when it has a result, returns a promise settled by the core's
   `$return` event. Values a registry names natively (`Registry::native_values`: the mobile UI's navigation) and
-  re-exports (`safeArea`, `useSafeAreaInsets`) come from the runtime. nsh's own export wins over a registry's of the
+  re-exports (`safeArea`, `useSafeAreaInsets`) come from the runtime. NSH's own export wins over a registry's of the
   same name.
 
 QuickJS-NG resolves imports when it compiles a module, so the bytecode compiler installs the same loader
@@ -143,7 +143,7 @@ natively removes its route; screens and modals provide the insets they report to
 
 ## Types
 
-`.nsh/types` holds the declarations of everything nsh serves, made from its Rust sources (`nsh-js`
+`.nsh/types` holds the declarations of everything NSH serves, made from its Rust sources (`nsh-js`
 `declarations.rs`, `tooling.md`), the same for every app: the JSX namespace (`nsh/jsx-runtime.d.ts`, `JSX` of
 `nsh/types.d.ts`) has no intrinsic elements, so TypeScript checks every tag as the value it names (a lowercase tag is
 an error, as in the compiler) and infers generic components (`<List each={rows}>{(row) => …}</List>`, `If` and `Each`

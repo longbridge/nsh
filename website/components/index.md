@@ -6,7 +6,7 @@ order: 1
 
 # Mobile UI
 
-`nsh/ui/mobile` is nsh's UI set for phones and tablets: buttons, cards, lists, text fields, sheets, safe areas, the
+`nsh/ui/mobile` is NSH's UI set for phones and tablets: buttons, cards, lists, text fields, sheets, safe areas, the
 keyboard, the status bar, system dialogs and navigation. Import what you need:
 
 ```tsx
@@ -22,7 +22,7 @@ The components are written in Rust, not in JavaScript. In your app a `<Button>` 
 the native core, and the core renders the button from host elements in the same layout pass as the rest of your UI.
 Its events come back to your handlers. This has a few practical consequences:
 
-- **The same look on iOS and Android.** A component draws itself with nsh's own views, not UIKit or Android
+- **The same look on iOS and Android.** A component draws itself with NSH's own views, not UIKit or Android
   widgets, so a `Button` looks the same on both platforms. The exceptions are [Alert](./alert.md) and
   [ActionSheet](./action-sheet.md), which show the platform's system dialogs.
 - **Interaction stays native.** Press feedback, the drag of a [Sheet](./sheet.md) and the repeat of a held
@@ -120,7 +120,7 @@ You can also write the theme's content inline as the value. The format is gpui-k
 - `radius` is the corner radius of controls (buttons, inputs, stepper buttons). `radius.lg` is the radius of large
   surfaces (cards, groups, inset lists, sheets). `font.size` is the base font size of button labels, card headers and the stepper. All values are in points.
 - If you leave out a pressed color (`primary.active.background`, `secondary.active.background`,
-  `danger.active.background`, ...), nsh derives it from the base color: 12% darker in light mode, 12% lighter in
+  `danger.active.background`, ...), NSH derives it from the base color: 12% darker in light mode, 12% lighter in
   dark mode.
 - Keys that only gpui-kit's desktop components use (sidebars, title bars, ...) are ignored, so you can use a gpui-kit
   theme file as it is.

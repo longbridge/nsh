@@ -7,7 +7,7 @@ group: ui
 
 # Networking
 
-nsh apps make HTTP requests with the standard `fetch`. It runs on the platform's network stack (NSURLSession on iOS, HttpURLConnection on Android), so requests use the system's TLS, proxies and HTTP/2, and it streams both ways: a response body arrives as a stream as the stack delivers it, and a request body can be a stream sent as you produce it. The Fetch API's companions are there too: `Headers`, `Request`, `Response`, `AbortController`, `FormData`, `Blob`, `File`, `URL`, `URLSearchParams`, `TextEncoder` / `TextDecoder` and Web Streams.
+NSH apps make HTTP requests with the standard `fetch`. It runs on the platform's network stack (NSURLSession on iOS, HttpURLConnection on Android), so requests use the system's TLS, proxies and HTTP/2, and it streams both ways: a response body arrives as a stream as the stack delivers it, and a request body can be a stream sent as you produce it. The Fetch API's companions are there too: `Headers`, `Request`, `Response`, `AbortController`, `FormData`, `Blob`, `File`, `URL`, `URLSearchParams`, `TextEncoder` / `TextDecoder` and Web Streams.
 
 ## Getting JSON
 
@@ -73,7 +73,7 @@ const results = await (await fetch(url)).json();
 
 ### Uploading files with FormData
 
-A `FormData` body is sent as `multipart/form-data` with its boundary. nsh always sets that content type for a `FormData` body, even if a library sets a default `Content-Type` first, because without the boundary the server cannot parse it.
+A `FormData` body is sent as `multipart/form-data` with its boundary. NSH always sets that content type for a `FormData` body, even if a library sets a default `Content-Type` first, because without the boundary the server cannot parse it.
 
 ```ts
 const form = new FormData();
@@ -217,7 +217,7 @@ An app may declare in `nsh.json` which hosts it talks to. Once `"capabilities"` 
 The checks are enforced in Rust, outside your JS, before a request reaches the network:
 
 - A refused `fetch` rejects with a `TypeError` whose message names the key to add, such as ``Network request failed: fetch GET https://evil.io/ is not granted: add `evil.io` to capabilities.network in nsh.json``.
-- **Every redirect is checked again.** nsh follows redirects itself (up to 20) instead of letting the platform do it, so a granted host cannot redirect your app to one that is not.
+- **Every redirect is checked again.** NSH follows redirects itself (up to 20) instead of letting the platform do it, so a granted host cannot redirect your app to one that is not.
 - The same `network` grants cover remote images (also in canvases and `Image.getSize` / `prefetch`) and video sources. `asset:` URIs of your own bundle are always allowed.
 - The host is taken after the last `@`, so `https://ok.com@evil.io` counts as `evil.io`.
 
@@ -225,7 +225,7 @@ An app without `"capabilities"` may reach every host: a standalone app is its de
 
 ## Differences from browsers
 
-nsh's `fetch` follows the Fetch standard with the differences that make sense for an app rather than a web page:
+NSH's `fetch` follows the Fetch standard with the differences that make sense for an app rather than a web page:
 
 - **No CORS.** An app talks to any host its capabilities allow; there are no preflight requests and no opaque responses.
 - **No forbidden headers.** An app may set `Cookie`, `User-Agent`, `Origin` and others.
@@ -237,7 +237,7 @@ Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) ge
 
 ## Related
 
-- [Web APIs](../modules/web-apis.md): every global, with its members.
+- [Global APIs](../modules/globals.md): every global, with its members.
 - [Sandbox and capabilities](./sandbox-and-capabilities.md): capabilities, limits and how the embedding app grants them.
 - [Images and assets](./images-and-assets.md): remote images.
 - [Lists](./lists.md#loading-more-onendreached): paging through an API.

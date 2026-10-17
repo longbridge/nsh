@@ -1,7 +1,7 @@
 # The web runtime (WebAssembly)
 
-`crates/nsh-platform-web` runs nsh apps in a browser page, rendering to the DOM: apps published with `nsh package
---target web`, the web development host (`nsh run --target web`) and the website's live demos (`website/demos/*.tsx`).
+`crates/nsh-platform-web` runs NSH apps in a browser page, rendering to the DOM: apps published with `NSH package
+--target web`, the web development host (`NSH run --target web`) and the website's live demos (`website/demos/*.tsx`).
 `Platform.OS` is `"web"` (`Os::Web`).
 User-facing page: `website/docs/web.md`.
 
@@ -158,14 +158,14 @@ Measure with names kept (`CARGO_PROFILE_WEB_STRIP=false`) and `twiggy top` / `tw
 ## The playground's compiler
 
 Feature `compiler` adds `nsh_compile` (and `nsh_compiled_ptr` / `_len`): `nsh_bundler::compile_module`, the one-module
-path of the bundler (`crates/nsh-bundler/src/compile.rs`: oxc parse, TypeScript removal, nsh's JSX compiler,
+path of the bundler (`crates/nsh-bundler/src/compile.rs`: oxc parse, TypeScript removal, NSH's JSX compiler,
 codegen). Rolldown does not build for wasm32, so `nsh-bundler` puts bundling behind its default feature `bundle`
 (rolldown, tokio, assets, `.nsh/types`); the workspace depends on it without, and the CLI and the engine's tests
 turn it on. The compiler grows the module by about 3 MB, so the docs pages load `nsh.wasm` and only the playground
 `nsh-playground.wasm`.
 
 oxc's transformer links `oxc-browserslist`, whose wasm32 build depends on `js-sys`: the module imports wasm-bindgen
-glue (`__wbindgen_placeholder__`, `__wbindgen_externref_xform__`) that nsh never calls (it only reads dates for
+glue (`__wbindgen_placeholder__`, `__wbindgen_externref_xform__`) that NSH never calls (it only reads dates for
 browserslist queries). `nsh.js` gives every import it does not know a stub that throws if called.
 
 ## The environment

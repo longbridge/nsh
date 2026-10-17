@@ -6,7 +6,7 @@ order: 9
 
 # WebView
 
-web view 在应用内显示一个网页，或你传入的一段 HTML：iOS 和 Mac Catalyst 上是 WKWebView，Android 上是 `android.webkit.WebView`。由于 nsh 用原生视图渲染，web view 和其他视图一样处在布局中：没有覆盖层，与周围视图之间也不存在层级问题。
+web view 在应用内显示一个网页，或你传入的一段 HTML：iOS 和 Mac Catalyst 上是 WKWebView，Android 上是 `android.webkit.WebView`。由于 NSH 用原生视图渲染，web view 和其他视图一样处在布局中：没有覆盖层，与周围视图之间也不存在层级问题。
 
 ```tsx
 import { signal, Text, View } from "nsh";

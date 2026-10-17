@@ -2,7 +2,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      viewBox="0 0 880 480" width="100%" role="img" aria-labelledby="t d">
   <title id="t">One module, many hosts</title>
-  <desc id="d">One module, App.tsx, is built once into bundle.nshc. The same Rust runtime runs it everywhere: QuickJS, the reactive graph, the renderer, Taffy layout, text and the components. iOS draws UIKit views and is supported from iOS 15.0, embedded as NshAppView. Android draws Android views and is supported from API 28, Android 9, embedded as NshView. Linux draws GTK 4 widgets and is supported. macOS draws AppKit views and is supported from macOS 14. Windows draws Win32 windows with Direct2D and is supported from Windows 10 1809. Web, WebAssembly rendering to the DOM, runs the live demos of these docs only and is not a target to ship to.</desc>
+  <desc id="d">One module, App.tsx, is built once into bundle.nshc. The same Rust runtime runs it everywhere: QuickJS, the reactive graph, the renderer, Taffy layout, text and the components. iOS draws UIKit views from iOS 15.0, embedded as NshAppView. Android draws Android views from API 28, Android 9, embedded as NshView. The desktops draw AppKit views on macOS, Win32 windows with Direct2D on Windows and GTK 4 widgets on Linux, embedded as AppView. GPUI draws GPUI elements on macOS, Windows and Linux, embedded as an AppView in GPUI apps. The web renders HTML in a browser page, embedded with createPlayer. All are supported.</desc>
 
   <defs>
     <style>
@@ -78,13 +78,15 @@
       <path class="arrowhead-dim" d="M0,0 L10,5 L0,10 Z"/>
     </marker>
 
-    <path id="to-ios"     d="M504,248 V262 Q504,268 498,268 H258 Q252,268 252,274 V310"/>
-    <path id="to-android" d="M504,248 V262 Q504,268 498,268 H426 Q420,268 420,274 V310"/>
-    <path id="to-web"     d="M504,248 V262 Q504,268 510,268 H750 Q756,268 756,274 V310"/>
+    <path id="to-ios" d="M504,248 V262 Q504,268 498,268 H238 Q232,268 232,274 V310"/>
+    <path id="to-android" d="M504,248 V262 Q504,268 498,268 H374 Q368,268 368,274 V310"/>
+    <path id="to-desktop" d="M504,248 V310"/>
+    <path id="to-gpui" d="M504,248 V262 Q504,268 510,268 H634 Q640,268 640,274 V310"/>
+    <path id="to-web" d="M504,248 V262 Q504,268 510,268 H770 Q776,268 776,274 V310"/>
   </defs>
 
   <text class="h1" x="24" y="30">One module, many hosts</text>
-  <text class="lede" x="24" y="50">The same bundle and the same Rust runtime on every backend. Each backend draws with its platform's own views.</text>
+  <text class="lede" x="24" y="50">The same bundle and the same Rust runtime on every backend. Each backend draws with its platform's own UI.</text>
 
   <!-- layer bands -->
   <rect class="band" x="160" y="72"  width="688" height="78" rx="12"/>
@@ -96,11 +98,11 @@
   <text class="layer"     x="24" y="205">Runtime</text>
   <text class="layer-sub" x="24" y="221">Rust, shared</text>
   <text class="layer"     x="24" y="360">Backends</text>
-  <text class="layer-sub" x="24" y="376">native views</text>
+  <text class="layer-sub" x="24" y="376">each platform's UI</text>
 
   <text class="band-name mono" x="192" y="105">App.tsx → bundle.nshc</text>
   <text class="note" x="192" y="123">your code only, built by nsh build</text>
-  <text class="note" x="832" y="105" text-anchor="end">no per-platform code</text>
+  <text class="note" x="832" y="105" text-anchor="end">one bundle for every platform</text>
 
   <text class="band-name" x="192" y="203">QuickJS · reactive graph · renderer · Taffy · text</text>
   <text class="note" x="192" y="221">nsh-js, nsh-core and the nsh/ui/mobile components, the same on every backend</text>
@@ -108,11 +110,12 @@
   <!-- flow -->
   <path class="flow" d="M504,150 L504,168" marker-end="url(#arrow)"/>
   <path class="flow" d="M504,248 V268"/>
-  <path class="flow" d="M252,274 Q252,268 258,268 H750 Q756,268 756,274"/>
-  <path class="flow" d="M252,274 V310" marker-end="url(#arrow)"/>
-  <path class="flow" d="M420,268 V310" marker-end="url(#arrow)"/>
-  <path class="flow" d="M756,274 V310" marker-end="url(#arrow)"/>
-  <path class="flow" d="M588,268 V310" marker-end="url(#arrow)"/>
+  <path class="flow" d="M232,274 Q232,268 238,268 H770 Q776,268 776,274"/>
+  <path class="flow" d="M232,274 V310" marker-end="url(#arrow)"/>
+  <path class="flow" d="M368,274 V310" marker-end="url(#arrow)"/>
+  <path class="flow" d="M504,268 V310" marker-end="url(#arrow)"/>
+  <path class="flow" d="M640,274 V310" marker-end="url(#arrow)"/>
+  <path class="flow" d="M776,274 V310" marker-end="url(#arrow)"/>
 
   <!-- tokens: one bundle, handed to each backend -->
   <g class="token">
@@ -126,41 +129,56 @@
     <animate attributeName="opacity" dur="5s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;0.06;0.46;0.52;1"/>
   </g>
   <g class="token">
-    <circle class="token-muted-halo" r="8"/><circle class="token-muted-core" r="3.5"/>
+    <circle class="token-halo" r="8"/><circle class="token-core" r="3.5"/>
+    <animateMotion dur="5s" repeatCount="indefinite" rotate="0" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"><mpath href="#to-desktop" xlink:href="#to-desktop"/></animateMotion>
+    <animate attributeName="opacity" dur="5s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;0.06;0.46;0.52;1"/>
+  </g>
+  <g class="token">
+    <circle class="token-halo" r="8"/><circle class="token-core" r="3.5"/>
+    <animateMotion dur="5s" repeatCount="indefinite" rotate="0" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"><mpath href="#to-gpui" xlink:href="#to-gpui"/></animateMotion>
+    <animate attributeName="opacity" dur="5s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;0.06;0.46;0.52;1"/>
+  </g>
+  <g class="token">
+    <circle class="token-halo" r="8"/><circle class="token-core" r="3.5"/>
     <animateMotion dur="5s" repeatCount="indefinite" rotate="0" keyPoints="0;1;1" keyTimes="0;0.5;1" calcMode="linear"><mpath href="#to-web" xlink:href="#to-web"/></animateMotion>
     <animate attributeName="opacity" dur="5s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;0.06;0.46;0.52;1"/>
   </g>
 
   <!-- backends -->
-  <rect class="card stage" x="176" y="312" width="152" height="112" rx="9" style="animation-delay:-2.6s"/>
-  <text class="name" x="192" y="337">iOS</text>
-  <text class="fact" x="192" y="357">UIKit views</text>
-  <text class="note" x="192" y="374">iOS 15.0+</text>
-  <text class="note mono" x="192" y="391">NshAppView</text>
-  <text class="status" x="192" y="412">SUPPORTED</text>
+  <rect class="card stage" x="170" y="312" width="124" height="112" rx="9" style="animation-delay:-2.6s"/>
+  <text class="name" x="184" y="337">iOS</text>
+  <text class="fact" x="184" y="357" font-size="10.5">UIKit views</text>
+  <text class="note" x="184" y="374" font-size="10">iOS 15.0+</text>
+  <text class="note mono" x="184" y="391">NshAppView</text>
+  <text class="status" x="184" y="412">SUPPORTED</text>
 
-  <rect class="card stage" x="344" y="312" width="152" height="112" rx="9" style="animation-delay:-2.6s"/>
-  <text class="name" x="360" y="337">Android</text>
-  <text class="fact" x="360" y="357">Android views</text>
-  <text class="note" x="360" y="374">API 28+ (Android 9)</text>
-  <text class="note mono" x="360" y="391">NshView</text>
-  <text class="status" x="360" y="412">SUPPORTED</text>
+  <rect class="card stage" x="306" y="312" width="124" height="112" rx="9" style="animation-delay:-2.6s"/>
+  <text class="name" x="320" y="337">Android</text>
+  <text class="fact" x="320" y="357" font-size="10.5">Android views</text>
+  <text class="note" x="320" y="374" font-size="10">API 28+ (Android 9)</text>
+  <text class="note mono" x="320" y="391">NshView</text>
+  <text class="status" x="320" y="412">SUPPORTED</text>
 
-  <rect class="card stage" x="512" y="312" width="152" height="112" rx="9" style="animation-delay:-2.6s"/>
-  <g>
-    <text class="name" x="528" y="337">Linux</text>
-    <text class="fact" x="528" y="357">GTK 4 widgets</text>
-    <text class="note" x="528" y="374">macOS · AppKit · supported</text>
-    <text class="note" x="528" y="391" font-size="9">Windows · Win32 / Direct2D · supported</text>
-    <text class="status" x="528" y="412">SUPPORTED</text>
-  </g>
+  <rect class="card stage" x="442" y="312" width="124" height="112" rx="9" style="animation-delay:-2.6s"/>
+  <text class="name" x="456" y="337">Desktop</text>
+  <text class="fact" x="456" y="357" font-size="10.5">AppKit, Win32, GTK</text>
+  <text class="note" x="456" y="374" font-size="10">Mac, Windows, Linux</text>
+  <text class="note mono" x="456" y="391">AppView</text>
+  <text class="status" x="456" y="412">SUPPORTED</text>
 
-  <rect class="card-demo" x="680" y="312" width="152" height="112" rx="9"/>
-  <text class="name" x="696" y="337">Web</text>
-  <text class="fact" x="696" y="357">WebAssembly → DOM</text>
-  <text class="note" x="696" y="374">this site's live demos</text>
-  <text class="note" x="696" y="391">not a ship target</text>
-  <text class="status-muted" x="696" y="412">DEMOS ONLY</text>
+  <rect class="card stage" x="578" y="312" width="124" height="112" rx="9" style="animation-delay:-2.6s"/>
+  <text class="name" x="592" y="337">GPUI</text>
+  <text class="fact" x="592" y="357" font-size="10.5">GPUI elements</text>
+  <text class="note" x="592" y="374" font-size="10">Mac, Windows, Linux</text>
+  <text class="note mono" x="592" y="391">AppView</text>
+  <text class="status" x="592" y="412">SUPPORTED</text>
 
-  <text class="claim" x="24" y="466">iOS, Android, Linux, macOS and Windows are supported. Web runs these demos only.</text>
+  <rect class="card stage" x="714" y="312" width="124" height="112" rx="9" style="animation-delay:-2.6s"/>
+  <text class="name" x="728" y="337">Web</text>
+  <text class="fact" x="728" y="357" font-size="10.5">HTML in the page</text>
+  <text class="note" x="728" y="374" font-size="10">modern browsers</text>
+  <text class="note mono" x="728" y="391">createPlayer</text>
+  <text class="status" x="728" y="412">SUPPORTED</text>
+
+  <text class="claim" x="24" y="466">iOS, Android, macOS, Windows, Linux, GPUI and the web: one bundle, every platform's own UI.</text>
 </svg>

@@ -1,27 +1,25 @@
 ---
 title: macOS
-description: Run nsh apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what the macOS backend does not support.
+description: Run NSH apps on macOS in AppKit windows, package them as .app bundles, embed them in a Mac app with AppView, and what differs on macOS.
 order: 13
 group: platforms
 ---
 
 # macOS
 
-nsh apps also run as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays out
+NSH apps also run as native Mac apps. The macOS backend renders them with AppKit views and Core Animation and lays out
 text with CoreText; the core, the reactive graph, the renderer, Taffy layout and the `nsh/ui/mobile` components are the
 same as on iOS and Android, so one bundle runs everywhere. On macOS, `Platform.OS` is `"macos"` and the
 `desktop={{…}}` props apply. The window's title, a title bar of the app's own, the menu bar and context menus come from
 [`nsh/desktop`](../modules/nsh-desktop.md).
 
-This is not [Mac Catalyst](./getting-started.md#mac-catalyst-default-on-macos), which stays the default `nsh run`
-target on macOS: Catalyst runs the iOS backend (UIKit) in an iPhone-sized window and behaves like a phone. The macOS
-backend behaves like a desktop app: mouse, trackpad and keyboard input, resizable windows, centered sheets and a menu
-bar.
+The macOS backend behaves like a desktop app: mouse, trackpad and keyboard input, resizable windows, centered sheets
+and a menu bar.
 
 ## Requirements
 
 - **macOS 14** or later, where the app runs.
-- Xcode's command line tools (`xcode-select --install`), to build nsh's macOS runtime from a checkout and to package
+- Xcode's command line tools (`xcode-select --install`), to build NSH's macOS runtime from a checkout and to package
   apps (`codesign`, `sips`). The distribution made with `cargo xtask dist` on a Mac ships the runtime in
   `runtime/macos/`.
 
@@ -55,7 +53,7 @@ app that updates twice a second:
 | `FPS` | Frames shown over the last second: display refreshes in which the app changed (an idle app reads low; that is not slowness). `max` is what the main thread could keep up with, then the display's rate (120 Hz on ProMotion screens). |
 | `TICK` | The gaps between display refreshes as they arrived (mean, p95) and `gap`, the p95 gap between shown frames: one refresh (8.3 ms at 120 Hz) when nothing is late. |
 | `MAIN` | Main-thread time per frame (applying the engine's changes, drawing text and canvases, animations, input), its 95th percentile, and `drop`: the share of frames that took longer than one refresh. |
-| `JS` / `CORE` | Per commit: your code (handlers, timers, list rows) and nsh's core (layout, text, diffing); commits per second, native view changes per commit. |
+| `JS` / `CORE` | Per commit: your code (handlers, timers, list rows) and NSH's core (layout, text, diffing); commits per second, native view changes per commit. |
 | `HOP` | How long changes wait between the engine thread and the main thread; how busy the engine thread is. |
 | `CPU` / `GPU` / `MEM` | The process: CPU (100% is one core), its GPU share, its memory footprint (Activity Monitor's figure). |
 
@@ -86,7 +84,7 @@ notarize it. `--run` opens the app after packaging it.
 
 ## Embedding in a Mac app
 
-The `nsh-platform-macos` crate (from the nsh repository) gives a Rust Mac app `AppView`: one nsh engine as an `NSView`.
+The `nsh-platform-macos` crate (from the NSH repository) gives a Rust Mac app `AppView`: one NSH engine as an `NSView`.
 Each `AppView` is independent; several can run at once.
 
 ```rust
@@ -113,7 +111,7 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 `AppView::load` replaces whatever ran; `stop` ends the app. `asset_base` tells it where `asset:/` URIs resolve
 (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`) load with
 `unsafe { Bundle::bytecode(bytes) }`: bytecode is trusted input, so only load it from your own app's files.
-For an app that is only an nsh app, `run_app(source, options)` opens one `AppView` in a window with a standard menu
+For an app that is only an NSH app, `run_app(source, options)` opens one `AppView` in a window with a standard menu
 (About, Hide, Quit, Edit, Minimize, Zoom, Enter Full Screen, Close), which the app can replace with
 `Menu.setApplicationMenu` ([`nsh/desktop`](../modules/nsh-desktop.md)), and runs until the window closes.
 

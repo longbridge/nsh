@@ -1,13 +1,13 @@
 ---
 title: Android
-description: Run nsh apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
+description: Run NSH apps on Android with Android views, on an emulator or a device, package them as an .apk, and embed them in an existing Android app with nsh.aar and NshView.
 order: 12
 group: platforms
 ---
 
 # Android
 
-nsh apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
+NSH apps run on Android with ordinary Android views and `StaticLayout` text, from Android 9 (API 28), on `arm64-v8a`
 and `x86_64`. An existing app embeds modules in an `NshView` and loads signed packages it downloads, under limits and
 capabilities it sets: that is the main use. Running and packaging whole apps work too, as on the other platforms. On Android, `Platform.OS` is
 `"android"` and the `android={{…}}` props apply.
@@ -24,7 +24,7 @@ capabilities it sets: that is the main use. Running and packaging whole apps wor
 nsh run my-app --target android
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; nsh uses the first one). `nsh` installs a
+Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). `nsh` installs a
 development host APK (rebuilt only when the runtime changes) and forwards the dev server's port with `adb reverse`, so
 it works over USB without a shared network; the app updates as you save, with logs in the terminal.
 
@@ -39,8 +39,8 @@ keystore. Signing for release and icons: [Packaging](./packaging.md#android).
 
 ## Embedding in an Android app
 
-An existing Android app can show nsh apps inside its own UI. The runtime ships as an Android library, `nsh.aar`: you
-create a `com.longbridge.nsh.NshView` (a `FrameLayout`), add it to any layout and load an app into it. The nsh app
+An existing Android app can show NSH apps inside its own UI. The runtime ships as an Android library, `nsh.aar`: you
+create a `com.longbridge.nsh.NshView` (a `FrameLayout`), add it to any layout and load an app into it. The NSH app
 renders with ordinary Android views next to your own.
 
 Each `NshView` is one independent engine with its own JS VM; there are no global singletons, so several can run at
@@ -75,7 +75,7 @@ dependencies {
 
 ## Ship a bundle with the app
 
-Build the nsh app into the app's assets:
+Build the NSH app into the app's assets:
 
 ```sh
 nsh build App.tsx --release --out app/src/main/assets/nsh
@@ -143,7 +143,7 @@ column.addView(nsh, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_P
 setContentView(column);
 ```
 
-The view's size is the app's window: nsh lays the app out at the view's size and again whenever it changes. Loading
+The view's size is the app's window: NSH lays the app out at the view's size and again whenever it changes. Loading
 again replaces the running app. The complete sample is
 `examples/embed-android/src/com/longbridge/nsh/embeddemo/MainActivity.java`.
 
@@ -255,14 +255,14 @@ config of the app may override it). The release `nsh.aar` does not.
   ```
 
   For predictive back on Android 13+, set `android:enableOnBackInvokedCallback="true"` on the `<application>`, as
-  packaged nsh apps do.
+  packaged NSH apps do.
 - **Keyboard.** `NshView` scrolls focused inputs clear of the keyboard itself. Leave `android:windowSoftInputMode` unset
   or use `adjustResize`; with `adjustPan` the system moves the whole window instead.
 - **Safe area.** The view reports as insets only the parts of the system bars and the keyboard that overlap it, so an
   `NshView` below a toolbar gets no top inset. For edge-to-edge content, draw behind the system bars and let the app use
   `SafeAreaView` / `useSafeAreaInsets()`.
 - **Configuration changes.** An activity recreated on rotation or a theme change destroys the view, and the app starts
-  again from scratch. To keep it running, declare the changes the activity handles itself; packaged nsh apps use:
+  again from scratch. To keep it running, declare the changes the activity handles itself; packaged NSH apps use:
 
   ```xml
   <activity android:name=".MainActivity"

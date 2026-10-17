@@ -181,7 +181,7 @@ function EditNote() {
 ```
 
 > [!IMPORTANT]
-> 系统会在用户操作的那一刻，在主线程上询问是否允许返回，而主线程从不等待 JS。因此 nsh 依据已经挂载的 `preventBack` 值作答。一旦有可能丢失的内容就应设置 `preventBack`，而不是在用户返回时才运行的处理函数里设置。
+> 系统会在用户操作的那一刻，在主线程上询问是否允许返回，而主线程从不等待 JS。因此 NSH 依据已经挂载的 `preventBack` 值作答。一旦有可能丢失的内容就应设置 `preventBack`，而不是在用户返回时才运行的处理函数里设置。
 
 如果只想关闭侧滑手势而保留返回按钮，使用 `gestureEnabled={false}`。
 
@@ -251,5 +251,5 @@ Modal 会把自己的安全区边距提供给其内容，因此其中的 [SafeAr
 
 - [导航指南](../docs/navigation.md)。
 - [SafeAreaView](./safe-area-view.md)：标题栏下方和 Modal 中的安全区边距。
-- [Sheet](./sheet.md)：由 nsh 绘制的底部面板，两个平台外观一致。
+- [Sheet](./sheet.md)：由 NSH 绘制的底部面板，两个平台外观一致。
 - [Alert](./alert.md)：离开页面前请用户确认。

@@ -8,7 +8,7 @@ demo: guide-layout
 
 # Layout
 
-nsh lays out every element with [Taffy](https://github.com/DioxusLabs/taffy), a Rust implementation of CSS flexbox, grid and block layout, configured so that children stack vertically and do not shrink by default. Layout runs in the core, after each JavaScript turn, and only the frames that changed are sent to the native views. Text is measured by the platform's text engine on the same thread, so layout never waits for the main thread.
+NSH lays out every element with [Taffy](https://github.com/DioxusLabs/taffy), a Rust implementation of CSS flexbox, grid and block layout, configured so that children stack vertically and do not shrink by default. Layout runs in the core, after each JavaScript turn, and only the frames that changed are sent to the native views. Text is measured by the platform's text engine on the same thread, so layout never waits for the main thread.
 
 The layout properties below are style properties. Each has a [Tailwind](./tailwind.md) equivalent (`flex-row`, `gap-4`, `grid-cols-3`, `absolute inset-0`, ...).
 
@@ -16,7 +16,7 @@ The layout properties below are style properties. Each has a [Tailwind](./tailwi
 
 A view lays out its children with flexbox. The defaults differ from the web's:
 
-| Property | nsh default | Web default |
+| Property | NSH default | Web default |
 |---|---|---|
 | `flexDirection` | `"column"` | `row` |
 | `flexShrink` | `0` | `1` |
@@ -171,7 +171,7 @@ import { I18nManager } from "nsh/device";
 </View>
 ```
 
-`I18nManager.isRTL` is reactive and changes apply at once, without a restart. The `direction` style (`"inherit"`, `"ltr"`, `"rtl"`) overrides the direction for one view and its children. On Android, apps that embed nsh need `android:supportsRtl="true"` in their manifest for native controls to mirror.
+`I18nManager.isRTL` is reactive and changes apply at once, without a restart. The `direction` style (`"inherit"`, `"ltr"`, `"rtl"`) overrides the direction for one view and its children. On Android, apps that embed NSH need `android:supportsRtl="true"` in their manifest for native controls to mirror.
 
 ## Related
 

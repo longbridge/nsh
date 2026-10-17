@@ -1,14 +1,14 @@
 ---
-title: Web API
-description: 每个 nsh 应用都能直接使用的浏览器风格全局对象——fetch、流、URL、文本编码、Blob 与 FormData、事件与中止信号、定时器和 console——以及它们与浏览器的差异。
+title: 全局 API
+description: 每个 NSH 应用无需 import 就能使用的全局对象——fetch、流、URL、文本编码、Blob 与 FormData、事件与中止信号、Intl、定时器和 console——都用 Rust 原生实现。
 order: 15
 ---
 
-# Web API
+# 全局 API
 
-除了 ECMAScript 标准库，nsh 应用的 JS 环境还提供一组 Web 平台全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及 QuickJS 缺少的用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import。很多为浏览器编写的库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
+除了 ECMAScript 标准库，NSH 应用的 JS 环境还提供一组标准全局对象：`fetch` 及其 `Headers`、`Request`、`Response`；Streams 标准；`URL` 和 `URLSearchParams`；`TextEncoder` / `TextDecoder`；`Blob`、`File` 和 `FormData`；`EventTarget`、`Event` 和 `AbortController`；定时器、`requestAnimationFrame` 和 `console`；以及用于数字与日期格式化的 `Intl`。它们都用 Rust 原生实现，遵循 WHATWG 标准，无需 import，因此大量基于这些标准的 JavaScript 库（HTTP 客户端、URL 与编码工具、流处理工具）可以直接使用。
 
-这里没有 DOM：没有 `window`、`document`、`localStorage`、`XMLHttpRequest`、`WebSocket`、`crypto`，也没有 `structuredClone`。界面用[元素](../elements/index.md)和[组件](../components/index.md)搭建，而不是 HTML。
+本页列出了应用拥有的全部全局对象。界面用[元素](../elements/index.md)和[组件](../components/index.md)搭建，其余能力来自应用导入的[模块](./index.md)。
 
 这些全局对象的 TypeScript 声明会生成到 `.nsh/types/nsh/globals.d.ts`（见[项目结构](../docs/project-structure.md)）。
 
@@ -624,7 +624,7 @@ for await (const line of res.body!.pipeThrough(new TextDecoderStream()).pipeThro
 
 ## 数字与日期格式化
 
-QuickJS 自身没有 `Intl`；nsh 补上了一个，在 Rust 中格式化：`Intl.NumberFormat`、`Intl.DateTimeFormat` 和 `Intl.getCanonicalLocales`，以及数字和 BigInt 的 `toLocaleString`、日期的 `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString`，它们接受相同的 `locales` 和 `options`。它们的声明来自 TypeScript 自带的 `ES2023` 库，所以不在 `globals.d.ts` 中。
+QuickJS 自身没有 `Intl`；NSH 补上了一个，在 Rust 中格式化：`Intl.NumberFormat`、`Intl.DateTimeFormat` 和 `Intl.getCanonicalLocales`，以及数字和 BigInt 的 `toLocaleString`、日期的 `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString`，它们接受相同的 `locales` 和 `options`。它们的声明来自 TypeScript 自带的 `ES2023` 库，所以不在 `globals.d.ts` 中。
 
 ```ts
 (1234567.891).toLocaleString();                                              // "1,234,567.891"（en-US）

@@ -1,6 +1,6 @@
 ---
 title: Style reference
-description: Every style key nsh accepts, grouped by LayoutStyle, ViewStyle, TextStyle and ImageStyle, with its type and meaning.
+description: Every style key NSH accepts, grouped by LayoutStyle, ViewStyle, TextStyle and ImageStyle, with its type and meaning.
 order: 16
 ---
 
@@ -396,7 +396,7 @@ How an image fills its box is the `resizeMode` prop of `<Image>`, not a style; s
 
 ## Props that look like styles
 
-Some settings are props in nsh, not style keys. Their Tailwind classes exist, but an explicit prop wins over the class:
+Some settings are props in NSH, not style keys. Their Tailwind classes exist, but an explicit prop wins over the class:
 
 | Setting | Prop | Class |
 |---|---|---|

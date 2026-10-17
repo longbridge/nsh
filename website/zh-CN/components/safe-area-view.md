@@ -93,7 +93,7 @@ function BottomBar() {
 ## 平台说明
 
 - **iOS**：inset 来自 UIKit 的安全区域（状态栏、刘海或灵动岛、Home 指示条）。
-- **Android**：nsh 只报告系统栏和屏幕挖孔中与 nsh 视图重叠的部分。当 nsh [嵌入](../docs/embedding-android.md)在原生工具栏下方时，视图不会得到顶部 inset。
+- **Android**：NSH 只报告系统栏和屏幕挖孔中与 NSH 视图重叠的部分。当 NSH [嵌入](../docs/embedding-android.md)在原生工具栏下方时，视图不会得到顶部 inset。
 - **Mac Catalyst**：顶部 inset 为窗口的标题栏。
 
 ## 相关内容

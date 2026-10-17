@@ -1,25 +1,23 @@
 ---
 title: macOS
-description: 在 macOS 上用 AppKit 窗口运行 nsh 应用、打包为 .app、用 AppView 嵌入 Mac 应用，以及 macOS 后端不支持的功能。
+description: 在 macOS 上用 AppKit 窗口运行 NSH 应用、打包为 .app、用 AppView 嵌入 Mac 应用，以及 macOS 上的差异。
 order: 13
 group: platforms
 ---
 
 # macOS
 
-nsh 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
+NSH 应用也能作为原生 Mac 应用运行。macOS 后端用 AppKit 视图和 Core Animation 渲染应用，用 CoreText 排版文字；核心、响应式图、
 渲染器、Taffy 布局和 `nsh/ui/mobile` 组件与 iOS、Android 上完全相同，因此同一个 bundle 可以在所有平台上运行。在 macOS 上，
 `Platform.OS` 为 `"macos"`，并会应用 `desktop={{…}}` 属性。窗口标题、自定义标题栏、
 菜单栏和右键菜单由 [`nsh/desktop`](../modules/nsh-desktop.md) 提供。
 
-它不是 [Mac Catalyst](./getting-started.md#mac-catalystmacos-上默认)。Mac Catalyst 仍是 macOS 上 `nsh run` 的默认目标：
-它在 iPhone 尺寸的窗口中运行 iOS 后端（UIKit），行为与手机一致。macOS 后端的行为则是桌面应用：鼠标、触控板和键盘输入，
-可调整大小的窗口，居中的表单和菜单栏。
+macOS 后端的行为是桌面应用：鼠标、触控板和键盘输入，可调整大小的窗口，居中的表单和菜单栏。
 
 ## 环境要求
 
 - 运行应用的机器需要 **macOS 14** 及以上。
-- Xcode 命令行工具（`xcode-select --install`），用于从源码构建 nsh 的 macOS 运行时以及打包应用（`codesign`、`sips`）。
+- Xcode 命令行工具（`xcode-select --install`），用于从源码构建 NSH 的 macOS 运行时以及打包应用（`codesign`、`sips`）。
   在 Mac 上用 `cargo xtask dist` 制作的发行版把运行时放在 `runtime/macos/` 中。
 
 ## 运行应用
@@ -49,7 +47,7 @@ dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --size 1200x800
 | `FPS` | 最近一秒显示的帧数：应用有变化的屏幕刷新次数（空闲的应用读数低，这不代表慢）。`max` 是主线程能跟上的帧率，之后是显示器的刷新率（ProMotion 屏幕为 120 Hz）。 |
 | `TICK` | 屏幕刷新实际到达的间隔（均值、p95），以及 `gap`：显示帧之间间隔的 p95。没有迟到时为一次刷新的时长（120 Hz 下 8.3 ms）。 |
 | `MAIN` | 每帧的主线程耗时（应用引擎的变更、绘制文本和画布、动画、输入）、它的 95 分位数，以及 `drop`：超过一次刷新时长的帧所占比例。 |
-| `JS` / `CORE` | 每次 commit：你的代码（事件处理、定时器、列表行）和 nsh 核心（布局、文本、diff）的耗时；每秒 commit 数、每次 commit 的原生视图变更数。 |
+| `JS` / `CORE` | 每次 commit：你的代码（事件处理、定时器、列表行）和 NSH 核心（布局、文本、diff）的耗时；每秒 commit 数、每次 commit 的原生视图变更数。 |
 | `HOP` | 变更在引擎线程和主线程之间等待的时间；引擎线程的繁忙程度。 |
 | `CPU` / `GPU` / `MEM` | 进程：CPU（100% 为一个核心）、它占用的 GPU 比例、内存占用（活动监视器中的数值）。 |
 
@@ -78,7 +76,7 @@ out/<Name>.app/Contents/
 
 ## 嵌入 Mac 应用
 
-`nsh-platform-macos` crate（位于 nsh 仓库中）为 Rust 编写的 Mac 应用提供 `AppView`：一个作为 `NSView` 的 nsh 引擎。每个
+`nsh-platform-macos` crate（位于 NSH 仓库中）为 Rust 编写的 Mac 应用提供 `AppView`：一个作为 `NSView` 的 NSH 引擎。每个
 `AppView` 相互独立，可以同时运行多个。
 
 ```rust
@@ -104,7 +102,7 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 
 `AppView::load` 会替换正在运行的内容；`stop` 结束应用。`asset_base` 指定 `asset:/` URI 从哪里解析（`AssetBase::Directory`
 或 `AssetBase::Http`）。字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }` 加载：字节码是受信任的输入，
-只能从你自己应用的文件中加载。如果应用只是一个 nsh 应用，`run_app(source, options)` 会在窗口中打开一个 `AppView`，带有标准菜单
+只能从你自己应用的文件中加载。如果应用只是一个 NSH 应用，`run_app(source, options)` 会在窗口中打开一个 `AppView`，带有标准菜单
 （关于、隐藏、退出、编辑、最小化、缩放、进入全屏、关闭），应用可以用 `Menu.setApplicationMenu`
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
 

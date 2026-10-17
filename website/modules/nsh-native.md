@@ -6,7 +6,7 @@ order: 9
 
 # nsh/native
 
-`nsh/native` connects your app to native views that the host app provides. An iOS or Android app that embeds nsh can register its own views (a map, a chart, a camera preview) by name; `nativeComponent` gives you a typed component for one of them. Because nsh renders with real native views, such a component sits in the view hierarchy like any other view: it is laid out by nsh, clips and scrolls with its parents, and overlaps correctly.
+`nsh/native` connects your app to native views that the host app provides. An iOS or Android app that embeds NSH can register its own views (a map, a chart, a camera preview) by name; `nativeComponent` gives you a typed component for one of them. Because NSH renders with real native views, such a component sits in the view hierarchy like any other view: it is laid out by NSH, clips and scrolls with its parents, and overlaps correctly.
 
 ```ts
 import { nativeComponent } from "nsh/native";
@@ -59,7 +59,7 @@ Where nothing is registered under `name` (a different host app, the dev host, th
 
 ## Example
 
-The badge here is a native view of the host app, registered as `embed.badge`. nsh lays it out, sends it `text` and `color`, receives its `tap` events, and calls its `pulse` command:
+The badge here is a native view of the host app, registered as `embed.badge`. NSH lays it out, sends it `text` and `color`, receives its `tap` events, and calls its `pulse` command:
 
 ```tsx
 import { mount, signal, type YNode } from "nsh";
@@ -94,4 +94,4 @@ mount(App);
 ```
 
 > [!NOTE]
-> Props, events and command arguments cross to the native side as JSON. Registered components are the host app's own code: nsh's [sandbox limits and capabilities](../docs/sandbox-and-capabilities.md) do not apply to what they do.
+> Props, events and command arguments cross to the native side as JSON. Registered components are the host app's own code: NSH's [sandbox limits and capabilities](../docs/sandbox-and-capabilities.md) do not apply to what they do.

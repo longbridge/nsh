@@ -1,12 +1,12 @@
 /** The published address of the site: canonical links, sitemap, llms.txt. */
-export const SITE_URL = 'https://native-shell.com';
+export const SITE_URL = 'https://nsh.dev';
 
 export const SITE_TITLE = 'Native Shell';
 
 export const SITE_DESCRIPTION =
-  'Native Shell: AI-generated UI, native in your app, on every platform. Apps on iOS, Android, macOS, Windows and Linux load signed, sandboxed TSX modules at run time and draw them with the platform’s own UI.';
+  'Native Shell: AI-generated UI, native in your app, on every platform. Apps on iOS, Android, macOS, Windows and Linux, GPUI apps and web pages load signed, sandboxed TSX modules at run time and draw them with the platform’s own UI.';
 
-export const REPO_URL = 'https://github.com/longbridge/native-shell';
+export const REPO_URL = 'https://github.com/longbridge/nsh';
 
 export const GPUI_KIT_URL = 'https://gpui-kit.com';
 

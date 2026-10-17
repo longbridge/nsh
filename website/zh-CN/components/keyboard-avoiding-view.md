@@ -13,7 +13,7 @@ import { KeyboardAvoidingView } from "nsh/ui/mobile";
 ```
 
 > [!TIP]
-> [滚动视图](../elements/scroll.md)或 [List](../elements/list.md) 中的输入框不需要它：nsh 会以原生方式把获得焦点的输入框滚动到可见区域。
+> [滚动视图](../elements/scroll.md)或 [List](../elements/list.md) 中的输入框不需要它：NSH 会以原生方式把获得焦点的输入框滚动到可见区域。
 
 ## 用法
 
@@ -80,7 +80,7 @@ mount(App);
 ## 平台说明
 
 - **iOS**：让位动画使用键盘自身的时长和 ease-in-ease-out 曲线。
-- **Android**：如果窗口会为键盘缩小（Activity 会调整窗口大小），内容本来就在键盘上方结束，键盘不会遮挡 nsh 视图，KeyboardAvoidingView 也就不会额外让出空间。键盘遮挡视图时，它的表现与 iOS 相同。
+- **Android**：如果窗口会为键盘缩小（Activity 会调整窗口大小），内容本来就在键盘上方结束，键盘不会遮挡 NSH 视图，KeyboardAvoidingView 也就不会额外让出空间。键盘遮挡视图时，它的表现与 iOS 相同。
 - **Mac Catalyst** 没有软键盘，该视图不会移动。
 
 ## 相关内容

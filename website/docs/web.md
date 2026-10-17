@@ -1,6 +1,6 @@
 ---
 title: Web (WebAssembly)
-description: Run nsh apps in a browser with the WebAssembly build of the runtime, which renders to the DOM; publish them as static sites with nsh package --target web, develop them with nsh run --target web.
+description: Run NSH apps in a browser with the WebAssembly build of the runtime, which renders to the DOM; publish them as static sites with NSH package --target web, develop them with NSH run --target web.
 order: 16
 group: platforms
 demo: counter
@@ -8,7 +8,7 @@ demo: counter
 
 # Web (WebAssembly)
 
-The nsh runtime also compiles to WebAssembly. The same engine runs in a browser page and renders to the DOM instead of UIKit or Android views: the core, the reactive graph, the renderer, Taffy layout, the `nsh/ui/mobile` components and QuickJS itself. `nsh package --target web` publishes an app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)), and every live demo on this site is an app bundle from `nsh build` running on this runtime.
+The NSH runtime also compiles to WebAssembly. The same engine runs in a browser page and renders to the DOM instead of UIKit or Android views: the core, the reactive graph, the renderer, Taffy layout, the `nsh/ui/mobile` components and QuickJS itself. `nsh package --target web` publishes an app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)), and every live demo on this site is an app bundle from `nsh build` running on this runtime.
 
 ## What runs where
 
@@ -120,7 +120,7 @@ The output directory holds:
 | File | What it is |
 |---|---|
 | `gallery/nsh.<digest>.wasm` | The runtime of published apps (about 3.5 MB, 1.2 MB gzipped, 0.93 MB with brotli; built with the `web` profile), shared by the player and the gallery |
-| `nsh-playground.wasm` | The same plus nsh's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
+| `nsh-playground.wasm` | The same plus NSH's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
 | `gallery/nsh.<digest>.js` | The DOM runtime (minified): loads the wasm, applies batches, turns input into events |
 | `index.html` | A player page: runs `demos/<name>.nshc` for `#<name>` |
 | `demos/<name>.nshc` | Each demo compiled by `nsh build --release` |
@@ -130,9 +130,9 @@ Serve the directory with any static server (it needs the `application/wasm` MIME
 
 ## The playground
 
-The [Playground](/playground) edits and runs an app in the browser: the page compiles the TSX with nsh's own JSX compiler (built into `nsh-playground.wasm`, without rolldown) and runs it on every pause in typing. Every demo on this site has an **Edit in Playground** link, and **Share** puts the code in the link itself, so nothing is stored on a server.
+The [Playground](/playground) edits and runs an app in the browser: the page compiles the TSX with NSH's own JSX compiler (built into `nsh-playground.wasm`, without rolldown) and runs it on every pause in typing. Every demo on this site has an **Edit in Playground** link, and **Share** puts the code in the link itself, so nothing is stored on a server.
 
-A playground app is one module: it imports nsh's modules (`nsh`, `nsh/*`, `nsh/ui/mobile`) but no other files or packages. `console.log` output and errors appear below the phone.
+A playground app is one module: it imports NSH's modules (`nsh`, `nsh/*`, `nsh/ui/mobile`) but no other files or packages. `console.log` output and errors appear below the phone.
 
 The compiler is also a Rust function, `nsh_bundler::compile_module(name, source, ui_sets)`, available without the crate's `bundle` feature.
 

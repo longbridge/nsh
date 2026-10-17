@@ -103,7 +103,7 @@ function Site() {
       </View>
       <WebView
         ref={site}
-        source={{ uri: "https://native-shell.com" }}
+        source={{ uri: "https://nsh.dev" }}
         style={{ height: 340, backgroundColor: colors.inset, ...frame() }}
         onNavigationStateChange={(v) => state.set(v)}
       />

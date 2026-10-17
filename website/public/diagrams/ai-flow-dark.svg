@@ -2,7 +2,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      viewBox="0 0 880 410" width="100%" role="img" aria-labelledby="t d">
   <title id="t">From a prompt to native UI</title>
-  <desc id="d">Two layers separated by a trust boundary. On your server, a model writes a small TSX module; nsh build compiles it to QuickJS bytecode and nsh trace runs it headless as a check; nsh publish signs it with a certified release key into an .nshpkg package. The package crosses the trust boundary when the app downloads it: the device trusts a root key it ships with, not the server or the network. On the device, NshTrust verifies the signature, the certificate, the revocation list and the build number; the module then runs in its own VM under the limits and capabilities the host set, and renders the platform's own views (UIKit, Android views, AppKit, GTK 4, Win32 with Direct2D) inside an NshAppView, NshView or AppView.</desc>
+  <desc id="d">Two layers separated by a trust boundary. On your server, a model writes a small TSX module; nsh build compiles it to QuickJS bytecode and nsh trace runs it headless as a check; nsh publish signs it with a certified release key into an .nshpkg package. The package crosses the trust boundary when the app downloads it: the device trusts a root key it ships with, not the server or the network. On the device, NshTrust verifies the signature, the certificate, the revocation list and the build number; the module then runs in its own VM under the limits and capabilities the host set, and renders the platform's own views (UIKit, Android views, AppKit, GTK 4, Win32 with Direct2D, GPUI, HTML) inside an NshAppView, NshView, AppView or web page.</desc>
 
   <defs>
     <style>
@@ -141,8 +141,8 @@
   <rect class="card stage-last" x="176" y="276" width="192" height="78" rx="9" style="animation-delay:-1.8s"/>
   <text class="name" x="196" y="301">Native views</text>
   <text class="fact" x="196" y="321">the platform's own views</text>
-  <text class="note" x="196" y="338">on phones and desktops</text>
+  <text class="note" x="196" y="338">on every platform</text>
 
-  <text class="claim" x="24" y="398">No app update, no store release: if a check fails, nothing runs.</text>
+  <text class="claim" x="24" y="398">Delivered straight to the app: only verified code runs.</text>
 
 </svg>

@@ -194,7 +194,7 @@ function EditNote() {
 
 > [!IMPORTANT]
 > The system asks whether the user may go back on the main thread, at the moment the user acts, and the main thread
-> never waits for JS. So nsh answers from the `preventBack` value already mounted. Set `preventBack` as soon as there
+> never waits for JS. So NSH answers from the `preventBack` value already mounted. Set `preventBack` as soon as there
 > is something to lose, not in a handler that runs when the user goes back.
 
 To turn off only the swipe gesture and keep the back buttons, use `gestureEnabled={false}`.
@@ -269,5 +269,5 @@ See [Modal](../elements/modal.md) for more about the element.
 
 - [Navigation guide](../docs/navigation.md).
 - [SafeAreaView](./safe-area-view.md): insets below headers and in modals.
-- [Sheet](./sheet.md): a bottom sheet drawn by nsh, the same on both platforms.
+- [Sheet](./sheet.md): a bottom sheet drawn by NSH, the same on both platforms.
 - [Alert](./alert.md): confirming before leaving a screen.

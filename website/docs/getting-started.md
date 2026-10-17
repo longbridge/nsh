@@ -8,10 +8,10 @@ demo: guide-getting-started
 
 # Getting started
 
-nsh's main use is hosting modules inside a native app (see [Introduction](./index.md)). This guide follows that path: write a module, develop it with hot reload on the platforms you target, show it in your app, and ship an update as a signed package. It assumes `nsh` is installed and on your `PATH` ([Installation](./installation.md)); in a checkout, use `./target/debug/nsh` instead.
+NSH's main use is hosting modules inside a native app (see [Introduction](./index.md)). This guide follows that path: write a module, develop it with hot reload on the platforms you target, show it in your app, and ship an update as a signed package. It assumes `nsh` is installed and on your `PATH` ([Installation](./installation.md)); in a checkout, use `./target/debug/nsh` instead.
 
 > [!TIP]
-> No app project at hand? The first two sections need none: `nsh run` shows the module in nsh's own development host: in a window on your computer, in the iOS simulator or on an Android device. You can stop there, or [package it as a standalone app](#or-ship-it-as-a-standalone-app).
+> No app project at hand? The first two sections need none: `nsh run` shows the module in NSH's own development host: in a window on your computer, in the iOS simulator or on an Android device. You can stop there, or [package it as a standalone app](#or-ship-it-as-a-standalone-app).
 
 ## Create a module
 
@@ -27,7 +27,7 @@ A module is what a host app loads: one or more `.tsx` files with an entry. `nsh 
 | `nsh.json` | The app's name, id, version and build number ([Project structure](./project-structure.md#nshjson)) |
 | `tsconfig.json` | TypeScript settings that resolve `nsh` to the declarations in `.nsh/types` |
 | `.gitignore` | Ignores `.nsh/` and `out/` |
-| `.nsh/types/` | Generated declarations of every nsh module, for your editor |
+| `.nsh/types/` | Generated declarations of every NSH module, for your editor |
 
 The display name defaults to the directory's name; pass `--name "My App"` to choose another. The id becomes `com.example.<name>`: change it in `nsh.json` before you ship. Files that already exist are kept, so you can run `nsh init` in a directory that has some of them.
 
@@ -63,7 +63,7 @@ Line by line:
 - **`import { SafeAreaView } from "nsh/ui/mobile"`**: the mobile UI set. [`SafeAreaView`](../components/safe-area-view.md) pads its content so it stays clear of the notch, the status bar and the home indicator; on desktops, where the safe area is 0, it adds no padding.
 - **`function App()`** is a component: a function that returns JSX. It runs **once**. `signal(0)` makes a value that changes over time.
 - **`{count()}`** reads the signal inside JSX. The compiler sees a call and makes this text follow the signal: when `count` changes, the runtime updates this one text, nothing else.
-- **`<View onPress>`** is a native view that reacts to presses; `activeOpacity` fades it while pressed, natively. `View`, `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from nsh's modules, like any component; only `If` and `Each` need no import.
+- **`<View onPress>`** is a native view that reacts to presses; `activeOpacity` fades it while pressed, natively. `View`, `Text`, `Image`, `Scroll`, `Input` and the other [host elements](../elements/index.md) are imported from NSH's modules, like any component; only `If` and `Each` need no import.
 - **`style={{ … }}`** takes an object of camelCase style properties, with numbers in points. Layout is flexbox, and children stack in a column by default ([Layout](./layout.md)).
 - **`mount(App)`** renders the component into the app's surface.
 
@@ -102,7 +102,7 @@ nsh run my-app/App.tsx --target ios --device "iPhone 16 Pro"
 nsh run my-app/App.tsx --target android
 ```
 
-Start an emulator or connect a device first (`adb devices` lists them; nsh uses the first one). `nsh` installs a development host APK (rebuilt only when the runtime changes) and forwards the dev server's port to the device with `adb reverse`, so it works over USB without a shared network.
+Start an emulator or connect a device first (`adb devices` lists them; NSH uses the first one). `nsh` installs a development host APK (rebuilt only when the runtime changes) and forwards the dev server's port to the device with `adb reverse`, so it works over USB without a shared network.
 
 #### macOS (AppKit)
 
@@ -160,7 +160,7 @@ function TapButton(props: { onPress: () => void }) {
 
 Use `<TapButton onPress={() => count.update((c) => c + 1)} />` in `App`, tap a few times, then change `TapButton`'s color: the button updates and the count stays.
 
-Hot replacement works per top-level component: a function with a capitalized name whose body contains JSX. A component renders again when its own code changes, or when the module's code outside components changes (a constant it uses, a helper). If an edit cannot be applied in place (for example, it imports an nsh module the running app did not import yet, or changes `nsh.json`'s capabilities), the host reloads the whole app.
+Hot replacement works per top-level component: a function with a capitalized name whose body contains JSX. A component renders again when its own code changes, or when the module's code outside components changes (a constant it uses, a helper). If an edit cannot be applied in place (for example, it imports an NSH module the running app did not import yet, or changes `nsh.json`'s capabilities), the host reloads the whole app.
 
 #### Errors
 
@@ -208,7 +208,7 @@ if (BuildConfig.DEBUG) {
 
 ### macOS, Windows and Linux
 
-Desktop apps written in Rust embed modules with `AppView`, from the `nsh-platform-macos`, `nsh-platform-windows` and `nsh-platform-linux` crates: an `NSView`, a child window or a GTK widget that loads a built bundle. See [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app) and [Linux](./linux.md#embedding-in-a-gtk-app), and [Platforms](./platforms.md#embed-in-a-native-app) for what the desktop hosts do not offer yet.
+Desktop apps written in Rust embed modules with `AppView`, from the `nsh-platform-macos`, `nsh-platform-windows`, `nsh-platform-linux` and `nsh-platform-gpui` crates: an `NSView`, a child window, a GTK widget or a GPUI view that loads a built bundle. See [macOS](./macos.md#embedding-in-a-mac-app), [Windows](./windows.md#embedding-in-a-win32-app), [Linux](./linux.md#embedding-in-a-gtk-app) and [GPUI](./gpui.md), and [Platforms](./platforms.md#embed-in-a-native-app) for every host side by side.
 
 ### What the module may do
 
@@ -224,7 +224,7 @@ nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*
 nsh publish my-app/App.tsx --key keys/release.secret --cert keys/release.cert --build 2
 ```
 
-The app trusts the root's public key and loads what it downloads; nsh verifies the signature, the certificate and the revocation list before running anything:
+The app trusts the root's public key and loads what it downloads; NSH verifies the signature, the certificate and the revocation list before running anything:
 
 ```swift
 let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -247,7 +247,7 @@ nsh package my-app --target linux
 nsh package my-app --target windows
 ```
 
-This is a supported use on every platform, and the quickest way to put a module on a device or a desktop, but nsh is designed around hosting modules in native apps. Options, signing and icons: [Packaging](./packaging.md).
+This is a supported use on every platform, and the quickest way to put a module on a device or a desktop, but NSH is designed around hosting modules in native apps. Options, signing and icons: [Packaging](./packaging.md).
 
 ## Try it in the terminal
 
