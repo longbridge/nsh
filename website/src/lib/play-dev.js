@@ -2,7 +2,9 @@
 // reload without `cargo xtask web` again. A demo (`play/demos/<name>.js`) is
 // bundled from `demos/<name>.tsx` on request by the nsh CLI the player build
 // made; `nsh.js` and `index.html` come from `crates/nsh-platform-web/web`.
-// `nsh.wasm` is the one built by `bun run dev` (rebuilt on the next start).
+// `nsh.wasm` is the one built by `bun run dev` (rebuilt on the next start),
+// read from the target directory (the built site's player loads the
+// gallery's copy, `play/gallery/nsh.<digest>.wasm`).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,6 +36,11 @@ export function playDev(base) {
           const file = join(web, rest);
           if (!existsSync(file)) return next();
           return send(rest.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8', readFileSync(file));
+        }
+        if (rest === 'nsh.wasm') {
+          const file = join(root, 'target/wasm32-unknown-unknown/web/nsh_platform_web.wasm');
+          if (!existsSync(file)) return next();
+          return send('application/wasm', readFileSync(file));
         }
         const demo = /^demos\/([\w-]+)\.js$/.exec(rest);
         if (!demo || !existsSync(nsh)) return next();

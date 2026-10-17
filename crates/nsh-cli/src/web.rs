@@ -90,10 +90,12 @@ pub(crate) fn package(
         fs::remove_dir_all(&dir).with_context(|| format!("remove {}", dir.display()))?;
     }
     let site = Site::new(&dir)?;
-    let js = site.add(
-        "nsh.js",
-        &fs::read(&runtime.js).with_context(|| format!("read {}", runtime.js.display()))?,
-    )?;
+    let js = fs::read_to_string(&runtime.js)
+        .with_context(|| format!("read {}", runtime.js.display()))?;
+    // About a third of its size: the runtime is downloaded before anything
+    // shows (the app's code is minified as it is bundled).
+    let js = nsh_bundler::minify_module("nsh.js", &js).map_err(anyhow::Error::msg)?;
+    let js = site.add("nsh.js", js.as_bytes())?;
     let wasm = site.add(
         "nsh.wasm",
         &fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?,

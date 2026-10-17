@@ -7,8 +7,8 @@ User-facing page: `website/docs/web.md`.
 
 ## Building
 
-`cargo xtask web` builds `nsh.wasm` (`--target wasm32-unknown-unknown --profile web`: the release profile optimized for size, QuickJS still at `-O3`), copies `web/nsh.js` and
-`web/index.html` (the player), `nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two
+`cargo xtask web` builds `nsh.wasm` (`--target wasm32-unknown-unknown --profile web`: the release profile optimized for size, QuickJS still at `-O3`), writes
+`web/index.html` (the player, loading the gallery's runtime files: see "What a published app downloads"), `nsh-playground.wasm` (feature `compiler`, built in `target/web-playground` so the two
 builds keep their caches), and bundles each demo with `nsh build --release` into `website/public/play/` (generated,
 ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
 Gallery page frames it). Check the crate with `cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown`: off
@@ -53,6 +53,32 @@ several times larger and slower; `AR_wasm32_unknown_unknown` defaults to `llvm-a
 `nsh_bundle_options` sets how the next `nsh_start` runs: development settings by default (the player, the
 playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities and a source
 map.
+
+### What a published app downloads
+
+`examples/gallery` as `nsh package --target web` publishes it (2026-10; `gzip -9`, `brotli -q 11`). The first load is
+the page, the runtime, the app's code and its fonts (preloaded: text is measured with them); images load when shown,
+icons when the browser wants them.
+
+| File | Raw | gzip | brotli |
+|---|---:|---:|---:|
+| `index.html` | 4.6 KB | 2.1 KB | 1.7 KB |
+| `nsh.<digest>.js` (minified; 70.6 / 20.3 / 17.7 KB before) | 41.8 KB | 14.0 KB | 12.6 KB |
+| `nsh.<digest>.wasm` | 3776 KB | 1310 KB | 1001 KB |
+| `app.<digest>.js` (minified by rolldown) | 347 KB | 92.5 KB | 74.9 KB |
+| `assets/fonts/Pacifico-Regular.<digest>.ttf` | 329 KB | 145 KB | 121 KB |
+| **first load** (with the 32 px favicon) | **4500 KB** | **1565 KB** | **1212 KB** |
+| `manifest.webmanifest` | 0.4 KB | 0.3 KB | 0.2 KB |
+| images (`bounce.gif`, `logo@2x.png`, `spinner.webp`) | 16.1 KB | 6.0 KB | 5.6 KB |
+| icons 180 / 192 / 512 px | 114 KB | 89.4 KB | 86.9 KB |
+
+The wasm is three quarters of the first load. `nsh.js` is minified at package time
+(`nsh_bundler::minify_module`: oxc's minifier, local names mangled, property names kept, since the mounter looks its
+`op_<name>` methods up by name); the dev host serves it as it is. Published sites carry no source maps.
+
+The website's player (`cargo xtask web`) loads the published gallery's `nsh.<digest>.js` and `nsh.<digest>.wasm`
+(`play/gallery/`) rather than copies of its own, so the site deploys one runtime; only the playground has a second
+wasm (`nsh-playground.wasm`, with the compiler).
 
 ## What WebAssembly changes in the shared crates
 

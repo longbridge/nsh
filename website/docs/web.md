@@ -53,7 +53,7 @@ page and files named after their content.
 |---|---|
 | `index.html` | The app's page: its name as the title, the icons, the colors of its `appearance`, a loading indicator, and a message when the app cannot load or start |
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
-| `nsh.<digest>.js` | The DOM runtime |
+| `nsh.<digest>.js` | The DOM runtime, minified (42 KB, 12.6 KB with brotli) |
 | `nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli) |
 | `app.<digest>.js` | The app, built as `nsh build --release --split` builds it |
 | `chunks/<name>.<digest>.js` | What `import()` loads, downloaded the first time it is imported ([split bundles](#split-bundles)) |
@@ -116,9 +116,9 @@ The output directory holds:
 
 | File | What it is |
 |---|---|
-| `nsh.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli; built with the `web` profile) |
+| `gallery/nsh.<digest>.wasm` | The engine, the core, the mobile components and QuickJS (about 3.7 MB, 1.3 MB gzipped, 1.0 MB with brotli; built with the `web` profile), shared by the player and the gallery |
 | `nsh-playground.wasm` | The same plus nsh's TSX compiler, for the [playground](#the-playground) (about 8 MB, 2.4 MB gzipped) |
-| `nsh.js` | The DOM runtime: loads `nsh.wasm`, applies batches, turns input into events |
+| `gallery/nsh.<digest>.js` | The DOM runtime (minified): loads the wasm, applies batches, turns input into events |
 | `index.html` | A player page: runs `demos/<name>.js` for `#<name>` |
 | `demos/<name>.js` | Each demo bundled by `nsh build --release` |
 | `gallery/` | The gallery app published with `nsh package --target web`, shown on the [Gallery](/gallery) page |
