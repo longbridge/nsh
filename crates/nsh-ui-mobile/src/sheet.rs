@@ -1,17 +1,8 @@
 //! `Sheet`: a panel that slides up from the bottom over a dimmed backdrop,
 //! dragged down to close. The drag and the springs run natively: the panel
-//! follows the finger with no render per frame.
+//! follows the finger with no engine work per frame.
 
 use nsh_core::ui::prelude::*;
-
-/// A bottom sheet ([`SheetProps`]).
-#[derive(Debug, Default)]
-pub struct Sheet {
-    /// How far down the panel is from where it rests.
-    offset: Option<NativeValue>,
-    /// Closing: the panel slides away, then the app is told.
-    closing: Option<Task<()>>,
-}
 
 /// A panel that slides up from the bottom over a dimmed backdrop while
 /// `open`; dragging it down, tapping the backdrop or the back button closes
@@ -20,7 +11,7 @@ pub struct Sheet {
 pub struct SheetProps {
     /// Shown.
     #[prop(default)]
-    pub open: bool,
+    pub open: Prop<bool>,
     /// The content: made when the sheet opens and released when it has
     /// closed, so it starts fresh each time.
     #[prop(lazy)]
@@ -38,123 +29,107 @@ pub enum SheetEvent {
 const CLOSE_DISTANCE: f32 = 120.0;
 const CLOSE_VELOCITY: f32 = 900.0;
 
-impl Sheet {
-    fn offset(&self) -> &NativeValue {
-        self.offset.as_ref().expect("set up")
-    }
-
-    /// Slides in from below the screen.
-    fn open(&mut self, cx: &mut Context<'_, Self>) {
-        self.closing = None;
-        let below = cx.environment().window.height;
-        self.offset().set(below);
-        self.offset().spring(
-            0.0,
-            Spring {
-                stiffness: 280.0,
-                damping: 30.0,
-                ..Spring::default()
-            },
-        );
-    }
-
-    /// Slides away, then tells the app.
-    fn close(&mut self, cx: &mut Context<'_, Self>) {
-        if self.closing.is_some() {
-            return;
-        }
-        let below = cx.environment().window.height;
-        let end = self.offset().timing(below, 220.0, Easing::EaseIn);
-        self.closing = Some(cx.spawn(|this, _| async move {
-            // Ended or interrupted: closed either way.
-            let _ = end.await;
-            this.update(|this, cx| {
-                this.closing = None;
-                cx.emit(SheetEvent::Close);
-            })
-            .await;
-        }));
+/// How the panel springs back to where it rests.
+fn settle(velocity: Option<f32>) -> Spring {
+    Spring {
+        stiffness: 280.0,
+        damping: 30.0,
+        velocity,
+        ..Spring::default()
     }
 }
 
-impl Component for Sheet {
-    type Props = SheetProps;
-    type Event = SheetEvent;
-
-    fn setup(&mut self, props: &SheetProps, cx: &mut Context<'_, Self>) {
-        self.offset = Some(cx.native_value(0.0));
-        if props.open {
-            self.open(cx);
+/// A bottom sheet ([`SheetProps`]).
+#[component]
+pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
+    // How far down the panel is from where it rests.
+    let offset = native_value(0.0);
+    // Closing: the panel slides away, then the app is told.
+    let closing = stored(None::<Spawned<()>>);
+    // Slides in from below the screen.
+    let open = {
+        let offset = offset.clone();
+        move || {
+            if let Some(task) = closing.replace(None) {
+                task.cancel();
+            }
+            offset.set(window().height);
+            offset.spring(0.0, settle(None));
         }
-    }
-
-    fn props_changed(&mut self, old: &SheetProps, new: &SheetProps, cx: &mut Context<'_, Self>) {
-        if new.open && !old.open {
-            self.open(cx);
+    };
+    // Slides away, then tells the app.
+    let close = {
+        let offset = offset.clone();
+        move || {
+            if closing.with(|c| c.is_some()) {
+                return;
+            }
+            let end = offset.timing(untracked(window).height, 220.0, Easing::EaseIn);
+            closing.replace(Some(spawn(async move {
+                // Ended or interrupted: closed either way.
+                let _ = end.await;
+                closing.replace(None);
+                cx.emit(SheetEvent::Close);
+            })));
         }
-    }
-
-    fn render(&self, props: &SheetProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let offset = self.offset();
-        let height = cx.window().height;
-        let bottom = cx.safe_area().bottom;
-        view().children(props.open.then(|| {
-            modal()
-                .transparent(true)
-                .animation(ModalAnimation::None)
-                .on_request_close(cx.listener(|this: &mut Self, _, cx| this.close(cx)))
-                .child(
-                    // The backdrop fades with the panel's position.
-                    view()
-                        .absolute()
-                        .inset_0()
-                        .bg(theme.overlay)
-                        .bind_opacity(&offset.interpolate(&[0.0, height], &[1.0, 0.0]))
-                        .label("Close")
-                        .on_press(cx.listener(|this: &mut Self, _, cx| this.close(cx))),
-                )
-                .child(
-                    view()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .pt_2()
-                        .pb(px(bottom + 16.0))
-                        .px_4()
-                        .gap_3()
-                        .rounded_t(px(theme.radius_lg.max(16.0)))
-                        .bg(theme.background)
-                        .shadow_lg()
-                        .bind_translate_y(offset)
-                        .pan_values(None, Some(offset))
-                        .on_pan_end(cx.listener(|this: &mut Self, e: &PanEvent, cx| {
-                            if e.translation_y > CLOSE_DISTANCE || e.velocity_y > CLOSE_VELOCITY {
-                                this.close(cx);
-                            } else {
-                                this.offset().spring(
-                                    0.0,
-                                    Spring {
-                                        stiffness: 280.0,
-                                        damping: 30.0,
-                                        velocity: Some(e.velocity_y),
-                                        ..Spring::default()
-                                    },
-                                );
-                            }
-                        }))
-                        // The grabber.
-                        .child(
-                            view()
-                                .w(px(36.0))
-                                .h(px(5.0))
-                                .self_center()
-                                .rounded_full()
-                                .bg(theme.muted),
-                        )
-                        .child(props.children),
-                )
-        }))
-    }
+    };
+    effect(move || {
+        if props.open.get() {
+            untracked(&open);
+        }
+    });
+    let children = props.children;
+    view().child(If::new(props.open, move || {
+        let height = untracked(window).height;
+        let (close_backdrop, close_drag, close_back) =
+            (close.clone(), close.clone(), close.clone());
+        let drag = offset.clone();
+        modal()
+            .transparent(true)
+            .animation(ModalAnimation::None)
+            .on_request_close(move |_: &()| close_back())
+            .child(
+                // The backdrop fades with the panel's position.
+                view()
+                    .absolute()
+                    .inset_0()
+                    .bg(move || theme().overlay)
+                    .bind_opacity(&offset.interpolate(&[0.0, height], &[1.0, 0.0]))
+                    .label("Close")
+                    .on_press(move |_: &()| close_backdrop()),
+            )
+            .child(
+                view()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .pt_2()
+                    .pb(move || px(safe_area().bottom + 16.0))
+                    .px_4()
+                    .gap_3()
+                    .rounded_t(move || px(theme().radius_lg.max(16.0)))
+                    .bg(move || theme().background)
+                    .shadow_lg()
+                    .bind_translate_y(&offset)
+                    .pan_values(None, Some(&offset))
+                    .on_pan_end(move |e: &PanEvent| {
+                        if e.translation_y > CLOSE_DISTANCE || e.velocity_y > CLOSE_VELOCITY {
+                            close_drag();
+                        } else {
+                            drag.spring(0.0, settle(Some(e.velocity_y)));
+                        }
+                    })
+                    // The grabber.
+                    .child(
+                        view()
+                            .w(px(36.0))
+                            .h(px(5.0))
+                            .self_center()
+                            .rounded_full()
+                            .bg(move || theme().muted),
+                    )
+                    .child(children),
+            )
+    }))
 }

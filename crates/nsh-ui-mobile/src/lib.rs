@@ -34,7 +34,7 @@ pub use crate::{
     select_list::{SelectList, SelectListEvent, SelectListProps},
     sheet::{Sheet, SheetEvent, SheetProps},
     status_bar::{BarAnimation, BarStyle, StatusBar, StatusBarProps},
-    stepper::{Stepper, StepperEvent, StepperProps},
+    stepper::{Stepper, StepperApi, StepperEvent, StepperProps},
     system::{ActionSheet, ActionSheetOptions, Alert, AlertButton, AlertButtonStyle, AlertOptions},
     text_field::{TextField, TextFieldEvent, TextFieldProps},
 };

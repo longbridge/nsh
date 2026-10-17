@@ -5,12 +5,12 @@
 
 use nsh_core::{
     Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
-    ui::{AnyElement, RenderCx, Screen, prelude::*},
+    ui::{AnyElement, Screen, prelude::*},
 };
 use nsh_ui_mobile::{SafeAreaView, SafeAreaViewProps};
 
 use crate::{
-    Gallery, nav,
+    nav,
     ui::{
         Badge, Button, ButtonVariant, Card, Figure, Finish, Finished, IconName, IconTile, Inset,
         MONO, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors, header, icon, motion,
@@ -18,26 +18,21 @@ use crate::{
     },
 };
 
+/// An edge's inset.
+type Edge = fn(EdgeInsets) -> f32;
+
 /// The safe-area insets where it renders, one figure per edge.
-#[derive(Debug, Default)]
-struct Insets;
-
-impl Component for Insets {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let i = cx.insets();
-        view().flex_row().children(
-            [
-                ("Top", i.top),
-                ("Bottom", i.bottom),
-                ("Left", i.left),
-                ("Right", i.right),
-            ]
-            .map(|(edge, inset)| Stat::new(edge, format!("{} pt", inset.round())).width(0.25)),
-        )
-    }
+#[component]
+fn Insets(cx: Scope<NoEvent>) -> impl IntoElement {
+    let edges: [(&str, Edge); 4] = [
+        ("Top", |i| i.top),
+        ("Bottom", |i| i.bottom),
+        ("Left", |i| i.left),
+        ("Right", |i| i.right),
+    ];
+    view().flex_row().children(edges.map(|(edge, inset)| {
+        Stat::new(edge, move || format!("{} pt", inset(cx.insets()).round())).width(0.25)
+    }))
 }
 
 fn insets() -> AnyElement {
@@ -59,7 +54,7 @@ fn title_block(badge: impl Into<SharedString>, title: impl Into<SharedString>, s
         .child(
             view()
                 .flex_row()
-                .child(Badge::new(badge).tone(Tone::Accent)),
+                .child(Badge::new(badge.into()).tone(Tone::Accent)),
         )
         .child(
             text(title.into())
@@ -96,15 +91,15 @@ fn page(intro: &str, content: impl IntoIterator<Item = AnyElement>) -> AnyElemen
 
 /// The stars of the custom header (its header item and content both show
 /// them).
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Likes(u32);
 
 /// The draft of the unsaved-changes screen (its `prevent_back` depends on
 /// it).
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Draft(String);
 
-fn large_title(cx: &mut RenderCx<'_, Gallery>) -> Screen {
+fn large_title() -> Screen {
     let rows = (1..=20).map(|i| {
         view()
             .h(px(48.0))
@@ -125,7 +120,7 @@ fn large_title(cx: &mut RenderCx<'_, Gallery>) -> Screen {
                     .tabular_nums(),
             )
     });
-    header(screen().title("Large title"), cx)
+    header(screen().title("Large title"))
         .header_large_title(true)
         .child(page(
             "iOS: the title shrinks into the bar as the content scrolls.",
@@ -136,13 +131,12 @@ fn large_title(cx: &mut RenderCx<'_, Gallery>) -> Screen {
         ))
 }
 
-fn transparent(cx: &mut RenderCx<'_, Gallery>) -> Screen {
-    let text_color = cx.color(colors::TEXT);
+fn transparent() -> Screen {
     screen()
         .title("Transparent")
         .header_transparent(true)
-        .header_tint_color(text_color)
-        .header_title_color(text_color)
+        .header_tint_color(|| color(colors::TEXT))
+        .header_title_color(|| color(colors::TEXT))
         .child(
             view()
                 .flex_1()
@@ -184,32 +178,33 @@ fn transparent(cx: &mut RenderCx<'_, Gallery>) -> Screen {
         )
 }
 
-fn custom_header(cx: &mut RenderCx<'_, Gallery>) -> Screen {
-    let likes = cx.global::<Likes>().0;
-    let on_accent = cx.color(colors::ON_ACCENT);
+fn custom_header() -> Screen {
+    let likes = global::<Likes>();
+    let count = move || likes.with(|l| l.0);
+    let on_accent = || color(colors::ON_ACCENT);
     screen()
         .title("Custom")
         .header_tint_color(on_accent)
-        .header_background_color(cx.color(colors::ACCENT_FILL))
+        .header_background_color(|| color(colors::ACCENT_FILL))
         .header_title_color(on_accent)
         .header_back_visible(false)
         .header_left(
             text("Close")
-                .text_color(on_accent)
+                .text_color(colors::ON_ACCENT)
                 .text_size(px(17.0))
                 .font_weight(FontWeight::MEDIUM)
                 .hit_slop(EdgeInsets::all(10.0))
-                .on_press(cx.listener(|_: &mut Gallery, _, cx| nav::pop(cx))),
+                .on_press(|_: &()| nav::pop()),
         )
         .header_title(
             view()
                 .flex_row()
                 .items_center()
                 .gap(px(7.0))
-                .child(view().size(px(10.0)).rounded(px(5.0)).bg(on_accent))
+                .child(view().size(px(10.0)).rounded(px(5.0)).bg(colors::ON_ACCENT))
                 .child(
                     text("Custom title")
-                        .text_color(on_accent)
+                        .text_color(colors::ON_ACCENT)
                         .text_size(px(17.0))
                         .font_weight(FontWeight::BOLD),
                 ),
@@ -220,13 +215,11 @@ fn custom_header(cx: &mut RenderCx<'_, Gallery>) -> Screen {
                 .items_center()
                 .gap(px(5.0))
                 .hit_slop(EdgeInsets::all(10.0))
-                .on_press(cx.listener(|_: &mut Gallery, _, cx| {
-                    cx.update_global::<Likes, _>(|likes, _| likes.0 += 1);
-                }))
+                .on_press(move |_: &()| likes.update(|likes| likes.0 += 1))
                 .child(icon(IconName::Star, 18.0, colors::ON_ACCENT))
                 .child(
-                    text(likes.to_string())
-                        .text_color(on_accent)
+                    text(move || count().to_string())
+                        .text_color(colors::ON_ACCENT)
                         .text_size(px(17.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .tabular_nums(),
@@ -237,17 +230,16 @@ fn custom_header(cx: &mut RenderCx<'_, Gallery>) -> Screen {
              the header.",
             [Section::new("Header")
                 .note("headerRight")
-                .child(Figure::new(likes.to_string()).unit(if likes == 1 {
-                    "star"
-                } else {
-                    "stars"
-                }))
+                .child(
+                    Figure::new(move || count().to_string())
+                        .unit(move || if count() == 1 { "star" } else { "stars" }),
+                )
                 .into_element()],
         ))
 }
 
-fn locked(cx: &mut RenderCx<'_, Gallery>) -> Screen {
-    header(screen().title("No swipe back"), cx)
+fn locked() -> Screen {
+    header(screen().title("No swipe back"))
         .gesture_enabled(false)
         .child(page(
             "The back gesture is off on this screen: no swipe on iOS, no predictive animation on \
@@ -269,80 +261,72 @@ fn locked(cx: &mut RenderCx<'_, Gallery>) -> Screen {
 }
 
 /// The draft's card (the screen's `prevent_back` follows the draft).
-#[derive(Debug, Default)]
-struct DraftCard {
-    focused: bool,
-}
-
-impl Component for DraftCard {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let draft = cx.global::<Draft>().0.clone();
-        let length = draft.chars().count();
-        let guarded = length > 0;
-        Card::new()
-            .icon(IconName::Form)
-            .title("Draft")
-            .subtitle("preventBack + onBackRequest")
-            .right(
-                Badge::new(if guarded { "Guarded" } else { "Empty" }).tone(if guarded {
+#[component]
+fn DraftCard() -> impl IntoElement {
+    let draft = global::<Draft>();
+    let focused = signal(false);
+    let length = computed(move || draft.with(|d| d.0.chars().count()));
+    let guarded = computed(move || length.get() > 0);
+    Card::new()
+        .icon(IconName::Form)
+        .title("Draft")
+        .subtitle("preventBack + onBackRequest")
+        .right(
+            Badge::new(move || if guarded.get() { "Guarded" } else { "Empty" }).tone(move || {
+                if guarded.get() {
                     Tone::Warn
                 } else {
                     Tone::Neutral
-                }),
-            )
-            .child(
-                input()
-                    .value(draft)
-                    .placeholder("A draft")
-                    .placeholder_color(cx.color(colors::FAINT))
-                    .selection_color(cx.color(colors::ACCENT))
-                    .h(px(48.0))
-                    .px(px(14.0))
-                    .text_size(px(15.0))
-                    .text_color(colors::TEXT)
-                    .bg(colors::INSET)
-                    .border_1()
-                    .border_color(if self.focused {
+                }
+            }),
+        )
+        .child(
+            input()
+                .value(move || draft.with(|d| d.0.clone()))
+                .placeholder("A draft")
+                .placeholder_color(|| color(colors::FAINT))
+                .selection_color(|| color(colors::ACCENT))
+                .h(px(48.0))
+                .px(px(14.0))
+                .text_size(px(15.0))
+                .text_color(colors::TEXT)
+                .bg(colors::INSET)
+                .border_1()
+                .border_color(move || {
+                    if focused.get() {
                         colors::ACCENT
                     } else {
                         colors::BORDER
-                    })
-                    .rounded(px(radius::CONTROL))
-                    .finish(Finish::Inset)
-                    .on_focus(cx.listener(|this: &mut Self, _, cx| {
-                        this.focused = true;
-                        cx.notify();
-                    }))
-                    .on_blur(cx.listener(|this: &mut Self, _, cx| {
-                        this.focused = false;
-                        cx.notify();
-                    }))
-                    .on_change_text(cx.listener(|_: &mut Self, text: &str, cx| {
-                        let text = text.to_owned();
-                        cx.update_global::<Draft, _>(|draft, _| draft.0 = text);
-                    })),
-            )
-            .child(
-                text(if guarded {
-                    format!("{length} characters would be lost: back asks first")
+                    }
+                })
+                .rounded(px(radius::CONTROL))
+                .finish(Finish::Inset)
+                .on_focus(move |_: &()| focused.set(true))
+                .on_blur(move |_: &()| focused.set(false))
+                .on_change_text(move |text: &str| {
+                    let text = text.to_owned();
+                    draft.update(|draft| draft.0 = text);
+                }),
+        )
+        .child(
+            text(move || {
+                if guarded.get() {
+                    format!("{} characters would be lost: back asks first", length.get())
                 } else {
                     "Nothing to lose: back pops".to_owned()
-                })
-                .text_size(px(13.0))
-                .text_color(colors::MUTED),
-            )
-    }
+                }
+            })
+            .text_size(px(13.0))
+            .text_color(colors::MUTED),
+        )
 }
 
-fn unsaved(cx: &mut RenderCx<'_, Gallery>) -> Screen {
-    let editing = !cx.global::<Draft>().0.is_empty();
-    header(screen().title("Unsaved changes"), cx)
-        .prevent_back(editing)
-        .on_back_request(cx.listener(|_: &mut Gallery, _, cx| {
-            let answer = cx.dialog(Dialog {
+fn unsaved() -> Screen {
+    let draft = global::<Draft>();
+    header(screen().title("Unsaved changes"))
+        .prevent_back(move || draft.with(|d| !d.0.is_empty()))
+        .on_back_request(move |_: &()| {
+            let answer = dialog(Dialog {
                 id: 0,
                 title: Some("Discard your changes?".into()),
                 message: None,
@@ -359,18 +343,14 @@ fn unsaved(cx: &mut RenderCx<'_, Gallery>) -> Screen {
                 cancelable: true,
                 sheet: false,
             });
-            cx.spawn(|this, _| async move {
+            spawn(async move {
                 if answer.await == 1 {
-                    this.update(|_, cx| {
-                        // TS's draft is the screen's own and goes with it.
-                        cx.update_global::<Draft, _>(|draft, _| draft.0.clear());
-                        nav::pop(cx);
-                    })
-                    .await;
+                    // TS's draft is the screen's own and goes with it.
+                    draft.update(|draft| draft.0.clear());
+                    nav::pop();
                 }
-            })
-            .detach();
-        }))
+            });
+        })
         .child(page(
             "Type something, then go back (header button, swipe, Android back): the screen asks \
              first.",
@@ -378,14 +358,14 @@ fn unsaved(cx: &mut RenderCx<'_, Gallery>) -> Screen {
         ))
 }
 
-fn faded(cx: &mut RenderCx<'_, Gallery>) -> Screen {
-    header(screen().title("Fade"), cx)
+fn faded() -> Screen {
+    header(screen().title("Fade"))
         .animation(ScreenAnimation::Fade)
         .child(page("This screen faded in, and fades out.", []))
 }
 
-fn instant(cx: &mut RenderCx<'_, Gallery>) -> Screen {
-    header(screen().title("No animation"), cx)
+fn instant() -> Screen {
+    header(screen().title("No animation"))
         .animation(ScreenAnimation::None)
         .child(page(
             "Shown without a transition, and removed without one.",
@@ -393,7 +373,7 @@ fn instant(cx: &mut RenderCx<'_, Gallery>) -> Screen {
         ))
 }
 
-fn headerless(cx: &mut RenderCx<'_, Gallery>) -> Screen {
+fn headerless() -> Screen {
     screen().header_shown(false).child(
         SafeAreaView::element(SafeAreaViewProps::default())
             .flex_1()
@@ -422,20 +402,15 @@ fn headerless(cx: &mut RenderCx<'_, Gallery>) -> Screen {
                         ),
                     )
                     .child(view().flex_1())
-                    .child(Button::new(
-                        "Back",
-                        cx.listener(|_: &mut Gallery, _, cx| nav::pop(cx)),
-                    )),
+                    .child(Button::new("Back", |_: &()| nav::pop())),
             ),
     )
 }
 
 /// Level `depth` of a deep stack.
-fn deep(depth: usize) -> impl Fn(&mut RenderCx<'_, Gallery>) -> Screen {
-    move |cx| {
-        let deeper = cx.listener(move |_: &mut Gallery, _, cx| {
-            nav::push(cx, format!("deep-{}", depth + 1), deep(depth + 1));
-        });
+fn deep(depth: usize) -> impl Fn() -> Screen {
+    move || {
+        let deeper = move |_: &()| nav::push(format!("deep-{}", depth + 1), deep(depth + 1));
         let levels = (1..=depth).map(|level| {
             let current = level == depth;
             view()
@@ -465,7 +440,7 @@ fn deep(depth: usize) -> impl Fn(&mut RenderCx<'_, Gallery>) -> Screen {
                         }),
                 )
         });
-        header(screen().title(format!("Level {depth}")), cx).child(page(
+        header(screen().title(format!("Level {depth}"))).child(page(
             "Every push is a native screen; popToTop() unwinds them all at once.",
             [Card::new()
                 .icon(IconName::Nav)
@@ -478,12 +453,9 @@ fn deep(depth: usize) -> impl Fn(&mut RenderCx<'_, Gallery>) -> Screen {
                         .gap_2()
                         .child(Button::new("Deeper", deeper).icon(IconName::Plus).flex_1())
                         .child(
-                            Button::new(
-                                "To the index",
-                                cx.listener(|_: &mut Gallery, _, cx| nav::pop_to_top(cx)),
-                            )
-                            .variant(ButtonVariant::Secondary)
-                            .flex_1(),
+                            Button::new("To the index", |_: &()| nav::pop_to_top())
+                                .variant(ButtonVariant::Secondary)
+                                .flex_1(),
                         ),
                 )
                 .into_element()],
@@ -497,12 +469,12 @@ fn link_row(
     title: &'static str,
     note: &'static str,
     first: bool,
-    on_press: Listener<()>,
+    on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
     press_with(
         PressProps {
-            scale: 0.98,
-            label: Some(title.into()),
+            scale: 0.98.into(),
+            label: Some(title.into()).into(),
             ..PressProps::default()
         },
         on_press,
@@ -591,7 +563,12 @@ const MODALS: [(Presented, &str, &str, &str, IconName); 6] = [
 ];
 
 /// A modal's content: what it is, its safe area, a close button.
-fn modal_body(title: &str, note: &str, text_body: &str, close: Listener<()>) -> impl IntoElement {
+fn modal_body(
+    title: &str,
+    note: &str,
+    text_body: &str,
+    close: impl Into<Listener<()>>,
+) -> impl IntoElement {
     SafeAreaView::element(SafeAreaViewProps::default())
         .flex_1()
         .bg(colors::BACKGROUND)
@@ -618,348 +595,330 @@ fn modal_body(title: &str, note: &str, text_body: &str, close: Listener<()>) -> 
 
 /// The demo's page: rows pushing the screens, its modals, and the Android
 /// back button.
-#[derive(Default)]
-pub(crate) struct Navigation {
-    sheet: Option<Presented>,
-    /// The dialog's spring in, 0 to 1.
-    pop: Option<NativeValue>,
-    /// The back button's listener while it is intercepted.
-    back: Option<BackSubscription>,
-    /// The presses it caught.
-    presses: u32,
-}
-
-impl Component for Navigation {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.pop = Some(cx.native_value(0.0));
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let intercepting = self.back.is_some();
-        let pop = self.pop.as_ref().expect("set up");
-        type Make = fn(&mut RenderCx<'_, Gallery>) -> Screen;
-        let screens: [(&str, IconName, &str, &str, Make); 8] = [
-            (
-                "large-title",
-                IconName::Text,
-                "Large title",
-                "ios.headerLargeTitle",
-                large_title,
-            ),
-            (
-                "transparent",
-                IconName::Styles,
-                "Transparent header",
-                "headerTransparent",
-                transparent,
-            ),
-            (
-                "custom",
-                IconName::Star,
-                "Custom header items",
-                "headerLeft / Title / Right",
-                custom_header,
-            ),
-            (
-                "headerless",
-                IconName::Mobile,
-                "No header",
-                "headerShown={false}",
-                headerless,
-            ),
-            (
-                "faded",
-                IconName::Spark,
-                "Fade in",
-                "animation=\"fade\"",
-                faded,
-            ),
-            (
-                "instant",
-                IconName::Play,
-                "No animation",
-                "animation=\"none\"",
-                instant,
-            ),
-            (
-                "locked",
-                IconName::Gestures,
-                "No swipe back",
-                "gestureEnabled={false}",
-                locked,
-            ),
-            (
-                "unsaved",
-                IconName::Form,
-                "Unsaved changes",
-                "preventBack + onBackRequest",
-                unsaved,
-            ),
-        ];
-        let mut links: Vec<AnyElement> = screens
-            .into_iter()
-            .enumerate()
-            .map(|(i, (key, icon_name, title, note, make))| {
-                link_row(
-                    icon_name,
-                    title,
-                    note,
-                    i == 0,
-                    cx.listener(move |_: &mut Self, _, cx| nav::push(cx, key, make)),
-                )
-                .into_element()
+#[component]
+pub(crate) fn Navigation() -> impl IntoElement {
+    let sheet = signal(None::<Presented>);
+    // The dialog's spring in, 0 to 1.
+    let pop = native_value(0.0);
+    // The back button is intercepted, and the presses it caught.
+    let intercepting = signal(false);
+    let presses = signal(0_u32);
+    // A listener hears the button before the stack pops it; listening only
+    // while intercepting keeps Android's back gesture previewing the pop.
+    effect(move || {
+        if intercepting.get() {
+            on_back_press(move || {
+                presses.update(|p| *p += 1);
+                true
+            });
+        }
+    });
+    type Make = fn() -> Screen;
+    let screens: [(&str, IconName, &str, &str, Make); 8] = [
+        (
+            "large-title",
+            IconName::Text,
+            "Large title",
+            "ios.headerLargeTitle",
+            large_title,
+        ),
+        (
+            "transparent",
+            IconName::Styles,
+            "Transparent header",
+            "headerTransparent",
+            transparent,
+        ),
+        (
+            "custom",
+            IconName::Star,
+            "Custom header items",
+            "headerLeft / Title / Right",
+            custom_header,
+        ),
+        (
+            "headerless",
+            IconName::Mobile,
+            "No header",
+            "headerShown={false}",
+            headerless,
+        ),
+        (
+            "faded",
+            IconName::Spark,
+            "Fade in",
+            "animation=\"fade\"",
+            faded,
+        ),
+        (
+            "instant",
+            IconName::Play,
+            "No animation",
+            "animation=\"none\"",
+            instant,
+        ),
+        (
+            "locked",
+            IconName::Gestures,
+            "No swipe back",
+            "gestureEnabled={false}",
+            locked,
+        ),
+        (
+            "unsaved",
+            IconName::Form,
+            "Unsaved changes",
+            "preventBack + onBackRequest",
+            unsaved,
+        ),
+    ];
+    let mut links: Vec<AnyElement> = screens
+        .into_iter()
+        .enumerate()
+        .map(|(i, (key, icon_name, title, note, make))| {
+            link_row(icon_name, title, note, i == 0, move |_: &()| {
+                nav::push(key, make)
             })
-            .collect();
-        links.push(
-            link_row(
-                IconName::Lists,
-                "A deep stack",
-                "push / popToTop",
-                false,
-                cx.listener(|_: &mut Self, _, cx| {
-                    let depth = nav::depth(cx);
-                    nav::push(cx, format!("deep-{depth}"), deep(1));
-                }),
-            )
-            .into_element(),
-        );
-        let tiles = MODALS.map(|(sheet, _, title, note, icon_name)| {
-            press_with(
-                PressProps {
-                    label: Some(title.into()),
-                    ..PressProps::default()
-                },
-                cx.listener(move |this: &mut Self, _, cx| {
-                    if sheet == Presented::Dialog {
-                        // The dialog springs up from a little smaller each
-                        // time it opens.
-                        let pop = this.pop.as_ref().expect("set up");
-                        pop.set(0.0);
-                        pop.spring(1.0, motion::SETTLE);
-                    }
-                    this.sheet = Some(sheet);
-                    cx.notify();
-                }),
-            )
-            .w(relative(0.485))
-            .child(
-                view()
-                    .min_h(px(100.0))
-                    .p_3()
-                    .gap_3()
-                    .rounded(px(radius::INSET))
-                    .border_curve(BorderCurve::Continuous)
-                    .bg(colors::INSET)
-                    .border_1()
-                    .border_color(colors::LINE)
-                    .finish(Finish::Inset)
-                    .child(IconTile::new(icon_name).size(32.0))
-                    .child(
-                        view()
-                            .gap(px(2.0))
-                            .child(
-                                text(title)
-                                    .text_size(px(15.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(colors::TEXT),
-                            )
-                            .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
-                    ),
-            )
-        });
-        let close = || {
-            cx.listener(|this: &mut Self, _, cx| {
-                this.sheet = None;
-                cx.notify();
-            })
-        };
-        let modal_view = match self.sheet {
-            Some(
-                sheet @ (Presented::FullScreen
-                | Presented::PageSheet
-                | Presented::FormSheet
-                | Presented::Fade),
-            ) => {
-                let presentation = match sheet {
+            .into_element()
+        })
+        .collect();
+    links.push(
+        link_row(
+            IconName::Lists,
+            "A deep stack",
+            "push / popToTop",
+            false,
+            |_: &()| nav::push(format!("deep-{}", nav::depth()), deep(1)),
+        )
+        .into_element(),
+    );
+    let tiles = MODALS.map(|(presented, _, title, note, icon_name)| {
+        let pop = pop.clone();
+        press_with(
+            PressProps {
+                label: Some(title.into()).into(),
+                ..PressProps::default()
+            },
+            move |_: &()| {
+                if presented == Presented::Dialog {
+                    // The dialog springs up from a little smaller each
+                    // time it opens.
+                    pop.set(0.0);
+                    pop.spring(1.0, motion::SETTLE);
+                }
+                sheet.set(Some(presented));
+            },
+        )
+        .w(relative(0.485))
+        .child(
+            view()
+                .min_h(px(100.0))
+                .p_3()
+                .gap_3()
+                .rounded(px(radius::INSET))
+                .border_curve(BorderCurve::Continuous)
+                .bg(colors::INSET)
+                .border_1()
+                .border_color(colors::LINE)
+                .finish(Finish::Inset)
+                .child(IconTile::new(icon_name).size(32.0))
+                .child(
+                    view()
+                        .gap(px(2.0))
+                        .child(
+                            text(title)
+                                .text_size(px(15.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(colors::TEXT),
+                        )
+                        .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
+                ),
+        )
+    });
+    let close = move |_: &()| sheet.set(None);
+    let modal_view = dynamic(move || {
+        sheet.get().map(|presented| match presented {
+            Presented::FullScreen
+            | Presented::PageSheet
+            | Presented::FormSheet
+            | Presented::Fade => {
+                let presentation = match presented {
                     Presented::PageSheet => ModalPresentation::PageSheet,
                     Presented::FormSheet => ModalPresentation::FormSheet,
                     _ => ModalPresentation::FullScreen,
                 };
-                let (_, key, title, ..) =
-                    MODALS.into_iter().find(|m| m.0 == sheet).expect("a modal");
-                Some(
-                    modal()
-                        .presentation(presentation)
-                        .animation(if sheet == Presented::Fade {
-                            ModalAnimation::Fade
-                        } else {
-                            ModalAnimation::Slide
-                        })
-                        .on_request_close(close())
-                        .child(modal_body(
-                            title,
-                            key,
-                            "Close with the button, the back button (Android) or a swipe down \
-                             (iOS sheets).",
-                            close(),
-                        )),
-                )
-            }
-            Some(Presented::Dismissible) => Some(
+                let (_, key, title, ..) = MODALS
+                    .into_iter()
+                    .find(|m| m.0 == presented)
+                    .expect("a modal");
                 modal()
-                    .dismissible(true)
-                    .presentation(ModalPresentation::PageSheet)
-                    .on_request_close(close())
-                    .on_dismiss(close())
+                    .presentation(presentation)
+                    .animation(if presented == Presented::Fade {
+                        ModalAnimation::Fade
+                    } else {
+                        ModalAnimation::Slide
+                    })
+                    .on_request_close(close)
                     .child(modal_body(
-                        "Dismissible",
-                        "dismissible",
-                        "Swipe it down (iOS) or press back (Android): it closes natively, then \
-                         tells the app.",
-                        close(),
-                    )),
-            ),
-            Some(Presented::Dialog) => Some(
-                modal()
-                    .transparent(true)
-                    .animation(ModalAnimation::Fade)
-                    .on_request_close(close())
-                    .child(
-                        view()
-                            .flex_1()
-                            .bg(rgba(0x0000_009e))
-                            .items_center()
-                            .justify_center()
-                            .p_4()
-                            .child(
-                                view()
-                                    .self_stretch()
-                                    .bind_opacity(pop)
-                                    .bind_scale(&pop.interpolate(&[0.0, 1.0], &[0.9, 1.0]))
-                                    .child(
-                                        Card::new()
-                                            .icon(IconName::Bell)
-                                            .title("A dialog")
-                                            .subtitle("transparent + fade")
-                                            .child(body(
-                                                "A transparent modal shows what is behind it; \
-                                                 the dialog springs in natively.",
-                                            ))
-                                            .child(
-                                                view()
-                                                    .flex_row()
-                                                    .gap_2()
-                                                    .child(
-                                                        Button::new("Cancel", close())
-                                                            .variant(ButtonVariant::Secondary)
-                                                            .flex_1(),
-                                                    )
-                                                    .child(Button::new("OK", close()).flex_1()),
-                                            ),
-                                    ),
-                            ),
-                    ),
-            ),
-            None => None,
-        };
-        let presses = self.presses;
-        view().flex_1().child(
-            scroll()
-                .flex_1()
-                .bg(colors::BACKGROUND)
+                        title,
+                        key,
+                        "Close with the button, the back button (Android) or a swipe down \
+                         (iOS sheets).",
+                        close,
+                    ))
+                    .into_element()
+            }
+            Presented::Dismissible => modal()
+                .dismissible(true)
+                .presentation(ModalPresentation::PageSheet)
+                .on_request_close(close)
+                .on_dismiss(close)
+                .child(modal_body(
+                    "Dismissible",
+                    "dismissible",
+                    "Swipe it down (iOS) or press back (Android): it closes natively, then \
+                     tells the app.",
+                    close,
+                ))
+                .into_element(),
+            Presented::Dialog => modal()
+                .transparent(true)
+                .animation(ModalAnimation::Fade)
+                .on_request_close(close)
                 .child(
                     view()
+                        .flex_1()
+                        .bg(rgba(0x0000_009e))
+                        .items_center()
+                        .justify_center()
                         .p_4()
-                        .pb(px(40.0))
-                        .gap_4()
                         .child(
-                            appear(0).child(
-                                Card::new()
-                                    .icon(IconName::Nav)
-                                    .title("Native stack")
-                                    .subtitle("Headers, transitions, the safe area")
-                                    .right(Badge::new("UIKit / View"))
-                                    .child(insets()),
-                            ),
-                        )
-                        .child(
-                            appear(1).child(
-                                Card::new()
-                                    .title("Screens")
-                                    .subtitle("Screen options, pushed with nav.push")
-                                    .flush()
-                                    .child(Inset::new().padding(0.0).gap(0.0).children(links)),
-                            ),
-                        )
-                        .child(
-                            appear(2).child(
-                                Card::new()
-                                    .title("Modals")
-                                    .subtitle("Presentation styles and transitions")
-                                    .flush()
-                                    .child(
-                                        view()
-                                            .flex_row()
-                                            .flex_wrap()
-                                            .justify_between()
-                                            .gap_y_2()
-                                            .children(tiles),
-                                    ),
-                            ),
-                        )
-                        .child(
-                            appear(3).child(
-                                Card::new()
-                                    .icon(IconName::System)
-                                    .title("Back button")
-                                    .subtitle("Android: BackHandler")
-                                    .right(
-                                        toggle(intercepting, "Intercept the back button").on_event(
-                                            cx.listener(|this: &mut Self, e: &ToggleEvent, cx| {
-                                                let ToggleEvent::Change(on) = *e;
-                                                // A listener hears the button before the
-                                                // stack pops it; listening only while
-                                                // intercepting keeps Android's back gesture
-                                                // previewing the pop.
-                                                this.back = on.then(|| {
-                                                    cx.on_back_press(|this: &mut Self, cx| {
-                                                        this.presses += 1;
-                                                        cx.notify();
-                                                        true
-                                                    })
-                                                });
-                                                cx.notify();
-                                            }),
+                            view()
+                                .self_stretch()
+                                .bind_opacity(&pop)
+                                .bind_scale(&pop.interpolate(&[0.0, 1.0], &[0.9, 1.0]))
+                                .child(
+                                    Card::new()
+                                        .icon(IconName::Bell)
+                                        .title("A dialog")
+                                        .subtitle("transparent + fade")
+                                        .child(body(
+                                            "A transparent modal shows what is behind it; the \
+                                             dialog springs in natively.",
+                                        ))
+                                        .child(
+                                            view()
+                                                .flex_row()
+                                                .gap_2()
+                                                .child(
+                                                    Button::new("Cancel", close)
+                                                        .variant(ButtonVariant::Secondary)
+                                                        .flex_1(),
+                                                )
+                                                .child(Button::new("OK", close).flex_1()),
                                         ),
-                                    )
-                                    .child(
-                                        Figure::new(presses.to_string())
-                                            .unit(if presses == 1 { "press" } else { "presses" })
-                                            .note(if intercepting { "caught" } else { "popped" })
-                                            .tone(if intercepting {
+                                ),
+                        ),
+                )
+                .into_element(),
+        })
+    });
+    view().flex_1().child(
+        scroll()
+            .flex_1()
+            .bg(colors::BACKGROUND)
+            .child(
+                view()
+                    .p_4()
+                    .pb(px(40.0))
+                    .gap_4()
+                    .child(
+                        appear(0).child(
+                            Card::new()
+                                .icon(IconName::Nav)
+                                .title("Native stack")
+                                .subtitle("Headers, transitions, the safe area")
+                                .right(Badge::new("UIKit / View"))
+                                .child(insets()),
+                        ),
+                    )
+                    .child(
+                        appear(1).child(
+                            Card::new()
+                                .title("Screens")
+                                .subtitle("Screen options, pushed with nav.push")
+                                .flush()
+                                .child(Inset::new().padding(0.0).gap(0.0).children(links)),
+                        ),
+                    )
+                    .child(
+                        appear(2).child(
+                            Card::new()
+                                .title("Modals")
+                                .subtitle("Presentation styles and transitions")
+                                .flush()
+                                .child(
+                                    view()
+                                        .flex_row()
+                                        .flex_wrap()
+                                        .justify_between()
+                                        .gap_y_2()
+                                        .children(tiles),
+                                ),
+                        ),
+                    )
+                    .child(
+                        appear(3).child(
+                            Card::new()
+                                .icon(IconName::System)
+                                .title("Back button")
+                                .subtitle("Android: BackHandler")
+                                .right(toggle(intercepting, "Intercept the back button").on_event(
+                                    move |e: &ToggleEvent| {
+                                        let ToggleEvent::Change(on) = *e;
+                                        intercepting.set(on);
+                                    },
+                                ))
+                                .child(
+                                    Figure::new(move || presses.get().to_string())
+                                        .unit(move || {
+                                            if presses.get() == 1 {
+                                                "press"
+                                            } else {
+                                                "presses"
+                                            }
+                                        })
+                                        .note(move || {
+                                            if intercepting.get() {
+                                                "caught"
+                                            } else {
+                                                "popped"
+                                            }
+                                        })
+                                        .tone(move || {
+                                            if intercepting.get() {
                                                 Tone::Warn
                                             } else {
                                                 Tone::Accent
-                                            }),
-                                    )
-                                    .child(
-                                        text(if intercepting {
-                                            "The handler returns true: back presses stay on this \
-                                             screen."
+                                            }
+                                        }),
+                                )
+                                .child(
+                                    text(move || {
+                                        if intercepting.get() {
+                                            "The handler returns true: back presses stay on \
+                                             this screen."
                                         } else {
                                             "Off: the back button pops this screen."
-                                        })
-                                        .text_size(px(13.0))
-                                        .line_height(px(18.0))
-                                        .text_color(colors::MUTED),
-                                    ),
-                            ),
+                                        }
+                                    })
+                                    .text_size(px(13.0))
+                                    .line_height(px(18.0))
+                                    .text_color(colors::MUTED),
+                                ),
                         ),
-                )
-                .children(modal_view),
-        )
-    }
+                    ),
+            )
+            .child(modal_view),
+    )
 }

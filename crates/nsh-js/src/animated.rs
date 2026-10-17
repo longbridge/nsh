@@ -49,7 +49,7 @@ pub(crate) struct Animations {
     composites: RefCell<FxHashMap<u32, *mut CompositeData>>,
     /// Live derived nodes by a hash of the operation that made them (its
     /// node 0): deriving the same node again (a canvas drawing again, a
-    /// component rendering again) gets the same node instead of a new one
+    /// binding running again) gets the same node instead of a new one
     /// in the graph. The objects are not owned (their finalizers take them
     /// out).
     derived: RefCell<DerivedNodes>,

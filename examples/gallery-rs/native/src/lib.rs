@@ -12,7 +12,7 @@ mod ui;
 use nsh_core::ui::prelude::*;
 use nsh_ui_mobile::{BarStyle, StatusBar, StatusBarProps};
 
-use crate::{nav::Routes, ui::colors};
+use crate::{nav::Route, ui::colors};
 
 /// The UI set of the gallery: what `App.tsx` imports from `gallery/native`.
 #[native_module("gallery/native")]
@@ -23,42 +23,34 @@ fn native(registry: &mut Registry) {
 
 /// The gallery: a native stack of its index and the screens pushed on it,
 /// in the gallery's design for the system's appearance.
-#[derive(Default)]
-pub struct Gallery;
-
-impl Component for Gallery {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let routes = cx.global::<Routes>().screens();
-        let index = demos::index(cx);
-        let pushed: Vec<_> = routes
-            .into_iter()
-            .enumerate()
-            .map(|(depth, route)| {
-                (route.screen)(cx)
-                    .key(route.key)
-                    // The user popped it natively: it and what is above it go.
-                    .on_dismiss(cx.listener(move |_: &mut Self, _, cx| {
-                        cx.update_global::<Routes, _>(|routes, _| routes.truncate(depth));
-                    }))
-            })
-            .collect();
+#[component]
+pub fn Gallery() -> impl IntoElement {
+    let routes = nav::routes();
+    // A screen is made when it is pushed and goes when it is popped.
+    let pushed = Each::new(
+        move || routes.with(|r| r.0.clone()),
+        |route: &Route| route.key.clone(),
+        |route, depth| {
+            let route = route.get_untracked();
+            (route.screen)()
+                // The user popped it natively: it and what is above it go.
+                .on_dismiss(move |_: &()| nav::truncate(depth.get_untracked()))
+        },
+    );
+    view()
+        .flex_1()
+        .bg(colors::BACKGROUND)
         // The status bar's content contrasts with the page in either
         // appearance.
-        let bar_style = if cx.dark() {
-            BarStyle::LightContent
-        } else {
-            BarStyle::DarkContent
-        };
-        view()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .child(StatusBar::element(StatusBarProps {
-                bar_style: Some(bar_style),
-                ..StatusBarProps::default()
-            }))
-            .child(stack().flex_1().child(index).children(pushed))
-    }
+        .child(StatusBar::element(StatusBarProps {
+            bar_style: Prop::bind(|| {
+                Some(if dark() {
+                    BarStyle::LightContent
+                } else {
+                    BarStyle::DarkContent
+                })
+            }),
+            ..StatusBarProps::default()
+        }))
+        .child(stack().flex_1().child(demos::index()).child(pushed))
 }

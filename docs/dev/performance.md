@@ -23,22 +23,28 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
 
 - Rust components vs the same component in TSX (`component_bench`, `examples/bench`, release, minimum of the runs;
   `TsButton.tsx` is the TSX Button `nsh/ui/mobile` had before components moved into Rust, restyled to draw exactly
-  like the Rust one; measured on the former JS runtime):
+  like the Rust one), with the Rust Button running once (its props bound) and, in brackets, as it rendered again
+  and was diffed before:
 
   | | Rust Button: JS / core | TSX Button: JS / core |
   |---|---|---|
-  | first frame, 200 Buttons (ops) | 1.32ms / 0.77ms (1015) | 2.32ms / 0.70ms (2415) |
-  | one update of all 200 titles (ops) | 0.42ms / 0.42ms (200) | 0.77ms / 0.36ms (600) |
-  | scrolling a 1000-row list, per rebinding frame | 8.3µs / 5.9µs | 10.2µs / 5.4µs |
+  | first frame, 200 Buttons (ops) | 0.42ms / 1.04ms [0.75ms] (1015) | 0.85ms / 0.64ms (2415) |
+  | one update of all 200 titles (ops) | 0.15ms / 0.44ms [0.48ms] (200) | 0.13ms / 0.34ms (400) |
+  | first frame, 1000-row list | 0.17ms / 0.23ms [0.19ms] | 0.23ms / 0.18ms |
+  | scrolling the list, per rebinding frame | 1.5µs / 6.1µs [6.3µs] | 1.5µs / 5.3µs |
 
-  JS does half the work or less, a net win of ~30% on the first frame and ~25% on updates. The core's extra time is
-  not the component code (its renders and diffs are ~15% of a commit) but the allocator: Taffy's compute takes the
-  same samples in both, while its per-layout vectors spend 2.5× longer in `malloc` / `free` / `madvise` after the
-  render trees the components build and drop each update (libmalloc coalesces the freed blocks and returns pages).
-  Pooling the style buffers bought 3%; a different global allocator in the binaries is the lever left. The
-  components' JS face must stay one effect per instance reading the props directly: the first version (Solid's
-  `splitProps` / `mergeProps` / `spread` in the former JS runtime) cost 4.0ms of JS for the same first frame, more
-  than the TSX Button.
+  JS does half the work or less. Running once costs the first frame ~40% more core time than rendering did: each
+  bound part of an element is a computation of the graph that runs as the view is made (its first value is applied
+  with the element's static parts, `core/views.rs`), and each prop a signal (`ui/prop.rs`); the rest of the core's
+  time (node creation, styles, Taffy) is the same in both. Updates cost what they change: an update of one title runs
+  its text's and label's bindings, and a large view with one changing value costs what that value costs
+  (`bench_view_tick`, below). The components' JS face must stay one effect per instance reading the props directly:
+  the first version (Solid's `splitProps` / `mergeProps` / `spread` in the former JS runtime) cost 4.0ms of JS for
+  the same first frame, more than the TSX Button.
+- Rust components run once (`cargo test --release -p nsh-core bench_view_tick -- --ignored --nocapture`, a view of
+  300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
+  ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
+  again and diffed it: ~312µs per commit for the same view.
 - Canvas recording (release `nsh trace`, minimum of the runs): in the former JS runtime, 2500 iterations of
   `beginPath`, `moveTo`, `lineTo`, `lineWidth =`, `strokeStyle =`, `stroke`, `fillRect` (17 500 calls) recorded into a
   JS array in ~1.4ms, the same with methods generated from the specs as with a hand-written class (an A/B of the two

@@ -1,11 +1,11 @@
-//! The reactive graph JS runs on: signals, memos, effects, owners and
-//! context, kept in Rust and called through QuickJS's C API.
+//! The reactive graph JS runs on: the generic graph of
+//! [`nsh_core::reactive`] with QuickJS values and functions, and the JS
+//! objects and natives over it.
 //!
 //! Reading a signal or a memo is a call of a native callable object (a few
 //! nanoseconds, cheaper than calling a JS function); writing one marks its
 //! dependants and runs the effects in Rust; only the user's closures run in
-//! the interpreter. The scheduling follows Solid 1.9 (`runUpdates`, the
-//! update and effect queues, stale owners updated before their children),
+//! the interpreter. The scheduling is Solid 1.9's (`nsh_core::reactive`),
 //! which the runtime and apps rely on.
 //!
 //! Lifetimes: a signal lives as long as its JS object (the object's GC mark
@@ -21,9 +21,9 @@
 use std::{
     ffi::{CStr, c_int, c_void},
     ptr,
-    rc::Rc,
 };
 
+use nsh_core::reactive::{self as r, Equals, Kind, NONE, UNOWNED};
 #[cfg(test)]
 use rquickjs::Ctx;
 use rquickjs::qjs;
@@ -32,52 +32,31 @@ type JsValue = qjs::JSValue;
 type JsContext = qjs::JSContext;
 
 const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
-/// No node (no listener, no owner).
-pub(crate) const NONE: u32 = u32::MAX;
-/// The owner of nodes made in a root without `dispose`: never disposed.
-pub(crate) const UNOWNED: u32 = u32::MAX - 1;
 
-const CLEAN: u8 = 0;
-const STALE: u8 = 1;
-const PENDING: u8 = 2;
+/// The graph's host: QuickJS values, functions as computations, equality
+/// functions and cleanups, reached through the context's state.
+#[derive(Clone, Copy)]
+pub(crate) struct Js(pub(crate) *mut JsContext);
 
-/// Runs of computations in one flush before it counts as an infinite loop.
-const MAX_RUNS: u64 = 1_000_000;
+/// The graph JS runs on.
+pub(crate) type Graph = r::Graph<Js>;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
-    Signal,
-    Memo,
-    /// A render effect (runs as soon as possible, before user effects).
-    Effect,
-    /// A user effect (`createEffect`: after the render effects).
-    UserEffect,
-    Root,
-    /// A freed slot.
-    Free,
+/// What the JS host keeps in the graph.
+pub(crate) struct JsData {
+    ctx: *mut JsContext,
+    classes: Classes,
+    /// The first exception of a round, thrown when the round ends.
+    error: Option<JsValue>,
 }
 
-/// When a signal or memo counts as changed.
-enum Equals {
-    /// `===` (the default).
-    Strict,
-    /// Always (`equals: false`).
-    Never,
-    /// `equals(previous, next)`.
-    Custom(JsValue),
-    /// The same truthiness (a condition: `<If when>`).
-    Truthiness,
-}
-
-/// A context value set by a provider, and the frame it shadows.
-struct Frame {
-    parent: Option<Rc<Frame>>,
+/// A context value set by a provider.
+pub(crate) struct JsFrame {
     key: JsValue,
     value: JsValue,
     ctx: *mut JsContext,
 }
 
-impl Drop for Frame {
+impl Drop for JsFrame {
     fn drop(&mut self) {
         // SAFETY: frames only live in a graph, which is torn down before
         // its context.
@@ -88,73 +67,118 @@ impl Drop for Frame {
     }
 }
 
-struct Node {
-    kind: Kind,
-    /// Bumped when the slot is reused: handles of the old node go stale.
-    generation: u32,
-    state: u8,
-    value: JsValue,
-    func: JsValue,
-    equals: Equals,
-    /// The exec round of the last run (`None`: never ran).
-    updated_at: Option<u64>,
-    /// (source, its index in the source's observers)
-    sources: Vec<(u32, u32)>,
-    /// (observer, its index in the observer's sources)
-    observers: Vec<(u32, u32)>,
-    /// The owner (for a root, the one it was made under: context and
-    /// `runTop` look through it, but it does not own the root).
-    owner: u32,
-    owned: Vec<u32>,
-    cleanups: Vec<JsValue>,
-    context: Option<Rc<Frame>>,
-    /// A JS object (signal, memo) refers to the node: its slot is freed
-    /// when the object is collected.
-    handle: bool,
-    /// Disposed: runs no more (a memo keeps its value for its object).
-    disposed: bool,
-}
+// SAFETY: the graph is reached through the context's state, and the
+// generic graph and the natives here take only short borrows of it.
+unsafe impl r::Host for Js {
+    type Value = JsValue;
+    type Func = JsValue;
+    type Equals = JsValue;
+    type Cleanup = JsValue;
+    type Context = JsFrame;
+    type Data = JsData;
 
-impl Node {
-    fn new(kind: Kind) -> Self {
-        Node {
-            kind,
-            generation: 1,
-            state: CLEAN,
-            value: UNDEFINED,
-            func: UNDEFINED,
-            equals: Equals::Strict,
-            updated_at: None,
-            sources: Vec::new(),
-            observers: Vec::new(),
-            owner: NONE,
-            owned: Vec::new(),
-            cleanups: Vec::new(),
-            context: None,
-            handle: false,
-            disposed: false,
+    #[inline]
+    unsafe fn graph<'a>(self) -> &'a mut Graph {
+        // SAFETY: as the caller promises; a projection of the state's field.
+        unsafe { &mut (*crate::state::state(self.0)).graph }
+    }
+
+    #[inline]
+    fn empty() -> JsValue {
+        UNDEFINED
+    }
+
+    #[inline]
+    fn dup(self, v: &JsValue) -> JsValue {
+        // SAFETY: a live value.
+        unsafe { qjs::JS_DupValue(self.0, *v) }
+    }
+
+    #[inline]
+    fn free(self, v: JsValue) {
+        // SAFETY: an owned value.
+        unsafe { qjs::JS_FreeValue(self.0, v) }
+    }
+
+    #[inline]
+    fn dup_func(self, f: &JsValue) -> JsValue {
+        self.dup(f)
+    }
+
+    #[inline]
+    fn free_func(self, f: JsValue) {
+        self.free(f)
+    }
+
+    fn dup_equals(self, e: &JsValue) -> JsValue {
+        self.dup(e)
+    }
+
+    fn free_equals(self, e: JsValue) {
+        self.free(e)
+    }
+
+    fn call(self, f: &JsValue, prev: JsValue) -> Option<JsValue> {
+        let mut args = [prev];
+        let r = call(self.0, *f, &mut args);
+        self.free(args[0]);
+        r.ok()
+    }
+
+    #[inline]
+    fn same(self, a: &JsValue, b: &JsValue) -> bool {
+        // SAFETY: live values; strict equality runs no JS.
+        unsafe { qjs::JS_IsStrictEqual(self.0, *a, *b) }
+    }
+
+    #[inline]
+    fn truthy(self, v: &JsValue) -> bool {
+        // SAFETY: a live value; truthiness runs no JS.
+        unsafe { qjs::JS_ToBool(self.0, *v) == 1 }
+    }
+
+    fn custom_changed(self, e: &JsValue, prev: JsValue, next: &JsValue) -> bool {
+        let mut args = [prev, self.dup(next)];
+        let r = call(self.0, *e, &mut args);
+        self.free(args[0]);
+        self.free(args[1]);
+        match r {
+            Ok(same) => {
+                let changed = !self.truthy(&same);
+                self.free(same);
+                changed
+            }
+            // A comparison that throws counts as a change.
+            Err(()) => true,
         }
     }
 
-    fn is_computation(&self) -> bool {
-        matches!(self.kind, Kind::Memo | Kind::Effect | Kind::UserEffect)
-    }
-}
-
-/// JS values a node held, freed after the graph is no longer borrowed.
-#[must_use]
-struct Held {
-    values: [JsValue; 3],
-    context: Option<Rc<Frame>>,
-}
-
-impl Held {
-    fn free(self, ctx: *mut JsContext) {
-        for v in self.values {
-            // SAFETY: values the node owned; no graph borrow is live.
-            unsafe { qjs::JS_FreeValue(ctx, v) };
+    fn run_cleanup(self, f: JsValue) {
+        if let Ok(r) = call(self.0, f, &mut []) {
+            self.free(r);
         }
-        drop(self.context);
+        self.free(f);
+    }
+
+    fn free_cleanup(self, f: JsValue) {
+        self.free(f);
+    }
+
+    fn runaway(self) {
+        let message = c"potential infinite loop: an effect keeps changing what it reads";
+        // SAFETY: a new error object; a short borrow of the graph.
+        unsafe {
+            let error = qjs::JS_NewError(self.0);
+            let bytes = message.to_bytes();
+            let text = qjs::JS_NewStringLen(self.0, bytes.as_ptr().cast(), bytes.len() as _);
+            qjs::JS_SetPropertyStr(self.0, error, c"message".as_ptr(), text);
+            let g = graph(self.0);
+            if g.data.error.is_none() {
+                g.data.error = Some(error);
+            } else {
+                qjs::JS_FreeValue(self.0, error);
+            }
+        }
     }
 }
 
@@ -166,24 +190,6 @@ struct Classes {
     memo: qjs::JSClassID,
 }
 
-pub(crate) struct Graph {
-    ctx: *mut JsContext,
-    classes: Classes,
-    nodes: Vec<Node>,
-    free: Vec<u32>,
-    listener: u32,
-    pub(crate) owner: u32,
-    /// Solid's `Updates`: computations to run in this round (`None`: not
-    /// in a round).
-    updates: Option<Vec<u32>>,
-    /// Solid's `Effects`.
-    effects: Option<Vec<u32>>,
-    exec: u64,
-    runs: u64,
-    /// The first exception of a round, thrown when the round ends.
-    error: Option<JsValue>,
-}
-
 /// The graph of `ctx`.
 ///
 /// # Safety
@@ -192,8 +198,8 @@ pub(crate) struct Graph {
 /// other reference to the graph.
 #[inline]
 pub(crate) unsafe fn graph<'a>(ctx: *mut JsContext) -> &'a mut Graph {
-    // SAFETY: as the caller promises; a projection of the state's field.
-    unsafe { &mut (*crate::state::state(ctx)).graph }
+    // SAFETY: as the caller promises.
+    unsafe { r::Host::graph(Js(ctx)) }
 }
 
 /// The graph of runtime `rt` (finalizers, GC marks), unless it is being
@@ -239,161 +245,14 @@ fn unpack(p: *mut c_void) -> (u32, u32) {
     (v & 0xf_ffff, (v >> 20) & GENERATION_MASK)
 }
 
-impl Graph {
-    fn alloc(&mut self, kind: Kind) -> u32 {
-        match self.free.pop() {
-            Some(id) => {
-                let generation = self.nodes[id as usize].generation.wrapping_add(1).max(1);
-                self.nodes[id as usize] = Node {
-                    generation,
-                    ..Node::new(kind)
-                };
-                id
-            }
-            None => {
-                self.nodes.push(Node::new(kind));
-                (self.nodes.len() - 1) as u32
-            }
-        }
-    }
-
-    /// Makes a computation under the current owner.
-    fn computation(&mut self, kind: Kind, func: JsValue, value: JsValue, state: u8) -> u32 {
-        let id = self.alloc(kind);
-        let owner = self.owner;
-        let context = self.context_of(owner);
-        let n = &mut self.nodes[id as usize];
-        n.func = func;
-        n.value = value;
-        n.state = state;
-        n.owner = owner;
-        n.context = context;
-        if owner != NONE && owner != UNOWNED {
-            self.nodes[owner as usize].owned.push(id);
-        }
-        id
-    }
-
-    fn context_of(&self, owner: u32) -> Option<Rc<Frame>> {
-        if owner == NONE || owner == UNOWNED {
-            return None;
-        }
-        self.nodes[owner as usize].context.clone()
-    }
-
-    /// Whether handle (`id`, `generation`) still names its node.
-    fn live(&self, id: u32, generation: u32) -> bool {
-        self.nodes.get(id as usize).is_some_and(|n| {
-            n.generation & GENERATION_MASK == generation & GENERATION_MASK && n.kind != Kind::Free
-        })
-    }
-
-    fn track(&mut self, id: u32) {
-        let l = self.listener;
-        if l == NONE || l == UNOWNED || self.nodes[l as usize].disposed {
-            return;
-        }
-        // Repeated reads of the same source make one edge.
-        if self.nodes[l as usize]
-            .sources
-            .last()
-            .is_some_and(|&(s, _)| s == id)
-        {
-            return;
-        }
-        let slot = self.nodes[id as usize].observers.len() as u32;
-        let back = self.nodes[l as usize].sources.len() as u32;
-        self.nodes[l as usize].sources.push((id, slot));
-        self.nodes[id as usize].observers.push((l, back));
-    }
-
-    fn unlink_sources(&mut self, id: u32) {
-        while let Some((src, slot)) = self.nodes[id as usize].sources.pop() {
-            let obs = &mut self.nodes[src as usize].observers;
-            let Some(last) = obs.pop() else { continue };
-            if (slot as usize) < obs.len() {
-                obs[slot as usize] = last;
-                self.nodes[last.0 as usize].sources[last.1 as usize].1 = slot;
-            }
-        }
-    }
-
-    fn unlink_observers(&mut self, id: u32) {
-        while let Some((o, slot)) = self.nodes[id as usize].observers.pop() {
-            let srcs = &mut self.nodes[o as usize].sources;
-            let Some(last) = srcs.pop() else { continue };
-            if (slot as usize) < srcs.len() {
-                srcs[slot as usize] = last;
-                self.nodes[last.0 as usize].observers[last.1 as usize].1 = slot;
-            }
-        }
-    }
-
-    /// Frees slot `id`: what it held, to be freed by the caller once no
-    /// borrow of the graph is live.
-    fn release(&mut self, id: u32) -> Held {
-        let n = &mut self.nodes[id as usize];
-        let held = Held {
-            values: [
-                std::mem::replace(&mut n.value, UNDEFINED),
-                std::mem::replace(&mut n.func, UNDEFINED),
-                match std::mem::replace(&mut n.equals, Equals::Strict) {
-                    Equals::Custom(f) => f,
-                    _ => UNDEFINED,
-                },
-            ],
-            context: n.context.take(),
-        };
-        n.kind = Kind::Free;
-        n.handle = false;
-        n.disposed = true;
-        self.free.push(id);
-        held
-    }
-
-    fn queue_update(&mut self, id: u32) {
-        match &mut self.updates {
-            Some(q) => q.push(id),
-            None => self.updates = Some(vec![id]),
-        }
-    }
-
-    fn queue_effect(&mut self, id: u32) {
-        match &mut self.effects {
-            Some(q) => q.push(id),
-            None => self.effects = Some(vec![id]),
-        }
-    }
-
-    /// Solid's `markDownstream`.
-    fn mark_downstream(&mut self, id: u32) {
-        let mut i = 0;
-        while i < self.nodes[id as usize].observers.len() {
-            let o = self.nodes[id as usize].observers[i].0;
-            i += 1;
-            if self.nodes[o as usize].state == CLEAN && !self.nodes[o as usize].disposed {
-                self.nodes[o as usize].state = PENDING;
-                if self.nodes[o as usize].kind == Kind::Memo {
-                    self.queue_update(o);
-                } else {
-                    self.queue_effect(o);
-                }
-                if !self.nodes[o as usize].observers.is_empty() {
-                    self.mark_downstream(o);
-                }
-            }
-        }
-    }
-}
-
 /// An exception of a JS call: kept as the round's error (the first wins).
 fn take_exception(ctx: *mut JsContext) {
     // SAFETY: an exception is pending.
     let exception = unsafe { qjs::JS_GetException(ctx) };
     // SAFETY: no other reference to the graph is live here.
     let g = unsafe { graph(ctx) };
-    if g.error.is_none() {
-        g.error = Some(exception);
+    if g.data.error.is_none() {
+        g.data.error = Some(exception);
     } else {
         // SAFETY: ours.
         unsafe { qjs::JS_FreeValue(ctx, exception) };
@@ -415,364 +274,6 @@ fn call(ctx: *mut JsContext, f: JsValue, args: &mut [JsValue]) -> Result<JsValue
     }
 }
 
-/// Solid's `runUpdates`: runs `f`, then the queued computations and
-/// effects (unless a round is running already: they join it). `init` (a
-/// root, `runWithOwner`): what `f` makes runs at once rather than queued;
-/// only effects wait for the end.
-fn run_updates<R>(ctx: *mut JsContext, init: bool, f: impl FnOnce() -> R) -> R {
-    // SAFETY: short borrows, none across `f`.
-    let g = unsafe { graph(ctx) };
-    if g.updates.is_some() {
-        return f();
-    }
-    if !init {
-        g.updates = Some(Vec::new());
-    }
-    let wait = if g.effects.is_some() {
-        true
-    } else {
-        g.effects = Some(Vec::new());
-        false
-    };
-    g.exec += 1;
-    let r = f();
-    complete_updates(ctx, wait);
-    r
-}
-
-/// Solid's `completeUpdates`.
-fn complete_updates(ctx: *mut JsContext, wait: bool) {
-    let mut i = 0;
-    loop {
-        // SAFETY: short borrows.
-        let g = unsafe { graph(ctx) };
-        let Some(next) = g.updates.as_ref().and_then(|q| q.get(i).copied()) else {
-            break;
-        };
-        i += 1;
-        if !count_run(ctx) {
-            break;
-        }
-        run_top(ctx, next);
-    }
-    // SAFETY: short borrow.
-    let g = unsafe { graph(ctx) };
-    g.updates = None;
-    if wait {
-        return;
-    }
-    let effects = g.effects.take().unwrap_or_default();
-    if !effects.is_empty() {
-        run_updates(ctx, false, || run_effects(ctx, &effects));
-    }
-}
-
-/// Counts a run; false (with an error) once a flush runs away.
-fn count_run(ctx: *mut JsContext) -> bool {
-    // SAFETY: short borrow.
-    let g = unsafe { graph(ctx) };
-    g.runs += 1;
-    if g.runs <= MAX_RUNS {
-        return true;
-    }
-    g.updates = Some(Vec::new());
-    g.effects = None;
-    if g.error.is_none() {
-        let message = c"potential infinite loop: an effect keeps changing what it reads";
-        // SAFETY: a new error object.
-        unsafe {
-            let error = qjs::JS_NewError(ctx);
-            let bytes = message.to_bytes();
-            let text = qjs::JS_NewStringLen(ctx, bytes.as_ptr().cast(), bytes.len() as _);
-            qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), text);
-            g.error = Some(error);
-        }
-    }
-    false
-}
-
-/// Solid's `runEffects` with user effects after the render effects.
-fn run_effects(ctx: *mut JsContext, effects: &[u32]) {
-    for user in [false, true] {
-        for &e in effects {
-            // SAFETY: short borrow.
-            let kind = unsafe { graph(ctx) }.nodes[e as usize].kind;
-            if (kind == Kind::UserEffect) == user && count_run(ctx) {
-                run_top(ctx, e);
-            }
-        }
-    }
-}
-
-/// Solid's `runTop`: updates the node, its stale owners first.
-fn run_top(ctx: *mut JsContext, id: u32) {
-    // SAFETY: short borrows, none across JS.
-    let g = unsafe { graph(ctx) };
-    let node = &g.nodes[id as usize];
-    if node.state == CLEAN || node.disposed || !node.is_computation() {
-        return;
-    }
-    if node.state == PENDING {
-        return look_upstream(ctx, id, NONE);
-    }
-    let exec = g.exec;
-    let mut ancestors = vec![id];
-    let mut at = node.owner;
-    while at != NONE && at != UNOWNED {
-        let n = &g.nodes[at as usize];
-        if n.updated_at.is_some_and(|t| t >= exec) {
-            break;
-        }
-        if n.state != CLEAN && n.is_computation() {
-            ancestors.push(at);
-        }
-        at = n.owner;
-    }
-    for &node in ancestors.iter().rev() {
-        // SAFETY: short borrow.
-        let n = &unsafe { graph(ctx) }.nodes[node as usize];
-        if n.disposed {
-            continue;
-        }
-        if n.state == STALE {
-            update_computation(ctx, node);
-        } else if n.state == PENDING {
-            let g = unsafe { graph(ctx) };
-            let updates = g.updates.take();
-            run_updates(ctx, false, || look_upstream(ctx, node, ancestors[0]));
-            // SAFETY: short borrow.
-            unsafe { graph(ctx) }.updates = updates;
-        }
-    }
-}
-
-/// Solid's `lookUpstream`: brings the stale memos `id` reads up to date.
-fn look_upstream(ctx: *mut JsContext, id: u32, ignore: u32) {
-    // SAFETY: short borrows, none across JS.
-    unsafe { graph(ctx) }.nodes[id as usize].state = CLEAN;
-    let mut i = 0;
-    loop {
-        let g = unsafe { graph(ctx) };
-        let Some(&(source, _)) = g.nodes[id as usize].sources.get(i) else {
-            break;
-        };
-        i += 1;
-        let s = &g.nodes[source as usize];
-        if s.kind != Kind::Memo {
-            continue;
-        }
-        if s.state == STALE {
-            if source != ignore && s.updated_at.is_none_or(|t| t < g.exec) {
-                run_top(ctx, source);
-            }
-        } else if s.state == PENDING {
-            look_upstream(ctx, source, ignore);
-        }
-    }
-}
-
-/// Solid's `updateComputation`: cleans the node and runs it again.
-fn update_computation(ctx: *mut JsContext, id: u32) {
-    // SAFETY: short borrow.
-    let g = unsafe { graph(ctx) };
-    if g.nodes[id as usize].disposed || g.nodes[id as usize].kind == Kind::Free {
-        return;
-    }
-    clean_node(ctx, id);
-    let exec = unsafe { graph(ctx) }.exec;
-    run_computation(ctx, id, exec);
-}
-
-/// Solid's `runComputation`.
-fn run_computation(ctx: *mut JsContext, id: u32, time: u64) {
-    // SAFETY: short borrows, none across JS.
-    let g = unsafe { graph(ctx) };
-    let n = &g.nodes[id as usize];
-    // SAFETY: dups of values the node keeps.
-    let (func, prev) = unsafe {
-        (
-            qjs::JS_DupValue(ctx, n.func),
-            qjs::JS_DupValue(ctx, n.value),
-        )
-    };
-    let (listener, owner) = (g.listener, g.owner);
-    g.listener = id;
-    g.owner = id;
-    let mut args = [prev];
-    let result = call(ctx, func, &mut args);
-    // SAFETY: our dups.
-    unsafe {
-        qjs::JS_FreeValue(ctx, func);
-        qjs::JS_FreeValue(ctx, args[0]);
-    }
-    let g = unsafe { graph(ctx) };
-    g.listener = listener;
-    g.owner = owner;
-    let Ok(next) = result else {
-        let n = &mut g.nodes[id as usize];
-        if n.kind == Kind::Memo {
-            n.state = STALE;
-            let owned = std::mem::take(&mut n.owned);
-            for c in owned {
-                dispose(ctx, c);
-            }
-        }
-        unsafe { graph(ctx) }.nodes[id as usize].updated_at = Some(time + 1);
-        return;
-    };
-    let n = &mut g.nodes[id as usize];
-    if n.disposed {
-        // Disposed while running (its owner re-ran).
-        unsafe { qjs::JS_FreeValue(ctx, next) };
-        return;
-    }
-    if n.updated_at.is_none_or(|t| t <= time) {
-        let notify = n.updated_at.is_some() && n.kind == Kind::Memo;
-        n.updated_at = Some(time);
-        if notify {
-            write(ctx, id, next);
-        } else {
-            let old = std::mem::replace(&mut n.value, next);
-            // SAFETY: the node's previous value; the borrow ended.
-            unsafe { qjs::JS_FreeValue(ctx, old) };
-        }
-    } else {
-        unsafe { qjs::JS_FreeValue(ctx, next) };
-    }
-}
-
-/// Whether `next` counts as a change from node `id`'s value.
-fn changed(ctx: *mut JsContext, id: u32, next: JsValue) -> bool {
-    // SAFETY: short borrows, none across JS.
-    let n = &unsafe { graph(ctx) }.nodes[id as usize];
-    match n.equals {
-        Equals::Strict => !unsafe { qjs::JS_IsStrictEqual(ctx, n.value, next) },
-        Equals::Never => true,
-        Equals::Truthiness => unsafe {
-            (qjs::JS_ToBool(ctx, n.value) == 1) != (qjs::JS_ToBool(ctx, next) == 1)
-        },
-        Equals::Custom(f) => {
-            let (f, prev) = unsafe { (qjs::JS_DupValue(ctx, f), qjs::JS_DupValue(ctx, n.value)) };
-            let mut args = [prev, unsafe { qjs::JS_DupValue(ctx, next) }];
-            let r = call(ctx, f, &mut args);
-            unsafe {
-                qjs::JS_FreeValue(ctx, f);
-                qjs::JS_FreeValue(ctx, args[0]);
-                qjs::JS_FreeValue(ctx, args[1]);
-            }
-            match r {
-                Ok(same) => {
-                    let same = unsafe { qjs::JS_ToBool(ctx, same) } == 1;
-                    !same
-                }
-                Err(()) => true,
-            }
-        }
-    }
-}
-
-/// Solid's `writeSignal`: takes `next` (owned).
-fn write(ctx: *mut JsContext, id: u32, next: JsValue) {
-    if !changed(ctx, id, next) {
-        // SAFETY: owned.
-        unsafe { qjs::JS_FreeValue(ctx, next) };
-        return;
-    }
-    // SAFETY: short borrows, none across JS or a free.
-    let g = unsafe { graph(ctx) };
-    let old = std::mem::replace(&mut g.nodes[id as usize].value, next);
-    let observed = !g.nodes[id as usize].observers.is_empty();
-    unsafe { qjs::JS_FreeValue(ctx, old) };
-    if !observed {
-        return;
-    }
-    run_updates(ctx, false, || {
-        let g = unsafe { graph(ctx) };
-        let mut i = 0;
-        while i < g.nodes[id as usize].observers.len() {
-            let o = g.nodes[id as usize].observers[i].0;
-            i += 1;
-            if g.nodes[o as usize].disposed {
-                continue;
-            }
-            if g.nodes[o as usize].state == CLEAN {
-                if g.nodes[o as usize].kind == Kind::Memo {
-                    g.queue_update(o);
-                } else {
-                    g.queue_effect(o);
-                }
-                if !g.nodes[o as usize].observers.is_empty() {
-                    g.mark_downstream(o);
-                }
-            }
-            g.nodes[o as usize].state = STALE;
-        }
-    });
-}
-
-/// Solid's `readSignal`: brings a memo up to date, tracks, and returns a
-/// dup of the value.
-fn read(ctx: *mut JsContext, id: u32) -> JsValue {
-    // SAFETY: short borrows, none across JS.
-    let g = unsafe { graph(ctx) };
-    let n = &g.nodes[id as usize];
-    if n.kind == Kind::Memo && !n.disposed && n.state != CLEAN {
-        if n.state == STALE {
-            update_computation(ctx, id);
-        } else {
-            let g = unsafe { graph(ctx) };
-            let updates = g.updates.take();
-            run_updates(ctx, false, || look_upstream(ctx, id, NONE));
-            unsafe { graph(ctx) }.updates = updates;
-        }
-    }
-    let g = unsafe { graph(ctx) };
-    if !g.nodes[id as usize].disposed {
-        g.track(id);
-    }
-    unsafe { qjs::JS_DupValue(ctx, g.nodes[id as usize].value) }
-}
-
-/// Solid's `cleanNode`: unlinks the node's sources, disposes what it owns
-/// and runs its cleanups.
-fn clean_node(ctx: *mut JsContext, id: u32) {
-    // SAFETY: short borrows, none across JS.
-    let g = unsafe { graph(ctx) };
-    g.unlink_sources(id);
-    while let Some(c) = unsafe { graph(ctx) }.nodes[id as usize].owned.pop() {
-        dispose(ctx, c);
-    }
-    while let Some(f) = unsafe { graph(ctx) }.nodes[id as usize].cleanups.pop() {
-        let _ = call(ctx, f, &mut []).map(|r| unsafe { qjs::JS_FreeValue(ctx, r) });
-        unsafe { qjs::JS_FreeValue(ctx, f) };
-    }
-    unsafe { graph(ctx) }.nodes[id as usize].state = CLEAN;
-}
-
-/// Disposes node `id`: cleans it, unlinks it and frees it (a memo with an
-/// object keeps its value until the object goes).
-fn dispose(ctx: *mut JsContext, id: u32) {
-    // SAFETY: short borrows, none across JS.
-    let g = unsafe { graph(ctx) };
-    if g.nodes[id as usize].disposed {
-        return;
-    }
-    clean_node(ctx, id);
-    let g = unsafe { graph(ctx) };
-    g.unlink_observers(id);
-    let n = &mut g.nodes[id as usize];
-    n.disposed = true;
-    n.state = CLEAN;
-    if n.handle {
-        let func = std::mem::replace(&mut n.func, UNDEFINED);
-        let context = n.context.take();
-        unsafe { qjs::JS_FreeValue(ctx, func) };
-        drop(context);
-    } else {
-        g.release(id).free(ctx);
-    }
-}
-
 // --- The JS objects -------------------------------------------------------
 
 /// The node a signal / setter / memo object names, if it is still live.
@@ -783,7 +284,9 @@ unsafe fn node_of(ctx: *mut JsContext, obj: JsValue, class: qjs::JSClassID) -> O
         return None;
     }
     let (id, generation) = unpack(p);
-    unsafe { graph(ctx) }.live(id, generation).then_some(id)
+    unsafe { graph(ctx) }
+        .live(id, generation, GENERATION_MASK)
+        .then_some(id)
 }
 
 unsafe extern "C" fn signal_call(
@@ -794,12 +297,12 @@ unsafe extern "C" fn signal_call(
     _argv: *mut JsValue,
     _flags: c_int,
 ) -> JsValue {
-    let class = unsafe { graph(ctx) }.classes.signal;
-    let memo = unsafe { graph(ctx) }.classes.memo;
-    let id = unsafe { node_of(ctx, func, class).or_else(|| node_of(ctx, func, memo)) };
+    let classes = unsafe { graph(ctx) }.data.classes;
+    let id =
+        unsafe { node_of(ctx, func, classes.signal).or_else(|| node_of(ctx, func, classes.memo)) };
     match id {
         Some(id) => {
-            let value = read(ctx, id);
+            let value = r::read(Js(ctx), id);
             finish(ctx, value)
         }
         None => UNDEFINED,
@@ -814,7 +317,7 @@ unsafe extern "C" fn setter_call(
     argv: *mut JsValue,
     _flags: c_int,
 ) -> JsValue {
-    let class = unsafe { graph(ctx) }.classes.setter;
+    let class = unsafe { graph(ctx) }.data.classes.setter;
     let Some(id) = (unsafe { node_of(ctx, func, class) }) else {
         return UNDEFINED;
     };
@@ -825,7 +328,7 @@ unsafe extern "C" fn setter_call(
     };
     // An updater gets the previous value.
     if unsafe { qjs::JS_IsFunction(ctx, value) } {
-        let prev = unsafe { qjs::JS_DupValue(ctx, graph(ctx).nodes[id as usize].value) };
+        let prev = unsafe { qjs::JS_DupValue(ctx, *graph(ctx).value(id)) };
         let mut args = [prev];
         let r = unsafe { qjs::JS_Call(ctx, value, UNDEFINED, 1, args.as_mut_ptr()) };
         unsafe {
@@ -838,7 +341,7 @@ unsafe extern "C" fn setter_call(
         value = r;
     }
     let returned = unsafe { qjs::JS_DupValue(ctx, value) };
-    write(ctx, id, value);
+    r::write(Js(ctx), id, value);
     finish(ctx, returned)
 }
 
@@ -846,12 +349,12 @@ unsafe extern "C" fn setter_call(
 fn finish(ctx: *mut JsContext, value: JsValue) -> JsValue {
     // SAFETY: short borrow.
     let g = unsafe { graph(ctx) };
-    if g.updates.is_some() {
+    if g.in_round() {
         // Still in a round: its end throws.
         return value;
     }
-    g.runs = 0;
-    match g.error.take() {
+    g.reset_runs();
+    match g.data.error.take() {
         Some(error) => unsafe {
             qjs::JS_FreeValue(ctx, value);
             qjs::JS_Throw(ctx, error)
@@ -865,7 +368,7 @@ unsafe extern "C" fn finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
         return;
     };
     let class = unsafe { qjs::JS_GetClassID(obj) };
-    if class == g.classes.setter {
+    if class == g.data.classes.setter {
         return;
     }
     let p = unsafe { qjs::JS_GetOpaque(obj, class) };
@@ -873,15 +376,13 @@ unsafe extern "C" fn finalize(rt: *mut qjs::JSRuntime, obj: JsValue) {
         return;
     }
     let (id, generation) = unpack(p);
-    if !g.live(id, generation) {
+    if !g.live(id, generation, GENERATION_MASK) {
         return;
     }
-    let n = &mut g.nodes[id as usize];
-    n.handle = false;
-    if n.kind == Kind::Signal || n.disposed {
-        g.unlink_observers(id);
-        // Freed now, as QuickJS's cycle collection expects of finalizers.
-        g.release(id).free(g.ctx);
+    let ctx = g.data.ctx;
+    // Freed now, as QuickJS's cycle collection expects of finalizers.
+    if let Some(held) = g.drop_handle(id) {
+        held.free(Js(ctx));
     }
 }
 
@@ -895,11 +396,10 @@ unsafe extern "C" fn gc_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark: qjs::J
         return;
     }
     let (id, generation) = unpack(p);
-    if g.live(id, generation) {
-        let n = &g.nodes[id as usize];
-        unsafe { qjs::JS_MarkValue(rt, n.value, mark) };
-        if let Equals::Custom(f) = n.equals {
-            unsafe { qjs::JS_MarkValue(rt, f, mark) };
+    if g.live(id, generation, GENERATION_MASK) {
+        unsafe { qjs::JS_MarkValue(rt, *g.value(id), mark) };
+        if let Some(f) = g.custom_equals(id) {
+            unsafe { qjs::JS_MarkValue(rt, *f, mark) };
         }
     }
 }
@@ -908,7 +408,7 @@ unsafe extern "C" fn gc_mark(rt: *mut qjs::JSRuntime, obj: JsValue, mark: qjs::J
 fn object(ctx: *mut JsContext, class: qjs::JSClassID, id: u32) -> JsValue {
     // SAFETY: a registered class; the opaque is a packed handle.
     unsafe {
-        let generation = graph(ctx).nodes[id as usize].generation;
+        let generation = graph(ctx).generation(id);
         let obj = qjs::JS_NewObjectClass(ctx, class);
         qjs::JS_SetOpaque(obj, pack(id, generation));
         obj
@@ -927,11 +427,11 @@ pub(crate) fn arg(argc: c_int, argv: *mut JsValue, i: usize) -> JsValue {
 }
 
 /// `equals` of an options object.
-fn equals_option(ctx: *mut JsContext, options: JsValue) -> Equals {
+fn equals_option(ctx: *mut JsContext, options: JsValue) -> Equals<JsValue> {
     // SAFETY: reading a property of a live value.
     unsafe {
         if !qjs::JS_IsObject(options) {
-            return Equals::Strict;
+            return Equals::Default;
         }
         let e = qjs::JS_GetPropertyStr(ctx, options, c"equals".as_ptr());
         if qjs::JS_IsFunction(ctx, e) {
@@ -939,13 +439,24 @@ fn equals_option(ctx: *mut JsContext, options: JsValue) -> Equals {
         } else {
             let never = qjs::JS_IsBool(e) && !qjs::JS_VALUE_GET_BOOL(e);
             qjs::JS_FreeValue(ctx, e);
-            if never { Equals::Never } else { Equals::Strict }
+            if never {
+                Equals::Never
+            } else {
+                Equals::Default
+            }
         }
     }
 }
 
 pub(crate) type Native =
     unsafe extern "C" fn(*mut JsContext, JsValue, c_int, *mut JsValue) -> JsValue;
+
+/// A new signal node holding `value` (borrowed), with `options`' equality.
+fn new_signal_node(ctx: *mut JsContext, value: JsValue, options: JsValue) -> u32 {
+    let value = unsafe { qjs::JS_DupValue(ctx, value) };
+    let equals = equals_option(ctx, options);
+    unsafe { graph(ctx) }.signal(value, equals)
+}
 
 /// `createSignal(value, options)`: `[read, write]`.
 #[cfg(test)]
@@ -955,16 +466,8 @@ unsafe extern "C" fn create_signal(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let g = unsafe { graph(ctx) };
-    let id = g.alloc(Kind::Signal);
-    let value = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 0)) };
-    let equals = equals_option(ctx, arg(argc, argv, 1));
-    let g = unsafe { graph(ctx) };
-    let n = &mut g.nodes[id as usize];
-    n.value = value;
-    n.equals = equals;
-    n.handle = true;
-    let classes = g.classes;
+    let id = new_signal_node(ctx, arg(argc, argv, 0), arg(argc, argv, 1));
+    let classes = unsafe { graph(ctx) }.data.classes;
     let mut pair = [
         object(ctx, classes.signal, id),
         object(ctx, classes.setter, id),
@@ -986,14 +489,9 @@ unsafe extern "C" fn create_memo(
         )
     };
     let equals = equals_option(ctx, arg(argc, argv, 2));
-    let g = unsafe { graph(ctx) };
-    let id = g.computation(Kind::Memo, func, value, STALE);
-    g.nodes[id as usize].equals = equals;
-    g.nodes[id as usize].handle = true;
-    let obj = object(ctx, g.classes.memo, id);
-    // At once, inside a round too: what is made while rendering reads it
-    // right away (as in Solid without transitions).
-    update_computation(ctx, id);
+    let id = r::memo(Js(ctx), func, value, equals, true);
+    let class = unsafe { graph(ctx) }.data.classes.memo;
+    let obj = object(ctx, class, id);
     finish(ctx, obj)
 }
 
@@ -1004,20 +502,7 @@ fn create_effect(ctx: *mut JsContext, argc: c_int, argv: *mut JsValue, kind: Kin
             qjs::JS_DupValue(ctx, arg(argc, argv, 1)),
         )
     };
-    let g = unsafe { graph(ctx) };
-    let id = g.computation(kind, func, value, STALE);
-    if kind == Kind::UserEffect {
-        // After the render effects of the round, or now outside one.
-        if g.effects.is_some() {
-            g.queue_effect(id);
-        } else {
-            update_computation(ctx, id);
-        }
-    } else {
-        // A render effect runs at once, inside a round too: a provider
-        // returns what its effect rendered.
-        update_computation(ctx, id);
-    }
+    r::effect(Js(ctx), kind, func, value);
     finish(ctx, UNDEFINED)
 }
 
@@ -1057,13 +542,11 @@ fn owner_of(ctx: *mut JsContext, handle: JsValue) -> Option<u32> {
         let bits = v as u64;
         let (id, generation) = (bits as u32, (bits >> 32) as u32);
         let g = graph(ctx);
-        Some(
-            if g.live(id, generation) && !g.nodes[id as usize].disposed {
-                id
-            } else {
-                UNOWNED
-            },
-        )
+        Some(if g.live(id, generation, u32::MAX) && !g.disposed(id) {
+            id
+        } else {
+            UNOWNED
+        })
     }
 }
 
@@ -1079,10 +562,7 @@ unsafe extern "C" fn dispose_root(
     let handle = unsafe { *data };
     if let Some(id) = owner_of(ctx, handle).filter(|&id| id != UNOWNED) {
         // Untracked: disposing reads nothing.
-        let g = unsafe { graph(ctx) };
-        let listener = std::mem::replace(&mut g.listener, NONE);
-        dispose(ctx, id);
-        unsafe { graph(ctx) }.listener = listener;
+        r::dispose_owner(Js(ctx), id);
     }
     finish(ctx, UNDEFINED)
 }
@@ -1098,8 +578,6 @@ unsafe extern "C" fn create_root(
 ) -> JsValue {
     let func = arg(argc, argv, 0);
     let detached = owner_of(ctx, arg(argc, argv, 1));
-    let g = unsafe { graph(ctx) };
-    let current = detached.unwrap_or(g.owner);
     let mut length = 0i32;
     unsafe {
         let l = qjs::JS_GetPropertyStr(ctx, func, c"length".as_ptr());
@@ -1110,40 +588,33 @@ unsafe extern "C" fn create_root(
         (UNOWNED, Vec::new())
     } else {
         let g = unsafe { graph(ctx) };
-        let id = g.alloc(Kind::Root);
-        let context = g.context_of(current);
-        let n = &mut g.nodes[id as usize];
-        n.owner = current;
-        n.context = context;
+        let previous = detached.map(|owner| g.set_owner(owner));
+        let id = g.root();
+        if let Some(previous) = previous {
+            g.set_owner(previous);
+        }
         let mut data = [handle_value(ctx, id)];
         let dispose = unsafe {
             qjs::JS_NewCFunctionData(ctx, Some(dispose_root), 0, 0, 1, data.as_mut_ptr())
         };
         (id, vec![dispose])
     };
-    let g = unsafe { graph(ctx) };
-    let (listener, owner) = (g.listener, g.owner);
-    g.owner = root;
-    g.listener = NONE;
     let mut args = args;
     let func = unsafe { qjs::JS_DupValue(ctx, func) };
-    let result = run_updates(ctx, true, || call(ctx, func, &mut args));
+    let result = r::with_owner(Js(ctx), root, || call(ctx, func, &mut args));
     unsafe {
         qjs::JS_FreeValue(ctx, func);
         for a in args {
             qjs::JS_FreeValue(ctx, a);
         }
     }
-    let g = unsafe { graph(ctx) };
-    g.listener = listener;
-    g.owner = owner;
     finish(ctx, result.unwrap_or(UNDEFINED))
 }
 
 /// An owner handle: a number packing the node and its generation.
 #[cfg(test)]
 fn handle_value(ctx: *mut JsContext, id: u32) -> JsValue {
-    let generation = unsafe { graph(ctx) }.nodes[id as usize].generation;
+    let generation = unsafe { graph(ctx) }.generation(id);
     qjs::JS_NewFloat64((((generation as u64) << 32) | id as u64) as f64)
 }
 
@@ -1154,11 +625,9 @@ pub(crate) unsafe extern "C" fn untrack(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let g = unsafe { graph(ctx) };
-    let listener = std::mem::replace(&mut g.listener, NONE);
-    let r = unsafe { qjs::JS_Call(ctx, arg(argc, argv, 0), UNDEFINED, 0, ptr::null_mut()) };
-    unsafe { graph(ctx) }.listener = listener;
-    r
+    r::untracked(Js(ctx), || unsafe {
+        qjs::JS_Call(ctx, arg(argc, argv, 0), UNDEFINED, 0, ptr::null_mut())
+    })
 }
 
 /// `batch(fn)`.
@@ -1169,7 +638,7 @@ pub(crate) unsafe extern "C" fn batch(
     argv: *mut JsValue,
 ) -> JsValue {
     let func = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 0)) };
-    let r = run_updates(ctx, false, || call(ctx, func, &mut []));
+    let r = r::batch(Js(ctx), || call(ctx, func, &mut []));
     unsafe { qjs::JS_FreeValue(ctx, func) };
     finish(ctx, r.unwrap_or(UNDEFINED))
 }
@@ -1182,10 +651,9 @@ pub(crate) unsafe extern "C" fn on_cleanup(
     argv: *mut JsValue,
 ) -> JsValue {
     let f = arg(argc, argv, 0);
-    let g = unsafe { graph(ctx) };
-    if g.owner != NONE && g.owner != UNOWNED {
-        let f = unsafe { qjs::JS_DupValue(ctx, f) };
-        g.nodes[g.owner as usize].cleanups.push(f);
+    let owned = unsafe { qjs::JS_DupValue(ctx, f) };
+    if let Err(owned) = unsafe { graph(ctx) }.on_cleanup(owned) {
+        unsafe { qjs::JS_FreeValue(ctx, owned) };
     }
     unsafe { qjs::JS_DupValue(ctx, f) }
 }
@@ -1198,7 +666,7 @@ unsafe extern "C" fn get_owner(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let owner = unsafe { graph(ctx) }.owner;
+    let owner = unsafe { graph(ctx) }.owner();
     if owner == NONE || owner == UNOWNED {
         UNDEFINED
     } else {
@@ -1215,16 +683,9 @@ unsafe extern "C" fn run_with_owner(
     argv: *mut JsValue,
 ) -> JsValue {
     let owner = owner_of(ctx, arg(argc, argv, 0)).unwrap_or(UNOWNED);
-    let g = unsafe { graph(ctx) };
-    let (prev_owner, prev_listener) = (g.owner, g.listener);
-    g.owner = owner;
-    g.listener = NONE;
     let func = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 1)) };
-    let r = run_updates(ctx, true, || call(ctx, func, &mut []));
+    let r = r::with_owner(Js(ctx), owner, || call(ctx, func, &mut []));
     unsafe { qjs::JS_FreeValue(ctx, func) };
-    let g = unsafe { graph(ctx) };
-    g.owner = prev_owner;
-    g.listener = prev_listener;
     finish(ctx, r.unwrap_or(UNDEFINED))
 }
 
@@ -1236,23 +697,30 @@ unsafe extern "C" fn set_context(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let g = unsafe { graph(ctx) };
-    let owner = g.owner;
-    if owner == NONE || owner == UNOWNED {
-        return UNDEFINED;
-    }
-    let parent = g.nodes[owner as usize].context.clone();
     let frame = unsafe {
-        Frame {
-            parent,
+        JsFrame {
             key: qjs::JS_DupValue(ctx, arg(argc, argv, 0)),
             value: qjs::JS_DupValue(ctx, arg(argc, argv, 1)),
             ctx,
         }
     };
-    let old = g.nodes[owner as usize].context.replace(Rc::new(frame));
-    drop(old);
+    // The frame replaced (or the new one, without an owner) is dropped
+    // once the graph is no longer borrowed.
+    let replaced = unsafe { graph(ctx) }.provide(frame);
+    drop(replaced);
     UNDEFINED
+}
+
+/// The value of `key` in the current owner's context (owned), if set.
+pub(crate) fn lookup(ctx: *mut JsContext, key: JsValue) -> Option<JsValue> {
+    let mut frame = unsafe { graph(ctx) }.context();
+    while let Some(f) = frame {
+        if unsafe { qjs::JS_IsStrictEqual(ctx, f.data.key, key) } {
+            return Some(unsafe { qjs::JS_DupValue(ctx, f.data.value) });
+        }
+        frame = f.parent.clone();
+    }
+    None
 }
 
 /// `useContext(key)`: the nearest value set for `key`, or `undefined`.
@@ -1263,107 +731,71 @@ unsafe extern "C" fn use_context(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let key = arg(argc, argv, 0);
-    let g = unsafe { graph(ctx) };
-    let mut frame = g.context_of(g.owner);
-    while let Some(f) = frame {
-        if unsafe { qjs::JS_IsStrictEqual(ctx, f.key, key) } {
-            return unsafe { qjs::JS_DupValue(ctx, f.value) };
-        }
-        frame = f.parent.clone();
-    }
-    UNDEFINED
+    lookup(ctx, arg(argc, argv, 0)).unwrap_or(UNDEFINED)
 }
 
-impl Graph {
-    /// A graph for context `raw`, with its classes registered.
-    pub(crate) fn new(raw: *mut JsContext) -> Graph {
-        // SAFETY: registering classes on the context's runtime.
-        unsafe {
-            let rt = qjs::JS_GetRuntime(raw);
-            let function_proto = qjs::JS_GetFunctionProto(raw);
-            let class =
-                |name: &'static CStr, call: qjs::JSClassCall, mark: bool, proto: JsValue| {
-                    let mut id: qjs::JSClassID = 0;
-                    qjs::JS_NewClassID(rt, &mut id);
-                    let def = qjs::JSClassDef {
-                        class_name: name.as_ptr(),
-                        finalizer: Some(finalize),
-                        gc_mark: if mark { Some(gc_mark) } else { None },
-                        call,
-                        exotic: ptr::null_mut(),
-                    };
-                    qjs::JS_NewClass(rt, id, &def);
-                    // Calls of their objects are function calls (`typeof` is
-                    // "function"); `proto` is taken.
-                    qjs::JS_SetClassProto(raw, id, proto);
-                    id
-                };
-            // A signal's methods: `count.set(1)`, `count.update(n => n + 1)`.
-            let signal_proto = qjs::JS_NewObjectProto(raw, function_proto);
-            for (name, f, length) in [
-                (c"set", signal_set as Native, 1),
-                (c"update", signal_update as Native, 1),
-            ] {
-                let func = new_function(raw, name, f, length);
-                qjs::JS_SetPropertyStr(raw, signal_proto, name.as_ptr(), func);
-            }
-            let classes = Classes {
-                signal: class(c"Signal", Some(signal_call), true, signal_proto),
-                setter: class(
-                    c"SignalSetter",
-                    Some(setter_call),
-                    false,
-                    qjs::JS_DupValue(raw, function_proto),
-                ),
-                memo: class(
-                    c"Memo",
-                    Some(signal_call),
-                    true,
-                    qjs::JS_DupValue(raw, function_proto),
-                ),
+/// A graph for context `raw`, with its classes registered.
+pub(crate) fn new_graph(raw: *mut JsContext) -> Graph {
+    // SAFETY: registering classes on the context's runtime.
+    unsafe {
+        let rt = qjs::JS_GetRuntime(raw);
+        let function_proto = qjs::JS_GetFunctionProto(raw);
+        let class = |name: &'static CStr, call: qjs::JSClassCall, mark: bool, proto: JsValue| {
+            let mut id: qjs::JSClassID = 0;
+            qjs::JS_NewClassID(rt, &mut id);
+            let def = qjs::JSClassDef {
+                class_name: name.as_ptr(),
+                finalizer: Some(finalize),
+                gc_mark: if mark { Some(gc_mark) } else { None },
+                call,
+                exotic: ptr::null_mut(),
             };
-            qjs::JS_FreeValue(raw, function_proto);
-            Graph {
-                ctx: raw,
-                classes,
-                nodes: Vec::new(),
-                free: Vec::new(),
-                listener: NONE,
-                owner: NONE,
-                updates: None,
-                effects: None,
-                exec: 0,
-                runs: 0,
-                error: None,
-            }
+            qjs::JS_NewClass(rt, id, &def);
+            // Calls of their objects are function calls (`typeof` is
+            // "function"); `proto` is taken.
+            qjs::JS_SetClassProto(raw, id, proto);
+            id
+        };
+        // A signal's methods: `count.set(1)`, `count.update(n => n + 1)`.
+        let signal_proto = qjs::JS_NewObjectProto(raw, function_proto);
+        for (name, f, length) in [
+            (c"set", signal_set as Native, 1),
+            (c"update", signal_update as Native, 1),
+        ] {
+            let func = new_function(raw, name, f, length);
+            qjs::JS_SetPropertyStr(raw, signal_proto, name.as_ptr(), func);
         }
+        let classes = Classes {
+            signal: class(c"Signal", Some(signal_call), true, signal_proto),
+            setter: class(
+                c"SignalSetter",
+                Some(setter_call),
+                false,
+                qjs::JS_DupValue(raw, function_proto),
+            ),
+            memo: class(
+                c"Memo",
+                Some(signal_call),
+                true,
+                qjs::JS_DupValue(raw, function_proto),
+            ),
+        };
+        qjs::JS_FreeValue(raw, function_proto);
+        Graph::new(JsData {
+            ctx: raw,
+            classes,
+            error: None,
+        })
     }
+}
 
-    /// Frees every JS value the graph holds (the state is unregistered:
-    /// finalizers that run meanwhile leave the graph alone).
-    pub(crate) fn free_all(&mut self, raw: *mut JsContext) {
-        // SAFETY: the graph's own values; no JS runs from here on.
-        unsafe {
-            for n in &mut self.nodes {
-                if n.kind == Kind::Free {
-                    continue;
-                }
-                qjs::JS_FreeValue(raw, std::mem::replace(&mut n.value, UNDEFINED));
-                qjs::JS_FreeValue(raw, std::mem::replace(&mut n.func, UNDEFINED));
-                if let Equals::Custom(f) = std::mem::replace(&mut n.equals, Equals::Strict) {
-                    qjs::JS_FreeValue(raw, f);
-                }
-                for f in n.cleanups.drain(..) {
-                    qjs::JS_FreeValue(raw, f);
-                }
-                n.context = None;
-                n.kind = Kind::Free;
-            }
-            if let Some(e) = self.error.take() {
-                qjs::JS_FreeValue(raw, e);
-            }
-        }
+/// Frees every JS value the graph holds (the state is unregistered:
+/// finalizers that run meanwhile leave the graph alone).
+pub(crate) fn free_all(graph: &mut Graph, raw: *mut JsContext) {
+    graph.free_all(Js(raw));
+    if let Some(e) = graph.data.error.take() {
+        // SAFETY: the graph's own value; no JS runs from here on.
+        unsafe { qjs::JS_FreeValue(raw, e) };
     }
 }
 
@@ -1424,9 +856,9 @@ unsafe extern "C" fn is_accessor(
     argv: *mut JsValue,
 ) -> JsValue {
     let v = arg(argc, argv, 0);
-    let g = unsafe { graph(ctx) };
+    let classes = unsafe { graph(ctx) }.data.classes;
     let class = unsafe { qjs::JS_GetClassID(v) };
-    let yes = class == g.classes.signal || class == g.classes.memo;
+    let yes = class == classes.signal || class == classes.memo;
     if yes { qjs::JS_TRUE } else { qjs::JS_FALSE }
 }
 
@@ -1439,21 +871,14 @@ pub(crate) unsafe extern "C" fn signal(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let g = unsafe { graph(ctx) };
-    let id = g.alloc(Kind::Signal);
-    let value = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 0)) };
-    let equals = equals_option(ctx, arg(argc, argv, 1));
-    let g = unsafe { graph(ctx) };
-    let n = &mut g.nodes[id as usize];
-    n.value = value;
-    n.equals = equals;
-    n.handle = true;
-    object(ctx, g.classes.signal, id)
+    let id = new_signal_node(ctx, arg(argc, argv, 0), arg(argc, argv, 1));
+    let class = unsafe { graph(ctx) }.data.classes.signal;
+    object(ctx, class, id)
 }
 
 /// The signal `this` names, or a thrown `TypeError`.
 fn this_signal(ctx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
-    let class = unsafe { graph(ctx) }.classes.signal;
+    let class = unsafe { graph(ctx) }.data.classes.signal;
     match unsafe { node_of(ctx, this, class) } {
         Some(id) => Ok(id),
         // SAFETY: throwing on a live context.
@@ -1473,7 +898,7 @@ unsafe extern "C" fn signal_set(
         Err(e) => return e,
     };
     let value = unsafe { qjs::JS_DupValue(ctx, arg(argc, argv, 0)) };
-    write(ctx, id, value);
+    r::write(Js(ctx), id, value);
     finish(ctx, UNDEFINED)
 }
 
@@ -1489,7 +914,7 @@ unsafe extern "C" fn signal_update(
         Err(e) => return e,
     };
     let f = arg(argc, argv, 0);
-    let prev = unsafe { qjs::JS_DupValue(ctx, graph(ctx).nodes[id as usize].value) };
+    let prev = unsafe { qjs::JS_DupValue(ctx, *graph(ctx).value(id)) };
     let mut args = [prev];
     // SAFETY: a live value; the graph is not borrowed across the call.
     let next = unsafe { qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr()) };
@@ -1497,7 +922,7 @@ unsafe extern "C" fn signal_update(
     if unsafe { qjs::JS_IsException(next) } {
         return next;
     }
-    write(ctx, id, next);
+    r::write(Js(ctx), id, next);
     finish(ctx, UNDEFINED)
 }
 
@@ -1531,12 +956,9 @@ pub(crate) unsafe extern "C" fn effect(
 /// Makes a render effect running `func` (owned) under the current owner,
 /// runs it, and returns the value of that first run (owned).
 pub(crate) fn render_effect(ctx: *mut JsContext, func: JsValue) -> JsValue {
-    let g = unsafe { graph(ctx) };
-    let id = g.computation(Kind::Effect, func, UNDEFINED, STALE);
-    update_computation(ctx, id);
-    let n = &unsafe { graph(ctx) }.nodes[id as usize];
+    let id = r::effect(Js(ctx), Kind::Effect, func, UNDEFINED);
     // SAFETY: a dup of the node's value (a disposed node holds undefined).
-    unsafe { qjs::JS_DupValue(ctx, n.value) }
+    unsafe { qjs::JS_DupValue(ctx, *graph(ctx).value(id)) }
 }
 
 /// A new signal object holding `value` (borrowed).
@@ -1550,7 +972,7 @@ pub(crate) fn new_signal(ctx: *mut JsContext, value: JsValue) -> JsValue {
 /// one).
 pub(crate) fn set_signal(ctx: *mut JsContext, obj: JsValue, value: JsValue) {
     match this_signal(ctx, obj) {
-        Ok(id) => write(ctx, id, value),
+        Ok(id) => r::write(Js(ctx), id, value),
         Err(e) => unsafe {
             // Not reachable for the renderer's own signals; drop the error.
             qjs::JS_FreeValue(ctx, e);
@@ -1576,9 +998,9 @@ pub(crate) fn peek_number(ctx: *mut JsContext, obj: JsValue) -> Option<f64> {
 
 /// The current value of signal object `obj` (borrowed; untracked), if live.
 pub(crate) fn peek(ctx: *mut JsContext, obj: JsValue) -> JsValue {
-    let class = unsafe { graph(ctx) }.classes.signal;
+    let class = unsafe { graph(ctx) }.data.classes.signal;
     match unsafe { node_of(ctx, obj, class) } {
-        Some(id) => unsafe { graph(ctx) }.nodes[id as usize].value,
+        Some(id) => *unsafe { graph(ctx) }.value(id),
         None => UNDEFINED,
     }
 }
@@ -1586,63 +1008,43 @@ pub(crate) fn peek(ctx: *mut JsContext, obj: JsValue) -> JsValue {
 /// Makes a memo of `func` (owned) under the current owner and returns its
 /// object.
 pub(crate) fn memo(ctx: *mut JsContext, func: JsValue, equals_truthy: bool) -> JsValue {
-    let g = unsafe { graph(ctx) };
-    let id = g.computation(Kind::Memo, func, UNDEFINED, STALE);
-    if equals_truthy {
-        g.nodes[id as usize].equals = Equals::Truthiness;
-    }
-    g.nodes[id as usize].handle = true;
-    let obj = object(ctx, g.classes.memo, id);
-    update_computation(ctx, id);
-    obj
+    let equals = if equals_truthy {
+        Equals::Truthiness
+    } else {
+        Equals::Default
+    };
+    let id = r::memo(Js(ctx), func, UNDEFINED, equals, true);
+    let class = unsafe { graph(ctx) }.data.classes.memo;
+    object(ctx, class, id)
 }
 
 /// Runs `f` as one batch: its writes apply together at the end.
 pub(crate) fn batch_with<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> R {
-    run_updates(ctx, false, f)
+    r::batch(Js(ctx), f)
 }
 
 /// Runs `f` with no listener (untracked).
 pub(crate) fn untracked_with<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> R {
-    let g = unsafe { graph(ctx) };
-    let listener = std::mem::replace(&mut g.listener, NONE);
-    let r = f();
-    unsafe { graph(ctx) }.listener = listener;
-    r
+    r::untracked(Js(ctx), f)
 }
 
 /// Runs `f` in a new root owner, under the current one (context passes
 /// through it); returns the root and `f`'s result. The root is disposed
 /// with [`dispose_owner`].
 pub(crate) fn with_root<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> (u32, R) {
-    let g = unsafe { graph(ctx) };
-    let current = g.owner;
-    let id = g.alloc(Kind::Root);
-    let context = g.context_of(current);
-    let n = &mut g.nodes[id as usize];
-    n.owner = current;
-    n.context = context;
-    let g = unsafe { graph(ctx) };
-    let (listener, owner) = (g.listener, g.owner);
-    g.owner = id;
-    g.listener = NONE;
-    let r = run_updates(ctx, true, f);
-    let g = unsafe { graph(ctx) };
-    g.listener = listener;
-    g.owner = owner;
-    (id, r)
+    r::with_root(Js(ctx), f)
 }
 
 /// Whether something owns what runs now (a component, an effect, a
 /// root): its cleanups run when it goes.
 pub(crate) fn has_owner(ctx: *mut JsContext) -> bool {
-    let owner = unsafe { graph(ctx) }.owner;
+    let owner = unsafe { graph(ctx) }.owner();
     owner != NONE && owner != UNOWNED
 }
 
 /// The current owner (for [`with_root_under`] later).
 pub(crate) fn current_owner(ctx: *mut JsContext) -> u32 {
-    unsafe { graph(ctx) }.owner
+    unsafe { graph(ctx) }.owner()
 }
 
 /// [`with_root`] as if run under `owner` (from [`current_owner`]): rows a
@@ -1652,17 +1054,12 @@ pub(crate) fn with_root_under<R>(
     owner: u32,
     f: impl FnOnce() -> R,
 ) -> (u32, R) {
-    let g = unsafe { graph(ctx) };
-    let live = owner != NONE && owner != UNOWNED && !g.nodes[owner as usize].disposed;
-    let previous = std::mem::replace(&mut g.owner, if live { owner } else { NONE });
-    let r = with_root(ctx, f);
-    unsafe { graph(ctx) }.owner = previous;
-    r
+    r::with_root_under(Js(ctx), owner, f)
 }
 
 /// Disposes owner `id` (a root from [`with_root`]), untracked.
 pub(crate) fn dispose_owner(ctx: *mut JsContext, id: u32) {
-    untracked_with(ctx, || dispose(ctx, id));
+    r::dispose_owner(Js(ctx), id);
 }
 
 /// Sets `key` to `value` (both borrowed) in the current owner's context.
@@ -1670,19 +1067,6 @@ pub(crate) fn provide(ctx: *mut JsContext, key: JsValue, value: JsValue) {
     let mut args = [key, value];
     // SAFETY: borrowed arguments.
     unsafe { set_context(ctx, UNDEFINED, 2, args.as_mut_ptr()) };
-}
-
-/// The value of `key` in the current owner's context (owned), if set.
-pub(crate) fn lookup(ctx: *mut JsContext, key: JsValue) -> Option<JsValue> {
-    let g = unsafe { graph(ctx) };
-    let mut frame = g.context_of(g.owner);
-    while let Some(f) = frame {
-        if unsafe { qjs::JS_IsStrictEqual(ctx, f.key, key) } {
-            return Some(unsafe { qjs::JS_DupValue(ctx, f.value) });
-        }
-        frame = f.parent.clone();
-    }
-    None
 }
 
 /// Throws the error the last round kept, if any (natives that ran JS
@@ -1855,7 +1239,7 @@ mod tests {
         let live = |raw| {
             // SAFETY: the graph `install` made; no JS runs meanwhile.
             let g = unsafe { super::graph(raw) };
-            (g.nodes.len() - g.free.len(), g.nodes.len())
+            g.slots()
         };
         let before = ctx.with(|ctx| {
             crate::state::install(&ctx, std::rc::Rc::default(), &[]);

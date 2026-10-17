@@ -1,20 +1,16 @@
-//! Async tasks of components ([`super::Context::spawn`]): futures run on the
-//! engine thread (they may hold the component's `!Send` state) by a small
-//! executor of the core, polled inside a tokio runtime's context, so the
-//! tokio ecosystem works in them: `tokio::time` for timers, network and
-//! file IO, channels; `Send` work goes to the runtime's threads
-//! ([`AsyncCx::background`]). Wakers may fire on any thread: they wake the
-//! engine. A task changes its component's state with
-//! [`WeakComponent::update`], applied by the core between polls (no shared
-//! borrows of the component). Dropping a [`Task`] cancels it; a
-//! component's tasks end with it.
+//! Async tasks ([`super::spawn`]): futures run on the engine thread (they
+//! may hold signals and other `!Send` handles) by a small executor of the
+//! core, polled inside a tokio runtime's context, so the tokio ecosystem
+//! works in them: `tokio::time` for timers, network and file IO, channels;
+//! `Send` work goes to the runtime's threads ([`super::background`]).
+//! Wakers may fire on any thread: they wake the engine. A task changes
+//! what it wants by writing signals; it ends with the owner it was made
+//! under.
 
 use std::{
-    any::Any,
     cell::RefCell,
     collections::VecDeque,
     future::Future,
-    marker::PhantomData,
     pin::Pin,
     rc::{Rc, Weak},
     sync::{Arc, Mutex},
@@ -25,7 +21,6 @@ use std::{
 use rustc_hash::FxHashMap;
 use tokio::runtime::Handle;
 
-use super::{Component, Context, Prefetch, ToastDuration, element::ErasedCx, services};
 use crate::{Command, Dialog, JsonValue, NodeId, ROOT_ID, StatusBarSetting, time::Instant};
 
 type LocalFuture = Pin<Box<dyn Future<Output = ()>>>;
@@ -57,16 +52,6 @@ impl Wake for TaskWaker {
             notify();
         }
     }
-}
-
-/// A change of a component's state a task asked for; `None` when the
-/// component is gone.
-pub(crate) type UpdateFn =
-    Box<dyn for<'a> FnOnce(Option<(&'a mut dyn Any, &'a dyn Any, &'a mut ErasedCx)>)>;
-
-pub(crate) struct Update {
-    pub(crate) host: NodeId,
-    pub(crate) run: UpdateFn,
 }
 
 /// What a component or a task asks of the platform, applied by the core.
@@ -125,8 +110,7 @@ pub struct ImageSize {
     pub height: f64,
 }
 
-/// The platform services components and tasks use ([`super::Context`],
-/// [`AsyncCx`]): commands for the surface's root.
+/// The status bar's base setting, as a command for the surface's root.
 pub(crate) fn status_bar(patch: StatusBarSetting) -> Action {
     Action::Command(ROOT_ID, Command::SetStatusBar(patch))
 }
@@ -141,7 +125,6 @@ struct Entry {
 struct Inner {
     tasks: FxHashMap<u64, Entry>,
     next_task: u64,
-    updates: VecDeque<Update>,
     actions: VecDeque<Action>,
     failures: Vec<(NodeId, String)>,
 }
@@ -156,7 +139,8 @@ pub(crate) struct Executor {
     /// Native animation nodes and animations made so far (their ids are
     /// odd: JS's are even).
     animation_ids: std::cell::Cell<u32>,
-    /// Live derived nodes, for renders deriving them again.
+    /// Live derived nodes, for what derives them again (a region or a row
+    /// made again).
     derived: RefCell<super::animated::Derived>,
     /// The components' listeners of the back button.
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
@@ -223,21 +207,6 @@ impl Executor {
         drop(removed);
     }
 
-    /// Cancels the tasks of component `host`.
-    pub(crate) fn cancel_host(&self, host: NodeId) {
-        let removed: Vec<Entry> = {
-            let mut inner = self.inner.borrow_mut();
-            let ids: Vec<u64> = inner
-                .tasks
-                .iter()
-                .filter(|(_, e)| e.host == host)
-                .map(|(&id, _)| id)
-                .collect();
-            ids.iter().filter_map(|id| inner.tasks.remove(id)).collect()
-        };
-        drop(removed);
-    }
-
     /// Polls the woken tasks; returns whether there were any.
     pub(crate) fn poll_ready(&self) -> bool {
         let mut ids = std::mem::take(&mut *self.ready.ids.lock().expect("ready lock"));
@@ -296,11 +265,6 @@ impl Executor {
         std::mem::take(&mut self.inner.borrow_mut().failures)
     }
 
-    /// The state changes tasks asked for.
-    pub(crate) fn take_updates(&self) -> VecDeque<Update> {
-        std::mem::take(&mut self.inner.borrow_mut().updates)
-    }
-
     /// What tasks asked of the platform.
     pub(crate) fn take_actions(&self) -> VecDeque<Action> {
         std::mem::take(&mut self.inner.borrow_mut().actions)
@@ -315,7 +279,7 @@ impl Executor {
     }
 }
 
-/// A running task ([`super::Context::spawn`]). Dropping it cancels the
+/// A running task of the core. Dropping it cancels the
 /// task (TS's `clearTimeout`, for timers); [`Task::detach`] lets it run
 /// on its own. Awaited in another task, it gives the task's output.
 #[must_use = "a dropped task is cancelled: keep it, or detach it"]
@@ -361,7 +325,7 @@ pub struct Answer<T> {
     slot: Rc<RefCell<Output<T>>>,
 }
 
-/// The answer to a dialog ([`super::Context::dialog`]): the index of the
+/// The answer to a dialog ([`super::ambient::dialog`]): the index of the
 /// button pressed, -1 when it was dismissed.
 pub type DialogAnswer = Answer<i32>;
 
@@ -434,267 +398,6 @@ impl<T> Future for Task<T> {
     }
 }
 
-/// What a task's code gets besides its component: timers and background
-/// work on tokio (any tokio API works in a task as well), and the
-/// platform's services.
-#[derive(Clone, Debug)]
-pub struct AsyncCx {
-    executor: Weak<Executor>,
-}
-
-impl AsyncCx {
-    pub(crate) fn new(executor: Weak<Executor>) -> Self {
-        Self { executor }
-    }
-
-    pub(crate) fn act(&self, action: Action) {
-        if let Some(executor) = self.executor.upgrade() {
-            executor.act(action);
-        }
-    }
-
-    /// Shows `dialog` (an alert, or with `sheet` an action sheet).
-    pub fn dialog(&self, dialog: Dialog) -> DialogAnswer {
-        let (answer, slot) = DialogAnswer::new();
-        self.act(Action::Dialog(dialog, slot));
-        answer
-    }
-
-    /// Unfocuses the focused input, hiding the software keyboard.
-    pub fn dismiss_keyboard(&self) {
-        self.act(Action::Command(ROOT_ID, Command::Blur));
-    }
-
-    /// Changes what functions set for the status bar (the fields `patch`
-    /// sets), under the settings components render.
-    pub fn set_status_bar(&self, patch: StatusBarSetting) {
-        self.act(status_bar(patch));
-    }
-
-    /// The screen reader reads `message` (TS:
-    /// `AccessibilityInfo.announceForAccessibility`).
-    pub fn announce_for_accessibility(&self, message: impl Into<String>) {
-        self.act(services::announce(message.into()));
-    }
-
-    /// Shows `message` at the bottom of the screen (Android's toasts, TS:
-    /// `Toast.show`); nothing happens elsewhere.
-    pub fn toast(&self, message: impl Into<String>, duration: ToastDuration) {
-        self.act(services::toast(message.into(), duration));
-    }
-
-    /// The size in pixels of the image at `uri` (TS: `Image.getSize`); its
-    /// bytes stay loaded for the views that show it next.
-    pub fn image_size(&self, uri: impl Into<String>) -> Answer<Result<ImageSize, String>> {
-        let (answer, action) = services::image_size(uri.into());
-        self.act(action);
-        answer
-    }
-
-    /// Loads the image at `uri` ahead of showing it (TS: `Image.prefetch`).
-    pub fn prefetch_image(&self, uri: impl Into<String>) -> Prefetch {
-        let (answer, action) = services::prefetch(uri.into());
-        self.act(action);
-        answer
-    }
-
-    /// Puts `text` on the system clipboard (TS: `Clipboard.setString`).
-    pub fn set_clipboard(&self, text: impl Into<String>) {
-        self.act(services::set_clipboard(text.into()));
-    }
-
-    /// The text on the system clipboard, `""` when it holds none (TS:
-    /// `Clipboard.getString`). On iOS, reading it may show the system's
-    /// paste notice.
-    pub fn clipboard_string(&self) -> Answer<String> {
-        let (answer, action) = services::clipboard_string();
-        self.act(action);
-        answer
-    }
-
-    /// Whether the system clipboard holds text, without reading it (TS:
-    /// `Clipboard.hasString`).
-    pub fn clipboard_has_string(&self) -> Answer<bool> {
-        let (answer, action) = services::clipboard_has_string();
-        self.act(action);
-        answer
-    }
-
-    /// Completes when the next display frame starts, with its time (TS:
-    /// what `requestAnimationFrame` waits for). Awaited in a loop, it runs
-    /// once per frame.
-    pub fn next_frame(&self) -> Answer<Instant> {
-        let (answer, action) = services::frame();
-        self.act(action);
-        answer
-    }
-
-    /// Shows the surface in `appearance` whatever the system's (TS:
-    /// `setColorScheme`): [`crate::ui::RenderCx::dark`] (the theme's
-    /// mode), `dark:` classes and the platform's controls follow it;
-    /// [`crate::platform::Appearance::System`] follows the system again.
-    pub fn set_color_scheme(&self, appearance: crate::platform::Appearance) {
-        self.act(Action::Appearance(appearance));
-    }
-
-    /// Lays the surface out right to left whatever the user's language
-    /// (TS: `I18nManager.forceRTL`), at once; `false` follows the language
-    /// again.
-    pub fn force_rtl(&self, force: bool) {
-        self.act(Action::Direction(services::Direction::Force(force)));
-    }
-
-    /// Whether a right-to-left language lays the surface out right to left
-    /// (TS: `I18nManager.allowRTL`; true by default).
-    pub fn allow_rtl(&self, allow: bool) {
-        self.act(Action::Direction(services::Direction::Allow(allow)));
-    }
-
-    /// Completes after `delay` (TS: what `setTimeout` waits for):
-    /// `tokio::time::sleep`.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn timer(&self, delay: Duration) -> tokio::time::Sleep {
-        tokio::time::sleep(delay)
-    }
-
-    /// Completes at `at`.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn timer_until(&self, at: Instant) -> tokio::time::Sleep {
-        tokio::time::sleep_until(at.into())
-    }
-
-    /// Completes after `delay` (TS: what `setTimeout` waits for).
-    #[cfg(target_arch = "wasm32")]
-    pub fn timer(&self, delay: Duration) -> crate::time::Sleep {
-        crate::time::sleep(delay)
-    }
-
-    /// Completes at `at`.
-    #[cfg(target_arch = "wasm32")]
-    pub fn timer_until(&self, at: Instant) -> crate::time::Sleep {
-        crate::time::sleep_until(at)
-    }
-
-    /// Runs `future` on the runtime's threads (`tokio::spawn`): `Send`
-    /// work that should not hold the engine thread. Await the handle for
-    /// its output. Not in WebAssembly, which has no threads.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn background<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        tokio::spawn(future)
-    }
-
-    /// Runs blocking `f` on the runtime's blocking threads
-    /// (`tokio::task::spawn_blocking`). Not in WebAssembly.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn blocking<R: Send + 'static>(
-        &self,
-        f: impl FnOnce() -> R + Send + 'static,
-    ) -> tokio::task::JoinHandle<R> {
-        tokio::task::spawn_blocking(f)
-    }
-}
-
-/// A component as its tasks see it: it may be gone by the time they run.
-pub struct WeakComponent<C> {
-    host: NodeId,
-    executor: Weak<Executor>,
-    _component: PhantomData<fn(&mut C)>,
-}
-
-impl<C> std::fmt::Debug for WeakComponent<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WeakComponent")
-            .field("host", &self.host)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<C> Clone for WeakComponent<C> {
-    fn clone(&self) -> Self {
-        Self {
-            host: self.host,
-            executor: self.executor.clone(),
-            _component: PhantomData,
-        }
-    }
-}
-
-impl<C: Component> WeakComponent<C> {
-    pub(crate) fn new(host: NodeId, executor: Weak<Executor>) -> Self {
-        Self {
-            host,
-            executor,
-            _component: PhantomData,
-        }
-    }
-
-    /// Changes the component's state: `f` runs on the engine thread right
-    /// after this poll, with the component and a [`Context`]
-    /// (`cx.notify()` renders it again). Await it for `f`'s result, `None`
-    /// when the component is gone; not awaited, it still runs.
-    pub fn update<R: 'static>(
-        &self,
-        f: impl FnOnce(&mut C, &mut Context<'_, C>) -> R + 'static,
-    ) -> Updated<R> {
-        let slot = Rc::new(RefCell::new(Output {
-            value: None,
-            waker: None,
-        }));
-        let result = slot.clone();
-        if let Some(executor) = self.executor.upgrade() {
-            executor.inner.borrow_mut().updates.push_back(Update {
-                host: self.host,
-                run: Box::new(move |target| {
-                    let value = target.and_then(|(state, props, cx)| {
-                        let props = props.downcast_ref::<C::Props>()?;
-                        let state = state.downcast_mut::<C>()?;
-                        Some(f(state, &mut Context::new(cx, props)))
-                    });
-                    let mut slot = result.borrow_mut();
-                    slot.value = Some(value);
-                    if let Some(waker) = slot.waker.take() {
-                        waker.wake();
-                    }
-                }),
-            });
-        } else {
-            slot.borrow_mut().value = Some(None);
-        }
-        Updated { slot }
-    }
-}
-
-/// An update's result ([`WeakComponent::update`]).
-#[must_use = "the update runs anyway; await it for its result"]
-pub struct Updated<R> {
-    slot: Rc<RefCell<Output<Option<R>>>>,
-}
-
-impl<R> std::fmt::Debug for Updated<R> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Updated").finish_non_exhaustive()
-    }
-}
-
-impl<R> Future for Updated<R> {
-    type Output = Option<R>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<R>> {
-        let mut slot = self.slot.borrow_mut();
-        match slot.value.take() {
-            Some(value) => Poll::Ready(value),
-            None => {
-                slot.waker = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-
 /// Starts `future` as a task of `host`, to run to its end.
 pub(crate) fn spawn_raw(executor: &Rc<Executor>, host: NodeId, future: LocalFuture) -> u64 {
     executor.spawn(host, future)
@@ -709,12 +412,14 @@ pub(crate) fn act_after(
     action: Action,
 ) -> Task<()> {
     let weak = Rc::downgrade(executor);
-    let cx = AsyncCx::new(weak.clone());
+    let acting = weak.clone();
     let id = executor.spawn(
         host,
         Box::pin(async move {
             tokio::time::sleep(delay).await;
-            cx.act(action);
+            if let Some(executor) = acting.upgrade() {
+                executor.act(action);
+            }
         }),
     );
     Task {
@@ -725,31 +430,21 @@ pub(crate) fn act_after(
     }
 }
 
-/// Starts `f(this, cx)` as a task of component `host`.
-pub(crate) fn spawn<C, R, Fut>(
+/// Starts `future` on the engine thread, with no component (a task of a
+/// component that runs once: its owner ends it, [`TaskHandle::cancel`]).
+/// The task is detached: dropping it does not cancel it.
+pub(crate) fn spawn_future<R: 'static>(
     executor: &Rc<Executor>,
-    host: NodeId,
-    f: impl FnOnce(WeakComponent<C>, AsyncCx) -> Fut,
-) -> Task<R>
-where
-    C: Component,
-    R: 'static,
-    Fut: Future<Output = R> + 'static,
-{
+    future: impl Future<Output = R> + 'static,
+) -> Task<R> {
     let weak = Rc::downgrade(executor);
-    let this = WeakComponent {
-        host,
-        executor: weak.clone(),
-        _component: PhantomData,
-    };
-    let future = f(this, AsyncCx::new(weak.clone()));
     let output = Rc::new(RefCell::new(Output {
         value: None,
         waker: None,
     }));
     let done = output.clone();
     let id = executor.spawn(
-        host,
+        0,
         Box::pin(async move {
             let value = future.await;
             let mut output = done.borrow_mut();
@@ -763,6 +458,31 @@ where
         executor: weak,
         id,
         output,
-        detached: false,
+        detached: true,
+    }
+}
+
+/// What cancels a task, apart from its handle.
+pub(crate) struct TaskHandle {
+    executor: Weak<Executor>,
+    id: u64,
+}
+
+impl TaskHandle {
+    /// Ends the task (nothing when it ended already).
+    pub(crate) fn cancel(&self) {
+        if let Some(executor) = self.executor.upgrade() {
+            executor.cancel(self.id);
+        }
+    }
+}
+
+impl<T> Task<T> {
+    /// What cancels it.
+    pub(crate) fn handle(&self) -> TaskHandle {
+        TaskHandle {
+            executor: self.executor.clone(),
+            id: self.id,
+        }
     }
 }

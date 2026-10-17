@@ -1,7 +1,7 @@
 //! Native animation values for Rust components (TS: `createNativeValue`,
 //! `Animated.spring`, `interpolate`): nodes of the platform's animation
 //! graph that styles, drags, scroll offsets and drawings are bound to, so
-//! they move on the UI thread without a render per frame. Composed
+//! they move on the UI thread with no engine work per frame. Composed
 //! animations ([`Animation`], TS: `Animated.sequence` and co.) run there
 //! too, step after step.
 //!
@@ -109,8 +109,8 @@ impl NativeNode {
     }
 
     /// The node `op` makes from this one: the live one made by the same
-    /// operation if there is one (a render deriving it again gets the same
-    /// node, so its bindings stay as they are).
+    /// operation if there is one (a region or a row made again derives it
+    /// again and gets the same node, so its bindings stay as they are).
     fn derive(
         &self,
         op: impl FnOnce(nsh_animation::NodeId) -> AnimationOp,
@@ -299,7 +299,7 @@ impl Default for Interpolation {
 }
 
 /// A settable, animatable value (made with
-/// [`super::Context::native_value`]): set it, animate it, bind it, derive
+/// [`super::ambient::native_value`]): set it, animate it, bind it, derive
 /// from it. Clones are the same value.
 #[derive(Clone, PartialEq, Debug)]
 pub struct NativeValue(NativeNode);
@@ -642,19 +642,21 @@ impl Animated for NativeValue {
 /// the exact end of the one before (no round trip to the engine between
 /// steps).
 ///
-/// Build it once (in `setup`, kept in a field) and run it any number of
-/// times: [`Self::start`] runs it (stopping a run of it going on) and
-/// returns its [`AnimationEnd`], [`Self::stop`] stops it where it is,
-/// [`Self::reset`] stops it and puts its values back where they were when
-/// it last started. Clones are the same animation; building a group from
+/// Build it once (in the view, captured by the listeners that run it) and
+/// run it any number of times: [`Self::start`] runs it (stopping a run of
+/// it going on) and returns its [`AnimationEnd`], [`Self::stop`] stops it
+/// where it is, [`Self::reset`] stops it and puts its values back where
+/// they were when it last started. Clones are the same animation; building a group from
 /// animations makes a new one (its parts are copied in).
 ///
 /// ```ignore
-/// self.jump = Some(Animation::sequence([
+/// let jump = Animation::sequence([
 ///     Animation::timing(&y, -36.0, Timing::new(220.0, Easing::EaseOut)),
 ///     Animation::spring(&y, 0.0, Spring::default()),
-/// ]));
-/// let end = self.jump().start();
+/// ]);
+/// view().on_press(move |_: &()| {
+///     let end = jump.start();
+/// })
 /// ```
 #[derive(Clone)]
 pub struct Animation(Rc<Composed>);

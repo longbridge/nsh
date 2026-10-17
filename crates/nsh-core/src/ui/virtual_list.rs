@@ -13,8 +13,8 @@ use std::{
 };
 
 use super::{
-    Accessible, AnyElement, Interactive, Position,
-    element::{ElKind, ElNode, Element, IntoElement, ListConfig, Listener},
+    Accessible, AnyElement, If, Interactive, IntoReactive, Position, Reactive,
+    element::{BoundListConfig, ElKind, ElNode, Element, IntoElement, ListConfig, Listener},
     events,
 };
 use crate::{
@@ -28,20 +28,31 @@ pub trait ListLayout: Sized {
     fn config(&mut self) -> &mut ListConfig;
 
     #[doc(hidden)]
-    fn content(&mut self) -> &mut ListContentStyle {
-        self.config().content.get_or_insert_default()
+    fn bound_config(&mut self) -> &mut Vec<BoundListConfig>;
+
+    /// Sets a field of the layout with `set`: once for a value, in a
+    /// binding (a component that runs once) for a signal or a closure.
+    #[doc(hidden)]
+    fn layout<T: 'static>(
+        mut self,
+        value: impl IntoReactive<T>,
+        set: impl Fn(&mut ListConfig, T) + 'static,
+    ) -> Self {
+        match value.into_reactive() {
+            Reactive::Static(v) => set(self.config(), v),
+            Reactive::Bound(f) => self.bound_config().push(Rc::new(move |c| set(c, f()))),
+        }
+        self
     }
 
     /// The size of rows not measured yet, in points (default 50).
-    fn estimated_item_size(mut self, points: f32) -> Self {
-        self.config().estimated = Some(points);
-        self
+    fn estimated_item_size(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| c.estimated = Some(points))
     }
 
     /// Rows side by side (vertical lists).
-    fn columns(mut self, columns: u32) -> Self {
-        self.config().columns = Some(columns.max(1));
-        self
+    fn columns(self, columns: impl IntoReactive<u32>) -> Self {
+        self.layout(columns, |c, columns| c.columns = Some(columns.max(1)))
     }
 
     /// Scrolls horizontally.
@@ -63,77 +74,85 @@ pub trait ListLayout: Sized {
     /// `maintainVisibleContentPosition={{ autoscrollToBottomThreshold }}`).
     /// For lists that are not [`Self::inverted`], which keep their distance
     /// from the end anyway.
-    fn follow_end(mut self, threshold: f32) -> Self {
-        self.config().follow_end = Some(threshold.max(0.0));
-        self
+    fn follow_end(self, threshold: impl IntoReactive<f32>) -> Self {
+        self.layout(threshold, |c, threshold| {
+            c.follow_end = Some(threshold.max(0.0));
+        })
     }
 
     /// Whether the scroll indicator shows (default yes).
-    fn shows_indicator(mut self, shows: bool) -> Self {
-        self.config().shows_indicator = Some(shows);
-        self
+    fn shows_indicator(self, shows: impl IntoReactive<bool>) -> Self {
+        self.layout(shows, |c, shows| c.shows_indicator = Some(shows))
     }
 
     /// Padding around the rows, in points.
-    fn content_padding(mut self, points: f32) -> Self {
-        self.content().padding = crate::EdgeInsets::all(points);
-        self
+    fn content_padding(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| {
+            content(c).padding = crate::EdgeInsets::all(points);
+        })
     }
 
     /// Horizontal padding around the rows.
-    fn content_padding_x(mut self, points: f32) -> Self {
-        let p = &mut self.content().padding;
-        (p.left, p.right) = (points, points);
-        self
+    fn content_padding_x(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| {
+            let p = &mut content(c).padding;
+            (p.left, p.right) = (points, points);
+        })
     }
 
     /// Vertical padding around the rows.
-    fn content_padding_y(mut self, points: f32) -> Self {
-        let p = &mut self.content().padding;
-        (p.top, p.bottom) = (points, points);
-        self
+    fn content_padding_y(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| {
+            let p = &mut content(c).padding;
+            (p.top, p.bottom) = (points, points);
+        })
     }
 
     /// Padding above the rows.
-    fn content_padding_top(mut self, points: f32) -> Self {
-        self.content().padding.top = points;
-        self
+    fn content_padding_top(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| content(c).padding.top = points)
     }
 
     /// Padding below the rows.
-    fn content_padding_bottom(mut self, points: f32) -> Self {
-        self.content().padding.bottom = points;
-        self
+    fn content_padding_bottom(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| content(c).padding.bottom = points)
     }
 
     /// Space between rows (columns in horizontal lists).
-    fn row_gap(mut self, points: f32) -> Self {
-        self.content().row_gap = points;
-        self
+    fn row_gap(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| content(c).row_gap = points)
     }
 
     /// Space between columns ([`Self::columns`]).
-    fn column_gap(mut self, points: f32) -> Self {
-        self.content().column_gap = points;
-        self
+    fn column_gap(self, points: impl IntoReactive<f32>) -> Self {
+        self.layout(points, |c, points| content(c).column_gap = points)
     }
 }
 
-/// Renders row `index` (of `Position::count`).
-pub(crate) type RowFn = Rc<dyn Fn(usize, Position) -> AnyElement>;
+/// The content style of a list's layout, made when first set.
+fn content(config: &mut ListConfig) -> &mut ListContentStyle {
+    config.content.get_or_insert_default()
+}
+
+/// Renders the row at a position.
+pub(crate) type RowFn = Rc<dyn Fn(Position) -> AnyElement>;
 
 /// Renders the separator between two rows.
 pub(crate) type SeparatorFn = Rc<dyn Fn() -> AnyElement>;
 
-/// A list of the component's own rows, as the render makes it.
+/// The rows' identities, hashed, read in a binding.
+pub(crate) type KeysFn = Rc<dyn Fn() -> Rc<[u64]>>;
+
+/// A list of the component's own rows, as a view makes it.
 #[derive(Clone)]
 pub(crate) struct VirtualListEl {
     pub(crate) config: ListConfig,
-    pub(crate) count: u32,
+    /// How many rows: bound, a binding that updates the list in place.
+    pub(crate) count: Reactive<u32>,
     pub(crate) row: RowFn,
     /// The rows' identities, for splices (rows keep their cells and sizes
     /// when rows are added or removed before them).
-    pub(crate) keys: Option<Rc<[u64]>>,
+    pub(crate) keys: Option<KeysFn>,
     /// Between rows (after each row but the last; before it, inverted).
     pub(crate) separator: Option<SeparatorFn>,
     /// The row scrolled to before the first frame.
@@ -143,26 +162,40 @@ pub(crate) struct VirtualListEl {
 }
 
 /// A virtualized, recycling list of `count` rows rendered by `row`: only
-/// the rows near the viewport exist. `row(index, at)` builds a row from the
-/// component's data (move it in: `let rows = self.rows.clone()`); it runs
-/// again when the cell shows another row and when the component renders.
-/// Give the rows' identities with [`VirtualList::keys`] when rows come and
-/// go other than at the end.
+/// the rows near the viewport exist. `row(at)` builds the row at `at`
+/// (`at.index()`) from the component's data.
+///
+/// Each cell's content is made once: when the cell shows another row its
+/// position changes, and only the bindings that read it run again
+/// (`text(move || rows.with(|r| r[at.index()].name.clone()))`). `count`
+/// can be a signal or a closure: the list grows and shrinks in place. Give
+/// the rows' identities with [`VirtualList::keys`] when rows come and go
+/// other than at the end.
 pub fn virtual_list<R: IntoElement>(
-    count: usize,
-    row: impl Fn(usize, Position) -> R + 'static,
+    count: impl IntoReactive<usize>,
+    row: impl Fn(Position) -> R + 'static,
 ) -> VirtualList {
+    let count = count.into_reactive().map(|n| n as u32);
     let mut node = ElNode::new(Tag::List);
     node.kind = ElKind::VirtualList(Box::new(VirtualListEl {
         config: ListConfig::default(),
-        count: count as u32,
-        row: Rc::new(move |index, at| row(index, at).into_element()),
+        count,
+        row: Rc::new(move |at| row(at).into_element()),
         keys: None,
         separator: None,
         initial_index: None,
         min_view_time: None,
     }));
     VirtualList(node)
+}
+
+/// One of a list's own cells (header, footer, empty) holding `content`.
+fn extra_cell(slot: CellSlot, key: &'static str, content: AnyElement) -> ElNode {
+    let mut cell = ElNode::new(Tag::Cell);
+    cell.key = Some(key.into());
+    super::host::set(&mut cell, Prop::Slot(slot));
+    cell.children.push(content.0);
+    cell
 }
 
 /// A list of the component's own rows ([`virtual_list`]).
@@ -178,35 +211,37 @@ impl VirtualList {
     }
 
     /// One of the list's own cells (header, footer, empty), outside the
-    /// recycling: rendered with the component, kept while the render has it.
+    /// recycling: made with the view, kept while the view has it.
     fn extra(mut self, slot: CellSlot, key: &'static str, content: AnyElement) -> Self {
         self.0
             .children
             .retain(|c| c.key.as_ref().is_none_or(|k| k.as_str() != key));
-        let mut cell = ElNode::new(Tag::Cell);
-        cell.key = Some(key.into());
-        super::host::set(&mut cell, Prop::Slot(slot));
-        cell.children.push(content.0);
-        self.0.children.push(cell);
+        self.0.children.push(extra_cell(slot, key, content));
         self
     }
 
-    /// The rows' identities, in order (any hashable id per row).
-    pub fn keys<K: Hash>(mut self, keys: impl IntoIterator<Item = K>) -> Self {
-        let keys: Rc<[u64]> = keys
-            .into_iter()
-            .map(|k| {
-                let mut h = rustc_hash::FxHasher::default();
-                k.hash(&mut h);
-                h.finish()
-            })
-            .collect();
-        self.list().keys = Some(keys);
+    /// The rows' identities, in order (any hashable id per row), read in a
+    /// binding:
+    /// `.keys(move || rows.with(|r| r.iter().map(|r| r.id).collect::<Vec<_>>()))`.
+    pub fn keys<K: Hash, I: IntoIterator<Item = K>>(
+        mut self,
+        keys: impl Fn() -> I + 'static,
+    ) -> Self {
+        self.list().keys = Some(Rc::new(move || {
+            keys()
+                .into_iter()
+                .map(|k| {
+                    let mut h = rustc_hash::FxHasher::default();
+                    k.hash(&mut h);
+                    h.finish()
+                })
+                .collect()
+        }));
         self
     }
 
     /// Above the rows, scrolling with them (TS: `ListHeaderComponent`):
-    /// part of this render, so its state and handlers are the
+    /// part of this view, so its state and handlers are the
     /// component's, and it is never recycled.
     pub fn header(self, header: impl IntoElement) -> Self {
         self.extra(CellSlot::Header, "\0header", header.into_element())
@@ -220,10 +255,18 @@ impl VirtualList {
     /// Shown instead of the rows while there are none (TS:
     /// `ListEmptyComponent`).
     pub fn empty(mut self, empty: impl IntoElement) -> Self {
-        if self.list().count > 0 {
-            return self;
+        let empty = empty.into_element();
+        match self.list().count.clone() {
+            Reactive::Static(0) => self.extra(CellSlot::Empty, "\0empty", empty),
+            Reactive::Static(_) => self,
+            // While the bound count is 0.
+            Reactive::Bound(count) => {
+                let cell = extra_cell(CellSlot::Empty, "\0empty", empty);
+                let shown = If::new(move || count() == 0, move || AnyElement(cell.clone()));
+                self.0.children.push(shown.into_element().0);
+                self
+            }
         }
-        self.extra(CellSlot::Empty, "\0empty", empty.into_element())
     }
 
     /// Between rows (TS: `ItemSeparatorComponent`): `separator()` renders
@@ -266,16 +309,19 @@ impl VirtualList {
     }
 
     /// The viewable rows changed (TS: `onViewableItemsChanged`).
-    pub fn on_viewable_items_changed(self, listener: Listener<ViewableItems>) -> Self {
+    pub fn on_viewable_items_changed(self, listener: impl Into<Listener<ViewableItems>>) -> Self {
         self.on(
             EventKind::ViewableItemsChanged,
-            events::typed(listener, viewable),
+            events::typed(listener.into(), viewable),
         )
     }
 
     /// Scrolled close to the end (load more).
-    pub fn on_end_reached(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::EndReached, events::typed(listener, events::unit))
+    pub fn on_end_reached(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::EndReached,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// How close to the end [`Self::on_end_reached`] fires, in viewports
@@ -376,6 +422,10 @@ fn viewable(p: &EventPayload) -> Option<Cow<'_, ViewableItems>> {
 impl ListLayout for VirtualList {
     fn config(&mut self) -> &mut ListConfig {
         &mut self.list().config
+    }
+
+    fn bound_config(&mut self) -> &mut Vec<BoundListConfig> {
+        &mut self.0.bound_list
     }
 }
 

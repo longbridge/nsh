@@ -2,63 +2,75 @@
 
 The components and modules of `nsh/ui/mobile`: buttons, cards, lists, safe areas, the keyboard, the status bar,
 system dialogs and the like, written in Rust.
-One implementation draws the same on iOS and Android: a component renders NSH's elements with typed styles and theme
-colors, the core lays it out in the same pass as everything else, and its interaction (press feedback, drags, state)
-stays native. JS only gets the events the component emits.
+One implementation draws the same on iOS and Android: a component makes its view from NSH's elements with typed styles
+and theme colors, the core lays it out in the same pass as everything else, and its interaction (press feedback, drags,
+state) stays native. JS only gets the events the component emits.
 
 - **One file per component** (`src/button.rs`), registered in `registry()` (`src/lib.rs`). Start with
-  `use nsh_core::ui::prelude::*;`. The JS export is the type's name (`pub struct Button` is `Button`): no name is
-  written by hand, and `the_exports_are_pinned` (`src/lib.rs`) lists them all.
-- **Props are a struct** (`#[derive(Clone, PartialEq, Props)]`), **events an enum** (`#[derive(Event)]`, or `NoEvent`),
-  choices an enum (`#[derive(PropEnum)]`). The bundler generates the `nsh/ui/mobile` export and its TypeScript
-  declarations from them, doc comments included, so apps write `<Button title="Save" onPress={save} />` with full
-  types; there is no hand-written glue. The props struct's doc comment documents the component in TypeScript.
-- **`render(&self, props, cx) -> impl IntoElement`** builds the tree with `view()`, `text()`, `image()` and other
-  components (`Card::element(props)`), styled with GPUI-style methods (`.px_4()`, `.rounded(px(theme.radius))`,
-  `.bg(theme.primary)`, `.active(|s| s.bg(theme.primary_active))`). It runs again when a prop changes or a listener
-  calls `cx.notify()`; keep it cheap and free of side effects. The root must be a `view()`: it is the component's host,
-  so the app's `class` (merged last, it wins) and `style` apply to it.
-- **Colors come from the theme** (`cx.theme()`: gpui-kit's semantic fields, a light and a dark value each), never
-  literals: apps restyle every component with their `nsh.json` theme, and dark appearance switches natively.
-- **What the render knows is plain Rust**: `.when(props.disabled, |v| v.opacity(0.5))`, `match props.variant`.
-  Interaction states that change without a render are variants: `.active(..)`, `.hover(..)`, `.focus(..)`.
+  `use nsh_core::ui::prelude::*;`. The JS export is the type's name (`#[component] pub fn Button` is `Button`): no
+  name is written by hand, and `the_exports_are_pinned` (`src/lib.rs`) lists them all.
+- **Props are a struct** (`#[derive(Clone, Copy, PartialEq, Props)]`, its fields `Prop<T>`), **events an enum**
+  (`#[derive(Event)]`, or `NoEvent`), choices an enum (`#[derive(PropEnum)]`). The bundler generates the
+  `nsh/ui/mobile` export and its TypeScript declarations from them, doc comments included, so apps write
+  `<Button title="Save" onPress={save} />` with full types; there is no hand-written glue. The props struct's doc
+  comment documents the component in TypeScript.
+- **A component runs once**: `#[component] pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl
+  IntoElement` makes its view once, with `view()`, `text()`, `image()` and other components (`Card::element(props)`),
+  styled with GPUI-style methods (`.px_4()`, `.rounded(px(16.0))`, `.active(|s| s.bg(..))`). What changes is a
+  **binding**: pass a closure or a signal where the value goes (`text(props.title)`, `.bg(move || theme().primary)`,
+  `.opacity(move || if props.disabled.get() { 0.5_f32 } else { 1.0 })`, `.style_when(props.disabled, |s| ..)`); when
+  what it read changes, only that part is updated. A prop is read with `props.x.get()` in a binding and
+  `get_untracked()` in a listener. The root can be any element; the app's `class` (merged last, it wins) and `style`
+  apply to it.
+- **Colors come from the theme** (`theme()`: gpui-kit's semantic fields, a light and a dark value each), never
+  literals: apps restyle every component with their `nsh.json` theme, and dark appearance switches natively. Read
+  `theme()` inside the bindings that use it, so a new theme reaches them.
+- **What never changes is plain Rust**: `.when(cond, |v| ..)`, `match` at build time. Interaction states are variants:
+  `.active(..)`, `.hover(..)`, `.focus(..)`.
+- **What comes and goes is a region**: `If::new(cond, || el).otherwise(|| el)`, `dynamic(move || ..)` (an element, an
+  `Option` or a `Vec`, made again when what it read changes) and `Each::new(items, key, |item, index| row)` (a row per
+  key, kept while the key stays). `TextField`'s label and clear button are the examples.
 - **The app's content is props, placed by closures**; the component lays it out, never creates or changes it:
-  `header: Option<Slot>` (`.slot(props.header, |h| h.px_4())`), `children: Children` (`.child(props.children)`, or
-  `.children_each(props.children, |child, at| ..)` to wrap each), `items: Items` for virtualized rows
+  `header: Prop<Option<Slot>>` (`props.header.place(|h| h.px_4())`), `children: Children` (`.child(props.children)`,
+  or `.children_each(props.children, |child, at| ..)` to wrap each), `items: Items` for virtualized rows
   (`.list(props.items, |l| l.estimated_item_size(48.0), |row, at| ..)`; in JS `each` and a row renderer, like `List`).
-  `at` tells the index, the count, first and last. `#[prop(lazy)]` on `children` has JS make them only while the
-  render places them (`Sheet`: fresh content on each opening).
-  `Group` and `ListView` are the examples. A Rust component fills them the same way: `.child(..)`, `.fill("header",
-  ..)`, and `ListView::element(props).items(virtual_list(n, row).header(..))` for the rows.
-- **State** lives in the component's fields, set up from the first props in `setup` and adjusted in `props_changed`;
-  listeners (`cx.listener(|this, event, cx| ..)`) get `&mut Self` and emit with `cx.emit(ButtonEvent::Press)`. Timers
-  and async work are tasks (`cx.set_interval`, `cx.spawn` with tokio inside); keep the `Task` in a field and drop it to
-  stop. Read the environment in the render (`cx.safe_area()`): it renders again when that changes. `Stepper` is the
-  example, also of methods: `#[methods] impl Stepper { pub fn set_value(..), pub fn value(&self) -> f64 }` are
-  `ref.setValue(5)` and `await ref.value()` in JS, and `r.update(|s, cx| s.set_value(5.0, cx))` on a
-  `ComponentRef<Stepper>` in Rust.
-- **Every host element is there**: `input()`, `scroll()`, `modal()`, `canvas(Painter::new()..)`, `web_view(url)`,
-  `video(url)`, `native(name)`, with typed props and events (`on_change_text(cx.listener(|this, text: &str, cx| ..))`,
-  `on_layout`, `on_pan_end`, `on_scroll`). Props that take a plain color take `cx.color(theme.x)`.
-- **Element refs** send commands to what the component rendered: `cx.element_ref()` in `setup`, `.element_ref(&r)` on
-  the element, `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after
-  clearing it).
-- **Native values** move styles without renders: `cx.native_value(0.0)`, `.bind_translate_y(&v)`, `.pan_values(..)`
-  (drags move it natively), `v.spring(..)` (await its `AnimationEnd` in a task). `Sheet` is the example.
-- **The component's own rows**: `virtual_list(count, move |i, at| row)` with `.keys(ids)` (and `.header(..)`,
-  `.footer(..)`, `.empty(..)`, `.separator(..)`, `.sticky_header_indices(..)`, the `Scrollable` behavior); rows'
-  handlers are the component's (`listener.map(move |_: &()| i)` passes the index). `SelectList` is the example.
-  Rows outlive the render: move what they read into them (copies of theme colors, an `Rc` of the data).
-- **Shared state**: `cx.global::<G>()` in the render subscribes, `update_global` renders the readers; `cx.provide(v)` /
-  `cx.context::<T>()` pass values down the tree. `catch_error` makes a component an error boundary.
-- **Modules are functions without a component**: `#[module] impl Alert { pub async fn alert(title: String, ..,
-  cx: AsyncCx) -> i32 }` is `await Alert.alert(title)` in JS (`system.rs`); a sync function takes `cx: &mut ModuleCx`.
-  Option parameters at the end may be left out; options objects are `#[derive(JsObject)]` structs. A module named like
-  a component adds static functions to it (`StatusBar.setHidden`, `status_bar.rs`). Register both in `registry()`.
-- **System UI goes through the context**: `cx.dialog(..)` (await the index chosen), `cx.dismiss_keyboard()`,
-  `cx.add_status_bar(..)` / `update_status_bar` / `remove_status_bar` for a rendered setting, `set_status_bar(patch)`
-  for a function's; insets with `cx.insets()` in the render and `.inset_padding(..)` / `.inset_margin(..)` on the
-  element (`SafeAreaView`, `KeyboardAvoidingView`).
+  `at` is a `Position` of signals: `at.index()`, `at.is_first()`, `at.is_last()`, read in bindings. `#[prop(lazy)]`
+  on `children` has JS make them only while the view places them (`Sheet`: fresh content on each opening). `Group`
+  and `ListView` are the examples. A Rust component fills them the same way: `.child(..)`, `.fill("header", ..)`, and
+  `ListView::element(props).items(virtual_list(n, row).header(..))` for the rows.
+- **State is signals** made in the body: `signal(v)` (equal writes are skipped), `signal_with(v, SignalEquals::Never)`,
+  `computed(..)` for what derives from them, `stored(v)` for what nothing displays (a running task). Listeners are
+  closures (`.on_press(move |_: &()| count.update(|c| *c += 1))`) and emit with `cx.emit(ButtonEvent::Press)`. An
+  `effect(..)` reacts to a prop. Timers and async work are tasks owned by the component (`set_interval(..)`,
+  `spawn(async move { timer(d).await; value.set(..) })`, tokio inside); they end with it. `Stepper` is the example,
+  also of methods: `#[methods] impl StepperApi { pub fn set_value(&self, ..), pub fn value(&self) -> f64 }`,
+  registered with `cx.methods(StepperApi { .. })` and named by `#[component(methods = StepperApi)]`, are
+  `ref.setValue(5)` and `await ref.value()` in JS, and `r.api::<StepperApi>()` on a `component_ref::<Stepper>()` in
+  Rust.
+- **The surface is free functions** whose reads subscribe: `window()`, `safe_area()`, `keyboard_height()`, `dark()`,
+  `font_scale()`, `rtl()`, `locale()`, `cx.insets()` (the screen's insets), `color(..)` for props that take a plain
+  color, `global::<G>()` (a signal of the surface), `provide_context(v)` / `use_context::<T>()`.
+- **Every host element is there**: `input()`, `scroll()`, `modal()`, `canvas(move || painter)`, `web_view(url)`,
+  `video(url)`, `native(name)`, with typed props and events (`.value(move || text.get())`, `.on_change_text(move
+  |t: &str| ..)`, `on_layout`, `on_pan_end`, `on_scroll`); their setters take bindings too.
+- **Element refs** send commands to what the view made: `element_ref()`, `.element_ref(&r)` on the element,
+  `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after clearing it).
+- **Native values** move styles with no binding per frame: `native_value(0.0)`, `.bind_translate_y(&v)`,
+  `.pan_values(..)` (drags move it natively), `v.spring(..)` (await its `AnimationEnd` in a task). `Sheet` is the
+  example.
+- **The component's own rows**: `virtual_list(count, move |at| row)` with `.keys(move || ids)` (and `.header(..)`,
+  `.footer(..)`, `.empty(..)`, `.separator(..)`, `.sticky_header_indices(..)`, the `Scrollable` behavior). A cell's
+  content is made once and follows the row it shows through `at`: read the row's data in bindings
+  (`text(move || options.with(|o| o[at.index()].clone()))`). `SelectList` is the example.
+- **Errors**: `catch_error(|| view, |error, reset| fallback)` is an error boundary.
+- **Modules are functions without a component**: `#[module] impl Alert { pub async fn alert(title: String, ..) -> i32 }`
+  is `await Alert.alert(title)` in JS (`system.rs`; an `async fn` uses the free functions, `dialog(..)`); a sync
+  function may take `cx: &mut ModuleCx`. Option parameters at the end may be left out; options objects are
+  `#[derive(JsObject)]` structs. A module named like a component adds static functions to it (`StatusBar.setHidden`,
+  `status_bar.rs`). Register both in `registry()`.
+- **System UI**: `dialog(..)` (await the index chosen), `dismiss_keyboard()`, `add_status_bar(..)` /
+  `update_status_bar(..)` for a component's setting (removed with it), `ModuleCx::set_status_bar(patch)` for a
+  function's; `.inset_padding(..)` / `.inset_margin(..)` on an element (`SafeAreaView`, `KeyboardAvoidingView`).
 - **Platform-only props** are an `android` / `ios` prop of a `JsObject` struct (`StatusBarAndroid`).
 - **Primitives only**, never a platform widget: the look is ours and identical on both platforms (system dialogs are
   the platform's, for now).

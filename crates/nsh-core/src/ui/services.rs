@@ -1,7 +1,7 @@
 //! The platform's services for components, modules and tasks beyond
 //! dialogs and the keyboard: screen reader announcements, toasts, the
 //! clipboard, image information, display frames and the layout direction
-//! ([`super::Context`], [`super::AsyncCx`], [`super::ModuleCx`]). Each is an
+//! ([`super::ambient`]'s functions, [`super::ModuleCx`]). Each is an
 //! [`Action`] the core applies in order with the component's other changes.
 
 use std::{
@@ -26,7 +26,7 @@ pub enum ToastDuration {
     Long,
 }
 
-/// Whether an image loaded ahead ([`super::Context::prefetch_image`]): true
+/// Whether an image loaded ahead ([`super::ambient::prefetch_image`]): true
 /// once its bytes are in memory.
 #[must_use = "an answer does nothing unless awaited"]
 #[derive(Debug)]

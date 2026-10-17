@@ -5,17 +5,21 @@
 //! independent of the app's Tailwind theme, so a component looks the same
 //! in every app.
 //!
-//! What changes without a render is native, as with classes: theme colors
-//! carry a light and a dark value ([`AdaptiveColor`]), `.active(|s| …)`,
-//! `.hover(…)` and `.focus(…)` follow the view's interaction states. What a
-//! render knows (disabled, a variant) is plain Rust: `.when(cond, …)`.
+//! Some changes are native, as with classes: theme colors carry a light
+//! and a dark value ([`AdaptiveColor`]), `.active(|s| …)`, `.hover(…)` and
+//! `.focus(…)` follow the view's interaction states. Others are bindings: a
+//! method given a signal or a closure (`.w(move || px(width.get()))`),
+//! `.style_when(signal, …)`, `.style_with(…)`. What is known when the view
+//! is made (a variant) is plain Rust: `.when(cond, …)`.
 
 use std::{
+    fmt,
     hash::{Hash, Hasher},
+    rc::Rc,
     sync::{Arc, LazyLock},
 };
 
-use super::SharedString;
+use super::{IntoReactive, Reactive, SharedString};
 use crate::{
     BlendMode, BoxShadow, FontVariant, TransformOrigin, TransitionProps,
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
@@ -103,7 +107,7 @@ pub const fn rgba(hex: u32) -> Color {
 }
 
 /// A color for each appearance: the platform switches between them
-/// without a render. Theme colors are adaptive; a plain [`Color`] is the
+/// with nothing running. Theme colors are adaptive; a plain [`Color`] is the
 /// same in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct AdaptiveColor {
@@ -642,17 +646,109 @@ impl Declaration {
 
 type Entries = Vec<(Variant, Declaration)>;
 
+crate::static_reactive!(AdaptiveColor: AdaptiveColor, Color);
+crate::static_reactive!(Length: Length);
+crate::static_reactive!(u16: u16);
+crate::static_reactive!(i16: i16);
+
+/// A bound part of a style: it adds its declarations to a style, reading
+/// the signals it binds (run again when they change).
+pub(crate) type BoundStyle = Rc<dyn Fn(&mut StyleRefinement)>;
+
 /// An element's styles, in order (later declarations win). Built by the
 /// [`Styled`] methods; `.active(|s| …)` and the like hand a fresh one to
-/// their closure.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// their closure. Values given as signals or closures are bound parts,
+/// added after the static declarations ([`StyleRefinement::resolved`]).
+#[derive(Clone, Default)]
 pub struct StyleRefinement {
     entries: Entries,
     /// The names of the groups its variants follow ([`Variant::group`]).
     names: Vec<&'static str>,
+    bound: Vec<BoundStyle>,
+}
+
+impl fmt::Debug for StyleRefinement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StyleRefinement")
+            .field("entries", &self.entries)
+            .field("names", &self.names)
+            .field("bound", &self.bound.len())
+            .finish()
+    }
+}
+
+/// Equal static declarations and the same bound parts.
+impl PartialEq for StyleRefinement {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+            && self.names == other.names
+            && self.bound.len() == other.bound.len()
+            && self
+                .bound
+                .iter()
+                .zip(&other.bound)
+                .all(|(a, b)| Rc::ptr_eq(a, b))
+    }
+}
+
+impl Eq for StyleRefinement {}
+
+/// The static declarations (a resolved style, [`StyleRefinement::resolved`],
+/// has no bound parts).
+impl Hash for StyleRefinement {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.entries.hash(state);
+        self.names.hash(state);
+    }
 }
 
 impl StyleRefinement {
+    /// Applies `value` with `apply`: now when it is static, else as a bound
+    /// part.
+    pub(crate) fn bind_value<T: 'static>(
+        &mut self,
+        value: impl IntoReactive<T>,
+        apply: impl Fn(&mut StyleRefinement, T) + 'static,
+    ) {
+        match value.into_reactive() {
+            Reactive::Static(v) => apply(self, v),
+            Reactive::Bound(f) => self.bound.push(Rc::new(move |s| apply(s, f()))),
+        }
+    }
+
+    /// Adds a bound part.
+    pub(crate) fn bind(&mut self, part: impl Fn(&mut StyleRefinement) + 'static) {
+        self.bound.push(Rc::new(part));
+    }
+
+    /// Whether it has bound parts.
+    pub(crate) fn is_bound(&self) -> bool {
+        !self.bound.is_empty()
+    }
+
+    /// Its static declarations alone.
+    pub(crate) fn static_part(&self) -> StyleRefinement {
+        StyleRefinement {
+            entries: self.entries.clone(),
+            names: self.names.clone(),
+            bound: Vec::new(),
+        }
+    }
+
+    /// The style now: the static declarations, then the bound parts' (read
+    /// in the running computation, which subscribes to them).
+    pub(crate) fn resolved(&self) -> StyleRefinement {
+        let mut out = StyleRefinement {
+            entries: self.entries.clone(),
+            names: self.names.clone(),
+            bound: Vec::new(),
+        };
+        for part in &self.bound {
+            part(&mut out);
+        }
+        out
+    }
+
     pub(crate) fn push(&mut self, decl: Declaration) {
         // Elements take several declarations: no regrowth for the first.
         if self.entries.capacity() == 0 {
@@ -696,6 +792,14 @@ impl StyleRefinement {
             }
             self.entries.push((v.within(variant), d));
         }
+        // Bound parts apply in the variant too.
+        for part in other.bound {
+            self.bound.push(Rc::new(move |s| {
+                let mut inner = StyleRefinement::default();
+                part(&mut inner);
+                s.extend_as(variant, inner);
+            }));
+        }
     }
 
     /// [`Variant::group`] of the group `name`.
@@ -713,9 +817,9 @@ impl StyleRefinement {
         u8::try_from(at + 1).expect("fewer than 255 group names")
     }
 
-    /// No declarations.
+    /// No declarations, and no bound parts.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.bound.is_empty()
     }
 
     /// The rules, as Tailwind classes compile to: one per variant, in
@@ -890,33 +994,35 @@ pub trait Styled: Sized {
     }
 
     /// `count` equal grid columns (Tailwind's `grid-cols-3`).
-    fn grid_cols(mut self, count: u16) -> Self {
-        self.style()
-            .push(Declaration::Tracks(StyleKey::GridTemplateColumns, count));
+    fn grid_cols(mut self, count: impl IntoReactive<u16>) -> Self {
+        self.style().bind_value(count, |s, count: u16| {
+            s.push(Declaration::Tracks(StyleKey::GridTemplateColumns, count));
+        });
         self
     }
 
     /// `count` equal grid rows.
-    fn grid_rows(mut self, count: u16) -> Self {
-        self.style()
-            .push(Declaration::Tracks(StyleKey::GridTemplateRows, count));
+    fn grid_rows(mut self, count: impl IntoReactive<u16>) -> Self {
+        self.style().bind_value(count, |s, count: u16| {
+            s.push(Declaration::Tracks(StyleKey::GridTemplateRows, count));
+        });
         self
     }
 
     /// The grid's columns as CSS tracks (`"200px 1fr"`, `"repeat(auto-fill,
     /// minmax(80px, 1fr))"`, line names).
-    fn grid_template_columns(mut self, tracks: impl Into<SharedString>) -> Self {
-        self.style().push(Declaration::Str(
-            StyleKey::GridTemplateColumns,
-            tracks.into(),
-        ));
+    fn grid_template_columns(mut self, tracks: impl IntoReactive<SharedString>) -> Self {
+        self.style().bind_value(tracks, |s, tracks: SharedString| {
+            s.push(Declaration::Str(StyleKey::GridTemplateColumns, tracks));
+        });
         self
     }
 
     /// The grid's rows as CSS tracks.
-    fn grid_template_rows(mut self, tracks: impl Into<SharedString>) -> Self {
-        self.style()
-            .push(Declaration::Str(StyleKey::GridTemplateRows, tracks.into()));
+    fn grid_template_rows(mut self, tracks: impl IntoReactive<SharedString>) -> Self {
+        self.style().bind_value(tracks, |s, tracks: SharedString| {
+            s.push(Declaration::Str(StyleKey::GridTemplateRows, tracks));
+        });
         self
     }
 
@@ -933,16 +1039,18 @@ pub trait Styled: Sized {
     }
 
     /// In the grid, `count` columns wide.
-    fn col_span(mut self, count: u16) -> Self {
-        self.style()
-            .push(Declaration::Span(StyleKey::GridColumn, count));
+    fn col_span(mut self, count: impl IntoReactive<u16>) -> Self {
+        self.style().bind_value(count, |s, count: u16| {
+            s.push(Declaration::Span(StyleKey::GridColumn, count));
+        });
         self
     }
 
     /// In the grid, `count` rows high.
-    fn row_span(mut self, count: u16) -> Self {
-        self.style()
-            .push(Declaration::Span(StyleKey::GridRow, count));
+    fn row_span(mut self, count: impl IntoReactive<u16>) -> Self {
+        self.style().bind_value(count, |s, count: u16| {
+            s.push(Declaration::Span(StyleKey::GridRow, count));
+        });
         self
     }
 
@@ -960,28 +1068,34 @@ pub trait Styled: Sized {
 
     /// Starts at column line `line` (1 is the first; negative from the
     /// end).
-    fn col_start(mut self, line: i16) -> Self {
-        self.style()
-            .number(StyleKey::GridColumnStart, f32::from(line));
+    fn col_start(mut self, line: impl IntoReactive<i16>) -> Self {
+        self.style().bind_value(line, |s, line: i16| {
+            s.number(StyleKey::GridColumnStart, f32::from(line));
+        });
         self
     }
 
     /// Ends at column line `line`.
-    fn col_end(mut self, line: i16) -> Self {
-        self.style()
-            .number(StyleKey::GridColumnEnd, f32::from(line));
+    fn col_end(mut self, line: impl IntoReactive<i16>) -> Self {
+        self.style().bind_value(line, |s, line: i16| {
+            s.number(StyleKey::GridColumnEnd, f32::from(line));
+        });
         self
     }
 
     /// Starts at row line `line`.
-    fn row_start(mut self, line: i16) -> Self {
-        self.style().number(StyleKey::GridRowStart, f32::from(line));
+    fn row_start(mut self, line: impl IntoReactive<i16>) -> Self {
+        self.style().bind_value(line, |s, line: i16| {
+            s.number(StyleKey::GridRowStart, f32::from(line));
+        });
         self
     }
 
     /// Ends at row line `line`.
-    fn row_end(mut self, line: i16) -> Self {
-        self.style().number(StyleKey::GridRowEnd, f32::from(line));
+    fn row_end(mut self, line: impl IntoReactive<i16>) -> Self {
+        self.style().bind_value(line, |s, line: i16| {
+            s.number(StyleKey::GridRowEnd, f32::from(line));
+        });
         self
     }
 
@@ -1050,15 +1164,19 @@ pub trait Styled: Sized {
 
     /// Takes free space, `factor` times as much as a sibling growing by 1
     /// (`flex-grow`; Tailwind's `grow-*`).
-    fn flex_grow(mut self, factor: f32) -> Self {
-        self.style().number(StyleKey::FlexGrow, factor);
+    fn flex_grow(mut self, factor: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(factor, |s, factor: f32| {
+            s.number(StyleKey::FlexGrow, factor);
+        });
         self
     }
 
     /// Gives up space when there is too little, `factor` times as much as
     /// a sibling shrinking by 1 (`flex-shrink`).
-    fn flex_shrink(mut self, factor: f32) -> Self {
-        self.style().number(StyleKey::FlexShrink, factor);
+    fn flex_shrink(mut self, factor: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(factor, |s, factor: f32| {
+            s.number(StyleKey::FlexShrink, factor);
+        });
         self
     }
 
@@ -1177,8 +1295,10 @@ pub trait Styled: Sized {
     }
 
     /// Width over height.
-    fn aspect_ratio(mut self, ratio: f32) -> Self {
-        self.style().number(StyleKey::AspectRatio, ratio);
+    fn aspect_ratio(mut self, ratio: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(ratio, |s, ratio: f32| {
+            s.number(StyleKey::AspectRatio, ratio);
+        });
         self
     }
 
@@ -1206,31 +1326,35 @@ pub trait Styled: Sized {
     }
 
     /// Stacking order among siblings.
-    fn z_index(mut self, z: i32) -> Self {
-        self.style().number(StyleKey::ZIndex, z as f32);
+    fn z_index(mut self, z: impl IntoReactive<i32>) -> Self {
+        self.style()
+            .bind_value(z, |s, z: i32| s.number(StyleKey::ZIndex, z as f32));
         self
     }
 
     // Visuals.
 
     /// The background color.
-    fn bg(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BackgroundColor], color.into());
+    fn bg(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BackgroundColor], color);
+        });
         self
     }
 
     /// Opacity, 0 (invisible) to 1.
-    fn opacity(mut self, opacity: f32) -> Self {
-        self.style()
-            .number(StyleKey::Opacity, opacity.clamp(0.0, 1.0));
+    fn opacity(mut self, opacity: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(opacity, |s, opacity: f32| {
+            s.number(StyleKey::Opacity, opacity.clamp(0.0, 1.0));
+        });
         self
     }
 
     /// The corner radius.
-    fn rounded(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderRadius], radius.into());
+    fn rounded(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderRadius], radius);
+        });
         self
     }
 
@@ -1280,32 +1404,38 @@ pub trait Styled: Sized {
     }
 
     /// The top corners' radius.
-    fn rounded_t(mut self, radius: impl Into<Length>) -> Self {
-        self.style().lengths(
-            &[
-                StyleKey::BorderTopLeftRadius,
-                StyleKey::BorderTopRightRadius,
-            ],
-            radius.into(),
-        );
+    fn rounded_t(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(
+                &[
+                    StyleKey::BorderTopLeftRadius,
+                    StyleKey::BorderTopRightRadius,
+                ],
+                radius,
+            );
+        });
         self
     }
 
     /// The bottom corners' radius.
-    fn rounded_b(mut self, radius: impl Into<Length>) -> Self {
-        self.style().lengths(
-            &[
-                StyleKey::BorderBottomLeftRadius,
-                StyleKey::BorderBottomRightRadius,
-            ],
-            radius.into(),
-        );
+    fn rounded_b(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(
+                &[
+                    StyleKey::BorderBottomLeftRadius,
+                    StyleKey::BorderBottomRightRadius,
+                ],
+                radius,
+            );
+        });
         self
     }
 
     /// The border width on all sides.
-    fn border(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderWidth, width);
+    fn border(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderWidth, width);
+        });
         self
     }
 
@@ -1344,122 +1474,150 @@ pub trait Styled: Sized {
     }
 
     /// The border color.
-    fn border_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style().color(&[StyleKey::BorderColor], color.into());
+    fn border_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderColor], color);
+        });
         self
     }
 
     /// The top border's width.
-    fn border_t(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderTopWidth, width);
+    fn border_t(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderTopWidth, width);
+        });
         self
     }
 
     /// The right border's width.
-    fn border_r(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderRightWidth, width);
+    fn border_r(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderRightWidth, width);
+        });
         self
     }
 
     /// The bottom border's width.
-    fn border_b(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderBottomWidth, width);
+    fn border_b(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderBottomWidth, width);
+        });
         self
     }
 
     /// The left border's width.
-    fn border_l(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderLeftWidth, width);
+    fn border_l(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderLeftWidth, width);
+        });
         self
     }
 
     /// The left and right borders' width.
-    fn border_x(mut self, width: f32) -> Self {
-        self.style().numbers(
-            &[StyleKey::BorderLeftWidth, StyleKey::BorderRightWidth],
-            width,
-        );
+    fn border_x(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.numbers(
+                &[StyleKey::BorderLeftWidth, StyleKey::BorderRightWidth],
+                width,
+            );
+        });
         self
     }
 
     /// The top and bottom borders' width.
-    fn border_y(mut self, width: f32) -> Self {
-        self.style().numbers(
-            &[StyleKey::BorderTopWidth, StyleKey::BorderBottomWidth],
-            width,
-        );
+    fn border_y(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.numbers(
+                &[StyleKey::BorderTopWidth, StyleKey::BorderBottomWidth],
+                width,
+            );
+        });
         self
     }
 
     /// The leading border's width (left in left-to-right layouts).
-    fn border_s(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderStartWidth, width);
+    fn border_s(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderStartWidth, width);
+        });
         self
     }
 
     /// The trailing border's width.
-    fn border_e(mut self, width: f32) -> Self {
-        self.style().number(StyleKey::BorderEndWidth, width);
+    fn border_e(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.number(StyleKey::BorderEndWidth, width);
+        });
         self
     }
 
     /// The top border's color.
-    fn border_t_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BorderTopColor], color.into());
+    fn border_t_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderTopColor], color);
+        });
         self
     }
 
     /// The right border's color.
-    fn border_r_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BorderRightColor], color.into());
+    fn border_r_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderRightColor], color);
+        });
         self
     }
 
     /// The bottom border's color.
-    fn border_b_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BorderBottomColor], color.into());
+    fn border_b_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderBottomColor], color);
+        });
         self
     }
 
     /// The left border's color.
-    fn border_l_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BorderLeftColor], color.into());
+    fn border_l_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderLeftColor], color);
+        });
         self
     }
 
     /// The left and right borders' color.
-    fn border_x_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style().color(
-            &[StyleKey::BorderLeftColor, StyleKey::BorderRightColor],
-            color.into(),
-        );
+    fn border_x_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(
+                &[StyleKey::BorderLeftColor, StyleKey::BorderRightColor],
+                color,
+            );
+        });
         self
     }
 
     /// The top and bottom borders' color.
-    fn border_y_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style().color(
-            &[StyleKey::BorderTopColor, StyleKey::BorderBottomColor],
-            color.into(),
-        );
+    fn border_y_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(
+                &[StyleKey::BorderTopColor, StyleKey::BorderBottomColor],
+                color,
+            );
+        });
         self
     }
 
     /// The leading border's color.
-    fn border_s_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BorderStartColor], color.into());
+    fn border_s_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderStartColor], color);
+        });
         self
     }
 
     /// The trailing border's color.
-    fn border_e_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::BorderEndColor], color.into());
+    fn border_e_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::BorderEndColor], color);
+        });
         self
     }
 
@@ -1494,107 +1652,123 @@ pub trait Styled: Sized {
     }
 
     /// The top left corner's radius.
-    fn rounded_tl(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderTopLeftRadius], radius.into());
+    fn rounded_tl(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderTopLeftRadius], radius);
+        });
         self
     }
 
     /// The top right corner's radius.
-    fn rounded_tr(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderTopRightRadius], radius.into());
+    fn rounded_tr(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderTopRightRadius], radius);
+        });
         self
     }
 
     /// The bottom right corner's radius.
-    fn rounded_br(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderBottomRightRadius], radius.into());
+    fn rounded_br(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderBottomRightRadius], radius);
+        });
         self
     }
 
     /// The bottom left corner's radius.
-    fn rounded_bl(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderBottomLeftRadius], radius.into());
+    fn rounded_bl(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderBottomLeftRadius], radius);
+        });
         self
     }
 
     /// The left corners' radius.
-    fn rounded_l(mut self, radius: impl Into<Length>) -> Self {
-        self.style().lengths(
-            &[
-                StyleKey::BorderTopLeftRadius,
-                StyleKey::BorderBottomLeftRadius,
-            ],
-            radius.into(),
-        );
+    fn rounded_l(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(
+                &[
+                    StyleKey::BorderTopLeftRadius,
+                    StyleKey::BorderBottomLeftRadius,
+                ],
+                radius,
+            );
+        });
         self
     }
 
     /// The right corners' radius.
-    fn rounded_r(mut self, radius: impl Into<Length>) -> Self {
-        self.style().lengths(
-            &[
-                StyleKey::BorderTopRightRadius,
-                StyleKey::BorderBottomRightRadius,
-            ],
-            radius.into(),
-        );
+    fn rounded_r(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(
+                &[
+                    StyleKey::BorderTopRightRadius,
+                    StyleKey::BorderBottomRightRadius,
+                ],
+                radius,
+            );
+        });
         self
     }
 
     /// The top leading corner's radius (top left in left-to-right
     /// layouts; Tailwind's `rounded-ss`).
-    fn rounded_ss(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderTopStartRadius], radius.into());
+    fn rounded_ss(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderTopStartRadius], radius);
+        });
         self
     }
 
     /// The top trailing corner's radius (`rounded-se`).
-    fn rounded_se(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderTopEndRadius], radius.into());
+    fn rounded_se(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderTopEndRadius], radius);
+        });
         self
     }
 
     /// The bottom trailing corner's radius (`rounded-ee`).
-    fn rounded_ee(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderBottomEndRadius], radius.into());
+    fn rounded_ee(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderBottomEndRadius], radius);
+        });
         self
     }
 
     /// The bottom leading corner's radius (`rounded-es`).
-    fn rounded_es(mut self, radius: impl Into<Length>) -> Self {
-        self.style()
-            .lengths(&[StyleKey::BorderBottomStartRadius], radius.into());
+    fn rounded_es(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(&[StyleKey::BorderBottomStartRadius], radius);
+        });
         self
     }
 
     /// The leading corners' radius.
-    fn rounded_s(mut self, radius: impl Into<Length>) -> Self {
-        self.style().lengths(
-            &[
-                StyleKey::BorderTopStartRadius,
-                StyleKey::BorderBottomStartRadius,
-            ],
-            radius.into(),
-        );
+    fn rounded_s(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(
+                &[
+                    StyleKey::BorderTopStartRadius,
+                    StyleKey::BorderBottomStartRadius,
+                ],
+                radius,
+            );
+        });
         self
     }
 
     /// The trailing corners' radius.
-    fn rounded_e(mut self, radius: impl Into<Length>) -> Self {
-        self.style().lengths(
-            &[
-                StyleKey::BorderTopEndRadius,
-                StyleKey::BorderBottomEndRadius,
-            ],
-            radius.into(),
-        );
+    fn rounded_e(mut self, radius: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(radius, |s, radius: Length| {
+            s.lengths(
+                &[
+                    StyleKey::BorderTopEndRadius,
+                    StyleKey::BorderBottomEndRadius,
+                ],
+                radius,
+            );
+        });
         self
     }
 
@@ -1608,14 +1782,18 @@ pub trait Styled: Sized {
     }
 
     /// The outline's color.
-    fn outline_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style().color(&[StyleKey::OutlineColor], color.into());
+    fn outline_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::OutlineColor], color);
+        });
         self
     }
 
     /// The outline's distance from the border (negative: inside it).
-    fn outline_offset(mut self, points: f32) -> Self {
-        self.style().number(StyleKey::OutlineOffset, points);
+    fn outline_offset(mut self, points: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(points, |s, points: f32| {
+            s.number(StyleKey::OutlineOffset, points);
+        });
         self
     }
 
@@ -1709,15 +1887,18 @@ pub trait Styled: Sized {
     /// A shadow of this opacity (0 by default: none), with
     /// [`Styled::shadow_color`] (black by default), [`Styled::shadow_radius`]
     /// and [`Styled::shadow_offset`].
-    fn shadow_opacity(mut self, opacity: f32) -> Self {
-        self.style()
-            .number(StyleKey::ShadowOpacity, opacity.clamp(0.0, 1.0));
+    fn shadow_opacity(mut self, opacity: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(opacity, |s, opacity: f32| {
+            s.number(StyleKey::ShadowOpacity, opacity.clamp(0.0, 1.0));
+        });
         self
     }
 
     /// The shadow's blur radius, in points (3 by default).
-    fn shadow_radius(mut self, radius: f32) -> Self {
-        self.style().number(StyleKey::ShadowRadius, radius);
+    fn shadow_radius(mut self, radius: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(radius, |s, radius: f32| {
+            s.number(StyleKey::ShadowRadius, radius);
+        });
         self
     }
 
@@ -1755,36 +1936,43 @@ pub trait Styled: Sized {
 
     /// The inset shadow's color (as [`Styled::shadow_color`] for the
     /// presets).
-    fn inset_shadow_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::InsetShadow, color.into()));
+    fn inset_shadow_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::InsetShadow, color));
+        });
         self
     }
 
     /// A ring `width` points wide around the border (a solid shadow; it
     /// takes no space), in the text color unless [`Styled::ring_color`].
-    fn ring(mut self, width: f32) -> Self {
-        self.style().push(Declaration::Ring(Bits(width)));
+    fn ring(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.push(Declaration::Ring(Bits(width)));
+        });
         self
     }
 
     /// The ring's color.
-    fn ring_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::Ring, color.into()));
+    fn ring_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::Ring, color));
+        });
         self
     }
 
     /// A gap of `width` points between the border and the ring.
-    fn ring_offset(mut self, width: f32) -> Self {
-        self.style().push(Declaration::RingOffset(Bits(width)));
+    fn ring_offset(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.push(Declaration::RingOffset(Bits(width)));
+        });
         self
     }
 
     /// The gap's color (white by default).
-    fn ring_offset_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::RingOffset, color.into()));
+    fn ring_offset_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::RingOffset, color));
+        });
         self
     }
 
@@ -1795,24 +1983,28 @@ pub trait Styled: Sized {
     }
 
     /// A second ring `width` points wide, inside the border.
-    fn inset_ring(mut self, width: f32) -> Self {
-        self.style().push(Declaration::InsetRing(Bits(width)));
+    fn inset_ring(mut self, width: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(width, |s, width: f32| {
+            s.push(Declaration::InsetRing(Bits(width)));
+        });
         self
     }
 
     /// The inside ring's color.
-    fn inset_ring_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::InsetRing, color.into()));
+    fn inset_ring_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::InsetRing, color));
+        });
         self
     }
 
     /// A linear gradient over the background, along `degrees` (0 up, 90
     /// right), from [`Styled::gradient_from`] through
     /// [`Styled::gradient_via`] to [`Styled::gradient_to`].
-    fn bg_linear(mut self, degrees: f32) -> Self {
-        self.style()
-            .push(Declaration::Gradient(GradientShape::Linear(Bits(degrees))));
+    fn bg_linear(mut self, degrees: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(degrees, |s, degrees: f32| {
+            s.push(Declaration::Gradient(GradientShape::Linear(Bits(degrees))));
+        });
         self
     }
 
@@ -1884,9 +2076,10 @@ pub trait Styled: Sized {
     }
 
     /// A conic gradient around the center, starting at `degrees` (0 up).
-    fn bg_conic(mut self, degrees: f32) -> Self {
-        self.style()
-            .push(Declaration::Gradient(GradientShape::Conic(Bits(degrees))));
+    fn bg_conic(mut self, degrees: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(degrees, |s, degrees: f32| {
+            s.push(Declaration::Gradient(GradientShape::Conic(Bits(degrees))));
+        });
         self
     }
 
@@ -1897,42 +2090,51 @@ pub trait Styled: Sized {
     }
 
     /// The gradient's first color (transparent by default).
-    fn gradient_from(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::From, color.into()));
+    fn gradient_from(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::From, color));
+        });
         self
     }
 
     /// A color in the middle of the gradient.
-    fn gradient_via(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::Via, color.into()));
+    fn gradient_via(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::Via, color));
+        });
         self
     }
 
     /// The gradient's last color (transparent by default).
-    fn gradient_to(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .push(Declaration::PartColor(ColorPart::To, color.into()));
+    fn gradient_to(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.push(Declaration::PartColor(ColorPart::To, color));
+        });
         self
     }
 
     /// Where the first color is, a fraction of the gradient (0 by
     /// default).
-    fn gradient_from_position(mut self, at: f32) -> Self {
-        self.style().push(Declaration::StopPosition(0, Bits(at)));
+    fn gradient_from_position(mut self, at: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(at, |s, at: f32| {
+            s.push(Declaration::StopPosition(0, Bits(at)));
+        });
         self
     }
 
     /// Where the middle color is (0.5 by default).
-    fn gradient_via_position(mut self, at: f32) -> Self {
-        self.style().push(Declaration::StopPosition(1, Bits(at)));
+    fn gradient_via_position(mut self, at: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(at, |s, at: f32| {
+            s.push(Declaration::StopPosition(1, Bits(at)));
+        });
         self
     }
 
     /// Where the last color is (1 by default).
-    fn gradient_to_position(mut self, at: f32) -> Self {
-        self.style().push(Declaration::StopPosition(2, Bits(at)));
+    fn gradient_to_position(mut self, at: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(at, |s, at: f32| {
+            s.push(Declaration::StopPosition(2, Bits(at)));
+        });
         self
     }
 
@@ -2085,14 +2287,18 @@ pub trait Styled: Sized {
     }
 
     /// Transitions last `ms` milliseconds.
-    fn duration(mut self, ms: f32) -> Self {
-        self.style().push(Declaration::Duration(Bits(ms)));
+    fn duration(mut self, ms: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(ms, |s, ms: f32| {
+            s.push(Declaration::Duration(Bits(ms)));
+        });
         self
     }
 
     /// Transitions start after `ms` milliseconds.
-    fn delay(mut self, ms: f32) -> Self {
-        self.style().push(Declaration::Delay(Bits(ms)));
+    fn delay(mut self, ms: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(ms, |s, ms: f32| {
+            s.push(Declaration::Delay(Bits(ms)));
+        });
         self
     }
 
@@ -2177,73 +2383,87 @@ pub trait Styled: Sized {
     }
 
     /// Scales from the center (1 is the natural size).
-    fn scale(self, scale: f32) -> Self {
+    fn scale(self, scale: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::Scale, scale)
     }
 
     /// Scales horizontally.
-    fn scale_x(self, scale: f32) -> Self {
+    fn scale_x(self, scale: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::ScaleX, scale)
     }
 
     /// Scales vertically.
-    fn scale_y(self, scale: f32) -> Self {
+    fn scale_y(self, scale: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::ScaleY, scale)
     }
 
     /// Moves horizontally by `points` (after layout).
-    fn translate_x(self, points: f32) -> Self {
+    fn translate_x(self, points: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::TranslateX, points)
     }
 
     /// Moves vertically by `points` (after layout).
-    fn translate_y(self, points: f32) -> Self {
+    fn translate_y(self, points: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::TranslateY, points)
     }
 
     /// Rotates by `degrees`, clockwise.
-    fn rotate(self, degrees: f32) -> Self {
+    fn rotate(self, degrees: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::Rotate, degrees)
     }
 
     /// Rotates by `degrees` around the horizontal axis (3D; with
     /// [`Styled::perspective`] it tilts towards the viewer).
-    fn rotate_x(self, degrees: f32) -> Self {
+    fn rotate_x(self, degrees: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::RotateX, degrees)
     }
 
     /// Rotates by `degrees` around the vertical axis (3D).
-    fn rotate_y(self, degrees: f32) -> Self {
+    fn rotate_y(self, degrees: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::RotateY, degrees)
     }
 
     /// Slants vertical edges by `degrees` (iOS; Android has no skew).
-    fn skew_x(self, degrees: f32) -> Self {
+    fn skew_x(self, degrees: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::SkewX, degrees)
     }
 
     /// Slants horizontal edges by `degrees` (iOS).
-    fn skew_y(self, degrees: f32) -> Self {
+    fn skew_y(self, degrees: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::SkewY, degrees)
     }
 
     /// Looks at its 3D rotations from `points` away (smaller: stronger).
-    fn perspective(self, points: f32) -> Self {
+    fn perspective(self, points: impl IntoReactive<f32>) -> Self {
         self.transform_step(TransformKind::Perspective, points)
     }
 
     /// The step `kind` of its transform, by `amount`. The steps compose in
     /// CSS's order, whatever the order of the calls: perspective,
     /// translate, rotate, scale, then the 3D rotations and the skews.
-    fn transform_step(mut self, kind: TransformKind, amount: f32) -> Self {
-        self.style()
-            .push(Declaration::Transform(kind, Bits(amount)));
+    fn transform_step(mut self, kind: TransformKind, amount: impl IntoReactive<f32>) -> Self {
+        // Steps compose in order: after a bound part, a static step is
+        // applied with the bound ones too.
+        let style = self.style();
+        match amount.into_reactive() {
+            Reactive::Static(amount) if !style.is_bound() => {
+                style.push(Declaration::Transform(kind, Bits(amount)));
+            }
+            amount => style.bind(move |s| {
+                s.push(Declaration::Transform(kind, Bits(amount.get())));
+            }),
+        }
         self
     }
 
     /// No transform (also none of the steps set before).
     fn transform_none(mut self) -> Self {
-        self.style().push(Declaration::TransformNone);
+        let style = self.style();
+        if style.is_bound() {
+            style.bind(|s| s.push(Declaration::TransformNone));
+        } else {
+            style.push(Declaration::TransformNone);
+        }
         self
     }
 
@@ -2331,14 +2551,18 @@ pub trait Styled: Sized {
     // Text (inherited by the texts inside).
 
     /// The text color.
-    fn text_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style().color(&[StyleKey::Color], color.into());
+    fn text_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::Color], color);
+        });
         self
     }
 
     /// The font size, in points.
-    fn text_size(mut self, size: impl Into<Length>) -> Self {
-        self.style().lengths(&[StyleKey::FontSize], size.into());
+    fn text_size(mut self, size: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(size, |s, size: Length| {
+            s.lengths(&[StyleKey::FontSize], size);
+        });
         self
     }
 
@@ -2421,8 +2645,10 @@ pub trait Styled: Sized {
     }
 
     /// The line height, in points.
-    fn line_height(mut self, height: impl Into<Length>) -> Self {
-        self.style().lengths(&[StyleKey::LineHeight], height.into());
+    fn line_height(mut self, height: impl IntoReactive<Length>) -> Self {
+        self.style().bind_value(height, |s, height: Length| {
+            s.lengths(&[StyleKey::LineHeight], height);
+        });
         self
     }
 
@@ -2433,9 +2659,10 @@ pub trait Styled: Sized {
     }
 
     /// The font family (`None` style: the system font is the default).
-    fn font_family(mut self, family: impl Into<SharedString>) -> Self {
-        self.style()
-            .push(Declaration::Str(StyleKey::FontFamily, family.into()));
+    fn font_family(mut self, family: impl IntoReactive<SharedString>) -> Self {
+        self.style().bind_value(family, |s, family: SharedString| {
+            s.push(Declaration::Str(StyleKey::FontFamily, family));
+        });
         self
     }
 
@@ -2465,9 +2692,10 @@ pub trait Styled: Sized {
 
     /// The color of the underline and strike-through (the text's by
     /// default).
-    fn text_decoration_color(mut self, color: impl Into<AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[StyleKey::TextDecorationColor], color.into());
+    fn text_decoration_color(mut self, color: impl IntoReactive<AdaptiveColor>) -> Self {
+        self.style().bind_value(color, |s, color: AdaptiveColor| {
+            s.color(&[StyleKey::TextDecorationColor], color);
+        });
         self
     }
 
@@ -2505,15 +2733,18 @@ pub trait Styled: Sized {
     }
 
     /// The decoration lines' thickness, in points.
-    fn text_decoration_thickness(mut self, points: f32) -> Self {
-        self.style()
-            .number(StyleKey::TextDecorationThickness, points);
+    fn text_decoration_thickness(mut self, points: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(points, |s, points: f32| {
+            s.number(StyleKey::TextDecorationThickness, points);
+        });
         self
     }
 
     /// The underline's distance below the baseline, in points.
-    fn underline_offset(mut self, points: f32) -> Self {
-        self.style().number(StyleKey::TextUnderlineOffset, points);
+    fn underline_offset(mut self, points: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(points, |s, points: f32| {
+            s.number(StyleKey::TextUnderlineOffset, points);
+        });
         self
     }
 
@@ -2646,8 +2877,10 @@ pub trait Styled: Sized {
     }
 
     /// The text shadow's blur radius, in points.
-    fn text_shadow_radius(mut self, radius: f32) -> Self {
-        self.style().number(StyleKey::TextShadowRadius, radius);
+    fn text_shadow_radius(mut self, radius: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(radius, |s, radius: f32| {
+            s.number(StyleKey::TextShadowRadius, radius);
+        });
         self
     }
 
@@ -2677,12 +2910,46 @@ pub trait Styled: Sized {
     }
 
     /// Extra space between letters, in points.
-    fn letter_spacing(mut self, points: f32) -> Self {
-        self.style().number(StyleKey::LetterSpacing, points);
+    fn letter_spacing(mut self, points: impl IntoReactive<f32>) -> Self {
+        self.style().bind_value(points, |s, points: f32| {
+            s.number(StyleKey::LetterSpacing, points);
+        });
         self
     }
 
-    // Variants (native: no render).
+    // Variants (native: nothing runs).
+
+    /// `f`'s styles while `when` holds: a value decides once, a signal or a
+    /// closure switches them as it changes (Tailwind's classes made
+    /// conditional; native states such as `.active` need none).
+    fn style_when(
+        mut self,
+        when: impl IntoReactive<bool>,
+        f: impl FnOnce(StyleRefinement) -> StyleRefinement,
+    ) -> Self {
+        let layer = f(StyleRefinement::default());
+        match when.into_reactive() {
+            Reactive::Static(true) => self.style().extend_as(Variant::default(), layer),
+            Reactive::Static(false) => {}
+            Reactive::Bound(when) => self.style().bind(move |s| {
+                if when() {
+                    s.extend_as(Variant::default(), layer.resolved());
+                }
+            }),
+        }
+        self
+    }
+
+    /// The styles `f` makes, made again when what it reads changes (any
+    /// style that depends on the app's state; a value that changes alone
+    /// is better given to its method: `.w(move || px(width.get()))`).
+    fn style_with(mut self, f: impl Fn(StyleRefinement) -> StyleRefinement + 'static) -> Self {
+        self.style().bind(move |s| {
+            let made = f(StyleRefinement::default()).resolved();
+            s.extend_as(Variant::default(), made);
+        });
+        self
+    }
 
     /// Styles in dark appearance (Tailwind's `dark:`), for what is not a
     /// color: theme colors switch by themselves.

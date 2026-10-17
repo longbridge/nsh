@@ -3,10 +3,10 @@
 //! frame), think first, call tools, fail and recover; every scenario
 //! comes from local scripts and timers.
 //!
-//! The conversation is the chat's state; its rows are a virtualized list.
-//! The reply being written is [`Live`], a global only [`LiveReply`] reads:
-//! a frame of tokens renders that row again and nothing else, and its
-//! Markdown blocks are components, so only the block being written does.
+//! The conversation is a signal of messages; its rows are a virtualized
+//! list whose cells bind to the message they show. The reply being written
+//! is [`Live`], signals only its row reads: a frame of tokens updates that
+//! row's last Markdown block, and in it the span the tokens lengthened.
 
 mod glyphs;
 mod markdown;
@@ -20,13 +20,13 @@ use std::{
 
 use nsh_core::{
     LayoutAnimation, Size,
-    ui::{AnyElement, ScrollEvent, ScrollOffset, prelude::*},
+    ui::{ScrollEvent, ScrollOffset, prelude::*},
 };
 use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 
 use self::{
     glyphs::{GlyphName, glyph},
-    markdown::{Block, MarkdownEvent, markdown, parse},
+    markdown::{Block, markdown, parse},
     parts::{
         action_button, avatar, caret, date_separator, error_row, file_chip, photo, spinner,
         tool_card,
@@ -42,19 +42,22 @@ use crate::ui::{
     radius, rgb_a,
 };
 
-/// The reply being written. Finished replies are plain data in the
-/// chat's messages.
-#[derive(Default)]
-pub(crate) struct Live {
-    id: Option<String>,
-    model: Model,
-    reason: String,
+/// The reply being written, as signals only its row reads. Finished
+/// replies are plain data in the chat's messages.
+#[derive(Clone, Copy)]
+struct Live {
+    /// Its message's id (none: no reply is being written).
+    id: Signal<Option<String>>,
+    /// Its reasoning so far.
+    reason: Signal<String>,
     /// When the thinking started, and its seconds once it ended.
-    thinking: Option<(Instant, Option<u64>)>,
-    tools: Vec<Tool>,
-    blocks: Vec<Block>,
+    thinking: Signal<Option<(Instant, Option<u64>)>>,
+    /// Its tool calls so far.
+    tools: Signal<Vec<Tool>>,
+    /// Its text so far, parsed (the last block completed).
+    blocks: Signal<Vec<Block>>,
     /// Ticks once a second while thinking.
-    now: Option<Instant>,
+    now: Signal<Option<Instant>>,
 }
 
 /// What the rows ask of the chat.
@@ -95,10 +98,22 @@ struct Run {
     /// Tokens collect here and reach [`Live`] once per frame.
     pending_text: String,
     pending_reason: String,
-    frame: Option<Task<()>>,
-    ticker: Option<Task<()>>,
-    /// The run's steps: dropping it (stopping, freezing) ends them.
-    _task: Option<Task<()>>,
+    frame: Option<Spawned<()>>,
+    ticker: Option<Spawned<()>>,
+    /// The run's steps: cancelled when it is stopped.
+    task: Option<Spawned<()>>,
+}
+
+impl Run {
+    /// Ends its tasks (the steps, the frame, the ticker).
+    fn cancel(&mut self) {
+        for task in [self.frame.take(), self.ticker.take(), self.task.take()]
+            .into_iter()
+            .flatten()
+        {
+            task.cancel();
+        }
+    }
 }
 
 /// Where streamed tokens go.
@@ -108,81 +123,52 @@ enum Stream {
     Reason,
 }
 
-/// The chat.
-pub(crate) struct Chat {
-    ids: u32,
-    messages: Rc<Vec<Msg>>,
-    model: Model,
-    draft: String,
-    input_height: f32,
-    /// The photo and the notes are attached.
-    attachment: bool,
-    menu: bool,
-    banner: Option<Banner>,
-    banner_kind: Banner,
-    /// The copied message or code block, for a moment.
-    copied: Option<String>,
-    copy_timer: Option<Task<()>>,
-    /// Whether the user is at the bottom (the list then follows the
-    /// stream natively); scrolling up clears it.
-    following: bool,
-    dragging: bool,
-    list: Option<ElementRef>,
-    run: Option<Run>,
-    offline: Option<Task<()>>,
-    settle: Option<Task<()>>,
-    /// The jump button, the menu and the banner: 0 hidden, 1 shown.
-    shown: Option<[NativeValue; 3]>,
+/// What kind of row a message is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowKind {
+    Date,
+    User,
+    Assistant,
 }
 
-impl Default for Chat {
-    fn default() -> Self {
-        Self {
-            ids: 0,
-            messages: Rc::default(),
-            model: Model::Swift,
-            draft: String::new(),
-            input_height: 20.0,
-            attachment: false,
-            menu: false,
-            banner: None,
-            banner_kind: Banner::Offline,
-            copied: None,
-            copy_timer: None,
-            following: true,
-            dragging: false,
-            list: None,
-            run: None,
-            offline: None,
-            settle: None,
-            shown: None,
+impl RowKind {
+    fn of(msg: &Msg) -> Self {
+        match msg {
+            Msg::Date { .. } => RowKind::Date,
+            Msg::User { .. } => RowKind::User,
+            Msg::Assistant(_) => RowKind::Assistant,
         }
     }
 }
 
-/// Streams `text` at about `rate` tokens a second, with jitter; false
-/// when the chat is gone.
-async fn stream(
-    this: &WeakComponent<Chat>,
-    cx: &AsyncCx,
-    text: &str,
-    rate: f64,
-    into: Stream,
-) -> bool {
-    let mut random = Jitter::new();
-    for token in tokens(text) {
-        let delay = 1.0 / rate * (0.55 + random.next() * 0.9);
-        cx.timer(Duration::from_secs_f64(delay)).await;
-        let added = this
-            .update(move |chat: &mut Chat, cx| chat.token(token, into, cx))
-            .await;
-        if added.is_none() {
-            return false;
-        }
+/// A list cell's message (none past the end).
+type Item = Memo<Option<Msg>>;
+
+/// `f` of the reply `item` is, if it is one (a tracked read).
+fn with_reply<R>(item: Item, f: impl FnOnce(&Assistant) -> R) -> Option<R> {
+    item.with(|m| match m {
+        Some(Msg::Assistant(a)) => Some(f(a)),
+        _ => None,
+    })
+}
+
+/// A task in `slot`, ending the one it replaces.
+fn keep(slot: Stored<Option<Spawned<()>>>, task: Spawned<()>) {
+    if let Some(old) = slot.replace(Some(task)) {
+        old.cancel();
     }
-    this.update(|chat: &mut Chat, cx| chat.flush(cx))
-        .await
-        .is_some()
+}
+
+/// Springs `value` to 1 while `on` holds and to 0 while it does not, as it
+/// changes.
+fn spring_on(value: NativeValue, on: impl Fn() -> bool + 'static) {
+    let shown = stored(untracked(&on));
+    effect(move || {
+        let now = on();
+        if shown.replace(now) != now {
+            let _ = value.spring(if now { 1.0 } else { 0.0 }, motion::SETTLE);
+        }
+    });
 }
 
 /// Numbers in 0..1 (xorshift), seeded from the clock: the streams' jitter.
@@ -231,104 +217,144 @@ fn tokens(text: &str) -> Vec<String> {
     out
 }
 
-impl Chat {
-    fn next_id(&mut self) -> String {
-        self.ids += 1;
-        format!("m{}", self.ids - 1)
+/// The chat's state: signals the view binds to and what its actions keep
+/// (`Copy`: closures and tasks capture it).
+#[derive(Clone, Copy)]
+struct ChatState {
+    /// The chat's own owner: its tasks end with it, not with the row or
+    /// branch whose button started them.
+    owner: Owner,
+    ids: Stored<u32>,
+    messages: Signal<Vec<Msg>>,
+    model: Signal<Model>,
+    draft: Signal<String>,
+    input_height: Signal<f32>,
+    /// The photo and the notes are attached.
+    attachment: Signal<bool>,
+    menu: Signal<bool>,
+    /// The connection banner shows, and what it says.
+    banner: Signal<bool>,
+    banner_kind: Signal<Banner>,
+    /// The copied message or code block, for a moment.
+    copied: Signal<Option<String>>,
+    copy_timer: Stored<Option<Spawned<()>>>,
+    /// Whether the user is at the bottom (the list then follows the
+    /// stream natively); scrolling up clears it.
+    following: Signal<bool>,
+    dragging: Stored<bool>,
+    list: Stored<ElementRef>,
+    run: Stored<Option<Run>>,
+    live: Live,
+    offline: Stored<Option<Spawned<()>>>,
+    settle: Stored<Option<Spawned<()>>>,
+}
+
+impl ChatState {
+    fn next_id(self) -> String {
+        self.ids.with(|ids| {
+            *ids += 1;
+            format!("m{}", *ids - 1)
+        })
     }
 
-    fn values(&self) -> &[NativeValue; 3] {
-        self.shown.as_ref().expect("set up")
-    }
-
-    fn set_following(&mut self, following: bool) {
-        if self.following != following {
-            self.following = following;
-            let _ = self.values()[0].spring(if following { 0.0 } else { 1.0 }, motion::SETTLE);
-        }
-    }
-
-    fn set_menu(&mut self, menu: bool) {
-        if self.menu != menu {
-            self.menu = menu;
-            let _ = self.values()[1].spring(if menu { 1.0 } else { 0.0 }, motion::SETTLE);
-        }
-    }
-
-    fn set_banner(&mut self, banner: Option<Banner>) {
-        if self.banner.is_some() != banner.is_some() {
-            let _ =
-                self.values()[2].spring(if banner.is_some() { 1.0 } else { 0.0 }, motion::SETTLE);
-        }
-        self.banner = banner;
+    fn running(self) -> bool {
+        self.run.with(|run| run.is_some())
     }
 
     /// Scrolls to the end on the user's own action (send, jump, load).
-    fn scroll_to_end(&mut self, animated: bool) {
-        self.set_following(true);
-        if let Some(list) = &self.list {
-            list.scroll_to_end(animated);
-        }
+    fn scroll_to_end(self, animated: bool) {
+        self.following.set(true);
+        self.list.with(|list| list.scroll_to_end(animated));
     }
 
-    fn update_messages(&mut self, f: impl FnOnce(&mut Vec<Msg>)) {
-        f(Rc::make_mut(&mut self.messages));
+    /// Streams `text` at about `rate` tokens a second, with jitter.
+    async fn stream(self, text: &str, rate: f64, into: Stream) {
+        let mut random = Jitter::new();
+        for token in tokens(text) {
+            let delay = 1.0 / rate * (0.55 + random.next() * 0.9);
+            timer(Duration::from_secs_f64(delay)).await;
+            self.token(token, into);
+        }
+        self.flush();
     }
 
     /// The streamed tokens so far reach the live reply.
-    fn flush(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(run) = self.run.as_mut() else {
+    fn flush(self) {
+        let update = self.run.with(|run| {
+            let run = run.as_mut()?;
+            let frame = run.frame.take();
+            let reason = !run.pending_reason.is_empty();
+            let text = !run.pending_text.is_empty();
+            if !reason && !text {
+                return Some((frame, None, None));
+            }
+            run.reason
+                .push_str(&std::mem::take(&mut run.pending_reason));
+            run.md.push_str(&std::mem::take(&mut run.pending_text));
+            Some((
+                frame,
+                reason.then(|| run.reason.clone()),
+                text.then(|| run.md.clone()),
+            ))
+        });
+        let Some((frame, reason, md)) = update else {
             return;
         };
-        run.frame = None;
-        let reason = !run.pending_reason.is_empty();
-        let text = !run.pending_text.is_empty();
-        if !reason && !text {
-            return;
+        if let Some(frame) = frame {
+            frame.cancel();
         }
-        run.reason
-            .push_str(&std::mem::take(&mut run.pending_reason));
-        run.md.push_str(&std::mem::take(&mut run.pending_text));
-        let (r, md) = (run.reason.clone(), run.md.clone());
-        cx.update_global::<Live, _>(|live, _| {
-            if reason {
-                live.reason = r;
+        let live = self.live;
+        batch(|| {
+            if let Some(reason) = reason {
+                live.reason.set(reason);
             }
-            if text {
-                live.blocks = parse(&md, true);
+            if let Some(md) = md {
+                live.blocks.set(parse(&md, true));
             }
         });
     }
 
     /// A token arrives: it shows with the next frame.
-    fn token(&mut self, token: String, into: Stream, cx: &mut Context<'_, Self>) {
-        let Some(run) = self.run.as_mut() else {
-            return;
-        };
-        match into {
-            Stream::Text => run.pending_text.push_str(&token),
-            Stream::Reason => run.pending_reason.push_str(&token),
-        }
-        if run.frame.is_none() {
-            run.frame = Some(cx.request_animation_frame(|this: &mut Self, _, cx| this.flush(cx)));
+    fn token(self, token: String, into: Stream) {
+        let queue = self.run.with(|run| {
+            let Some(run) = run.as_mut() else {
+                return false;
+            };
+            match into {
+                Stream::Text => run.pending_text.push_str(&token),
+                Stream::Reason => run.pending_reason.push_str(&token),
+            }
+            run.frame.is_none()
+        });
+        if queue {
+            let frame = self
+                .owner
+                .run(|| request_animation_frame(move |_| self.flush()));
+            self.run.with(|run| {
+                if let Some(run) = run.as_mut() {
+                    run.frame = Some(frame);
+                }
+            });
         }
     }
 
     /// Freezes the reply into a message and ends the run.
-    fn freeze(&mut self, status: Status, error: Option<&'static str>, cx: &mut Context<'_, Self>) {
-        let Some(mut run) = self.run.take() else {
+    fn freeze(self, status: Status, error: Option<&'static str>) {
+        let Some(mut run) = self.run.replace(None) else {
             return;
         };
+        // From its own steps too: a task cancelled while it runs ends
+        // once it yields.
+        run.cancel();
         run.md.push_str(&run.pending_text);
         run.reason.push_str(&run.pending_reason);
         let seconds = run
             .think_seconds
             .unwrap_or_else(|| (run.think_start.elapsed().as_secs_f64().round() as u64).max(1));
-        let tools = cx.update_global::<Live, _>(|live, _| {
-            live.id = None;
-            std::mem::take(&mut live.tools)
-        });
-        let tools = tools
+        let tools = self
+            .live
+            .tools
+            .get_untracked()
             .into_iter()
             .map(|t| {
                 if t.state == ToolState::Done {
@@ -358,30 +384,34 @@ impl Chat {
             error,
             rating: None,
         };
-        cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-        self.update_messages(|messages| {
-            if let Some(m) = messages.iter_mut().find(|m| m.id() == reply.id) {
-                *m = Msg::Assistant(reply);
-            }
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        batch(|| {
+            self.messages.update(|messages| {
+                if let Some(m) = messages.iter_mut().find(|m| m.id() == reply.id) {
+                    *m = Msg::Assistant(reply);
+                }
+            });
+            self.live.id.set(None);
         });
-        cx.notify();
         // The list follows the final layout natively; once the layout
         // animation has settled, a following list ends exactly at the
         // bottom.
-        self.settle = Some(
-            cx.set_timeout(Duration::from_millis(360), |this: &mut Self, _| {
-                if this.following
-                    && let Some(list) = &this.list
-                {
-                    list.scroll_to_end(true);
-                }
+        let (following, list) = (self.following, self.list);
+        keep(
+            self.settle,
+            self.owner.run(|| {
+                set_timeout(Duration::from_millis(360), move || {
+                    if following.get_untracked() {
+                        list.with(|list| list.scroll_to_end(true));
+                    }
+                })
             }),
         );
     }
 
     /// Runs a scenario's reply; `at` replaces that message (retry,
     /// regenerate).
-    fn reply(&mut self, s: Scenario, at: Option<String>, cx: &mut Context<'_, Self>) {
+    fn reply(self, s: Scenario, at: Option<String>) {
         let id = self.next_id();
         let placeholder = Assistant {
             id: id.clone(),
@@ -395,121 +425,102 @@ impl Chat {
             error: None,
             rating: None,
         };
-        cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-        let (live_id, model) = (id.clone(), s.model);
-        cx.update_global::<Live, _>(|live, _| {
-            *live = Live {
-                id: Some(live_id),
-                model,
-                ..Live::default()
-            };
-        });
-        self.update_messages(|messages| match at {
-            Some(at) => {
-                if let Some(m) = messages.iter_mut().find(|m| m.id() == at) {
-                    *m = Msg::Assistant(placeholder);
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        let live = self.live;
+        batch(|| {
+            live.reason.set(String::new());
+            live.thinking.set(None);
+            live.tools.set(Vec::new());
+            live.blocks.set(Vec::new());
+            live.now.set(None);
+            live.id.set(Some(id.clone()));
+            self.messages.update(|messages| match at {
+                Some(at) => {
+                    if let Some(m) = messages.iter_mut().find(|m| m.id() == at) {
+                        *m = Msg::Assistant(placeholder);
+                    }
                 }
-            }
-            None => messages.push(Msg::Assistant(placeholder)),
+                None => messages.push(Msg::Assistant(placeholder)),
+            });
         });
-        cx.notify();
         let steps = s.steps;
-        let task = cx.spawn(move |this, cx| async move {
-            let wait = |ms: u64| cx.timer(Duration::from_millis(ms));
-            wait(450).await;
-            for step in steps {
-                match step {
-                    Step::Think(text) => {
-                        let started = this
-                            .update(|chat: &mut Self, cx| {
-                                let now = Instant::now();
-                                if let Some(run) = chat.run.as_mut() {
+        let task = self.owner.run(|| {
+            spawn(async move {
+                let wait = |ms: u64| timer(Duration::from_millis(ms));
+                wait(450).await;
+                for step in steps {
+                    match step {
+                        Step::Think(text) => {
+                            let now = Instant::now();
+                            let ticker = self.owner.run(|| {
+                                set_interval(Duration::from_secs(1), move || {
+                                    live.now.set(Some(Instant::now()));
+                                })
+                            });
+                            self.run.with(|run| {
+                                if let Some(run) = run.as_mut() {
                                     run.think_start = now;
-                                    run.ticker = Some(cx.set_interval(
-                                        Duration::from_secs(1),
-                                        |_: &mut Self, cx| {
-                                            cx.update_global::<Live, _>(|live, _| {
-                                                live.now = Some(Instant::now());
-                                            });
-                                        },
-                                    ));
+                                    run.ticker = Some(ticker);
                                 }
-                                cx.update_global::<Live, _>(|live, _| {
-                                    live.thinking = Some((now, None));
-                                    live.now = Some(now);
-                                });
-                            })
-                            .await;
-                        if started.is_none() {
-                            return;
-                        }
-                        if !stream(&this, &cx, &text, 75.0, Stream::Reason).await {
-                            return;
-                        }
-                        this.update(|chat: &mut Self, cx| {
-                            if let Some(run) = chat.run.as_mut() {
-                                run.ticker = None;
+                            });
+                            batch(|| {
+                                live.thinking.set(Some((now, None)));
+                                live.now.set(Some(now));
+                            });
+                            self.stream(&text, 75.0, Stream::Reason).await;
+                            let ended = self.run.with(|run| {
+                                let run = run.as_mut()?;
+                                let ticker = run.ticker.take();
                                 let seconds =
                                     (run.think_start.elapsed().as_secs_f64().round() as u64).max(1);
                                 run.think_seconds = Some(seconds);
-                                let start = run.think_start;
-                                cx.update_global::<Live, _>(|live, _| {
-                                    live.thinking = Some((start, Some(seconds)));
-                                });
-                            }
-                        })
-                        .await;
-                        wait(350).await;
-                    }
-                    Step::Tool(tool, ms) => {
-                        let id = tool.id;
-                        let set = move |state: ToolState| {
-                            move |_: &mut Self, cx: &mut Context<'_, Self>| {
-                                if state == ToolState::Done {
-                                    cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+                                Some((ticker, run.think_start, seconds))
+                            });
+                            if let Some((ticker, start, seconds)) = ended {
+                                if let Some(ticker) = ticker {
+                                    ticker.cancel();
                                 }
-                                cx.update_global::<Live, _>(|live, _| {
-                                    if let Some(t) = live.tools.iter_mut().find(|t| t.id == id) {
+                                live.thinking.set(Some((start, Some(seconds))));
+                            }
+                            wait(350).await;
+                        }
+                        Step::Tool(tool, ms) => {
+                            let id = tool.id;
+                            let set = move |state: ToolState| {
+                                if state == ToolState::Done {
+                                    animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+                                }
+                                live.tools.update(|tools| {
+                                    if let Some(t) = tools.iter_mut().find(|t| t.id == id) {
                                         t.state = state;
                                     }
                                 });
-                            }
-                        };
-                        this.update(move |_: &mut Self, cx| {
-                            cx.update_global::<Live, _>(|live, _| {
-                                live.tools.push(Tool {
+                            };
+                            live.tools.update(|tools| {
+                                tools.push(Tool {
                                     state: ToolState::Pending,
                                     ..tool
                                 });
                             });
-                        })
-                        .await;
-                        wait(450).await;
-                        this.update(set(ToolState::Running)).await;
-                        wait(ms).await;
-                        this.update(set(ToolState::Done)).await;
-                        wait(400).await;
-                    }
-                    Step::Say(text) => {
-                        if !stream(&this, &cx, &text, 40.0, Stream::Text).await {
+                            wait(450).await;
+                            set(ToolState::Running);
+                            wait(ms).await;
+                            set(ToolState::Done);
+                            wait(400).await;
+                        }
+                        Step::Say(text) => self.stream(&text, 40.0, Stream::Text).await,
+                        Step::Fail(error) => {
+                            wait(900).await;
+                            self.freeze(Status::Error, Some(error));
                             return;
                         }
+                        Step::Offline(_) => {}
                     }
-                    Step::Fail(error) => {
-                        wait(900).await;
-                        this.update(move |chat: &mut Self, cx| {
-                            chat.freeze(Status::Error, Some(error), cx)
-                        })
-                        .await;
-                        return;
-                    }
-                    Step::Offline(_) => {}
                 }
-            }
-            this.update(|chat: &mut Self, cx| chat.freeze(Status::Done, None, cx))
-                .await;
+                self.freeze(Status::Done, None);
+            })
         });
-        self.run = Some(Run {
+        let run = Run {
             id,
             model: s.model,
             script: s.id,
@@ -521,29 +532,26 @@ impl Chat {
             pending_reason: String::new(),
             frame: None,
             ticker: None,
-            _task: Some(task),
-        });
+            task: Some(task),
+        };
+        // A reply started while another waited for the connection ends it.
+        if let Some(mut old) = self.run.replace(Some(run)) {
+            old.cancel();
+        }
     }
 
-    fn stop(&mut self, cx: &mut Context<'_, Self>) {
-        // Its task ends with it.
-        self.freeze(Status::Stopped, None, cx);
+    fn stop(self) {
+        // Its tasks end with it.
+        self.freeze(Status::Stopped, None);
     }
 
     /// Sends the user's message for a scenario, then its reply.
-    fn submit(
-        &mut self,
-        s: Scenario,
-        text: String,
-        image: Option<&'static str>,
-        file: Option<FileRef>,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if self.run.is_some() {
+    fn submit(self, s: Scenario, text: String, image: Option<&'static str>, file: Option<FileRef>) {
+        if self.running() {
             return;
         }
-        self.set_menu(false);
-        self.set_following(true);
+        self.menu.set(false);
+        self.following.set(true);
         let offline = s.steps.iter().find_map(|step| match step {
             Step::Offline(ms) => Some(*ms),
             _ => None,
@@ -556,20 +564,24 @@ impl Chat {
             file,
             waiting: offline.is_some(),
         };
-        cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-        let date = self.messages.is_empty().then(|| Msg::Date {
-            id: self.next_id(),
-            label: "Today",
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        let date = self
+            .messages
+            .with_untracked(Vec::is_empty)
+            .then(|| Msg::Date {
+                id: self.next_id(),
+                label: "Today",
+            });
+        batch(|| {
+            self.messages.update(|messages| {
+                messages.extend(date);
+                messages.push(user);
+            });
+            self.draft.set(String::new());
+            self.attachment.set(false);
+            self.model.set(s.model);
         });
-        self.update_messages(|messages| {
-            messages.extend(date);
-            messages.push(user);
-        });
-        self.draft.clear();
-        self.attachment = false;
-        self.model = s.model;
         self.scroll_to_end(true);
-        cx.notify();
         let rest = Scenario {
             steps: s
                 .steps
@@ -581,48 +593,50 @@ impl Chat {
         };
         match offline {
             Some(ms) => {
-                self.banner_kind = Banner::Offline;
-                self.set_banner(Some(Banner::Offline));
-                self.offline = Some(cx.spawn(move |this, cx| async move {
-                    cx.timer(Duration::from_millis(ms)).await;
-                    this.update(move |chat: &mut Self, cx| {
-                        chat.banner_kind = Banner::Online;
-                        chat.update_messages(|messages| {
-                            if let Some(Msg::User { waiting, .. }) =
-                                messages.iter_mut().find(|m| m.id() == user_id)
-                            {
-                                *waiting = false;
-                            }
+                batch(|| {
+                    self.banner_kind.set(Banner::Offline);
+                    self.banner.set(true);
+                });
+                let task = self.owner.run(|| {
+                    spawn(async move {
+                        timer(Duration::from_millis(ms)).await;
+                        batch(|| {
+                            self.banner_kind.set(Banner::Online);
+                            self.messages.update(|messages| {
+                                if let Some(Msg::User { waiting, .. }) =
+                                    messages.iter_mut().find(|m| m.id() == user_id)
+                                {
+                                    *waiting = false;
+                                }
+                            });
                         });
-                        cx.notify();
+                        timer(Duration::from_millis(900)).await;
+                        self.banner.set(false);
+                        self.reply(rest, None);
                     })
-                    .await;
-                    cx.timer(Duration::from_millis(900)).await;
-                    this.update(move |chat: &mut Self, cx| {
-                        chat.set_banner(None);
-                        chat.reply(rest, None, cx);
-                    })
-                    .await;
-                }));
+                });
+                keep(self.offline, task);
             }
-            None => self.reply(rest, None, cx),
+            None => self.reply(rest, None),
         }
     }
 
-    fn send(&mut self, cx: &mut Context<'_, Self>) {
-        let text = self.draft.trim().to_owned();
-        if text.is_empty() && !self.attachment {
+    fn send(self) {
+        let text = self.draft.with_untracked(|d| d.trim().to_owned());
+        let attachment = self.attachment.get_untracked();
+        if text.is_empty() && !attachment {
             return;
         }
-        if self.attachment {
+        let model = self.model.get_untracked();
+        if attachment {
             let vision = scenarios()
                 .into_iter()
                 .find(|s| s.id == "vision")
                 .expect("the vision scenario");
-            let model = if self.model == Model::Swift {
+            let model = if model == Model::Swift {
                 Model::Vision
             } else {
-                self.model
+                model
             };
             let prompt = if text.is_empty() {
                 vision.prompt.to_owned()
@@ -634,91 +648,92 @@ impl Chat {
                 prompt,
                 Some(PHOTO),
                 Some(NOTES),
-                cx,
             );
         } else {
-            let s = freeform(&text, self.model);
-            self.submit(s, text, None, None, cx);
+            let s = freeform(&text, model);
+            self.submit(s, text, None, None);
         }
     }
 
-    fn play(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+    fn play(self, id: &str) {
         if id == "history" {
-            self.set_menu(false);
+            self.menu.set(false);
             let mut older = history(|| self.next_id());
-            self.update_messages(|messages| {
+            self.messages.update(|messages| {
                 older.append(messages);
                 *messages = older;
             });
             self.scroll_to_end(false);
-            cx.notify();
             return;
         }
         let Some(s) = scenarios().into_iter().find(|s| s.id == id) else {
             return;
         };
         let (prompt, image, file) = (s.prompt.to_owned(), s.image, s.file.clone());
-        self.submit(s, prompt, image, file, cx);
+        self.submit(s, prompt, image, file);
     }
 
-    fn prompt_before(&self, id: &str) -> String {
-        let at = self.messages.iter().position(|m| m.id() == id).unwrap_or(0);
-        self.messages[..at]
-            .iter()
-            .rev()
-            .find_map(|m| match m {
-                Msg::User { text, .. } => Some(text.clone()),
-                _ => None,
-            })
-            .unwrap_or_default()
-    }
-
-    fn assistant(&self, id: &str) -> Option<&Assistant> {
-        self.messages.iter().find_map(|m| match m {
-            Msg::Assistant(a) if a.id == id => Some(a),
-            _ => None,
+    fn prompt_before(self, id: &str) -> String {
+        self.messages.with_untracked(|messages| {
+            let at = messages.iter().position(|m| m.id() == id).unwrap_or(0);
+            messages[..at]
+                .iter()
+                .rev()
+                .find_map(|m| match m {
+                    Msg::User { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
         })
     }
 
-    fn update_assistant(&mut self, id: &str, f: impl FnOnce(&mut Assistant)) {
-        self.update_messages(|messages| {
+    fn assistant(self, id: &str) -> Option<Assistant> {
+        self.messages.with_untracked(|messages| {
+            messages.iter().find_map(|m| match m {
+                Msg::Assistant(a) if a.id == id => Some(a.clone()),
+                _ => None,
+            })
+        })
+    }
+
+    fn update_assistant(self, id: &str, f: impl FnOnce(&mut Assistant)) {
+        self.messages.update(|messages| {
             if let Some(Msg::Assistant(a)) = messages.iter_mut().find(|m| m.id() == id) {
                 f(a);
             }
         });
     }
 
-    fn act(&mut self, action: &Action, cx: &mut Context<'_, Self>) {
+    fn act(self, action: Action) {
         match action {
             Action::Copy(key, text) => {
-                cx.set_clipboard(text.clone());
-                self.copied = Some(key.clone());
-                let key = key.clone();
-                self.copy_timer = Some(cx.set_timeout(
-                    Duration::from_millis(1600),
-                    move |this: &mut Self, cx| {
-                        if this.copied.as_deref() == Some(key.as_str()) {
-                            this.copied = None;
-                            cx.notify();
+                set_clipboard(text);
+                self.copied.set(Some(key.clone()));
+                let copied = self.copied;
+                let timer = self.owner.run(|| {
+                    set_timeout(Duration::from_millis(1600), move || {
+                        if copied.with_untracked(|c| c.as_deref() == Some(key.as_str())) {
+                            copied.set(None);
                         }
-                    },
-                ));
+                    })
+                });
+                keep(self.copy_timer, timer);
             }
             Action::Regenerate(id) => {
-                if self.run.is_some() {
+                if self.running() {
                     return;
                 }
-                let Some(m) = self.assistant(id).cloned() else {
+                let Some(m) = self.assistant(&id) else {
                     return;
                 };
-                self.set_following(true);
+                self.following.set(true);
                 let s = if m.script == "retry" {
                     retried()
                 } else {
                     scenarios()
                         .into_iter()
                         .find(|s| s.id == m.script)
-                        .unwrap_or_else(|| freeform(&self.prompt_before(id), m.model))
+                        .unwrap_or_else(|| freeform(&self.prompt_before(&id), m.model))
                 };
                 let steps = s
                     .steps
@@ -732,20 +747,18 @@ impl Chat {
                         steps,
                         ..s
                     },
-                    Some(id.clone()),
-                    cx,
+                    Some(id),
                 );
             }
             Action::Retry(id) => {
-                if self.run.is_some() {
+                if self.running() {
                     return;
                 }
-                self.set_following(true);
-                self.reply(retried(), Some(id.clone()), cx);
+                self.following.set(true);
+                self.reply(retried(), Some(id));
             }
             Action::Rate(id, rating) => {
-                let rating = *rating;
-                self.update_assistant(id, |a| {
+                self.update_assistant(&id, |a| {
                     a.rating = if a.rating == Some(rating) {
                         None
                     } else {
@@ -754,172 +767,413 @@ impl Chat {
                 });
             }
             Action::Reasoning(id) => {
-                cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-                self.update_assistant(id, |a| {
+                animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+                self.update_assistant(&id, |a| {
                     if let Some(r) = a.reasoning.as_mut() {
                         r.open = !r.open;
                     }
                 });
             }
         }
-        cx.notify();
     }
 }
 
-impl Component for Chat {
-    type Props = ();
-    type Event = NoEvent;
+/// The chat: the conversation, the menu, the banner and the composer.
+#[component]
+pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
+    let list = element_ref();
+    let chat = ChatState {
+        owner: Owner::current(),
+        ids: stored(0),
+        messages: signal(Vec::new()),
+        model: signal(Model::Swift),
+        draft: signal(String::new()),
+        input_height: signal(20.0),
+        attachment: signal(false),
+        menu: signal(false),
+        banner: signal(false),
+        banner_kind: signal(Banner::Offline),
+        copied: signal(None),
+        copy_timer: stored(None),
+        following: signal(true),
+        dragging: stored(false),
+        list: stored(list.clone()),
+        run: stored(None),
+        live: Live {
+            id: signal(None),
+            reason: signal(String::new()),
+            thinking: signal(None),
+            tools: signal(Vec::new()),
+            blocks: signal(Vec::new()),
+            now: signal(None),
+        },
+        offline: stored(None),
+        settle: stored(None),
+    };
+    let ChatState {
+        messages,
+        model,
+        draft,
+        input_height,
+        attachment,
+        menu,
+        banner_kind,
+        following,
+        ..
+    } = chat;
+    // The jump button, the menu and the banner: 0 hidden, 1 shown; they
+    // spring natively as their state changes.
+    let [jump, menu_value, banner_value] = [0.0; 3].map(native_value);
+    spring_on(jump.clone(), move || !following.get());
+    spring_on(menu_value.clone(), move || menu.get());
+    spring_on(banner_value.clone(), move || chat.banner.get());
+    let streaming = computed(move || chat.live.id.with(Option::is_some));
+    let chips: Rc<[(&'static str, &'static str)]> = scenarios()
+        .iter()
+        .map(|s| (s.id, s.chip))
+        .chain([("history", "Load a long conversation")])
+        .collect();
 
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.shown = Some([
-            cx.native_value(0.0),
-            cx.native_value(0.0),
-            cx.native_value(0.0),
-        ]);
-        self.list = Some(cx.element_ref());
-    }
+    let content = If::new(
+        move || !messages.with(Vec::is_empty),
+        move || chat.list_view(list.clone()),
+    )
+    .otherwise(move || chat.empty());
 
-    fn cleanup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.run = None;
-        cx.update_global::<Live, _>(|live, _| *live = Live::default());
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let insets = cx.insets();
-        let keyboard = cx.keyboard_height();
-        let [jump, menu_value, banner_value] = self.values();
-        let streaming = self.run.is_some();
-        let actions = cx.listener(|this: &mut Self, action: &Action, cx| this.act(action, cx));
-        let play =
-            |id: &'static str| cx.listener(move |this: &mut Self, _: &(), cx| this.play(id, cx));
-        let chips: Vec<(&'static str, &'static str)> = scenarios()
-            .iter()
-            .map(|s| (s.id, s.chip))
-            .chain([("history", "Load a long conversation")])
-            .collect();
-
-        let content: AnyElement = if self.messages.is_empty() {
-            self.empty(cx).into_element()
-        } else {
-            self.list(actions.clone(), cx).into_element()
-        };
-
-        // Jump to the latest message: shown while scrolled up.
-        let jump_button = view()
-            .pointer_events(if self.following {
+    // Jump to the latest message: shown, and taking touches, while scrolled
+    // up.
+    let jump_button = view()
+        .pointer_events(move || {
+            if following.get() {
                 PointerEvents::None
             } else {
                 PointerEvents::Auto
-            })
-            .absolute()
-            .right_4()
-            .bottom_3()
-            .bind_opacity(jump)
-            .bind_scale(&jump.interpolate(&[0.0, 1.0], &[0.7, 1.0]))
-            .child(
-                RoundButton::new(
-                    IconName::ArrowDown,
-                    "Jump to the latest message",
-                    cx.listener(|this: &mut Self, _: &(), _| this.scroll_to_end(true)),
-                )
-                .secondary(),
+            }
+        })
+        .absolute()
+        .right_4()
+        .bottom_3()
+        .bind_opacity(&jump)
+        .bind_scale(&jump.interpolate(&[0.0, 1.0], &[0.7, 1.0]))
+        .child(
+            RoundButton::new(
+                IconName::ArrowDown,
+                "Jump to the latest message",
+                move |_: &()| chat.scroll_to_end(true),
             )
-            .when(streaming, |v| {
-                v.child(
-                    view()
-                        .absolute()
-                        .top(px(2.0))
-                        .right(px(2.0))
-                        .size(px(10.0))
-                        .rounded(px(5.0))
-                        .bg(colors::ACCENT)
-                        .border_2()
-                        .border_color(colors::BACKGROUND),
-                )
-            });
+            .secondary(),
+        )
+        .child(If::new(streaming, || {
+            view()
+                .absolute()
+                .top(px(2.0))
+                .right(px(2.0))
+                .size(px(10.0))
+                .rounded(px(5.0))
+                .bg(colors::ACCENT)
+                .border_2()
+                .border_color(colors::BACKGROUND)
+        }));
 
-        // The connection banner.
-        let offline = self.banner_kind == Banner::Offline;
-        let banner_tone = if offline { Tone::Warn } else { Tone::Up };
-        let banner = view()
-            .pointer_events(PointerEvents::None)
-            .absolute()
-            .top_2()
-            .left_4()
-            .right_4()
-            .bind_opacity(banner_value)
-            .bind_translate_y(&banner_value.interpolate(&[0.0, 1.0], &[-64.0, 0.0]))
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .min_h(px(48.0))
-                    .px(px(14.0))
-                    .rounded(px(radius::INSET))
-                    .border_curve(BorderCurve::Continuous)
-                    .finish(Finish::Menu)
-                    .border_1()
-                    .border_color(banner_tone.color().opacity(0.35))
-                    .child(
-                        view()
-                            .size(px(28.0))
-                            .rounded(px(14.0))
-                            .items_center()
-                            .justify_center()
-                            .bg(banner_tone.tint())
-                            .child(glyph(
-                                if offline {
+    // The connection banner.
+    let offline = computed(move || banner_kind.get() == Banner::Offline);
+    let banner_tone = move || if offline.get() { Tone::Warn } else { Tone::Up };
+    let banner = view()
+        .pointer_events(PointerEvents::None)
+        .absolute()
+        .top_2()
+        .left_4()
+        .right_4()
+        .bind_opacity(&banner_value)
+        .bind_translate_y(&banner_value.interpolate(&[0.0, 1.0], &[-64.0, 0.0]))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .min_h(px(48.0))
+                .px(px(14.0))
+                .rounded(px(radius::INSET))
+                .border_curve(BorderCurve::Continuous)
+                .finish(Finish::Menu)
+                .border_1()
+                .border_color(move || banner_tone().color().opacity(0.35))
+                .child(
+                    view()
+                        .size(px(28.0))
+                        .rounded(px(14.0))
+                        .items_center()
+                        .justify_center()
+                        .bg(move || banner_tone().tint())
+                        .child(glyph(
+                            Prop::bind(move || {
+                                if offline.get() {
                                     GlyphName::Offline
                                 } else {
                                     GlyphName::Check
-                                },
-                                15.0,
-                                banner_tone.color(),
-                            )),
-                    )
-                    .child(
-                        view()
-                            .flex_1()
-                            .gap(px(1.0))
-                            .child(
-                                text(if offline {
+                                }
+                            }),
+                            15.0,
+                            move || banner_tone().color(),
+                        )),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .gap(px(1.0))
+                        .child(
+                            text(move || {
+                                if offline.get() {
                                     "You're offline"
                                 } else {
                                     "Back online"
-                                })
-                                .text_size(px(14.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(colors::TEXT),
-                            )
-                            .child(
-                                text(if offline {
+                                }
+                            })
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors::TEXT),
+                        )
+                        .child(
+                            text(move || {
+                                if offline.get() {
                                     "Your message sends when the connection returns."
                                 } else {
                                     "Sending your message."
-                                })
-                                .text_size(px(13.0))
-                                .text_color(colors::MUTED),
-                            ),
-                    ),
-            );
+                                }
+                            })
+                            .text_size(px(13.0))
+                            .text_color(colors::MUTED),
+                        ),
+                ),
+        );
 
-        // The "+" menu: attachments and the scenarios, to replay them.
-        let pointer = if self.menu {
+    // The "+" menu: attachments and the scenarios, to replay them. The
+    // backdrop and the menu take touches while it is open.
+    let pointer = move || {
+        if menu.get() {
             PointerEvents::Auto
         } else {
             PointerEvents::None
-        };
-        let backdrop = view()
-            .pointer_events(pointer)
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.set_menu(false);
-                cx.notify();
-            }))
-            .absolute()
-            .inset_0()
-            .bg(rgb_a(0x000000, 0.45))
-            .bind_opacity(menu_value);
+        }
+    };
+    let backdrop = view()
+        .pointer_events(pointer)
+        .on_press(move |_: &()| menu.set(false))
+        .absolute()
+        .inset_0()
+        .bg(rgb_a(0x000000, 0.45))
+        .bind_opacity(&menu_value);
+    let menu_view = chat.menu_view(pointer, &menu_value, &chips);
+
+    // Suggestions while the conversation is empty.
+    let suggestions = If::new(
+        move || messages.with(Vec::is_empty),
+        move || {
+            scroll()
+                .horizontal()
+                .shows_indicator(false)
+                .keyboard_taps(KeyboardTaps::Handled)
+                .flex_grow(0.0)
+                .child(
+                    view()
+                        .flex_row()
+                        .gap_2()
+                        .px_4()
+                        .py_2()
+                        .children(chips.iter().map(|&(id, label)| {
+                            press_with(
+                                PressProps {
+                                    hit_slop: Some(4.0),
+                                    label: Some(label.into()).into(),
+                                    ..PressProps::default()
+                                },
+                                move |_: &()| chat.play(id),
+                            )
+                            .child(
+                                view()
+                                    .h(px(36.0))
+                                    .px(px(14.0))
+                                    .rounded(px(18.0))
+                                    .justify_center()
+                                    .finish(Finish::Pill)
+                                    .border_1()
+                                    .child(
+                                        text(label)
+                                            .text_size(px(13.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(colors::TEXT),
+                                    ),
+                            )
+                        })),
+                )
+        },
+    );
+
+    // The composer.
+    let can_send = computed(move || !draft.with(|d| d.trim().is_empty()) || attachment.get());
+    let send_button = move || {
+        view()
+            .opacity(move || if can_send.get() { 1.0_f32 } else { 0.35 })
+            .pointer_events(move || {
+                if can_send.get() {
+                    PointerEvents::Auto
+                } else {
+                    PointerEvents::None
+                }
+            })
+            .child(RoundButton::new(
+                IconName::ArrowUp,
+                "Send",
+                move |_: &()| chat.send(),
+            ))
+    };
+    let composer = view()
+        .px_4()
+        .pt_2()
+        .pb(move || {
+            px(8.0
+                + if keyboard_height() > 0.0 {
+                    0.0
+                } else {
+                    cx.insets().bottom
+                })
+        })
+        .gap_2()
+        .child(If::new(attachment, move || {
+            appear(0).child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(photo(PHOTO, 48.0, 48.0))
+                    .child(view().flex_1().child(file_chip(
+                        &NOTES,
+                        Some((move |_: &()| attachment.set(false)).into()),
+                    ))),
+            )
+        }))
+        .child(
+            view()
+                .rounded(px(24.0))
+                .border_curve(BorderCurve::Continuous)
+                // Glass like the menu above it, without the blur: nothing
+                // scrolls under it.
+                .finish_fill(Finish::Menu)
+                .finish_shadow(Finish::Menu)
+                .when_some(Finish::Menu.border_color(), |v, c| v.border_color(c))
+                .border_1()
+                .p(px(6.0))
+                .gap_1()
+                .child(
+                    input()
+                        .value(move || draft.get())
+                        .multiline(true)
+                        .placeholder(move || format!("Message {}", model.get().name()))
+                        .placeholder_color(|| color(colors::FAINT))
+                        .selection_color(|| color(colors::ACCENT))
+                        .on_focus(move |_: &()| menu.set(false))
+                        .on_content_size_change(move |size: &Size| {
+                            input_height.set(size.height.clamp(20.0, 100.0));
+                        })
+                        .on_change_text(move |text: &str| draft.set(text.to_owned()))
+                        .h(move || px(input_height.get() + 20.0))
+                        .text_size(px(15.0))
+                        .line_height(px(20.0))
+                        .text_color(colors::TEXT)
+                        .px(px(10.0))
+                        .py(px(10.0)),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            view()
+                                .style_with(move |s| s.rotate(if menu.get() { 45.0 } else { 0.0 }))
+                                .transition_transform()
+                                .duration(200.0)
+                                .ease_out()
+                                .child(
+                                    RoundButton::new(IconName::Plus, "Add", move |_: &()| {
+                                        menu.update(|m| *m = !*m);
+                                    })
+                                    .secondary(),
+                                ),
+                        )
+                        .child(
+                            view().flex_1().child(
+                                Segmented::element(SegmentedProps {
+                                    options: MODELS
+                                        .iter()
+                                        .map(|m| Segment::new(m.name()))
+                                        .collect::<Vec<_>>()
+                                        .into(),
+                                    selected: Prop::bind(move || {
+                                        let model = model.get();
+                                        MODELS.iter().position(|m| *m == model).unwrap_or(0) as u32
+                                    }),
+                                    size: SegmentedSize::Small,
+                                })
+                                .on_event(
+                                    move |e: &SegmentedEvent| {
+                                        let SegmentedEvent::Change(i) = *e;
+                                        model.set(MODELS[i as usize]);
+                                    },
+                                ),
+                            ),
+                        )
+                        .child(
+                            If::new(streaming, move || {
+                                press_with(
+                                    PressProps {
+                                        scale: 0.9.into(),
+                                        label: Some("Stop generating".into()).into(),
+                                        ..PressProps::default()
+                                    },
+                                    move |_: &()| chat.stop(),
+                                )
+                                .child(
+                                    view()
+                                        .size(px(44.0))
+                                        .rounded(px(22.0))
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(colors::LIGHT)
+                                        .finish(Finish::Light)
+                                        .child(glyph(GlyphName::Stop, 16.0, colors::ON_LIGHT)),
+                                )
+                            })
+                            .otherwise(send_button),
+                        ),
+                ),
+        );
+
+    view().flex_1().bg(colors::BACKGROUND).child(
+        KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+            .flex_1()
+            .child(
+                view()
+                    .flex_1()
+                    .child(content)
+                    .child(jump_button)
+                    .child(banner)
+                    .child(backdrop)
+                    .child(menu_view),
+            )
+            .child(suggestions)
+            .child(composer),
+    )
+}
+
+impl ChatState {
+    /// The "+" menu, taking touches with `pointer`.
+    fn menu_view(
+        self,
+        pointer: impl IntoReactive<PointerEvents>,
+        shown: &NativeValue,
+        chips: &[(&'static str, &'static str)],
+    ) -> View {
         let rows = std::iter::once(("attach", GlyphName::Clip, "Attach a photo and a file"))
             .chain(
                 chips
@@ -929,16 +1183,15 @@ impl Component for Chat {
             .enumerate()
             .map(|(i, (id, name, label))| {
                 view()
-                    .on_press(cx.listener(move |this: &mut Self, _, cx| {
-                        this.set_menu(false);
+                    .on_press(move |_: &()| {
+                        self.menu.set(false);
                         if id == "attach" {
-                            this.attachment = true;
+                            self.attachment.set(true);
                         } else {
-                            this.play(id, cx);
+                            self.play(id);
                         }
-                        cx.notify();
-                    }))
-                    .underlay(cx.color(colors::TEXT.opacity(0.06)), 0.85)
+                    })
+                    .underlay(|| color(colors::TEXT.opacity(0.06)), 0.85)
                     .role(AccessibilityRole::Button)
                     .label(label)
                     .flex_row()
@@ -961,16 +1214,17 @@ impl Component for Chat {
                             .text_size(px(15.0))
                             .text_color(colors::TEXT),
                     )
-            });
-        let menu = view()
+            })
+            .collect::<Vec<_>>();
+        view()
             .pointer_events(pointer)
             .absolute()
             .left_4()
             .right_4()
             .bottom_2()
-            .bind_opacity(menu_value)
-            .bind_translate_y(&menu_value.interpolate(&[0.0, 1.0], &[24.0, 0.0]))
-            .bind_scale(&menu_value.interpolate(&[0.0, 1.0], &[0.97, 1.0]))
+            .bind_opacity(shown)
+            .bind_translate_y(&shown.interpolate(&[0.0, 1.0], &[24.0, 0.0]))
+            .bind_scale(&shown.interpolate(&[0.0, 1.0], &[0.97, 1.0]))
             .child(
                 view()
                     .rounded(px(radius::CARD))
@@ -990,222 +1244,11 @@ impl Component for Chat {
                             .pb_1(),
                     )
                     .child(scroll().flex_grow(0.0).children(rows)),
-            );
-
-        // Suggestions while the conversation is empty.
-        let suggestions = self.messages.is_empty().then(|| {
-            scroll()
-                .horizontal()
-                .shows_indicator(false)
-                .keyboard_taps(KeyboardTaps::Handled)
-                .flex_grow(0.0)
-                .child(
-                    view()
-                        .flex_row()
-                        .gap_2()
-                        .px_4()
-                        .py_2()
-                        .children(chips.iter().map(|&(id, label)| {
-                            press_with(
-                                PressProps {
-                                    hit_slop: Some(4.0),
-                                    label: Some(label.into()),
-                                    ..PressProps::default()
-                                },
-                                play(id),
-                            )
-                            .child(
-                                view()
-                                    .h(px(36.0))
-                                    .px(px(14.0))
-                                    .rounded(px(18.0))
-                                    .justify_center()
-                                    .finish(Finish::Pill)
-                                    .border_1()
-                                    .child(
-                                        text(label)
-                                            .text_size(px(13.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(colors::TEXT),
-                                    ),
-                            )
-                        })),
-                )
-        });
-
-        // The composer.
-        let can_send = !self.draft.trim().is_empty() || self.attachment;
-        let composer = view()
-            .px_4()
-            .pt_2()
-            .pb(px(8.0 + if keyboard > 0.0 { 0.0 } else { insets.bottom }))
-            .gap_2()
-            .when(self.attachment, |v| {
-                v.child(
-                    appear(0).child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(photo(PHOTO, 48.0, 48.0))
-                            .child(view().flex_1().child(file_chip(
-                                &NOTES,
-                                Some(cx.listener(|this: &mut Self, _: &(), cx| {
-                                    this.attachment = false;
-                                    cx.notify();
-                                })),
-                            ))),
-                    ),
-                )
-            })
-            .child(
-                view()
-                    .rounded(px(24.0))
-                    .border_curve(BorderCurve::Continuous)
-                    // Glass like the menu above it, without the blur:
-                    // nothing scrolls under it.
-                    .finish_fill(Finish::Menu)
-                    .finish_shadow(Finish::Menu)
-                    .when_some(Finish::Menu.border_color(), |v, c| v.border_color(c))
-                    .border_1()
-                    .p(px(6.0))
-                    .gap_1()
-                    .child(
-                        input()
-                            .value(self.draft.clone())
-                            .multiline(true)
-                            .placeholder(format!("Message {}", self.model.name()))
-                            .placeholder_color(cx.color(colors::FAINT))
-                            .selection_color(cx.color(colors::ACCENT))
-                            .on_focus(cx.listener(|this: &mut Self, _, cx| {
-                                this.set_menu(false);
-                                cx.notify();
-                            }))
-                            .on_content_size_change(cx.listener(
-                                |this: &mut Self, size: &Size, cx| {
-                                    let h = size.height.clamp(20.0, 100.0);
-                                    if this.input_height != h {
-                                        this.input_height = h;
-                                        cx.notify();
-                                    }
-                                },
-                            ))
-                            .on_change_text(cx.listener(|this: &mut Self, text: &str, cx| {
-                                this.draft = text.to_owned();
-                                cx.notify();
-                            }))
-                            .h(px(self.input_height + 20.0))
-                            .text_size(px(15.0))
-                            .line_height(px(20.0))
-                            .text_color(colors::TEXT)
-                            .px(px(10.0))
-                            .py(px(10.0)),
-                    )
-                    .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                view()
-                                    .rotate(if self.menu { 45.0 } else { 0.0 })
-                                    .transition_transform()
-                                    .duration(200.0)
-                                    .ease_out()
-                                    .child(
-                                        RoundButton::new(
-                                            IconName::Plus,
-                                            "Add",
-                                            cx.listener(|this: &mut Self, _: &(), cx| {
-                                                this.set_menu(!this.menu);
-                                                cx.notify();
-                                            }),
-                                        )
-                                        .secondary(),
-                                    ),
-                            )
-                            .child(
-                                view().flex_1().child(
-                                    Segmented::element(SegmentedProps {
-                                        options: MODELS
-                                            .iter()
-                                            .map(|m| Segment::new(m.name()))
-                                            .collect(),
-                                        selected: MODELS
-                                            .iter()
-                                            .position(|m| *m == self.model)
-                                            .unwrap_or(0)
-                                            as u32,
-                                        size: SegmentedSize::Small,
-                                    })
-                                    .on_event(cx.listener(
-                                        |this: &mut Self, e: &SegmentedEvent, cx| {
-                                            let SegmentedEvent::Change(i) = e;
-                                            this.model = MODELS[*i as usize];
-                                            cx.notify();
-                                        },
-                                    )),
-                                ),
-                            )
-                            .child(if streaming {
-                                press_with(
-                                    PressProps {
-                                        scale: 0.9,
-                                        label: Some("Stop generating".into()),
-                                        ..PressProps::default()
-                                    },
-                                    cx.listener(|this: &mut Self, _: &(), cx| this.stop(cx)),
-                                )
-                                .child(
-                                    view()
-                                        .size(px(44.0))
-                                        .rounded(px(22.0))
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(colors::LIGHT)
-                                        .finish(Finish::Light)
-                                        .child(glyph(GlyphName::Stop, 16.0, colors::ON_LIGHT)),
-                                )
-                                .into_element()
-                            } else {
-                                view()
-                                    .opacity(if can_send { 1.0 } else { 0.35 })
-                                    .pointer_events(if can_send {
-                                        PointerEvents::Auto
-                                    } else {
-                                        PointerEvents::None
-                                    })
-                                    .child(RoundButton::new(
-                                        IconName::ArrowUp,
-                                        "Send",
-                                        cx.listener(|this: &mut Self, _: &(), cx| this.send(cx)),
-                                    ))
-                                    .into_element()
-                            }),
-                    ),
-            );
-
-        view().flex_1().bg(colors::BACKGROUND).child(
-            KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
-                .flex_1()
-                .child(
-                    view()
-                        .flex_1()
-                        .child(content)
-                        .child(jump_button)
-                        .child(banner)
-                        .child(backdrop)
-                        .child(menu),
-                )
-                .children(suggestions)
-                .child(composer),
-        )
+            )
     }
-}
 
-impl Chat {
     /// The empty conversation: a greeting and four features.
-    fn empty(&self, cx: &RenderCx<'_, Self>) -> View {
+    fn empty(self) -> View {
         let all = scenarios();
         view()
             .flex_1()
@@ -1241,10 +1284,10 @@ impl Chat {
                         appear(i as u32 + 1).child(
                             press_with(
                                 PressProps {
-                                    label: Some(chip.into()),
+                                    label: Some(chip.into()).into(),
                                     ..PressProps::default()
                                 },
-                                cx.listener(move |this: &mut Self, _: &(), cx| this.play(id, cx)),
+                                move |_: &()| self.play(id),
                             )
                             .child(
                                 view()
@@ -1276,40 +1319,33 @@ impl Chat {
             ))
     }
 
-    /// The conversation, virtualized.
-    fn list(&self, actions: Listener<Action>, cx: &RenderCx<'_, Self>) -> VirtualList {
-        let messages = self.messages.clone();
-        let live = self.run.as_ref().map(|r| r.id.clone());
-        let copied = self.copied.clone();
-        let count = messages.len();
-        let ids: Vec<String> = messages.iter().map(|m| m.id().to_owned()).collect();
-        let on_copy = actions.clone().map(|e: &MarkdownEvent| {
-            let MarkdownEvent::Copy { key, text } = e;
-            Action::Copy(key.to_string(), text.to_string())
-        });
-        let list = self.list.as_ref().expect("set up");
-        virtual_list(count, move |i, _| match &messages[i] {
-            Msg::Date { label, .. } => date_separator(label).into_element(),
-            Msg::User {
-                text: body,
-                image,
-                file,
-                waiting,
-                ..
-            } => user_row(body, *image, file.as_ref(), *waiting).into_element(),
-            Msg::Assistant(m) if live.as_deref() == Some(m.id.as_str()) => view()
-                .child(
-                    LiveReply::element(LiveReplyProps {
-                        copied: copied.clone().map(Into::into),
-                    })
-                    .on_event(on_copy.clone()),
-                )
-                .into_element(),
-            Msg::Assistant(m) => {
-                assistant_row(m, copied.as_deref(), &actions, &on_copy).into_element()
-            }
-        })
-        .keys(ids)
+    /// The conversation, virtualized: a cell binds to the message it shows,
+    /// and is made again only when it shows another kind of message.
+    fn list_view(self, list: ElementRef) -> VirtualList {
+        let messages = self.messages;
+        let count = messages.with_untracked(Vec::len);
+        let (following, dragging) = (self.following, self.dragging);
+        virtual_list(
+            move || messages.with(Vec::len),
+            move |at: Position| {
+                let item = computed(move || messages.with(|m| m.get(at.index()).cloned()));
+                let kind = computed(move || item.with(|m| m.as_ref().map(RowKind::of)));
+                view().child(dynamic(move || {
+                    let kind = kind.get()?;
+                    Some(untracked(|| match kind {
+                        RowKind::Date => date_separator(move || {
+                            item.with(|m| match m {
+                                Some(Msg::Date { label, .. }) => *label,
+                                _ => "",
+                            })
+                        }),
+                        RowKind::User => user_row(item),
+                        RowKind::Assistant => self.assistant_row(item),
+                    }))
+                }))
+            },
+        )
+        .keys(move || messages.with(|m| m.iter().map(|m| m.id().to_owned()).collect::<Vec<_>>()))
         .estimated_item_size(140.0)
         .initial_scroll_index(count.saturating_sub(1))
         .flex_1()
@@ -1318,44 +1354,246 @@ impl Chat {
         .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
         .follow_end(40.0)
         .event_throttle(100.0)
-        .element_ref(list)
-        .on_scroll_begin_drag(cx.listener(|this: &mut Self, _: &ScrollOffset, _| {
-            this.dragging = true;
-        }))
-        .on_scroll(cx.listener(|this: &mut Self, e: &ScrollEvent, cx| {
-            if this.dragging {
-                let following = e.y + e.height >= e.content_height - 40.0;
-                if following != this.following {
-                    this.set_following(following);
-                    cx.notify();
-                }
+        .element_ref(&list)
+        .on_scroll_begin_drag(move |_: &ScrollOffset| {
+            dragging.replace(true);
+        })
+        .on_scroll(move |e: &ScrollEvent| {
+            if dragging.with(|d| *d) {
+                following.set(e.y + e.height >= e.content_height - 40.0);
             }
-        }))
-        .on_momentum_scroll_end(cx.listener(|this: &mut Self, _: &ScrollOffset, _| {
-            this.dragging = false;
-        }))
-        .on_scroll_end(cx.listener(|this: &mut Self, _: &ScrollOffset, _| {
-            this.dragging = false;
-        }))
+        })
+        .on_momentum_scroll_end(move |_: &ScrollOffset| {
+            dragging.replace(false);
+        })
+        .on_scroll_end(move |_: &ScrollOffset| {
+            dragging.replace(false);
+        })
+    }
+
+    /// A reply, finished or being written ([`Live`] while its id is the
+    /// live one).
+    fn assistant_row(self, item: Item) -> View {
+        let (live, copied) = (self.live, self.copied);
+        let id = computed(move || with_reply(item, |a| a.id.clone()).unwrap_or_default());
+        let is_live = computed(move || {
+            let id = id.get();
+            live.id.with(|l| l.as_deref() == Some(id.as_str()))
+        });
+        let status = computed(move || with_reply(item, |a| a.status).unwrap_or(Status::Done));
+        let model = computed(move || with_reply(item, |a| a.model).unwrap_or_default());
+        let done =
+            move |status_is: fn(Status) -> bool| move || !is_live.get() && status_is(status.get());
+        let stopped = computed(done(|s| s == Status::Stopped));
+        // The reasoning: the live one while it streams (open), else the
+        // reply's.
+        let reasoned = computed(move || {
+            if is_live.get() {
+                !live.reason.with(String::is_empty)
+            } else {
+                with_reply(item, |a| a.reasoning.is_some()) == Some(true)
+            }
+        });
+        let open = computed(move || {
+            is_live.get()
+                || with_reply(item, |a| a.reasoning.as_ref().is_some_and(|r| r.open)) == Some(true)
+        });
+        let thinking_now = computed(move || {
+            is_live.get() && live.thinking.with(|t| t.is_some_and(|(_, s)| s.is_none()))
+        });
+        let label = move || {
+            if !is_live.get() {
+                let seconds =
+                    with_reply(item, |a| a.reasoning.as_ref().map(|r| r.seconds)).flatten();
+                return format!("Thought for {} s", seconds.unwrap_or(1));
+            }
+            match live.thinking.get() {
+                Some((start, None)) => {
+                    let now = live.now.get().unwrap_or(start);
+                    format!(
+                        "Thinking… {} s",
+                        now.saturating_duration_since(start).as_secs()
+                    )
+                }
+                Some((_, Some(seconds))) => format!("Thought for {seconds} s"),
+                None => "Thought for 1 s".into(),
+            }
+        };
+        let reason = move || {
+            if is_live.get() {
+                live.reason.get()
+            } else {
+                with_reply(item, |a| a.reasoning.as_ref().map(|r| r.text.clone()))
+                    .flatten()
+                    .unwrap_or_default()
+            }
+        };
+        let waiting = computed(move || {
+            is_live.get()
+                && live.blocks.with(Vec::is_empty)
+                && live.tools.with(Vec::is_empty)
+                && !thinking_now.get()
+        });
+        let act =
+            move |action: fn(String) -> Action| move |_: &()| self.act(action(id.get_untracked()));
+        let copied_reply = Prop::bind(move || {
+            let id = id.get();
+            copied.with(|c| c.as_deref() == Some(id.as_str()))
+        });
+        let rating = computed(move || with_reply(item, |a| a.rating).flatten());
+        view()
+            .px_4()
+            .pt_2()
+            .pb_1()
+            .gap_3()
+            .child(reply_header(model, stopped))
+            .child(If::new(reasoned, move || {
+                view()
+                    .gap_2()
+                    .child(
+                        press_with(
+                            PressProps {
+                                scale: 0.98.into(),
+                                label: Some("Reasoning".into()).into(),
+                                selected: open.into(),
+                                ..PressProps::default()
+                            },
+                            move |_: &()| {
+                                if !is_live.get_untracked() {
+                                    self.act(Action::Reasoning(id.get_untracked()));
+                                }
+                            },
+                        )
+                        .child(reasoning_toggle(label, thinking_now, open)),
+                    )
+                    .child(If::new(open, move || reasoning_text(reason)))
+            }))
+            .child(Each::new(
+                move || {
+                    if is_live.get() {
+                        live.tools.get()
+                    } else {
+                        with_reply(item, |a| a.tools.clone()).unwrap_or_default()
+                    }
+                },
+                |t: &Tool| t.id,
+                |tool, _| tool_card(tool),
+            ))
+            .child(If::new(waiting, || {
+                view().flex_row().h(px(22.0)).items_center().child(caret())
+            }))
+            .child(markdown(
+                move || {
+                    if is_live.get() {
+                        live.blocks.get()
+                    } else {
+                        with_reply(item, |a| a.blocks.clone()).unwrap_or_default()
+                    }
+                },
+                move || id.get(),
+                move || is_live.get(),
+                copied,
+                Rc::new(move |key, text| self.act(Action::Copy(key, text))),
+            ))
+            .child(If::new(done(|s| s == Status::Error), move || {
+                error_row(
+                    move || {
+                        with_reply(item, |a| a.error)
+                            .flatten()
+                            .unwrap_or("Something went wrong.")
+                    },
+                    act(Action::Retry),
+                )
+            }))
+            .child(If::new(stopped, || {
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(glyph(GlyphName::Stop, 12.0, colors::FAINT))
+                    .child(
+                        text("You stopped this reply")
+                            .text_size(px(13.0))
+                            .text_color(colors::FAINT),
+                    )
+            }))
+            .child(If::new(done(|s| s != Status::Error), move || {
+                view()
+                    .flex_row()
+                    .items_center()
+                    .ml(px(-8.0))
+                    .mt(px(-6.0))
+                    .child(action_button(
+                        Prop::bind(move || {
+                            if copied_reply.get() {
+                                GlyphName::Check
+                            } else {
+                                GlyphName::Copy
+                            }
+                        }),
+                        "Copy",
+                        copied_reply,
+                        Tone::Up,
+                        move |_: &()| {
+                            let md = untracked(|| with_reply(item, |a| a.md.clone()));
+                            self.act(Action::Copy(id.get_untracked(), md.unwrap_or_default()));
+                        },
+                    ))
+                    .child(action_button(
+                        GlyphName::Regenerate,
+                        "Regenerate",
+                        false.into(),
+                        Tone::Accent,
+                        act(Action::Regenerate),
+                    ))
+                    .child(action_button(
+                        GlyphName::ThumbUp,
+                        "Good reply",
+                        Prop::bind(move || rating.get() == Some(Rating::Up)),
+                        Tone::Accent,
+                        act(|id| Action::Rate(id, Rating::Up)),
+                    ))
+                    .child(action_button(
+                        GlyphName::ThumbDown,
+                        "Bad reply",
+                        Prop::bind(move || rating.get() == Some(Rating::Down)),
+                        Tone::Danger,
+                        act(|id| Action::Rate(id, Rating::Down)),
+                    ))
+            }))
     }
 }
 
 /// A message of the user: its attachments and its text in a bubble.
-fn user_row(
-    body: &str,
-    image: Option<&'static str>,
-    file: Option<&FileRef>,
-    waiting: bool,
-) -> View {
+fn user_row(item: Item) -> View {
+    let field = move |m: &Option<Msg>| match m {
+        Some(Msg::User {
+            text,
+            image,
+            file,
+            waiting,
+            ..
+        }) => (text.clone(), *image, file.clone(), *waiting),
+        _ => (String::new(), None, None, false),
+    };
+    let user = computed(move || item.with(field));
+    let image = computed(move || user.with(|u| u.1));
+    let file = computed(move || user.with(|u| u.2.clone()));
+    let body = computed(move || user.with(|u| u.0.clone()));
     view()
         .items_end()
         .px_4()
         .py_2()
         .gap_2()
-        .children(image.map(|src| photo(src, 220.0, 165.0)))
-        .children(file.map(|f| file_chip(f, None)))
-        .when(!body.is_empty(), |v| {
-            v.child(
+        .child(dynamic(move || {
+            image.get().map(|src| photo(src, 220.0, 165.0))
+        }))
+        .child(dynamic(move || {
+            file.with(|f| f.as_ref().map(|f| file_chip(f, None)))
+        }))
+        .child(If::new(
+            move || !body.with(String::is_empty),
+            move || {
                 view()
                     .max_w(relative(0.82))
                     .px(px(14.0))
@@ -1368,16 +1606,17 @@ fn user_row(
                     .border_1()
                     .border_color(colors::BORDER)
                     .child(
-                        text(body.to_owned())
+                        text(move || body.get())
                             .selectable(true)
                             .text_size(px(15.0))
                             .line_height(px(21.0))
                             .text_color(colors::TEXT),
-                    ),
-            )
-        })
-        .when(waiting, |v| {
-            v.child(
+                    )
+            },
+        ))
+        .child(If::new(
+            move || user.with(|u| u.3),
+            || {
                 view()
                     .flex_row()
                     .items_center()
@@ -1387,13 +1626,13 @@ fn user_row(
                         text("Waiting for a connection")
                             .text_size(px(12.0))
                             .text_color(colors::MUTED),
-                    ),
-            )
-        })
+                    )
+            },
+        ))
 }
 
-/// The header of a reply: the avatar and the model.
-fn reply_header(model: Model, stopped: bool) -> View {
+/// The header of a reply: the avatar, the model, and a badge once stopped.
+fn reply_header(model: Memo<Model>, stopped: Memo<bool>) -> View {
     view()
         .flex_row()
         .items_center()
@@ -1401,29 +1640,32 @@ fn reply_header(model: Model, stopped: bool) -> View {
         .h(px(26.0))
         .child(avatar())
         .child(
-            text(model.name())
+            text(move || model.get().name())
                 .flex_1()
                 .text_size(px(13.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors::MUTED),
         )
-        .when(stopped, |v| v.child(Badge::new("Stopped").tone(Tone::Warn)))
+        .child(If::new(stopped, || Badge::new("Stopped").tone(Tone::Warn)))
 }
 
 /// The reasoning's toggle: a glyph (a spinner while thinking), its label
 /// and a caret that turns.
-fn reasoning_toggle(label: String, thinking: bool, open: bool) -> View {
+fn reasoning_toggle(
+    label: impl Fn() -> String + 'static,
+    thinking: Memo<bool>,
+    open: Memo<bool>,
+) -> View {
     view()
         .flex_row()
         .items_center()
         .gap_2()
         .h(px(32.0))
         .self_start()
-        .child(if thinking {
-            spinner(14.0, colors::MUTED).into_element()
-        } else {
-            glyph(GlyphName::Brain, 16.0, colors::MUTED).into_element()
-        })
+        .child(
+            If::new(thinking, || spinner(14.0, colors::MUTED))
+                .otherwise(|| glyph(GlyphName::Brain, 16.0, colors::MUTED)),
+        )
         .child(
             text(label)
                 .text_size(px(14.0))
@@ -1432,7 +1674,7 @@ fn reasoning_toggle(label: String, thinking: bool, open: bool) -> View {
         )
         .child(
             view()
-                .rotate(if open { 0.0 } else { -90.0 })
+                .style_with(move |s| s.rotate(if open.get() { 0.0 } else { -90.0 }))
                 .transition_transform()
                 .duration(220.0)
                 .ease_out()
@@ -1441,182 +1683,18 @@ fn reasoning_toggle(label: String, thinking: bool, open: bool) -> View {
 }
 
 /// The reasoning's text, beside a rule.
-fn reasoning_text(reasoning: &str) -> View {
+fn reasoning_text(reasoning: impl Fn() -> String + 'static) -> View {
     view()
         .flex_row()
         .gap_3()
         .pl(px(7.0))
         .child(view().w(px(2.0)).rounded(px(1.0)).bg(colors::BORDER))
         .child(
-            text(reasoning.to_owned())
+            text(reasoning)
                 .selectable(true)
                 .flex_1()
                 .text_size(px(14.0))
                 .line_height(px(20.0))
                 .text_color(colors::MUTED),
         )
-}
-
-/// A finished reply.
-fn assistant_row(
-    m: &Assistant,
-    copied: Option<&str>,
-    actions: &Listener<Action>,
-    on_copy: &Listener<MarkdownEvent>,
-) -> View {
-    let act = |action: Action| actions.clone().map(move |_: &()| action.clone());
-    let id = m.id.clone();
-    let reasoning = m.reasoning.as_ref().map(|r| {
-        view()
-            .gap_2()
-            .child(
-                press_with(
-                    PressProps {
-                        scale: 0.98,
-                        label: Some("Reasoning".into()),
-                        selected: r.open,
-                        ..PressProps::default()
-                    },
-                    act(Action::Reasoning(id.clone())),
-                )
-                .child(reasoning_toggle(
-                    format!("Thought for {} s", r.seconds),
-                    false,
-                    r.open,
-                )),
-            )
-            .when(r.open, |v| v.child(reasoning_text(&r.text)))
-    });
-    let copied_reply = copied == Some(m.id.as_str());
-    view()
-        .px_4()
-        .pt_2()
-        .pb_1()
-        .gap_3()
-        .child(reply_header(m.model, m.status == Status::Stopped))
-        .children(reasoning)
-        .children(m.tools.iter().map(|t| tool_card(t).key(t.id)))
-        .child(markdown(&m.blocks, &m.id, false, copied, on_copy.clone()))
-        .when(m.status == Status::Error, |v| {
-            v.child(error_row(
-                m.error.unwrap_or("Something went wrong."),
-                act(Action::Retry(id.clone())),
-            ))
-        })
-        .when(m.status == Status::Stopped, |v| {
-            v.child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(glyph(GlyphName::Stop, 12.0, colors::FAINT))
-                    .child(
-                        text("You stopped this reply")
-                            .text_size(px(13.0))
-                            .text_color(colors::FAINT),
-                    ),
-            )
-        })
-        .when(m.status != Status::Error, |v| {
-            v.child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .ml(px(-8.0))
-                    .mt(px(-6.0))
-                    .child(action_button(
-                        if copied_reply {
-                            GlyphName::Check
-                        } else {
-                            GlyphName::Copy
-                        },
-                        "Copy",
-                        copied_reply,
-                        Tone::Up,
-                        act(Action::Copy(id.clone(), m.md.clone())),
-                    ))
-                    .child(action_button(
-                        GlyphName::Regenerate,
-                        "Regenerate",
-                        false,
-                        Tone::Accent,
-                        act(Action::Regenerate(id.clone())),
-                    ))
-                    .child(action_button(
-                        GlyphName::ThumbUp,
-                        "Good reply",
-                        m.rating == Some(Rating::Up),
-                        Tone::Accent,
-                        act(Action::Rate(id.clone(), Rating::Up)),
-                    ))
-                    .child(action_button(
-                        GlyphName::ThumbDown,
-                        "Bad reply",
-                        m.rating == Some(Rating::Down),
-                        Tone::Danger,
-                        act(Action::Rate(id.clone(), Rating::Down)),
-                    )),
-            )
-        })
-}
-
-/// The reply being written: it reads [`Live`], so a frame of tokens
-/// renders it again and nothing else.
-#[derive(Debug, Default)]
-pub(crate) struct LiveReply;
-
-/// The props of [`LiveReply`].
-#[derive(Debug, Clone, PartialEq, Props)]
-pub(crate) struct LiveReplyProps {
-    /// The copied message or code block.
-    pub(crate) copied: Option<SharedString>,
-}
-
-impl Component for LiveReply {
-    type Props = LiveReplyProps;
-    type Event = MarkdownEvent;
-
-    fn render(&self, props: &LiveReplyProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let live = cx.global::<Live>();
-        let id = live.id.clone().unwrap_or_default();
-        let thinking_now = live.thinking.is_some_and(|(_, s)| s.is_none());
-        let label = match live.thinking {
-            Some((start, None)) => {
-                let now = live.now.unwrap_or(start);
-                format!(
-                    "Thinking… {} s",
-                    now.saturating_duration_since(start).as_secs()
-                )
-            }
-            Some((_, Some(seconds))) => format!("Thought for {seconds} s"),
-            None => "Thought for 1 s".into(),
-        };
-        let waiting = live.blocks.is_empty() && live.tools.is_empty() && !thinking_now;
-        let on_copy = cx.listener(|_: &mut Self, e: &MarkdownEvent, cx| cx.emit(e.clone()));
-        view()
-            .px_4()
-            .pt_2()
-            .pb_1()
-            .gap_3()
-            .child(reply_header(live.model, false))
-            .when(!live.reason.is_empty(), |v| {
-                v.child(
-                    view()
-                        .gap_2()
-                        .child(reasoning_toggle(label, thinking_now, true))
-                        .child(reasoning_text(&live.reason)),
-                )
-            })
-            .children(live.tools.iter().map(|t| tool_card(t).key(t.id)))
-            .when(waiting, |v| {
-                v.child(view().flex_row().h(px(22.0)).items_center().child(caret()))
-            })
-            .child(markdown(
-                &live.blocks,
-                &id,
-                true,
-                props.copied.as_deref(),
-                on_copy,
-            ))
-    }
 }

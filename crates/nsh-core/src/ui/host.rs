@@ -1,13 +1,14 @@
 //! The host elements beyond views, texts and images: inputs, scroll views,
 //! navigation stacks and their screens, modals, canvases, web views, videos
 //! and the embedder's native components, with their props and typed events. Their props are the
-//! core's [`Prop`]s, kept per element and diffed by kind: a prop a render
-//! no longer sets goes back to its default, as when JS clears it.
+//! core's [`Prop`]s, kept per element and diffed by kind: a prop an
+//! element's binding (or a region's element made again) no longer sets
+//! goes back to its default, as when JS clears it.
 
 use std::sync::Arc;
 
 use super::{
-    Accessible, AnyElement, Interactive,
+    Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, Listener, ParentElement},
     events::{self, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
 };
@@ -41,11 +42,36 @@ pub(crate) fn reset(prop: &Prop) -> Option<Prop> {
 
 /// Sets `prop` on `node`, replacing the value of the same property.
 pub(crate) fn set(node: &mut ElNode, prop: Prop) {
-    let props = &mut node.attrs.props;
+    set_in(&mut node.attrs.props, prop);
+}
+
+crate::static_reactive!(Color: Color);
+crate::static_reactive!(AutoCapitalize: AutoCapitalize);
+crate::static_reactive!(AutoFill: AutoFill);
+crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
+crate::static_reactive!(KeyboardType: KeyboardType);
+crate::static_reactive!(ModalAnimation: ModalAnimation);
+crate::static_reactive!(ModalPresentation: ModalPresentation);
+crate::static_reactive!(ResizeMode: ResizeMode);
+crate::static_reactive!(ReturnKeyType: ReturnKeyType);
+crate::static_reactive!(SubmitBehavior: SubmitBehavior);
+
+/// Sets `prop` among `props`, replacing one of its kind.
+fn set_in(props: &mut Vec<Prop>, prop: Prop) {
     match props.iter_mut().find(|p| same_kind(p, &prop)) {
         Some(p) => *p = prop,
         None => props.push(prop),
     }
+}
+
+/// Sets the prop `prop` makes of `value`: now when it is static, else as a
+/// bound part.
+pub(crate) fn bind_prop<T: 'static>(
+    node: &mut ElNode,
+    value: impl IntoReactive<T>,
+    prop: impl Fn(T) -> Prop + 'static,
+) {
+    node.bind_attr(value, move |attrs, v| set_in(&mut attrs.props, prop(v)));
 }
 
 /// Adds a typed listener of `kind`.
@@ -84,6 +110,15 @@ macro_rules! host_element {
         impl $name {
             fn set(mut self, prop: Prop) -> Self {
                 set(&mut self.0, prop);
+                self
+            }
+
+            fn bind_prop<T: 'static>(
+                mut self,
+                value: impl IntoReactive<T>,
+                prop: impl Fn(T) -> Prop + 'static,
+            ) -> Self {
+                bind_prop(&mut self.0, value, prop);
                 self
             }
 
@@ -128,7 +163,7 @@ host_element! {
 
 host_element! {
     /// A modal (`<modal>`), made by [`modal`]: presented while it is in the
-    /// render, over everything else; its children are its content.
+    /// view, over everything else; its children are its content.
     Modal
 }
 
@@ -201,8 +236,8 @@ pub fn stack() -> Stack {
     Stack(ElNode::new(Tag::Stack))
 }
 
-/// A screen of a [`stack`]. What it renders reads its insets below the
-/// header ([`super::RenderCx::insets`]).
+/// A screen of a [`stack`]. What it shows reads its insets below the
+/// header ([`super::Scope::insets`]).
 pub fn screen() -> Screen {
     let mut node = ElNode::new(Tag::Screen);
     // Its insets come with this event.
@@ -210,11 +245,11 @@ pub fn screen() -> Screen {
     Screen(node)
 }
 
-/// A modal presenting its children. Put it in the render to present it,
-/// leave it out to dismiss it.
+/// A modal presenting its children. Put it in the view to present it (in
+/// a region: [`super::If`]), leave it out to dismiss it.
 pub fn modal() -> Modal {
     let mut node = ElNode::new(Tag::Modal);
-    // Its insets (`RenderCx::insets` inside it) come with this event.
+    // Its insets (`Scope::insets` inside it) come with this event.
     node.handlers.push((EventKind::Insets, Listener::noop()));
     Modal(node)
 }
@@ -222,7 +257,7 @@ pub fn modal() -> Modal {
 /// A bar shown over the keyboard of the inputs whose
 /// [`Input::input_accessory`] is `native_id` (iOS's `inputAccessoryView`):
 /// as wide as the window and as tall as its content, moving with the
-/// keyboard natively. It takes no room where the render places it; on
+/// keyboard natively. It takes no room where the view places it; on
 /// Android, which has no input accessories, it is an empty hidden view.
 pub fn input_accessory_view(native_id: &str) -> InputAccessoryView {
     let tag = if cfg!(target_os = "android") {
@@ -239,15 +274,20 @@ pub fn input_accessory_view(native_id: &str) -> InputAccessoryView {
     InputAccessoryView(node)
 }
 
-/// A canvas showing what `painter` recorded (draw again, e.g. from
-/// `on_layout`'s size, to change it; native values in it move natively).
-pub fn canvas(painter: impl Into<Painter>) -> CanvasView {
-    let painter = painter.into();
+/// A canvas showing what `painter` recorded (native values in it move
+/// natively). A closure draws in a binding: `canvas(move || draw(theme()))`
+/// draws again when what it read changes (a size kept from `on_layout`,
+/// the appearance).
+pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
     let mut node = ElNode::new(Tag::Canvas);
-    node.attrs.drawing = Some(Arc::new(painter.drawing));
-    node.attrs.bound = painter.nodes;
+    node.bind_attr(painter, |attrs, painter: Painter| {
+        attrs.drawing = Some(Arc::new(painter.drawing));
+        attrs.bound = painter.nodes;
+    });
     CanvasView(node)
 }
+
+crate::static_reactive!(Painter: Painter, Drawing);
 
 /// A web view loading `url`.
 pub fn web_view(url: &str) -> WebView {
@@ -257,7 +297,7 @@ pub fn web_view(url: &str) -> WebView {
 
 /// A web view showing the page `html`, its relative links resolved against
 /// `base_url` (TS: `source={{ html, baseUrl }}`).
-pub fn web_view_html(html: &str, base_url: Option<&str>) -> WebView {
+pub fn web_view_html(html: impl IntoReactive<String>, base_url: Option<&str>) -> WebView {
     WebView(ElNode::new(Tag::WebView)).html(html, base_url)
 }
 
@@ -274,149 +314,161 @@ pub fn native(name: &str) -> NativeView {
 impl Input {
     /// The text, when the component controls it (update it from
     /// [`Self::on_change_text`]).
-    pub fn value(self, text: impl Into<String>) -> Self {
-        self.set(Prop::Value(text.into()))
+    pub fn value(self, text: impl IntoReactive<String>) -> Self {
+        self.bind_prop(text, |text: String| Prop::Value(text))
     }
 
     /// The first text, when the input keeps its own.
-    pub fn default_value(self, text: impl Into<String>) -> Self {
-        self.set(Prop::DefaultValue(text.into()))
+    pub fn default_value(self, text: impl IntoReactive<String>) -> Self {
+        self.bind_prop(text, |text: String| Prop::DefaultValue(text))
     }
 
     /// Shown while it is empty.
-    pub fn placeholder(self, text: impl Into<String>) -> Self {
-        self.set(Prop::Placeholder(text.into()))
+    pub fn placeholder(self, text: impl IntoReactive<String>) -> Self {
+        self.bind_prop(text, |text: String| Prop::Placeholder(text))
     }
 
     /// The placeholder's color (`cx.color(theme.muted_foreground)`).
-    pub fn placeholder_color(self, color: Color) -> Self {
-        self.set(Prop::PlaceholderColor(Some(color)))
+    pub fn placeholder_color(self, color: impl IntoReactive<Color>) -> Self {
+        self.bind_prop(color, |color: Color| Prop::PlaceholderColor(Some(color)))
     }
 
     /// The caret's and the selection's color.
-    pub fn selection_color(self, color: Color) -> Self {
-        self.set(Prop::SelectionColor(Some(color)))
+    pub fn selection_color(self, color: impl IntoReactive<Color>) -> Self {
+        self.bind_prop(color, |color: Color| Prop::SelectionColor(Some(color)))
     }
 
     /// Hides what is typed (passwords).
-    pub fn secure(self, secure: bool) -> Self {
-        self.set(Prop::Secure(secure))
+    pub fn secure(self, secure: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(secure, |secure: bool| Prop::Secure(secure))
     }
 
     /// The software keyboard's layout.
-    pub fn keyboard_type(self, kind: KeyboardType) -> Self {
-        self.set(Prop::KeyboardType(kind))
+    pub fn keyboard_type(self, kind: impl IntoReactive<KeyboardType>) -> Self {
+        self.bind_prop(kind, |kind: KeyboardType| Prop::KeyboardType(kind))
     }
 
     /// The software keyboard's light or dark look (iOS; TS:
     /// `ios={{ keyboardAppearance }}`).
-    pub fn keyboard_appearance(self, appearance: KeyboardAppearance) -> Self {
-        self.set(Prop::KeyboardAppearance(appearance))
+    pub fn keyboard_appearance(self, appearance: impl IntoReactive<KeyboardAppearance>) -> Self {
+        self.bind_prop(appearance, |appearance: KeyboardAppearance| {
+            Prop::KeyboardAppearance(appearance)
+        })
     }
 
     /// The return key's label.
-    pub fn return_key_type(self, kind: ReturnKeyType) -> Self {
-        self.set(Prop::ReturnKeyType(kind))
+    pub fn return_key_type(self, kind: impl IntoReactive<ReturnKeyType>) -> Self {
+        self.bind_prop(kind, |kind: ReturnKeyType| Prop::ReturnKeyType(kind))
     }
 
     /// Automatic capitals.
-    pub fn auto_capitalize(self, mode: AutoCapitalize) -> Self {
-        self.set(Prop::AutoCapitalize(mode))
+    pub fn auto_capitalize(self, mode: impl IntoReactive<AutoCapitalize>) -> Self {
+        self.bind_prop(mode, |mode: AutoCapitalize| Prop::AutoCapitalize(mode))
     }
 
     /// Spelling correction (default on).
-    pub fn auto_correct(self, on: bool) -> Self {
-        self.set(Prop::AutoCorrect(on))
+    pub fn auto_correct(self, on: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(on, |on: bool| Prop::AutoCorrect(on))
     }
 
     /// What it holds, for autofill and suggestions.
-    pub fn auto_fill(self, kind: AutoFill) -> Self {
-        self.set(Prop::AutoFill(kind))
+    pub fn auto_fill(self, kind: impl IntoReactive<AutoFill>) -> Self {
+        self.bind_prop(kind, |kind: AutoFill| Prop::AutoFill(kind))
     }
 
     /// Several lines, growing with the text (return adds a line).
-    pub fn multiline(self, multiline: bool) -> Self {
-        self.set(Prop::Multiline(multiline))
+    pub fn multiline(self, multiline: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(multiline, |multiline: bool| Prop::Multiline(multiline))
     }
 
     /// At most `length` characters.
-    pub fn max_length(self, length: u32) -> Self {
-        self.set(Prop::MaxLength(Some(length)))
+    pub fn max_length(self, length: impl IntoReactive<u32>) -> Self {
+        self.bind_prop(length, |length: u32| Prop::MaxLength(Some(length)))
     }
 
     /// Editable (default yes).
-    pub fn editable(self, editable: bool) -> Self {
-        self.set(Prop::Editable(editable))
+    pub fn editable(self, editable: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(editable, |editable: bool| Prop::Editable(editable))
     }
 
     /// The return key unfocuses it (default yes, for one line).
-    pub fn blur_on_submit(self, blur: bool) -> Self {
-        self.set(Prop::BlurOnSubmit(blur))
+    pub fn blur_on_submit(self, blur: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(blur, |blur: bool| Prop::BlurOnSubmit(blur))
     }
 
     /// What return does (`submitBehavior`; default: submit and unfocus for
     /// one line, a line break for several).
-    pub fn submit_behavior(self, behavior: SubmitBehavior) -> Self {
-        self.set(Prop::SubmitBehavior(Some(behavior)))
+    pub fn submit_behavior(self, behavior: impl IntoReactive<SubmitBehavior>) -> Self {
+        self.bind_prop(behavior, |behavior: SubmitBehavior| {
+            Prop::SubmitBehavior(Some(behavior))
+        })
     }
 
     /// Focused when it appears.
-    pub fn auto_focus(self, focus: bool) -> Self {
-        self.set(Prop::AutoFocus(focus))
+    pub fn auto_focus(self, focus: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(focus, |focus: bool| Prop::AutoFocus(focus))
     }
 
     /// No caret.
-    pub fn caret_hidden(self, hidden: bool) -> Self {
-        self.set(Prop::CaretHidden(hidden))
+    pub fn caret_hidden(self, hidden: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(hidden, |hidden: bool| Prop::CaretHidden(hidden))
     }
 
     /// Shows the input accessory with this `nativeID` over the keyboard
     /// ([`input_accessory_view`]; iOS).
-    pub fn input_accessory(self, native_id: &str) -> Self {
-        self.set(Prop::InputAccessoryViewId(Some(native_id.into())))
+    pub fn input_accessory(self, native_id: impl IntoReactive<String>) -> Self {
+        self.bind_prop(native_id, |id: String| {
+            Prop::InputAccessoryViewId(Some(id.into()))
+        })
     }
 
-    /// Selects `start..end` (UTF-16 units; a caret when equal) when the
-    /// value differs from the last render's (TS: the controlled
+    /// Selects `(start, end)` (UTF-16 units; a caret when equal) when the
+    /// input is made and whenever the value changes (TS: the controlled
     /// `selection`); the user moves it on from there
     /// ([`Self::on_selection_change`]).
-    pub fn selection(self, start: u32, end: u32) -> Self {
-        self.set(Prop::Selection(start, end))
+    pub fn selection(self, range: impl IntoReactive<(u32, u32)>) -> Self {
+        self.bind_prop(range, |(start, end): (u32, u32)| {
+            Prop::Selection(start, end)
+        })
     }
 
     /// The text changed (the new text).
-    pub fn on_change_text(self, listener: Listener<str>) -> Self {
-        self.listen(EventKind::ChangeText, listener, events::text)
+    pub fn on_change_text(self, listener: impl Into<Listener<str>>) -> Self {
+        self.listen(EventKind::ChangeText, listener.into(), events::text)
     }
 
     /// The return key was pressed (the text).
-    pub fn on_submit_editing(self, listener: Listener<str>) -> Self {
-        self.listen(EventKind::SubmitEditing, listener, events::text)
+    pub fn on_submit_editing(self, listener: impl Into<Listener<str>>) -> Self {
+        self.listen(EventKind::SubmitEditing, listener.into(), events::text)
     }
 
     /// It became focused.
-    pub fn on_focus(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::Focus, listener, events::unit)
+    pub fn on_focus(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::Focus, listener.into(), events::unit)
     }
 
     /// It lost focus.
-    pub fn on_blur(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::Blur, listener, events::unit)
+    pub fn on_blur(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::Blur, listener.into(), events::unit)
     }
 
     /// The selection or caret moved.
-    pub fn on_selection_change(self, listener: Listener<Selection>) -> Self {
-        self.listen(EventKind::SelectionChange, listener, events::selection)
+    pub fn on_selection_change(self, listener: impl Into<Listener<Selection>>) -> Self {
+        self.listen(
+            EventKind::SelectionChange,
+            listener.into(),
+            events::selection,
+        )
     }
 
     /// A key was pressed: the character, `Backspace` or `Enter`.
-    pub fn on_key_press(self, listener: Listener<str>) -> Self {
-        self.listen(EventKind::KeyPress, listener, events::key)
+    pub fn on_key_press(self, listener: impl Into<Listener<str>>) -> Self {
+        self.listen(EventKind::KeyPress, listener.into(), events::key)
     }
 
     /// The text's size changed (multiline inputs growing).
-    pub fn on_content_size_change(self, listener: Listener<Size>) -> Self {
-        self.listen(EventKind::ContentSizeChange, listener, events::size)
+    pub fn on_content_size_change(self, listener: impl Into<Listener<Size>>) -> Self {
+        self.listen(EventKind::ContentSizeChange, listener.into(), events::size)
     }
 }
 
@@ -427,8 +479,8 @@ impl Scroll {
     }
 
     /// Whether the scroll indicator shows (default yes).
-    pub fn shows_indicator(self, shows: bool) -> Self {
-        self.set(Prop::ShowsIndicator(shows))
+    pub fn shows_indicator(self, shows: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shows, |shows: bool| Prop::ShowsIndicator(shows))
     }
 
     /// Pinch zoom between `min` and `max`.
@@ -438,24 +490,30 @@ impl Scroll {
     }
 
     /// The zoom.
-    pub fn zoom(self, scale: f32) -> Self {
-        self.set(Prop::Scroll(ScrollProp::Zoom(scale)))
+    pub fn zoom(self, scale: impl IntoReactive<f32>) -> Self {
+        self.bind_prop(scale, |scale: f32| Prop::Scroll(ScrollProp::Zoom(scale)))
     }
 
     /// Pinches may go past the zoom limits and spring back (default yes;
     /// TS: `bouncesZoom`).
-    pub fn bounces_zoom(self, bounces: bool) -> Self {
-        self.set(Prop::Scroll(ScrollProp::BouncesZoom(bounces)))
+    pub fn bounces_zoom(self, bounces: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(bounces, |bounces: bool| {
+            Prop::Scroll(ScrollProp::BouncesZoom(bounces))
+        })
     }
 
     /// The user can pinch to zoom (default yes; TS: `pinchGestureEnabled`).
-    pub fn pinch_gesture_enabled(self, enabled: bool) -> Self {
-        self.set(Prop::Scroll(ScrollProp::Pinch(enabled)))
+    pub fn pinch_gesture_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(enabled, |enabled: bool| {
+            Prop::Scroll(ScrollProp::Pinch(enabled))
+        })
     }
 
     /// Content smaller than the view sits in its center (zoomed images).
-    pub fn center_content(self, center: bool) -> Self {
-        self.set(Prop::Scroll(ScrollProp::CenterContent(center)))
+    pub fn center_content(self, center: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(center, |center: bool| {
+            Prop::Scroll(ScrollProp::CenterContent(center))
+        })
     }
 }
 
@@ -471,71 +529,79 @@ impl Screen {
         self
     }
 
-    fn screen(self, prop: ScreenProp) -> Self {
-        self.set(Prop::Screen(prop))
-    }
-
     /// The header's title.
-    pub fn title(self, title: impl Into<Arc<str>>) -> Self {
-        self.screen(ScreenProp::Title(Some(title.into())))
+    pub fn title(self, title: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(title, |t| {
+            Prop::Screen(ScreenProp::Title(Some(Arc::from(t.as_str()))))
+        })
     }
 
     /// Whether the header shows (default true).
-    pub fn header_shown(self, shown: bool) -> Self {
-        self.screen(ScreenProp::HeaderShown(shown))
+    pub fn header_shown(self, shown: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shown, |v| Prop::Screen(ScreenProp::HeaderShown(v)))
     }
 
     /// A large title (iOS); the content scrolls under the header.
-    pub fn header_large_title(self, large: bool) -> Self {
-        self.screen(ScreenProp::HeaderLargeTitle(large))
+    pub fn header_large_title(self, large: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(large, |v| Prop::Screen(ScreenProp::HeaderLargeTitle(v)))
     }
 
     /// The content extends under the header.
-    pub fn header_transparent(self, transparent: bool) -> Self {
-        self.screen(ScreenProp::HeaderTransparent(transparent))
+    pub fn header_transparent(self, transparent: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(transparent, |v| {
+            Prop::Screen(ScreenProp::HeaderTransparent(v))
+        })
     }
 
     /// The back button's and bar buttons' color.
-    pub fn header_tint_color(self, color: impl Into<Color>) -> Self {
-        self.screen(ScreenProp::HeaderTintColor(Some(color.into())))
+    pub fn header_tint_color(self, color: impl IntoReactive<Color>) -> Self {
+        self.bind_prop(color, |c| {
+            Prop::Screen(ScreenProp::HeaderTintColor(Some(c)))
+        })
     }
 
     /// The header's background.
-    pub fn header_background_color(self, color: impl Into<Color>) -> Self {
-        self.screen(ScreenProp::HeaderBackgroundColor(Some(color.into())))
+    pub fn header_background_color(self, color: impl IntoReactive<Color>) -> Self {
+        self.bind_prop(color, |c| {
+            Prop::Screen(ScreenProp::HeaderBackgroundColor(Some(c)))
+        })
     }
 
     /// The title's color.
-    pub fn header_title_color(self, color: impl Into<Color>) -> Self {
-        self.screen(ScreenProp::HeaderTitleColor(Some(color.into())))
+    pub fn header_title_color(self, color: impl IntoReactive<Color>) -> Self {
+        self.bind_prop(color, |c| {
+            Prop::Screen(ScreenProp::HeaderTitleColor(Some(c)))
+        })
     }
 
     /// The label of the back button leading back to this screen (iOS).
-    pub fn header_back_title(self, title: impl Into<Arc<str>>) -> Self {
-        self.screen(ScreenProp::HeaderBackTitle(Some(title.into())))
+    pub fn header_back_title(self, title: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(title, |t| {
+            Prop::Screen(ScreenProp::HeaderBackTitle(Some(Arc::from(t.as_str()))))
+        })
     }
 
     /// Whether the back button shows (default true).
-    pub fn header_back_visible(self, visible: bool) -> Self {
-        self.screen(ScreenProp::HeaderBackVisible(visible))
+    pub fn header_back_visible(self, visible: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
     }
 
     /// The interactive back gesture (iOS swipe back, Android predictive
     /// back); the back buttons pop either way (default true).
-    pub fn gesture_enabled(self, enabled: bool) -> Self {
-        self.screen(ScreenProp::GestureEnabled(enabled))
+    pub fn gesture_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(enabled, |v| Prop::Screen(ScreenProp::GestureEnabled(v)))
     }
 
     /// The user cannot leave the screen: no swipe back, and the back
     /// buttons report [`Self::on_back_request`] instead of popping. Decided
     /// natively when the system asks, so set it before the user acts.
-    pub fn prevent_back(self, prevent: bool) -> Self {
-        self.screen(ScreenProp::PreventBack(prevent))
+    pub fn prevent_back(self, prevent: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(prevent, |v| Prop::Screen(ScreenProp::PreventBack(v)))
     }
 
     /// How the screen enters and leaves.
-    pub fn animation(self, animation: ScreenAnimation) -> Self {
-        self.screen(ScreenProp::Animation(animation))
+    pub fn animation(self, animation: impl IntoReactive<ScreenAnimation>) -> Self {
+        self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
     }
 
     /// An element at the header's start (instead of the back button).
@@ -554,36 +620,44 @@ impl Screen {
     }
 
     /// The user popped the screen natively (back button, swipe): leave it
-    /// out of the next render.
-    pub fn on_dismiss(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::Dismiss, listener, events::unit)
+    /// out of the view (its region).
+    pub fn on_dismiss(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::Dismiss, listener.into(), events::unit)
     }
 
     /// The user tried to leave a screen that [`Self::prevent_back`]s.
-    pub fn on_back_request(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::BackRequest, listener, events::unit)
+    pub fn on_back_request(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::BackRequest, listener.into(), events::unit)
     }
 }
 
 impl Modal {
     /// How it comes in (default: slides up).
-    pub fn animation(self, animation: ModalAnimation) -> Self {
-        self.set(Prop::Modal(ModalProp::Animation(animation)))
+    pub fn animation(self, animation: impl IntoReactive<ModalAnimation>) -> Self {
+        self.bind_prop(animation, |animation: ModalAnimation| {
+            Prop::Modal(ModalProp::Animation(animation))
+        })
     }
 
     /// Full screen, or a sheet (iOS).
-    pub fn presentation(self, presentation: ModalPresentation) -> Self {
-        self.set(Prop::Modal(ModalProp::Presentation(presentation)))
+    pub fn presentation(self, presentation: impl IntoReactive<ModalPresentation>) -> Self {
+        self.bind_prop(presentation, |presentation: ModalPresentation| {
+            Prop::Modal(ModalProp::Presentation(presentation))
+        })
     }
 
     /// What is behind shows through (its content draws the dimming).
-    pub fn transparent(self, transparent: bool) -> Self {
-        self.set(Prop::Modal(ModalProp::Transparent(transparent)))
+    pub fn transparent(self, transparent: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(transparent, |transparent: bool| {
+            Prop::Modal(ModalProp::Transparent(transparent))
+        })
     }
 
     /// Under the status bar (Android).
-    pub fn status_bar_translucent(self, translucent: bool) -> Self {
-        self.set(Prop::Modal(ModalProp::StatusBarTranslucent(translucent)))
+    pub fn status_bar_translucent(self, translucent: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(translucent, |translucent: bool| {
+            Prop::Modal(ModalProp::StatusBarTranslucent(translucent))
+        })
     }
 
     /// The orientations it allows while it is presented (iOS; default:
@@ -599,24 +673,26 @@ impl Modal {
     /// Swipes down and the back button dismiss it, reporting
     /// [`Self::on_dismiss`] (default: they ask with
     /// [`Self::on_request_close`]).
-    pub fn dismissible(self, dismissible: bool) -> Self {
-        self.set(Prop::Modal(ModalProp::Dismissible(dismissible)))
+    pub fn dismissible(self, dismissible: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(dismissible, |dismissible: bool| {
+            Prop::Modal(ModalProp::Dismissible(dismissible))
+        })
     }
 
     /// The user asked to close it (back button, swipe down): leave it out
-    /// of the next render to close it.
-    pub fn on_request_close(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::RequestClose, listener, events::unit)
+    /// of the view (its region) to close it.
+    pub fn on_request_close(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::RequestClose, listener.into(), events::unit)
     }
 
     /// It finished appearing.
-    pub fn on_show(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::Show, listener, events::unit)
+    pub fn on_show(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::Show, listener.into(), events::unit)
     }
 
     /// The user or the system dismissed it.
-    pub fn on_dismiss(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::Dismiss, listener, events::unit)
+    pub fn on_dismiss(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::Dismiss, listener.into(), events::unit)
     }
 }
 
@@ -649,73 +725,85 @@ impl Orientation {
 }
 
 impl WebView {
-    /// Loads `html` (relative links against `base_url`) instead of a URL.
-    pub fn html(self, html: &str, base_url: Option<&str>) -> Self {
-        self.set(Prop::Native(NativeProp::Source(WebSource::Html {
-            html: html.into(),
-            base_url: base_url.map(Into::into),
-        })))
+    /// Loads `html` (relative links against `base_url`) instead of a URL;
+    /// a bound page loads again when it changes.
+    pub fn html(self, html: impl IntoReactive<String>, base_url: Option<&str>) -> Self {
+        let base_url: Option<Arc<str>> = base_url.map(Into::into);
+        self.bind_prop(html, move |html: String| {
+            Prop::Native(NativeProp::Source(WebSource::Html {
+                html: html.into(),
+                base_url: base_url.clone(),
+            }))
+        })
     }
 
     /// Runs after each page loads.
-    pub fn injected_java_script(self, script: &str) -> Self {
-        self.set(Prop::Native(NativeProp::InjectedJavaScript(Some(
-            script.into(),
-        ))))
+    pub fn injected_java_script(self, script: impl IntoReactive<String>) -> Self {
+        self.bind_prop(script, |script: String| {
+            Prop::Native(NativeProp::InjectedJavaScript(Some(script.into())))
+        })
     }
 
     /// Runs before each page's own scripts.
-    pub fn injected_java_script_before_content(self, script: &str) -> Self {
-        self.set(Prop::Native(NativeProp::InjectedJavaScriptBefore(Some(
-            script.into(),
-        ))))
+    pub fn injected_java_script_before_content(self, script: impl IntoReactive<String>) -> Self {
+        self.bind_prop(script, |script: String| {
+            Prop::Native(NativeProp::InjectedJavaScriptBefore(Some(script.into())))
+        })
     }
 
     /// The user agent it sends.
-    pub fn user_agent(self, agent: &str) -> Self {
-        self.set(Prop::Native(NativeProp::UserAgent(Some(agent.into()))))
+    pub fn user_agent(self, agent: impl IntoReactive<String>) -> Self {
+        self.bind_prop(agent, |agent: String| {
+            Prop::Native(NativeProp::UserAgent(Some(agent.into())))
+        })
     }
 
     /// Scrolls (default yes).
-    pub fn scroll_enabled(self, enabled: bool) -> Self {
-        self.set(Prop::Native(NativeProp::ScrollEnabled(enabled)))
+    pub fn scroll_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(enabled, |enabled: bool| {
+            Prop::Native(NativeProp::ScrollEnabled(enabled))
+        })
     }
 
     /// Runs the pages' JavaScript (default yes).
-    pub fn java_script_enabled(self, enabled: bool) -> Self {
-        self.set(Prop::Native(NativeProp::JavaScriptEnabled(enabled)))
+    pub fn java_script_enabled(self, enabled: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(enabled, |enabled: bool| {
+            Prop::Native(NativeProp::JavaScriptEnabled(enabled))
+        })
     }
 
     /// Swipes go back and forward (iOS).
-    pub fn back_forward_gestures(self, enabled: bool) -> Self {
-        self.set(Prop::Native(NativeProp::BackForwardGestures(enabled)))
+    pub fn back_forward_gestures(self, enabled: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(enabled, |enabled: bool| {
+            Prop::Native(NativeProp::BackForwardGestures(enabled))
+        })
     }
 
     /// A page started loading.
-    pub fn on_load_start(self, listener: Listener<WebNavigation>) -> Self {
-        self.listen(EventKind::LoadStart, listener, events::navigation)
+    pub fn on_load_start(self, listener: impl Into<Listener<WebNavigation>>) -> Self {
+        self.listen(EventKind::LoadStart, listener.into(), events::navigation)
     }
 
     /// A page loaded.
-    pub fn on_load(self, listener: Listener<WebNavigation>) -> Self {
-        self.listen(EventKind::Load, listener, events::navigation)
+    pub fn on_load(self, listener: impl Into<Listener<WebNavigation>>) -> Self {
+        self.listen(EventKind::Load, listener.into(), events::navigation)
     }
 
     /// A page failed to load (the message).
-    pub fn on_error(self, listener: Listener<str>) -> Self {
-        self.listen(EventKind::Error, listener, events::message)
+    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
+        self.listen(EventKind::Error, listener.into(), events::message)
     }
 
     /// The page called `window.ReactNativeWebView.postMessage(data)`.
-    pub fn on_message(self, listener: Listener<str>) -> Self {
-        self.listen(EventKind::Message, listener, events::data)
+    pub fn on_message(self, listener: impl Into<Listener<str>>) -> Self {
+        self.listen(EventKind::Message, listener.into(), events::data)
     }
 
     /// It navigated.
-    pub fn on_navigation_state_change(self, listener: Listener<WebNavigation>) -> Self {
+    pub fn on_navigation_state_change(self, listener: impl Into<Listener<WebNavigation>>) -> Self {
         self.listen(
             EventKind::NavigationStateChange,
-            listener,
+            listener.into(),
             events::navigation,
         )
     }
@@ -723,73 +811,83 @@ impl WebView {
 
 impl Video {
     /// Paused.
-    pub fn paused(self, paused: bool) -> Self {
-        self.set(Prop::Native(NativeProp::Paused(paused)))
+    pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(paused, |paused: bool| {
+            Prop::Native(NativeProp::Paused(paused))
+        })
     }
 
     /// Without sound.
-    pub fn muted(self, muted: bool) -> Self {
-        self.set(Prop::Native(NativeProp::Muted(muted)))
+    pub fn muted(self, muted: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(muted, |muted: bool| Prop::Native(NativeProp::Muted(muted)))
     }
 
     /// 0..1.
-    pub fn volume(self, volume: f32) -> Self {
-        self.set(Prop::Native(NativeProp::Volume(volume)))
+    pub fn volume(self, volume: impl IntoReactive<f32>) -> Self {
+        self.bind_prop(volume, |volume: f32| {
+            Prop::Native(NativeProp::Volume(volume))
+        })
     }
 
     /// Playback speed.
-    pub fn rate(self, rate: f32) -> Self {
-        self.set(Prop::Native(NativeProp::Rate(rate)))
+    pub fn rate(self, rate: impl IntoReactive<f32>) -> Self {
+        self.bind_prop(rate, |rate: f32| Prop::Native(NativeProp::Rate(rate)))
     }
 
     /// Starts over at the end.
-    pub fn repeat(self, repeat: bool) -> Self {
-        self.set(Prop::Native(NativeProp::Repeat(repeat)))
+    pub fn repeat(self, repeat: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(repeat, |repeat: bool| {
+            Prop::Native(NativeProp::Repeat(repeat))
+        })
     }
 
     /// How the picture fits (default: contain).
-    pub fn resize_mode(self, mode: ResizeMode) -> Self {
-        self.set(Prop::Native(NativeProp::VideoResizeMode(mode)))
+    pub fn resize_mode(self, mode: impl IntoReactive<ResizeMode>) -> Self {
+        self.bind_prop(mode, |mode: ResizeMode| {
+            Prop::Native(NativeProp::VideoResizeMode(mode))
+        })
     }
 
     /// The platform's playback controls.
-    pub fn controls(self, controls: bool) -> Self {
-        self.set(Prop::Native(NativeProp::Controls(controls)))
+    pub fn controls(self, controls: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(controls, |controls: bool| {
+            Prop::Native(NativeProp::Controls(controls))
+        })
     }
 
     /// Milliseconds between [`Self::on_progress`] events (default 250).
-    pub fn progress_interval(self, ms: f32) -> Self {
-        self.set(Prop::Native(NativeProp::ProgressInterval(ms)))
+    pub fn progress_interval(self, ms: impl IntoReactive<f32>) -> Self {
+        self.bind_prop(ms, |ms: f32| Prop::Native(NativeProp::ProgressInterval(ms)))
     }
 
     /// It started loading.
-    pub fn on_load_start(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::LoadStart, listener, events::unit)
+    pub fn on_load_start(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::LoadStart, listener.into(), events::unit)
     }
 
     /// It loaded: length and size.
-    pub fn on_load(self, listener: Listener<VideoInfo>) -> Self {
-        self.listen(EventKind::Load, listener, events::video)
+    pub fn on_load(self, listener: impl Into<Listener<VideoInfo>>) -> Self {
+        self.listen(EventKind::Load, listener.into(), events::video)
     }
 
     /// It played on.
-    pub fn on_progress(self, listener: Listener<VideoProgress>) -> Self {
-        self.listen(EventKind::Progress, listener, events::progress)
+    pub fn on_progress(self, listener: impl Into<Listener<VideoProgress>>) -> Self {
+        self.listen(EventKind::Progress, listener.into(), events::progress)
     }
 
     /// It played to its end.
-    pub fn on_end(self, listener: Listener<()>) -> Self {
-        self.listen(EventKind::End, listener, events::unit)
+    pub fn on_end(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen(EventKind::End, listener.into(), events::unit)
     }
 
     /// It started (`true`) or stopped buffering.
-    pub fn on_buffer(self, listener: Listener<bool>) -> Self {
-        self.listen(EventKind::Buffer, listener, events::buffering)
+    pub fn on_buffer(self, listener: impl Into<Listener<bool>>) -> Self {
+        self.listen(EventKind::Buffer, listener.into(), events::buffering)
     }
 
     /// It failed (the message).
-    pub fn on_error(self, listener: Listener<str>) -> Self {
-        self.listen(EventKind::Error, listener, events::message)
+    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
+        self.listen(EventKind::Error, listener.into(), events::message)
     }
 }
 
@@ -800,8 +898,8 @@ impl NativeView {
     }
 
     /// It emitted an event.
-    pub fn on_native_event(self, listener: Listener<NativeEvent>) -> Self {
-        self.listen(EventKind::NativeEvent, listener, events::native)
+    pub fn on_native_event(self, listener: impl Into<Listener<NativeEvent>>) -> Self {
+        self.listen(EventKind::NativeEvent, listener.into(), events::native)
     }
 }
 
@@ -872,7 +970,7 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 /// may be native values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
 /// [`Painter::num`], [`Painter::paint`] and [`Painter::op`]. Text is
-/// measured with [`super::RenderCx::measure_text`].
+/// measured with [`super::ambient::measure_text`].
 #[derive(Debug, Clone, Default)]
 pub struct Painter {
     drawing: Drawing,
@@ -933,7 +1031,7 @@ impl Painter {
     /// transform, as recorded so far (TS: `ctx.isPointInPath(x, y, rule)`).
     /// Answered from the geometry here, with no platform round trip; a
     /// number given as a native value counts as 0, as in TS. To find what
-    /// is under a tap, build the render's painter in a method the press
+    /// is under a tap, build the canvas's painter in a function the press
     /// handler calls too.
     pub fn is_point_in_path(&self, x: f32, y: f32, rule: FillRule) -> bool {
         crate::canvas::point_in_path(&self.drawing.ops, None, rule, x, y, |_| 0.0)
@@ -1415,3 +1513,5 @@ impl From<Drawing> for Painter {
         }
     }
 }
+
+crate::static_reactive!(ScreenAnimation: ScreenAnimation);

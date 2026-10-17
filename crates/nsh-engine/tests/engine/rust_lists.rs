@@ -11,7 +11,7 @@ use nsh_core::{
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Engine, EngineConfig, Environment};
-use nsh_ui_mobile::{ListView, ListViewProps, Stepper, StepperProps};
+use nsh_ui_mobile::{ListView, ListViewProps, Stepper, StepperApi, StepperProps};
 
 use crate::ChannelSink;
 
@@ -110,68 +110,45 @@ impl Tree {
 
 /// A list of its own rows with a header, a footer, an empty view and
 /// separators.
-#[derive(Default)]
-struct Own {
-    count: usize,
-    header_taps: u32,
-    visible: String,
-    /// Emptied once at the end.
-    emptied: bool,
-}
-
-impl Component for Own {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        self.count = 50;
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .child(
-                virtual_list(self.count, |i, _| text(format!("row {i}")).h(px(40.0)))
-                    .estimated_item_size(40.0)
-                    .flex_1()
-                    .header(
-                        text(format!("header {}", self.header_taps)).on_press(cx.listener(
-                            |this: &mut Self, _, cx| {
-                                this.header_taps += 1;
-                                cx.notify();
-                            },
-                        )),
-                    )
-                    .footer(text("footer"))
-                    .empty(
-                        text("nothing").on_press(cx.listener(|this: &mut Self, _, cx| {
-                            this.count = 3;
-                            cx.notify();
-                        })),
-                    )
-                    .separator(|| view().h(px(1.0)).bg(rgb(0xeeeeee)))
-                    .sticky_header_indices([0])
-                    .keyboard_dismiss_mode(KeyboardDismissMode::OnDrag)
-                    .end_reached_threshold(0.5)
-                    .initial_scroll_index(2)
-                    .minimum_view_time(Duration::from_millis(100))
-                    .on_viewable_items_changed(cx.listener(
-                        |this: &mut Self, rows: &ViewableItems, cx| {
-                            let rows = rows.indices();
-                            this.visible = format!("{}-{}", rows.start(), rows.end());
-                            cx.notify();
-                        },
-                    ))
-                    .on_end_reached(cx.listener(|this: &mut Self, _, cx| {
-                        if !this.emptied {
-                            this.emptied = true;
-                            this.count = 0;
-                            cx.notify();
-                        }
-                    })),
+#[component]
+fn Own() -> impl IntoElement {
+    let count = signal(50_usize);
+    let header_taps = signal(0);
+    let visible = signal(String::new());
+    // Emptied once at the end.
+    let emptied = stored(false);
+    view()
+        .flex_1()
+        .child(
+            virtual_list(
+                move || count.get(),
+                |at| text(move || format!("row {}", at.index())).h(px(40.0)),
             )
-            .child(text(format!("visible {}", self.visible)))
-    }
+            .estimated_item_size(40.0)
+            .flex_1()
+            .header(
+                text(move || format!("header {}", header_taps.get()))
+                    .on_press(move |_: &()| header_taps.update(|t| *t += 1)),
+            )
+            .footer(text("footer"))
+            .empty(text("nothing").on_press(move |_: &()| count.set(3)))
+            .separator(|| view().h(px(1.0)).bg(rgb(0xeeeeee)))
+            .sticky_header_indices([0])
+            .keyboard_dismiss_mode(KeyboardDismissMode::OnDrag)
+            .end_reached_threshold(0.5)
+            .initial_scroll_index(2)
+            .minimum_view_time(Duration::from_millis(100))
+            .on_viewable_items_changed(move |rows: &ViewableItems| {
+                let rows = rows.indices();
+                visible.set(format!("{}-{}", rows.start(), rows.end()));
+            })
+            .on_end_reached(move |_: &()| {
+                if !emptied.replace(true) {
+                    count.set(0);
+                }
+            }),
+        )
+        .child(text(move || format!("visible {}", visible.get())))
 }
 
 #[test]
@@ -257,41 +234,26 @@ fn rust_lists_have_headers_footers_separators_and_empty_views() {
 }
 
 /// A `ListView` with rows of this component and a header.
-#[derive(Default)]
-struct Stocks {
-    rows: std::rc::Rc<Vec<String>>,
-    pressed: String,
-    ended: u32,
-}
-
-impl Component for Stocks {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        self.rows = std::rc::Rc::new((0..100).map(|i| format!("stock {i}")).collect());
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let rows = self.rows.clone();
-        let press = cx.listener(|this: &mut Self, index: &usize, cx| {
-            this.pressed = format!("pressed {index}");
-            cx.notify();
-        });
-        view().flex_1().child(
-            ListView::element(ListViewProps::default()).items(
-                virtual_list(rows.len(), move |i, _| {
-                    text(rows[i].clone()).on_press(press.clone().map(move |_: &()| i))
-                })
-                .keys(0..100)
-                .header(text(format!("{} ended {}", self.pressed, self.ended)))
-                .on_end_reached(cx.listener(|this: &mut Self, _, cx| {
-                    this.ended += 1;
-                    cx.notify();
-                })),
-            ),
-        )
-    }
+#[component]
+fn Stocks() -> impl IntoElement {
+    let rows: std::rc::Rc<Vec<String>> =
+        std::rc::Rc::new((0..100).map(|i| format!("stock {i}")).collect());
+    let pressed = signal(String::new());
+    let ended = signal(0);
+    view().flex_1().child(
+        ListView::element(ListViewProps::default()).items(
+            virtual_list(rows.len(), move |at| {
+                let rows = rows.clone();
+                text(move || rows[at.index()].clone())
+                    .on_press(move |_: &()| pressed.set(format!("pressed {}", at.index())))
+            })
+            .keys(|| 0..100)
+            .header(text(move || {
+                format!("{} ended {}", pressed.get(), ended.get())
+            }))
+            .on_end_reached(move |_: &()| ended.update(|e| *e += 1)),
+        ),
+    )
 }
 
 #[test]
@@ -395,52 +357,30 @@ fn the_apps_handlers_on_a_list_views_rows_run() {
 }
 
 /// A stepper it asks for its value, then sets.
-#[derive(Default)]
-struct Asker {
-    asked: String,
-    stepper: Option<ComponentRef<Stepper>>,
-    ask: Option<Task<()>>,
-}
-
-impl Component for Asker {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.stepper = Some(cx.component_ref());
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let stepper = self.stepper.as_ref().expect("set up");
-        view()
-            .flex_1()
-            .child(text(format!("asked {}", self.asked)).on_press(cx.listener(
-                |this: &mut Self, _, cx| {
-                    let stepper = this.stepper.clone().expect("set up");
-                    let value = stepper.update(|s, cx| {
-                        let value = s.value();
-                        s.set_value(5.0, cx);
-                        value
-                    });
-                    this.ask = Some(cx.spawn(|this, _| async move {
-                        let value = value.await;
-                        let _ = this
-                            .update(move |this, cx| {
-                                this.asked = format!("{value:?}");
-                                cx.notify();
-                            })
-                            .await;
-                    }));
-                },
-            )))
-            .child(
-                Stepper::element(StepperProps {
-                    default_value: 3.0,
-                    ..StepperProps::default()
-                })
-                .component_ref(stepper),
-            )
-    }
+#[component]
+fn Asker() -> impl IntoElement {
+    let asked = signal(String::new());
+    let stepper = component_ref::<Stepper>();
+    let asking = stepper.clone();
+    view()
+        .flex_1()
+        .child(
+            text(move || format!("asked {}", asked.get())).on_press(move |_: &()| {
+                let value = asking.api::<StepperApi>().map(|api| {
+                    let value = api.value();
+                    api.set_value(5.0);
+                    value
+                });
+                asked.set(format!("{value:?}"));
+            }),
+        )
+        .child(
+            Stepper::element(StepperProps {
+                default_value: 3.0.into(),
+                ..StepperProps::default()
+            })
+            .component_ref(&stepper),
+        )
 }
 
 #[test]

@@ -76,6 +76,8 @@ pub(crate) enum IconName {
     Spark,
 }
 
+nsh_core::static_reactive!(IconName: IconName);
+
 fn line(p: Painter, points: &[f32]) -> Painter {
     let mut p = p.begin_path().move_to(points[0], points[1]);
     for xy in points[2..].chunks(2) {
@@ -309,54 +311,53 @@ impl From<AdaptiveColor> for Tint {
     }
 }
 
-/// A glyph, stroked with its tint (a canvas: it renders again when the
-/// appearance changes, to draw with the other color).
-#[derive(Debug, Default)]
-pub(crate) struct Icon;
-
 /// The props of [`Icon`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct IconProps {
     /// The glyph.
-    pub(crate) name: IconName,
+    pub(crate) name: Prop<IconName>,
     /// Its width and height, in points.
     #[prop(default = 20.0)]
-    pub(crate) size: f32,
+    pub(crate) size: Prop<f32>,
     /// Its color.
-    pub(crate) tint: Tint,
+    pub(crate) tint: Prop<Tint>,
 }
 
-impl Component for Icon {
-    type Props = IconProps;
-    type Event = NoEvent;
-
-    fn render(&self, props: &IconProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let tint = cx.color(AdaptiveColor::new(props.tint.light, props.tint.dark));
-        let scale = props.size / 20.0;
-        let painter = Painter::new()
-            .scale(scale, scale)
-            .stroke_color(tint)
-            .fill_color(tint)
-            .line_width(1.6)
-            .line_cap(LineCap::Round)
-            .line_join(LineJoin::Round);
-        // A component's root is a view: the canvas fills it.
-        view()
-            .size(px(props.size))
-            .pointer_events(PointerEvents::None)
-            .child(canvas(props.name.draw(painter)).size_full())
-    }
+/// A glyph, stroked with its tint (a canvas drawn in a binding: again when
+/// the glyph, its tint or the appearance changes).
+#[component]
+pub(crate) fn Icon(props: IconProps) -> impl IntoElement {
+    view()
+        .size(move || px(props.size.get()))
+        .pointer_events(PointerEvents::None)
+        .child(
+            canvas(move || {
+                let tint = props.tint.get();
+                let tint = color(AdaptiveColor::new(tint.light, tint.dark));
+                let scale = props.size.get() / 20.0;
+                let painter = Painter::new()
+                    .scale(scale, scale)
+                    .stroke_color(tint)
+                    .fill_color(tint)
+                    .line_width(1.6)
+                    .line_cap(LineCap::Round)
+                    .line_join(LineJoin::Round);
+                props.name.get().draw(painter)
+            })
+            .size_full(),
+        )
 }
 
-/// [`Icon`] `name`, `size` points wide, in `tint`.
+/// [`Icon`] `name`, `size` points wide, in `tint` (a color, or a signal or
+/// closure of one: the glyph is drawn again when it changes).
 pub(crate) fn icon(
-    name: IconName,
-    size: f32,
-    tint: impl Into<AdaptiveColor>,
+    name: impl Into<Prop<IconName>>,
+    size: impl Into<Prop<f32>>,
+    tint: impl IntoReactive<AdaptiveColor>,
 ) -> ComponentElement<Icon> {
     Icon::element(IconProps {
-        name,
-        size,
-        tint: tint.into().into(),
+        name: name.into(),
+        size: size.into(),
+        tint: tint.into_reactive().map(Tint::from).into(),
     })
 }

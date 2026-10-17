@@ -24,6 +24,7 @@ mod mount;
 mod ops;
 pub mod platform;
 mod props;
+pub mod reactive;
 pub mod runtime;
 pub mod shape;
 mod style;

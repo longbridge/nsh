@@ -30,34 +30,25 @@ impl PressRole {
     }
 }
 
-/// A pressable that sinks a little under the finger and springs back (the
-/// spring runs natively; only press in / out reach Rust). Its content is
-/// its children: `Press::element(..).on_event(..).child(..)`, or
-/// [`press`].
-#[derive(Debug, Default)]
-pub(crate) struct Press {
-    scale: Option<NativeValue>,
-}
-
 /// The props of [`Press`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct PressProps {
     /// How far it shrinks.
     #[prop(default = 0.97)]
-    pub(crate) scale: f32,
+    pub(crate) scale: Prop<f32>,
     /// Takes no presses, at 40% opacity.
     #[prop(default)]
-    pub(crate) disabled: bool,
+    pub(crate) disabled: Prop<bool>,
     /// What it is to assistive technologies.
     #[prop(default)]
-    pub(crate) role: PressRole,
+    pub(crate) role: Prop<PressRole>,
     /// Its accessibility label.
-    pub(crate) label: Option<SharedString>,
+    pub(crate) label: Prop<Option<SharedString>>,
     /// Selected (a tab).
     #[prop(default)]
-    pub(crate) selected: bool,
+    pub(crate) selected: Prop<bool>,
     /// Checked (a switch).
-    pub(crate) checked: Option<bool>,
+    pub(crate) checked: Prop<Option<bool>>,
     /// How far around it a touch still hits it, in points.
     pub(crate) hit_slop: Option<f32>,
     /// It reports long presses ([`PressEvent::LongPress`]) instead of the
@@ -77,71 +68,60 @@ pub(crate) enum PressEvent {
     LongPress,
 }
 
-impl Press {
-    fn value(&self) -> &NativeValue {
-        self.scale.as_ref().expect("set up")
-    }
-}
-
-impl Component for Press {
-    type Props = PressProps;
-    type Event = PressEvent;
-
-    fn setup(&mut self, _: &PressProps, cx: &mut Context<'_, Self>) {
-        self.scale = Some(cx.native_value(1.0));
-    }
-
-    fn render(&self, props: &PressProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let checked = props.checked.map(|on| {
-            if on {
-                nsh_core::Checked::True
-            } else {
-                nsh_core::Checked::False
-            }
-        });
-        view()
-            .bind_scale(self.value())
-            .opacity(if props.disabled { 0.4 } else { 1.0 })
-            .disabled(props.disabled)
-            .role(props.role.role())
-            .when_some(props.label.clone(), |v, label| v.label(label))
-            .accessibility_state(AccessibilityState {
-                disabled: props.disabled,
-                selected: props.selected,
-                checked,
-                ..AccessibilityState::default()
-            })
-            .when_some(props.hit_slop, |v, slop| v.hit_slop(EdgeInsets::all(slop)))
-            .on_press_in(cx.listener(|this: &mut Self, _, cx| {
-                this.value().spring(cx.props().scale, motion::PRESS);
-            }))
-            .on_press_out(cx.listener(|this: &mut Self, _, _| {
-                this.value().spring(1.0, motion::PRESS);
-            }))
-            .on_press(cx.listener(|_: &mut Self, _, cx| cx.emit(PressEvent::Press)))
-            .when(props.long_press, |v| {
-                v.on_long_press(cx.listener(|_: &mut Self, _, cx| cx.emit(PressEvent::LongPress)))
-            })
-            .child(props.children)
-    }
+/// A pressable that sinks a little under the finger and springs back (the
+/// spring runs natively; only press in / out reach Rust). Its content is
+/// its children: `Press::element(..).on_event(..).child(..)`, or
+/// [`press_with`].
+#[component]
+pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElement {
+    let scale = native_value(1.0);
+    let (down, up) = (scale.clone(), scale.clone());
+    view()
+        .bind_scale(&scale)
+        .opacity(move || if props.disabled.get() { 0.4_f32 } else { 1.0 })
+        .disabled(props.disabled)
+        .role(props.role.get_untracked().role())
+        .when(props.label.with_untracked(Option::is_some), |v| {
+            v.label(move || props.label.get().unwrap_or_default())
+        })
+        .accessibility_state(move || AccessibilityState {
+            disabled: props.disabled.get(),
+            selected: props.selected.get(),
+            checked: props.checked.get().map(|on| {
+                if on {
+                    nsh_core::Checked::True
+                } else {
+                    nsh_core::Checked::False
+                }
+            }),
+            ..AccessibilityState::default()
+        })
+        .when_some(props.hit_slop, |v, slop| v.hit_slop(EdgeInsets::all(slop)))
+        .on_press_in(move |_: &()| {
+            down.spring(props.scale.get_untracked(), motion::PRESS);
+        })
+        .on_press_out(move |_: &()| {
+            up.spring(1.0, motion::PRESS);
+        })
+        .on_press(move |_: &()| cx.emit(PressEvent::Press))
+        .when(props.long_press, |v| {
+            v.on_long_press(move |_: &()| cx.emit(PressEvent::LongPress))
+        })
+        .child(props.children)
 }
 
 /// A [`Press`] with `props`, calling `on_press` when pressed (and, with
 /// `long_press`, held: [`Press::element`] with `.on_event(..)` tells them
 /// apart).
-pub(crate) fn press_with(props: PressProps, on_press: Listener<()>) -> ComponentElement<Press> {
-    Press::element(props).on_event(on_press.map(|_: &PressEvent| ()))
-}
-
-/// Fades and lifts its content in once mounted; `index` staggers siblings
-/// (40 ms apart). `flex` lets it wrap a page that fills its parent.
-#[derive(Debug, Default)]
-pub(crate) struct Appear {
-    shown: Option<NativeValue>,
+pub(crate) fn press_with(
+    props: PressProps,
+    on_press: impl Into<Listener<()>>,
+) -> ComponentElement<Press> {
+    Press::element(props).on_event(on_press.into().map(|_: &PressEvent| ()))
 }
 
 /// The props of [`Appear`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct AppearProps {
     /// Its place among siblings coming in together: it waits 40 ms per
     /// place (8 at most).
@@ -154,30 +134,23 @@ pub(crate) struct AppearProps {
     pub(crate) children: Children,
 }
 
-impl Component for Appear {
-    type Props = AppearProps;
-    type Event = NoEvent;
-
-    fn setup(&mut self, props: &AppearProps, cx: &mut Context<'_, Self>) {
-        let shown = cx.native_value(0.0);
-        shown.timing_with(
-            1.0,
-            Timing {
-                delay_ms: props.index.min(8) as f32 * 40.0,
-                ..motion::ENTER
-            },
-        );
-        self.shown = Some(shown);
-    }
-
-    fn render(&self, props: &AppearProps, _: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let shown = self.shown.as_ref().expect("set up");
-        view()
-            .when(props.flex, |v| v.flex_1())
-            .bind_opacity(shown)
-            .bind_translate_y(&shown.interpolate(&[0.0, 1.0], &[14.0, 0.0]))
-            .child(props.children)
-    }
+/// Fades and lifts its content in once mounted; `index` staggers siblings
+/// (40 ms apart). `flex` lets it wrap a page that fills its parent.
+#[component]
+pub(crate) fn Appear(props: AppearProps) -> impl IntoElement {
+    let shown = native_value(0.0);
+    shown.timing_with(
+        1.0,
+        Timing {
+            delay_ms: props.index.min(8) as f32 * 40.0,
+            ..motion::ENTER
+        },
+    );
+    view()
+        .when(props.flex, |v| v.flex_1())
+        .bind_opacity(&shown)
+        .bind_translate_y(&shown.interpolate(&[0.0, 1.0], &[14.0, 0.0]))
+        .child(props.children)
 }
 
 /// [`Appear`] at `index` among its siblings.

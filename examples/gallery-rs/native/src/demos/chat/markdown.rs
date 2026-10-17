@@ -2,13 +2,15 @@
 //! `demos/chat/markdown.tsx`): headings, paragraphs (bold, italic, inline
 //! code), bullet and numbered lists, fenced code, tables and quotes.
 //!
-//! Each block is a [`MarkdownBlock`] given its block as props, keyed by
-//! position and kind: while a reply streams, only the block being written
-//! changes, so only it renders again. Every block (and each list item and
-//! table cell) is one selectable text: a long press highlights it and
-//! offers Copy.
+//! The blocks are keyed by position and kind, and each block's pieces of
+//! text by position and look: while a reply streams, only the block being
+//! written changes, and in it only the span a token lengthens. Every block
+//! (and each list item and table cell) is one selectable text: a long press
+//! highlights it and offers Copy.
 
-use nsh_core::ui::{AnyElement, JsObject, PropEnum, prelude::*};
+use std::rc::Rc;
+
+use nsh_core::ui::{AnyElement, prelude::*};
 
 use super::{
     glyphs::{GlyphName, glyph},
@@ -17,7 +19,7 @@ use super::{
 use crate::ui::{Finish, Finished, MONO, PressProps, colors, press_with, radius};
 
 /// What a block is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Kind {
     H,
     #[default]
@@ -30,7 +32,7 @@ pub(crate) enum Kind {
 }
 
 /// A block of a reply.
-#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Block {
     /// Its place and kind (`2:p`).
     pub(crate) key: SharedString,
@@ -300,7 +302,7 @@ fn kind_name(kind: Kind) -> &'static str {
 }
 
 /// How a piece of inline text looks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Span {
     Plain,
     Bold,
@@ -361,20 +363,47 @@ fn pieces(text: &str) -> Vec<(Span, &str)> {
     out
 }
 
-/// `text` with its emphasis as spans.
-pub(crate) fn inline(text: &str) -> Text {
-    pieces(text).into_iter().fold(text_root(), |t, (span, s)| {
-        let piece = nsh_core::ui::text(s.to_owned());
-        t.child(match span {
-            Span::Plain => piece,
-            Span::Bold => piece.font_weight(FontWeight::SEMIBOLD),
-            Span::Italic => piece.italic(),
-            Span::Code => piece
-                .font_family(MONO)
-                .text_size(px(14.0))
-                .text_color(colors::CODE),
-        })
-    })
+/// A piece of a text's inline content: its place among the pieces, its
+/// look and its text.
+#[derive(Debug, Clone, PartialEq)]
+struct Piece {
+    at: usize,
+    span: Span,
+    text: String,
+}
+
+/// The text `source` gives with its emphasis as spans. Each piece is a
+/// span of its own, known by its place and look: as a reply streams, a
+/// token updates the one span it lengthens (or adds one).
+pub(crate) fn inline(source: impl Fn() -> SharedString + 'static) -> Text {
+    let pieces = move || {
+        let text = source();
+        pieces(&text)
+            .into_iter()
+            .enumerate()
+            .map(|(at, (span, s))| Piece {
+                at,
+                span,
+                text: s.to_owned(),
+            })
+            .collect::<Vec<_>>()
+    };
+    text_root().child(Each::new(
+        pieces,
+        |p: &Piece| (p.at, p.span),
+        |piece, _| {
+            let content = nsh_core::ui::text(move || piece.with(|p| p.text.clone()));
+            match piece.with_untracked(|p| p.span) {
+                Span::Plain => content,
+                Span::Bold => content.font_weight(FontWeight::SEMIBOLD),
+                Span::Italic => content.italic(),
+                Span::Code => content
+                    .font_family(MONO)
+                    .text_size(px(14.0))
+                    .text_color(colors::CODE),
+            }
+        },
+    ))
 }
 
 fn text_root() -> Text {
@@ -388,247 +417,292 @@ fn body(t: Text) -> Text {
         .text_color(colors::TEXT)
 }
 
-/// One block of a reply.
-#[derive(Debug, Default)]
-pub(crate) struct MarkdownBlock;
-
-/// The props of [`MarkdownBlock`].
-#[derive(Debug, Clone, PartialEq, Props)]
-pub(crate) struct MarkdownBlockProps {
-    pub(crate) block: Block,
-    /// The reply it is in (code blocks are copied by `reply:block`).
-    pub(crate) id: SharedString,
-    /// The streaming caret ends it.
-    #[prop(default)]
-    pub(crate) caret: bool,
-    /// Its code was just copied.
-    #[prop(default)]
-    pub(crate) copied: bool,
+/// Positions `0..len`: rows kept by place (an item being written keeps its
+/// row).
+fn places(len: usize) -> Vec<usize> {
+    (0..len).collect()
 }
 
-/// What a [`MarkdownBlock`] reports.
-#[derive(Debug, Clone, PartialEq, Event)]
-pub(crate) enum MarkdownEvent {
-    /// Its code's Copy button was pressed.
-    Copy {
-        key: SharedString,
-        text: SharedString,
-    },
+/// What the blocks of a reply share: the reply's id, the copied code block
+/// and what a code block's Copy button calls (its key and its text).
+#[derive(Clone)]
+struct Shared {
+    id: Memo<String>,
+    copied: Signal<Option<String>>,
+    on_copy: Rc<dyn Fn(String, String)>,
 }
 
-impl Component for MarkdownBlock {
-    type Props = MarkdownBlockProps;
-    type Event = MarkdownEvent;
-
-    fn render(&self, props: &MarkdownBlockProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let b = &props.block;
-        let tail = |t: Text, on: bool| if on { t.child(caret()) } else { t };
-        let paragraph = |t: Text| tail(text_root().selectable(true).child(t), props.caret);
-        match b.kind {
-            Kind::H => {
-                let (size, line) = match b.level {
-                    1 => (20.0, 26.0),
-                    2 => (17.0, 22.0),
-                    _ => (15.0, 22.0),
-                };
-                view().child(
-                    paragraph(inline(&b.text))
-                        .text_size(px(size))
-                        .line_height(px(line))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(colors::TEXT)
-                        .pt_1(),
-                )
-            }
-            Kind::P => view().child(body(paragraph(inline(&b.text)))),
-            Kind::Ul | Kind::Ol => {
-                let count = b.items.len();
-                view()
-                    .gap(px(6.0))
-                    .children(b.items.iter().enumerate().map(|(i, item)| {
-                        let marker: AnyElement = if b.kind == Kind::Ol {
-                            nsh_core::ui::text(format!("{}.", i + 1))
-                                .w(px(16.0))
-                                .text_size(px(15.0))
-                                .line_height(px(22.0))
-                                .text_color(colors::MUTED)
-                                .tabular_nums()
-                                .into_element()
-                        } else {
-                            view()
-                                .w(px(16.0))
-                                .h(px(22.0))
-                                .items_center()
-                                .justify_center()
-                                .child(view().size(px(5.0)).rounded(px(2.5)).bg(colors::MUTED))
-                                .into_element()
-                        };
-                        view().flex_row().gap(px(10.0)).child(marker).child(
-                            body(tail(
-                                text_root().selectable(true).child(inline(item)),
-                                props.caret && i + 1 == count,
-                            ))
-                            .flex_1(),
-                        )
-                    }))
-            }
-            Kind::Code => {
-                let copied = props.copied;
-                let key: SharedString = format!("{}:{}", props.id, b.key).into();
-                let copy = cx.listener(move |_: &mut Self, _: &(), cx| {
-                    let text = cx.props().block.text.clone();
-                    cx.emit(MarkdownEvent::Copy {
-                        key: key.clone(),
-                        text,
-                    });
-                });
-                let tone = if copied { colors::UP } else { colors::MUTED };
-                view()
-                    .bg(colors::INSET)
-                    .finish(Finish::Inset)
-                    .rounded(px(radius::INSET))
-                    .border_curve(BorderCurve::Continuous)
-                    .border_1()
-                    .border_color(colors::LINE)
-                    .overflow_hidden()
-                    .child(
+/// One block of a reply: its kind is its key's, so it is made once; its
+/// content follows `block`. `last` puts the caret at its end.
+fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> View {
+    let paragraph = move |source: Box<dyn Fn() -> SharedString>| {
+        text_root()
+            .selectable(true)
+            .child(inline(source))
+            .child(If::new(last, caret))
+    };
+    let text_of = move || -> Box<dyn Fn() -> SharedString> {
+        Box::new(move || block.with(|b| b.text.clone()))
+    };
+    match block.with_untracked(|b| b.kind) {
+        Kind::H => {
+            let level = computed(move || block.with(|b| b.level));
+            view().child(
+                paragraph(text_of())
+                    .text_size(move || {
+                        px(match level.get() {
+                            1 => 20.0,
+                            2 => 17.0,
+                            _ => 15.0,
+                        })
+                    })
+                    .line_height(move || px(if level.get() == 1 { 26.0 } else { 22.0 }))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(colors::TEXT)
+                    .pt_1(),
+            )
+        }
+        Kind::P => view().child(body(paragraph(text_of()))),
+        kind @ (Kind::Ul | Kind::Ol) => {
+            let count = computed(move || block.with(|b| b.items.len()));
+            view().gap(px(6.0)).child(Each::new(
+                move || places(count.get()),
+                |i: &usize| *i,
+                move |i, _| {
+                    let i = i.get_untracked();
+                    let marker: AnyElement = if kind == Kind::Ol {
+                        nsh_core::ui::text(format!("{}.", i + 1))
+                            .w(px(16.0))
+                            .text_size(px(15.0))
+                            .line_height(px(22.0))
+                            .text_color(colors::MUTED)
+                            .tabular_nums()
+                            .into_element()
+                    } else {
                         view()
-                            .flex_row()
+                            .w(px(16.0))
+                            .h(px(22.0))
                             .items_center()
-                            .h(px(40.0))
-                            .pl_3()
-                            .border_b_1()
-                            .border_b_color(colors::LINE)
-                            .child(
-                                nsh_core::ui::text(if b.lang.is_empty() {
-                                    SharedString::from("text")
-                                } else {
-                                    b.lang.clone()
+                            .justify_center()
+                            .child(view().size(px(5.0)).rounded(px(2.5)).bg(colors::MUTED))
+                            .into_element()
+                    };
+                    let at_end = computed(move || last.get() && i + 1 == count.get());
+                    view().flex_row().gap(px(10.0)).child(marker).child(
+                        body(
+                            text_root()
+                                .selectable(true)
+                                .child(inline(move || {
+                                    block.with(|b| b.items.get(i).cloned().unwrap_or_default())
+                                }))
+                                .child(If::new(at_end, caret)),
+                        )
+                        .flex_1(),
+                    )
+                },
+            ))
+        }
+        Kind::Code => {
+            let Shared {
+                id,
+                copied,
+                on_copy,
+            } = shared;
+            let key = computed(move || format!("{}:{}", id.get(), block.with(|b| b.key.clone())));
+            let done = computed(move || {
+                let key = key.get();
+                copied.with(|c| c.as_deref() == Some(key.as_str()))
+            });
+            let tone = move || {
+                if done.get() {
+                    colors::UP
+                } else {
+                    colors::MUTED
+                }
+            };
+            let copy = move |_: &()| {
+                on_copy(
+                    key.get_untracked(),
+                    block.with_untracked(|b| b.text.to_string()),
+                );
+            };
+            view()
+                .bg(colors::INSET)
+                .finish(Finish::Inset)
+                .rounded(px(radius::INSET))
+                .border_curve(BorderCurve::Continuous)
+                .border_1()
+                .border_color(colors::LINE)
+                .overflow_hidden()
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .h(px(40.0))
+                        .pl_3()
+                        .border_b_1()
+                        .border_b_color(colors::LINE)
+                        .child(
+                            nsh_core::ui::text(move || {
+                                block.with(|b| {
+                                    if b.lang.is_empty() {
+                                        SharedString::from("text")
+                                    } else {
+                                        b.lang.clone()
+                                    }
                                 })
-                                .flex_1()
-                                .text_size(px(12.0))
-                                .text_color(colors::MUTED)
-                                .font_family(MONO),
+                            })
+                            .flex_1()
+                            .text_size(px(12.0))
+                            .text_color(colors::MUTED)
+                            .font_family(MONO),
+                        )
+                        .child(
+                            press_with(
+                                PressProps {
+                                    label: Some("Copy code".into()).into(),
+                                    hit_slop: Some(4.0),
+                                    ..PressProps::default()
+                                },
+                                copy,
                             )
                             .child(
-                                press_with(
-                                    PressProps {
-                                        label: Some("Copy code".into()),
-                                        hit_slop: Some(4.0),
-                                        ..PressProps::default()
-                                    },
-                                    copy,
-                                )
-                                .child(
-                                    view()
-                                        .h(px(40.0))
-                                        .px_3()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap(px(6.0))
-                                        .child(glyph(
-                                            if copied {
+                                view()
+                                    .h(px(40.0))
+                                    .px_3()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(glyph(
+                                        Prop::bind(move || {
+                                            if done.get() {
                                                 GlyphName::Check
                                             } else {
                                                 GlyphName::Copy
-                                            },
-                                            14.0,
-                                            tone,
-                                        ))
-                                        .child(
-                                            nsh_core::ui::text(if copied {
-                                                "Copied"
-                                            } else {
-                                                "Copy"
-                                            })
-                                            .text_size(px(13.0))
-                                            .text_color(tone),
-                                        ),
-                                ),
+                                            }
+                                        }),
+                                        14.0,
+                                        tone,
+                                    ))
+                                    .child(
+                                        nsh_core::ui::text(move || {
+                                            if done.get() { "Copied" } else { "Copy" }
+                                        })
+                                        .text_size(px(13.0))
+                                        .text_color(tone),
+                                    ),
                             ),
-                    )
-                    .child(
-                        scroll().horizontal().shows_indicator(false).child(
-                            view().p_3().child(tail(
-                                nsh_core::ui::text(b.text.clone())
-                                    .selectable(true)
-                                    .font_family(MONO)
-                                    .text_size(px(13.0))
-                                    .line_height(px(19.0))
-                                    .text_color(colors::CODE),
-                                props.caret,
-                            )),
                         ),
-                    )
-            }
-            Kind::Table => {
-                let cell = |t: Text| t.flex_1().px(px(10.0)).py_2();
-                view()
-                    .rounded(px(radius::CONTROL))
-                    .border_1()
-                    .border_color(colors::BORDER)
-                    .overflow_hidden()
-                    .child(
-                        view()
-                            .flex_row()
-                            .bg(colors::RAISED)
-                            .finish(Finish::Raised)
-                            .children(b.head.iter().map(|h| {
-                                cell(nsh_core::ui::text(h.clone()))
-                                    .text_size(px(13.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(colors::MUTED)
-                            })),
-                    )
-                    .children(b.rows.iter().map(|row| {
+                )
+                .child(
+                    scroll().horizontal().shows_indicator(false).child(
+                        view().p_3().child(
+                            nsh_core::ui::text(move || block.with(|b| b.text.clone()))
+                                .selectable(true)
+                                .font_family(MONO)
+                                .text_size(px(13.0))
+                                .line_height(px(19.0))
+                                .text_color(colors::CODE)
+                                .child(If::new(last, caret)),
+                        ),
+                    ),
+                )
+        }
+        Kind::Table => {
+            let head = computed(move || block.with(|b| b.head.clone()));
+            let rows = computed(move || block.with(|b| b.rows.clone()));
+            let cell = |t: Text| t.flex_1().px(px(10.0)).py_2();
+            view()
+                .rounded(px(radius::CONTROL))
+                .border_1()
+                .border_color(colors::BORDER)
+                .overflow_hidden()
+                .child(
+                    view()
+                        .flex_row()
+                        .bg(colors::RAISED)
+                        .finish(Finish::Raised)
+                        .child(Each::new(
+                            move || places(head.with(Vec::len)),
+                            |i: &usize| *i,
+                            move |i, _| {
+                                let i = i.get_untracked();
+                                cell(nsh_core::ui::text(move || {
+                                    head.with(|h| h.get(i).cloned().unwrap_or_default())
+                                }))
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(colors::MUTED)
+                            },
+                        )),
+                )
+                .child(Each::new(
+                    move || places(rows.with(Vec::len)),
+                    |r: &usize| *r,
+                    move |r, _| {
+                        let r = r.get_untracked();
+                        let row = computed(move || {
+                            rows.with(|rs| rs.get(r).cloned().unwrap_or_default())
+                        });
                         view()
                             .flex_row()
                             .border_t_1()
                             .border_t_color(colors::LINE)
-                            .children(row.iter().map(|c| {
-                                cell(inline(c))
+                            .child(Each::new(
+                                move || places(row.with(Vec::len)),
+                                |c: &usize| *c,
+                                move |c, _| {
+                                    let c = c.get_untracked();
+                                    cell(inline(move || {
+                                        row.with(|r| r.get(c).cloned().unwrap_or_default())
+                                    }))
                                     .selectable(true)
                                     .text_size(px(14.0))
                                     .text_color(colors::TEXT)
                                     .tabular_nums()
-                            }))
-                    }))
-            }
-            Kind::Quote => view()
-                .flex_row()
-                .gap_3()
-                .child(view().w(px(3.0)).rounded(px(1.5)).bg(colors::BORDER))
-                .child(
-                    body(paragraph(inline(&b.text)))
-                        .flex_1()
-                        .text_color(colors::MUTED),
-                ),
+                                },
+                            ))
+                    },
+                ))
         }
+        Kind::Quote => view()
+            .flex_row()
+            .gap_3()
+            .child(view().w(px(3.0)).rounded(px(1.5)).bg(colors::BORDER))
+            .child(
+                body(paragraph(text_of()))
+                    .flex_1()
+                    .text_color(colors::MUTED),
+            ),
     }
 }
 
-/// The blocks of a reply as components; the caret (while streaming) ends
-/// the last one, `copied` names the copied code block.
+/// The blocks of a reply (keyed by place and kind: while it streams, only
+/// the block being written changes). `id` is the reply's; while `caret`
+/// holds (streaming) the caret ends the last block; `copied` names the
+/// copied code block, and a code block's Copy button calls `on_copy` with
+/// its key and its text.
 pub(crate) fn markdown(
-    blocks: &[Block],
-    id: &str,
-    caret: bool,
-    copied: Option<&str>,
-    on_copy: Listener<MarkdownEvent>,
+    blocks: impl Fn() -> Vec<Block> + 'static,
+    id: impl Fn() -> String + 'static,
+    caret: impl Fn() -> bool + 'static,
+    copied: Signal<Option<String>>,
+    on_copy: Rc<dyn Fn(String, String)>,
 ) -> View {
-    let count = blocks.len();
-    view()
-        .gap_3()
-        .children(blocks.iter().enumerate().map(|(i, block)| {
-            let key = format!("{id}:{}", block.key);
-            let copied = copied == Some(key.as_str());
-            MarkdownBlock::element(MarkdownBlockProps {
-                block: block.clone(),
-                id: id.to_owned().into(),
-                caret: caret && i + 1 == count,
-                copied,
-            })
-            .key(block.key.clone())
-            .on_event(on_copy.clone())
-        }))
+    let blocks = computed(blocks);
+    let caret = computed(caret);
+    let count = computed(move || blocks.with(Vec::len));
+    let shared = Shared {
+        id: computed(id),
+        copied,
+        on_copy,
+    };
+    view().gap_3().child(Each::new(
+        blocks,
+        |b: &Block| b.key.clone(),
+        move |block, index| {
+            let last = computed(move || caret.get() && index.get() + 1 == count.get());
+            block_view(block, last, shared.clone())
+        },
+    ))
 }

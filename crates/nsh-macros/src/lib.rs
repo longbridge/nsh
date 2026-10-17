@@ -127,7 +127,7 @@ struct PropAttr {
     rename: Option<String>,
     /// More names a `PropEnum` variant is read from.
     aliases: Vec<String>,
-    /// `Children` made only while the render places them.
+    /// `Children` made only while the view places them.
     lazy: bool,
 }
 
@@ -165,8 +165,8 @@ fn prop_attr(attrs: &[Attribute]) -> syn::Result<PropAttr> {
 }
 
 /// Whether field `ident` is not the `Children` field found so far.
-fn kind_is_not_children(children: &Option<Ident>, ident: &Ident) -> bool {
-    children.as_ref() != Some(ident)
+fn kind_is_not_children(children: Option<&Ident>, ident: &Ident) -> bool {
+    children != Some(ident)
 }
 
 /// The last segment of a type path (`Slot`, `Option`) and its first
@@ -200,14 +200,14 @@ enum Kind {
 ///   JS clearing a prop restores it.
 /// - `Option<Slot>`: a named slot, JSX the app passes in that prop.
 /// - `Children`: the JSX children; with `#[prop(lazy)]` JS makes them only
-///   while the render places them (made again each time it does, released
+///   while the view places them (made again each time it does, released
 ///   when it stops: a sheet's content starts fresh when it opens).
 /// - `Items`: virtualized rows (in JS `each`, a row renderer and `List`'s
 ///   data props), at most one, and not with `Children`.
 ///
 /// `#[prop(rename = "…")]` sets the JS name. The struct's doc comment
 /// documents the component in TypeScript, the fields' its props. The props
-/// also get `Default` (every field at its default), for Rust renders:
+/// also get `Default` (every field at its default), for Rust views:
 /// `ButtonProps { title: "+1".into(), ..Default::default() }`.
 #[proc_macro_derive(Props, attributes(prop))]
 pub fn derive_props(input: TokenStream) -> TokenStream {
@@ -238,9 +238,30 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut lazy_children = false;
     let mut items: Option<Ident> = None;
     let mut items_js: Option<String> = None;
+    // Fields of type `Prop<T>`: held in signals by an instance.
+    let mut held = Vec::new();
+    let mut updates = Vec::new();
+    let mut any_held = false;
     for field in &fields.named {
         let ident = field.ident.as_ref().expect("named");
-        let ty = &field.ty;
+        // A `Prop<T>` is a prop of type `T`, held in a signal.
+        let (ty, is_held) = match last_segment(&field.ty) {
+            Some((id, Some(inner))) if id == "Prop" => (inner, true),
+            _ => (&field.ty, false),
+        };
+        any_held |= is_held;
+        if is_held {
+            held.push(quote!(#ident: self.#ident.__hold()));
+            updates.push(quote!(self.#ident.__update_from(&new.#ident);));
+        } else {
+            held.push(quote!(#ident: ::core::clone::Clone::clone(&self.#ident)));
+            updates.push(quote! {
+                if self.#ident != new.#ident {
+                    self.#ident = ::core::clone::Clone::clone(&new.#ident);
+                    changed = true;
+                }
+            });
+        }
         let attr = prop_attr(&field.attrs)?;
         let js = attr
             .rename
@@ -262,7 +283,30 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             (Some(Some(expr)), _) => quote!(#expr),
             _ => quote!(::core::default::Default::default()),
         };
-        initial.push(quote!(#ident: #init));
+        if is_held && matches!(kind, Kind::Items) {
+            return Err(syn::Error::new(
+                field.span(),
+                "`Items` is not a `Prop`: the rows change, not the field",
+            ));
+        }
+        // How a field takes a new value (`value`): a held one writes its
+        // signal.
+        let assign = |value: TokenStream2| {
+            if is_held {
+                quote!(self.#ident.__set(#ui::Reactive::Static(#value)))
+            } else {
+                quote! {{
+                    let changed = self.#ident != #value;
+                    self.#ident = #value;
+                    changed
+                }}
+            }
+        };
+        if is_held {
+            initial.push(quote!(#ident: #ui::Prop::new(#init)));
+        } else {
+            initial.push(quote!(#ident: #init));
+        }
         match kind {
             Kind::Value => {
                 let optional = is_option || attr.default.is_some();
@@ -275,6 +319,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         kind: #ui::PropKind::Value,
                     }
                 });
+                let take = assign(quote!(value));
                 set_arms.push(quote! {
                     #js => {
                         let value: #ty = match value {
@@ -282,12 +327,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                                 .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #js, e)))?,
                             ::core::option::Option::None => #init,
                         };
-                        if self.#ident == value {
-                            ::core::result::Result::Ok(false)
-                        } else {
-                            self.#ident = value;
-                            ::core::result::Result::Ok(true)
-                        }
+                        ::core::result::Result::Ok(#take)
                     }
                 });
             }
@@ -301,12 +341,9 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         kind: #ui::PropKind::Slot,
                     }
                 });
+                let take = assign(quote!(slot));
                 slot_arms.push(quote! {
-                    #js => {
-                        let changed = self.#ident != slot;
-                        self.#ident = slot;
-                        changed
-                    }
+                    #js => #take,
                 });
             }
             Kind::Items => {
@@ -344,11 +381,11 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         kind: #ui::PropKind::Children,
                     }
                 });
-                children = Some(ident.clone());
+                children = Some((ident.clone(), assign(quote!(children))));
                 lazy_children = attr.lazy;
             }
         }
-        if attr.lazy && kind_is_not_children(&children, ident) {
+        if attr.lazy && kind_is_not_children(children.as_ref().map(|c| &c.0), ident) {
             return Err(syn::Error::new(
                 field.span(),
                 "`#[prop(lazy)]` is for the `Children` field",
@@ -356,15 +393,26 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
         }
     }
     let set_children = match &children {
-        Some(ident) => quote! {
-            let changed = self.#ident != children;
-            self.#ident = children;
-            changed
-        },
+        Some((_, take)) => quote!(#take),
         None => quote!({
             let _ = children;
             false
         }),
+    };
+    let held_fns = if any_held {
+        quote! {
+            fn held(&self) -> Self {
+                Self { #(#held),* }
+            }
+
+            fn update_from(&mut self, new: &Self) -> bool {
+                let mut changed = false;
+                #(#updates)*
+                changed
+            }
+        }
+    } else {
+        quote!()
     };
     let items_const = match &items_js {
         Some(js) => quote!(::core::option::Option::Some(#js)),
@@ -372,8 +420,8 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     };
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     Ok(quote! {
-        /// Every prop at its default (`..Default::default()` when Rust
-        /// renders the component).
+        /// Every prop at its default (`..Default::default()` when a Rust
+        /// view makes the component).
         impl #impl_generics ::core::default::Default for #name #ty_generics #where_clause {
             fn default() -> Self {
                 <Self as #ui::Props>::initial()
@@ -424,6 +472,8 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             fn set_children(&mut self, children: #ui::Children) -> bool {
                 #set_children
             }
+
+            #held_fns
         }
     })
 }
@@ -766,6 +816,118 @@ pub fn assets(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// `#[component]` on a function: a component that runs once
+/// (`Component::view`), named after the function.
+///
+/// ```ignore
+/// /// A number with − and + buttons.
+/// #[component]
+/// pub fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement {
+///     let value = signal(0.0);
+///     view().child(text(move || format!("{}", value.get())))
+/// }
+/// ```
+///
+/// makes `pub struct Stepper;` and its `Component` impl; the body is its
+/// view, run once. Without a `Scope` parameter it emits no
+/// events (`NoEvent`); without props it has none (`()`).
+/// `#[component(methods = StepperApi)]` gives its ref in JS the methods of
+/// that [`methods`] API, which the view registers with `cx.methods(..)`.
+#[proc_macro_attribute]
+pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut methods = None;
+    let parser = syn::meta::parser(|meta| {
+        if meta.path.is_ident("methods") {
+            methods = Some(meta.value()?.parse::<syn::Path>()?);
+            Ok(())
+        } else {
+            Err(meta.error("`#[component]` takes `methods = Api`"))
+        }
+    });
+    parse_macro_input!(attr with parser);
+    let item = parse_macro_input!(item as ItemFn);
+    component_fn(item, methods)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenStream2> {
+    let ui = quote!(::nsh_core::ui);
+    let sig = &item.sig;
+    if !sig.generics.params.is_empty() || sig.asyncness.is_some() {
+        return Err(syn::Error::new(
+            sig.span(),
+            "a component is a plain function: no generics, not async",
+        ));
+    }
+    let name = &sig.ident;
+    let vis = &item.vis;
+    let attrs = &item.attrs;
+    let body = &item.block;
+    let output = &sig.output;
+    let mut props: Option<(Box<Pat>, Box<Type>)> = None;
+    let mut scope: Option<(Box<Pat>, Box<Type>, Type)> = None;
+    for input in &sig.inputs {
+        let FnArg::Typed(arg) = input else {
+            return Err(syn::Error::new(input.span(), "a component takes no `self`"));
+        };
+        match last_segment(&arg.ty) {
+            Some((id, Some(event))) if id == "Scope" => {
+                if scope.is_some() {
+                    return Err(syn::Error::new(arg.span(), "one `Scope` parameter"));
+                }
+                scope = Some((arg.pat.clone(), arg.ty.clone(), event.clone()));
+            }
+            _ => {
+                if props.is_some() {
+                    return Err(syn::Error::new(
+                        arg.span(),
+                        "a component takes its props and its `Scope`",
+                    ));
+                }
+                props = Some((arg.pat.clone(), arg.ty.clone()));
+            }
+        }
+    }
+    let (props_pat, props_ty) = match &props {
+        Some((pat, ty)) => (quote!(#pat), quote!(#ty)),
+        None => (quote!(_), quote!(())),
+    };
+    let (scope_pat, scope_ty, event) = match &scope {
+        Some((pat, ty, event)) => (quote!(#pat), quote!(#ty), quote!(#event)),
+        None => (
+            quote!(_),
+            quote!(#ui::Scope<#ui::NoEvent>),
+            quote!(#ui::NoEvent),
+        ),
+    };
+    let output = match output {
+        ReturnType::Default => {
+            return Err(syn::Error::new(
+                sig.span(),
+                "a component returns its view: `-> impl IntoElement`",
+            ));
+        }
+        ReturnType::Type(_, ty) => quote!(#ty),
+    };
+    let methods =
+        methods.map(|api| quote!(const METHODS: #ui::Methods = #ui::Methods::of::<#api>();));
+    Ok(quote! {
+        #(#attrs)*
+        #[derive(::core::fmt::Debug, ::core::default::Default, ::core::clone::Clone, ::core::marker::Copy)]
+        #vis struct #name;
+
+        impl #ui::Component for #name {
+            type Props = #props_ty;
+            type Event = #event;
+            #methods
+
+            #[allow(unused_variables)]
+            fn view(#props_pat: #props_ty, #scope_pat: #scope_ty) -> #output #body
+        }
+    })
+}
+
 /// `#[native_module("gallery/native")]` on `fn native(registry: &mut
 /// Registry)` at the root of an app's crate (`nsh.json` `"rust"`): the UI
 /// set the app's TSX imports by that specifier. The function registers the
@@ -818,8 +980,10 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
         let Helper { doc, name, keys } = h;
         out.extend(quote! {
             #[doc = #doc]
-            fn #name(mut self, length: impl ::core::convert::Into<crate::ui::Length>) -> Self {
-                self.style().lengths(&[#(crate::style::StyleKey::#keys),*], length.into());
+            fn #name(mut self, length: impl crate::ui::IntoReactive<crate::ui::Length>) -> Self {
+                self.style().bind_value(length, |s, length: crate::ui::Length| {
+                    s.lengths(&[#(crate::style::StyleKey::#keys),*], length);
+                });
                 self
             }
         });
@@ -841,26 +1005,16 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
     out.into()
 }
 
-/// Whether `ty` is `&mut Context<..>` (a method's context parameter).
-fn is_context(ty: &Type) -> bool {
-    match ty {
-        Type::Reference(r) => {
-            r.mutability.is_some()
-                && matches!(last_segment(&r.elem), Some((id, _)) if id == "Context")
-        }
-        _ => false,
-    }
-}
-
-/// `#[methods]` on an `impl` block of a component: each function becomes a
-/// method of the component's ref in JS, named in camel case (`set_value`
-/// is `setValue`), documented by its doc comment. A function takes `&self`
-/// or `&mut self`, then [`JsValue`] parameters, and optionally a last
-/// `cx: &mut Context<Self>`; it returns nothing (JS calls it and moves on;
-/// the call is ordered with the props set before it) or a [`JsValue`] (JS
-/// gets a `Promise`). The block's functions are JS's: keep helpers in
-/// another `impl`. The component lists them with
-/// `const METHODS: &'static [Method<Self>] = Self::JS_METHODS;`.
+/// `#[methods]` on an `impl` block of a component's API (`Api`: a handle
+/// its view makes, holding the signals the methods read and write): each
+/// function becomes a method of the component's ref in JS, named in camel
+/// case (`set_value` is `setValue`), documented by its doc comment. A
+/// function takes `&self`, then [`JsValue`] parameters; it returns nothing
+/// (JS calls it and moves on; the call is ordered with the props set before
+/// it) or a [`JsValue`] (JS gets a `Promise`). The block's functions are
+/// JS's: keep helpers in another `impl`. The view registers the API with
+/// `cx.methods(api)`, and the component names it in its spec with
+/// `#[component(methods = StepperApi)]`.
 #[proc_macro_attribute]
 pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
@@ -886,18 +1040,17 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
         let doc = decl(&docs(&f.attrs));
         let mut inputs = f.sig.inputs.iter();
         match inputs.next() {
-            Some(FnArg::Receiver(r)) if r.reference.is_some() => {}
+            Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_none() => {}
             _ => {
                 return Err(syn::Error::new(
                     f.sig.span(),
-                    "a JS method takes `&self` or `&mut self`",
+                    "a JS method takes `&self` (the API holds signals)",
                 ));
             }
         }
         let mut params = Vec::new();
         let mut decode = Vec::new();
         let mut call_args = Vec::new();
-        let mut takes_cx = false;
         let typed: Vec<_> = inputs
             .map(|arg| match arg {
                 FnArg::Typed(t) => Ok(t),
@@ -906,16 +1059,6 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             .collect::<syn::Result<_>>()?;
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
-            if is_context(ty) {
-                if i + 1 != typed.len() {
-                    return Err(syn::Error::new(
-                        arg.span(),
-                        "the context is the last parameter",
-                    ));
-                }
-                takes_cx = true;
-                continue;
-            }
             let Pat::Ident(name) = &*arg.pat else {
                 return Err(syn::Error::new(
                     arg.pat.span(),
@@ -933,9 +1076,6 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             });
             call_args.push(quote!(#local));
         }
-        if takes_cx {
-            call_args.push(quote!(cx));
-        }
         let (returns, result) = match &f.sig.output {
             ReturnType::Default => (
                 quote!(::core::option::Option::None),
@@ -952,7 +1092,6 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 },
             ),
         };
-        let unused_cx = (!takes_cx).then(|| quote!(let _ = cx;));
         let args_iter = if decode.is_empty() {
             quote!(let _ = args;)
         } else {
@@ -964,8 +1103,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 doc: #doc,
                 params: &[#(#params),*],
                 returns: #returns,
-                call: |this, args, cx| {
-                    #unused_cx
+                call: |this, args| {
                     #args_iter
                     #(#decode)*
                     #result
@@ -976,10 +1114,8 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
     Ok(quote! {
         #item
 
-        impl #impl_generics #self_ty #where_clause {
-            /// The methods JS calls on the component's ref (`#[methods]`).
-            #[doc(hidden)]
-            pub const JS_METHODS: &'static [#ui::Method<Self>] = &[#(#entries),*];
+        impl #impl_generics #ui::Api for #self_ty #where_clause {
+            const METHODS: &'static [#ui::Method<Self>] = &[#(#entries),*];
         }
     })
 }
@@ -1085,24 +1221,18 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
-/// Whether `ty` is `AsyncCx` / `&mut ModuleCx`: a module function's
-/// context.
-fn module_cx(ty: &Type) -> Option<bool> {
-    match ty {
-        Type::Reference(r) if matches!(last_segment(&r.elem), Some((id, _)) if id == "ModuleCx") => {
-            Some(false)
-        }
-        t if matches!(last_segment(t), Some((id, _)) if id == "AsyncCx") => Some(true),
-        _ => None,
-    }
+/// Whether `ty` is `&mut ModuleCx`: a module function's context.
+fn module_cx(ty: &Type) -> bool {
+    matches!(ty, Type::Reference(r) if matches!(last_segment(&r.elem), Some((id, _)) if id == "ModuleCx"))
 }
 
 /// `#[module]` on an `impl` block of a unit struct: its functions (no
 /// receiver) become functions of a JS object named after the struct
 /// (`Alert.alert(...)`), documented by their doc comments (the block's doc
 /// comment documents the object). A function takes [`JsValue`] parameters
-/// (an `Option` one is optional), then optionally `cx: &mut ModuleCx`, or
-/// for an `async fn` `cx: AsyncCx`; it returns nothing (JS calls it and
+/// (an `Option` one is optional), then optionally `cx: &mut ModuleCx` (not
+/// an `async fn`: it reaches the platform with the free functions views
+/// use, `dialog(..)`, `clipboard_string()`, ...); it returns nothing (JS calls it and
 /// moves on) or a [`JsValue`] (JS gets a `Promise`), or a `Result` of one
 /// (an `Err` rejects the `Promise` with its message). A UI set registers
 /// the module (`Registry::module::<Alert>()`); a component exported under
@@ -1169,11 +1299,12 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
         let mut call_args = Vec::new();
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
-            if let Some(async_cx) = module_cx(ty) {
-                if i + 1 != typed.len() || async_cx != is_async {
+            if module_cx(ty) {
+                if i + 1 != typed.len() || is_async {
                     return Err(syn::Error::new(
                         arg.span(),
-                        "the last parameter: `cx: &mut ModuleCx`, or `cx: AsyncCx` for an `async fn`",
+                        "the last parameter of a function that is not `async`: `cx: &mut ModuleCx` \
+                         (an `async fn` uses the free functions: `dialog(..)`, ...)",
                     ));
                 }
                 call_args.push(quote!(cx));
@@ -1228,8 +1359,7 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
         };
         let call = if is_async {
             quote! {
-                #ui::FunctionCall::Async(|args, cx| {
-                    #unused_cx
+                #ui::FunctionCall::Async(|args| {
                     #args_iter
                     #(#decode)*
                     ::core::result::Result::Ok(::std::boxed::Box::pin(async move {

@@ -4,11 +4,10 @@
 //! A call is an op (ordered with the props set before it); a function
 //! returning a value gives JS a `Promise`, an `async fn` runs as a task.
 
-use std::{any::TypeId, future::Future, pin::Pin};
+use std::{future::Future, pin::Pin};
 
 use super::{
-    AsyncCx, DialogAnswer, Environment, PropError, TsType, TsTypes,
-    element::ErasedCx,
+    DialogAnswer, PropError, TsType, TsTypes,
     task::{self, Action},
 };
 use crate::{Command, Dialog, JsonValue, LayoutAnimation, ROOT_ID, StatusBarSetting};
@@ -38,9 +37,10 @@ pub type ModuleFuture = Pin<Box<dyn Future<Output = Result<JsonValue, String>>>>
 /// How a module function runs.
 pub enum FunctionCall {
     /// At once, with a [`ModuleCx`]; an error rejects the `Promise`.
-    Sync(fn(Vec<JsonValue>, &mut ModuleCx<'_>) -> Result<JsonValue, PropError>),
-    /// As a task (its arguments checked first).
-    Async(fn(Vec<JsonValue>, AsyncCx) -> Result<ModuleFuture, PropError>),
+    Sync(fn(Vec<JsonValue>, &mut ModuleCx) -> Result<JsonValue, PropError>),
+    /// As a task (its arguments checked first): it reaches the platform with
+    /// the same free functions views use (`dialog`, `clipboard_string`, ...).
+    Async(fn(Vec<JsonValue>) -> Result<ModuleFuture, PropError>),
 }
 
 /// A function of a module (`#[module]` makes them).
@@ -111,64 +111,36 @@ impl ModuleSpec {
     }
 }
 
-/// The context of a module function: the environment, the surface's
-/// globals and the platform's services.
-pub struct ModuleCx<'a> {
-    inner: &'a mut ErasedCx,
+/// The context of a module function that is not `async`: the platform's
+/// services, applied in order right after the call (an `async` one uses the
+/// free functions, `dialog(..)`, ...).
+#[derive(Default)]
+pub struct ModuleCx {
+    pub(crate) actions: Vec<Action>,
 }
 
-impl<'a> ModuleCx<'a> {
-    pub(crate) fn new(inner: &'a mut ErasedCx) -> Self {
-        Self { inner }
-    }
-
-    /// The environment now.
-    pub fn environment(&self) -> &Environment {
-        &self.inner.environment
-    }
-
-    /// Runs `f` on the surface's `G` (made with `Default` the first time),
-    /// the state a module shares with its components.
-    pub fn update_global<G: Default + 'static, R>(
-        &mut self,
-        f: impl FnOnce(&mut G, &mut Self) -> R,
-    ) -> R {
-        let id = TypeId::of::<G>();
-        let taken = self.inner.globals.borrow_mut().remove(&id);
-        let mut global = taken
-            .and_then(|g| g.downcast::<G>().ok())
-            .unwrap_or_default();
-        let result = f(&mut global, self);
-        self.inner.globals.borrow_mut().insert(id, global);
-        if !self.inner.changed_globals.contains(&id) {
-            self.inner.changed_globals.push(id);
-        }
-        result
-    }
-
+impl ModuleCx {
     /// Shows `dialog`; await the answer in an `async` function.
     pub fn dialog(&mut self, dialog: Dialog) -> DialogAnswer {
         let (answer, slot) = DialogAnswer::new();
-        self.inner.actions.push(Action::Dialog(dialog, slot));
+        self.actions.push(Action::Dialog(dialog, slot));
         answer
     }
 
     /// Unfocuses the focused input, hiding the software keyboard.
     pub fn dismiss_keyboard(&mut self) {
-        self.inner
-            .actions
-            .push(Action::Command(ROOT_ID, Command::Blur));
+        self.actions.push(Action::Command(ROOT_ID, Command::Blur));
     }
 
     /// Changes what functions set for the status bar (the fields `patch`
     /// sets), under the settings components render.
     pub fn set_status_bar(&mut self, patch: StatusBarSetting) {
-        self.inner.actions.push(task::status_bar(patch));
+        self.actions.push(task::status_bar(patch));
     }
 
     /// Animates the layout changes of the next commit.
     pub fn animate_layout(&mut self, animation: LayoutAnimation) {
-        self.inner.actions.push(Action::Command(
+        self.actions.push(Action::Command(
             ROOT_ID,
             Command::LayoutAnimation(animation),
         ));
@@ -177,52 +149,46 @@ impl<'a> ModuleCx<'a> {
     /// The screen reader reads `message` (TS:
     /// `AccessibilityInfo.announceForAccessibility`).
     pub fn announce_for_accessibility(&mut self, message: impl Into<String>) {
-        self.inner
-            .actions
-            .push(super::services::announce(message.into()));
+        self.actions.push(super::services::announce(message.into()));
     }
 
     /// Puts `text` on the system clipboard (TS: `Clipboard.setString`).
     pub fn set_clipboard(&mut self, text: impl Into<String>) {
-        self.inner
-            .actions
+        self.actions
             .push(super::services::set_clipboard(text.into()));
     }
 
     /// Shows `message` at the bottom of the screen (Android's toasts);
     /// nothing happens elsewhere.
     pub fn toast(&mut self, message: impl Into<String>, duration: super::ToastDuration) {
-        self.inner
-            .actions
+        self.actions
             .push(super::services::toast(message.into(), duration));
     }
 
     /// Shows the surface in `appearance` whatever the system's (TS:
-    /// `setColorScheme`): [`crate::ui::RenderCx::dark`] (the theme's
-    /// mode), `dark:` classes and the platform's controls follow it;
+    /// `setColorScheme`): [`crate::ui::prelude::dark`] (the theme's mode),
+    /// `dark:` classes and the platform's controls follow it;
     /// [`crate::platform::Appearance::System`] follows the system again.
     pub fn set_color_scheme(&mut self, appearance: crate::platform::Appearance) {
-        self.inner.actions.push(Action::Appearance(appearance));
+        self.actions.push(Action::Appearance(appearance));
     }
 
     /// Lays the surface out right to left whatever the user's language
     /// (TS: `I18nManager.forceRTL`); `false` follows the language again.
     pub fn force_rtl(&mut self, force: bool) {
-        self.inner
-            .actions
+        self.actions
             .push(Action::Direction(super::services::Direction::Force(force)));
     }
 
     /// Whether a right-to-left language lays the surface out right to left
     /// (TS: `I18nManager.allowRTL`; true by default).
     pub fn allow_rtl(&mut self, allow: bool) {
-        self.inner
-            .actions
+        self.actions
             .push(Action::Direction(super::services::Direction::Allow(allow)));
     }
 
     /// Asks the platform for `action` (the runtime's own modules).
     pub(crate) fn act(&mut self, action: Action) {
-        self.inner.actions.push(action);
+        self.actions.push(action);
     }
 }

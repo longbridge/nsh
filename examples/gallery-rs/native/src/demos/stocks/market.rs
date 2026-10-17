@@ -3,12 +3,11 @@
 //! real time (a 50 ms tick is one market second), so a one-minute candle
 //! closes every three seconds.
 //!
-//! The market is plain data the watchlist owns and steps; what the
-//! components show of it goes to them as props (each renders again only
-//! when its part changed), and the focused stock's screen reads it through
-//! [`super::Feed`] at the cadence of each part: the quote, the chart and
-//! the book every tick, the tape and the depth chart four times a second,
-//! the flow, the ranges and the stats once a second.
+//! The market is plain data the watchlist owns and steps; what moved goes
+//! to the views as signals ([`super::Live`]), at the cadence of each part:
+//! the quotes (and with the focused stock's, its chart and its book) every
+//! tick, the tape and the depth chart four times a second, the flow, the
+//! ranges and the stats once a second.
 
 use std::{collections::HashMap, rc::Rc, time::Instant};
 

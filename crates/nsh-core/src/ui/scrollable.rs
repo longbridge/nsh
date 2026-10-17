@@ -3,7 +3,7 @@
 //! (`ScrollingHostProps`).
 
 use super::{
-    Element, Listener, NativeValue, ScrollEvent, ScrollOffset,
+    Element, IntoReactive, Listener, NativeValue, ScrollEvent, ScrollOffset,
     events::{self, Decode},
     host,
 };
@@ -36,49 +36,76 @@ pub trait Scrollable: Element {
     }
 
     /// Stops on multiples of its size (TS: `pagingEnabled`).
-    fn paging(self, paging: bool) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::Paging(paging)))
+    fn paging(mut self, paging: impl IntoReactive<bool>) -> Self {
+        host::bind_prop(self.node(), paging, |paging| {
+            Prop::Scroll(ScrollProp::Paging(paging))
+        });
+        self
     }
 
     /// Stops on multiples of `points` (TS: `snapToInterval`; 0: off).
-    fn snap_interval(self, points: f32) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::SnapInterval(points)))
+    fn snap_interval(mut self, points: impl IntoReactive<f32>) -> Self {
+        host::bind_prop(self.node(), points, |points| {
+            Prop::Scroll(ScrollProp::SnapInterval(points))
+        });
+        self
     }
 
     /// Stops at these offsets (TS: `snapToOffsets`).
-    fn snap_offsets(self, offsets: Vec<f32>) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::SnapOffsets(offsets)))
+    fn snap_offsets(mut self, offsets: impl IntoReactive<Vec<f32>>) -> Self {
+        host::bind_prop(self.node(), offsets, |offsets| {
+            Prop::Scroll(ScrollProp::SnapOffsets(offsets))
+        });
+        self
     }
 
     /// Where a snapped item sits in the viewport (TS: `snapToAlignment`).
-    fn snap_alignment(self, alignment: SnapAlignment) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::SnapAlignment(alignment)))
+    fn snap_alignment(mut self, alignment: impl IntoReactive<SnapAlignment>) -> Self {
+        host::bind_prop(self.node(), alignment, |alignment| {
+            Prop::Scroll(ScrollProp::SnapAlignment(alignment))
+        });
+        self
     }
 
     /// A fling moves one snap point at most (TS: `disableIntervalMomentum`).
-    fn disable_interval_momentum(self, disable: bool) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::DisableIntervalMomentum(disable)))
+    fn disable_interval_momentum(mut self, disable: impl IntoReactive<bool>) -> Self {
+        host::bind_prop(self.node(), disable, |disable| {
+            Prop::Scroll(ScrollProp::DisableIntervalMomentum(disable))
+        });
+        self
     }
 
     /// How fast a fling slows down: the velocity kept per millisecond (TS:
     /// `decelerationRate`; 0.99 is `"fast"`, 0.998 `"normal"`).
-    fn deceleration(self, rate: f32) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::Deceleration(rate)))
+    fn deceleration(mut self, rate: impl IntoReactive<f32>) -> Self {
+        host::bind_prop(self.node(), rate, |rate| {
+            Prop::Scroll(ScrollProp::Deceleration(rate))
+        });
+        self
     }
 
     /// The user can scroll it (default yes; TS: `scrollEnabled`).
-    fn scroll_enabled(self, enabled: bool) -> Self {
-        self.set_scroll_prop(Prop::Native(crate::NativeProp::ScrollEnabled(enabled)))
+    fn scroll_enabled(mut self, enabled: impl IntoReactive<bool>) -> Self {
+        host::bind_prop(self.node(), enabled, |enabled| {
+            Prop::Native(crate::NativeProp::ScrollEnabled(enabled))
+        });
+        self
     }
 
     /// Bounces at the ends (default yes).
-    fn bounces(self, bounces: bool) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::Bounces(bounces)))
+    fn bounces(mut self, bounces: impl IntoReactive<bool>) -> Self {
+        host::bind_prop(self.node(), bounces, |bounces| {
+            Prop::Scroll(ScrollProp::Bounces(bounces))
+        });
+        self
     }
 
     /// Space around the content that scrolls with it.
-    fn content_inset(self, insets: EdgeInsets) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::ContentInset(insets)))
+    fn content_inset(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
+        host::bind_prop(self.node(), insets, |insets| {
+            Prop::Scroll(ScrollProp::ContentInset(insets))
+        });
+        self
     }
 
     /// Where it starts (set once).
@@ -88,29 +115,39 @@ pub trait Scrollable: Element {
 
     /// Taps while the keyboard shows: dismiss it, or reach the content (TS:
     /// `keyboardShouldPersistTaps`).
-    fn keyboard_taps(self, taps: KeyboardTaps) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::KeyboardTaps(taps)))
+    fn keyboard_taps(mut self, taps: impl IntoReactive<KeyboardTaps>) -> Self {
+        host::bind_prop(self.node(), taps, |taps| {
+            Prop::Scroll(ScrollProp::KeyboardTaps(taps))
+        });
+        self
     }
 
     /// Dragging dismisses the keyboard (TS: `keyboardDismissMode`).
-    fn keyboard_dismiss_mode(self, mode: KeyboardDismissMode) -> Self {
-        self.set_scroll_prop(Prop::KeyboardDismissMode(mode))
+    fn keyboard_dismiss_mode(mut self, mode: impl IntoReactive<KeyboardDismissMode>) -> Self {
+        host::bind_prop(self.node(), mode, Prop::KeyboardDismissMode);
+        self
     }
 
     /// At most one `on_scroll` per `ms` milliseconds (default: every frame;
     /// TS: `scrollEventThrottle`).
-    fn event_throttle(self, ms: f32) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::EventThrottle(ms)))
+    fn event_throttle(mut self, ms: impl IntoReactive<f32>) -> Self {
+        host::bind_prop(self.node(), ms, |ms| {
+            Prop::Scroll(ScrollProp::EventThrottle(ms))
+        });
+        self
     }
 
     /// Shows the pull-to-refresh spinner (start it from
     /// [`Self::on_refresh`], clear it when done).
-    fn refreshing(self, refreshing: bool) -> Self {
-        self.set_scroll_prop(Prop::Refreshing(refreshing))
+    fn refreshing(mut self, refreshing: impl IntoReactive<bool>) -> Self {
+        host::bind_prop(self.node(), refreshing, |refreshing| {
+            Prop::Refreshing(refreshing)
+        });
+        self
     }
 
     /// Follows the scroll offset (along its axis) with a native value:
-    /// headers that shrink or fade, parallax, with no render per frame
+    /// headers that shrink or fade, parallax, with no engine work per frame
     /// (TS: `scrollValue`).
     fn scroll_value(mut self, value: &NativeValue) -> Self {
         host::set(self.node(), Prop::ScrollValue(Some(value.node().id())));
@@ -119,37 +156,50 @@ pub trait Scrollable: Element {
     }
 
     /// Pulled down to refresh (enables pull to refresh).
-    fn on_refresh(self, listener: Listener<()>) -> Self {
-        self.listen_scroll(EventKind::Refresh, listener, events::unit)
+    fn on_refresh(self, listener: impl Into<Listener<()>>) -> Self {
+        self.listen_scroll(EventKind::Refresh, listener.into(), events::unit)
     }
 
     /// It moved (at most once per frame, [`Self::event_throttle`]).
-    fn on_scroll(self, listener: Listener<ScrollEvent>) -> Self {
-        self.listen_scroll(EventKind::Scroll, listener, events::scroll)
+    fn on_scroll(self, listener: impl Into<Listener<ScrollEvent>>) -> Self {
+        self.listen_scroll(EventKind::Scroll, listener.into(), events::scroll)
     }
 
     /// The user started dragging it.
-    fn on_scroll_begin_drag(self, listener: Listener<ScrollOffset>) -> Self {
-        self.listen_scroll(EventKind::ScrollBeginDrag, listener, events::offset)
+    fn on_scroll_begin_drag(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+        self.listen_scroll(EventKind::ScrollBeginDrag, listener.into(), events::offset)
     }
 
     /// The user let go.
-    fn on_scroll_end_drag(self, listener: Listener<ScrollOffset>) -> Self {
-        self.listen_scroll(EventKind::ScrollEndDrag, listener, events::offset)
+    fn on_scroll_end_drag(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+        self.listen_scroll(EventKind::ScrollEndDrag, listener.into(), events::offset)
     }
 
     /// It started gliding after a fling.
-    fn on_momentum_scroll_begin(self, listener: Listener<ScrollOffset>) -> Self {
-        self.listen_scroll(EventKind::MomentumScrollBegin, listener, events::offset)
+    fn on_momentum_scroll_begin(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+        self.listen_scroll(
+            EventKind::MomentumScrollBegin,
+            listener.into(),
+            events::offset,
+        )
     }
 
     /// It stopped gliding.
-    fn on_momentum_scroll_end(self, listener: Listener<ScrollOffset>) -> Self {
-        self.listen_scroll(EventKind::MomentumScrollEnd, listener, events::offset)
+    fn on_momentum_scroll_end(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+        self.listen_scroll(
+            EventKind::MomentumScrollEnd,
+            listener.into(),
+            events::offset,
+        )
     }
 
     /// It came to rest.
-    fn on_scroll_end(self, listener: Listener<ScrollOffset>) -> Self {
-        self.listen_scroll(EventKind::ScrollEnd, listener, events::offset)
+    fn on_scroll_end(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+        self.listen_scroll(EventKind::ScrollEnd, listener.into(), events::offset)
     }
 }
+
+crate::static_reactive!(SnapAlignment: SnapAlignment);
+crate::static_reactive!(KeyboardTaps: KeyboardTaps);
+crate::static_reactive!(KeyboardDismissMode: KeyboardDismissMode);
+crate::static_reactive!(Vec<f32>: Vec<f32>);

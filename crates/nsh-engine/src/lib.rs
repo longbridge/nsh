@@ -399,7 +399,7 @@ pub trait MountSink: Send + 'static {
     fn report_error(&self, _message: &str) {}
 
     /// JS or a component's task asked for a display frame
-    /// (`requestAnimationFrame`, `AsyncCx::next_frame`): call
+    /// (`requestAnimationFrame`, `ui::ambient::next_frame`): call
     /// [`EngineControl::frame`] at the next vsync. Requests are not repeated
     /// until that call.
     fn request_frame(&self) {}

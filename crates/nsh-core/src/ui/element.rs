@@ -1,59 +1,48 @@
-//! The elements a component renders ([`view`], [`text`], [`image`], other
-//! components, slots and children) and the contexts of renders and
-//! handlers.
+//! The elements a view is made of ([`view`], [`text`], [`image`], other
+//! components, slots and children).
 
-use std::{
-    any::{Any, TypeId},
-    cell::RefCell,
-    future::Future,
-    marker::PhantomData,
-    rc::Rc,
-    sync::Arc,
-    time::Duration,
-};
-
-use rustc_hash::FxHashMap;
+use std::{any::Any, fmt, marker::PhantomData, rc::Rc, sync::Arc};
 
 use super::{
-    Component, ComponentSpec, Event, JsValue, PropError, SharedString, Theme,
+    Component, ComponentSpec, Event, IntoReactive, JsValue, PropError, Reactive, SharedString,
     component::AnyInstance,
-    env::{self, Environment},
     events::{self, GestureEvent, PanEvent},
-    status_bar::{StatusBarEntry, StatusBars},
     style::{StyleRefinement, Styled, Variant},
-    task::{self, Action, AsyncCx, DialogAnswer, Executor, Task, WeakComponent},
 };
 use crate::{
-    AccessibilityProp, AccessibilityRole, AccessibilityState, Command, Dialog, EdgeInsets,
-    EventKind, EventPayload, ImageSource, JsonValue, LayoutAnimation, ListContentStyle, NativeProp,
-    NodeId, PointerEvents, Prop, Rect, Size, StatusBarSetting, Tag, TouchEvent, style::Color,
-    time::Instant,
+    AccessibilityProp, AccessibilityRole, AccessibilityState, EdgeInsets, EventKind, EventPayload,
+    ImageSource, JsonValue, ListContentStyle, NativeProp, NodeId, PointerEvents, Prop, Rect, Size,
+    Tag, TouchEvent, style::Color,
 };
 
-/// A handler of `E` on an element, made by [`RenderCx::listener`]: it runs
-/// with the component that rendered the element.
-pub struct Listener<E: ?Sized>(pub(crate) Rc<ErasedListener<E>>);
-
-/// A listener with the component's type erased (it downcasts the state).
-/// It gets the component's state and props.
-pub(crate) type ErasedListener<E> = dyn Fn(&mut dyn Any, &dyn Any, &E, &mut ErasedCx);
+/// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
+/// writes the signals it captured.
+pub struct Listener<E: ?Sized>(pub(crate) Rc<dyn Fn(&E)>);
 
 impl<E: ?Sized + 'static> Listener<E> {
     /// A listener that does nothing (the element still listens).
     pub(crate) fn noop() -> Self {
-        Self(Rc::new(|_, _, _, _| {}))
+        Self(Rc::new(|_| {}))
+    }
+
+    /// Calls it with `event`.
+    pub(crate) fn call(&self, event: &E) {
+        (self.0)(event);
     }
 }
 
 impl<E: 'static> Listener<E> {
-    /// This listener for events of another type, turned into `E` by `f`:
-    /// a list row hands the component its index with
-    /// `remove.map(move |_: &()| index)`.
+    /// This listener for events of another type, turned into `E` by `f`.
     pub fn map<F: ?Sized + 'static>(self, f: impl Fn(&F) -> E + 'static) -> Listener<F> {
         let inner = self.0;
-        Listener(Rc::new(move |state, props, event: &F, cx| {
-            inner(state, props, &f(event), cx);
-        }))
+        Listener(Rc::new(move |event: &F| inner(&f(event))))
+    }
+}
+
+/// A closure as a listener.
+impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
+    fn from(f: F) -> Self {
+        Listener(Rc::new(f))
     }
 }
 
@@ -63,7 +52,7 @@ impl<E: ?Sized> Clone for Listener<E> {
     }
 }
 
-/// An event a handler emitted, with its type erased.
+/// An event a component emitted, with its type erased.
 pub(crate) trait AnyEvent {
     fn name(&self) -> &'static str;
     fn data(&self) -> JsonValue;
@@ -81,581 +70,6 @@ impl<E: Event> AnyEvent for E {
 
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-/// State shared by the components of a surface, by type
-/// ([`Context::update_global`]).
-pub(crate) type Globals = Rc<RefCell<FxHashMap<TypeId, Box<dyn Any>>>>;
-
-/// What setup, listeners, timers and tasks did, for the core.
-pub(crate) struct ErasedCx {
-    pub(crate) emits: Vec<Box<dyn AnyEvent>>,
-    pub(crate) notify: bool,
-    pub(crate) environment: Environment,
-    /// The component's host and the core's executor, for its tasks.
-    pub(crate) host: NodeId,
-    pub(crate) executor: Rc<Executor>,
-    pub(crate) globals: Globals,
-    pub(crate) actions: Vec<Action>,
-    /// The globals `update_global` changed (their readers render again).
-    pub(crate) changed_globals: Vec<TypeId>,
-}
-
-impl ErasedCx {
-    pub(crate) fn new(
-        environment: Environment,
-        host: NodeId,
-        executor: Rc<Executor>,
-        globals: Globals,
-    ) -> Self {
-        Self {
-            emits: Vec::new(),
-            notify: false,
-            environment,
-            host,
-            executor,
-            globals,
-            actions: Vec::new(),
-            changed_globals: Vec::new(),
-        }
-    }
-}
-
-/// A render's context: the theme, the environment (reading it subscribes:
-/// the component renders again when what it read changes, as TS
-/// accessors do), and listeners for the elements.
-pub struct RenderCx<'a, C> {
-    scope: &'a RenderScope<'a>,
-    pub(crate) reads: RefCell<RenderReads>,
-    _component: PhantomData<fn(&mut C)>,
-}
-
-/// What a render can read, from the core.
-pub(crate) struct RenderScope<'a> {
-    pub(crate) theme: &'a Theme,
-    pub(crate) environment: &'a Environment,
-    pub(crate) insets: EdgeInsets,
-    pub(crate) globals: &'a Globals,
-    /// The nearest provided value of a type above the component.
-    pub(crate) context: &'a dyn Fn(TypeId) -> Option<Rc<dyn Any>>,
-    /// The width of a line of text in a canvas font (the text engine's).
-    pub(crate) measure: &'a dyn Fn(&crate::canvas::CanvasFont, &str) -> f32,
-}
-
-/// A value a render provides to the components below it.
-#[derive(Clone)]
-pub(crate) struct Provided {
-    pub(crate) type_id: TypeId,
-    pub(crate) value: Rc<dyn Any>,
-    pub(crate) eq: fn(&dyn Any, &dyn Any) -> bool,
-}
-
-impl Provided {
-    /// Whether `other` provides the same value.
-    pub(crate) fn same(&self, other: &Provided) -> bool {
-        self.type_id == other.type_id && (self.eq)(&*self.value, &*other.value)
-    }
-}
-
-/// What a render read (it renders again when one changes) and provided.
-#[derive(Clone, Default)]
-pub(crate) struct RenderReads {
-    /// Parts of the environment ([`env`] bits).
-    pub(crate) env: u16,
-    pub(crate) globals: Vec<TypeId>,
-    pub(crate) contexts: Vec<TypeId>,
-    pub(crate) provided: Vec<Provided>,
-}
-
-impl<'a, C: Component> RenderCx<'a, C> {
-    pub(crate) fn new(scope: &'a RenderScope<'a>) -> Self {
-        Self {
-            scope,
-            reads: RefCell::new(RenderReads::default()),
-            _component: PhantomData,
-        }
-    }
-
-    fn read(&self, what: u16) -> &'a Environment {
-        self.reads.borrow_mut().env |= what;
-        self.scope.environment
-    }
-
-    /// The surface's `G` (made with `Default` the first time; TS: a
-    /// signal at module level). Reading subscribes: the component
-    /// renders again when a listener, task or module changes `G` with
-    /// `update_global`.
-    pub fn global<G: Default + 'static>(&self) -> std::cell::Ref<'a, G> {
-        let id = TypeId::of::<G>();
-        {
-            let mut reads = self.reads.borrow_mut();
-            if !reads.globals.contains(&id) {
-                reads.globals.push(id);
-            }
-        }
-        let globals = self.scope.globals;
-        if !globals.borrow().contains_key(&id) {
-            globals.borrow_mut().insert(id, Box::new(G::default()));
-        }
-        std::cell::Ref::map(globals.borrow(), |g| {
-            g[&id].downcast_ref::<G>().expect("keyed by its type")
-        })
-    }
-
-    /// Provides `value` to the components rendered below this one (TS:
-    /// `<Ctx.Provider value>`): their [`Self::context`] finds it. A new value
-    /// renders the components that read it again.
-    pub fn provide<T: PartialEq + 'static>(&self, value: T) {
-        fn eq<T: PartialEq + 'static>(a: &dyn Any, b: &dyn Any) -> bool {
-            matches!((a.downcast_ref::<T>(), b.downcast_ref::<T>()), (Some(a), Some(b)) if a == b)
-        }
-        let provided = Provided {
-            type_id: TypeId::of::<T>(),
-            value: Rc::new(value),
-            eq: eq::<T>,
-        };
-        let mut reads = self.reads.borrow_mut();
-        reads.provided.retain(|p| p.type_id != provided.type_id);
-        reads.provided.push(provided);
-    }
-
-    /// The `T` the nearest component above this one provides (TS:
-    /// calling the context, `Ctx()`), through the app's elements too; `None` without one.
-    /// Reading subscribes.
-    pub fn context<T: 'static>(&self) -> Option<Rc<T>> {
-        let id = TypeId::of::<T>();
-        {
-            let mut reads = self.reads.borrow_mut();
-            if !reads.contexts.contains(&id) {
-                reads.contexts.push(id);
-            }
-        }
-        (self.scope.context)(id).and_then(|v| v.downcast::<T>().ok())
-    }
-
-    /// The app's theme.
-    pub fn theme(&self) -> &'a Theme {
-        self.scope.theme
-    }
-
-    /// The surface's size in points (TS: `windowSize()`).
-    pub fn window(&self) -> Size {
-        self.read(env::WINDOW).window
-    }
-
-    /// The edges system UI covers: notch, home indicator (TS:
-    /// `safeArea()`).
-    pub fn safe_area(&self) -> EdgeInsets {
-        self.read(env::SAFE_AREA).safe_area
-    }
-
-    /// The edges system UI or a header covers where the component renders:
-    /// its screen's (below the header) or modal's, else the safe area
-    /// (TS: `useSafeAreaInsets()`).
-    pub fn insets(&self) -> EdgeInsets {
-        self.reads.borrow_mut().env |= env::INSETS;
-        self.scope.insets
-    }
-
-    /// The software keyboard's height over the surface, 0 when hidden
-    /// (TS: `keyboard().height`).
-    pub fn keyboard_height(&self) -> f32 {
-        self.read(env::KEYBOARD).keyboard_height
-    }
-
-    /// Dark appearance (TS: `colorScheme() === "dark"`). Theme colors
-    /// follow it without this; read it for anything else.
-    pub fn dark(&self) -> bool {
-        self.read(env::APPEARANCE).dark
-    }
-
-    /// `color` for the appearance now (props that take a [`Color`], such as
-    /// an input's placeholder color; styles take theme colors as they are).
-    pub fn color(&self, color: impl Into<super::AdaptiveColor>) -> Color {
-        let color = color.into();
-        if self.dark() { color.dark } else { color.light }
-    }
-
-    /// The user's text size relative to the default (TS: `fontScale()`).
-    pub fn font_scale(&self) -> f32 {
-        self.read(env::FONT_SCALE).font_scale
-    }
-
-    /// The user asked for less motion (TS: `reduceMotion()`).
-    pub fn reduce_motion(&self) -> bool {
-        self.read(env::MOTION).reduce_motion
-    }
-
-    /// A screen reader runs (TS: `screenReaderEnabled()`).
-    pub fn screen_reader(&self) -> bool {
-        self.read(env::SCREEN_READER).screen_reader
-    }
-
-    /// The layout runs right to left (TS: `I18nManager.isRTL`).
-    pub fn rtl(&self) -> bool {
-        self.read(env::RTL).rtl
-    }
-
-    /// The width of `text` on one line in `font` (the CSS `font` shorthand,
-    /// as [`super::Painter::font`] takes it; an invalid one measures in the
-    /// canvas default, `10px sans-serif`), measured by the platform's text
-    /// engine (TS: a canvas's `measureText(text).width`).
-    pub fn measure_text(&self, font: &str, text: &str) -> f32 {
-        let font = crate::canvas::CanvasFont::parse(font).unwrap_or_default();
-        (self.scope.measure)(&font, text)
-    }
-
-    /// Device pixels per point (TS: `PixelRatio.get()`); one device pixel
-    /// is `1.0 / cx.pixel_ratio()` points.
-    pub fn pixel_ratio(&self) -> f32 {
-        self.read(env::PIXEL_RATIO).pixel_ratio
-    }
-
-    /// `points` rounded to whole device pixels (TS:
-    /// `PixelRatio.roundToNearestPixel`).
-    pub fn round_to_nearest_pixel(&self, points: f32) -> f32 {
-        let ratio = self.pixel_ratio().max(f32::MIN_POSITIVE);
-        (points * ratio).round() / ratio
-    }
-
-    /// The user's locale (TS: what `Intl` and `toLocaleString` format
-    /// for by default): format numbers and dates for it with a Rust crate.
-    pub fn locale(&self) -> crate::platform::Locale {
-        self.read(env::LOCALE).locale
-    }
-
-    /// The operating system (TS: `Platform.OS`).
-    pub fn os(&self) -> crate::platform::Os {
-        self.scope.environment.os
-    }
-
-    /// The OS version: major and minor on iOS, the API level and 0 on
-    /// Android (TS: `Platform.Version`).
-    pub fn os_version(&self) -> (u16, u16) {
-        self.scope.environment.os_version
-    }
-
-    /// The kind of device (TS: `Platform.isPad`, `isTV`,
-    /// `isMacCatalyst`).
-    pub fn idiom(&self) -> crate::platform::Idiom {
-        self.scope.environment.idiom
-    }
-
-    /// A handler for an element of this render: `f` gets the component (its
-    /// state), the event and a [`Context`] to change state, emit events and
-    /// start timers.
-    pub fn listener<E: ?Sized + 'static>(
-        &self,
-        f: impl Fn(&mut C, &E, &mut Context<'_, C>) + 'static,
-    ) -> Listener<E> {
-        Listener(Rc::new(move |this, props, event, cx| {
-            if let (Some(this), Some(props)) =
-                (this.downcast_mut::<C>(), props.downcast_ref::<C::Props>())
-            {
-                f(this, event, &mut Context::new(cx, props));
-            }
-        }))
-    }
-}
-
-/// The context of everything that changes a component: [`Component::setup`],
-/// [`Component::props_changed`], listeners, timers and tasks' updates.
-pub struct Context<'a, C: Component> {
-    inner: &'a mut ErasedCx,
-    props: &'a C::Props,
-}
-
-impl<'a, C: Component> Context<'a, C> {
-    pub(crate) fn new(inner: &'a mut ErasedCx, props: &'a C::Props) -> Self {
-        Self { inner, props }
-    }
-
-    /// The component's props now (TS: `props` in the component's body).
-    pub fn props(&self) -> &C::Props {
-        self.props
-    }
-
-    /// Sends `event` to the app (its `on<Event>` handler), or to the
-    /// component that rendered this one.
-    pub fn emit(&mut self, event: C::Event) {
-        self.inner.emits.push(Box::new(event));
-    }
-
-    /// The component's state changed: render it again.
-    pub fn notify(&mut self) {
-        self.inner.notify = true;
-    }
-
-    /// The environment now (not a subscription: read it in the render for
-    /// that).
-    pub fn environment(&self) -> &Environment {
-        &self.inner.environment
-    }
-
-    /// Runs `f` on the surface's `G` (made with `Default` the first time):
-    /// state components share, like a signal at module level.
-    pub fn update_global<G: Default + 'static, R>(
-        &mut self,
-        f: impl FnOnce(&mut G, &mut Self) -> R,
-    ) -> R {
-        let id = TypeId::of::<G>();
-        // Out of the map while `f` runs: it may use other globals.
-        let taken = self.inner.globals.borrow_mut().remove(&id);
-        let mut global = taken
-            .and_then(|g| g.downcast::<G>().ok())
-            .unwrap_or_default();
-        let result = f(&mut global, self);
-        self.inner.globals.borrow_mut().insert(id, global);
-        if !self.inner.changed_globals.contains(&id) {
-            self.inner.changed_globals.push(id);
-        }
-        result
-    }
-
-    /// Shows `dialog` (an alert, or with `sheet` an action sheet); await the
-    /// answer in a task.
-    pub fn dialog(&mut self, dialog: Dialog) -> DialogAnswer {
-        let (answer, slot) = DialogAnswer::new();
-        self.inner.actions.push(Action::Dialog(dialog, slot));
-        answer
-    }
-
-    /// Unfocuses the focused input, hiding the software keyboard.
-    pub fn dismiss_keyboard(&mut self) {
-        self.inner
-            .actions
-            .push(Action::Command(crate::ROOT_ID, Command::Blur));
-    }
-
-    /// Adds `setting` over the status bar's other settings (and what
-    /// functions set) until [`Self::remove_status_bar`]: the most recently
-    /// added wins, field by field.
-    pub fn add_status_bar(&mut self, setting: StatusBarSetting) -> StatusBarEntry {
-        StatusBars::update(&self.inner.globals, |bars| bars.add(setting))
-    }
-
-    /// Changes a setting [`Self::add_status_bar`] added.
-    pub fn update_status_bar(&mut self, entry: StatusBarEntry, setting: StatusBarSetting) {
-        StatusBars::update(&self.inner.globals, |bars| bars.set(entry, setting));
-    }
-
-    /// Removes a setting [`Self::add_status_bar`] added.
-    pub fn remove_status_bar(&mut self, entry: StatusBarEntry) {
-        StatusBars::update(&self.inner.globals, |bars| bars.remove(entry));
-    }
-
-    /// Animates the layout changes of the next commit (React Native's
-    /// `LayoutAnimation.configureNext`).
-    pub fn animate_layout(&mut self, animation: LayoutAnimation) {
-        self.inner.actions.push(Action::Command(
-            crate::ROOT_ID,
-            Command::LayoutAnimation(animation),
-        ));
-    }
-
-    /// The screen reader reads `message` (TS:
-    /// `AccessibilityInfo.announceForAccessibility`).
-    pub fn announce_for_accessibility(&mut self, message: impl Into<String>) {
-        self.inner
-            .actions
-            .push(super::services::announce(message.into()));
-    }
-
-    /// Puts `text` on the system clipboard (TS: `Clipboard.setString`).
-    pub fn set_clipboard(&mut self, text: impl Into<String>) {
-        self.inner
-            .actions
-            .push(super::services::set_clipboard(text.into()));
-    }
-
-    /// The text on the system clipboard, `""` when it holds none (TS:
-    /// `Clipboard.getString`), to await in a task. On iOS, reading it may
-    /// show the system's paste notice.
-    pub fn clipboard_string(&mut self) -> task::Answer<String> {
-        let (answer, action) = super::services::clipboard_string();
-        self.inner.actions.push(action);
-        answer
-    }
-
-    /// Whether the system clipboard holds text, without reading it (TS:
-    /// `Clipboard.hasString`), to await in a task.
-    pub fn clipboard_has_string(&mut self) -> task::Answer<bool> {
-        let (answer, action) = super::services::clipboard_has_string();
-        self.inner.actions.push(action);
-        answer
-    }
-
-    /// Shows `message` at the bottom of the screen (Android's toasts, TS:
-    /// `Toast.show`); nothing happens elsewhere.
-    pub fn toast(&mut self, message: impl Into<String>, duration: super::ToastDuration) {
-        self.inner
-            .actions
-            .push(super::services::toast(message.into(), duration));
-    }
-
-    /// The size in pixels of the image at `uri` (TS: `Image.getSize`), to
-    /// await in a task; its bytes stay loaded for the views that show it
-    /// next.
-    pub fn image_size(
-        &mut self,
-        uri: impl Into<String>,
-    ) -> task::Answer<Result<task::ImageSize, String>> {
-        let (answer, action) = super::services::image_size(uri.into());
-        self.inner.actions.push(action);
-        answer
-    }
-
-    /// Loads the image at `uri` ahead of showing it (TS: `Image.prefetch`):
-    /// await it in a task for whether it loaded.
-    pub fn prefetch_image(&mut self, uri: impl Into<String>) -> super::Prefetch {
-        let (answer, action) = super::services::prefetch(uri.into());
-        self.inner.actions.push(action);
-        answer
-    }
-
-    /// Shows the surface in `appearance` whatever the system's (TS:
-    /// `setColorScheme`): [`crate::ui::RenderCx::dark`] (the theme's
-    /// mode), `dark:` classes and the platform's controls follow it;
-    /// [`crate::platform::Appearance::System`] follows the system again.
-    pub fn set_color_scheme(&mut self, appearance: crate::platform::Appearance) {
-        self.inner.actions.push(Action::Appearance(appearance));
-    }
-
-    /// Lays the surface out right to left whatever the user's language
-    /// (TS: `I18nManager.forceRTL`), at once: the components that read
-    /// [`RenderCx::rtl`] render again. `false` follows the language again.
-    pub fn force_rtl(&mut self, force: bool) {
-        self.inner
-            .actions
-            .push(Action::Direction(super::services::Direction::Force(force)));
-    }
-
-    /// Whether a right-to-left language lays the surface out right to left
-    /// (TS: `I18nManager.allowRTL`; true by default).
-    pub fn allow_rtl(&mut self, allow: bool) {
-        self.inner
-            .actions
-            .push(Action::Direction(super::services::Direction::Allow(allow)));
-    }
-
-    /// A native animation value starting at `value` (TS:
-    /// `createNativeValue`): keep it in a field, bind it to styles, drags,
-    /// scroll offsets or drawings, and animate it from listeners and tasks.
-    pub fn native_value(&self, value: f32) -> super::NativeValue {
-        super::NativeValue::new(&self.inner.executor, value)
-    }
-
-    /// A handle for an element of the render (TS: `ref`): keep it in a
-    /// field, put it on the element with [`Element::element_ref`], call its
-    /// commands from listeners and tasks.
-    pub fn element_ref(&self) -> super::ElementRef {
-        super::ElementRef::new(&self.inner.executor)
-    }
-
-    /// A handle for a component of the render (TS: a `ref` to a component,
-    /// `stepper.value()`): keep it in a field, put it on the component with
-    /// [`ComponentElement::component_ref`], call its methods with
-    /// [`super::ComponentRef::update`] from listeners and tasks.
-    pub fn component_ref<T: Component>(&self) -> super::ComponentRef<T> {
-        super::ComponentRef::new(&self.inner.executor)
-    }
-
-    /// Starts a task: `f(this, cx)` builds a future run on the engine
-    /// thread, which changes the component with `this.update(..)` and waits
-    /// with `cx.timer(..)` or for any other future. Dropping the [`Task`]
-    /// cancels it; the component's tasks end with it.
-    ///
-    /// ```ignore
-    /// self.loading = Some(cx.spawn(|this, cx| async move {
-    ///     cx.timer(Duration::from_millis(300)).await;
-    ///     this.update(|this, cx| { this.ready = true; cx.notify(); }).await;
-    /// }));
-    /// ```
-    pub fn spawn<R: 'static, Fut: Future<Output = R> + 'static>(
-        &mut self,
-        f: impl FnOnce(WeakComponent<C>, AsyncCx) -> Fut,
-    ) -> Task<R> {
-        task::spawn(&self.inner.executor, self.inner.host, f)
-    }
-
-    /// This component as a handle others keep (TS: handing another part
-    /// of the app an object with methods, a store's `start()` / `stop()`):
-    /// a component elsewhere, on another screen say, changes it with
-    /// [`WeakComponent::update`], applied before the next render, `None`
-    /// once it is gone. Its tasks get the same handle.
-    pub fn weak(&self) -> WeakComponent<C> {
-        WeakComponent::new(self.inner.host, Rc::downgrade(&self.inner.executor))
-    }
-
-    /// Listens to the Android back button (TS:
-    /// `BackHandler.addEventListener("hardwareBackPress", f)`): when no modal
-    /// is shown, `f` runs before the stack pops, newest listener first, and
-    /// returns true when it handled the press; when no listener does, the
-    /// innermost stack pops, else the app exits. Dropping the subscription
-    /// removes the listener; while one exists, a back gesture does not
-    /// preview the pop.
-    pub fn on_back_press(
-        &mut self,
-        f: impl Fn(&mut C, &mut Context<'_, C>) -> bool + 'static,
-    ) -> super::BackSubscription {
-        let listener: super::back::BackListener = Rc::new(move |this, props, cx| {
-            match (this.downcast_mut::<C>(), props.downcast_ref::<C::Props>()) {
-                (Some(this), Some(props)) => f(this, &mut Context::new(cx, props)),
-                _ => false,
-            }
-        });
-        let back = &self.inner.executor.back;
-        let id = back.borrow_mut().add(self.inner.host, listener);
-        super::BackSubscription::new(back, id)
-    }
-
-    /// Runs `f` once after `delay` (TS: `setTimeout`; dropping the task
-    /// is `clearTimeout`). A task: a timer, then an update.
-    pub fn set_timeout(
-        &mut self,
-        delay: Duration,
-        f: impl FnOnce(&mut C, &mut Context<'_, C>) + 'static,
-    ) -> Task<()> {
-        self.spawn(move |this, cx| async move {
-            cx.timer(delay).await;
-            this.update(f).await;
-        })
-    }
-
-    /// Runs `f` when the next display frame starts, with its time (TS:
-    /// `requestAnimationFrame`; dropping the task is
-    /// `cancelAnimationFrame`). Ask again from `f` for the frame after; a
-    /// task awaiting [`AsyncCx::next_frame`] in a loop runs every frame.
-    pub fn request_animation_frame(
-        &mut self,
-        f: impl FnOnce(&mut C, Instant, &mut Context<'_, C>) + 'static,
-    ) -> Task<()> {
-        self.spawn(move |this, cx| async move {
-            let at = cx.next_frame().await;
-            this.update(move |this, cx| f(this, at, cx)).await;
-        })
-    }
-
-    /// Runs `f` every `period` (TS: `setInterval`; dropping the task is
-    /// `clearInterval`). Late wakes do not pile up runs.
-    pub fn set_interval(
-        &mut self,
-        period: Duration,
-        f: impl Fn(&mut C, &mut Context<'_, C>) + 'static,
-    ) -> Task<()> {
-        let f = Rc::new(f);
-        self.spawn(move |this, cx| async move {
-            let mut next = Instant::now() + period;
-            loop {
-                cx.timer_until(next).await;
-                next = (next + period).max(Instant::now());
-                let f = f.clone();
-                if this.update(move |this, cx| f(this, cx)).await.is_none() {
-                    break;
-                }
-            }
-        })
     }
 }
 
@@ -682,7 +96,7 @@ pub struct Attrs {
     pub(crate) props: Vec<Prop>,
     /// A canvas's drawing.
     pub(crate) drawing: Option<Arc<crate::canvas::Drawing>>,
-    /// The handle the render put on the element (not a prop).
+    /// The handle the view put on the element (not a prop).
     pub(crate) element_ref: Option<super::ElementRef>,
     /// Style properties bound to native animation nodes (kept alive while
     /// bound).
@@ -771,16 +185,16 @@ impl<P: Clone + 'static> AnyProps for P {
     }
 }
 
-/// A nested component of a render.
+/// A nested component of a view.
 pub(crate) struct ComponentEl {
     pub(crate) name: &'static str,
-    /// Makes an instance: a component rendered by Rust need not be
-    /// registered (the registry is what JS can render by name).
+    /// Makes an instance: a component a view makes need not be registered
+    /// (the registry is what JS can make by name).
     pub(crate) make: fn() -> Box<dyn AnyInstance>,
     /// Its spec (made once per type and kept by the core).
     pub(crate) spec: fn() -> ComponentSpec,
     pub(crate) props: Box<dyn AnyProps>,
-    /// The rendering component's handler of its events.
+    /// The handler of its events in the view that has it.
     pub(crate) on_event: Option<Listener<dyn Any>>,
 }
 
@@ -800,24 +214,57 @@ impl Clone for ComponentEl {
 pub(crate) type PlaceFn = Rc<dyn Fn(Child, Position) -> AnyElement>;
 
 /// Where a JSX child or a list row is among its siblings (what a TS row
-/// knows from its index and the data's length).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// knows from its index and the data's length). `Copy`: a handle of two
+/// signals, so a binding that reads it (`move || at.is_last()`) runs again
+/// when a list cell shows another row or the rows come and go, and the
+/// cell's content stays.
+#[derive(Clone, Copy)]
 pub struct Position {
-    /// Its index.
-    pub index: usize,
-    /// How many there are.
-    pub count: usize,
+    index: super::reactive::Node,
+    count: super::reactive::Node,
 }
 
 impl Position {
+    /// The position read from signals (or memos) of the index and the
+    /// count.
+    pub(crate) fn of(index: super::reactive::Node, count: super::reactive::Node) -> Self {
+        Self { index, count }
+    }
+
+    /// A position that does not change (signals of the current owner).
+    pub(crate) fn fixed(index: usize, count: usize) -> Self {
+        Self::of(super::signal(index).node(), super::signal(count).node())
+    }
+
+    /// Its index, subscribing the running computation.
+    #[track_caller]
+    pub fn index(&self) -> usize {
+        self.index.with("a position", |i: &usize| *i)
+    }
+
+    /// How many there are, subscribing the running computation.
+    #[track_caller]
+    pub fn count(&self) -> usize {
+        self.count.with("a position", |n: &usize| *n)
+    }
+
     /// The first one.
+    #[track_caller]
     pub fn is_first(&self) -> bool {
-        self.index == 0
+        self.index() == 0
     }
 
     /// The last one.
+    #[track_caller]
     pub fn is_last(&self) -> bool {
-        self.index + 1 == self.count
+        self.index() + 1 == self.count()
+    }
+}
+
+impl fmt::Debug for Position {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (index, count) = super::untracked(|| (self.index(), self.count()));
+        write!(f, "Position({index} of {count})")
     }
 }
 
@@ -862,7 +309,7 @@ impl ListConfig {
     }
 }
 
-/// A list slot as a render places it.
+/// A list slot as a view places it.
 #[derive(Clone)]
 pub(crate) struct ListEl {
     pub(crate) name: &'static str,
@@ -890,6 +337,13 @@ pub(crate) enum ElKind {
     /// JS's strings in a `<text>`).
     Raw,
     Component(ComponentEl),
+    /// Elements that change ([`super::dynamic`], [`super::If`],
+    /// [`super::Each`]): a region of its parent's children, reconciled on
+    /// its own.
+    Region(super::flow::Region),
+    /// In a region: the element of this key stays as it is (an `Each` row
+    /// that was there before).
+    Keep,
 }
 
 /// An element as the core expands it (opaque).
@@ -907,9 +361,93 @@ pub struct ElNode {
     pub(crate) responder: Option<Rc<super::responder::ResponderEl>>,
     pub(crate) children: Vec<ElNode>,
     pub(crate) kind: ElKind,
+    /// A text's content when it is bound (read in a binding).
+    pub(crate) bound_text: Option<Rc<dyn Fn() -> SharedString>>,
+    /// Bound props: each sets the fields it binds on the static ones.
+    pub(crate) bound_attrs: Vec<BoundAttrs>,
+    /// A list's bound layout: each sets the fields it binds.
+    pub(crate) bound_list: Vec<BoundListConfig>,
 }
 
+/// A bound part of a list's layout.
+#[doc(hidden)]
+pub type BoundListConfig = Rc<dyn Fn(&mut ListConfig)>;
+
+crate::static_reactive!(AccessibilityState: AccessibilityState);
+crate::static_reactive!(EdgeInsets: EdgeInsets);
+crate::static_reactive!(Style: Style);
+crate::static_reactive!(PointerEvents: PointerEvents);
+
+/// A bound part of an element's props.
+pub(crate) type BoundAttrs = Rc<dyn Fn(&mut Attrs)>;
+
 impl ElNode {
+    /// Applies `value` to the props with `apply`: now when it is static,
+    /// else as a bound part.
+    pub(crate) fn bind_attr<T: 'static>(
+        &mut self,
+        value: impl IntoReactive<T>,
+        apply: impl Fn(&mut Attrs, T) + 'static,
+    ) {
+        match value.into_reactive() {
+            Reactive::Static(v) => apply(&mut self.attrs, v),
+            Reactive::Bound(f) => self.bound_attrs.push(Rc::new(move |a| apply(a, f()))),
+        }
+    }
+
+    /// Whether it has bound parts (text, props or styles).
+    pub(crate) fn is_bound(&self) -> bool {
+        self.bound_text.is_some()
+            || !self.bound_attrs.is_empty()
+            || self.style.is_bound()
+            || !self.bound_list.is_empty()
+    }
+
+    /// The props now: the static ones with the bound parts applied (read in
+    /// the running computation, which subscribes to them).
+    pub(crate) fn resolved_attrs(&self) -> Attrs {
+        let mut attrs = self.attrs.clone();
+        for part in &self.bound_attrs {
+            part(&mut attrs);
+        }
+        attrs
+    }
+
+    /// Turns the bound parts into static ones, read once, untracked: how a
+    /// nested component's element and a slot's node take them.
+    pub(crate) fn resolve_once(&mut self) {
+        if !self.is_bound() {
+            return;
+        }
+        super::untracked(|| {
+            if let Some(text) = self.bound_text.take() {
+                self.text = Some(text());
+            }
+            if !self.bound_attrs.is_empty() {
+                self.attrs = self.resolved_attrs();
+                self.bound_attrs.clear();
+            }
+            if self.style.is_bound() {
+                self.style = self.style.resolved();
+            }
+            let parts = std::mem::take(&mut self.bound_list);
+            if let Some(config) = self.list_config() {
+                for part in &parts {
+                    part(config);
+                }
+            }
+        });
+    }
+
+    /// A list's layout (of a list element or a virtual list).
+    pub(crate) fn list_config(&mut self) -> Option<&mut ListConfig> {
+        match &mut self.kind {
+            ElKind::List(list) => Some(&mut list.config),
+            ElKind::VirtualList(list) => Some(&mut list.config),
+            _ => None,
+        }
+    }
+
     /// What a component that is not registered renders.
     pub(crate) fn empty_view() -> Self {
         Self::new(Tag::View)
@@ -926,6 +464,9 @@ impl ElNode {
             responder: None,
             children: Vec::new(),
             kind: ElKind::Plain,
+            bound_text: None,
+            bound_attrs: Vec::new(),
+            bound_list: Vec::new(),
         }
     }
 }
@@ -993,8 +534,8 @@ pub trait Element: IntoElement + Sized {
     #[doc(hidden)]
     fn node(&mut self) -> &mut ElNode;
 
-    /// Identifies the element among its siblings across renders (where
-    /// their order changes).
+    /// Identifies the element among its siblings when they are made again
+    /// (a region's, a list cell's row; where their order changes).
     fn key(mut self, key: impl Into<SharedString>) -> Self {
         self.node().key = Some(key.into());
         self
@@ -1090,21 +631,23 @@ pub trait Element: IntoElement + Sized {
 
     /// Padding added to the element's own (from styles): insets of system
     /// UI, a keyboard.
-    fn inset_padding(mut self, insets: EdgeInsets) -> Self {
-        self.node().attrs.inset_padding = Some(insets);
+    fn inset_padding(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
+        self.node()
+            .bind_attr(insets, |a, insets| a.inset_padding = Some(insets));
         self
     }
 
     /// Margin added to the element's own.
-    fn inset_margin(mut self, insets: EdgeInsets) -> Self {
-        self.node().attrs.inset_margin = Some(insets);
+    fn inset_margin(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
+        self.node()
+            .bind_attr(insets, |a, insets| a.inset_margin = Some(insets));
         self
     }
 
     /// An inline style the app passed (a prop of type `Style`, React
     /// Native's names), over the element's styles.
-    fn inline_style(mut self, style: &Style) -> Self {
-        self.node().attrs.inline = style.0.clone();
+    fn inline_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        self.node().bind_attr(style, |a, style| a.inline = style.0);
         self
     }
 }
@@ -1166,10 +709,10 @@ pub trait ParentElement: Element {
     /// wraps each (runs again when the children change).
     fn children_each<R: IntoElement>(
         mut self,
-        children: Children,
+        children: impl Into<Children>,
         place: impl Fn(Child, Position) -> R + 'static,
     ) -> Self {
-        let _ = children;
+        let _ = children.into();
         let mut node = ElNode::new(Tag::View);
         node.kind = ElKind::EachChild(Rc::new(move |child, at| place(child, at).into_element()));
         self.node().children.push(node);
@@ -1178,9 +721,9 @@ pub trait ParentElement: Element {
 
     /// Places the app's virtualized list of `items` here: `config` lays
     /// the list out (size, columns, padding), `row(content, at)` wraps
-    /// each row the app renders (runs again when a cell shows another row
-    /// or the number of rows changes). Only rows near the viewport exist;
-    /// the core recycles them.
+    /// each row the app renders, once per cell (`at` follows the row the
+    /// cell shows and the number of rows). Only rows near the viewport
+    /// exist; the core recycles them.
     fn list<R: IntoElement>(
         mut self,
         items: Items,
@@ -1201,20 +744,22 @@ pub trait ParentElement: Element {
 /// Elements with an accessibility description.
 pub trait Accessible: Element {
     /// Whether assistive technologies see it as one element.
-    fn accessible(mut self, accessible: bool) -> Self {
-        self.node().attrs.accessible = Some(accessible);
+    fn accessible(mut self, accessible: impl IntoReactive<bool>) -> Self {
+        self.node()
+            .bind_attr(accessible, |a, accessible| a.accessible = Some(accessible));
         self
     }
 
     /// What screen readers say.
-    fn label(mut self, label: impl Into<SharedString>) -> Self {
-        self.node().attrs.label = Some(label.into());
+    fn label(mut self, label: impl IntoReactive<SharedString>) -> Self {
+        self.node()
+            .bind_attr(label, |a, label| a.label = Some(label));
         self
     }
 
     /// What happens when activated, for screen readers.
-    fn hint(mut self, hint: impl Into<SharedString>) -> Self {
-        self.node().attrs.hint = Some(hint.into());
+    fn hint(mut self, hint: impl IntoReactive<SharedString>) -> Self {
+        self.node().bind_attr(hint, |a, hint| a.hint = Some(hint));
         self
     }
 
@@ -1226,12 +771,13 @@ pub trait Accessible: Element {
 
     /// Its state for screen readers (`disabled` follows
     /// [`Interactive::disabled`]).
-    fn accessibility_state(mut self, state: AccessibilityState) -> Self {
-        let attrs = &mut self.node().attrs;
-        attrs.state = AccessibilityState {
-            disabled: attrs.state.disabled,
-            ..state
-        };
+    fn accessibility_state(mut self, state: impl IntoReactive<AccessibilityState>) -> Self {
+        self.node().bind_attr(state, |a, state| {
+            a.state = AccessibilityState {
+                disabled: a.state.disabled,
+                ..state
+            };
+        });
         self
     }
 }
@@ -1239,35 +785,53 @@ pub trait Accessible: Element {
 /// Elements that take touches.
 pub trait Interactive: Element {
     /// Handles presses.
-    fn on_press(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::Press, events::typed(listener, events::unit))
+    fn on_press(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::Press,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// Handles presses held for about half a second.
-    fn on_long_press(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::LongPress, events::typed(listener, events::unit))
+    fn on_long_press(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::LongPress,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// A finger went down on the element.
-    fn on_press_in(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::PressIn, events::typed(listener, events::unit))
+    fn on_press_in(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::PressIn,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// The press ended, inside or outside the element.
-    fn on_press_out(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::PressOut, events::typed(listener, events::unit))
+    fn on_press_out(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::PressOut,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// Its frame changed (relative to its parent).
-    fn on_layout(self, listener: Listener<Rect>) -> Self {
-        self.on(EventKind::Layout, events::typed(listener, events::layout))
+    fn on_layout(self, listener: impl Into<Listener<Rect>>) -> Self {
+        self.on(
+            EventKind::Layout,
+            events::typed(listener.into(), events::layout),
+        )
     }
 
     /// Touches on it or inside it, every phase (custom gestures): the
     /// elements around the finger hear them from it outwards. To have them
     /// alone, claim them ([`Interactive::claim_touches`]).
-    fn on_touch(self, listener: Listener<TouchEvent>) -> Self {
-        self.on(EventKind::Touch, events::typed(listener, events::touch))
+    fn on_touch(self, listener: impl Into<Listener<TouchEvent>>) -> Self {
+        self.on(
+            EventKind::Touch,
+            events::typed(listener.into(), events::touch),
+        )
     }
 
     /// Claims the touches of a gesture as `claim` says (TS:
@@ -1292,53 +856,59 @@ pub trait Interactive: Element {
     }
 
     /// It became the responder (TS: `onResponderGrant`).
-    fn on_responder_grant(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).grant = Some(listener);
+    fn on_responder_grant(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
+        super::responder::of(self.node()).grant = Some(listener.into());
         self
     }
 
     /// It claimed the touches, but the responder kept them (TS:
     /// `onResponderReject`).
-    fn on_responder_reject(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).reject = Some(listener);
+    fn on_responder_reject(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
+        super::responder::of(self.node()).reject = Some(listener.into());
         self
     }
 
     /// As the responder, a finger went down (the first one too, after the
     /// grant; TS: `onResponderStart`).
-    fn on_responder_start(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).start = Some(listener);
+    fn on_responder_start(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
+        super::responder::of(self.node()).start = Some(listener.into());
         self
     }
 
     /// As the responder, the fingers moved (TS: `onResponderMove`).
-    fn on_responder_move(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).moved = Some(listener);
+    fn on_responder_move(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
+        super::responder::of(self.node()).moved = Some(listener.into());
         self
     }
 
     /// As the responder, a finger lifted (TS: `onResponderEnd`).
-    fn on_responder_end(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).end = Some(listener);
+    fn on_responder_end(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
+        super::responder::of(self.node()).end = Some(listener.into());
         self
     }
 
     /// The last finger lifted: it is no longer the responder (TS:
     /// `onResponderRelease`).
-    fn on_responder_release(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).release = Some(listener);
+    fn on_responder_release(
+        mut self,
+        listener: impl Into<Listener<super::ResponderEvent>>,
+    ) -> Self {
+        super::responder::of(self.node()).release = Some(listener.into());
         self
     }
 
     /// Another element or a native gesture took the touches over, or the
     /// system cancelled them (TS: `onResponderTerminate`).
-    fn on_responder_terminate(mut self, listener: Listener<super::ResponderEvent>) -> Self {
-        super::responder::of(self.node()).terminate = Some(listener);
+    fn on_responder_terminate(
+        mut self,
+        listener: impl Into<Listener<super::ResponderEvent>>,
+    ) -> Self {
+        super::responder::of(self.node()).terminate = Some(listener.into());
         self
     }
 
     /// Drags move these values natively (by the drag's translation from
-    /// where they were), with no render per frame; bind them to its
+    /// where they were), with no engine work per frame; bind them to its
     /// transform to follow the finger. `on_pan_end` reports where they
     /// ended, to spring them on.
     fn pan_values(
@@ -1378,56 +948,65 @@ pub trait Interactive: Element {
     }
 
     /// A drag started on it (the platform recognizes it).
-    fn on_pan_start(self, listener: Listener<PanEvent>) -> Self {
-        self.on(EventKind::PanStart, events::typed(listener, events::pan))
+    fn on_pan_start(self, listener: impl Into<Listener<PanEvent>>) -> Self {
+        self.on(
+            EventKind::PanStart,
+            events::typed(listener.into(), events::pan),
+        )
     }
 
     /// The drag ended, with its velocity.
-    fn on_pan_end(self, listener: Listener<PanEvent>) -> Self {
-        self.on(EventKind::PanEnd, events::typed(listener, events::pan))
+    fn on_pan_end(self, listener: impl Into<Listener<PanEvent>>) -> Self {
+        self.on(
+            EventKind::PanEnd,
+            events::typed(listener.into(), events::pan),
+        )
     }
 
     /// A pinch started (its scale).
-    fn on_pinch_start(self, listener: Listener<GestureEvent>) -> Self {
+    fn on_pinch_start(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
         self.on(
             EventKind::PinchStart,
-            events::typed(listener, events::pinch),
+            events::typed(listener.into(), events::pinch),
         )
     }
 
     /// The pinch ended.
-    fn on_pinch_end(self, listener: Listener<GestureEvent>) -> Self {
-        self.on(EventKind::PinchEnd, events::typed(listener, events::pinch))
+    fn on_pinch_end(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+        self.on(
+            EventKind::PinchEnd,
+            events::typed(listener.into(), events::pinch),
+        )
     }
 
     /// A two-finger rotation started (radians).
-    fn on_rotation_start(self, listener: Listener<GestureEvent>) -> Self {
+    fn on_rotation_start(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
         self.on(
             EventKind::RotationStart,
-            events::typed(listener, events::rotation),
+            events::typed(listener.into(), events::rotation),
         )
     }
 
     /// The rotation ended.
-    fn on_rotation_end(self, listener: Listener<GestureEvent>) -> Self {
+    fn on_rotation_end(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
         self.on(
             EventKind::RotationEnd,
-            events::typed(listener, events::rotation),
+            events::typed(listener.into(), events::rotation),
         )
     }
 
     /// An assistive technology performed an action (its name).
-    fn on_accessibility_action(self, listener: Listener<str>) -> Self {
+    fn on_accessibility_action(self, listener: impl Into<Listener<str>>) -> Self {
         self.on(
             EventKind::AccessibilityAction,
-            events::typed(listener, events::action),
+            events::typed(listener.into(), events::action),
         )
     }
 
     /// Handles native event `kind` with its raw payload (the element
     /// listens to it).
-    fn on(mut self, kind: EventKind, listener: Listener<EventPayload>) -> Self {
-        self.node().handlers.push((kind, listener));
+    fn on(mut self, kind: EventKind, listener: impl Into<Listener<EventPayload>>) -> Self {
+        self.node().handlers.push((kind, listener.into()));
         self
     }
 
@@ -1445,8 +1024,8 @@ pub trait Interactive: Element {
 
     /// Shows `color` as the background while pressed, fading the children
     /// to `opacity`.
-    fn underlay(mut self, color: Color, opacity: f32) -> Self {
-        super::host::set(self.node(), Prop::UnderlayColor(Some(color)));
+    fn underlay(mut self, color: impl IntoReactive<Color>, opacity: f32) -> Self {
+        super::host::bind_prop(self.node(), color, |c| Prop::UnderlayColor(Some(c)));
         super::host::set(self.node(), Prop::UnderlayOpacity(opacity));
         self
     }
@@ -1475,7 +1054,7 @@ pub trait Interactive: Element {
         self
     }
 
-    /// Styles while pressed (native: no render).
+    /// Styles while pressed (native: nothing runs).
     fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.style().extend_as(Variant::ACTIVE, s);
@@ -1504,16 +1083,18 @@ pub trait Interactive: Element {
     }
 
     /// No presses nor press feedback; screen readers say it is disabled.
-    fn disabled(mut self, disabled: bool) -> Self {
-        let attrs = &mut self.node().attrs;
-        attrs.disabled = disabled;
-        attrs.state.disabled = disabled;
+    fn disabled(mut self, disabled: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(disabled, |a, disabled| {
+            a.disabled = disabled;
+            a.state.disabled = disabled;
+        });
         self
     }
 
     /// Which touches it and its children take.
-    fn pointer_events(mut self, pointer_events: PointerEvents) -> Self {
-        self.node().attrs.pointer_events = pointer_events;
+    fn pointer_events(mut self, pointer_events: impl IntoReactive<PointerEvents>) -> Self {
+        self.node()
+            .bind_attr(pointer_events, |a, p| a.pointer_events = p);
         self
     }
 
@@ -1562,13 +1143,13 @@ element! {
 }
 
 element! {
-    /// A slot's node as a render places it ([`ParentElement::slot`]):
+    /// A slot's node as a view places it ([`ParentElement::slot`]):
     /// style it like a view; its children are the app's.
     SlotElement
 }
 
 element! {
-    /// A list as a render lays it out ([`ParentElement::list`]).
+    /// A list as a view lays it out ([`ParentElement::list`]).
     ListElement
 }
 
@@ -1606,6 +1187,7 @@ fn span(mut el: ElNode) -> ElNode {
         && el.handlers.is_empty()
         && el.style.is_empty()
         && el.attrs == Attrs::default()
+        && !el.is_bound()
     {
         el.kind = ElKind::Raw;
     }
@@ -1706,31 +1288,43 @@ impl Image {
     }
 
     /// It loaded: its size in pixels.
-    pub fn on_load(self, listener: Listener<Size>) -> Self {
-        self.on(EventKind::Load, events::typed(listener, events::size))
+    pub fn on_load(self, listener: impl Into<Listener<Size>>) -> Self {
+        self.on(
+            EventKind::Load,
+            events::typed(listener.into(), events::size),
+        )
     }
 
     /// It failed to load (the message).
-    pub fn on_error(self, listener: Listener<str>) -> Self {
-        self.on(EventKind::Error, events::typed(listener, events::message))
+    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
+        self.on(
+            EventKind::Error,
+            events::typed(listener.into(), events::message),
+        )
     }
 
     /// It started loading.
-    pub fn on_load_start(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::LoadStart, events::typed(listener, events::unit))
+    pub fn on_load_start(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::LoadStart,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// It finished loading, or failed.
-    pub fn on_load_end(self, listener: Listener<()>) -> Self {
-        self.on(EventKind::LoadEnd, events::typed(listener, events::unit))
+    pub fn on_load_end(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::LoadEnd,
+            events::typed(listener.into(), events::unit),
+        )
     }
 
     /// Its download went on: bytes so far and in all (at most every 100
     /// ms; none for images already in memory).
-    pub fn on_progress(self, listener: Listener<events::ImageProgress>) -> Self {
+    pub fn on_progress(self, listener: impl Into<Listener<events::ImageProgress>>) -> Self {
         self.on(
             EventKind::Progress,
-            events::typed(listener, events::image_progress),
+            events::typed(listener.into(), events::image_progress),
         )
     }
 }
@@ -1743,6 +1337,10 @@ impl super::ListLayout for ListElement {
             ElKind::List(list) => &mut list.config,
             _ => unreachable!("a ListElement is a list"),
         }
+    }
+
+    fn bound_config(&mut self) -> &mut Vec<BoundListConfig> {
+        &mut self.0.bound_list
     }
 }
 
@@ -1761,6 +1359,13 @@ impl Slot {
     /// Its name (its prop's, in JS).
     pub fn name(&self) -> &'static str {
         self.name
+    }
+
+    /// The slot's node, to style and place (its children are the app's).
+    pub fn element(self) -> SlotElement {
+        let mut node = ElNode::new(Tag::View);
+        node.kind = ElKind::Slot(self.name);
+        SlotElement(node)
     }
 }
 
@@ -1819,23 +1424,29 @@ pub fn view() -> View {
 
 /// A text block showing `content`, then its children (spans:
 /// [`ParentElement`] for [`Text`]).
-pub fn text(content: impl Into<SharedString>) -> Text {
+pub fn text(content: impl IntoReactive<SharedString>) -> Text {
     let mut node = ElNode::new(Tag::Text);
-    node.text = Some(content.into());
+    match content.into_reactive() {
+        Reactive::Static(content) => node.text = Some(content),
+        Reactive::Bound(content) => {
+            node.text = Some(SharedString::default());
+            node.bound_text = Some(content);
+        }
+    }
     Text(node)
 }
 
 /// An image loading `src`: a URL, a file path or `asset:/` URI, or an
 /// [`super::ImageAsset`] (`asset!("logo@2x.png")`), which lays out at its
 /// natural size before it loads.
-pub fn image(src: impl Into<super::ImageSrc>) -> Image {
+pub fn image(src: impl IntoReactive<super::ImageSrc>) -> Image {
     let mut node = ElNode::new(Tag::Image);
-    node.attrs.src = Some(src.into());
+    node.bind_attr(src, |a, src| a.src = Some(src));
     Image(node)
 }
 
-/// The JSX children of a component (a `Children` prop): rendered where the
-/// render puts it, among the render's own children.
+/// The JSX children of a component (a `Children` prop): placed where the
+/// view puts it, among the view's own children.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Children {
     present: bool,
@@ -1860,7 +1471,7 @@ impl IntoElement for Children {
     }
 }
 
-/// Another component in a render ([`Component::element`]). Its styles go
+/// Another component in a view ([`Component::element`]). Its styles go
 /// after the component's own, like an app's classes.
 pub struct ComponentElement<C: Component> {
     node: ElNode,
@@ -1896,7 +1507,7 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
-    /// Fills its `Items` prop with rows of this render (TS: `each` and the
+    /// Fills its `Items` prop with rows of this view (TS: `each` and the
     /// row renderer, `keyExtractor`, `ListHeaderComponent`, ...): the rows,
     /// their keys, header, footer, empty view, separators, sticky rows,
     /// viewability, the refresh and the end reached are `list`'s, rendered
@@ -1920,16 +1531,14 @@ impl<C: Component> ComponentElement<C> {
     }
 
     /// Handles its events (they then do not reach the app).
-    pub fn on_event(mut self, listener: Listener<C::Event>) -> Self {
-        let inner = listener.0;
+    pub fn on_event(mut self, listener: impl Into<Listener<C::Event>>) -> Self {
+        let inner = listener.into().0;
         if let ElKind::Component(c) = &mut self.node.kind {
-            c.on_event = Some(Listener(Rc::new(
-                move |this, props, event: &dyn Any, cx| {
-                    if let Some(event) = event.downcast_ref::<C::Event>() {
-                        inner(this, props, event, cx);
-                    }
-                },
-            )));
+            c.on_event = Some(Listener(Rc::new(move |event: &dyn Any| {
+                if let Some(event) = event.downcast_ref::<C::Event>() {
+                    inner(event);
+                }
+            })));
         }
         self
     }
@@ -1943,7 +1552,7 @@ impl<C: Component> Element for ComponentElement<C> {
 
 /// The content of a nested component: `.child(..)` / `.children(..)` are
 /// its `Children`, [`ComponentElement::fill`] its slots, placed where its
-/// render places the app's.
+/// view places the app's.
 impl<C: Component> ParentElement for ComponentElement<C> {}
 
 impl<C: Component> IntoElement for ComponentElement<C> {

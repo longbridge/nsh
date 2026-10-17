@@ -11,17 +11,16 @@ use std::{
 };
 
 use super::{
-    Answer, Component, Context,
-    task::{Action, Executor, Updated, WeakComponent},
+    Answer, Component,
+    task::{Action, Executor},
 };
 use crate::{Command, JsonValue, Measurement, NodeId};
 
-/// One element of a component's render: made once
-/// ([`super::Context::element_ref`], in `setup`), put on an element each
-/// render ([`super::Element::element_ref`]). Its commands go to whatever
-/// element carries it now, in order with the component's other changes;
-/// they do nothing while no rendered element carries it. Works from
-/// listeners and tasks alike.
+/// An element of a view: made with [`super::ambient::element_ref`], put on
+/// the element ([`super::Element::element_ref`]). Its commands go to
+/// whatever element carries it now, in order with the component's other
+/// changes; they do nothing while no rendered element carries it. Works
+/// from listeners and tasks alike.
 #[derive(Clone)]
 pub struct ElementRef {
     /// The node, 0 while none carries it.
@@ -197,11 +196,10 @@ impl fmt::Debug for ElementRef {
     }
 }
 
-/// One component of a component's render (TS: a `ref` to a component, its
-/// methods): made once ([`super::Context::component_ref`], in `setup`), put
-/// on the component each render ([`super::ComponentElement::component_ref`]).
-/// Rust calls its methods directly, with no encoding: [`Self::update`] runs
-/// a closure with the component and its [`Context`].
+/// A component of a view (TS: a `ref` to a component, its methods): made
+/// with [`super::ambient::component_ref`], put on the component's element
+/// ([`super::ComponentElement::component_ref`]); [`Self::api`] reaches its
+/// methods, with no encoding.
 pub struct ComponentRef<C: Component> {
     element: ElementRef,
     _component: PhantomData<fn() -> C>,
@@ -224,17 +222,11 @@ impl<C: Component> ComponentRef<C> {
         self.element.node()
     }
 
-    /// Runs `f` with the component and its [`Context`] (its `#[methods]`
-    /// are plain Rust functions: `|stepper, cx| stepper.set_value(5.0,
-    /// cx)`), right after the current listener or update, before the next
-    /// render. Await it for `f`'s result (TS: a method's promise), `None`
-    /// when no rendered component carries the ref; not awaited, it still
-    /// runs.
-    pub fn update<R: 'static>(
-        &self,
-        f: impl FnOnce(&mut C, &mut Context<'_, C>) -> R + 'static,
-    ) -> Updated<R> {
-        WeakComponent::<C>::new(self.node().unwrap_or(0), self.element.executor.clone()).update(f)
+    /// The API a component that runs once registered
+    /// ([`super::Scope::methods`]), while one is mounted: Rust calls its
+    /// methods directly (`stepper.api::<StepperApi>()?.set_value(5.0)`).
+    pub fn api<A: super::Api>(&self) -> Option<Rc<A>> {
+        super::reactive::api_of::<A>(self.node()?)
     }
 }
 

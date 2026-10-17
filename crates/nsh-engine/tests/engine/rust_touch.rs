@@ -17,52 +17,45 @@ use crate::ChannelSink;
 
 /// A sketch pad in a scroll view: each stroke drawn from the responder's
 /// events.
-#[derive(Default)]
-struct Sketch {
-    strokes: Vec<Vec<(f32, f32)>>,
-    released: bool,
-}
-
-impl Component for Sketch {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let mut p = Painter::new();
-        for stroke in &self.strokes {
-            p = p.begin_path();
-            for (i, &(x, y)) in stroke.iter().enumerate() {
-                p = if i == 0 {
-                    p.move_to(x, y)
-                } else {
-                    p.line_to(x, y)
-                };
-            }
-            p = p.stroke();
-        }
-        view().flex_1().child(
-            scroll().flex_1().child(
-                canvas(p)
-                    .h(px(300.0))
-                    .claim_touches(TouchClaim::on_start())
-                    .keep_touches(true)
-                    .on_responder_grant(cx.listener(|this: &mut Self, e: &ResponderEvent, cx| {
-                        this.strokes.push(vec![(e.location_x, e.location_y)]);
-                        cx.notify();
-                    }))
-                    .on_responder_move(cx.listener(|this: &mut Self, e: &ResponderEvent, cx| {
-                        if let Some(stroke) = this.strokes.last_mut() {
-                            stroke.push((e.location_x, e.location_y));
+#[component]
+fn Sketch() -> impl IntoElement {
+    let strokes = signal(Vec::<Vec<(f32, f32)>>::new());
+    let released = signal(false);
+    view().flex_1().child(
+        scroll().flex_1().child(
+            canvas(move || {
+                strokes.with(|strokes| {
+                    let mut p = Painter::new();
+                    for stroke in strokes {
+                        p = p.begin_path();
+                        for (i, &(x, y)) in stroke.iter().enumerate() {
+                            p = if i == 0 {
+                                p.move_to(x, y)
+                            } else {
+                                p.line_to(x, y)
+                            };
                         }
-                        cx.notify();
-                    }))
-                    .on_responder_release(cx.listener(|this: &mut Self, _, cx| {
-                        this.released = true;
-                        cx.notify();
-                    })),
-            ),
-        )
-    }
+                        p = p.stroke();
+                    }
+                    p
+                })
+            })
+            .h(px(300.0))
+            .claim_touches(TouchClaim::on_start())
+            .keep_touches(true)
+            .on_responder_grant(move |e: &ResponderEvent| {
+                strokes.update(|s| s.push(vec![(e.location_x, e.location_y)]));
+            })
+            .on_responder_move(move |e: &ResponderEvent| {
+                strokes.update(|s| {
+                    if let Some(stroke) = s.last_mut() {
+                        stroke.push((e.location_x, e.location_y));
+                    }
+                });
+            })
+            .on_responder_release(move |_: &ResponderEvent| released.set(true)),
+        ),
+    )
 }
 
 fn touch(phase: TouchPhase, path: &[u32], x: f32, y: f32, t: f64) -> EventPayload {

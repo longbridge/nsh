@@ -98,7 +98,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Whether `key` hangs from the main tree's root or a root view that
     /// does.
-    fn in_tree(&self, mut key: Key) -> bool {
+    pub(super) fn in_tree(&self, mut key: Key) -> bool {
         while key != NO_KEY {
             if key == self.root {
                 return true;

@@ -18,111 +18,58 @@ use crate::ChannelSink;
 
 /// A value, a jump (a delayed timing, a wait, a timing back) and a pulse
 /// looping until stopped.
-#[derive(Default)]
-struct Jumper {
-    x: Option<NativeValue>,
-    jump: Option<Animation>,
-    pulse: Option<Animation>,
-    state: String,
-}
-
-impl Jumper {
-    /// Runs `animation` (`jump` or `pulse`), reporting how it ended.
-    fn run(&mut self, name: &'static str, cx: &mut Context<'_, Self>) {
-        let animation = if name == "jump" {
-            &self.jump
-        } else {
-            &self.pulse
-        };
-        let end = animation.as_ref().expect("set up").start();
-        cx.spawn(move |this, _| async move {
-            let finished = end.await;
-            this.update(move |this, cx| {
-                let how = if finished { "finished" } else { "stopped" };
-                this.state = format!("{name}: {how}");
-                cx.notify();
-            })
-            .await;
-        })
-        .detach();
-        self.state = format!("{name}…");
-        cx.notify();
-    }
-
-    fn each(&self, f: impl Fn(&Animation)) {
-        self.jump.iter().chain(&self.pulse).for_each(f);
-    }
-}
-
-impl Component for Jumper {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        let x = cx.native_value(0.0);
-        let linear = |ms| Timing::new(ms, Easing::Linear);
-        self.jump = Some(Animation::sequence([
-            Animation::timing(
-                &x,
-                100.0,
-                Timing {
-                    delay_ms: 50.0,
-                    ..linear(200.0)
-                },
-            ),
-            Animation::delay(100.0),
-            Animation::timing(&x, 0.0, linear(200.0)),
-        ]));
-        self.pulse = Some(
-            Animation::sequence([
-                Animation::timing(&x, 50.0, linear(100.0)),
-                Animation::timing(&x, 0.0, linear(100.0)),
-            ])
-            .looped(None),
-        );
-        self.x = Some(x);
-        self.state = "idle".into();
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .bind_translate_x(self.x.as_ref().expect("set up"))
-            .bind_shadow_radius(self.x.as_ref().expect("set up"))
-            .child(text(self.state.clone()))
-            .child(
-                text("Jump").on_press(cx.listener(|this: &mut Self, _, cx| this.run("jump", cx))),
-            )
-            .child(
-                text("Pulse").on_press(cx.listener(|this: &mut Self, _, cx| this.run("pulse", cx))),
-            )
-            .child(
-                text("Stop")
-                    .on_press(cx.listener(|this: &mut Self, _, _| this.each(Animation::stop))),
-            )
-            .child(
-                text("Reset")
-                    .on_press(cx.listener(|this: &mut Self, _, _| this.each(Animation::reset))),
-            )
-            .child(
-                text("Where").on_press(cx.listener(|this: &mut Self, _, cx| {
-                    // Stopped, then read: where it stopped (TS: `stop()`'s
-                    // promise).
-                    let x = this.x.as_ref().expect("set up");
-                    x.stop();
-                    let at = x.value();
-                    cx.spawn(|this, _| async move {
-                        let at = at.await;
-                        this.update(move |this, cx| {
-                            this.state = format!("at {at:.2}");
-                            cx.notify();
-                        })
-                        .await;
-                    })
-                    .detach();
-                })),
-            )
-    }
+#[component]
+fn Jumper() -> impl IntoElement {
+    let x = native_value(0.0);
+    let linear = |ms| Timing::new(ms, Easing::Linear);
+    let jump = Animation::sequence([
+        Animation::timing(
+            &x,
+            100.0,
+            Timing {
+                delay_ms: 50.0,
+                ..linear(200.0)
+            },
+        ),
+        Animation::delay(100.0),
+        Animation::timing(&x, 0.0, linear(200.0)),
+    ]);
+    let pulse = Animation::sequence([
+        Animation::timing(&x, 50.0, linear(100.0)),
+        Animation::timing(&x, 0.0, linear(100.0)),
+    ])
+    .looped(None);
+    let state = signal(SharedString::from("idle"));
+    // Runs `animation` (`jump` or `pulse`), reporting how it ended.
+    let run = move |name: &'static str, animation: &Animation| {
+        let end = animation.start();
+        spawn(async move {
+            let how = if end.await { "finished" } else { "stopped" };
+            state.set(format!("{name}: {how}").into());
+        });
+        state.set(format!("{name}…").into());
+    };
+    let both = [jump.clone(), pulse.clone()];
+    let (stop, reset) = (both.clone(), both);
+    let at = x.clone();
+    view()
+        .flex_1()
+        .bind_translate_x(&x)
+        .bind_shadow_radius(&x)
+        .child(text(state))
+        .child(text("Jump").on_press(move |_: &()| run("jump", &jump)))
+        .child(text("Pulse").on_press(move |_: &()| run("pulse", &pulse)))
+        .child(text("Stop").on_press(move |_: &()| stop.iter().for_each(Animation::stop)))
+        .child(text("Reset").on_press(move |_: &()| reset.iter().for_each(Animation::reset)))
+        .child(text("Where").on_press(move |_: &()| {
+            // Stopped, then read: where it stopped (TS: `stop()`'s promise).
+            at.stop();
+            let value = at.value();
+            spawn(async move {
+                let value = value.await;
+                state.set(format!("at {value:.2}").into());
+            });
+        }))
 }
 
 /// The engine, and the platform's part: what it shows and its graph.

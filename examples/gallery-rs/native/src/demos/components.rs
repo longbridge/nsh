@@ -27,30 +27,35 @@ use crate::{
     },
 };
 
-/// One device pixel, in points (TS: `1 / PixelRatio.get()`).
-fn hairline<C: Component>(cx: &RenderCx<'_, C>) -> f32 {
-    1.0 / cx.pixel_ratio()
+/// One device pixel, in points (TS: `1 / PixelRatio.get()`; reading it in
+/// a binding follows the screen).
+fn hairline() -> f32 {
+    1.0 / pixel_ratio()
 }
 
 /// A dark input, 48 pt tall, lit while `focused` (its owner keeps that
 /// from `on_focus` / `on_blur`).
-fn field<C: Component>(focused: bool, cx: &RenderCx<'_, C>) -> Input {
+fn field(focused: Signal<bool>) -> Input {
     input()
-        .placeholder_color(cx.color(colors::FAINT))
-        .selection_color(cx.color(colors::ACCENT))
+        .placeholder_color(|| color(colors::FAINT))
+        .selection_color(|| color(colors::ACCENT))
         .h(px(48.0))
         .px(px(14.0))
         .text_size(px(15.0))
         .text_color(colors::TEXT)
         .bg(colors::INSET)
         .border_1()
-        .border_color(if focused {
-            colors::ACCENT
-        } else {
-            colors::BORDER
+        .border_color(move || {
+            if focused.get() {
+                colors::ACCENT
+            } else {
+                colors::BORDER
+            }
         })
         .rounded(px(radius::CONTROL))
         .finish(Finish::Inset)
+        .on_focus(move |_: &()| focused.set(true))
+        .on_blur(move |_: &()| focused.set(false))
 }
 
 /// A cell of a row of equal widths.
@@ -73,7 +78,7 @@ fn title_block(badge: impl Into<SharedString>, title: &str) -> View {
         .child(
             view()
                 .flex_row()
-                .child(Badge::new(badge).tone(Tone::Accent)),
+                .child(Badge::new(badge.into()).tone(Tone::Accent)),
         )
         .child(
             text(title.to_owned())
@@ -85,114 +90,100 @@ fn title_block(badge: impl Into<SharedString>, title: &str) -> View {
 }
 
 /// The components of `nsh/ui/mobile` (Rust, `nsh-ui-mobile`) in a Rust
-/// render.
-#[derive(Debug, Default)]
-struct MobileComponents {
-    presses: u32,
-}
-
-impl Component for MobileComponents {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let pressed = || {
-            cx.listener(|this: &mut Self, _: &ButtonEvent, cx| {
-                this.presses += 1;
-                cx.notify();
+/// view.
+#[component]
+fn MobileComponents() -> impl IntoElement {
+    let presses = signal(0_u32);
+    let pressed = move |_: &ButtonEvent| presses.update(|p| *p += 1);
+    let mobile_button = |title: &str, variant: ButtonVariant, disabled: bool| {
+        Button::element(ButtonProps {
+            title: title.to_owned().into(),
+            variant: variant.into(),
+            disabled: disabled.into(),
+            ..ButtonProps::default()
+        })
+    };
+    ui::Card::new()
+        .icon(IconName::Mobile)
+        .title("nsh/ui/mobile")
+        .subtitle("Rust components, the app's theme")
+        .right(
+            Badge::new(move || {
+                let presses = presses.get();
+                format!("{presses} {}", if presses == 1 { "tap" } else { "taps" })
             })
-        };
-        let mobile_button = |title: &str, variant, disabled| {
-            Button::element(ButtonProps {
-                title: title.to_owned().into(),
-                variant,
-                disabled,
-                ..ButtonProps::default()
-            })
-        };
-        let presses = self.presses;
-        ui::Card::new()
-            .icon(IconName::Mobile)
-            .title("nsh/ui/mobile")
-            .subtitle("Rust components, the app's theme")
-            .right(
-                Badge::new(format!(
-                    "{presses} {}",
-                    if presses == 1 { "tap" } else { "taps" }
-                ))
-                .tone(if presses > 0 {
+            .tone(move || {
+                if presses.get() > 0 {
                     Tone::Accent
                 } else {
                     Tone::Neutral
-                }),
-            )
-            .child(mobile_button("Primary", ButtonVariant::Primary, false).on_event(pressed()))
-            .child(
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(cell(
-                        mobile_button("Secondary", ButtonVariant::Secondary, false)
-                            .on_event(pressed()),
-                    ))
-                    .child(cell(
-                        mobile_button("Danger", ButtonVariant::Danger, false).on_event(pressed()),
-                    )),
-            )
-            .child(
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(cell(
-                        mobile_button("Plain", ButtonVariant::Plain, false).on_event(pressed()),
-                    ))
-                    .child(cell(
-                        mobile_button("Disabled", ButtonVariant::Secondary, true)
-                            .on_event(pressed()),
-                    )),
-            )
-            .child(
-                Card::element(CardProps::default())
-                    .fill("header", text("Card with slots"))
-                    .fill(
-                        "footer",
-                        view()
-                            .flex_row()
-                            .gap_2()
-                            .child(cell(
-                                mobile_button("Reset", ButtonVariant::Secondary, false).on_event(
-                                    cx.listener(|this: &mut Self, _: &ButtonEvent, cx| {
-                                        this.presses = 0;
-                                        cx.notify();
-                                    }),
-                                ),
-                            ))
-                            .child(cell(
-                                mobile_button("Add one", ButtonVariant::Primary, false)
-                                    .on_event(pressed()),
-                            )),
-                    )
-                    .child(text(
-                        "The header, this body and the footer are JSX in a Rust component's \
-                         slots and children.",
-                    )),
-            )
-            .child(
-                Card::element(CardProps {
-                    variant: CardVariant::Outlined,
-                    ..CardProps::default()
-                })
-                .child(text("An outlined card, children only.")),
-            )
-            .child(caption(
-                "Colors come from the app's theme",
-                Some("theme.json"),
-            ))
-    }
+                }
+            }),
+        )
+        .child(mobile_button("Primary", ButtonVariant::Primary, false).on_event(pressed))
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
+                .child(cell(
+                    mobile_button("Secondary", ButtonVariant::Secondary, false).on_event(pressed),
+                ))
+                .child(cell(
+                    mobile_button("Danger", ButtonVariant::Danger, false).on_event(pressed),
+                )),
+        )
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
+                .child(cell(
+                    mobile_button("Plain", ButtonVariant::Plain, false).on_event(pressed),
+                ))
+                .child(cell(
+                    mobile_button("Disabled", ButtonVariant::Secondary, true).on_event(pressed),
+                )),
+        )
+        .child(
+            Card::element(CardProps::default())
+                .fill("header", text("Card with slots"))
+                .fill(
+                    "footer",
+                    view()
+                        .flex_row()
+                        .gap_2()
+                        .child(cell(
+                            mobile_button("Reset", ButtonVariant::Secondary, false)
+                                .on_event(move |_: &ButtonEvent| presses.set(0)),
+                        ))
+                        .child(cell(
+                            mobile_button("Add one", ButtonVariant::Primary, false)
+                                .on_event(pressed),
+                        )),
+                )
+                .child(text(
+                    "The header, this body and the footer are JSX in a Rust component's slots \
+                     and children.",
+                )),
+        )
+        .child(
+            Card::element(CardProps {
+                variant: CardVariant::Outlined.into(),
+                ..CardProps::default()
+            })
+            .child(text("An outlined card, children only.")),
+        )
+        .child(caption(
+            "Colors come from the app's theme",
+            Some("theme.json"),
+        ))
 }
 
 /// A tile to press: its title, the prop it shows, something on the right.
-fn tile_content(title: impl Into<SharedString>, prop: &str, right: Option<AnyElement>) -> View {
+fn tile_content(
+    title: impl IntoReactive<SharedString>,
+    prop: &str,
+    right: Option<AnyElement>,
+) -> View {
     view()
         .min_h(px(60.0))
         .flex_row()
@@ -204,11 +195,7 @@ fn tile_content(title: impl Into<SharedString>, prop: &str, right: Option<AnyEle
             view()
                 .flex_1()
                 .gap(px(2.0))
-                .child(
-                    text(title.into())
-                        .text_size(px(15.0))
-                        .text_color(colors::TEXT),
-                )
+                .child(text(title).text_size(px(15.0)).text_color(colors::TEXT))
                 .child(
                     text(prop.to_owned())
                         .text_size(px(12.0))
@@ -233,171 +220,143 @@ fn tile() -> View {
 
 /// Press feedback is native: opacity, an underlay, styles; `disabled`
 /// takes no presses.
-#[derive(Debug, Default)]
-struct PressFeedback {
-    last: &'static str,
-    disabled: bool,
-}
-
-impl Component for PressFeedback {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        self.last = "None yet";
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let last = |what: &'static str| {
-            cx.listener(move |this: &mut Self, _, cx| {
-                this.last = what;
-                cx.notify();
-            })
-        };
-        let disabled = self.disabled;
-        ui::Card::new()
-            .icon(IconName::Gestures)
-            .title("Press feedback")
-            .subtitle("Drawn natively while the finger is down")
-            .child(
-                tile()
-                    .active_opacity(0.4)
-                    .on_press(last("Fading tile"))
-                    .child(tile_content(
-                        "Fades while pressed",
-                        "activeOpacity={0.4}",
-                        None,
-                    )),
-            )
-            .child(
-                tile()
-                    .underlay(cx.color(colors::RAISED), UNDERLAY_OPACITY)
-                    .on_press(last("Underlay tile"))
-                    .child(tile_content(
-                        "Lights up while pressed",
-                        "underlayColor",
-                        None,
-                    )),
-            )
-            .child(
-                tile()
-                    .disabled(disabled)
-                    .underlay(cx.color(tints::DANGER), UNDERLAY_OPACITY)
-                    .disabled_style(|s| s.opacity(0.4))
-                    .on_press(last("Enabled tile"))
-                    .child(tile_content(
-                        if disabled {
+#[component]
+fn PressFeedback() -> impl IntoElement {
+    let last = signal("None yet");
+    let disabled = signal(false);
+    let pressed = move |what: &'static str| move |_: &()| last.set(what);
+    ui::Card::new()
+        .icon(IconName::Gestures)
+        .title("Press feedback")
+        .subtitle("Drawn natively while the finger is down")
+        .child(
+            tile()
+                .active_opacity(0.4)
+                .on_press(pressed("Fading tile"))
+                .child(tile_content(
+                    "Fades while pressed",
+                    "activeOpacity={0.4}",
+                    None,
+                )),
+        )
+        // The underlays' colors follow the appearance.
+        .child(
+            tile()
+                .underlay(|| color(colors::RAISED), UNDERLAY_OPACITY)
+                .on_press(pressed("Underlay tile"))
+                .child(tile_content(
+                    "Lights up while pressed",
+                    "underlayColor",
+                    None,
+                )),
+        )
+        .child(
+            tile()
+                .disabled(disabled)
+                .underlay(|| color(tints::DANGER), UNDERLAY_OPACITY)
+                .disabled_style(|s| s.opacity(0.4))
+                .on_press(pressed("Enabled tile"))
+                .child(tile_content(
+                    move || {
+                        if disabled.get() {
                             "Takes no presses"
                         } else {
                             "Enabled"
-                        },
-                        "disabled + disabled:opacity-40",
-                        Some(
-                            Badge::new(if disabled { "Off" } else { "On" })
-                                .tone(if disabled { Tone::Neutral } else { Tone::Up })
-                                .into_element(),
-                        ),
-                    )),
-            )
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .child(cell(caption("Last pressed", Some(self.last))))
-                    .child(
-                        toggle(disabled, "Disable the third tile").on_event(cx.listener(
-                            |this: &mut Self, e: &ToggleEvent, cx| {
-                                let ToggleEvent::Change(on) = *e;
-                                this.disabled = on;
-                                cx.notify();
-                            },
-                        )),
+                        }
+                    },
+                    "disabled + disabled:opacity-40",
+                    Some(
+                        Badge::new(move || if disabled.get() { "Off" } else { "On" })
+                            .tone(move || {
+                                if disabled.get() {
+                                    Tone::Neutral
+                                } else {
+                                    Tone::Up
+                                }
+                            })
+                            .into_element(),
                     ),
-            )
-    }
+                )),
+        )
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(cell(caption("Last pressed", Some(move || last.get()))))
+                .child(toggle(disabled, "Disable the third tile").on_event(
+                    move |e: &ToggleEvent| {
+                        let ToggleEvent::Change(on) = *e;
+                        disabled.set(on);
+                    },
+                )),
+        )
 }
 
 /// A pressable with press styles (TS: Tailwind's `active:`) that opens a
 /// sheet.
-#[derive(Debug, Default)]
-struct PressableSheet {
-    sheet: bool,
-}
-
-impl Component for PressableSheet {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let open = |sheet: bool| {
-            cx.listener(move |this: &mut Self, _, cx| {
-                this.sheet = sheet;
-                cx.notify();
-            })
-        };
-        let modal_view = self.sheet.then(|| {
-            modal()
-                .presentation(ModalPresentation::PageSheet)
-                .animation(ModalAnimation::Slide)
-                .on_request_close(open(false))
-                .child(
-                    SafeAreaView::element(SafeAreaViewProps::default())
-                        .flex_1()
-                        .bg(colors::BACKGROUND)
-                        .child(
-                            view()
-                                .flex_1()
-                                .p_4()
-                                .gap_4()
-                                .child(
-                                    title_block("pageSheet", "A sheet").px_1().pt_2().child(
-                                        text(
-                                            "Swipe down (iOS) or press back (Android) to \
-                                                 close.",
-                                        )
+#[component]
+fn PressableSheet() -> impl IntoElement {
+    let sheet = signal(false);
+    let open = move |open: bool| move |_: &()| sheet.set(open);
+    let modal_view = If::new(sheet, move || {
+        modal()
+            .presentation(ModalPresentation::PageSheet)
+            .animation(ModalAnimation::Slide)
+            .on_request_close(open(false))
+            .child(
+                SafeAreaView::element(SafeAreaViewProps::default())
+                    .flex_1()
+                    .bg(colors::BACKGROUND)
+                    .child(
+                        view()
+                            .flex_1()
+                            .p_4()
+                            .gap_4()
+                            .child(
+                                title_block("pageSheet", "A sheet").px_1().pt_2().child(
+                                    text("Swipe down (iOS) or press back (Android) to close.")
                                         .text_size(px(15.0))
                                         .line_height(px(21.0))
                                         .text_color(colors::MUTED),
-                                    ),
-                                )
-                                .child(view().flex_1())
-                                .child(ui::Button::new("Close", open(false))),
-                        ),
-                )
-        });
-        let (accent_light, accent_dark) = Finish::Accent.shadows();
-        ui::Card::new()
-            .icon(IconName::Components)
-            .title("Sheet")
-            .subtitle("A Tailwind active: variant opens it")
-            .child(
-                view()
-                    .role(AccessibilityRole::Button)
-                    .on_press(open(true))
-                    .adaptive_shadow(accent_light.iter().copied(), accent_dark.iter().copied())
-                    .h_12()
-                    .flex_row()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .rounded(px(12.0))
-                    .bg(rgb(0xc8f26d))
-                    .transition()
-                    .active(|s| s.scale(0.97).bg(rgb(0xa9d14f)))
-                    .child(
-                        text("Open a sheet")
-                            .text_size(px(15.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors::ON_ACCENT),
+                                ),
+                            )
+                            .child(view().flex_1())
+                            .child(ui::Button::new("Close", open(false))),
                     ),
             )
-            .child(caption(
-                "Scales and darkens while pressed",
-                Some("active:scale-[0.97]"),
-            ))
-            .children(modal_view)
-    }
+    });
+    let (accent_light, accent_dark) = Finish::Accent.shadows();
+    ui::Card::new()
+        .icon(IconName::Components)
+        .title("Sheet")
+        .subtitle("A Tailwind active: variant opens it")
+        .child(
+            view()
+                .role(AccessibilityRole::Button)
+                .on_press(open(true))
+                .adaptive_shadow(accent_light.iter().copied(), accent_dark.iter().copied())
+                .h_12()
+                .flex_row()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .rounded(px(12.0))
+                .bg(rgb(0xc8f26d))
+                .transition()
+                .active(|s| s.scale(0.97).bg(rgb(0xa9d14f)))
+                .child(
+                    text("Open a sheet")
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors::ON_ACCENT),
+                ),
+        )
+        .child(caption(
+            "Scales and darkens while pressed",
+            Some("active:scale-[0.97]"),
+        ))
+        .child(modal_view)
 }
 
 /// Shuffles `items` in place.
@@ -421,37 +380,26 @@ const PRESETS: [(LayoutAnimation, &str); 3] = [
 const TILE_TONES: [Tone; 5] = [Tone::Accent, Tone::Info, Tone::Warn, Tone::Up, Tone::Danger];
 
 /// Views added, moved and removed with a layout animation.
-#[derive(Debug, Default)]
-struct LayoutAnimations {
-    items: Vec<u32>,
-    next: u32,
-    preset: u32,
-}
-
-impl LayoutAnimations {
-    /// Changes the items, animating the layout change.
-    fn animate(&mut self, cx: &mut Context<'_, Self>, change: impl FnOnce(&mut Self)) {
-        cx.animate_layout(PRESETS[self.preset as usize].0);
-        change(self);
-        cx.notify();
-    }
-}
-
-impl Component for LayoutAnimations {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        self.items = vec![1, 2, 3];
-        self.next = 4;
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let white = 0xffffff;
-        let boxes = self.items.iter().map(|&n| {
+#[component]
+fn LayoutAnimations() -> impl IntoElement {
+    let items = signal(vec![1_u32, 2, 3]);
+    let next = stored(4_u32);
+    let preset = signal(0_u32);
+    // Changes the items, animating the layout change.
+    let animate = move |change: fn(&mut Vec<u32>, Stored<u32>)| {
+        move |_: &()| {
+            animate_layout(PRESETS[preset.get_untracked() as usize].0);
+            items.update(|items| change(items, next));
+        }
+    };
+    let white = 0xffffff;
+    let boxes = Each::new(
+        items,
+        |n: &u32| *n,
+        move |n, _| {
+            let n = n.get_untracked();
             let tone = TILE_TONES[n as usize % TILE_TONES.len()];
             view()
-                .key(n.to_string())
                 .size(px(56.0))
                 .rounded(px(14.0))
                 .border_curve(BorderCurve::Continuous)
@@ -469,169 +417,123 @@ impl Component for LayoutAnimations {
                         .tabular_nums()
                         .text_color(tone.color()),
                 )
-        });
-        ui::Card::new()
-            .icon(IconName::Animation)
-            .title("Layout animation")
-            .subtitle("configureNext, then change the tree")
-            .right(Badge::new(self.items.len().to_string()))
-            .child(
-                Segmented::element(SegmentedProps {
-                    options: PRESETS
-                        .iter()
-                        .map(|(_, label)| Segment::new(*label))
-                        .collect(),
-                    selected: self.preset,
-                    size: SegmentedSize::Small,
-                })
-                .on_event(cx.listener(
-                    |this: &mut Self, e: &SegmentedEvent, cx| {
-                        let SegmentedEvent::Change(i) = *e;
-                        this.preset = i;
-                        cx.notify();
-                    },
-                )),
-            )
-            .child(
-                view()
-                    .flex_row()
-                    .flex_wrap()
-                    .gap_2()
-                    .min_h(px(56.0))
-                    .children(boxes),
-            )
-            .child(
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(cell(
-                        ui::Button::new(
-                            "Add",
-                            cx.listener(|this: &mut Self, _, cx| {
-                                this.animate(cx, |this| {
-                                    this.items.insert(0, this.next);
-                                    this.next += 1;
-                                });
-                            }),
-                        )
-                        .icon(IconName::Plus),
-                    ))
-                    .child(cell(
-                        ui::Button::new(
-                            "Shuffle",
-                            cx.listener(|this: &mut Self, _, cx| {
-                                this.animate(cx, |this| shuffle(&mut this.items));
-                            }),
-                        )
+        },
+    );
+    ui::Card::new()
+        .icon(IconName::Animation)
+        .title("Layout animation")
+        .subtitle("configureNext, then change the tree")
+        .right(Badge::new(move || items.with(Vec::len).to_string()))
+        .child(
+            Segmented::element(SegmentedProps {
+                options: PRESETS
+                    .iter()
+                    .map(|(_, label)| Segment::new(*label))
+                    .collect::<Vec<_>>()
+                    .into(),
+                selected: preset.into(),
+                size: SegmentedSize::Small,
+            })
+            .on_event(move |e: &SegmentedEvent| {
+                let SegmentedEvent::Change(i) = *e;
+                preset.set(i);
+            }),
+        )
+        .child(
+            view()
+                .flex_row()
+                .flex_wrap()
+                .gap_2()
+                .min_h(px(56.0))
+                .child(boxes),
+        )
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
+                .child(cell(
+                    ui::Button::new(
+                        "Add",
+                        animate(|items, next| {
+                            items.insert(0, next.with(|n| *n));
+                            next.with(|n| *n += 1);
+                        }),
+                    )
+                    .icon(IconName::Plus),
+                ))
+                .child(cell(
+                    ui::Button::new("Shuffle", animate(|items, _| shuffle(items)))
                         .variant(UiVariant::Secondary),
-                    ))
-                    .child(cell(
-                        ui::Button::new(
-                            "Remove",
-                            cx.listener(|this: &mut Self, _, cx| {
-                                this.animate(cx, |this| {
-                                    if !this.items.is_empty() {
-                                        this.items.remove(0);
-                                    }
-                                });
-                            }),
-                        )
-                        .variant(UiVariant::Secondary)
-                        .disabled(self.items.is_empty()),
-                    )),
-            )
-    }
+                ))
+                .child(cell(
+                    ui::Button::new(
+                        "Remove",
+                        animate(|items, _| {
+                            if !items.is_empty() {
+                                items.remove(0);
+                            }
+                        }),
+                    )
+                    .variant(UiVariant::Secondary)
+                    .disabled(Prop::bind(move || items.with(Vec::is_empty))),
+                )),
+        )
 }
 
 /// An input with a bar over the keyboard (iOS's input accessory).
-#[derive(Debug, Default)]
-struct Accessory {
-    text: String,
-    focused: bool,
-    input: Option<ElementRef>,
-}
-
-impl Component for Accessory {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.input = Some(cx.element_ref());
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let input_ref = self.input.as_ref().expect("set up");
-        let hairline = hairline(cx);
-        ui::Card::new()
-            .icon(IconName::Text)
-            .title("Input accessory")
-            .subtitle("A bar over the iOS keyboard")
-            .right(Badge::new("nsh/ios"))
-            .child(
-                field(self.focused, cx)
-                    .element_ref(input_ref)
-                    .value(self.text.clone())
-                    .placeholder("Focus me")
-                    .input_accessory("counter")
-                    .on_focus(cx.listener(|this: &mut Self, _, cx| {
-                        this.focused = true;
-                        cx.notify();
-                    }))
-                    .on_blur(cx.listener(|this: &mut Self, _, cx| {
-                        this.focused = false;
-                        cx.notify();
-                    }))
-                    .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                        this.text = v.to_owned();
-                        cx.notify();
-                    })),
-            )
-            .child(caption(
-                if cx.os() == Os::Android {
-                    "Android has no input accessories"
-                } else {
-                    "The bar counts what you type"
-                },
-                Some("inputAccessoryViewID=\"counter\""),
-            ))
-            .child(
-                input_accessory_view("counter").bg(colors::SURFACE).child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .px_4()
-                        .py_2()
-                        .border_t(hairline)
-                        .border_t_color(colors::BORDER)
-                        .child(
-                            text(format!("{} characters", self.text.encode_utf16().count()))
-                                .flex_1()
-                                .text_size(px(13.0))
-                                .text_color(colors::MUTED)
-                                .tabular_nums(),
-                        )
-                        .child(
-                            ui::Button::new(
-                                "Clear",
-                                cx.listener(|this: &mut Self, _, cx| {
-                                    this.text.clear();
-                                    cx.notify();
-                                }),
-                            )
+#[component]
+fn Accessory() -> impl IntoElement {
+    let content = signal(String::new());
+    let focused = signal(false);
+    let input = element_ref();
+    let done = input.clone();
+    ui::Card::new()
+        .icon(IconName::Text)
+        .title("Input accessory")
+        .subtitle("A bar over the iOS keyboard")
+        .right(Badge::new("nsh/ios"))
+        .child(
+            field(focused)
+                .element_ref(&input)
+                .value(move || content.get())
+                .placeholder("Focus me")
+                .input_accessory("counter")
+                .on_change_text(move |v: &str| content.set(v.to_owned())),
+        )
+        .child(caption(
+            if os() == Os::Android {
+                "Android has no input accessories"
+            } else {
+                "The bar counts what you type"
+            },
+            Some("inputAccessoryViewID=\"counter\""),
+        ))
+        .child(
+            input_accessory_view("counter").bg(colors::SURFACE).child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .px_4()
+                    .py_2()
+                    .border_t(hairline)
+                    .border_t_color(colors::BORDER)
+                    .child(
+                        text(move || {
+                            format!("{} characters", content.with(|c| c.encode_utf16().count()))
+                        })
+                        .flex_1()
+                        .text_size(px(13.0))
+                        .text_color(colors::MUTED)
+                        .tabular_nums(),
+                    )
+                    .child(
+                        ui::Button::new("Clear", move |_: &()| content.set(String::new()))
                             .variant(UiVariant::Secondary),
-                        )
-                        .child(ui::Button::new(
-                            "Done",
-                            cx.listener(|this: &mut Self, _, _| {
-                                if let Some(input) = &this.input {
-                                    input.blur();
-                                }
-                            }),
-                        )),
-                ),
-            )
-    }
+                    )
+                    .child(ui::Button::new("Done", move |_: &()| done.blur())),
+            ),
+        )
 }
 
 /// The behaviors of the keyboard avoiding view: label, what it does.
@@ -654,287 +556,246 @@ const BEHAVIORS: [(AvoidBehavior, &str, &str); 3] = [
 ];
 
 /// The content of the keyboard avoiding view's screen.
-#[derive(Debug, Default)]
-struct AvoidingPage {
-    behavior: u32,
-    focused: bool,
-}
-
-impl Component for AvoidingPage {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let (behavior, name, what) = BEHAVIORS[self.behavior as usize];
-        // The inner view of `position` fills the avoiding view.
-        let fill = Style::from_json(JsonValue::from_iter([("flex", 1)])).unwrap_or_default();
-        view().flex_1().child(
-            KeyboardAvoidingView::element(KeyboardAvoidingViewProps {
-                behavior,
-                content_container_style: fill,
-                ..KeyboardAvoidingViewProps::default()
-            })
-            .flex_1()
-            .bg(tints::INFO)
-            .child(
-                view()
-                    .flex_1()
-                    .p_4()
-                    .gap_4()
-                    .child(
-                        appear(0).child(
-                            ui::Card::new()
-                                .icon(IconName::Form)
-                                .title(format!("behavior=\"{name}\""))
-                                .subtitle("Focus the field at the bottom")
-                                .child(
-                                    segmented(
-                                        BEHAVIORS.map(|(_, label, _)| Segment::new(label)),
-                                        self.behavior,
-                                    )
-                                    .on_event(cx.listener(
-                                        |this: &mut Self, e: &SegmentedEvent, cx| {
-                                            let SegmentedEvent::Change(i) = *e;
-                                            this.behavior = i;
-                                            cx.notify();
-                                        },
-                                    )),
+#[component]
+fn AvoidingPage() -> impl IntoElement {
+    let behavior = signal(0_u32);
+    let focused = signal(false);
+    let picked = move || BEHAVIORS[behavior.get() as usize];
+    // The inner view of `position` fills the avoiding view.
+    let fill = Style::from_json(JsonValue::from_iter([("flex", 1)])).unwrap_or_default();
+    view().flex_1().child(
+        KeyboardAvoidingView::element(KeyboardAvoidingViewProps {
+            behavior: Prop::bind(move || picked().0),
+            content_container_style: fill.into(),
+            ..KeyboardAvoidingViewProps::default()
+        })
+        .flex_1()
+        .bg(tints::INFO)
+        .child(
+            view()
+                .flex_1()
+                .p_4()
+                .gap_4()
+                .child(
+                    appear(0).child(
+                        ui::Card::new()
+                            .icon(IconName::Form)
+                            .title(move || format!("behavior=\"{}\"", picked().1))
+                            .subtitle("Focus the field at the bottom")
+                            .child(
+                                segmented(
+                                    BEHAVIORS.map(|(_, label, _)| Segment::new(label)),
+                                    behavior,
                                 )
-                                .child(note(what)),
-                        ),
-                    )
-                    .child(view().flex_1())
-                    .child(
-                        field(self.focused, cx)
-                            .placeholder("Type here")
-                            .on_focus(cx.listener(|this: &mut Self, _, cx| {
-                                this.focused = true;
-                                cx.notify();
-                            }))
-                            .on_blur(cx.listener(|this: &mut Self, _, cx| {
-                                this.focused = false;
-                                cx.notify();
-                            })),
+                                .on_event(
+                                    move |e: &SegmentedEvent| {
+                                        let SegmentedEvent::Change(i) = *e;
+                                        behavior.set(i);
+                                    },
+                                ),
+                            )
+                            .child(
+                                text(move || picked().2)
+                                    .text_size(px(14.0))
+                                    .line_height(px(20.0))
+                                    .text_color(colors::MUTED),
+                            ),
                     ),
-            ),
-        )
-    }
+                )
+                .child(view().flex_1())
+                .child(field(focused).placeholder("Type here")),
+        ),
+    )
 }
 
 /// A modal's platform options.
-#[derive(Debug, Default)]
-struct ModalOptions {
-    visible: bool,
-    translucent: bool,
-}
-
-impl Component for ModalOptions {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let show = |visible: bool| {
-            cx.listener(move |this: &mut Self, _, cx| {
-                this.visible = visible;
-                cx.notify();
-            })
-        };
-        let translucent = self.translucent;
-        let modal_view = self.visible.then(|| {
-            modal()
-                .animation(ModalAnimation::Slide)
-                .status_bar_translucent(translucent)
-                .supported_orientations([Orientation::Portrait, Orientation::Landscape])
-                .on_request_close(show(false))
-                .child(
-                    view()
-                        .flex_1()
-                        .bg(AdaptiveColor::new(rgb(0xeef5dc), rgb(0x16200d)))
-                        .child(
-                            SafeAreaView::element(SafeAreaViewProps::default())
-                                .flex_1()
-                                .p_4()
-                                .gap_3()
-                                .child(
-                                    view().flex_row().pt_2().child(
-                                        Badge::new(if translucent {
+#[component]
+fn ModalOptions() -> impl IntoElement {
+    let visible = signal(false);
+    let translucent = signal(false);
+    let show = move |shown: bool| move |_: &()| visible.set(shown);
+    let modal_view = If::new(visible, move || {
+        modal()
+            .animation(ModalAnimation::Slide)
+            .status_bar_translucent(translucent)
+            .supported_orientations([Orientation::Portrait, Orientation::Landscape])
+            .on_request_close(show(false))
+            .child(
+                view()
+                    .flex_1()
+                    .bg(AdaptiveColor::new(rgb(0xeef5dc), rgb(0x16200d)))
+                    .child(
+                        SafeAreaView::element(SafeAreaViewProps::default())
+                            .flex_1()
+                            .p_4()
+                            .gap_3()
+                            .child(
+                                view().flex_row().pt_2().child(
+                                    Badge::new(move || {
+                                        if translucent.get() {
                                             "translucent"
                                         } else {
                                             "opaque bar"
-                                        })
-                                        .tone(Tone::Accent),
-                                    ),
-                                )
-                                .child(
-                                    text("A modal")
-                                        .text_size(px(28.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .letter_spacing(-0.5)
-                                        .text_color(colors::TEXT),
-                                )
-                                .child(
-                                    text(format!(
+                                        }
+                                    })
+                                    .tone(Tone::Accent),
+                                ),
+                            )
+                            .child(
+                                text("A modal")
+                                    .text_size(px(28.0))
+                                    .font_weight(FontWeight::BOLD)
+                                    .letter_spacing(-0.5)
+                                    .text_color(colors::TEXT),
+                            )
+                            .child(
+                                text(move || {
+                                    format!(
                                         "The olive background starts {} the status bar on \
                                          Android.",
-                                        if translucent { "under" } else { "below" }
-                                    ))
-                                    .text_size(px(15.0))
-                                    .line_height(px(21.0))
-                                    .text_color(colors::MUTED),
-                                )
-                                .child(view().flex_1())
-                                .child(ui::Button::new("Close", show(false))),
-                        ),
-                )
-        });
-        ui::Card::new()
-            .icon(IconName::System)
-            .title("Modal options")
-            .subtitle("statusBarTranslucent, orientations")
-            .right(
-                toggle(translucent, "statusBarTranslucent").on_event(cx.listener(
-                    |this: &mut Self, e: &ToggleEvent, cx| {
-                        let ToggleEvent::Change(on) = *e;
-                        this.translucent = on;
-                        cx.notify();
-                    },
-                )),
+                                        if translucent.get() { "under" } else { "below" }
+                                    )
+                                })
+                                .text_size(px(15.0))
+                                .line_height(px(21.0))
+                                .text_color(colors::MUTED),
+                            )
+                            .child(view().flex_1())
+                            .child(ui::Button::new("Close", show(false))),
+                    ),
             )
-            .child(note(
-                "Android: translucent content reaches under the status bar. iOS: this modal \
-                 allows portrait and landscape.",
-            ))
-            .child(caption(
-                "statusBarTranslucent",
-                Some(translucent.to_string()),
-            ))
-            .child(ui::Button::new("Open the modal", show(true)).variant(UiVariant::Secondary))
-            .children(modal_view)
-    }
+    });
+    ui::Card::new()
+        .icon(IconName::System)
+        .title("Modal options")
+        .subtitle("statusBarTranslucent, orientations")
+        .right(
+            toggle(translucent, "statusBarTranslucent").on_event(move |e: &ToggleEvent| {
+                let ToggleEvent::Change(on) = *e;
+                translucent.set(on);
+            }),
+        )
+        .child(note(
+            "Android: translucent content reaches under the status bar. iOS: this modal allows \
+             portrait and landscape.",
+        ))
+        .child(caption(
+            "statusBarTranslucent",
+            Some(move || translucent.get().to_string()),
+        ))
+        .child(ui::Button::new("Open the modal", show(true)).variant(UiVariant::Secondary))
+        .child(modal_view)
 }
 
 /// The platform, the pixel ratio and the screen reader.
-#[derive(Debug, Default)]
-struct PlatformInfo {
-    /// Announcements made.
-    announced: u32,
-    /// The note the reader's focus moves to.
-    note: Option<ElementRef>,
-}
-
-impl Component for PlatformInfo {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.note = Some(cx.element_ref());
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let os = cx.os();
-        let (major, minor) = cx.os_version();
-        // A string on iOS ("17.5"), the API level on Android (as TS's).
-        let version = if os == Os::Android {
-            major.to_string()
-        } else {
-            format!("{major}.{minor}")
-        };
-        let idiom = cx.idiom();
-        let branch = match os {
-            Os::Ios => "ios branch",
-            Os::Android => "android branch",
-            _ => "",
-        };
-        let hairline = hairline(cx);
-        let rows = [
-            ("Platform.OS", os.name().to_owned()),
-            ("Platform.Version", version),
-            (
-                "isPad / isTV / isMacCatalyst",
-                format!(
-                    "{} / {} / {}",
-                    idiom == Idiom::Pad,
-                    idiom == Idiom::Tv,
-                    idiom == Idiom::Mac
-                ),
-            ),
-            ("Platform.select", branch.to_owned()),
-            ("PixelRatio.get()", cx.pixel_ratio().to_string()),
-            (
-                "roundToNearestPixel(10.3)",
-                cx.round_to_nearest_pixel(10.3).to_string(),
-            ),
-            ("screenReaderEnabled()", cx.screen_reader().to_string()),
-            ("reduceMotion()", cx.reduce_motion().to_string()),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(i, (name, value))| {
-            Row::new(i == 0)
-                .child(
-                    text(name)
-                        .number_of_lines(1)
-                        .flex_1()
-                        .text_size(px(12.0))
-                        .text_color(colors::MUTED)
-                        .font_family(MONO),
-                )
-                .child(
-                    text(value)
-                        .number_of_lines(1)
-                        .text_size(px(14.0))
-                        .text_color(colors::TEXT)
-                        .tabular_nums(),
-                )
-        });
-        ui::Card::new()
-            .icon(IconName::Spark)
-            .title("Platform")
-            .subtitle("Platform, PixelRatio, AccessibilityInfo")
-            .right(Badge::new(os.name()).tone(Tone::Accent))
-            .child(view().children(rows))
-            .child(view().h(px(hairline)).bg(colors::ACCENT))
-            .child(caption(
-                "The line above is one device pixel tall",
-                Some(format!("{hairline:.3} pt")),
-            ))
+#[component]
+fn PlatformInfo() -> impl IntoElement {
+    // Announcements made.
+    let announced = stored(0_u32);
+    // The note the reader's focus moves to.
+    let note_ref = element_ref();
+    let focus = note_ref.clone();
+    let os = os();
+    let (major, minor) = os_version();
+    // A string on iOS ("17.5"), the API level on Android (as TS's).
+    let version = if os == Os::Android {
+        major.to_string()
+    } else {
+        format!("{major}.{minor}")
+    };
+    let idiom = idiom();
+    let branch = match os {
+        Os::Ios => "ios branch",
+        Os::Android => "android branch",
+        _ => "",
+    };
+    let rows: [(&str, Reactive<SharedString>); 8] = [
+        ("Platform.OS", os.name().into_reactive()),
+        ("Platform.Version", version.into_reactive()),
+        (
+            "isPad / isTV / isMacCatalyst",
+            format!(
+                "{} / {} / {}",
+                idiom == Idiom::Pad,
+                idiom == Idiom::Tv,
+                idiom == Idiom::Mac
+            )
+            .into_reactive(),
+        ),
+        ("Platform.select", branch.into_reactive()),
+        (
+            "PixelRatio.get()",
+            (|| pixel_ratio().to_string()).into_reactive(),
+        ),
+        (
+            "roundToNearestPixel(10.3)",
+            (|| round_to_nearest_pixel(10.3).to_string()).into_reactive(),
+        ),
+        (
+            "screenReaderEnabled()",
+            (|| screen_reader().to_string()).into_reactive(),
+        ),
+        (
+            "reduceMotion()",
+            (|| reduce_motion().to_string()).into_reactive(),
+        ),
+    ];
+    let rows = rows.into_iter().enumerate().map(|(i, (name, value))| {
+        Row::new(i == 0)
             .child(
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(cell(ui::Button::new(
-                        "Announce",
-                        cx.listener(|this: &mut Self, _, cx| {
-                            this.announced += 1;
-                            cx.announce_for_accessibility(format!(
-                                "Announcement {}",
-                                this.announced
-                            ));
-                        }),
-                    )))
-                    .child(cell(
-                        ui::Button::new(
-                            "Focus the note",
-                            cx.listener(|this: &mut Self, _, _| {
-                                if let Some(note) = &this.note {
-                                    note.set_accessibility_focus();
-                                }
-                            }),
-                        )
-                        .variant(UiVariant::Secondary),
-                    )),
+                text(name)
+                    .number_of_lines(1)
+                    .flex_1()
+                    .text_size(px(12.0))
+                    .text_color(colors::MUTED)
+                    .font_family(MONO),
             )
             .child(
-                text(
-                    "With VoiceOver or TalkBack on, the buttons above speak and move the reader \
-                     here.",
-                )
-                .text_size(px(13.0))
-                .line_height(px(18.0))
-                .text_color(colors::FAINT)
-                .element_ref(self.note.as_ref().expect("set up")),
+                text(value)
+                    .number_of_lines(1)
+                    .text_size(px(14.0))
+                    .text_color(colors::TEXT)
+                    .tabular_nums(),
             )
-    }
+    });
+    ui::Card::new()
+        .icon(IconName::Spark)
+        .title("Platform")
+        .subtitle("Platform, PixelRatio, AccessibilityInfo")
+        .right(Badge::new(os.name()).tone(Tone::Accent))
+        .child(view().children(rows))
+        .child(view().h(move || px(hairline())).bg(colors::ACCENT))
+        .child(caption(
+            "The line above is one device pixel tall",
+            Some(move || format!("{:.3} pt", hairline())),
+        ))
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
+                .child(cell(ui::Button::new("Announce", move |_: &()| {
+                    let n = announced.with(|n| {
+                        *n += 1;
+                        *n
+                    });
+                    announce_for_accessibility(format!("Announcement {n}"));
+                })))
+                .child(cell(
+                    ui::Button::new("Focus the note", move |_: &()| {
+                        focus.set_accessibility_focus();
+                    })
+                    .variant(UiVariant::Secondary),
+                )),
+        )
+        .child(
+            text(
+                "With VoiceOver or TalkBack on, the buttons above speak and move the reader here.",
+            )
+            .text_size(px(13.0))
+            .line_height(px(18.0))
+            .text_color(colors::FAINT)
+            .element_ref(&note_ref),
+        )
 }
 
 /// A row that pushes a screen.
@@ -942,12 +803,12 @@ fn link_row(
     icon_name: IconName,
     title: &'static str,
     prop: &'static str,
-    on_press: Listener<()>,
+    on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
     press_with(
         PressProps {
-            scale: 0.98,
-            label: Some(title.into()),
+            scale: 0.98.into(),
+            label: Some(title.into()).into(),
             ..PressProps::default()
         },
         on_press,
@@ -984,52 +845,44 @@ fn link_row(
 }
 
 /// The demo's page.
-#[derive(Debug, Default)]
-pub(crate) struct Components;
-
-impl Component for Components {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let avoiding = ui::Card::new()
-            .title("Keyboard avoidance")
-            .subtitle("Content outside scroll views")
-            .flush()
-            .child(Inset::new().padding(0.0).gap(0.0).child(link_row(
-                IconName::Form,
-                "KeyboardAvoidingView",
-                "padding / height / position",
-                cx.listener(|_: &mut Self, _, cx| {
-                    nav::push(cx, "keyboard-avoiding", |cx| {
-                        header(screen().title("KeyboardAvoidingView"), cx)
-                            .child(AvoidingPage::element(()))
-                    });
-                }),
-            )));
-        let cards = [
-            MobileComponents::element(()).into_element(),
-            PressFeedback::element(()).into_element(),
-            PressableSheet::element(()).into_element(),
-            LayoutAnimations::element(()).into_element(),
-            Accessory::element(()).into_element(),
-            avoiding.into_element(),
-            ModalOptions::element(()).into_element(),
-            PlatformInfo::element(()).into_element(),
-        ];
-        view().flex_1().child(
-            scroll()
-                .flex_1()
-                .bg(colors::BACKGROUND)
-                .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-                .child(
-                    view().p_4().pb(px(40.0)).gap_4().children(
-                        cards
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, card)| appear(i as u32).child(card)),
-                    ),
+#[component]
+pub(crate) fn Components() -> impl IntoElement {
+    let avoiding = ui::Card::new()
+        .title("Keyboard avoidance")
+        .subtitle("Content outside scroll views")
+        .flush()
+        .child(Inset::new().padding(0.0).gap(0.0).child(link_row(
+            IconName::Form,
+            "KeyboardAvoidingView",
+            "padding / height / position",
+            |_: &()| {
+                nav::push("keyboard-avoiding", || {
+                    header(screen().title("KeyboardAvoidingView")).child(AvoidingPage::element(()))
+                });
+            },
+        )));
+    let cards = [
+        MobileComponents::element(()).into_element(),
+        PressFeedback::element(()).into_element(),
+        PressableSheet::element(()).into_element(),
+        LayoutAnimations::element(()).into_element(),
+        Accessory::element(()).into_element(),
+        avoiding.into_element(),
+        ModalOptions::element(()).into_element(),
+        PlatformInfo::element(()).into_element(),
+    ];
+    view().flex_1().child(
+        scroll()
+            .flex_1()
+            .bg(colors::BACKGROUND)
+            .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+            .child(
+                view().p_4().pb(px(40.0)).gap_4().children(
+                    cards
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, card)| appear(i as u32).child(card)),
                 ),
-        )
-    }
+            ),
+    )
 }

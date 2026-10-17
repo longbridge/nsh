@@ -45,7 +45,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The appearance the app asks for (`nsh.json` `"appearance"`, TS
-    /// `setColorScheme`, [`crate::ui::Context::set_color_scheme`]): what
+    /// `setColorScheme`, [`crate::ui::ambient::set_color_scheme`]): what
     /// `dark:` variants and the components' theme follow in place of the
     /// system's; the platform applies it to its own controls
     /// ([`MountItem::Appearance`]).

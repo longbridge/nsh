@@ -5,10 +5,15 @@
 //! module and task shares it; the core sends the merged result once per
 //! commit, when it changed.
 
-use super::element::Globals;
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{StatusBarConfig, StatusBarSetting};
 
-/// A setting a component rendered ([`super::Context::add_status_bar`]).
+/// The surface's status bar settings, shared by its components, modules and
+/// tasks.
+pub(crate) type SharedStatusBars = Rc<RefCell<StatusBars>>;
+
+/// A setting a component added ([`super::ambient::add_status_bar`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StatusBarEntry(u64);
 
@@ -24,24 +29,16 @@ pub(crate) struct StatusBars {
 
 impl StatusBars {
     /// Runs `f` on the surface's settings.
-    pub(crate) fn update<R>(globals: &Globals, f: impl FnOnce(&mut StatusBars) -> R) -> R {
-        let mut globals = globals.borrow_mut();
-        let bars = globals
-            .entry(std::any::TypeId::of::<StatusBars>())
-            .or_insert_with(|| Box::new(StatusBars::default()))
-            .downcast_mut::<StatusBars>()
-            .expect("keyed by its type");
+    pub(crate) fn update<R>(bars: &SharedStatusBars, f: impl FnOnce(&mut StatusBars) -> R) -> R {
+        let mut bars = bars.borrow_mut();
         bars.dirty = true;
-        f(bars)
+        f(&mut bars)
     }
 
     /// The merged config, when it changed since the last call (once per
     /// commit).
-    pub(crate) fn take_changed(globals: &Globals) -> Option<StatusBarConfig> {
-        let mut globals = globals.borrow_mut();
-        let bars = globals
-            .get_mut(&std::any::TypeId::of::<StatusBars>())?
-            .downcast_mut::<StatusBars>()?;
+    pub(crate) fn take_changed(bars: &SharedStatusBars) -> Option<StatusBarConfig> {
+        let mut bars = bars.borrow_mut();
         if !std::mem::take(&mut bars.dirty) {
             return None;
         }
@@ -108,7 +105,7 @@ mod tests {
 
     #[test]
     fn the_last_entry_wins_field_by_field_over_the_base() {
-        let globals = Globals::default();
+        let globals = SharedStatusBars::default();
         let shown = |f: &dyn Fn(&mut StatusBars)| {
             StatusBars::update(&globals, f);
             StatusBars::take_changed(&globals).map(|c| (c.style, c.hidden, c.background))

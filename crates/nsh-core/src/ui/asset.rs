@@ -104,3 +104,12 @@ impl From<&ImageAsset> for ImageSrc {
         (*asset).into()
     }
 }
+
+crate::static_reactive!(
+    ImageSrc: ImageSrc,
+    ImageAsset,
+    &ImageAsset,
+    super::SharedString,
+    String,
+    &'static str
+);

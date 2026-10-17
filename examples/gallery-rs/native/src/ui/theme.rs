@@ -115,6 +115,8 @@ pub(crate) enum Tone {
     Down,
 }
 
+nsh_core::static_reactive!(Tone: Tone);
+
 impl Tone {
     /// Its color (TS `toneColor`).
     pub(crate) const fn color(self) -> AdaptiveColor {

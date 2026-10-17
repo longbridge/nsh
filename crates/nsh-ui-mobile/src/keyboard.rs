@@ -17,10 +17,6 @@ impl Keyboard {
     }
 }
 
-/// A view keeping its content above the keyboard ([`KeyboardAvoidingViewProps`]).
-#[derive(Debug, Default)]
-pub struct KeyboardAvoidingView;
-
 /// A view that keeps its content above the software keyboard, animated
 /// with the keyboard. For content outside scroll views, such as a message
 /// bar at the bottom of a screen (inputs inside scroll views are kept
@@ -31,22 +27,22 @@ pub struct KeyboardAvoidingView;
 pub struct KeyboardAvoidingViewProps {
     /// Avoid the keyboard (default true).
     #[prop(default = true)]
-    pub enabled: bool,
+    pub enabled: Prop<bool>,
     /// `padding` (default) pads the bottom by the keyboard's height;
     /// `height` shrinks the view instead (a bottom margin, so its
     /// background ends at the keyboard); `position` moves an inner content
     /// view (`contentContainerStyle`) up.
     #[prop(default)]
-    pub behavior: AvoidBehavior,
+    pub behavior: Prop<AvoidBehavior>,
     /// Added to the keyboard's height while it shows (a tab bar below the
     /// view, say).
     #[prop(default)]
-    pub keyboard_vertical_offset: f32,
+    pub keyboard_vertical_offset: Prop<f32>,
     /// The inner view's style with `behavior="position"`.
     #[prop(default)]
-    pub content_container_style: Style,
+    pub content_container_style: Prop<Style>,
     /// The content.
-    pub children: Children,
+    pub children: Prop<Children>,
 }
 
 /// How a [`KeyboardAvoidingView`] makes room.
@@ -61,60 +57,64 @@ pub enum AvoidBehavior {
     Position,
 }
 
-impl Component for KeyboardAvoidingView {
-    type Props = KeyboardAvoidingViewProps;
-    type Event = NoEvent;
-
-    fn environment_changed(
-        &mut self,
-        props: &KeyboardAvoidingViewProps,
-        old: &Environment,
-        new: &Environment,
-        cx: &mut Context<'_, Self>,
-    ) {
-        // Moves with the keyboard: the frame change animates natively.
-        if props.enabled
-            && old.keyboard_height != new.keyboard_height
-            && new.keyboard_duration > 0.0
+/// A view keeping its content above the keyboard ([`KeyboardAvoidingViewProps`]).
+#[component]
+pub fn KeyboardAvoidingView(props: KeyboardAvoidingViewProps) -> impl IntoElement {
+    // Moves with the keyboard: the frame change animates natively.
+    let shown = std::cell::Cell::new(None);
+    effect(move || {
+        let height = keyboard_height();
+        let previous = shown.replace(Some(height));
+        let duration = untracked(keyboard_duration);
+        if previous.is_some_and(|p| p != height)
+            && untracked(|| props.enabled.get())
+            && duration > 0.0
         {
-            cx.animate_layout(LayoutAnimation {
+            animate_layout(LayoutAnimation {
                 create: None,
                 update: Some(LayoutTransition {
                     curve: LayoutCurve::EaseInEaseOut,
                     property: LayoutProperty::Opacity,
-                    duration_ms: new.keyboard_duration * 1000.0,
+                    duration_ms: duration * 1000.0,
                     delay_ms: 0.0,
                 }),
                 delete: None,
             });
         }
-    }
-
-    fn render(
-        &self,
-        props: &KeyboardAvoidingViewProps,
-        cx: &mut RenderCx<'_, Self>,
-    ) -> impl IntoElement {
-        let height = cx.keyboard_height();
-        let lift = if !props.enabled || height == 0.0 {
+    });
+    let lift = computed(move || {
+        let height = keyboard_height();
+        if !props.enabled.get() || height == 0.0 {
             0.0
         } else {
-            (height + props.keyboard_vertical_offset).max(0.0)
-        };
-        let below = EdgeInsets {
-            bottom: lift,
-            ..EdgeInsets::default()
-        };
-        match props.behavior {
-            AvoidBehavior::Padding => view().inset_padding(below).child(props.children),
-            AvoidBehavior::Height => view().inset_margin(below).child(props.children),
-            AvoidBehavior::Position => view().child(
-                view()
-                    .inline_style(&props.content_container_style)
-                    .relative()
-                    .bottom(px(lift))
-                    .child(props.children),
-            ),
+            (height + props.keyboard_vertical_offset.get()).max(0.0)
         }
-    }
+    });
+    // The room it makes, by `behavior`.
+    let room = move |behavior: AvoidBehavior| {
+        move || EdgeInsets {
+            bottom: if props.behavior.get() == behavior {
+                lift.get()
+            } else {
+                0.0
+            },
+            ..EdgeInsets::default()
+        }
+    };
+    let children = props.children.get_untracked();
+    view()
+        .inset_padding(room(AvoidBehavior::Padding))
+        .inset_margin(room(AvoidBehavior::Height))
+        .child(dynamic(move || {
+            if props.behavior.get() == AvoidBehavior::Position {
+                view()
+                    .inline_style(props.content_container_style)
+                    .relative()
+                    .bottom(move || px(lift.get()))
+                    .child(children)
+                    .into_element()
+            } else {
+                children.into_element()
+            }
+        }))
 }

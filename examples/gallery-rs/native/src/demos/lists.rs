@@ -42,11 +42,11 @@ fn tone_name(tone: Tone) -> &'static str {
 fn action(
     label: &'static str,
     icon_name: Option<IconName>,
-    on_press: Listener<()>,
+    on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
     press_with(
         PressProps {
-            label: Some(label.into()),
+            label: Some(label.into()).into(),
             hit_slop: Some(4.0),
             ..PressProps::default()
         },
@@ -77,175 +77,159 @@ fn action(
 /// The grid's items: 90, of four heights.
 const ITEMS: usize = 90;
 
-/// Three columns, a header and a footer, padding and gaps, viewability.
-#[derive(Debug, Default)]
-struct Grid {
-    /// The first and last viewable rows.
-    visible: Option<(usize, usize)>,
-    list: Option<ElementRef>,
+/// The grid's item `id`'s height, in points.
+fn item_height(id: usize) -> usize {
+    84 + (id % 4) * 22
 }
 
-impl Grid {
-    fn header(&self, cx: &RenderCx<'_, Self>) -> impl IntoElement + use<> {
-        let (value, note) = match self.visible {
-            Some((first, last)) => (
-                format!("{first}–{last}"),
-                format!("  {} visible", last - first + 1),
-            ),
-            None => ("—".to_owned(), String::new()),
-        };
-        let progress = self
-            .visible
-            .map_or(0.0, |(_, last)| (last + 1) as f32 / ITEMS as f32);
-        view()
-            .bg(colors::SURFACE)
-            .rounded(px(radius::CARD))
-            .border_curve(BorderCurve::Continuous)
-            .border_1()
-            .border_color(colors::BORDER)
-            .p_4()
-            .gap_3()
-            .mb_1()
-            .finish(Finish::Card)
-            .child(
-                view()
-                    .flex_row()
-                    .items_end()
-                    .gap_2()
-                    .child(
-                        view()
-                            .flex_1()
-                            .gap(px(2.0))
+/// The grid's header: the viewable rows (`visible`, the first and the
+/// last), a meter of how far down they are, and the jumps.
+fn grid_header(visible: Signal<Option<(usize, usize)>>, list: &ElementRef) -> impl IntoElement {
+    let progress = computed(move || {
+        visible
+            .get()
+            .map_or(0.0, |(_, last)| (last + 1) as f32 / ITEMS as f32)
+    });
+    let (jump, end) = (list.clone(), list.clone());
+    view()
+        .bg(colors::SURFACE)
+        .rounded(px(radius::CARD))
+        .border_curve(BorderCurve::Continuous)
+        .border_1()
+        .border_color(colors::BORDER)
+        .p_4()
+        .gap_3()
+        .mb_1()
+        .finish(Finish::Card)
+        .child(
+            view()
+                .flex_row()
+                .items_end()
+                .gap_2()
+                .child(
+                    view()
+                        .flex_1()
+                        .gap(px(2.0))
+                        .child(
+                            text("Viewable items (at least half shown)")
+                                .text_size(px(13.0))
+                                .text_color(colors::MUTED),
+                        )
+                        .child(
+                            text(move || match visible.get() {
+                                Some((first, last)) => format!("{first}–{last}"),
+                                None => "—".to_owned(),
+                            })
+                            .text_size(px(30.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors::TEXT)
+                            .tabular_nums()
+                            .letter_spacing(-0.5)
                             .child(
-                                text("Viewable items (at least half shown)")
-                                    .text_size(px(13.0))
-                                    .text_color(colors::MUTED),
-                            )
-                            .child(
-                                text(value)
-                                    .text_size(px(30.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(colors::TEXT)
-                                    .tabular_nums()
-                                    .letter_spacing(-0.5)
-                                    .child(
-                                        text(note)
-                                            .text_size(px(15.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(colors::ACCENT),
-                                    ),
+                                text(move || {
+                                    visible.get().map_or(String::new(), |(first, last)| {
+                                        format!("  {} visible", last - first + 1)
+                                    })
+                                })
+                                .text_size(px(15.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(colors::ACCENT),
                             ),
-                    )
-                    .child(
-                        text("90 items, 3 columns")
-                            .text_size(px(13.0))
-                            .text_color(colors::FAINT)
-                            .pb(px(6.0)),
-                    ),
-            )
-            .child(Meter::new(progress))
-            .child(
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(action(
-                        "Jump to 60",
-                        Some(IconName::ArrowDown),
-                        cx.listener(|this: &mut Self, _, _| {
-                            if let Some(list) = &this.list {
-                                list.scroll_to_index(60, 0.5, 0.0, true);
-                            }
-                        }),
-                    ))
-                    .child(action(
-                        "End",
-                        None,
-                        cx.listener(|this: &mut Self, _, _| {
-                            if let Some(list) = &this.list {
-                                list.scroll_to_end(true);
-                            }
-                        }),
-                    )),
-            )
-    }
+                        ),
+                )
+                .child(
+                    text("90 items, 3 columns")
+                        .text_size(px(13.0))
+                        .text_color(colors::FAINT)
+                        .pb(px(6.0)),
+                ),
+        )
+        .child(Meter::new(progress))
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
+                .child(action(
+                    "Jump to 60",
+                    Some(IconName::ArrowDown),
+                    move |_: &()| jump.scroll_to_index(60, 0.5, 0.0, true),
+                ))
+                .child(action("End", None, move |_: &()| end.scroll_to_end(true))),
+        )
 }
 
-impl Component for Grid {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.list = Some(cx.element_ref());
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let list = self.list.clone().expect("set up");
-        view().flex_1().child(
-            virtual_list(ITEMS, |id, _| {
-                let height = 84 + (id % 4) * 22;
-                view()
-                    .h(px(height as f32))
-                    .rounded(px(radius::INSET))
-                    .border_curve(BorderCurve::Continuous)
-                    .border_1()
-                    .border_color(if id == 60 {
+/// Three columns, a header and a footer, padding and gaps, viewability.
+#[component]
+fn Grid() -> impl IntoElement {
+    // The first and last viewable rows.
+    let visible = signal(None::<(usize, usize)>);
+    let list = element_ref();
+    let header = grid_header(visible, &list);
+    view().flex_1().child(
+        // A cell shows other items as it is reused: what differs between
+        // items is bound to its position.
+        virtual_list(ITEMS, |at| {
+            view()
+                .h(move || px(item_height(at.index()) as f32))
+                .rounded(px(radius::INSET))
+                .border_curve(BorderCurve::Continuous)
+                .border_1()
+                .border_color(move || {
+                    if at.index() == 60 {
                         Tone::Accent.color()
                     } else {
                         colors::BORDER
-                    })
-                    .bg(colors::RAISED)
-                    .finish(Finish::Raised)
-                    .p_3()
-                    .justify_between()
-                    .child(
-                        view()
-                            .w(px(18.0))
-                            .h(px(4.0))
-                            .rounded(px(2.0))
-                            .bg(TONES[id % TONES.len()].color()),
-                    )
-                    .child(
-                        view()
-                            .child(
-                                text(id.to_string())
-                                    .text_size(px(22.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(colors::TEXT)
-                                    .tabular_nums(),
-                            )
-                            .child(
-                                text(format!("{height} pt"))
-                                    .text_size(px(12.0))
-                                    .text_color(colors::FAINT)
-                                    .tabular_nums(),
-                            ),
-                    )
-            })
-            .columns(3)
-            .estimated_item_size(110.0)
-            .content_padding(16.0)
-            .row_gap(8.0)
-            .column_gap(8.0)
-            .viewability(Viewability {
-                item_visible_percent: Some(50.0),
-                ..Viewability::default()
-            })
-            .on_viewable_items_changed(cx.listener(|this: &mut Self, rows: &ViewableItems, cx| {
-                this.visible = rows.viewable;
-                cx.notify();
-            }))
-            .header(self.header(cx))
-            .footer(
-                text("End of the list")
-                    .text_center()
-                    .text_color(colors::FAINT)
-                    .text_size(px(13.0))
-                    .p_4(),
-            )
-            .flex_1()
-            .element_ref(&list),
+                    }
+                })
+                .bg(colors::RAISED)
+                .finish(Finish::Raised)
+                .p_3()
+                .justify_between()
+                .child(
+                    view()
+                        .w(px(18.0))
+                        .h(px(4.0))
+                        .rounded(px(2.0))
+                        .bg(move || TONES[at.index() % TONES.len()].color()),
+                )
+                .child(
+                    view()
+                        .child(
+                            text(move || at.index().to_string())
+                                .text_size(px(22.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(colors::TEXT)
+                                .tabular_nums(),
+                        )
+                        .child(
+                            text(move || format!("{} pt", item_height(at.index())))
+                                .text_size(px(12.0))
+                                .text_color(colors::FAINT)
+                                .tabular_nums(),
+                        ),
+                )
+        })
+        .columns(3)
+        .estimated_item_size(110.0)
+        .content_padding(16.0)
+        .row_gap(8.0)
+        .column_gap(8.0)
+        .viewability(Viewability {
+            item_visible_percent: Some(50.0),
+            ..Viewability::default()
+        })
+        .on_viewable_items_changed(move |rows: &ViewableItems| visible.set(rows.viewable))
+        .header(header)
+        .footer(
+            text("End of the list")
+                .text_center()
+                .text_color(colors::FAINT)
+                .text_size(px(13.0))
+                .p_4(),
         )
-    }
+        .flex_1()
+        .element_ref(&list),
+    )
 }
 
 /// The people of the contacts: first and last name, what they made.
@@ -267,156 +251,176 @@ const PEOPLE: [(&str, &str, &str); 15] = [
     ("Niklaus", "Wirth", "Pascal, Oberon"),
 ];
 
-/// A row of the contacts: a letter's header or a person.
-#[derive(Debug, Clone)]
-enum ContactRow {
-    Header {
-        letter: char,
-        count: usize,
-    },
-    Person {
-        first: &'static str,
-        last: &'static str,
-        note: &'static str,
-        tone: Tone,
-        /// The last of its letter: no hairline under it.
-        end: bool,
-    },
+/// A person of the contacts, as their row shows them.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Person {
+    first: &'static str,
+    last: &'static str,
+    note: &'static str,
+    tone: Tone,
+    /// The last of its letter: no hairline under it.
+    end: bool,
 }
 
-/// One row of the contacts.
-fn contact_row(row: &ContactRow, on_press: Listener<()>) -> AnyElement {
-    match *row {
-        ContactRow::Header { letter, count } => view()
-            .flex_row()
-            .items_center()
-            .h(px(34.0))
-            .px_4()
-            .gap(px(10.0))
-            // Opaque: rows scroll under it while it sticks.
-            .bg(colors::BACKGROUND)
-            .border_b_1()
-            .border_b_color(colors::BORDER)
-            .child(
-                text(letter.to_string())
-                    .text_size(px(13.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(colors::ACCENT),
-            )
-            .child(view().flex_1().h(px(1.0)).bg(colors::LINE))
-            .child(
-                text(count.to_string())
-                    .text_size(px(13.0))
-                    .text_color(colors::FAINT)
-                    .tabular_nums(),
-            )
-            .into_element(),
-        ContactRow::Person {
-            first,
-            last,
-            note,
-            tone,
-            end,
-        } => {
-            let initials: String = first.chars().take(1).chain(last.chars().take(1)).collect();
-            view()
-                .on_press(on_press)
-                .active(|s| s.bg(colors::RAISED))
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .pl_4()
-                .h(px(60.0))
-                .child(
-                    view()
-                        .size(px(38.0))
-                        .rounded(px(19.0))
-                        .bg(tone.tint())
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            text(initials)
-                                .text_size(px(14.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(tone.color()),
-                        ),
-                )
-                .child(
-                    view()
-                        .flex_1()
-                        .self_stretch()
-                        .justify_center()
-                        .gap(px(2.0))
-                        .pr_4()
-                        .when(!end, |v| v.border_b_1().border_b_color(colors::LINE))
-                        .child(
-                            text(format!("{first} "))
-                                .text_size(px(15.0))
-                                .text_color(colors::TEXT)
-                                .child(text(last).font_weight(FontWeight::SEMIBOLD)),
-                        )
-                        .child(
-                            text(note)
-                                .number_of_lines(1)
-                                .text_size(px(13.0))
-                                .text_color(colors::MUTED),
-                        ),
-                )
-                .into_element()
+/// A row of the contacts: a letter's header or a person.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ContactRow {
+    Header { letter: char, count: usize },
+    Person(Person),
+}
+
+impl ContactRow {
+    /// The letter and its count (nothing for a person's row).
+    fn header(self) -> (char, usize) {
+        match self {
+            ContactRow::Header { letter, count } => (letter, count),
+            ContactRow::Person(_) => (' ', 0),
         }
     }
+
+    /// The person (nobody for a header's row).
+    fn person(self) -> Person {
+        match self {
+            ContactRow::Person(person) => person,
+            ContactRow::Header { .. } => Person::default(),
+        }
+    }
+}
+
+/// The contacts' rows: each letter's header, then its people.
+fn contact_rows() -> Vec<ContactRow> {
+    let initial = |name: &str| name.chars().next().unwrap_or(' ');
+    let mut letters: Vec<char> = PEOPLE.iter().map(|p| initial(p.0)).collect();
+    letters.dedup();
+    let mut rows = Vec::new();
+    for letter in letters {
+        let group: Vec<_> = PEOPLE.iter().filter(|p| initial(p.0) == letter).collect();
+        rows.push(ContactRow::Header {
+            letter,
+            count: group.len(),
+        });
+        for (i, &&(first, last, note)) in group.iter().enumerate() {
+            rows.push(ContactRow::Person(Person {
+                first,
+                last,
+                note,
+                tone: TONES[(rows.len() + i) % (TONES.len() - 1)],
+                end: i + 1 == group.len(),
+            }));
+        }
+    }
+    rows
+}
+
+/// A letter's header row, of the cell's `row`.
+fn contact_header(row: Memo<ContactRow>) -> impl IntoElement {
+    view()
+        .flex_row()
+        .items_center()
+        .h(px(34.0))
+        .px_4()
+        .gap(px(10.0))
+        // Opaque: rows scroll under it while it sticks.
+        .bg(colors::BACKGROUND)
+        .border_b_1()
+        .border_b_color(colors::BORDER)
+        .child(
+            text(move || row.get().header().0.to_string())
+                .text_size(px(13.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(colors::ACCENT),
+        )
+        .child(view().flex_1().h(px(1.0)).bg(colors::LINE))
+        .child(
+            text(move || row.get().header().1.to_string())
+                .text_size(px(13.0))
+                .text_color(colors::FAINT)
+                .tabular_nums(),
+        )
+}
+
+/// A person's row, of the cell's `row`.
+fn contact_person(row: Memo<ContactRow>) -> impl IntoElement {
+    let person = move || row.get().person();
+    view()
+        // A tap lights the row up and does nothing else.
+        .on_press(|_: &()| {})
+        .active(|s| s.bg(colors::RAISED))
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .pl_4()
+        .h(px(60.0))
+        .child(
+            view()
+                .size(px(38.0))
+                .rounded(px(19.0))
+                .bg(move || person().tone.tint())
+                .items_center()
+                .justify_center()
+                .child(
+                    text(move || {
+                        let p = person();
+                        p.first
+                            .chars()
+                            .take(1)
+                            .chain(p.last.chars().take(1))
+                            .collect::<String>()
+                    })
+                    .text_size(px(14.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(move || person().tone.color()),
+                ),
+        )
+        .child(
+            view()
+                .flex_1()
+                .self_stretch()
+                .justify_center()
+                .gap(px(2.0))
+                .pr_4()
+                .style_when(
+                    move || !person().end,
+                    |v| v.border_b_1().border_b_color(colors::LINE),
+                )
+                .child(
+                    text(move || format!("{} ", person().first))
+                        .text_size(px(15.0))
+                        .text_color(colors::TEXT)
+                        .child(text(move || person().last).font_weight(FontWeight::SEMIBOLD)),
+                )
+                .child(
+                    text(move || person().note)
+                        .number_of_lines(1)
+                        .text_size(px(13.0))
+                        .text_color(colors::MUTED),
+                ),
+        )
 }
 
 /// Section headers stick to the top until the next one pushes them out.
-#[derive(Debug, Default)]
-struct Contacts {
-    rows: Rc<Vec<ContactRow>>,
-}
-
-impl Component for Contacts {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        let initial = |name: &str| name.chars().next().unwrap_or(' ');
-        let mut letters: Vec<char> = PEOPLE.iter().map(|p| initial(p.0)).collect();
-        letters.dedup();
-        let mut rows = Vec::new();
-        for letter in letters {
-            let group: Vec<_> = PEOPLE.iter().filter(|p| initial(p.0) == letter).collect();
-            rows.push(ContactRow::Header {
-                letter,
-                count: group.len(),
-            });
-            for (i, &&(first, last, note)) in group.iter().enumerate() {
-                rows.push(ContactRow::Person {
-                    first,
-                    last,
-                    note,
-                    tone: TONES[(rows.len() + i) % (TONES.len() - 1)],
-                    end: i + 1 == group.len(),
-                });
-            }
-        }
-        self.rows = Rc::new(rows);
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let rows = self.rows.clone();
-        // The headers' rows stick.
-        let headers: Vec<usize> = (0..rows.len())
-            .filter(|&i| matches!(rows[i], ContactRow::Header { .. }))
-            .collect();
-        // A tap lights a person's row up and does nothing else.
-        let noop = cx.listener(|_: &mut Self, _: &(), _| {});
-        view().flex_1().child(
-            virtual_list(rows.len(), move |i, _| contact_row(&rows[i], noop.clone()))
-                .sticky_header_indices(headers)
-                .estimated_item_size(60.0)
-                .content_padding_bottom(24.0)
-                .flex_1(),
-        )
-    }
+#[component]
+fn Contacts() -> impl IntoElement {
+    let rows = Rc::new(contact_rows());
+    // The headers' rows stick.
+    let headers: Vec<usize> = (0..rows.len())
+        .filter(|&i| matches!(rows[i], ContactRow::Header { .. }))
+        .collect();
+    let count = rows.len();
+    view().flex_1().child(
+        virtual_list(count, move |at| {
+            // A cell is a header's or a person's as the row it shows is:
+            // the kind picks the branch, the rest is bound.
+            let rows = rows.clone();
+            let row = computed(move || rows[at.index()]);
+            let header = computed(move || matches!(row.get(), ContactRow::Header { .. }));
+            If::new(header, move || contact_header(row)).otherwise(move || contact_person(row))
+        })
+        .sticky_header_indices(headers)
+        .estimated_item_size(60.0)
+        .content_padding_bottom(24.0)
+        .flex_1(),
+    )
 }
 
 /// What the chat's messages say, in turn.
@@ -431,7 +435,7 @@ const LINES: [&str; 7] = [
 ];
 
 /// A message of the chat.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Message {
     id: u32,
     text: String,
@@ -441,78 +445,59 @@ struct Message {
 
 /// An inverted list: starts at the newest message, keeps its place as
 /// older ones load.
-#[derive(Debug, Default)]
-struct Chat {
-    /// Newest first.
-    messages: Rc<Vec<Message>>,
-    next: u32,
-    draft: String,
-    /// Pages of older messages loaded.
-    older: u32,
-}
-
-impl Chat {
-    fn message(&mut self, text: String, mine: bool) -> Message {
-        let id = self.next;
-        self.next += 1;
+#[component]
+fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
+    // The id of the next message.
+    let next = stored(0_u32);
+    let message = move |text: String, mine: bool| {
+        let id = next.with(|n| {
+            *n += 1;
+            *n - 1
+        });
         Message {
             id,
             text,
             mine,
             time: format!("{:02}:{:02}", 9 + (id / 60) % 12, id % 60),
         }
-    }
-
-    fn send(&mut self, cx: &mut Context<'_, Self>) {
-        if self.draft.trim().is_empty() {
+    };
+    // Newest first.
+    let messages = signal(
+        (0..30)
+            .map(|i| message(LINES[i % LINES.len()].to_owned(), i % 3 == 0))
+            .collect::<Vec<_>>(),
+    );
+    let draft = signal(String::new());
+    // Pages of older messages loaded.
+    let older = signal(0_u32);
+    let send = move || {
+        if draft.with_untracked(|d| d.trim().is_empty()) {
             return;
         }
-        cx.animate_layout(LayoutAnimation::SPRING);
-        let text = std::mem::take(&mut self.draft);
-        let message = self.message(text, true);
-        Rc::make_mut(&mut self.messages).insert(0, message);
-        cx.notify();
-    }
-}
-
-impl Component for Chat {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        let messages = (0..30)
-            .map(|i| self.message(LINES[i % LINES.len()].to_owned(), i % 3 == 0))
+        animate_layout(LayoutAnimation::SPRING);
+        let text = draft.get_untracked();
+        draft.set(String::new());
+        let sent = message(text, true);
+        messages.update(|m| m.insert(0, sent));
+    };
+    let load_older = move |_: &()| {
+        let count = messages.with_untracked(Vec::len);
+        older.update(|o| *o += 1);
+        let loaded: Vec<_> = (0..20)
+            .map(|i| message(format!("Older message {}", count + i + 1), i % 4 == 0))
             .collect();
-        self.messages = Rc::new(messages);
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let messages = self.messages.clone();
-        let bottom = if cx.keyboard_height() > 0.0 {
-            0.0
-        } else {
-            cx.insets().bottom
-        };
-        let load_older = cx.listener(|this: &mut Self, _, cx| {
-            let count = this.messages.len();
-            this.older += 1;
-            let older: Vec<_> = (0..20)
-                .map(|i| this.message(format!("Older message {}", count + i + 1), i % 4 == 0))
-                .collect();
-            Rc::make_mut(&mut this.messages).extend(older);
-            cx.notify();
-        });
-        let list = virtual_list(messages.len(), move |i, _| {
-            let m = &messages[i];
-            let mine = m.mine;
+        messages.update(|m| m.extend(loaded));
+    };
+    let list = virtual_list(
+        move || messages.with(Vec::len),
+        move |at| {
+            // A cell shows other messages as it is reused: what it shows is
+            // bound to its position.
+            let mine = computed(move || messages.with(|m| m[at.index()].mine));
+            let theirs = move || !mine.get();
             view()
-                .map(|v| {
-                    if mine {
-                        v.self_end().items_end()
-                    } else {
-                        v.self_start().items_start()
-                    }
-                })
+                .style_when(mine, |v| v.self_end().items_end())
+                .style_when(theirs, |v| v.self_start().items_start())
                 .max_w(relative(0.78))
                 .gap(px(3.0))
                 .child(
@@ -521,116 +506,122 @@ impl Component for Chat {
                         .py(px(9.0))
                         .rounded(px(18.0))
                         .border_curve(BorderCurve::Continuous)
-                        .rounded_br(px(if mine { 6.0 } else { 18.0 }))
-                        .rounded_bl(px(if mine { 18.0 } else { 6.0 }))
-                        .map(|v| {
-                            if mine {
-                                v.bg(colors::ACCENT_FILL).finish(Finish::Accent)
-                            } else {
-                                v.bg(colors::RAISED)
-                                    .finish(Finish::Raised)
-                                    .border_1()
-                                    .border_color(colors::BORDER)
-                            }
+                        .rounded_br(move || px(if mine.get() { 6.0 } else { 18.0 }))
+                        .rounded_bl(move || px(if mine.get() { 18.0 } else { 6.0 }))
+                        .style_when(mine, |v| v.bg(colors::ACCENT_FILL).finish(Finish::Accent))
+                        .style_when(theirs, |v| {
+                            v.bg(colors::RAISED)
+                                .finish(Finish::Raised)
+                                .border_1()
+                                .border_color(colors::BORDER)
                         })
                         .child(
-                            text(m.text.clone())
-                                .text_color(if mine {
-                                    colors::ON_ACCENT
-                                } else {
-                                    colors::TEXT
+                            text(move || messages.with(|m| m[at.index()].text.clone()))
+                                .text_color(move || {
+                                    if mine.get() {
+                                        colors::ON_ACCENT
+                                    } else {
+                                        colors::TEXT
+                                    }
                                 })
                                 .text_size(px(15.0)),
                         ),
                 )
                 .child(
-                    text(m.time.clone())
+                    text(move || messages.with(|m| m[at.index()].time.clone()))
                         .text_size(px(11.0))
                         .text_color(colors::FAINT)
                         .tabular_nums()
                         .px_1(),
                 )
-        })
-        .keys(self.messages.iter().map(|m| m.id))
-        .inverted()
-        .estimated_item_size(52.0)
-        .content_padding_x(16.0)
-        .content_padding_y(12.0)
-        .row_gap(6.0)
-        .flex_1()
-        .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-        .on_end_reached(load_older)
-        .end_reached_threshold(0.5);
-        let room = view()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_4()
-            .pb_2()
-            .child(view().size(px(8.0)).rounded(px(4.0)).bg(colors::UP))
-            .child(
-                text("Release room")
-                    .flex_1()
-                    .text_size(px(13.0))
-                    .text_color(colors::MUTED),
-            )
-            .child(
-                text(format!(
-                    "{} messages, {} older pages",
-                    self.messages.len(),
-                    self.older
-                ))
-                .text_size(px(13.0))
-                .text_color(colors::FAINT)
-                .tabular_nums(),
-            );
-        let bar = view()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_4()
-            .pt_2()
-            .pb(px(8.0 + bottom))
-            .bg(colors::SURFACE)
-            .border_t_1()
-            .border_t_color(colors::BORDER)
-            .child(
-                input()
-                    .value(self.draft.clone())
-                    .on_change_text(cx.listener(|this: &mut Self, text: &str, cx| {
-                        this.draft = text.to_owned();
-                        cx.notify();
-                    }))
-                    .on_submit_editing(cx.listener(|this: &mut Self, _: &str, cx| this.send(cx)))
-                    .blur_on_submit(false)
-                    .placeholder("Message")
-                    .placeholder_color(cx.color(colors::FAINT))
-                    .selection_color(cx.color(colors::ACCENT))
-                    .return_key_type(ReturnKeyType::Send)
-                    .flex_1()
-                    .h(px(44.0))
-                    .text_size(px(15.0))
-                    .text_color(colors::TEXT)
-                    .bg(colors::INSET)
-                    .finish(Finish::Inset)
-                    .border_1()
-                    .border_color(colors::BORDER)
-                    .rounded(px(22.0))
-                    .px_4(),
-            )
-            .child(RoundButton::new(
-                IconName::ArrowUp,
-                "Send",
-                cx.listener(|this: &mut Self, _, cx| this.send(cx)),
-            ));
-        view().flex_1().child(
-            KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+        },
+    )
+    .keys(move || messages.with(|m| m.iter().map(|m| m.id).collect::<Vec<_>>()))
+    .inverted()
+    .estimated_item_size(52.0)
+    .content_padding_x(16.0)
+    .content_padding_y(12.0)
+    .row_gap(6.0)
+    .flex_1()
+    .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+    .on_end_reached(load_older)
+    .end_reached_threshold(0.5);
+    let room = view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_4()
+        .pb_2()
+        .child(view().size(px(8.0)).rounded(px(4.0)).bg(colors::UP))
+        .child(
+            text("Release room")
                 .flex_1()
-                .child(room)
-                .child(list)
-                .child(bar),
+                .text_size(px(13.0))
+                .text_color(colors::MUTED),
         )
-    }
+        .child(
+            text(move || {
+                format!(
+                    "{} messages, {} older pages",
+                    messages.with(Vec::len),
+                    older.get()
+                )
+            })
+            .text_size(px(13.0))
+            .text_color(colors::FAINT)
+            .tabular_nums(),
+        );
+    // Clear of the home indicator unless the keyboard covers it.
+    let bottom = move || {
+        if keyboard_height() > 0.0 {
+            0.0
+        } else {
+            cx.insets().bottom
+        }
+    };
+    let bar = view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .px_4()
+        .pt_2()
+        .pb(move || px(8.0 + bottom()))
+        .bg(colors::SURFACE)
+        .border_t_1()
+        .border_t_color(colors::BORDER)
+        .child(
+            input()
+                .value(move || draft.get())
+                .on_change_text(move |text: &str| draft.set(text.to_owned()))
+                .on_submit_editing(move |_: &str| send())
+                .blur_on_submit(false)
+                .placeholder("Message")
+                .placeholder_color(|| color(colors::FAINT))
+                .selection_color(|| color(colors::ACCENT))
+                .return_key_type(ReturnKeyType::Send)
+                .flex_1()
+                .h(px(44.0))
+                .text_size(px(15.0))
+                .text_color(colors::TEXT)
+                .bg(colors::INSET)
+                .finish(Finish::Inset)
+                .border_1()
+                .border_color(colors::BORDER)
+                .rounded(px(22.0))
+                .px_4(),
+        )
+        .child(RoundButton::new(
+            IconName::ArrowUp,
+            "Send",
+            move |_: &()| send(),
+        ));
+    view().flex_1().child(
+        KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+            .flex_1()
+            .child(room)
+            .child(list)
+            .child(bar),
+    )
 }
 
 /// The ranges of the horizontal scroll view.
@@ -645,306 +636,309 @@ const RANGES: [&str; 7] = [
 ];
 
 /// An item of the empty list.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Item {
     n: usize,
     tone: Tone,
 }
 
-/// Horizontal scrolling, pull to refresh on a plain scroll view, and an
-/// empty list.
-#[derive(Debug)]
-struct More {
-    refreshing: bool,
-    refreshed: u32,
-    range: &'static str,
-    items: Rc<Vec<Item>>,
-    /// The refresh in progress (dropping it cancels it).
-    refresh: Option<Task<()>>,
-}
-
-impl Default for More {
-    fn default() -> Self {
-        Self {
-            refreshing: false,
-            refreshed: 0,
-            range: "This week",
-            items: Rc::default(),
-            refresh: None,
-        }
-    }
-}
-
-impl More {
-    fn refresh_section(&self) -> Section {
-        Section::new("Pull to refresh").child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .child(IconTile::new(IconName::ArrowDown).tint(if self.refreshing {
+/// The pull to refresh section: the spinner's state and the refreshes.
+fn refresh_section(refreshing: Signal<bool>, refreshed: Signal<u32>) -> Section {
+    Section::new("Pull to refresh").child(
+        view()
+            .flex_row()
+            .items_center()
+            .gap_3()
+            .child(IconTile::new(IconName::ArrowDown).tint(move || {
+                if refreshing.get() {
                     colors::ACCENT
                 } else {
                     colors::TEXT
-                }))
-                .child(
-                    view()
-                        .flex_1()
-                        .gap(px(2.0))
-                        .child(
-                            text(if self.refreshing {
+                }
+            }))
+            .child(
+                view()
+                    .flex_1()
+                    .gap(px(2.0))
+                    .child(
+                        text(move || {
+                            if refreshing.get() {
                                 "Refreshing…"
                             } else {
                                 "Pull the page down"
-                            })
-                            .text_size(px(15.0))
-                            .text_color(colors::TEXT),
-                        )
-                        .child(
-                            text("The system spinner on a plain scroll view")
-                                .text_size(px(13.0))
-                                .text_color(colors::MUTED),
-                        ),
-                )
-                .child(
-                    view()
-                        .items_end()
-                        .child(
-                            text(self.refreshed.to_string())
-                                .text_size(px(28.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(colors::TEXT)
-                                .tabular_nums(),
-                        )
-                        .child(
-                            text("refreshes")
-                                .text_size(px(12.0))
-                                .text_color(colors::FAINT),
-                        ),
-                ),
-        )
-    }
-
-    fn ranges(&self, cx: &RenderCx<'_, Self>) -> Section {
-        let chips = RANGES.map(|label| {
-            let selected = self.range == label;
-            press_with(
-                PressProps {
-                    hit_slop: Some(4.0),
-                    role: PressRole::Tab,
-                    selected,
-                    label: Some(label.into()),
-                    ..PressProps::default()
-                },
-                cx.listener(move |this: &mut Self, _, cx| {
-                    this.range = label;
-                    cx.notify();
-                }),
+                            }
+                        })
+                        .text_size(px(15.0))
+                        .text_color(colors::TEXT),
+                    )
+                    .child(
+                        text("The system spinner on a plain scroll view")
+                            .text_size(px(13.0))
+                            .text_color(colors::MUTED),
+                    ),
             )
             .child(
                 view()
-                    .h(px(36.0))
-                    .px(px(14.0))
-                    .rounded(px(18.0))
-                    .justify_center()
-                    .map(|v| {
-                        if selected {
-                            v.bg(colors::LIGHT).finish(Finish::Light)
-                        } else {
-                            v.bg(colors::RAISED)
-                                .finish(Finish::Raised)
-                                .border_1()
-                                .border_color(colors::BORDER)
-                        }
-                    })
+                    .items_end()
                     .child(
-                        text(label)
-                            .text_size(px(13.0))
+                        text(move || refreshed.get().to_string())
+                            .text_size(px(28.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if selected {
+                            .text_color(colors::TEXT)
+                            .tabular_nums(),
+                    )
+                    .child(
+                        text("refreshes")
+                            .text_size(px(12.0))
+                            .text_color(colors::FAINT),
+                    ),
+            ),
+    )
+}
+
+/// The horizontal scroll view of range chips, `range` the selected one.
+fn ranges(range: Signal<&'static str>) -> Section {
+    let chips = RANGES.map(|label| {
+        let selected = computed(move || range.get() == label);
+        press_with(
+            PressProps {
+                hit_slop: Some(4.0),
+                role: PressRole::Tab.into(),
+                selected: selected.into(),
+                label: Some(label.into()).into(),
+                ..PressProps::default()
+            },
+            move |_: &()| range.set(label),
+        )
+        .child(
+            view()
+                .h(px(36.0))
+                .px(px(14.0))
+                .rounded(px(18.0))
+                .justify_center()
+                .style_when(selected, |v| v.bg(colors::LIGHT).finish(Finish::Light))
+                .style_when(
+                    move || !selected.get(),
+                    |v| {
+                        v.bg(colors::RAISED)
+                            .finish(Finish::Raised)
+                            .border_1()
+                            .border_color(colors::BORDER)
+                    },
+                )
+                .child(
+                    text(label)
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(move || {
+                            if selected.get() {
                                 colors::ON_LIGHT
                             } else {
                                 colors::MUTED
-                            }),
+                            }
+                        }),
+                ),
+        )
+    });
+    Section::new("Horizontal scroll view")
+        .note(move || range.get())
+        .child(
+            view().mx(px(-14.0)).child(
+                scroll()
+                    .horizontal()
+                    .shows_indicator(false)
+                    .child(view().flex_row().gap_2().px(px(14.0)).children(chips)),
+            ),
+        )
+}
+
+/// A thousand recycled cards in a horizontal list.
+fn cards() -> Section {
+    // A cell shows other cards as it is reused: what differs between cards
+    // is bound to its position.
+    let cards = virtual_list(1000, |at| {
+        let tone = move || TONES[at.index() % (TONES.len() - 1)];
+        let load = move || ((at.index() * 37) % 100) as f32 / 100.0;
+        view()
+            .w(px(120.0))
+            .h(px(124.0))
+            .rounded(px(radius::INSET))
+            .border_curve(BorderCurve::Continuous)
+            .bg(colors::RAISED)
+            .finish(Finish::Raised)
+            .border_1()
+            .border_color(colors::BORDER)
+            .p_3()
+            .justify_between()
+            .child(
+                text(move || format!("Card {}", at.index() + 1))
+                    .text_size(px(12.0))
+                    .text_color(colors::MUTED)
+                    .tabular_nums(),
+            )
+            .child(
+                text(move || ((load() * 100.0).round() as u32).to_string())
+                    .text_size(px(26.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(colors::TEXT)
+                    .tabular_nums()
+                    .child(
+                        text(" %")
+                            .text_size(px(15.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(move || tone().color()),
                     ),
             )
-        });
-        Section::new("Horizontal scroll view")
-            .note(self.range)
-            .child(
-                view().mx(px(-14.0)).child(
-                    scroll()
-                        .horizontal()
-                        .shows_indicator(false)
-                        .child(view().flex_row().gap_2().px(px(14.0)).children(chips)),
-                ),
-            )
-    }
+            .child(Meter::new(load).tone(tone))
+    })
+    .horizontal()
+    .estimated_item_size(130.0)
+    .shows_indicator(false)
+    .content_padding_x(14.0)
+    .row_gap(10.0)
+    .h(px(124.0));
+    Section::new("Horizontal list")
+        .note("1,000 recycled cards")
+        .child(view().mx(px(-14.0)).child(cards))
+}
 
-    fn cards(&self) -> Section {
-        let cards = virtual_list(1000, |i, _| {
-            let tone = TONES[i % (TONES.len() - 1)];
-            let load = ((i * 37) % 100) as f32 / 100.0;
-            view()
-                .w(px(120.0))
-                .h(px(124.0))
-                .rounded(px(radius::INSET))
-                .border_curve(BorderCurve::Continuous)
-                .bg(colors::RAISED)
-                .finish(Finish::Raised)
-                .border_1()
-                .border_color(colors::BORDER)
-                .p_3()
-                .justify_between()
-                .child(
-                    text(format!("Card {}", i + 1))
-                        .text_size(px(12.0))
-                        .text_color(colors::MUTED)
-                        .tabular_nums(),
-                )
-                .child(
-                    text(((load * 100.0).round() as u32).to_string())
-                        .text_size(px(26.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(colors::TEXT)
-                        .tabular_nums()
-                        .child(
-                            text(" %")
-                                .text_size(px(15.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(tone.color()),
-                        ),
-                )
-                .child(Meter::new(load).tone(tone))
-        })
-        .horizontal()
-        .estimated_item_size(130.0)
-        .shows_indicator(false)
-        .content_padding_x(14.0)
-        .row_gap(10.0)
-        .h(px(124.0));
-        Section::new("Horizontal list")
-            .note("1,000 recycled cards")
-            .child(view().mx(px(-14.0)).child(cards))
-    }
-
-    fn empty_list(&self, cx: &RenderCx<'_, Self>) -> Section {
-        // Changes to the list animate.
-        let add = cx.listener(|this: &mut Self, _, cx| {
-            cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-            let items = Rc::make_mut(&mut this.items);
+/// A list that starts empty, with separators; rows are added and cleared.
+fn empty_list() -> Section {
+    let items = signal(Rc::new(Vec::<Item>::new()));
+    let count = computed(move || items.with(|i| i.len()));
+    // Changes to the list animate.
+    let add = move |_: &()| {
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        items.update(|items| {
+            let items = Rc::make_mut(items);
             items.push(Item {
                 n: items.len() + 1,
                 tone: TONES[items.len() % (TONES.len() - 1)],
             });
-            cx.notify();
         });
-        let clear = cx.listener(|this: &mut Self, _, cx| {
-            cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-            this.items = Rc::default();
-            cx.notify();
-        });
-        let items = self.items.clone();
-        let list = virtual_list(items.len(), move |i, _| {
-            let item = &items[i];
-            view()
-                .h(px(48.0))
-                .flex_row()
-                .items_center()
-                .gap(px(10.0))
-                .px(px(14.0))
-                .child(view().size(px(8.0)).rounded(px(2.5)).bg(item.tone.color()))
-                .child(
-                    text(format!("Item {}", item.n))
-                        .flex_1()
-                        .text_size(px(15.0))
-                        .text_color(colors::TEXT),
-                )
-                .child(Badge::new(tone_name(item.tone)).tone(item.tone))
-        })
-        .estimated_item_size(48.0)
-        .empty(
-            view()
-                .items_center()
-                .justify_center()
-                .gap(px(10.0))
-                .h(px(194.0))
-                .child(IconTile::new(IconName::Lists).tint(colors::FAINT))
-                .child(
-                    text("Nothing here yet: tap Add")
-                        .text_size(px(13.0))
-                        .text_color(colors::MUTED),
-                ),
-        )
-        .separator(|| view().h(px(1.0)).ml(px(14.0)).bg(colors::LINE))
-        .h(px(196.0))
-        .rounded(px(radius::CONTROL))
-        .bg(colors::SURFACE)
-        .finish(Finish::Card)
-        .border_1()
-        .border_color(colors::LINE);
-        let mono = |name: &'static str| text(name).font_family(MONO).text_color(colors::TEXT);
-        Section::new("An empty list")
-            .note(format!("{} items", self.items.len()))
+    };
+    let clear = move |_: &()| {
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        items.set(Rc::default());
+    };
+    let list = virtual_list(count, move |at| {
+        // The item this cell shows: a cell shows another item through its
+        // bindings.
+        let item = computed(move || items.with(|i| i.get(at.index()).cloned()));
+        let tone = move || item.with(|i| i.as_ref().map_or(Tone::Neutral, |i| i.tone));
+        view()
+            .h(px(48.0))
+            .flex_row()
+            .items_center()
+            .gap(px(10.0))
+            .px(px(14.0))
             .child(
                 view()
-                    .flex_row()
-                    .gap_2()
-                    .child(
-                        view()
-                            .flex_1()
-                            .child(Button::new("Add", add).icon(IconName::Plus)),
-                    )
-                    .child(
-                        view().flex_1().child(
-                            Button::new("Clear", clear)
-                                .variant(ButtonVariant::Secondary)
-                                .disabled(self.items.is_empty()),
-                        ),
-                    ),
+                    .size(px(8.0))
+                    .rounded(px(2.5))
+                    .bg(move || tone().color()),
             )
-            .child(list)
             .child(
-                text("")
-                    .text_size(px(13.0))
-                    .text_color(colors::MUTED)
-                    .child(mono("ListEmptyComponent"))
-                    .child(" while empty, separators between rows; changes animate with ")
-                    .child(mono("LayoutAnimation"))
-                    .child("."),
-            )
-    }
-}
-
-impl Component for More {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view().flex_1().child(
-            scroll()
+                text(move || {
+                    item.with(|i| {
+                        i.as_ref()
+                            .map(|i| format!("Item {}", i.n))
+                            .unwrap_or_default()
+                    })
+                })
                 .flex_1()
-                .refreshing(self.refreshing)
-                .on_refresh(cx.listener(|this: &mut Self, _, cx| {
-                    this.refreshing = true;
-                    cx.notify();
-                    this.refresh = Some(cx.set_timeout(Duration::from_secs(1), |this, cx| {
-                        this.refreshed += 1;
-                        this.refreshing = false;
-                        cx.notify();
-                    }));
-                }))
+                .text_size(px(15.0))
+                .text_color(colors::TEXT),
+            )
+            .child(Badge::new(move || tone_name(tone())).tone(tone))
+    })
+    .estimated_item_size(48.0)
+    .empty(
+        view()
+            .items_center()
+            .justify_center()
+            .gap(px(10.0))
+            .h(px(194.0))
+            .child(IconTile::new(IconName::Lists).tint(colors::FAINT))
+            .child(
+                text("Nothing here yet: tap Add")
+                    .text_size(px(13.0))
+                    .text_color(colors::MUTED),
+            ),
+    )
+    .separator(|| view().h(px(1.0)).ml(px(14.0)).bg(colors::LINE))
+    .h(px(196.0))
+    .rounded(px(radius::CONTROL))
+    .bg(colors::SURFACE)
+    .finish(Finish::Card)
+    .border_1()
+    .border_color(colors::LINE);
+    let mono = |name: &'static str| text(name).font_family(MONO).text_color(colors::TEXT);
+    Section::new("An empty list")
+        .note(move || format!("{} items", count.get()))
+        .child(
+            view()
+                .flex_row()
+                .gap_2()
                 .child(
                     view()
-                        .p_4()
-                        .gap_4()
-                        .child(self.refresh_section())
-                        .child(self.ranges(cx))
-                        .child(self.cards())
-                        .child(self.empty_list(cx)),
+                        .flex_1()
+                        .child(Button::new("Add", add).icon(IconName::Plus)),
+                )
+                .child(
+                    view().flex_1().child(
+                        Button::new("Clear", clear)
+                            .variant(ButtonVariant::Secondary)
+                            .disabled(Prop::bind(move || count.get() == 0)),
+                    ),
                 ),
         )
-    }
+        .child(list)
+        .child(
+            text("")
+                .text_size(px(13.0))
+                .text_color(colors::MUTED)
+                .child(mono("ListEmptyComponent"))
+                .child(" while empty, separators between rows; changes animate with ")
+                .child(mono("LayoutAnimation"))
+                .child("."),
+        )
+}
+
+/// Horizontal scrolling, pull to refresh on a plain scroll view, and an
+/// empty list.
+#[component]
+fn More() -> impl IntoElement {
+    let refreshing = signal(false);
+    let refreshed = signal(0_u32);
+    let range = signal("This week");
+    // The refresh in progress.
+    let refresh = stored(None::<Spawned<()>>);
+    let on_refresh = move |_: &()| {
+        refreshing.set(true);
+        let task = set_timeout(Duration::from_secs(1), move || {
+            refreshed.update(|r| *r += 1);
+            refreshing.set(false);
+        });
+        if let Some(old) = refresh.replace(Some(task)) {
+            old.cancel();
+        }
+    };
+    view().flex_1().child(
+        scroll()
+            .flex_1()
+            .refreshing(refreshing)
+            .on_refresh(on_refresh)
+            .child(
+                view()
+                    .p_4()
+                    .gap_4()
+                    .child(refresh_section(refreshing, refreshed))
+                    .child(ranges(range))
+                    .child(cards())
+                    .child(empty_list()),
+            ),
+    )
 }
 
 /// The demo's tabs.
@@ -965,42 +959,38 @@ const TABS: [(Tab, &str); 4] = [
 ];
 
 /// The demo's page: the tabs and the selected one's list.
-#[derive(Debug, Default)]
-pub(crate) struct Lists {
-    tab: Tab,
-}
-
-impl Component for Lists {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let selected = TABS.iter().position(|t| t.0 == self.tab).unwrap_or(0);
-        let (key, content) = match self.tab {
-            Tab::Grid => ("grid", Grid::element(()).into_element()),
-            Tab::Sections => ("sections", Contacts::element(()).into_element()),
-            Tab::Chat => ("chat", Chat::element(()).into_element()),
-            Tab::More => ("more", More::element(()).into_element()),
-        };
-        view()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .child(view().px_4().pt_2().pb_2().child(
-                segmented(TABS.map(|t| Segment::new(t.1)), selected as u32).on_event(cx.listener(
-                    |this: &mut Self, e: &SegmentedEvent, cx| {
-                        let SegmentedEvent::Change(i) = *e;
-                        this.tab = TABS[i as usize].0;
-                        cx.notify();
-                    },
-                )),
-            ))
-            .child(
-                Appear::element(AppearProps {
-                    flex: true,
-                    ..AppearProps::default()
-                })
-                .key(key)
-                .child(content),
-            )
-    }
+#[component]
+pub(crate) fn Lists() -> impl IntoElement {
+    let tab = signal(Tab::default());
+    view()
+        .flex_1()
+        .bg(colors::BACKGROUND)
+        .child(
+            view().px_4().pt_2().pb_2().child(
+                segmented(
+                    TABS.map(|t| Segment::new(t.1)),
+                    Prop::bind(move || {
+                        TABS.iter().position(|t| t.0 == tab.get()).unwrap_or(0) as u32
+                    }),
+                )
+                .on_event(move |e: &SegmentedEvent| {
+                    let SegmentedEvent::Change(i) = *e;
+                    tab.set(TABS[i as usize].0);
+                }),
+            ),
+        )
+        // A tab's list is made when it is chosen, and comes in.
+        .child(dynamic(move || {
+            let content = match tab.get() {
+                Tab::Grid => Grid::element(()).into_element(),
+                Tab::Sections => Contacts::element(()).into_element(),
+                Tab::Chat => Chat::element(()).into_element(),
+                Tab::More => More::element(()).into_element(),
+            };
+            Appear::element(AppearProps {
+                flex: true,
+                ..AppearProps::default()
+            })
+            .child(content)
+        }))
 }

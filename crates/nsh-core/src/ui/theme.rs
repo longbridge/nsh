@@ -143,7 +143,7 @@ theme_colors! {
     warning_foreground = "warning.foreground",
 }
 
-/// The theme components render with ([`super::RenderCx::theme`]). Derefs
+/// The theme components are drawn with ([`super::ambient::theme`]). Derefs
 /// to its colors: `theme.primary`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {

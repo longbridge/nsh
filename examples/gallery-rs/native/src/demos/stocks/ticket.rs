@@ -5,7 +5,7 @@
 
 use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
-    ui::{AnyElement, PropEnum, prelude::*},
+    ui::{PropEnum, prelude::*},
 };
 
 use super::market::{grouped, price};
@@ -47,24 +47,16 @@ const EXPAND: LayoutAnimation = LayoutAnimation {
     delete: Some(LayoutTransition::new(LayoutCurve::EaseInEaseOut, 380.0)),
 };
 
-/// The ticket: each opening starts from the last price, not reviewing.
-#[derive(Debug, Default)]
-pub(crate) struct Ticket {
-    limit: f64,
-    quantity: f64,
-    review: bool,
-}
-
 /// The props of [`Ticket`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub(crate) struct TicketProps {
-    /// The sheet is open.
-    pub(crate) open: bool,
     pub(crate) code: SharedString,
     pub(crate) tick: f64,
     /// The last price, live.
-    pub(crate) last: f64,
-    pub(crate) side: Side,
+    #[prop(default)]
+    pub(crate) last: Prop<f64>,
+    #[prop(default)]
+    pub(crate) side: Prop<Side>,
 }
 
 /// What a [`Ticket`] reports.
@@ -80,19 +72,11 @@ pub(crate) enum TicketEvent {
     },
 }
 
-impl Ticket {
-    fn expand(&mut self, open: bool, cx: &mut Context<'_, Self>) {
-        cx.animate_layout(EXPAND);
-        self.review = open;
-        cx.notify();
-    }
-}
-
 /// A square 44 pt stepper button.
-fn step(plus: bool, label: &'static str, on_press: Listener<()>) -> impl IntoElement {
+fn step(plus: bool, label: &'static str, on_press: impl Into<Listener<()>>) -> impl IntoElement {
     press_with(
         PressProps {
-            label: Some(label.into()),
+            label: Some(label.into()).into(),
             ..PressProps::default()
         },
         on_press,
@@ -122,7 +106,7 @@ fn step(plus: bool, label: &'static str, on_press: Listener<()>) -> impl IntoEle
 }
 
 /// A line of the review: a label and a value.
-fn line(label: &'static str, value: String, strong: bool) -> View {
+fn line(label: &'static str, value: impl IntoReactive<SharedString>, strong: bool) -> View {
     view()
         .flex_row()
         .items_baseline()
@@ -147,7 +131,7 @@ fn line(label: &'static str, value: String, strong: bool) -> View {
 }
 
 /// A caption row: a muted label, a value on the right.
-fn caption(label: String) -> View {
+fn caption(label: impl IntoReactive<SharedString>) -> View {
     view().flex_row().items_baseline().child(
         text(label)
             .flex_1()
@@ -156,94 +140,102 @@ fn caption(label: String) -> View {
     )
 }
 
-impl Component for Ticket {
-    type Props = TicketProps;
-    type Event = TicketEvent;
-
-    fn setup(&mut self, props: &TicketProps, _: &mut Context<'_, Self>) {
-        self.limit = props.last;
-        self.quantity = 500.0;
-        self.review = false;
-    }
-
-    fn props_changed(&mut self, old: &TicketProps, new: &TicketProps, _: &mut Context<'_, Self>) {
-        if new.open && !old.open {
-            self.limit = new.last;
-            self.review = false;
-        }
-    }
-
-    fn render(&self, props: &TicketProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let decimals = super::market::decimals(props.tick);
-        let p = |v: f64| price(v, decimals);
-        let cost = self.limit * self.quantity;
-        let fee = (cost * 0.0003).max(1.0);
-        let buy = props.side == Side::Buy;
-        let tone = if buy { colors::UP } else { colors::DOWN };
-        let verb = props.side.verb();
-        let nudge = |steps: f64| {
-            cx.listener(move |this: &mut Self, _: &(), cx| {
-                let tick = cx.props().tick;
-                this.limit = tick.max(((this.limit / tick).round() + steps) * tick);
-                cx.notify();
-            })
-        };
-        let chips: Vec<AnyElement> = QUANTITIES
-            .iter()
-            .map(|&q| {
-                let selected = self.quantity == q;
+/// The ticket: made when its sheet opens, it starts from the last price,
+/// not reviewing.
+#[component]
+pub(crate) fn Ticket(props: TicketProps, cx: Scope<TicketEvent>) -> impl IntoElement {
+    let (code, tick) = (props.code, props.tick);
+    let decimals = super::market::decimals(tick);
+    let p = move |v: f64| price(v, decimals);
+    let limit = signal(props.last.get_untracked());
+    let quantity = signal(500.0_f64);
+    let review = signal(false);
+    let expand = move |open: bool| {
+        animate_layout(EXPAND);
+        review.set(open);
+    };
+    let cost = computed(move || limit.get() * quantity.get());
+    let fee = computed(move || (cost.get() * 0.0003).max(1.0));
+    let buy = computed(move || props.side.get() == Side::Buy);
+    let tone = move || if buy.get() { colors::UP } else { colors::DOWN };
+    let verb = move || props.side.get().verb();
+    let nudge = move |steps: f64| {
+        move |_: &()| limit.update(|l| *l = tick.max(((*l / tick).round() + steps) * tick))
+    };
+    let chips = QUANTITIES.map(|q| {
+        let selected = computed(move || quantity.get() == q);
+        view().flex_1().child(
+            press_with(
+                PressProps {
+                    label: Some(format!("{q} shares").into()).into(),
+                    selected: selected.into(),
+                    ..PressProps::default()
+                },
+                move |_: &()| quantity.set(q),
+            )
+            .child(
                 view()
-                    .flex_1()
+                    .h(px(44.0))
+                    .rounded(px(radius::CONTROL))
+                    .items_center()
+                    .justify_center()
+                    .bg(move || {
+                        if selected.get() {
+                            tints::ACCENT
+                        } else {
+                            colors::RAISED
+                        }
+                    })
+                    .border_1()
+                    .border_color(move || {
+                        if selected.get() {
+                            colors::ACCENT
+                        } else {
+                            colors::BORDER
+                        }
+                    })
                     .child(
-                        press_with(
-                            PressProps {
-                                label: Some(format!("{q} shares").into()),
-                                selected,
-                                ..PressProps::default()
-                            },
-                            cx.listener(move |this: &mut Self, _: &(), cx| {
-                                this.quantity = q;
-                                cx.notify();
-                            }),
-                        )
-                        .child(
-                            view()
-                                .h(px(44.0))
-                                .rounded(px(radius::CONTROL))
-                                .items_center()
-                                .justify_center()
-                                .bg(if selected {
-                                    tints::ACCENT
-                                } else {
-                                    colors::RAISED
-                                })
-                                .border_1()
-                                .border_color(if selected {
-                                    colors::ACCENT
-                                } else {
-                                    colors::BORDER
-                                })
-                                .child(
-                                    text(if q >= 1000.0 {
-                                        format!("{}K", q / 1000.0)
-                                    } else {
-                                        format!("{q}")
-                                    })
-                                    .text_size(px(14.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .tabular_nums()
-                                    .text_color(if selected {
-                                        colors::ACCENT
-                                    } else {
-                                        colors::TEXT
-                                    }),
-                                ),
-                        ),
-                    )
-                    .into_element()
-            })
-            .collect();
-        let review = if self.review {
+                        text(if q >= 1000.0 {
+                            format!("{}K", q / 1000.0)
+                        } else {
+                            format!("{q}")
+                        })
+                        .text_size(px(14.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .tabular_nums()
+                        .text_color(move || {
+                            if selected.get() {
+                                colors::ACCENT
+                            } else {
+                                colors::TEXT
+                            }
+                        }),
+                    ),
+            ),
+        )
+    });
+    let place = {
+        let code = code.clone();
+        move |_: &()| {
+            let side = props.side.get_untracked();
+            cx.emit(TicketEvent::Placed {
+                title: format!("{} order placed", side.verb()).into(),
+                detail: format!(
+                    "{} {} at {} · simulated",
+                    grouped(quantity.get_untracked(), 0),
+                    code,
+                    p(limit.get_untracked())
+                )
+                .into(),
+                side,
+            });
+            expand(false);
+        }
+    };
+    let reviewing = {
+        let code = code.clone();
+        move || {
+            let (code, place) = (code.clone(), place.clone());
             view()
                 .gap_3()
                 .p(px(14.0))
@@ -251,18 +243,16 @@ impl Component for Ticket {
                 .border_curve(BorderCurve::Continuous)
                 .border_1()
                 .border_color(tone)
-                .bg(if buy { tints::UP } else { tints::DOWN })
+                .bg(move || if buy.get() { tints::UP } else { tints::DOWN })
                 .child(
                     view()
                         .flex_row()
                         .items_center()
                         .gap_2()
                         .child(
-                            text(format!(
-                                "{verb} {} {}",
-                                grouped(self.quantity, 0),
-                                props.code
-                            ))
+                            text(move || {
+                                format!("{} {} {}", verb(), grouped(quantity.get(), 0), code)
+                            })
                             .flex_1()
                             .text_size(px(15.0))
                             .font_weight(FontWeight::SEMIBOLD)
@@ -278,11 +268,14 @@ impl Component for Ticket {
                 .child(
                     view()
                         .gap(px(2.0))
-                        .child(line("Limit", p(self.limit), false))
-                        .child(line("Fees (est.)", grouped(fee, 2), false))
+                        .child(line("Limit", move || p(limit.get()), false))
+                        .child(line("Fees (est.)", move || grouped(fee.get(), 2), false))
                         .child(line(
                             "Total",
-                            grouped(if buy { cost + fee } else { cost - fee }, 2),
+                            move || {
+                                let (cost, fee) = (cost.get(), fee.get());
+                                grouped(if buy.get() { cost + fee } else { cost - fee }, 2)
+                            },
                             true,
                         )),
                 )
@@ -291,182 +284,166 @@ impl Component for Ticket {
                         .flex_row()
                         .gap(px(10.0))
                         .child(
-                            Button::new(
-                                "Edit",
-                                cx.listener(|this: &mut Self, _: &(), cx| this.expand(false, cx)),
-                            )
-                            .variant(ButtonVariant::Secondary)
-                            .flex_1(),
+                            Button::new("Edit", move |_: &()| expand(false))
+                                .variant(ButtonVariant::Secondary)
+                                .flex_1(),
                         )
                         .child(
                             Button::new(
-                                format!("Place {} order", verb.to_lowercase()),
-                                cx.listener(|this: &mut Self, _: &(), cx| {
-                                    let props = cx.props().clone();
-                                    let decimals = super::market::decimals(props.tick);
-                                    let verb = props.side.verb();
-                                    cx.emit(TicketEvent::Placed {
-                                        title: format!("{verb} order placed").into(),
-                                        detail: format!(
-                                            "{} {} at {} · simulated",
-                                            grouped(this.quantity, 0),
-                                            props.code,
-                                            price(this.limit, decimals)
-                                        )
-                                        .into(),
-                                        side: props.side,
-                                    });
-                                    this.expand(false, cx);
-                                }),
+                                move || format!("Place {} order", verb().to_lowercase()),
+                                place,
                             )
                             .flex_1()
                             .flex_grow(2.0),
                         ),
                 )
-                .into_element()
-        } else {
-            Button::new(
-                format!("Review {}", verb.to_lowercase()),
-                cx.listener(|this: &mut Self, _: &(), cx| this.expand(true, cx)),
-            )
-            .into_element()
-        };
-        view()
-            .gap_4()
-            .pt_1()
-            .child(
-                view()
-                    .flex_row()
-                    .items_baseline()
-                    .gap_2()
-                    .child(
-                        text(format!("{verb} {}", props.code))
-                            .flex_1()
-                            .text_size(px(20.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors::TEXT),
-                    )
-                    .child(
-                        text("simulated · nothing is sent")
-                            .text_size(px(12.0))
-                            .text_color(colors::FAINT)
-                            .tabular_nums(),
-                    ),
-            )
-            .child(
-                Segmented::element(SegmentedProps {
-                    options: vec![Segment::new("Buy"), Segment::new("Sell")],
-                    selected: u32::from(!buy),
-                    ..SegmentedProps::default()
-                })
-                .on_event(cx.listener(|_: &mut Self, e: &SegmentedEvent, cx| {
-                    let SegmentedEvent::Change(i) = e;
-                    cx.emit(TicketEvent::Side(if *i == 0 {
-                        Side::Buy
-                    } else {
-                        Side::Sell
-                    }));
-                })),
-            )
-            .child(
-                view()
-                    .gap_2()
-                    .child(
-                        caption("Limit price".into()).child(
-                            text(format!("use last {}", p(props.last)))
-                                .on_press(cx.listener(|this: &mut Self, _, cx| {
-                                    this.limit = cx.props().last;
-                                    cx.notify();
-                                }))
-                                .role(AccessibilityRole::Button)
-                                .hit_slop(EdgeInsets::all(10.0))
-                                .text_size(px(13.0))
-                                .text_color(colors::ACCENT)
-                                .tabular_nums(),
-                        ),
-                    )
-                    .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(10.0))
-                            .child(step(false, "Lower the price", nudge(-1.0)))
-                            .child(
-                                view()
-                                    .flex_1()
-                                    .h(px(44.0))
-                                    .rounded(px(radius::CONTROL))
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(colors::INSET)
-                                    .border_1()
-                                    .border_color(colors::BORDER)
-                                    .child(
-                                        text(p(self.limit))
-                                            .text_size(px(20.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(colors::TEXT)
-                                            .tabular_nums(),
-                                    ),
-                            )
-                            .child(step(true, "Raise the price", nudge(1.0))),
-                    ),
-            )
-            .child(
-                view()
-                    .gap_2()
-                    .child(
-                        caption("Quantity".into()).child(
-                            text(format!("{} sh", grouped(self.quantity, 0)))
-                                .text_size(px(13.0))
-                                .text_color(colors::FAINT)
-                                .tabular_nums(),
-                        ),
-                    )
-                    .child(view().flex_row().gap_2().children(chips)),
-            )
-            .child(
-                view()
-                    .gap(px(6.0))
-                    .pt(px(2.0))
-                    .child(
-                        caption(format!(
-                            "Estimated {}",
-                            if buy { "cost" } else { "proceeds" }
-                        ))
-                        .child(
-                            text(grouped(cost, 2))
-                                .text_size(px(22.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(colors::TEXT)
-                                .tabular_nums(),
-                        ),
-                    )
-                    .child(
-                        view()
-                            .h(px(6.0))
-                            .rounded(px(3.0))
-                            .bg(colors::RAISED)
-                            .overflow_hidden()
-                            .child(
-                                view()
-                                    .w(relative((cost / POWER).min(1.0) as f32))
-                                    .h(px(6.0))
-                                    .rounded(px(3.0))
-                                    .bg(if cost > POWER { colors::DANGER } else { tone }),
-                            ),
-                    )
-                    .child(
-                        text(format!(
-                            "{:.1}% of {} buying power",
-                            cost / POWER * 100.0,
-                            grouped(POWER, 0)
-                        ))
+        }
+    };
+    view()
+        .gap_4()
+        .pt_1()
+        .child(
+            view()
+                .flex_row()
+                .items_baseline()
+                .gap_2()
+                .child(
+                    text(move || format!("{} {code}", verb()))
+                        .flex_1()
+                        .text_size(px(20.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors::TEXT),
+                )
+                .child(
+                    text("simulated · nothing is sent")
                         .text_size(px(12.0))
                         .text_color(colors::FAINT)
                         .tabular_nums(),
+                ),
+        )
+        .child(
+            Segmented::element(SegmentedProps {
+                options: vec![Segment::new("Buy"), Segment::new("Sell")].into(),
+                selected: Prop::bind(move || u32::from(!buy.get())),
+                ..SegmentedProps::default()
+            })
+            .on_event(move |e: &SegmentedEvent| {
+                let SegmentedEvent::Change(i) = e;
+                cx.emit(TicketEvent::Side(if *i == 0 {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                }));
+            }),
+        )
+        .child(
+            view()
+                .gap_2()
+                .child(
+                    caption("Limit price").child(
+                        text(move || format!("use last {}", p(props.last.get())))
+                            .on_press(move |_: &()| limit.set(props.last.get_untracked()))
+                            .role(AccessibilityRole::Button)
+                            .hit_slop(EdgeInsets::all(10.0))
+                            .text_size(px(13.0))
+                            .text_color(colors::ACCENT)
+                            .tabular_nums(),
                     ),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(step(false, "Lower the price", nudge(-1.0)))
+                        .child(
+                            view()
+                                .flex_1()
+                                .h(px(44.0))
+                                .rounded(px(radius::CONTROL))
+                                .items_center()
+                                .justify_center()
+                                .bg(colors::INSET)
+                                .border_1()
+                                .border_color(colors::BORDER)
+                                .child(
+                                    text(move || p(limit.get()))
+                                        .text_size(px(20.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(colors::TEXT)
+                                        .tabular_nums(),
+                                ),
+                        )
+                        .child(step(true, "Raise the price", nudge(1.0))),
+                ),
+        )
+        .child(
+            view()
+                .gap_2()
+                .child(
+                    caption("Quantity").child(
+                        text(move || format!("{} sh", grouped(quantity.get(), 0)))
+                            .text_size(px(13.0))
+                            .text_color(colors::FAINT)
+                            .tabular_nums(),
+                    ),
+                )
+                .child(view().flex_row().gap_2().children(chips)),
+        )
+        .child(
+            view()
+                .gap(px(6.0))
+                .pt(px(2.0))
+                .child(
+                    caption(move || {
+                        format!("Estimated {}", if buy.get() { "cost" } else { "proceeds" })
+                    })
+                    .child(
+                        text(move || grouped(cost.get(), 2))
+                            .text_size(px(22.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors::TEXT)
+                            .tabular_nums(),
+                    ),
+                )
+                .child(
+                    view()
+                        .h(px(6.0))
+                        .rounded(px(3.0))
+                        .bg(colors::RAISED)
+                        .overflow_hidden()
+                        .child(
+                            view()
+                                .w(move || relative((cost.get() / POWER).min(1.0) as f32))
+                                .h(px(6.0))
+                                .rounded(px(3.0))
+                                .bg(move || {
+                                    if cost.get() > POWER {
+                                        colors::DANGER
+                                    } else {
+                                        tone()
+                                    }
+                                }),
+                        ),
+                )
+                .child(
+                    text(move || {
+                        format!(
+                            "{:.1}% of {} buying power",
+                            cost.get() / POWER * 100.0,
+                            grouped(POWER, 0)
+                        )
+                    })
+                    .text_size(px(12.0))
+                    .text_color(colors::FAINT)
+                    .tabular_nums(),
+                ),
+        )
+        // Reviewing expands the ticket (its layout springs).
+        .child(If::new(review, reviewing).otherwise(move || {
+            Button::new(
+                move || format!("Review {}", verb().to_lowercase()),
+                move |_: &()| expand(true),
             )
-            .child(review)
-    }
+        }))
 }

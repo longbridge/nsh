@@ -7,11 +7,14 @@ use nsh_core::{
     Rect,
     canvas::{CanvasTextAlign, CanvasTextBaseline},
     nsh_animation::{Curve, EaseMode},
-    ui::{AnyElement, prelude::*},
+    ui::prelude::*,
 };
 
 use super::{
-    market::{BLOCK, BUCKETS, TAPE, TAPE_HELD, Trade, compact, price, time},
+    Live,
+    detail::StockProps,
+    figure, live,
+    market::{self, BLOCK, BUCKETS, TAPE, TAPE_HELD, Trade, compact, price, time},
     parts::{Block, Col, GRID, SpringBar, SpringBarProps, head, spring_bar},
 };
 use crate::ui::{colors, legend, tints};
@@ -20,145 +23,143 @@ use crate::ui::{colors, legend, tints};
 const SHOWN: usize = 8;
 const ROW: f32 = 28.0;
 
-/// The tape: the newest trades on top, blocks highlighted. It is one
-/// canvas redrawn four times a second (its section's totals change every
-/// tick, outside it); the new rows slide in by a native
-/// offset (the canvas redraws itself as the value moves, without a
-/// render).
-#[derive(Debug, Default)]
-pub(crate) struct Tape {
-    offset: Option<NativeValue>,
-    /// The newest trade shown so far (-1: none yet).
-    top: i64,
-    width: f32,
-}
-
-/// The props of [`Tape`].
-#[derive(Debug, Clone, PartialEq, Props)]
-pub(crate) struct TapeProps {
-    /// The newest trades as of the last quarter second.
-    pub(crate) shown: Vec<Trade>,
-    pub(crate) decimals: u32,
-}
-
-impl Tape {
-    fn draw(&self, props: &TapeProps, cx: &RenderCx<'_, Self>) -> Painter {
-        let (width, height) = (self.width, SHOWN as f32 * ROW);
-        let c = |color: AdaptiveColor| cx.color(color);
-        let mut p = Painter::new()
-            .save()
-            .begin_path()
-            .rect(0.0, 0.0, width, height)
-            .clip()
-            .translate(0.0, self.offset.as_ref().expect("set up"))
-            .text_baseline(CanvasTextBaseline::Middle);
-        for (i, t) in props.shown.iter().enumerate() {
-            let top = i as f32 * ROW;
-            let y = top + ROW / 2.0;
-            let block = t.size >= BLOCK;
-            let color = if t.side > 0.0 {
-                colors::UP
-            } else {
-                colors::DOWN
-            };
-            if block {
-                p = p
-                    .fill_color(c(tints::ACCENT))
-                    .begin_path()
-                    .round_rect(0.0, top + 2.0, width, ROW - 4.0, 8.0)
-                    .fill();
-            } else if i > 0 {
-                p = p
-                    .stroke_color(c(GRID))
-                    .line_width(1.0)
-                    .begin_path()
-                    .move_to(0.0, top)
-                    .line_to(width, top)
-                    .stroke();
-            }
+/// The newest trades (`shown`), drawn `width` wide with prices of
+/// `decimals`, slid down by `offset`.
+fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &NativeValue) -> Painter {
+    let height = SHOWN as f32 * ROW;
+    let mut p = Painter::new()
+        .save()
+        .begin_path()
+        .rect(0.0, 0.0, width, height)
+        .clip()
+        .translate(0.0, offset)
+        .text_baseline(CanvasTextBaseline::Middle);
+    for (i, t) in shown.iter().enumerate() {
+        let top = i as f32 * ROW;
+        let y = top + ROW / 2.0;
+        let block = t.size >= BLOCK;
+        let side = if t.side > 0.0 {
+            colors::UP
+        } else {
+            colors::DOWN
+        };
+        if block {
             p = p
-                .font("12px system-ui")
-                .text_align(CanvasTextAlign::Left)
-                .fill_color(c(colors::FAINT))
-                .fill_text(&time(t.t, true), 8.0, y)
-                .fill_color(c(color))
+                .fill_color(color(tints::ACCENT))
                 .begin_path()
-                .arc(84.0, y, 3.0, 0.0, TAU)
-                .fill()
-                .font("14px system-ui")
-                .fill_text(&price(t.price, props.decimals), 96.0, y)
-                .text_align(CanvasTextAlign::Right)
-                .font(if block {
-                    "600 14px system-ui"
-                } else {
-                    "14px system-ui"
-                })
-                .fill_color(c(if block { colors::ACCENT } else { colors::TEXT }))
-                .fill_text(&compact(t.size), width - 8.0, y);
-            if block {
-                p = p
-                    .font("600 10px system-ui")
-                    .fill_text("BLOCK", width - 70.0, y);
+                .round_rect(0.0, top + 2.0, width, ROW - 4.0, 8.0)
+                .fill();
+        } else if i > 0 {
+            p = p
+                .stroke_color(color(GRID))
+                .line_width(1.0)
+                .begin_path()
+                .move_to(0.0, top)
+                .line_to(width, top)
+                .stroke();
+        }
+        p = p
+            .font("12px system-ui")
+            .text_align(CanvasTextAlign::Left)
+            .fill_color(color(colors::FAINT))
+            .fill_text(&time(t.t, true), 8.0, y)
+            .fill_color(color(side))
+            .begin_path()
+            .arc(84.0, y, 3.0, 0.0, TAU)
+            .fill()
+            .font("14px system-ui")
+            .fill_text(&price(t.price, decimals), 96.0, y)
+            .text_align(CanvasTextAlign::Right)
+            .font(if block {
+                "600 14px system-ui"
+            } else {
+                "14px system-ui"
+            })
+            .fill_color(color(if block { colors::ACCENT } else { colors::TEXT }))
+            .fill_text(&compact(t.size), width - 8.0, y);
+        if block {
+            p = p
+                .font("600 10px system-ui")
+                .fill_text("BLOCK", width - 70.0, y);
+        }
+    }
+    p.restore()
+}
+
+/// The tape: the newest trades on top, blocks highlighted. It is one
+/// canvas drawn again four times a second (its section's totals change
+/// every tick, outside it); the new rows slide in by a native offset (the
+/// canvas draws itself again as the value moves).
+#[component]
+pub(crate) fn Tape(props: StockProps) -> impl IntoElement {
+    let live = live();
+    let decimals = live.market.borrow().stocks[props.stock as usize].decimals();
+    let (quarter, market) = (live.quarter, live.market);
+    // The newest trades as of the last quarter second.
+    let shown = computed(move || {
+        quarter.get();
+        market.borrow().tape.clone()
+    });
+    let offset = native_value(0.0);
+    {
+        let offset = offset.clone();
+        // The newest trade shown so far (-1: none yet).
+        let top = stored(-1_i64);
+        effect(move || {
+            // What came in since the last drawing, and the slide that shows
+            // it.
+            let Some(first) = shown.with(|s| s.first().map(|t| t.id as i64)) else {
+                return;
+            };
+            let last = top.replace(first);
+            let fresh = if last < 0 { 0 } else { first - last };
+            // Ids are consecutive: past the trades kept, nothing old is
+            // left.
+            let k = if fresh >= TAPE as i64 {
+                TAPE_HELD as i64
+            } else {
+                fresh.min(4)
+            };
+            if k > 0 {
+                offset.set(-(k as f32) * ROW);
+                let _ = offset.timing(0.0, 220.0, Easing::Curve(Curve::Cubic, EaseMode::Out));
             }
-        }
-        p.restore()
+        });
     }
+    let width = signal(0.0_f32);
+    view().child(
+        canvas(move || {
+            let width = width.get();
+            shown.with(|s| draw_tape(s, width, decimals, &offset))
+        })
+        .h(px(SHOWN as f32 * ROW))
+        .label("Recent trades")
+        .on_layout(move |frame: &Rect| width.set(frame.width)),
+    )
 }
 
-impl Component for Tape {
-    type Props = TapeProps;
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &TapeProps, cx: &mut Context<'_, Self>) {
-        self.offset = Some(cx.native_value(0.0));
-        self.top = -1;
-    }
-
-    fn props_changed(&mut self, old: &TapeProps, new: &TapeProps, _: &mut Context<'_, Self>) {
-        if old.shown == new.shown {
-            return;
-        }
-        // What came in since the last frame, and the slide that shows it.
-        let Some(first) = new.shown.first() else {
-            return;
-        };
-        let fresh = if self.top < 0 {
-            0
-        } else {
-            first.id as i64 - self.top
-        };
-        self.top = first.id as i64;
-        // Ids are consecutive: past the trades kept, nothing old is left.
-        let k = if fresh >= TAPE as i64 {
-            TAPE_HELD as i64
-        } else {
-            fresh.min(4)
-        };
-        if k > 0 {
-            let offset = self.offset.as_ref().expect("set up");
-            offset.set(-(k as f32) * ROW);
-            let _ = offset.timing(0.0, 220.0, Easing::Curve(Curve::Cubic, EaseMode::Out));
-        }
-    }
-
-    fn render(&self, props: &TapeProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view().child(
-            canvas(self.draw(props, cx))
-                .h(px(SHOWN as f32 * ROW))
-                .label("Recent trades")
-                .on_layout(cx.listener(|this: &mut Self, frame: &Rect, cx| {
-                    if this.width != frame.width {
-                        this.width = frame.width;
-                        cx.notify();
-                    }
-                })),
-        )
-    }
-}
-
-/// The tape's section: its totals (every tick), the columns and the
-/// [`Tape`] (four times a second).
-pub(crate) fn tape(buys: f64, sells: f64, blocks: u32, tape: TapeProps) -> Block {
+/// The tape's section of stock `index`: its totals (every tick), the
+/// columns and the [`Tape`] (four times a second).
+pub(crate) fn tape(live: &Live, index: usize) -> Block {
+    let quote = live.quotes[index];
+    let market = live.market.clone();
+    // Bought at the ask, sold at the bid, and the blocks, over the trades
+    // kept.
+    let totals = computed(move || {
+        quote.get();
+        market
+            .borrow()
+            .trades
+            .iter()
+            .fold((0.0, 0.0, 0_u32), |(b, s, k), t| {
+                let block = u32::from(t.size >= BLOCK);
+                if t.side > 0.0 {
+                    (b + t.size, s, k + block)
+                } else {
+                    (b, s + t.size, k + block)
+                }
+            })
+    });
     Block::new()
         .title("Time & sales")
         .note(format!("blocks ≥ {}", compact(BLOCK)))
@@ -168,9 +169,21 @@ pub(crate) fn tape(buys: f64, sells: f64, blocks: u32, tape: TapeProps) -> Block
                 .flex_wrap()
                 .gap_x(px(16.0))
                 .gap_y(px(6.0))
-                .child(legend(colors::UP, "At ask", Some(compact(buys))))
-                .child(legend(colors::DOWN, "At bid", Some(compact(sells))))
-                .child(legend(colors::ACCENT, "Blocks", Some(blocks.to_string()))),
+                .child(legend(
+                    colors::UP,
+                    "At ask",
+                    Some(move || compact(totals.get().0)),
+                ))
+                .child(legend(
+                    colors::DOWN,
+                    "At bid",
+                    Some(move || compact(totals.get().1)),
+                ))
+                .child(legend(
+                    colors::ACCENT,
+                    "Blocks",
+                    Some(move || totals.get().2.to_string()),
+                )),
         )
         .child(
             view()
@@ -181,28 +194,22 @@ pub(crate) fn tape(buys: f64, sells: f64, blocks: u32, tape: TapeProps) -> Block
                 .child(head("PRICE", Col::Flex, false))
                 .child(head("SIZE", Col::Auto, true)),
         )
-        .child(Tape::element(tape))
+        .child(Tape::element(StockProps {
+            stock: index as u32,
+        }))
 }
 
-/// Bought vs sold volume by order size: who is moving the price; once a
-/// second.
-#[derive(Debug, Default)]
-pub(crate) struct Flow;
-
-/// The props of [`Flow`].
-#[derive(Debug, Clone, PartialEq, Props)]
-pub(crate) struct FlowProps {
-    /// Volume bought, by bucket.
-    pub(crate) buy: Vec<f64>,
-    /// Volume sold, by bucket.
-    pub(crate) sell: Vec<f64>,
-}
-
-/// One bucket: sold to the left of the middle, bought to the right.
-fn flow_row(label: &'static str, note: &'static str, buy: f64, sell: f64, max: f64) -> AnyElement {
-    let figure = |s: String, color: AdaptiveColor| {
-        text(s).text_size(px(12.0)).tabular_nums().text_color(color)
-    };
+/// One bucket of `flow` (of its `max`): sold to the left of the middle,
+/// bought to the right.
+fn flow_row(
+    label: &'static str,
+    note: &'static str,
+    bucket: usize,
+    flow: Memo<market::Flow>,
+    max: Memo<f64>,
+) -> impl IntoElement {
+    let buy = move || flow.with(|f| f.buy[bucket]);
+    let sell = move || flow.with(|f| f.sell[bucket]);
     view()
         .gap_1()
         .child(
@@ -222,9 +229,9 @@ fn flow_row(label: &'static str, note: &'static str, buy: f64, sell: f64, max: f
                                 .tabular_nums(),
                         ),
                 )
-                .child(figure(compact(sell), colors::DOWN))
-                .child(figure("/".into(), colors::FAINT))
-                .child(figure(compact(buy), colors::UP)),
+                .child(figure(move || compact(sell()), colors::DOWN))
+                .child(figure("/", colors::FAINT))
+                .child(figure(move || compact(buy()), colors::UP)),
         )
         .child(
             view()
@@ -234,7 +241,7 @@ fn flow_row(label: &'static str, note: &'static str, buy: f64, sell: f64, max: f
                     from_right: true,
                     height: 10.0,
                     radius: Some(3.0),
-                    ..spring_bar(sell / max, colors::DOWN)
+                    ..spring_bar(move || sell() / max.get(), colors::DOWN)
                 })))
                 .child(
                     view()
@@ -247,49 +254,62 @@ fn flow_row(label: &'static str, note: &'static str, buy: f64, sell: f64, max: f
                 .child(view().flex_1().child(SpringBar::element(SpringBarProps {
                     height: 10.0,
                     radius: Some(3.0),
-                    ..spring_bar(buy / max, colors::UP)
+                    ..spring_bar(move || buy() / max.get(), colors::UP)
                 }))),
         )
-        .into_element()
 }
 
-impl Component for Flow {
-    type Props = FlowProps;
-    type Event = NoEvent;
-
-    fn render(&self, props: &FlowProps, _: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let at = |v: &Vec<f64>, i: usize| v.get(i).copied().unwrap_or(0.0);
-        let max = props
-            .buy
-            .iter()
-            .chain(&props.sell)
-            .fold(1.0_f64, |m, &v| m.max(v));
-        let net = props.buy.iter().sum::<f64>() - props.sell.iter().sum::<f64>();
-        let big = at(&props.buy, 2) + at(&props.buy, 3) - at(&props.sell, 2) - at(&props.sell, 3);
-        let sign = |v: f64| if v >= 0.0 { "+" } else { "" };
-        Block::new()
-            .title("Trade flow")
-            .note("sold ← · → bought")
-            .child(
-                text(format!("{}{}", sign(net), compact(net)))
-                    .text_size(px(22.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors::TEXT)
+/// Bought vs sold volume by order size: who is moving the price; once a
+/// second.
+#[component]
+pub(crate) fn Flow() -> impl IntoElement {
+    let live = live();
+    let (second, market) = (live.second, live.market);
+    // The trade flow as of the last second.
+    let flow = computed(move || {
+        second.get();
+        market.borrow().flow.clone()
+    });
+    let max = computed(move || {
+        flow.with(|f| f.buy.iter().chain(&f.sell).fold(1.0_f64, |m, &v| m.max(v)))
+    });
+    let net =
+        computed(move || flow.with(|f| f.buy.iter().sum::<f64>() - f.sell.iter().sum::<f64>()));
+    // Large and block orders, bought less sold.
+    let big = computed(move || flow.with(|f| f.buy[2] + f.buy[3] - f.sell[2] - f.sell[3]));
+    let sign = |v: f64| if v >= 0.0 { "+" } else { "" };
+    Block::new()
+        .title("Trade flow")
+        .note("sold ← · → bought")
+        .child(
+            text(move || format!("{}{}", sign(net.get()), compact(net.get())))
+                .text_size(px(22.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(colors::TEXT)
+                .tabular_nums()
+                .child(
+                    text(move || {
+                        let big = big.get();
+                        format!(" net · {}{} large orders", sign(big), compact(big))
+                    })
+                    .text_size(px(13.0))
+                    .font_weight(FontWeight::NORMAL)
                     .tabular_nums()
-                    .child(
-                        text(format!(" net · {}{} large orders", sign(big), compact(big)))
-                            .text_size(px(13.0))
-                            .font_weight(FontWeight::NORMAL)
-                            .tabular_nums()
-                            .text_color(if big >= 0.0 { colors::UP } else { colors::DOWN }),
-                    ),
-            )
-            .child(
-                view()
-                    .gap(px(10.0))
-                    .children(BUCKETS.iter().enumerate().map(|(i, b)| {
-                        flow_row(b.label, b.note, at(&props.buy, i), at(&props.sell, i), max)
-                    })),
-            )
-    }
+                    .text_color(move || {
+                        if big.get() >= 0.0 {
+                            colors::UP
+                        } else {
+                            colors::DOWN
+                        }
+                    }),
+                ),
+        )
+        .child(
+            view().gap(px(10.0)).children(
+                BUCKETS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, b)| flow_row(b.label, b.note, i, flow, max)),
+            ),
+        )
 }

@@ -2,24 +2,20 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A press target with a label ([`ButtonProps`]).
-#[derive(Debug, Default)]
-pub struct Button;
-
 /// A press target with a label, the same on iOS and Android.
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct ButtonProps {
     /// The label.
-    pub title: SharedString,
+    pub title: Prop<SharedString>,
     /// `primary` (default): filled; `secondary`: tinted; `danger`: a
     /// destructive action; `plain`: text only.
     #[prop(default)]
-    pub variant: ButtonVariant,
+    pub variant: Prop<ButtonVariant>,
     /// No presses, no feedback, dimmed.
     #[prop(default)]
-    pub disabled: bool,
+    pub disabled: Prop<bool>,
     /// For screen readers, when `title` is not enough.
-    pub accessibility_label: Option<SharedString>,
+    pub accessibility_label: Prop<Option<SharedString>>,
 }
 
 /// How a [`Button`] looks.
@@ -43,50 +39,53 @@ pub enum ButtonEvent {
     Press,
 }
 
-impl Component for Button {
-    type Props = ButtonProps;
-    type Event = ButtonEvent;
-
-    fn render(&self, props: &ButtonProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let (bg, pressed, fg) = match props.variant {
-            ButtonVariant::Primary => (
-                theme.primary,
-                theme.primary_active,
-                theme.primary_foreground,
-            ),
-            ButtonVariant::Secondary => (
-                theme.secondary,
-                theme.secondary_active,
-                theme.secondary_foreground,
-            ),
-            ButtonVariant::Danger => (theme.danger, theme.danger_active, theme.danger_foreground),
-            ButtonVariant::Plain => (AdaptiveColor::TRANSPARENT, theme.accent, theme.foreground),
-        };
-        view()
-            .flex_row()
-            .items_center()
-            .justify_center()
-            .px_4()
-            .py_3()
-            .rounded(px(theme.radius))
-            .bg(bg)
-            .active(|s| s.bg(pressed))
-            .when(props.disabled, |v| v.opacity(0.5))
-            .disabled(props.disabled)
-            .role(AccessibilityRole::Button)
-            .label(
-                props
-                    .accessibility_label
-                    .clone()
-                    .unwrap_or_else(|| props.title.clone()),
-            )
-            .on_press(cx.listener(|_, _, cx| cx.emit(ButtonEvent::Press)))
-            .child(
-                text(props.title.clone())
-                    .text_size(px(theme.font_size))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(fg),
-            )
+/// The background, the background while pressed and the label's color of
+/// `variant`.
+fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColor) {
+    let theme = theme();
+    match variant {
+        ButtonVariant::Primary => (
+            theme.primary,
+            theme.primary_active,
+            theme.primary_foreground,
+        ),
+        ButtonVariant::Secondary => (
+            theme.secondary,
+            theme.secondary_active,
+            theme.secondary_foreground,
+        ),
+        ButtonVariant::Danger => (theme.danger, theme.danger_active, theme.danger_foreground),
+        ButtonVariant::Plain => (AdaptiveColor::TRANSPARENT, theme.accent, theme.foreground),
     }
+}
+
+/// A press target with a label ([`ButtonProps`]).
+#[component]
+pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
+    let colors = computed(move || colors(props.variant.get()));
+    view()
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .px_4()
+        .py_3()
+        .rounded(move || px(theme().radius))
+        .bg(move || colors.get().0)
+        .active(|s| s.bg(move || colors.get().1))
+        .style_when(props.disabled, |v| v.opacity(0.5))
+        .disabled(props.disabled)
+        .role(AccessibilityRole::Button)
+        .label(move || {
+            props
+                .accessibility_label
+                .get()
+                .unwrap_or_else(|| props.title.get())
+        })
+        .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
+        .child(
+            text(props.title)
+                .text_size(move || px(theme().font_size))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(move || colors.get().2),
+        )
 }

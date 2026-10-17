@@ -2,10 +2,6 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A scrolling list of rows ([`ListViewProps`]).
-#[derive(Debug, Default)]
-pub struct ListView;
-
 /// A scrolling list of the app's rows, padded and divided: only the rows
 /// near the screen exist, cells are reused. The app passes the data and
 /// renders a row (`each` and children, like `List`); the look is the
@@ -17,10 +13,10 @@ pub struct ListViewProps {
     /// `plain` (default): full-width rows; `inset`: rows in a rounded box
     /// with a margin, like grouped settings.
     #[prop(default)]
-    pub variant: ListViewVariant,
+    pub variant: Prop<ListViewVariant>,
     /// Hairlines between rows.
     #[prop(default = true)]
-    pub dividers: bool,
+    pub dividers: Prop<bool>,
 }
 
 /// How a [`ListView`] shows its rows.
@@ -33,52 +29,51 @@ pub enum ListViewVariant {
     Inset,
 }
 
-impl Component for ListView {
-    type Props = ListViewProps;
-    type Event = NoEvent;
-
-    fn render(&self, props: &ListViewProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let inset = props.variant == ListViewVariant::Inset;
-        // The last rows scroll clear of the home indicator (renders again
-        // when the safe area changes, as `safeArea()` in Solid).
-        let below = cx.safe_area().bottom;
-        // Inset: rows on the background color over a muted page, as
-        // grouped settings look.
-        let (border, dividers, surface, radius) = (
-            theme.border,
-            props.dividers,
-            theme.background,
-            px(theme.radius_lg),
-        );
-        view()
-            .flex_1()
-            .bg(if inset { theme.muted } else { theme.background })
-            .text_color(theme.foreground)
-            .list(
-                props.items,
-                |list| {
-                    list.flex_1()
-                        .estimated_item_size(48.0)
-                        .when(inset, |l| l.content_padding(16.0))
-                        .content_padding_bottom(below + if inset { 16.0 } else { 0.0 })
-                },
-                move |row, at| {
-                    view()
-                        .px_4()
-                        .py_3()
-                        .min_h(px(48.0))
-                        .justify_center()
-                        .when(dividers && !at.is_first(), |v| {
-                            v.border_t_1().border_color(border)
-                        })
-                        .when(inset, |v| {
-                            v.bg(surface)
-                                .when(at.is_first(), |v| v.rounded_t(radius))
-                                .when(at.is_last(), |v| v.rounded_b(radius))
-                        })
-                        .child(row)
-                },
-            )
-    }
+/// A scrolling list of rows ([`ListViewProps`]).
+#[component]
+pub fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoElement {
+    let inset = computed(move || props.variant.get() == ListViewVariant::Inset);
+    let dividers = props.dividers;
+    // Inset: rows on the background color over a muted page, as grouped
+    // settings look.
+    view()
+        .flex_1()
+        .bg(move || {
+            if inset.get() {
+                theme().muted
+            } else {
+                theme().background
+            }
+        })
+        .text_color(move || theme().foreground)
+        .list(
+            props.items,
+            move |list| {
+                let margin = move || if inset.get() { 16.0 } else { 0.0 };
+                list.flex_1()
+                    .estimated_item_size(48.0)
+                    .content_padding(margin)
+                    // The last rows scroll clear of the home indicator.
+                    .content_padding_bottom(move || safe_area().bottom + margin())
+            },
+            move |row, at| {
+                let radius = move || px(theme().radius_lg);
+                view()
+                    .px_4()
+                    .py_3()
+                    .min_h(px(48.0))
+                    .justify_center()
+                    .style_when(
+                        move || dividers.get() && !at.is_first(),
+                        |v| v.border_t_1().border_color(move || theme().border),
+                    )
+                    .style_when(inset, |v| v.bg(move || theme().background))
+                    .style_when(
+                        move || inset.get() && at.is_first(),
+                        |v| v.rounded_t(radius),
+                    )
+                    .style_when(move || inset.get() && at.is_last(), |v| v.rounded_b(radius))
+                    .child(row)
+            },
+        )
 }

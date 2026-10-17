@@ -1,6 +1,6 @@
 //! The embedding app's theme: sent before the start it is in the first
-//! frame, sent later it renders the components again, and it wins over
-//! the app's own theme until cleared.
+//! frame, sent later it updates what read the theme, and it wins over the
+//! app's own theme until cleared.
 
 use std::time::Duration;
 
@@ -13,16 +13,10 @@ use nsh_engine::{App, Engine, EngineConfig, Environment};
 
 use crate::ChannelSink;
 
-#[derive(Default)]
-struct Swatch;
-
-impl Component for Swatch {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view().size_10().bg(cx.theme().primary)
-    }
+/// A square of the theme's primary color.
+#[component]
+fn Swatch() -> impl IntoElement {
+    view().size_10().bg(move || theme().primary)
 }
 
 fn themed(hex: &str) -> Theme {
@@ -95,7 +89,7 @@ fn a_host_theme_sent_before_the_start_is_in_the_first_frame() {
 }
 
 #[test]
-fn the_host_theme_rerenders_and_gives_way_to_the_apps_when_cleared() {
+fn the_host_theme_updates_the_views_and_gives_way_to_the_apps_when_cleared() {
     let (engine, rx) = start(Some(themed("#0000ff")), None);
     assert_eq!(backgrounds(&rx), vec![Color(0x0000ffff)]);
     engine.control().set_theme(Some(themed("#00ff00")));

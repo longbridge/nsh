@@ -175,9 +175,9 @@ pub(crate) fn typed<T: ?Sized + ToOwned + 'static>(
     decode: Decode<T>,
 ) -> Listener<EventPayload> {
     let inner = listener.0;
-    Listener(Rc::new(move |state, props, payload: &EventPayload, cx| {
+    Listener(Rc::new(move |payload: &EventPayload| {
         if let Some(value) = decode(payload) {
-            inner(state, props, &value, cx);
+            inner(&value);
         }
     }))
 }

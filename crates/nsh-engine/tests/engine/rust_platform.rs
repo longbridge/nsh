@@ -143,16 +143,9 @@ impl Assets for CrateAssets {
     }
 }
 
-#[derive(Default)]
-struct Label;
-
-impl Component for Label {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), _: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view().child(text("ready").font_family("Script"))
-    }
+#[component]
+fn Label() -> impl IntoElement {
+    view().child(text("ready").font_family("Script"))
 }
 
 #[test]
@@ -187,43 +180,22 @@ fn the_fonts_ui_sets_ship_are_registered_before_the_first_render() {
 }
 
 /// Counts display frames while a task awaits them.
-#[derive(Default)]
-struct Frames {
-    frames: u32,
-    /// The frame `request_animation_frame` called back with.
-    called: bool,
-    _loop: Option<Task<()>>,
-    _once: Option<Task<()>>,
-}
-
-impl Component for Frames {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        let start = Instant::now();
-        self._once = Some(cx.request_animation_frame(move |this, at, cx| {
-            this.called = at >= start;
-            cx.notify();
-        }));
-        self._loop = Some(cx.spawn(|this, cx| async move {
-            for _ in 0..3 {
-                cx.next_frame().await;
-                this.update(|this, cx| {
-                    this.frames += 1;
-                    cx.notify();
-                })
-                .await;
-            }
-        }));
-    }
-
-    fn render(&self, _: &(), _: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view().child(text(format!(
-            "{} frames, called {}",
-            self.frames, self.called
-        )))
-    }
+#[component]
+fn Frames() -> impl IntoElement {
+    let frames = signal(0);
+    // The frame `request_animation_frame` called back with.
+    let called = signal(false);
+    let start = Instant::now();
+    request_animation_frame(move |at| called.set(at >= start));
+    spawn(async move {
+        for _ in 0..3 {
+            next_frame().await;
+            frames.update(|f| *f += 1);
+        }
+    });
+    view().child(text(move || {
+        format!("{} frames, called {}", frames.get(), called.get())
+    }))
 }
 
 #[test]
@@ -250,28 +222,23 @@ fn tasks_wait_for_display_frames() {
 }
 
 /// Flips the surface's direction on presses.
-#[derive(Default)]
-struct Direction {
-    presses: u32,
-}
-
-impl Component for Direction {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.presses += 1;
-                match this.presses {
-                    1 => cx.force_rtl(true),
-                    2 => cx.force_rtl(false),
-                    _ => cx.allow_rtl(false),
-                }
-            }))
-            .child(text(if cx.rtl() { "rtl" } else { "ltr" }))
-    }
+#[component]
+fn Direction() -> impl IntoElement {
+    let presses = stored(0_u32);
+    view()
+        .flex_1()
+        .on_press(move |_: &()| {
+            let n = presses.with(|p| {
+                *p += 1;
+                *p
+            });
+            match n {
+                1 => force_rtl(true),
+                2 => force_rtl(false),
+                _ => allow_rtl(false),
+            }
+        })
+        .child(text(|| if rtl() { "rtl" } else { "ltr" }))
 }
 
 #[test]
@@ -306,24 +273,19 @@ fn components_set_the_layout_direction() {
 }
 
 /// Shows the pixel ratio, the device and the locale.
-#[derive(Default)]
-struct Device;
-
-impl Component for Device {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let (major, minor) = cx.os_version();
-        view().child(text(format!(
+#[component]
+fn Device() -> impl IntoElement {
+    view().child(text(|| {
+        let (major, minor) = os_version();
+        format!(
             "{} {major}.{minor} {:?} ×{} {} {}",
-            cx.os().name(),
-            cx.idiom(),
-            cx.pixel_ratio(),
-            cx.round_to_nearest_pixel(10.3),
-            cx.locale(),
-        )))
-    }
+            os().name(),
+            idiom(),
+            pixel_ratio(),
+            round_to_nearest_pixel(10.3),
+            locale(),
+        )
+    }))
 }
 
 #[test]
@@ -340,8 +302,8 @@ fn components_read_the_pixel_ratio_the_device_and_the_locale() {
     let shown = "android 34.0 Pad ×3 10.333333 de-DE";
     let (texts, ..) = until(&rx, shown);
     assert!(texts.iter().any(|t| t == shown), "{texts:?}");
-    // The window moved to another screen: the pixel ratio's readers render
-    // again.
+    // The window moved to another screen: what reads the pixel ratio
+    // follows.
     engine.control().set_environment(Environment {
         pixel_ratio: 2.0,
         ..environment
@@ -349,7 +311,7 @@ fn components_read_the_pixel_ratio_the_device_and_the_locale() {
     let shown = "android 34.0 Pad ×2 10.5 de-DE";
     let (texts, ..) = until(&rx, shown);
     assert!(texts.iter().any(|t| t == shown), "{texts:?}");
-    // The user changed the language: the locale's readers render again.
+    // The user changed the language: what reads the locale follows.
     engine.control().set_environment(Environment {
         pixel_ratio: 2.0,
         locale: Locale::parse("zh-Hans_CN").unwrap(),

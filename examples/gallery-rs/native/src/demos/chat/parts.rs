@@ -1,7 +1,7 @@
 //! The chat's pieces (as the TSX gallery's `demos/chat/parts.tsx`):
 //! loaders, the caret, the buttons under a reply, attachments, tool
-//! cards, the error row and the avatar. Builders, so a list row can make
-//! them without a render of its own.
+//! cards, the error row and the avatar. Builders a list row makes once;
+//! what changes in them (a tool's state, a button's tint) is bound.
 
 use nsh_core::ui::{AnyElement, prelude::*};
 
@@ -13,8 +13,8 @@ use crate::ui::{
     Badge, Finish, Finished, IconName, MONO, PressProps, Tone, colors, icon, press_with, radius,
 };
 
-/// A ring that spins natively.
-pub(crate) fn spinner(size: f32, tint: AdaptiveColor) -> View {
+/// A ring that spins natively, its arc in `tint` (a value, or bound).
+pub(crate) fn spinner(size: f32, tint: impl IntoReactive<AdaptiveColor>) -> View {
     view()
         .size(px(size))
         .rounded(px(size / 2.0))
@@ -35,18 +35,19 @@ pub(crate) fn caret() -> View {
         .animation(KeyframeAnimation::new(Keyframes::Pulse).duration(900.0))
 }
 
-/// A small icon button under a reply (44 pt touch target).
+/// A small icon button under a reply (44 pt touch target), tinted while
+/// `active`.
 pub(crate) fn action_button(
-    name: GlyphName,
+    name: impl Into<Prop<GlyphName>>,
     label: &'static str,
-    active: bool,
+    active: Prop<bool>,
     tone: Tone,
-    on_press: Listener<()>,
+    on_press: impl Into<Listener<()>>,
 ) -> AnyElement {
     press_with(
         PressProps {
-            scale: 0.86,
-            label: Some(label.into()),
+            scale: 0.86.into(),
+            label: Some(label.into()).into(),
             selected: active,
             ..PressProps::default()
         },
@@ -64,25 +65,29 @@ pub(crate) fn action_button(
                     .absolute()
                     .size(px(32.0))
                     .rounded(px(16.0))
-                    .bg(if active {
-                        tone.tint()
-                    } else {
-                        AdaptiveColor::TRANSPARENT
+                    .bg(move || {
+                        if active.get() {
+                            tone.tint()
+                        } else {
+                            AdaptiveColor::TRANSPARENT
+                        }
                     })
                     .transition_colors()
                     .duration(180.0),
             )
-            .child(glyph(
-                name,
-                17.0,
-                if active { tone.color() } else { colors::MUTED },
-            )),
+            .child(glyph(name, 17.0, move || {
+                if active.get() {
+                    tone.color()
+                } else {
+                    colors::MUTED
+                }
+            })),
     )
     .into_element()
 }
 
 /// A row between days.
-pub(crate) fn date_separator(label: &str) -> View {
+pub(crate) fn date_separator(label: impl IntoReactive<SharedString>) -> View {
     let rule = || view().flex_1().h(px(1.0)).bg(colors::LINE);
     view()
         .flex_row()
@@ -92,7 +97,7 @@ pub(crate) fn date_separator(label: &str) -> View {
         .py_3()
         .child(rule())
         .child(
-            text(label.to_owned())
+            text(label)
                 .text_size(px(12.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(colors::FAINT),
@@ -146,8 +151,8 @@ pub(crate) fn file_chip(file: &FileRef, on_remove: Option<Listener<()>>) -> View
         .children(on_remove.map(|remove| {
             press_with(
                 PressProps {
-                    scale: 0.85,
-                    label: Some("Remove file".into()),
+                    scale: 0.85.into(),
+                    label: Some("Remove file".into()).into(),
                     ..PressProps::default()
                 },
                 remove,
@@ -177,9 +182,9 @@ pub(crate) fn photo(src: &'static str, width: f32, height: f32) -> View {
         .child(image(src).w(px(width)).h(px(height)))
 }
 
-/// A tool call: a header with its state, then its result once done.
-pub(crate) fn tool_card(tool: &Tool) -> View {
-    let (name, title, detail) = match &tool.kind {
+/// What a tool's header shows: its glyph, its title and the detail.
+fn tool_head(kind: &ToolKind) -> (GlyphName, &'static str, String) {
+    match kind {
         ToolKind::Search { query, .. } => (GlyphName::Globe, "Web search", query.to_string()),
         ToolKind::Weather { city, .. } => (GlyphName::Sun, "Weather", city.to_string()),
         ToolKind::Code { lang, .. } => (
@@ -187,19 +192,28 @@ pub(crate) fn tool_card(tool: &Tool) -> View {
             "Run code",
             format!("{lang}, sandboxed"),
         ),
-    };
-    let state = tool.state;
-    let busy = matches!(state, ToolState::Running | ToolState::Pending);
+    }
+}
+
+/// A tool call: a header with its state, then its result once done. Its
+/// state changes alone; the result is made when it comes.
+pub(crate) fn tool_card(tool: ReadSignal<Tool>) -> View {
+    let head = computed(move || tool.with(|t| tool_head(&t.kind)));
+    let state = computed(move || tool.with(|t| t.state));
+    let busy = computed(move || matches!(state.get(), ToolState::Running | ToolState::Pending));
+    let body = computed(move || tool.with(|t| (t.kind.clone(), t.state == ToolState::Done)));
     view()
         .bg(colors::SURFACE)
         .finish(Finish::Card)
         .rounded(px(radius::INSET))
         .border_curve(BorderCurve::Continuous)
         .border_1()
-        .border_color(if state == ToolState::Running {
-            AdaptiveColor::new(colors::INFO.opacity(0.4).light, rgb(0x33405a))
-        } else {
-            colors::BORDER
+        .border_color(move || {
+            if state.get() == ToolState::Running {
+                AdaptiveColor::new(colors::INFO.opacity(0.4).light, rgb(0x33405a))
+            } else {
+                colors::BORDER
+            }
         })
         .transition_colors()
         .duration(250.0)
@@ -220,55 +234,63 @@ pub(crate) fn tool_card(tool: &Tool) -> View {
                         .finish(Finish::Raised)
                         .border_1()
                         .border_color(colors::BORDER)
-                        .child(glyph(name, 16.0, colors::TEXT)),
+                        .child(glyph(
+                            Prop::bind(move || head.with(|h| h.0)),
+                            16.0,
+                            colors::TEXT,
+                        )),
                 )
                 .child(
                     view()
                         .flex_1()
                         .gap(px(1.0))
                         .child(
-                            text(title)
+                            text(move || head.with(|h| h.1))
                                 .text_size(px(14.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(colors::TEXT),
                         )
                         .child(
-                            text(detail)
+                            text(move || head.with(|h| h.2.clone()))
                                 .number_of_lines(1)
                                 .text_size(px(13.0))
                                 .text_color(colors::MUTED),
                         ),
                 )
-                .child(if busy {
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .child(spinner(
-                            14.0,
-                            if state == ToolState::Pending {
-                                colors::FAINT
-                            } else {
-                                colors::INFO
-                            },
-                        ))
-                        .child(
-                            text(state.label())
-                                .text_size(px(13.0))
-                                .text_color(colors::MUTED),
-                        )
-                        .into_element()
-                } else {
-                    Badge::new(state.label()).tone(state.tone()).into_element()
-                }),
+                .child(
+                    If::new(busy, move || {
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(spinner(14.0, move || {
+                                if state.get() == ToolState::Pending {
+                                    colors::FAINT
+                                } else {
+                                    colors::INFO
+                                }
+                            }))
+                            .child(
+                                text(move || state.get().label())
+                                    .text_size(px(13.0))
+                                    .text_color(colors::MUTED),
+                            )
+                    })
+                    .otherwise(move || {
+                        Badge::new(move || state.get().label()).tone(move || state.get().tone())
+                    }),
+                ),
         )
-        .children(tool_body(tool))
+        .child(dynamic(move || {
+            body.with(|(kind, done)| tool_body(kind, *done))
+        }))
 }
 
-fn tool_body(tool: &Tool) -> Option<View> {
-    let done = tool.state == ToolState::Done;
+/// A tool's result: a search's sources and a forecast once done, a run's
+/// code (and its output once done).
+fn tool_body(kind: &ToolKind, done: bool) -> Option<View> {
     let rule = || view().border_t_1().border_t_color(colors::LINE);
-    match &tool.kind {
+    match kind {
         ToolKind::Search { sources, .. } => done.then(|| {
             rule().py_1().children(
                 sources
@@ -437,7 +459,10 @@ fn source_row(source: &Source, index: usize) -> View {
 }
 
 /// The reply's error: what went wrong and a Retry button.
-pub(crate) fn error_row(message: &str, on_retry: Listener<()>) -> View {
+pub(crate) fn error_row(
+    message: impl IntoReactive<SharedString>,
+    on_retry: impl Into<Listener<()>>,
+) -> View {
     view()
         .flex_row()
         .items_center()
@@ -450,7 +475,7 @@ pub(crate) fn error_row(message: &str, on_retry: Listener<()>) -> View {
         .border_color(colors::DANGER.opacity(0.32))
         .child(glyph(GlyphName::Alert, 18.0, colors::DANGER))
         .child(
-            text(message.to_owned())
+            text(message)
                 .flex_1()
                 .text_size(px(14.0))
                 .line_height(px(19.0))
@@ -459,7 +484,7 @@ pub(crate) fn error_row(message: &str, on_retry: Listener<()>) -> View {
         .child(
             press_with(
                 PressProps {
-                    label: Some("Retry".into()),
+                    label: Some("Retry".into()).into(),
                     ..PressProps::default()
                 },
                 on_retry,

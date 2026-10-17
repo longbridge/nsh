@@ -12,44 +12,28 @@ use nsh_engine::{App, Engine, EngineConfig, Environment};
 
 use crate::ChannelSink;
 
-#[derive(Default)]
-struct Counter {
-    count: u32,
-    ticks: u32,
-    _timer: Option<Task<()>>,
-}
-
 #[derive(Clone, PartialEq, Props)]
 struct CounterProps {
     #[prop(default = "Count".into())]
-    label: SharedString,
+    label: Prop<SharedString>,
 }
 
-impl Component for Counter {
-    type Props = CounterProps;
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &CounterProps, cx: &mut Context<'_, Self>) {
-        self._timer = Some(
-            cx.set_timeout(Duration::from_millis(10), |this: &mut Self, cx| {
-                this.ticks += 1;
-                cx.notify();
-            }),
-        );
-    }
-
-    fn render(&self, props: &CounterProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.count += 1;
-                cx.notify();
-            }))
-            .child(text(format!(
+#[component]
+fn Counter(props: CounterProps) -> impl IntoElement {
+    let count = signal(0);
+    let ticks = signal(0);
+    set_timeout(Duration::from_millis(10), move || ticks.update(|t| *t += 1));
+    view()
+        .flex_1()
+        .on_press(move |_: &()| count.update(|c| *c += 1))
+        .child(text(move || {
+            format!(
                 "{} {} ({} ticks)",
-                props.label, self.count, self.ticks
-            )))
-    }
+                props.label.get(),
+                count.get(),
+                ticks.get()
+            )
+        }))
 }
 
 fn start() -> (Engine, Receiver<MountBatch>) {
@@ -117,35 +101,21 @@ fn a_rust_app_renders_handles_presses_and_runs_tasks() {
 }
 
 /// A Rust navigation stack: a screen per route, keyed by it.
-#[derive(Default)]
-struct Navigation {
-    routes: Vec<u32>,
-}
-
-impl Component for Navigation {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        self.routes = vec![0, 1];
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        // A component's root is a view (its host node).
-        view()
-            .flex_1()
-            .child(stack().flex_1().children(self.routes.iter().map(|&route| {
-                screen()
-                    .key(route.to_string())
-                    .title(format!("page {route}"))
-                    .header_right(text("more"))
-                    .on_dismiss(cx.listener(move |this: &mut Self, _, cx| {
-                        this.routes.retain(|r| *r < route);
-                        cx.notify();
-                    }))
-                    .child(text(format!("content {route}")))
-            })))
-    }
+#[component]
+fn Navigation() -> impl IntoElement {
+    let routes = signal(vec![0_u32, 1]);
+    stack().flex_1().child(Each::new(
+        move || routes.get(),
+        |&route: &u32| route,
+        move |route, _| {
+            let route = route.get_untracked();
+            screen()
+                .title(format!("page {route}"))
+                .header_right(text("more"))
+                .on_dismiss(move |_: &()| routes.update(|r| r.retain(|r| *r < route)))
+                .child(text(format!("content {route}")))
+        },
+    ))
 }
 
 #[test]
@@ -217,29 +187,17 @@ fn rust_components_navigate_with_native_stacks() {
 
 /// Rust content in a Rust component of the mobile UI: a card's header
 /// and body.
-#[derive(Default)]
-struct WithCard {
-    taps: u32,
-}
-
-impl Component for WithCard {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view().flex_1().child(
-            nsh_ui_mobile::Card::element(nsh_ui_mobile::CardProps::default())
-                .fill("header", text("card header"))
-                .child(
-                    text(format!("card body {}", self.taps)).on_press(cx.listener(
-                        |this: &mut Self, _, cx| {
-                            this.taps += 1;
-                            cx.notify();
-                        },
-                    )),
-                ),
-        )
-    }
+#[component]
+fn WithCard() -> impl IntoElement {
+    let taps = signal(0);
+    view().flex_1().child(
+        nsh_ui_mobile::Card::element(nsh_ui_mobile::CardProps::default())
+            .fill("header", text("card header"))
+            .child(
+                text(move || format!("card body {}", taps.get()))
+                    .on_press(move |_: &()| taps.update(|t| *t += 1)),
+            ),
+    )
 }
 
 #[test]
@@ -300,7 +258,7 @@ fn rust_components_pass_content_to_rust_components() {
     let body_box = parents[&id_of("card body 0")];
     assert_ne!(body_box, card, "the body is in the card's box");
     assert_eq!(parents[&body_box], card);
-    // The body renders again with the parent's state.
+    // The body follows the parent's state.
     let body = texts.iter().find(|t| t.1 == "card body 0").unwrap().0;
     engine
         .control()
@@ -320,29 +278,16 @@ fn rust_components_pass_content_to_rust_components() {
 
 /// A Rust component takes the Android back button while it listens; when
 /// it no longer handles it, the platform goes back.
-#[derive(Default)]
-struct BackCounter {
-    presses: u32,
-    _back: Option<BackSubscription>,
-}
-
-impl Component for BackCounter {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self._back = Some(cx.on_back_press(|this: &mut Self, cx| {
-            this.presses += 1;
-            cx.notify();
-            this.presses < 2
-        }));
-    }
-
-    fn render(&self, _: &(), _: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .child(text(format!("presses {}", self.presses)))
-    }
+#[component]
+fn BackCounter() -> impl IntoElement {
+    let presses = signal(0);
+    on_back_press(move || {
+        presses.update(|p| *p += 1);
+        presses.get_untracked() < 2
+    });
+    view()
+        .flex_1()
+        .child(text(move || format!("presses {}", presses.get())))
 }
 
 #[test]
@@ -399,37 +344,22 @@ fn rust_components_take_the_back_button() {
 
 /// The core's events (a layout) and throttled scroll events reach a Rust
 /// component with no JS.
-#[derive(Default)]
-struct Measured {
-    width: f32,
-    scrolled: f32,
-}
-
-impl Component for Measured {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .on_layout(cx.listener(|this: &mut Self, frame: &nsh_core::Rect, cx| {
-                this.width = frame.width;
-                cx.notify();
-            }))
-            .child(text(format!(
-                "width {} scrolled {}",
-                self.width, self.scrolled
-            )))
-            .child(
-                scroll()
-                    .flex_1()
-                    .on_scroll(cx.listener(|this: &mut Self, e: &ScrollEvent, cx| {
-                        this.scrolled = e.y;
-                        cx.notify();
-                    }))
-                    .child(view().h(px(2000.0))),
-            )
-    }
+#[component]
+fn Measured() -> impl IntoElement {
+    let width = signal(0.0_f32);
+    let scrolled = signal(0.0_f32);
+    view()
+        .flex_1()
+        .on_layout(move |frame: &nsh_core::Rect| width.set(frame.width))
+        .child(text(move || {
+            format!("width {} scrolled {}", width.get(), scrolled.get())
+        }))
+        .child(
+            scroll()
+                .flex_1()
+                .on_scroll(move |e: &ScrollEvent| scrolled.set(e.y))
+                .child(view().h(px(2000.0))),
+        )
 }
 
 #[test]
@@ -478,34 +408,22 @@ fn rust_components_hear_layouts_and_scrolls() {
 
 /// A nested component's events in a row of a component's own list reach
 /// the component whose list it is.
-#[derive(Default)]
-struct ButtonRows {
-    pressed: Option<usize>,
-}
-
-impl Component for ButtonRows {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let press = cx.listener(|this: &mut Self, row: &usize, cx| {
-            this.pressed = Some(*row);
-            cx.notify();
-        });
-        view()
-            .flex_1()
-            .child(text(format!("pressed {:?}", self.pressed)))
-            .child(
-                virtual_list(20, move |i, _| {
-                    nsh_ui_mobile::Button::element(nsh_ui_mobile::ButtonProps {
-                        title: format!("row {i}").into(),
-                        ..Default::default()
-                    })
-                    .on_event(press.clone().map(move |_: &nsh_ui_mobile::ButtonEvent| i))
+#[component]
+fn ButtonRows() -> impl IntoElement {
+    let pressed = signal(None::<usize>);
+    view()
+        .flex_1()
+        .child(text(move || format!("pressed {:?}", pressed.get())))
+        .child(
+            virtual_list(20, move |at| {
+                nsh_ui_mobile::Button::element(nsh_ui_mobile::ButtonProps {
+                    title: Prop::bind(move || format!("row {}", at.index()).into()),
+                    ..Default::default()
                 })
-                .flex_1(),
-            )
-    }
+                .on_event(move |_: &nsh_ui_mobile::ButtonEvent| pressed.set(Some(at.index())))
+            })
+            .flex_1(),
+        )
 }
 
 #[test]
@@ -552,30 +470,19 @@ fn nested_components_in_list_rows_reach_the_list_owner() {
 
 /// Content a nested component does not place (a closed sheet's) is not on
 /// screen; it is once the component places it.
-#[derive(Default)]
-struct WithSheet {
-    open: bool,
-}
-
-impl Component for WithSheet {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .child(text("open").on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.open = true;
-                cx.notify();
-            })))
-            .child(
-                nsh_ui_mobile::Sheet::element(nsh_ui_mobile::SheetProps {
-                    open: self.open,
-                    ..Default::default()
-                })
-                .child(text("sheet body")),
-            )
-    }
+#[component]
+fn WithSheet() -> impl IntoElement {
+    let open = signal(false);
+    view()
+        .flex_1()
+        .child(text("open").on_press(move |_: &()| open.set(true)))
+        .child(
+            nsh_ui_mobile::Sheet::element(nsh_ui_mobile::SheetProps {
+                open: open.into(),
+                ..Default::default()
+            })
+            .child(text("sheet body")),
+        )
 }
 
 #[test]

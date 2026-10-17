@@ -20,53 +20,45 @@ use nsh_engine::{App, Engine, EngineConfig, Environment};
 
 use crate::ChannelSink;
 
-#[derive(Default)]
-struct Card {
-    taps: u32,
-}
-
-impl Component for Card {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        view()
-            .flex_1()
-            .child(
-                view()
-                    .group()
-                    .p_4()
-                    .rounded_tl(px(20.0))
-                    .border_t(4.0)
-                    .border_dashed()
-                    .bg_linear_to_br()
-                    .gradient_from(SKY.shade(400))
-                    .gradient_to(VIOLET.shade(600))
-                    .shadow_lg()
-                    .shadow_color(SKY.shade(500).with_alpha(0.5))
-                    .ring(2.0)
-                    .ring_color(SKY.shade(500))
-                    .perspective(400.0)
-                    .rotate_y(20.0)
-                    .animate_pulse()
-                    .child(
-                        text("In the group")
-                            .text_color(ZINC.shade(500))
-                            .group_active(|s| s.text_color(VIOLET.shade(600))),
-                    ),
-            )
-            .child(
-                text(format!("Tapped {} times: ", self.taps))
-                    .child(text("tap").underline().line_through().on_press(cx.listener(
-                        |this: &mut Self, _, cx| {
-                            this.taps += 1;
-                            cx.notify();
-                        },
-                    )))
-                    .child(" or ")
-                    .child(text("not").font_weight(FontWeight::BOLD)),
-            )
-    }
+#[component]
+fn Card() -> impl IntoElement {
+    let taps = signal(0);
+    view()
+        .flex_1()
+        .child(
+            view()
+                .group()
+                .p_4()
+                .rounded_tl(px(20.0))
+                .border_t(4.0)
+                .border_dashed()
+                .bg_linear_to_br()
+                .gradient_from(SKY.shade(400))
+                .gradient_to(VIOLET.shade(600))
+                .shadow_lg()
+                .shadow_color(SKY.shade(500).with_alpha(0.5))
+                .ring(2.0)
+                .ring_color(SKY.shade(500))
+                .perspective(400.0)
+                .rotate_y(20.0)
+                .animate_pulse()
+                .child(
+                    text("In the group")
+                        .text_color(ZINC.shade(500))
+                        .group_active(|s| s.text_color(VIOLET.shade(600))),
+                ),
+        )
+        .child(
+            text(move || format!("Tapped {} times: ", taps.get()))
+                .child(
+                    text("tap")
+                        .underline()
+                        .line_through()
+                        .on_press(move |_: &()| taps.update(|t| *t += 1)),
+                )
+                .child(" or ")
+                .child(text("not").font_weight(FontWeight::BOLD)),
+        )
 }
 
 fn start() -> (Engine, Receiver<MountBatch>) {

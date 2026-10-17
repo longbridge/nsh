@@ -65,7 +65,7 @@ pub(crate) fn install(ctx: &Ctx<'_>, shared: Rc<Shared>, ui_sets: &[Registry]) {
     // freed by `uninstall`.
     unsafe {
         let rt = qjs::JS_GetRuntime(raw);
-        let graph = Graph::new(raw);
+        let graph = crate::reactive::new_graph(raw);
         let dom = Dom::new(raw, shared);
         let state = Box::into_raw(Box::new(State {
             graph,
@@ -120,6 +120,6 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         state.components.free_all(raw);
         state.env.free_all(raw);
         state.dom.free_all(raw);
-        state.graph.free_all(raw);
+        crate::reactive::free_all(&mut state.graph, raw);
     }
 }

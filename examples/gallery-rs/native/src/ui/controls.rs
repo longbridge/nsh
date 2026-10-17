@@ -8,22 +8,14 @@ use nsh_core::{
 
 use super::theme::{Finish, Finished, colors, inset_shadow, motion, rgb_a};
 
-/// An on / off switch: the knob springs across, the track changes color
-/// natively.
-#[derive(Debug, Default)]
-pub(crate) struct Toggle {
-    /// 0 off, 1 on.
-    on: Option<NativeValue>,
-}
-
 /// The props of [`Toggle`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct ToggleProps {
     /// On.
     #[prop(default)]
-    pub(crate) value: bool,
+    pub(crate) value: Prop<bool>,
     /// Its accessibility label.
-    pub(crate) label: Option<SharedString>,
+    pub(crate) label: Prop<Option<SharedString>>,
 }
 
 /// What a [`Toggle`] reports.
@@ -33,96 +25,106 @@ pub(crate) enum ToggleEvent {
     Change(bool),
 }
 
-impl Toggle {
-    fn on(&self) -> &NativeValue {
-        self.on.as_ref().expect("set up")
-    }
+/// Where the knob is for `on`: 0 off, 1 on.
+fn knob(on: bool) -> f32 {
+    if on { 1.0 } else { 0.0 }
 }
 
-impl Component for Toggle {
-    type Props = ToggleProps;
-    type Event = ToggleEvent;
-
-    fn setup(&mut self, props: &ToggleProps, cx: &mut Context<'_, Self>) {
-        self.on = Some(cx.native_value(if props.value { 1.0 } else { 0.0 }));
-    }
-
-    fn props_changed(&mut self, old: &ToggleProps, new: &ToggleProps, _: &mut Context<'_, Self>) {
-        if old.value != new.value {
-            self.on()
-                .spring(if new.value { 1.0 } else { 0.0 }, motion::SETTLE);
+/// An on / off switch: the knob springs across, the track changes color
+/// natively.
+#[component]
+pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoElement {
+    let on = native_value(knob(props.value.get_untracked()));
+    // A new value from the owner springs the knob there.
+    let spring = on.clone();
+    let shown = stored(props.value.get_untracked());
+    effect(move || {
+        let value = props.value.get();
+        if shown.replace(value) != value {
+            spring.spring(knob(value), motion::SETTLE);
         }
-    }
-
-    fn render(&self, props: &ToggleProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let on = self.on();
-        let (track, fill) = (cx.color(colors::TRACK), cx.color(colors::ACCENT_FILL));
-        let (knob_light, _) = Finish::Knob.shadows();
-        view()
-            .w(px(50.0))
-            .h(px(30.0))
-            .rounded(px(15.0))
-            .p(px(3.0))
-            .border_1()
-            .border_color(colors::BORDER)
-            .finish_shadow(Finish::Track)
-            .bind_background(&on.interpolate_colors(&[0.0, 1.0], &[track, fill]))
-            .role(AccessibilityRole::Switch)
-            .when_some(props.label.clone(), |v, label| v.label(label))
-            .accessibility_state(AccessibilityState {
-                checked: Some(if props.value {
-                    nsh_core::Checked::True
-                } else {
-                    nsh_core::Checked::False
-                }),
-                ..AccessibilityState::default()
-            })
-            .hit_slop(EdgeInsets::all(8.0))
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                let next = !cx.props().value;
-                this.on()
-                    .spring(if next { 1.0 } else { 0.0 }, motion::SETTLE);
-                cx.emit(ToggleEvent::Change(next));
-            }))
-            .child(
-                view()
-                    .size(px(22.0))
-                    .rounded(px(11.0))
-                    .bg(if props.value {
+    });
+    let (knob_light, _) = Finish::Knob.shadows();
+    let press = on.clone();
+    // The track's colors are the appearance's: made again when it changes.
+    let track = on.clone();
+    view()
+        .w(px(50.0))
+        .h(px(30.0))
+        .rounded(px(15.0))
+        .p(px(3.0))
+        .border_1()
+        .border_color(colors::BORDER)
+        .finish_shadow(Finish::Track)
+        .role(AccessibilityRole::Switch)
+        .label(move || props.label.get().unwrap_or_default())
+        .accessibility_state(move || AccessibilityState {
+            checked: Some(if props.value.get() {
+                nsh_core::Checked::True
+            } else {
+                nsh_core::Checked::False
+            }),
+            ..AccessibilityState::default()
+        })
+        .hit_slop(EdgeInsets::all(8.0))
+        .on_press(move |_: &()| {
+            let next = !props.value.get_untracked();
+            press.spring(knob(next), motion::SETTLE);
+            cx.emit(ToggleEvent::Change(next));
+        })
+        .child(dynamic(move || {
+            let colors = [color(colors::TRACK), color(colors::ACCENT_FILL)];
+            // Inside the border: its radius less the border's width.
+            view()
+                .absolute()
+                .inset_0()
+                .rounded(px(14.0))
+                .pointer_events(PointerEvents::None)
+                .bind_background(&track.interpolate_colors(&[0.0, 1.0], &colors))
+        }))
+        .child(
+            view()
+                .size(px(22.0))
+                .rounded(px(11.0))
+                .bg(move || {
+                    if props.value.get() {
                         colors::ON_ACCENT
                     } else {
                         colors::KNOB
-                    })
-                    // A drop of glass: a specular top over the knob's color.
-                    .bg_linear_to_b()
-                    .gradient_from(rgb_a(0xffffff, 0.3))
-                    .gradient_to(rgb_a(0xffffff, 0.0))
-                    .gradient_to_position(0.6)
-                    .adaptive_shadow(
-                        knob_light.iter().copied(),
-                        [
-                            inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.2)),
-                            BoxShadow {
-                                offset_x: 0.0,
-                                offset_y: 1.0,
-                                blur: 3.0,
-                                spread: 0.0,
-                                color: rgb_a(0x000000, 0.4),
-                                inset: false,
-                            },
-                        ],
-                    )
-                    .bind_translate_x(&on.interpolate(&[0.0, 1.0], &[0.0, 20.0])),
-            )
-    }
+                    }
+                })
+                // A drop of glass: a specular top over the knob's color.
+                .bg_linear_to_b()
+                .gradient_from(rgb_a(0xffffff, 0.3))
+                .gradient_to(rgb_a(0xffffff, 0.0))
+                .gradient_to_position(0.6)
+                .adaptive_shadow(
+                    knob_light.iter().copied(),
+                    [
+                        inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.2)),
+                        BoxShadow {
+                            offset_x: 0.0,
+                            offset_y: 1.0,
+                            blur: 3.0,
+                            spread: 0.0,
+                            color: rgb_a(0x000000, 0.4),
+                            inset: false,
+                        },
+                    ],
+                )
+                .bind_translate_x(&on.interpolate(&[0.0, 1.0], &[0.0, 20.0])),
+        )
 }
 
 /// A [`Toggle`] at `value` with accessibility label `label`; its owner
 /// handles [`ToggleEvent::Change`] with `.on_event(..)`.
-pub(crate) fn toggle(value: bool, label: impl Into<SharedString>) -> ComponentElement<Toggle> {
+pub(crate) fn toggle(
+    value: impl Into<Prop<bool>>,
+    label: impl Into<SharedString>,
+) -> ComponentElement<Toggle> {
     Toggle::element(ToggleProps {
-        value,
-        label: Some(label.into()),
+        value: value.into(),
+        label: Some(label.into()).into(),
     })
 }
 
@@ -161,25 +163,14 @@ pub(crate) enum SegmentedSize {
     Small,
 }
 
-/// Equal segments with an indicator that springs to the selected one.
-#[derive(Debug, Default)]
-pub(crate) struct Segmented {
-    /// Its width as laid out (0 before the first layout).
-    width: f32,
-    /// The indicator's offset.
-    x: Option<NativeValue>,
-    /// The indicator was placed: later moves spring, the first jumps.
-    placed: bool,
-}
-
 /// The props of [`Segmented`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct SegmentedProps {
     /// The segments.
-    pub(crate) options: Vec<Segment>,
+    pub(crate) options: Prop<Vec<Segment>>,
     /// The selected one's index.
     #[prop(default)]
-    pub(crate) selected: u32,
+    pub(crate) selected: Prop<u32>,
     /// Its height.
     #[prop(default)]
     pub(crate) size: SegmentedSize,
@@ -192,140 +183,122 @@ pub(crate) enum SegmentedEvent {
     Change(u32),
 }
 
-impl Segmented {
-    /// The width of a segment.
-    fn segment(&self, props: &SegmentedProps) -> f32 {
-        (self.width - 6.0) / props.options.len().max(1) as f32
-    }
-
-    /// Moves the indicator under the selected segment.
-    fn place(&mut self, props: &SegmentedProps) {
-        if self.width <= 0.0 {
+/// Equal segments with an indicator that springs to the selected one.
+#[component]
+pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> impl IntoElement {
+    // Its width as laid out (0 before the first layout).
+    let width = signal(0.0_f32);
+    let count = computed(move || props.options.with(Vec::len).max(1));
+    let segment = computed(move || (width.get() - 6.0) / count.get() as f32);
+    // The indicator's offset: the first place jumps, later moves spring.
+    let x = native_value(0.0);
+    let placed = stored(false);
+    let mover = x.clone();
+    effect(move || {
+        let index = (props.selected.get() as usize).min(count.get() - 1);
+        let to = index as f32 * segment.get();
+        if width.get() <= 0.0 {
             return;
         }
-        let index = (props.selected as usize).min(props.options.len().saturating_sub(1));
-        let to = index as f32 * self.segment(props);
-        let x = self.x.as_ref().expect("set up");
-        if self.placed {
-            x.spring(to, motion::SETTLE);
+        if placed.replace(true) {
+            mover.spring(to, motion::SETTLE);
         } else {
-            x.set(to);
+            mover.set(to);
         }
-        self.placed = true;
-    }
-}
-
-impl Component for Segmented {
-    type Props = SegmentedProps;
-    type Event = SegmentedEvent;
-
-    fn setup(&mut self, _: &SegmentedProps, cx: &mut Context<'_, Self>) {
-        self.x = Some(cx.native_value(0.0));
-    }
-
-    fn props_changed(
-        &mut self,
-        old: &SegmentedProps,
-        new: &SegmentedProps,
-        _: &mut Context<'_, Self>,
-    ) {
-        if old.selected != new.selected || old.options.len() != new.options.len() {
-            self.place(new);
-        }
-    }
-
-    fn render(&self, props: &SegmentedProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let small = props.size == SegmentedSize::Small;
-        let height = if small { 32.0 } else { 40.0 };
-        let (track_light, track_dark) = Finish::Track.shadows();
-        // The track's glass: the sunk shadow plus a lit lower rim.
-        let rim = |color| inset_shadow(-1.0, 0.0, color);
-        let segments = props.options.iter().enumerate().map(|(i, option)| {
-            let selected = i as u32 == props.selected;
-            view()
-                .flex_1()
-                .flex_row()
-                .items_center()
-                .justify_center()
-                .gap(px(5.0))
-                .role(AccessibilityRole::Tab)
-                .accessibility_state(AccessibilityState {
-                    selected,
-                    ..AccessibilityState::default()
-                })
-                .on_press(cx.listener(move |_: &mut Self, _, cx| {
-                    cx.emit(SegmentedEvent::Change(i as u32));
-                }))
-                .child(
-                    text(option.label.clone())
-                        .number_of_lines(1)
-                        .text_size(px(if small { 13.0 } else { 14.0 }))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(if selected {
-                            colors::TEXT
-                        } else {
-                            colors::MUTED
-                        }),
-                )
-                .children(option.count.map(|count| {
-                    text(count.to_string())
-                        .text_size(px(12.0))
-                        .text_color(colors::FAINT)
-                        .tabular_nums()
-                }))
-        });
-        view()
-            .h(px(height))
-            .flex_row()
-            .p(px(3.0))
-            .rounded(px(height / 2.0))
-            .bg(colors::INSET)
-            .adaptive_shadow(
-                track_light
-                    .iter()
-                    .copied()
-                    .chain([rim(rgb_a(0xffffff, 0.85))]),
-                track_dark
-                    .iter()
-                    .copied()
-                    .chain([rim(rgb_a(0xffffff, 0.04))]),
-            )
-            .border_1()
-            .border_color(colors::BORDER)
-            .role(AccessibilityRole::Tablist)
-            .on_layout(cx.listener(|this: &mut Self, frame: &Rect, cx| {
-                if this.width != frame.width {
-                    this.width = frame.width;
-                    this.place(cx.props());
-                    cx.notify();
-                }
-            }))
-            .child(
+    });
+    let small = props.size == SegmentedSize::Small;
+    let height = if small { 32.0 } else { 40.0 };
+    let (track_light, track_dark) = Finish::Track.shadows();
+    // The track's glass: the sunk shadow plus a lit lower rim.
+    let rim = |color| inset_shadow(-1.0, 0.0, color);
+    let segments = dynamic(move || {
+        props
+            .options
+            .get()
+            .into_iter()
+            .enumerate()
+            .map(|(i, option)| {
+                let i = i as u32;
+                let selected = computed(move || props.selected.get() == i);
                 view()
-                    .absolute()
-                    .top(px(3.0))
-                    .left(px(3.0))
-                    .bottom(px(3.0))
-                    .w(px(self.segment(props).max(0.0)))
-                    .rounded(px((height - 6.0) / 2.0))
-                    .finish(Finish::Pill)
-                    .border_1()
-                    .pointer_events(PointerEvents::None)
-                    .bind_translate_x(self.x.as_ref().expect("set up")),
-            )
-            .children(segments)
-    }
+                    .flex_1()
+                    .flex_row()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(5.0))
+                    .role(AccessibilityRole::Tab)
+                    .accessibility_state(move || AccessibilityState {
+                        selected: selected.get(),
+                        ..AccessibilityState::default()
+                    })
+                    .on_press(move |_: &()| cx.emit(SegmentedEvent::Change(i)))
+                    .child(
+                        text(option.label)
+                            .number_of_lines(1)
+                            .text_size(px(if small { 13.0 } else { 14.0 }))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(move || {
+                                if selected.get() {
+                                    colors::TEXT
+                                } else {
+                                    colors::MUTED
+                                }
+                            }),
+                    )
+                    .children(option.count.map(|count| {
+                        text(count.to_string())
+                            .text_size(px(12.0))
+                            .text_color(colors::FAINT)
+                            .tabular_nums()
+                    }))
+            })
+            .collect::<Vec<_>>()
+    });
+    view()
+        .h(px(height))
+        .flex_row()
+        .p(px(3.0))
+        .rounded(px(height / 2.0))
+        .bg(colors::INSET)
+        .adaptive_shadow(
+            track_light
+                .iter()
+                .copied()
+                .chain([rim(rgb_a(0xffffff, 0.85))]),
+            track_dark
+                .iter()
+                .copied()
+                .chain([rim(rgb_a(0xffffff, 0.04))]),
+        )
+        .border_1()
+        .border_color(colors::BORDER)
+        .role(AccessibilityRole::Tablist)
+        .on_layout(move |frame: &Rect| width.set(frame.width))
+        .child(
+            view()
+                .absolute()
+                .top(px(3.0))
+                .left(px(3.0))
+                .bottom(px(3.0))
+                .w(move || px(segment.get().max(0.0)))
+                .rounded(px((height - 6.0) / 2.0))
+                .finish(Finish::Pill)
+                .border_1()
+                .pointer_events(PointerEvents::None)
+                .bind_translate_x(&x),
+        )
+        .child(segments)
 }
 
 /// A [`Segmented`] of `options` with `selected` selected; its owner
 /// handles [`SegmentedEvent::Change`] with `.on_event(..)`.
 pub(crate) fn segmented(
     options: impl IntoIterator<Item = Segment>,
-    selected: u32,
+    selected: impl Into<Prop<u32>>,
 ) -> ComponentElement<Segmented> {
     Segmented::element(SegmentedProps {
-        options: options.into_iter().collect(),
-        selected,
+        options: options.into_iter().collect::<Vec<_>>().into(),
+        selected: selected.into(),
         size: SegmentedSize::Regular,
     })
 }

@@ -1,10 +1,10 @@
 //! The core's side of the platform services Rust components ask for
-//! ([`crate::ui::Context`], [`crate::ui::AsyncCx`]) beyond commands for the
+//! ([`crate::ui::ambient`]'s functions) beyond commands for the
 //! platform: display frames and the layout direction.
 //!
 //! The surface's direction is its root's (`Prop::LayoutDirection` on the
 //! root, which JS's `I18nManager` sets), else the platform's; components
-//! read it ([`crate::ui::RenderCx::rtl`]). Once a component sets a policy
+//! read it ([`crate::ui::ambient::rtl`]). Once a component sets a policy
 //! (`force_rtl`, `allow_rtl`), and from the start in a Rust app, the core
 //! sets the root's direction from the policy and the platform's language,
 //! again whenever the language changes. In an app whose JS also sets it,
@@ -123,8 +123,8 @@ impl<M: TextEngine> Core<M> {
         });
     }
 
-    /// The root's direction changed (JS's or the policy's): the components
-    /// that read it render again.
+    /// The root's direction changed (JS's or the policy's): what read it
+    /// runs again.
     pub(super) fn root_direction_changed(&mut self, rtl: bool) {
         if self.components.environment.rtl != rtl {
             let environment = crate::ui::Environment {

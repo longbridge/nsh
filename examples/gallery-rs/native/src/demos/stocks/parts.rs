@@ -9,27 +9,19 @@ use nsh_core::{
     ui::{AnyElement, prelude::*},
 };
 
-use super::{Feed, Running};
+use super::live;
 use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, press_with};
 
 /// Grid lines of charts: the hairline color, a step darker on the light
 /// page.
 pub(crate) const GRID: AdaptiveColor = AdaptiveColor::new(colors::BORDER.light, colors::LINE.dark);
 
-/// A bar that grows from one edge of its track to `share` (0..1) with a
-/// native spring: the bar is the track's width and slides in, clipped.
-#[derive(Debug, Default)]
-pub(crate) struct SpringBar {
-    x: Option<NativeValue>,
-    width: f32,
-    placed: bool,
-}
-
 /// The props of [`SpringBar`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct SpringBarProps {
     /// How much of the track it fills, 0..1.
-    pub(crate) share: f32,
+    #[prop(default)]
+    pub(crate) share: Prop<f32>,
     /// Its color.
     pub(crate) color: Tint,
     /// It grows from the right edge.
@@ -42,94 +34,88 @@ pub(crate) struct SpringBarProps {
     pub(crate) radius: Option<f32>,
 }
 
-impl SpringBar {
-    fn place(&mut self, props: &SpringBarProps) {
-        if self.width <= 0.0 {
-            return;
+/// A bar that grows from one edge of its track to `share` (0..1) with a
+/// native spring: the bar is the track's width and slides in, clipped.
+#[component]
+pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
+    let x = native_value(0.0);
+    // The track's width as laid out (0 before), and whether the bar was
+    // placed (the first place jumps, later ones spring).
+    let width = stored(0.0_f32);
+    let placed = stored(false);
+    let from_right = props.from_right;
+    let place = {
+        let x = x.clone();
+        move |share: f32| {
+            let width = width.with(|w| *w);
+            if width <= 0.0 {
+                return;
+            }
+            let share = share.clamp(0.0, 1.0);
+            let to = if from_right { 1.0 } else { -1.0 } * (1.0 - share) * width;
+            if placed.replace(true) {
+                let _ = x.spring(
+                    to,
+                    Spring {
+                        stiffness: 180.0,
+                        damping: 22.0,
+                        ..Spring::default()
+                    },
+                );
+            } else {
+                x.set(to);
+            }
         }
-        let share = props.share.clamp(0.0, 1.0);
-        let to = if props.from_right { 1.0 } else { -1.0 } * (1.0 - share) * self.width;
-        let x = self.x.as_ref().expect("set up");
-        if self.placed {
-            let _ = x.spring(
-                to,
-                Spring {
-                    stiffness: 180.0,
-                    damping: 22.0,
-                    ..Spring::default()
-                },
-            );
-        } else {
-            x.set(to);
-        }
-        self.placed = true;
+    };
+    {
+        let place = place.clone();
+        effect(move || {
+            let share = props.share.get();
+            untracked(|| place(share));
+        });
     }
+    let radius = props.radius.unwrap_or(props.height / 2.0);
+    let color = AdaptiveColor::new(props.color.light, props.color.dark);
+    view()
+        .h(px(props.height))
+        .overflow_hidden()
+        .rounded(px(radius))
+        .on_layout(move |frame: &Rect| {
+            if width.replace(frame.width) != frame.width {
+                place(props.share.get_untracked());
+            }
+        })
+        .child(
+            view()
+                .absolute()
+                .inset_0()
+                .rounded(px(radius))
+                .bg(color)
+                .bind_translate_x(&x),
+        )
 }
 
-impl Component for SpringBar {
-    type Props = SpringBarProps;
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &SpringBarProps, cx: &mut Context<'_, Self>) {
-        self.x = Some(cx.native_value(0.0));
-    }
-
-    fn props_changed(
-        &mut self,
-        old: &SpringBarProps,
-        new: &SpringBarProps,
-        _: &mut Context<'_, Self>,
-    ) {
-        if old.share != new.share {
-            self.place(new);
-        }
-    }
-
-    fn render(&self, props: &SpringBarProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let radius = props.radius.unwrap_or(props.height / 2.0);
-        let color = AdaptiveColor::new(props.color.light, props.color.dark);
-        view()
-            .h(px(props.height))
-            .overflow_hidden()
-            .rounded(px(radius))
-            .on_layout(cx.listener(|this: &mut Self, frame: &Rect, cx| {
-                if this.width != frame.width {
-                    this.width = frame.width;
-                    this.place(cx.props());
-                }
-            }))
-            .child(
-                view()
-                    .absolute()
-                    .inset_0()
-                    .rounded(px(radius))
-                    .bg(color)
-                    .bind_translate_x(self.x.as_ref().expect("set up")),
-            )
-    }
-}
-
-/// A [`SpringBar`] of `color` filled to `share`.
-pub(crate) fn spring_bar(share: f64, color: AdaptiveColor) -> SpringBarProps {
+/// A [`SpringBar`] of `color` filled to `share` (a binding: the bar
+/// springs when it changes).
+pub(crate) fn spring_bar(
+    share: impl Fn() -> f64 + 'static,
+    color: AdaptiveColor,
+) -> SpringBarProps {
     SpringBarProps {
-        share: share as f32,
+        share: Prop::bind(move || share() as f32),
         color: color.into(),
-        ..SpringBarProps::default()
+        from_right: false,
+        height: 8.0,
+        radius: None,
     }
-}
-
-/// A dot with a ring that pulses natively while the market runs: 0 → 1
-/// over 1.4 s, looped.
-#[derive(Debug, Default)]
-pub(crate) struct LiveDot {
-    pulse: Option<(NativeValue, Animation)>,
 }
 
 /// The props of [`LiveDot`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct LiveDotProps {
     /// The market runs.
-    pub(crate) running: bool,
+    #[prop(default)]
+    pub(crate) running: Prop<bool>,
     /// The dot's size.
     #[prop(default = 8.0)]
     pub(crate) size: f32,
@@ -137,8 +123,8 @@ pub(crate) struct LiveDotProps {
 
 /// A value that pulses 0 → 1 over 1.4 s, looped (started by
 /// [`run_pulse`]).
-pub(crate) fn pulse<C: Component>(cx: &Context<'_, C>) -> (NativeValue, Animation) {
-    let v = cx.native_value(0.0);
+pub(crate) fn pulse() -> (NativeValue, Animation) {
+    let v = native_value(0.0);
     let looped = Animation::timing(
         &v,
         1.0,
@@ -158,119 +144,95 @@ pub(crate) fn run_pulse((v, looped): &(NativeValue, Animation), running: bool) {
     }
 }
 
-impl Component for LiveDot {
-    type Props = LiveDotProps;
-    type Event = NoEvent;
-
-    fn setup(&mut self, props: &LiveDotProps, cx: &mut Context<'_, Self>) {
-        let pulse = pulse(cx);
-        run_pulse(&pulse, props.running);
-        self.pulse = Some(pulse);
-    }
-
-    fn props_changed(&mut self, old: &LiveDotProps, new: &LiveDotProps, _: &mut Context<'_, Self>) {
-        if old.running != new.running {
-            run_pulse(self.pulse.as_ref().expect("set up"), new.running);
-        }
-    }
-
-    fn render(&self, props: &LiveDotProps, _: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let (p, _) = self.pulse.as_ref().expect("set up");
-        let size = props.size;
-        view()
-            .size(px(size * 2.5))
-            .items_center()
-            .justify_center()
-            .child(
-                view()
-                    .absolute()
-                    .size(px(size))
-                    .rounded(px(size / 2.0))
-                    .bg(colors::ACCENT)
-                    .bind_opacity(&p.interpolate(&[0.0, 1.0], &[0.55, 0.0]))
-                    .bind_scale(&p.interpolate(&[0.0, 1.0], &[1.0, 2.5])),
-            )
-            .child(
-                view()
-                    .size(px(size))
-                    .rounded(px(size / 2.0))
-                    .bg(if props.running {
-                        colors::ACCENT
-                    } else {
-                        colors::FAINT
-                    }),
-            )
-    }
+/// A dot with a ring that pulses natively while the market runs: 0 → 1
+/// over 1.4 s, looped.
+#[component]
+pub(crate) fn LiveDot(props: LiveDotProps) -> impl IntoElement {
+    let pulse = pulse();
+    let p = pulse.0.clone();
+    effect(move || run_pulse(&pulse, props.running.get()));
+    let size = props.size;
+    view()
+        .size(px(size * 2.5))
+        .items_center()
+        .justify_center()
+        .child(
+            view()
+                .absolute()
+                .size(px(size))
+                .rounded(px(size / 2.0))
+                .bg(colors::ACCENT)
+                .bind_opacity(&p.interpolate(&[0.0, 1.0], &[0.55, 0.0]))
+                .bind_scale(&p.interpolate(&[0.0, 1.0], &[1.0, 2.5])),
+        )
+        .child(view().size(px(size)).rounded(px(size / 2.0)).bg(move || {
+            if props.running.get() {
+                colors::ACCENT
+            } else {
+                colors::FAINT
+            }
+        }))
 }
 
-/// [`LiveDot`] of `size`.
-pub(crate) fn live_dot(running: bool, size: f32) -> ComponentElement<LiveDot> {
-    LiveDot::element(LiveDotProps { running, size })
+/// [`LiveDot`] of `size`, pulsing while the market runs.
+pub(crate) fn live_dot(running: Signal<bool>, size: f32) -> ComponentElement<LiveDot> {
+    LiveDot::element(LiveDotProps {
+        running: running.into(),
+        size,
+    })
 }
 
 /// Pauses or resumes the market: a pill while it runs, citrus while it
 /// is paused.
-#[derive(Debug, Default)]
-pub(crate) struct MarketButton;
-
-impl Component for MarketButton {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let running = cx.global::<Running>().0;
-        let owner = cx.global::<Feed>().owner.clone();
-        let toggle = cx.listener(move |_: &mut Self, _: &(), _| {
-            if let Some(owner) = &owner {
-                drop(owner.update(|stocks, cx| stocks.toggle(cx)));
-            }
-        });
-        // A component's root is a view: the press sits in one.
-        view().child(
-            press_with(
-                PressProps {
-                    hit_slop: Some(6.0),
-                    label: Some(
-                        if running {
+#[component]
+pub(crate) fn MarketButton() -> impl IntoElement {
+    let running = live().running;
+    // In a view: the press takes the styles a parent gives the button.
+    view().child(
+        press_with(
+            PressProps {
+                hit_slop: Some(6.0),
+                label: Prop::bind(move || {
+                    Some(
+                        if running.get() {
                             "Pause the market"
                         } else {
                             "Resume the market"
                         }
                         .into(),
-                    ),
-                    ..PressProps::default()
-                },
-                toggle,
-            )
-            .child(
-                view()
-                    .size(px(32.0))
-                    .rounded(px(16.0))
-                    .items_center()
-                    .justify_center()
-                    .map(|v| {
-                        if running {
-                            v.finish(Finish::Pill).border_1()
-                        } else {
-                            v.finish(Finish::Accent)
-                        }
-                    })
-                    .child(icon(
-                        if running {
+                    )
+                }),
+                ..PressProps::default()
+            },
+            move |_: &()| running.update(|r| *r = !*r),
+        )
+        .child(
+            view()
+                .size(px(32.0))
+                .rounded(px(16.0))
+                .items_center()
+                .justify_center()
+                .style_when(running, |v| v.finish(Finish::Pill).border_1())
+                .style_when(move || !running.get(), |v| v.finish(Finish::Accent))
+                .child(icon(
+                    Prop::bind(move || {
+                        if running.get() {
                             IconName::Pause
                         } else {
                             IconName::Play
-                        },
-                        13.0,
-                        if running {
+                        }
+                    }),
+                    13.0,
+                    move || {
+                        if running.get() {
                             colors::MUTED
                         } else {
                             colors::ON_ACCENT
-                        },
-                    )),
-            ),
-        )
-    }
+                        }
+                    },
+                )),
+        ),
+    )
 }
 
 /// An axis range that follows its data calmly: it widens at once (nothing

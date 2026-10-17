@@ -8,6 +8,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [native-pipeline.md](native-pipeline.md) | How apps are compiled and run: the JSX compiler, the native modules, the renderer, types, hot reload |
 | [js-modules.md](js-modules.md) | The module layers (`nsh/*`, `nsh/ui/*`), where each module is implemented and declared, platform props, where new things go |
 | [components.md](components.md) | Rust components: the host node, renders and diffing, children and slots, events, the JS face and declarations |
+| [reactive-components.md](reactive-components.md) | Rust components on the shared reactive graph (run once, fine-grained bindings, no diff) |
 | [elements.md](elements.md) | Host elements and runtime components, touch, accessibility, the environment, why the main thread never waits for JS |
 | [text.md](text.md) | Text blocks, spans, inline attachments |
 | [styles.md](styles.md) | Tailwind, effects, view styles, Android differences |

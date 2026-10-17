@@ -153,46 +153,34 @@ fn captioned(gap: f32, sample: impl IntoElement, caption: &'static str) -> AnyEl
 }
 
 /// The demo's page: the Tailwind demo's cards in typed styles.
-#[derive(Default)]
-pub(crate) struct TypedStyles {
-    /// The first button's presses.
-    count: u32,
-    /// The third button is disabled.
-    busy: bool,
-}
-
-impl Component for TypedStyles {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let sections: [AnyElement; CARDS] = [
-            hero(),
-            stats(),
-            self.buttons(cx),
-            cards(),
-            layout(cx.window().width),
-            shadows(),
-            gradients(),
-            typography(),
-            effects(),
-            motion(),
-            lists(),
-            inputs(cx),
-            palette(),
-        ];
-        // A component's root is a view: the page scrolls inside it.
-        view().flex_1().child(
-            scroll().flex_1().bg(colors::BACKGROUND).child(
-                view().gap_4().p_4().pb_10().children(
-                    sections
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, section)| appear(i as u32).child(section)),
-                ),
+#[component]
+pub(crate) fn TypedStyles() -> impl IntoElement {
+    let sections: [AnyElement; CARDS] = [
+        hero(),
+        stats(),
+        buttons(),
+        cards(),
+        layout(),
+        shadows(),
+        gradients(),
+        typography(),
+        effects(),
+        motion(),
+        lists(),
+        inputs(),
+        palette(),
+    ];
+    // The page scrolls inside the component's view.
+    view().flex_1().child(
+        scroll().flex_1().bg(colors::BACKGROUND).child(
+            view().gap_4().p_4().pb_10().children(
+                sections
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, section)| appear(i as u32).child(section)),
             ),
-        )
-    }
+        ),
+    )
 }
 
 /// A gradient hero lit by a citrus glow, with a big tabular figure and two
@@ -410,111 +398,99 @@ fn stats() -> AnyElement {
     )
 }
 
-impl TypedStyles {
-    /// Buttons: press states without a render, transitions, disabled.
-    fn buttons(&self, cx: &mut RenderCx<'_, Self>) -> AnyElement {
-        let busy = self.busy;
-        let pressed = view()
-            .h_11()
-            .flex_row()
-            .items_center()
-            .justify_center()
-            .rounded(px(10.0))
-            .bg(zinc(900, 100))
-            .finish(Finish::Light)
-            .transition()
-            .duration(150.0)
-            .active(|s| s.scale(0.97).opacity(0.9))
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.count += 1;
-                cx.notify();
-            }))
-            .child(
-                text(format!("Pressed {}×", self.count))
-                    .text_size(px(15.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(adaptive(WHITE, ZINC.shade(900))),
-            );
-        let reset = view()
-            .h_11()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .rounded(px(10.0))
-            .border_1()
-            .border_color(colors::BORDER)
-            .bg(colors::RAISED)
-            .finish(Finish::Raised)
-            .transition()
-            .active(|s| s.scale(0.95).opacity(0.8))
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.count = 0;
-                cx.notify();
-            }))
-            .child(
-                text("Reset")
-                    .text_size(px(15.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(zinc(900, 100)),
-            );
-        let disable = view()
-            .h_11()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .rounded(px(10.0))
-            .bg(rgb(CITRUS))
-            .finish(Finish::Accent)
-            .transition()
-            .active(|s| s.scale(0.95))
-            .hover(|s| s.opacity(0.9))
-            .disabled(busy)
-            .disabled_style(|s| s.opacity(0.4))
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.busy = !this.busy;
-                cx.notify();
-            }))
-            .child(
-                text(if busy { "Disabled" } else { "Disable me" })
-                    .text_size(px(15.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors::ON_ACCENT),
-            );
-        let enable = view()
-            .min_h(px(44.0))
-            .justify_center()
-            .self_start()
-            .rounded_lg()
-            .px_1()
-            .active(|s| s.bg(adaptive(BLACK.with_alpha(0.05), WHITE.with_alpha(0.05))))
-            .on_press(cx.listener(|this: &mut Self, _, cx| {
-                this.busy = false;
-                cx.notify();
-            }))
-            .child(
-                text("Enable again")
-                    .text_sm()
-                    .text_color(colors::ACCENT)
-                    .underline()
-                    .text_decoration_dotted()
-                    .underline_offset(4.0),
-            );
-        card(
-            IconName::Components,
-            "Buttons",
-            ".active(..) .hover(..) .transition() .disabled_style(..)",
-            [
-                pressed.into_element(),
-                view()
-                    .flex_row()
-                    .gap_2()
-                    .child(reset)
-                    .child(disable)
-                    .into_element(),
-                enable.into_element(),
-            ],
-        )
-    }
+/// Buttons: press states without a render, transitions, disabled.
+fn buttons() -> AnyElement {
+    // The first button's presses; the third button is disabled.
+    let count = signal(0_u32);
+    let busy = signal(false);
+    let pressed = view()
+        .h_11()
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .rounded(px(10.0))
+        .bg(zinc(900, 100))
+        .finish(Finish::Light)
+        .transition()
+        .duration(150.0)
+        .active(|s| s.scale(0.97).opacity(0.9))
+        .on_press(move |_: &()| count.update(|n| *n += 1))
+        .child(
+            text(move || format!("Pressed {}×", count.get()))
+                .text_size(px(15.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(adaptive(WHITE, ZINC.shade(900))),
+        );
+    let reset = view()
+        .h_11()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(colors::BORDER)
+        .bg(colors::RAISED)
+        .finish(Finish::Raised)
+        .transition()
+        .active(|s| s.scale(0.95).opacity(0.8))
+        .on_press(move |_: &()| count.set(0))
+        .child(
+            text("Reset")
+                .text_size(px(15.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(zinc(900, 100)),
+        );
+    let disable = view()
+        .h_11()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .rounded(px(10.0))
+        .bg(rgb(CITRUS))
+        .finish(Finish::Accent)
+        .transition()
+        .active(|s| s.scale(0.95))
+        .hover(|s| s.opacity(0.9))
+        .disabled(busy)
+        .disabled_style(|s| s.opacity(0.4))
+        .on_press(move |_: &()| busy.update(|b| *b = !*b))
+        .child(
+            text(move || if busy.get() { "Disabled" } else { "Disable me" })
+                .text_size(px(15.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(colors::ON_ACCENT),
+        );
+    let enable = view()
+        .min_h(px(44.0))
+        .justify_center()
+        .self_start()
+        .rounded_lg()
+        .px_1()
+        .active(|s| s.bg(adaptive(BLACK.with_alpha(0.05), WHITE.with_alpha(0.05))))
+        .on_press(move |_: &()| busy.set(false))
+        .child(
+            text("Enable again")
+                .text_sm()
+                .text_color(colors::ACCENT)
+                .underline()
+                .text_decoration_dotted()
+                .underline_offset(4.0),
+        );
+    card(
+        IconName::Components,
+        "Buttons",
+        ".active(..) .hover(..) .transition() .disabled_style(..)",
+        [
+            pressed.into_element(),
+            view()
+                .flex_row()
+                .gap_2()
+                .child(reset)
+                .child(disable)
+                .into_element(),
+            enable.into_element(),
+        ],
+    )
 }
 
 /// Cards: a group press row, tinted badges, an inner ring.
@@ -609,8 +585,8 @@ fn cards() -> AnyElement {
     )
 }
 
-/// Flex rows, a grid and a breakpoint. `width` is the window's.
-fn layout(width: f32) -> AnyElement {
+/// Flex rows, a grid and a breakpoint (the window's width).
+fn layout() -> AnyElement {
     let violet = |alpha: f32| {
         view()
             .h_12()
@@ -686,7 +662,7 @@ fn layout(width: f32) -> AnyElement {
             view()
                 .flex_col()
                 .gap_2()
-                .when(width >= 640.0, |v| v.flex_row())
+                .style_when(|| window().width >= 640.0, |s| s.flex_row())
                 .child(
                     view()
                         .h_8()
@@ -1113,7 +1089,7 @@ fn lists() -> AnyElement {
 }
 
 /// An input with focus, placeholder and caret colors.
-fn inputs(cx: &mut RenderCx<'_, TypedStyles>) -> AnyElement {
+fn inputs() -> AnyElement {
     card(
         IconName::Form,
         "Inputs",
@@ -1121,8 +1097,8 @@ fn inputs(cx: &mut RenderCx<'_, TypedStyles>) -> AnyElement {
         [
             input()
                 .placeholder("Focus me")
-                .placeholder_color(cx.color(zinc(400, 600)))
-                .selection_color(cx.color(colors::ACCENT))
+                .placeholder_color(|| color(zinc(400, 600)))
+                .selection_color(|| color(colors::ACCENT))
                 .h_11()
                 .rounded(px(10.0))
                 .border_1()

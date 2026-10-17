@@ -13,7 +13,7 @@ use crate::ui::{Badge, Finish, Finished, IconName, PressProps, Stat, Tone, color
 const PAGE: usize = 200;
 
 /// A photo of the list.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Photo {
     id: usize,
     title: String,
@@ -60,11 +60,15 @@ fn compact(n: usize) -> String {
     }
 }
 
-/// One row: the picture, its title, author and views, its number.
-fn row(photo: &Photo) -> impl IntoElement + use<> {
+/// One row: the picture, its title, author and views, its number (of the
+/// photo `photo` reads: a cell shows another photo through its bindings).
+fn row(photo: Memo<Option<Photo>>) -> impl IntoElement {
+    let field = move |f: fn(&Photo) -> String| {
+        move || photo.with(|p| p.as_ref().map(f).unwrap_or_default())
+    };
     crate::ui::Press::element(PressProps {
-        scale: 0.985,
-        label: Some(photo.title.clone().into()),
+        scale: 0.985.into(),
+        label: Prop::bind(move || photo.with(|p| p.as_ref().map(|p| p.title.clone().into()))),
         ..PressProps::default()
     })
     .child(
@@ -75,14 +79,16 @@ fn row(photo: &Photo) -> impl IntoElement + use<> {
             .px_4()
             .h(px(76.0))
             .child(
-                image(format!("https://picsum.photos/seed/{}/112/112", photo.id))
-                    .size(px(56.0))
-                    .rounded(px(radius::INSET))
-                    .border_curve(BorderCurve::Continuous)
-                    .border_1()
-                    .border_color(colors::BORDER)
-                    .bg(colors::RAISED)
-                    .finish(Finish::Raised),
+                image(field(|p| {
+                    format!("https://picsum.photos/seed/{}/112/112", p.id)
+                }))
+                .size(px(56.0))
+                .rounded(px(radius::INSET))
+                .border_curve(BorderCurve::Continuous)
+                .border_1()
+                .border_color(colors::BORDER)
+                .bg(colors::RAISED)
+                .finish(Finish::Raised),
             )
             .child(
                 view()
@@ -93,7 +99,7 @@ fn row(photo: &Photo) -> impl IntoElement + use<> {
                     .border_b_1()
                     .border_b_color(colors::LINE)
                     .child(
-                        text(photo.title.clone())
+                        text(field(|p| p.title.clone()))
                             .number_of_lines(1)
                             .text_size(px(15.0))
                             .font_weight(FontWeight::SEMIBOLD)
@@ -104,14 +110,18 @@ fn row(photo: &Photo) -> impl IntoElement + use<> {
                             .flex_row()
                             .items_center()
                             .gap(px(6.0))
-                            .child(view().size(px(6.0)).rounded(px(3.0)).bg(photo.tone.color()))
+                            .child(view().size(px(6.0)).rounded(px(3.0)).bg(move || {
+                                photo
+                                    .with(|p| p.as_ref().map_or(Tone::Neutral, |p| p.tone))
+                                    .color()
+                            }))
                             .child(
-                                text(photo.author)
+                                text(field(|p| p.author.to_owned()))
                                     .text_size(px(13.0))
                                     .text_color(colors::MUTED),
                             )
                             .child(
-                                text(format!("· {} views", compact(photo.views)))
+                                text(field(|p| format!("· {} views", compact(p.views))))
                                     .text_size(px(13.0))
                                     .text_color(colors::FAINT)
                                     .tabular_nums(),
@@ -119,7 +129,7 @@ fn row(photo: &Photo) -> impl IntoElement + use<> {
                     ),
             )
             .child(
-                text(format!("#{}", photo.id))
+                text(field(|p| format!("#{}", p.id)))
                     .text_size(px(13.0))
                     .text_color(colors::FAINT)
                     .tabular_nums(),
@@ -127,208 +137,194 @@ fn row(photo: &Photo) -> impl IntoElement + use<> {
     )
 }
 
-/// The demo's page.
-#[derive(Debug, Default)]
-pub(crate) struct Photos {
-    photos: Rc<Vec<Photo>>,
-    refreshing: bool,
-    refreshes: u32,
-    /// The refresh in progress (dropping it cancels it).
-    refresh: Option<Task<()>>,
-    /// The list's scroll offset, fed natively: the hero's parallax and
-    /// fade and the compact bar run without a render per frame.
-    scroll_y: Option<NativeValue>,
-}
-
-impl Photos {
-    /// The list's header: a card of figures and a hint, fading out and
-    /// moving at half speed as the list slides over it.
-    fn hero(&self, scroll_y: &NativeValue) -> impl IntoElement + use<> {
-        let count = self.photos.len();
-        view()
-            .px_4()
-            .pt_2()
-            .pb_4()
-            .bind_opacity(&scroll_y.interpolate(&[0.0, 150.0], &[1.0, 0.0]))
-            .bind_translate_y(&scroll_y.interpolate(&[-200.0, 0.0, 300.0], &[0.0, 0.0, 150.0]))
-            .child(
-                view()
-                    .bg(colors::SURFACE)
-                    .rounded(px(radius::CARD))
-                    .border_curve(BorderCurve::Continuous)
-                    .border_1()
-                    .border_color(colors::BORDER)
-                    .p_4()
-                    .gap_3()
-                    .finish(Finish::Card)
-                    .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                view()
-                                    .size(px(40.0))
-                                    .rounded(px(12.0))
-                                    .border_curve(BorderCurve::Continuous)
-                                    .bg(colors::RAISED)
-                                    .border_1()
-                                    .border_color(colors::BORDER)
-                                    .items_center()
-                                    .justify_center()
-                                    .finish(Finish::Raised)
-                                    .child(image(crate::assets::LOGO).size(px(24.0))),
-                            )
-                            .child(
-                                view()
-                                    .flex_1()
-                                    .gap(px(2.0))
-                                    .child(
-                                        text("Photo stream")
-                                            .text_size(px(17.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(colors::TEXT),
-                                    )
-                                    .child(
-                                        text("A recycled list of remote images")
-                                            .text_size(px(13.0))
-                                            .text_color(colors::MUTED),
-                                    ),
-                            )
-                            .child(Badge::new("Remote").tone(Tone::Info)),
-                    )
-                    .child(
-                        text(grouped(count))
-                            .text_size(px(40.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors::TEXT)
-                            .tabular_nums()
-                            .letter_spacing(-1.0)
-                            .child(
-                                text(" photos")
-                                    .text_size(px(15.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(colors::ACCENT),
-                            ),
-                    )
-                    .child(
-                        view()
-                            .flex_row()
-                            .border_t_1()
-                            .border_t_color(colors::LINE)
-                            .pt(px(10.0))
-                            .child(Stat::new("Pages", count.div_ceil(PAGE).to_string()).width(0.33))
-                            .child(Stat::new("Per page", PAGE.to_string()).width(0.33))
-                            .child({
-                                let stat =
-                                    Stat::new("Refreshes", self.refreshes.to_string()).width(0.33);
-                                if self.refreshes > 0 {
-                                    stat.tone(Tone::Accent)
-                                } else {
-                                    stat
-                                }
-                            }),
-                    ),
-            )
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .pt_3()
-                    .child(icon(IconName::ArrowDown, 14.0, colors::FAINT))
-                    .child(
-                        text(format!(
-                            "Pull to refresh. Scrolling to the end loads {PAGE} more."
-                        ))
-                        .flex_1()
-                        .text_size(px(13.0))
-                        .text_color(colors::FAINT),
-                    ),
-            )
-    }
-}
-
-impl Component for Photos {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.photos = Rc::new(make_photos(1, 1000).collect());
-        self.scroll_y = Some(cx.native_value(0.0));
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let photos = self.photos.clone();
-        let scroll_y = self.scroll_y.as_ref().expect("set up");
-        let refresh = cx.listener(|this: &mut Self, _, cx| {
-            this.refreshing = true;
-            cx.notify();
-            this.refresh = Some(cx.set_timeout(Duration::from_millis(800), |this, cx| {
-                this.photos = Rc::new(make_photos(1, 1000).collect());
-                this.refreshes += 1;
-                this.refreshing = false;
-                cx.notify();
-            }));
-        });
-        let load_more = cx.listener(|this: &mut Self, _, cx| {
-            let from = this.photos.len() + 1;
-            log::info!("loading more after {}", this.photos.len());
-            Rc::make_mut(&mut this.photos).extend(make_photos(from, PAGE));
-            cx.notify();
-        });
-        view()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .child(
-                virtual_list(photos.len(), move |i, _| row(&photos[i]))
-                    .estimated_item_size(76.0)
+/// The list's header: a card of figures and a hint, fading out and moving
+/// at half speed as the list slides over it.
+fn hero(count: Memo<usize>, refreshes: Signal<u32>, scroll_y: &NativeValue) -> impl IntoElement {
+    view()
+        .px_4()
+        .pt_2()
+        .pb_4()
+        .bind_opacity(&scroll_y.interpolate(&[0.0, 150.0], &[1.0, 0.0]))
+        .bind_translate_y(&scroll_y.interpolate(&[-200.0, 0.0, 300.0], &[0.0, 0.0, 150.0]))
+        .child(
+            view()
+                .bg(colors::SURFACE)
+                .rounded(px(radius::CARD))
+                .border_curve(BorderCurve::Continuous)
+                .border_1()
+                .border_color(colors::BORDER)
+                .p_4()
+                .gap_3()
+                .finish(Finish::Card)
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            view()
+                                .size(px(40.0))
+                                .rounded(px(12.0))
+                                .border_curve(BorderCurve::Continuous)
+                                .bg(colors::RAISED)
+                                .border_1()
+                                .border_color(colors::BORDER)
+                                .items_center()
+                                .justify_center()
+                                .finish(Finish::Raised)
+                                .child(image(crate::assets::LOGO).size(px(24.0))),
+                        )
+                        .child(
+                            view()
+                                .flex_1()
+                                .gap(px(2.0))
+                                .child(
+                                    text("Photo stream")
+                                        .text_size(px(17.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(colors::TEXT),
+                                )
+                                .child(
+                                    text("A recycled list of remote images")
+                                        .text_size(px(13.0))
+                                        .text_color(colors::MUTED),
+                                ),
+                        )
+                        .child(Badge::new("Remote").tone(Tone::Info)),
+                )
+                .child(
+                    text(move || grouped(count.get()))
+                        .text_size(px(40.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors::TEXT)
+                        .tabular_nums()
+                        .letter_spacing(-1.0)
+                        .child(
+                            text(" photos")
+                                .text_size(px(15.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(colors::ACCENT),
+                        ),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .border_t_1()
+                        .border_t_color(colors::LINE)
+                        .pt(px(10.0))
+                        .child(
+                            Stat::new("Pages", move || count.get().div_ceil(PAGE).to_string())
+                                .width(0.33),
+                        )
+                        .child(Stat::new("Per page", PAGE.to_string()).width(0.33))
+                        .child(
+                            Stat::new("Refreshes", move || refreshes.get().to_string())
+                                .width(0.33)
+                                .tone_when(move || refreshes.get() > 0, Tone::Accent),
+                        ),
+                ),
+        )
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .pt_3()
+                .child(icon(IconName::ArrowDown, 14.0, colors::FAINT))
+                .child(
+                    text(format!(
+                        "Pull to refresh. Scrolling to the end loads {PAGE} more."
+                    ))
                     .flex_1()
-                    .content_padding_bottom(24.0)
-                    .scroll_value(scroll_y)
-                    .refreshing(self.refreshing)
-                    .on_refresh(refresh)
-                    .on_end_reached(load_more)
-                    .header(self.hero(scroll_y))
-                    .footer(
-                        text(format!("Loading {PAGE} more…"))
-                            .text_center()
-                            .text_size(px(13.0))
-                            .text_color(colors::FAINT)
-                            .p_4(),
-                    ),
-            )
-            // The compact bar fades in once the hero has scrolled away.
-            .child(
-                view()
-                    .pointer_events(PointerEvents::None)
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .h(px(44.0))
-                    .px_4()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .bg(colors::BACKGROUND)
-                    .border_b_1()
-                    .border_b_color(colors::BORDER)
-                    .bind_opacity(&scroll_y.interpolate(&[140.0, 190.0], &[0.0, 1.0]))
-                    .bind_translate_y(&scroll_y.interpolate(&[140.0, 190.0], &[-8.0, 0.0]))
-                    .child(
-                        text("Photo stream")
-                            .flex_1()
-                            .text_size(px(15.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors::TEXT),
-                    )
-                    .child(
-                        text(format!("{} photos", grouped(self.photos.len())))
-                            .text_size(px(13.0))
-                            .text_color(colors::MUTED)
-                            .tabular_nums(),
-                    ),
-            )
-    }
+                    .text_size(px(13.0))
+                    .text_color(colors::FAINT),
+                ),
+        )
+}
+
+/// The demo's page.
+#[component]
+pub(crate) fn Photos() -> impl IntoElement {
+    let photos = signal(Rc::new(make_photos(1, 1000).collect::<Vec<_>>()));
+    let count = computed(move || photos.with(|p| p.len()));
+    let refreshing = signal(false);
+    let refreshes = signal(0_u32);
+    // The refresh in progress.
+    let refresh = stored(None::<Spawned<()>>);
+    // The list's scroll offset, fed natively: the hero's parallax and fade
+    // and the compact bar run without a binding per frame.
+    let scroll_y = native_value(0.0);
+    let on_refresh = move |_: &()| {
+        refreshing.set(true);
+        let task = set_timeout(Duration::from_millis(800), move || {
+            photos.set(Rc::new(make_photos(1, 1000).collect()));
+            refreshes.update(|r| *r += 1);
+            refreshing.set(false);
+        });
+        if let Some(old) = refresh.replace(Some(task)) {
+            old.cancel();
+        }
+    };
+    let load_more = move |_: &()| {
+        let from = count.get_untracked() + 1;
+        log::info!("loading more after {}", from - 1);
+        photos.update(|p| Rc::make_mut(p).extend(make_photos(from, PAGE)));
+    };
+    view()
+        .flex_1()
+        .bg(colors::BACKGROUND)
+        .child(
+            virtual_list(count, move |at| {
+                row(computed(move || {
+                    photos.with(|p| p.get(at.index()).cloned())
+                }))
+            })
+            .estimated_item_size(76.0)
+            .flex_1()
+            .content_padding_bottom(24.0)
+            .scroll_value(&scroll_y)
+            .refreshing(refreshing)
+            .on_refresh(on_refresh)
+            .on_end_reached(load_more)
+            .header(hero(count, refreshes, &scroll_y))
+            .footer(
+                text(format!("Loading {PAGE} more…"))
+                    .text_center()
+                    .text_size(px(13.0))
+                    .text_color(colors::FAINT)
+                    .p_4(),
+            ),
+        )
+        // The compact bar fades in once the hero has scrolled away.
+        .child(
+            view()
+                .pointer_events(PointerEvents::None)
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(44.0))
+                .px_4()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .bg(colors::BACKGROUND)
+                .border_b_1()
+                .border_b_color(colors::BORDER)
+                .bind_opacity(&scroll_y.interpolate(&[140.0, 190.0], &[0.0, 1.0]))
+                .bind_translate_y(&scroll_y.interpolate(&[140.0, 190.0], &[-8.0, 0.0]))
+                .child(
+                    text("Photo stream")
+                        .flex_1()
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors::TEXT),
+                )
+                .child(
+                    text(move || format!("{} photos", grouped(count.get())))
+                        .text_size(px(13.0))
+                        .text_color(colors::MUTED)
+                        .tabular_nums(),
+                ),
+        )
 }

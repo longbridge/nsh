@@ -59,12 +59,11 @@ impl Alert {
         message: Option<SharedString>,
         buttons: Option<Vec<AlertButton>>,
         options: Option<AlertOptions>,
-        cx: AsyncCx,
     ) -> i32 {
         let buttons = buttons
             .filter(|b| !b.is_empty())
             .unwrap_or_else(|| vec![AlertButton::default()]);
-        cx.dialog(Dialog {
+        dialog(Dialog {
             id: 0,
             title: Some(title.to_string()),
             message: message.map(|m| m.to_string()),
@@ -107,35 +106,34 @@ pub struct ActionSheetOptions {
 impl ActionSheet {
     /// Shows the sheet and resolves with the index of the action chosen
     /// (the cancel index, or -1, when it was dismissed).
-    pub async fn show(options: ActionSheetOptions, cx: AsyncCx) -> i32 {
+    pub async fn show(options: ActionSheetOptions) -> i32 {
         let destructive = options
             .destructive_button_indexes
             .clone()
             .unwrap_or_default();
-        let index = cx
-            .dialog(Dialog {
-                id: 0,
-                title: options.title.as_ref().map(|t| t.to_string()),
-                message: options.message.as_ref().map(|m| m.to_string()),
-                buttons: options
-                    .options
-                    .iter()
-                    .enumerate()
-                    .map(|(i, text)| DialogButton {
-                        text: text.to_string(),
-                        style: if Some(i as u32) == options.cancel_button_index {
-                            DialogButtonStyle::Cancel
-                        } else if destructive.contains(&(i as u32)) {
-                            DialogButtonStyle::Destructive
-                        } else {
-                            DialogButtonStyle::Default
-                        },
-                    })
-                    .collect(),
-                cancelable: true,
-                sheet: true,
-            })
-            .await;
+        let index = dialog(Dialog {
+            id: 0,
+            title: options.title.as_ref().map(|t| t.to_string()),
+            message: options.message.as_ref().map(|m| m.to_string()),
+            buttons: options
+                .options
+                .iter()
+                .enumerate()
+                .map(|(i, text)| DialogButton {
+                    text: text.to_string(),
+                    style: if Some(i as u32) == options.cancel_button_index {
+                        DialogButtonStyle::Cancel
+                    } else if destructive.contains(&(i as u32)) {
+                        DialogButtonStyle::Destructive
+                    } else {
+                        DialogButtonStyle::Default
+                    },
+                })
+                .collect(),
+            cancelable: true,
+            sheet: true,
+        })
+        .await;
         if index >= 0 {
             index
         } else {

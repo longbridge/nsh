@@ -23,9 +23,11 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 crates/
   nsh-core/            Platform-independent core: shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
-                       Rust components (`ui/`: elements, typed styles, the theme; `core/components.rs`); the runtime's Rust
+                       the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host);
+                       Rust components that run once (`ui/`: signals, elements, bindings, typed styles, the theme;
+                       `core/components.rs`, `core/views.rs`); the runtime's Rust
                        modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs)
-  nsh-macros/          Derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`,
+  nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`,
                        `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
   nsh-ui-mobile/       The components and modules of `nsh/ui/mobile` (Button, SafeAreaView, StatusBar, Alert, ...), written in Rust; their JS
@@ -33,8 +35,8 @@ crates/
   nsh-animation/       Native animation graph (pure Rust): value / interpolate / math nodes, timing / spring / decay drivers
   nsh-js/              QuickJS host and NSH's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
                        the native modules apps import (`modules.rs`: module table and loader; docs/dev/js-modules.md), the
-                       renderer of compiled JSX (`dom.rs`, `nsh:rt`), the reactive graph (`reactive.rs`: signals, memos,
-                       effects, owners, context), Rust components' and modules' JS face (`components.rs`), navigation,
+                       renderer of compiled JSX (`dom.rs`, `nsh:rt`), JS's reactive graph (`reactive.rs`: `nsh-core`'s
+                       graph with JS values: signals, memos, effects, owners, context), Rust components' and modules' JS face (`components.rs`), navigation,
                        lists, canvas, animation (`navigation.rs`, `list.rs`, `canvas.rs`, `animated.rs`), touches and the
                        responder system (`touch.rs`), the environment (`env.rs`), hot module replacement (`hot.rs`);
                        decoding JS values into core types (`protocol.rs`); the web APIs of TS apps (`web/`: fetch, streams,

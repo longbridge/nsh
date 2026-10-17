@@ -5,6 +5,8 @@
 //! and keys, a sheet of inputs and a message bar riding on the keyboard
 //! (as the TSX gallery's `demos/Form.tsx`).
 
+use std::rc::Rc;
+
 use nsh_core::{
     Size,
     ui::{
@@ -26,33 +28,32 @@ use crate::{
 };
 
 /// What a [`field`] animates: the focus ring and the shake of an error.
-#[derive(Debug)]
+#[derive(Clone)]
 struct FieldFx {
     /// 0 blurred, 1 focused: the ring's opacity.
     focus: NativeValue,
     /// The field's horizontal offset while it shakes.
     shake: NativeValue,
     /// It shows an error now.
-    shown: bool,
+    shown: Stored<bool>,
 }
 
 impl FieldFx {
-    fn new<C: Component>(cx: &mut Context<'_, C>) -> Self {
+    fn new() -> Self {
         Self {
-            focus: cx.native_value(0.0),
-            shake: cx.native_value(0.0),
-            shown: false,
+            focus: native_value(0.0),
+            shake: native_value(0.0),
+            shown: stored(false),
         }
     }
 
     /// The field shows an error (`error`) or not: a change slides the
     /// message in or out (layout animation), one coming shakes the field.
-    fn error<C: Component>(&mut self, error: bool, cx: &mut Context<'_, C>) {
-        if error == self.shown {
+    fn error(&self, error: bool) {
+        if self.shown.replace(error) == error {
             return;
         }
-        self.shown = error;
-        cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
         if error {
             Animation::sequence(
                 [9.0, -8.0, 6.0, -4.0, 2.0, 0.0].map(|x| {
@@ -64,25 +65,29 @@ impl FieldFx {
     }
 }
 
+/// A field's error message, when it shows one.
+type FieldError = Memo<Option<&'static str>>;
+
 /// A labelled input (`api` names the prop it shows, `hint` is a plain
 /// note): the border glows accent while focused (a ring fading in
 /// natively), an error turns it red, slides a message in and shakes the
 /// field ([`FieldFx::error`]).
-struct Field<'a> {
-    fx: &'a FieldFx,
+struct Field {
+    fx: FieldFx,
     label: SharedString,
     api: Option<&'static str>,
-    hint: Option<SharedString>,
-    error: Option<&'static str>,
+    hint: Option<Reactive<SharedString>>,
+    error: Option<FieldError>,
     prefix: Option<&'static str>,
     multiline: bool,
     editable: bool,
+    on_blur: Option<Box<dyn Fn()>>,
 }
 
 /// A [`Field`] labelled `label`, animated by `fx`.
-fn field(fx: &FieldFx, label: impl Into<SharedString>) -> Field<'_> {
+fn field(fx: &FieldFx, label: impl Into<SharedString>) -> Field {
     Field {
-        fx,
+        fx: fx.clone(),
         label: label.into(),
         api: None,
         hint: None,
@@ -90,22 +95,24 @@ fn field(fx: &FieldFx, label: impl Into<SharedString>) -> Field<'_> {
         prefix: None,
         multiline: false,
         editable: true,
+        on_blur: None,
     }
 }
 
-impl Field<'_> {
+impl Field {
     fn api(mut self, api: &'static str) -> Self {
         self.api = Some(api);
         self
     }
 
-    fn hint(mut self, hint: impl Into<SharedString>) -> Self {
-        self.hint = Some(hint.into());
+    fn hint(mut self, hint: impl IntoReactive<SharedString>) -> Self {
+        self.hint = Some(hint.into_reactive());
         self
     }
 
-    fn error(mut self, error: Option<&'static str>) -> Self {
-        self.error = error;
+    /// Its error: it shows, and animates in, while there is one.
+    fn error(mut self, error: FieldError) -> Self {
+        self.error = Some(error);
         self
     }
 
@@ -124,31 +131,32 @@ impl Field<'_> {
         self
     }
 
+    /// Runs when it loses focus, after the ring fades.
+    fn on_blur(mut self, f: impl Fn() + 'static) -> Self {
+        self.on_blur = Some(Box::new(f));
+        self
+    }
+
     /// The field, its input made by `input` from the styled one (values,
-    /// listeners, refs, styles of its own); `on_blur` runs when it loses
-    /// focus, after the ring fades.
-    fn render<C: Component>(
-        self,
-        cx: &RenderCx<'_, C>,
-        on_blur: Option<fn(&mut C, &mut Context<'_, C>)>,
-        input: impl FnOnce(Input) -> Input,
-    ) -> View {
+    /// listeners, refs, styles of its own).
+    fn render(self, input: impl FnOnce(Input) -> Input) -> View {
         let (focus_in, focus_out) = (self.fx.focus.clone(), self.fx.focus.clone());
+        let on_blur = self.on_blur;
         let base = nsh_core::ui::input()
-            .placeholder_color(cx.color(colors::FAINT))
-            .selection_color(cx.color(colors::ACCENT))
+            .placeholder_color(|| color(colors::FAINT))
+            .selection_color(|| color(colors::ACCENT))
             .return_key_type(ReturnKeyType::Done)
             .multiline(self.multiline)
             .editable(self.editable)
-            .on_focus(cx.listener(move |_: &mut C, _: &(), _| {
+            .on_focus(move |_: &()| {
                 focus_in.timing(1.0, 160.0, Easing::EaseInOut);
-            }))
-            .on_blur(cx.listener(move |this: &mut C, _: &(), cx| {
+            })
+            .on_blur(move |_: &()| {
                 focus_out.timing(0.0, 220.0, Easing::EaseInOut);
-                if let Some(on_blur) = on_blur {
-                    on_blur(this, cx);
+                if let Some(on_blur) = &on_blur {
+                    on_blur();
                 }
-            }))
+            })
             .flex_1()
             .px(px(14.0))
             .text_size(px(15.0))
@@ -165,6 +173,12 @@ impl Field<'_> {
                 }
             });
         let error = self.error;
+        let failed = move || error.is_some_and(|e| e.with(Option::is_some));
+        if error.is_some() {
+            let fx = self.fx.clone();
+            effect(move || fx.error(failed()));
+        }
+        let editable = self.editable;
         view()
             .gap(px(6.0))
             .bind_translate_x(&self.fx.shake)
@@ -206,12 +220,14 @@ impl Field<'_> {
                     .rounded(px(radius::CONTROL))
                     .border_curve(BorderCurve::Continuous)
                     .border_1()
-                    .border_color(if error.is_some() {
-                        colors::DANGER
-                    } else if self.editable {
-                        colors::BORDER
-                    } else {
-                        colors::LINE
+                    .border_color(move || {
+                        if failed() {
+                            colors::DANGER
+                        } else if editable {
+                            colors::BORDER
+                        } else {
+                            colors::LINE
+                        }
                     })
                     .bg(colors::INSET)
                     // Recessed while editable; a read-only field lies flat.
@@ -234,26 +250,35 @@ impl Field<'_> {
                             .rounded(px(radius::CONTROL))
                             .border_curve(BorderCurve::Continuous)
                             .border(1.5)
-                            .border_color(if error.is_some() {
-                                colors::DANGER
-                            } else {
-                                colors::ACCENT
+                            .border_color(move || {
+                                if failed() {
+                                    colors::DANGER
+                                } else {
+                                    colors::ACCENT
+                                }
                             })
                             .bind_opacity(&self.fx.focus),
                     ),
             )
+            // The error's row comes and goes; while it shows, its text
+            // follows the error.
             .children(error.map(|error| {
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(7.0))
-                    .child(view().size(px(6.0)).rounded(px(3.0)).bg(colors::DANGER))
-                    .child(
-                        text(error)
-                            .flex_1()
-                            .text_size(px(13.0))
-                            .text_color(colors::DANGER),
-                    )
+                If::new(
+                    move || error.with(Option::is_some),
+                    move || {
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(7.0))
+                            .child(view().size(px(6.0)).rounded(px(3.0)).bg(colors::DANGER))
+                            .child(
+                                text(move || error.get().unwrap_or_default())
+                                    .flex_1()
+                                    .text_size(px(13.0))
+                                    .text_color(colors::DANGER),
+                            )
+                    },
+                )
             }))
     }
 }
@@ -273,12 +298,12 @@ fn link_row(
     title: &'static str,
     note: &'static str,
     first: bool,
-    on_press: Listener<()>,
+    on_press: impl Into<Listener<()>>,
 ) -> impl IntoElement {
     press_with(
         PressProps {
-            scale: 0.98,
-            label: Some(title.into()),
+            scale: 0.98.into(),
+            label: Some(title.into()).into(),
             ..PressProps::default()
         },
         on_press,
@@ -401,594 +426,456 @@ const STRENGTH_TONE: [Tone; 5] = [
 ];
 
 /// The fields that were left (or submitted): only those show errors.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct Touched {
     name: bool,
     email: bool,
     password: bool,
 }
 
-/// The demo's page.
-#[derive(Debug, Default)]
-pub(crate) struct Form {
-    name: String,
-    email: String,
-    password: String,
-    code: String,
-    shout: String,
-    notes: String,
-    mode: KeyboardDismissMode,
-    /// What submitting found: up (sent) or danger, and what it says.
-    status: Option<(Tone, String)>,
-    sheet: bool,
-    touched: Touched,
-    /// The inputs in return-key order.
-    refs: Vec<ElementRef>,
-    fx: Vec<FieldFx>,
+/// The name's error, once it was left.
+fn name_error(touched: Touched, name: &str) -> Option<&'static str> {
+    (touched.name && name.trim().is_empty()).then_some("Enter your name")
 }
 
-impl Form {
-    fn name_error(&self) -> Option<&'static str> {
-        (self.touched.name && self.name.trim().is_empty()).then_some("Enter your name")
-    }
+/// The e-mail's error, once it was left.
+fn email_error(touched: Touched, email: &str) -> Option<&'static str> {
+    (touched.email && !is_email(email)).then_some(if email.is_empty() {
+        "Enter your e-mail"
+    } else {
+        "That address needs an @ and a domain"
+    })
+}
 
-    fn email_error(&self) -> Option<&'static str> {
-        (self.touched.email && !is_email(&self.email)).then_some(if self.email.is_empty() {
-            "Enter your e-mail"
-        } else {
-            "That address needs an @ and a domain"
-        })
-    }
+/// The password's error, once it was left.
+fn password_error(touched: Touched, password: &str) -> Option<&'static str> {
+    (touched.password && password.encode_utf16().count() < 8).then_some("Use at least 8 characters")
+}
 
-    fn password_error(&self) -> Option<&'static str> {
-        (self.touched.password && self.password.encode_utf16().count() < 8)
-            .then_some("Use at least 8 characters")
-    }
+/// The demo's page: the form's cards in a scroll view whose keyboard
+/// dismiss mode the page picks, and its sheet of inputs.
+#[component]
+pub(crate) fn Form() -> impl IntoElement {
+    let name = signal(String::new());
+    let email = signal(String::new());
+    let password = signal(String::new());
+    let code = signal(String::new());
+    let shout = signal(String::new());
+    let notes = signal(String::new());
+    // How dragging the scroll view treats the keyboard, an index into
+    // MODES: on drag.
+    let mode = signal(1_usize);
+    // What submitting found: up (sent) or danger, and what it says.
+    let status = signal(None::<(Tone, String)>);
+    let sheet = signal(false);
+    let touched = signal(Touched::default());
+    // The inputs in return-key order.
+    let refs: Rc<[ElementRef]> = (0..CHAIN).map(|_| element_ref()).collect();
+    let fx: Vec<FieldFx> = (0..f::COUNT).map(|_| FieldFx::new()).collect();
+    let name_err = computed(move || name.with(|n| name_error(touched.get(), n)));
+    let email_err = computed(move || email.with(|e| email_error(touched.get(), e)));
+    let password_err = computed(move || password.with(|p| password_error(touched.get(), p)));
+    let touch = move |f: fn(&mut Touched)| move || touched.update(f);
 
-    /// The fields' errors may have come or gone: they animate.
-    fn check(&mut self, cx: &mut Context<'_, Self>) {
-        let errors = [
-            (f::NAME, self.name_error().is_some()),
-            (f::EMAIL, self.email_error().is_some()),
-            (f::PASSWORD, self.password_error().is_some()),
-        ];
-        for (i, error) in errors {
-            self.fx[i].error(error, cx);
+    // Input `i` of the return-key order: return focuses the next one.
+    let chained = {
+        let refs = refs.clone();
+        move |i: usize, input: Input| {
+            let input = input.element_ref(&refs[i]);
+            if i + 1 == CHAIN {
+                return input;
+            }
+            let refs = refs.clone();
+            input
+                .return_key_type(ReturnKeyType::Next)
+                .on_submit_editing(move |_: &str| {
+                    if let Some(next) = refs.get(i + 1) {
+                        next.focus();
+                    }
+                })
         }
-        cx.notify();
-    }
+    };
+    let set = |text: Signal<String>| move |v: &str| text.set(v.to_owned());
 
-    /// Input `i` of the return-key order: return focuses the next one.
-    fn chained(&self, i: usize, input: Input, cx: &RenderCx<'_, Self>) -> Input {
-        let input = input.element_ref(&self.refs[i]);
-        if i + 1 == CHAIN {
-            return input;
-        }
-        input
-            .return_key_type(ReturnKeyType::Next)
-            .on_submit_editing(cx.listener(move |this: &mut Self, _: &str, _| {
-                if let Some(next) = this.refs.get(i + 1) {
-                    next.focus();
-                }
-            }))
-    }
-
-    fn keyboard(&self, cx: &RenderCx<'_, Self>) -> Card {
-        let height = cx.keyboard_height();
-        let selected = MODES.iter().position(|m| m.0 == self.mode).unwrap_or(0);
-        Card::new()
-            .icon(IconName::Form)
-            .title("Keyboard")
-            .subtitle("keyboardDismissMode while dragging")
-            .right(
-                Badge::new(format!("{} pt", height.round())).tone(if height > 0.0 {
+    let keyboard = Card::new()
+        .icon(IconName::Form)
+        .title("Keyboard")
+        .subtitle("keyboardDismissMode while dragging")
+        .right(
+            Badge::new(move || format!("{} pt", keyboard_height().round())).tone(move || {
+                if keyboard_height() > 0.0 {
                     Tone::Accent
                 } else {
                     Tone::Neutral
-                }),
+                }
+            }),
+        )
+        .child(
+            segmented(
+                MODES.map(|m| Segment::new(m.1)),
+                Prop::bind(move || mode.get() as u32),
             )
-            .child(
-                segmented(MODES.map(|m| Segment::new(m.1)), selected as u32).on_event(cx.listener(
-                    |this: &mut Self, e: &SegmentedEvent, cx| {
-                        let SegmentedEvent::Change(i) = *e;
-                        this.mode = MODES[i as usize].0;
-                        cx.notify();
-                    },
-                )),
-            )
-            .child(caption(
-                "Drag the form with the keyboard up",
-                Some(MODES[selected].2),
-            ))
-    }
+            .on_event(move |e: &SegmentedEvent| {
+                let SegmentedEvent::Change(i) = *e;
+                mode.set(i as usize);
+            }),
+        )
+        .child(caption(
+            "Drag the form with the keyboard up",
+            Some(move || MODES[mode.get()].2),
+        ));
 
-    fn account(&self, cx: &RenderCx<'_, Self>) -> Section {
-        let score = strength(&self.password);
-        Section::new("Account")
-            .note("autoComplete")
-            .child(
-                field(&self.fx[f::NAME], "Name")
-                    .error(self.name_error())
-                    .render(
-                        cx,
-                        Some(|this: &mut Self, cx| {
-                            this.touched.name = true;
-                            this.check(cx);
+    let score = computed(move || password.with(|p| strength(p)));
+    let account = Section::new("Account")
+        .note("autoComplete")
+        .child(
+            field(&fx[f::NAME], "Name")
+                .error(name_err)
+                .on_blur(touch(|t| t.name = true))
+                .render(|i| {
+                    chained(0, i)
+                        .value(move || name.get())
+                        .on_change_text(set(name))
+                        .auto_capitalize(AutoCapitalize::Words)
+                        .auto_fill(AutoFill::Name)
+                        .placeholder("Ada Lovelace")
+                }),
+        )
+        .child(
+            field(&fx[f::EMAIL], "E-mail")
+                .api("email-address")
+                .error(email_err)
+                .on_blur(touch(|t| t.email = true))
+                .render(|i| {
+                    chained(1, i)
+                        .value(move || email.get())
+                        .on_change_text(set(email))
+                        .keyboard_type(KeyboardType::Email)
+                        .auto_capitalize(AutoCapitalize::None)
+                        .auto_correct(false)
+                        .auto_fill(AutoFill::Email)
+                        .placeholder("ada@example.com")
+                }),
+        )
+        .child(
+            view()
+                .gap_2()
+                .child(
+                    field(&fx[f::PASSWORD], "Password")
+                        .api("secureTextEntry")
+                        .error(password_err)
+                        .on_blur(touch(|t| t.password = true))
+                        .render(|i| {
+                            chained(2, i)
+                                .value(move || password.get())
+                                .on_change_text(move |v: &str| {
+                                    if strength(v) != score.get_untracked() {
+                                        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+                                    }
+                                    password.set(v.to_owned());
+                                })
+                                .secure(true)
+                                .auto_fill(AutoFill::NewPassword)
+                                .placeholder("At least 8 characters")
                         }),
-                        |i| {
-                            self.chained(0, i, cx)
-                                .value(self.name.clone())
-                                .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                                    this.name = v.to_owned();
-                                    this.check(cx);
-                                }))
-                                .auto_capitalize(AutoCapitalize::Words)
-                                .auto_fill(AutoFill::Name)
-                                .placeholder("Ada Lovelace")
-                        },
-                    ),
-            )
-            .child(
-                field(&self.fx[f::EMAIL], "E-mail")
-                    .api("email-address")
-                    .error(self.email_error())
-                    .render(
-                        cx,
-                        Some(|this: &mut Self, cx| {
-                            this.touched.email = true;
-                            this.check(cx);
-                        }),
-                        |i| {
-                            self.chained(1, i, cx)
-                                .value(self.email.clone())
-                                .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                                    this.email = v.to_owned();
-                                    this.check(cx);
-                                }))
-                                .keyboard_type(KeyboardType::Email)
-                                .auto_capitalize(AutoCapitalize::None)
-                                .auto_correct(false)
-                                .auto_fill(AutoFill::Email)
-                                .placeholder("ada@example.com")
-                        },
-                    ),
-            )
-            .child(
-                view()
-                    .gap_2()
-                    .child(
-                        field(&self.fx[f::PASSWORD], "Password")
-                            .api("secureTextEntry")
-                            .error(self.password_error())
-                            .render(
-                                cx,
-                                Some(|this: &mut Self, cx| {
-                                    this.touched.password = true;
-                                    this.check(cx);
-                                }),
-                                |i| {
-                                    self.chained(2, i, cx)
-                                        .value(self.password.clone())
-                                        .on_change_text(cx.listener(
-                                            |this: &mut Self, v: &str, cx| {
-                                                if strength(v) != strength(&this.password) {
-                                                    cx.animate_layout(
-                                                        LayoutAnimation::EASE_IN_EASE_OUT,
-                                                    );
-                                                }
-                                                this.password = v.to_owned();
-                                                this.check(cx);
-                                            },
-                                        ))
-                                        .secure(true)
-                                        .auto_fill(AutoFill::NewPassword)
-                                        .placeholder("At least 8 characters")
-                                },
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(
+                            view().flex_1().child(
+                                Meter::new(move || score.get() as f32 / 4.0)
+                                    .tone(move || STRENGTH_TONE[score.get()]),
                             ),
-                    )
-                    .child(
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(10.0))
-                            .child(
-                                view().flex_1().child(
-                                    Meter::new(score as f32 / 4.0).tone(STRENGTH_TONE[score]),
-                                ),
-                            )
-                            .child(
-                                text(STRENGTH_LABEL[score])
-                                    .w(px(52.0))
-                                    .text_right()
-                                    .text_size(px(13.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(if score > 0 {
+                        )
+                        .child(
+                            text(move || STRENGTH_LABEL[score.get()])
+                                .w(px(52.0))
+                                .text_right()
+                                .text_size(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(move || {
+                                    let score = score.get();
+                                    if score > 0 {
                                         STRENGTH_TONE[score].color()
                                     } else {
                                         colors::FAINT
-                                    }),
-                            ),
-                    ),
-            )
-            .child(
-                field(&self.fx[f::PHONE], "Phone")
-                    .api("phone-pad")
-                    .render(cx, None, |i| {
-                        self.chained(3, i, cx)
-                            .keyboard_type(KeyboardType::Phone)
-                            .auto_fill(AutoFill::Tel)
-                            .placeholder("+1 555 0100")
-                    }),
-            )
-            .child(
-                field(&self.fx[f::WEBSITE], "Website")
-                    .api("url")
-                    .render(cx, None, |i| {
-                        self.chained(4, i, cx)
-                            .keyboard_type(KeyboardType::Url)
-                            .auto_capitalize(AutoCapitalize::None)
-                            .auto_correct(false)
-                            .placeholder("https://")
-                    }),
-            )
-    }
-
-    fn numbers(&self, cx: &RenderCx<'_, Self>) -> Section {
-        Section::new("Numbers")
-            .note("keyboardType")
-            .child(pair(
-                field(&self.fx[f::AGE], "Age")
-                    .hint("3 digits")
-                    .render(cx, None, |i| {
-                        self.chained(5, i, cx)
-                            .keyboard_type(KeyboardType::Number)
-                            .max_length(3)
-                            .placeholder("36")
-                    }),
-                field(&self.fx[f::AMOUNT], "Amount")
-                    .api("decimal-pad")
-                    .prefix("$")
-                    .render(cx, None, |i| {
-                        self.chained(6, i, cx)
-                            .keyboard_type(KeyboardType::Decimal)
-                            .placeholder("0.00")
-                    }),
-            ))
-            .child(
-                field(&self.fx[f::OFFSET], "Offset")
-                    .api("numbers-and-punctuation")
-                    .hint("dark keyboard (iOS)")
-                    .render(cx, None, |i| {
-                        i.keyboard_type(KeyboardType::NumbersAndPunctuation)
-                            .keyboard_appearance(KeyboardAppearance::Dark)
-                            .placeholder("-12.5")
-                    }),
-            )
-            .child(
-                field(&self.fx[f::CODE], "Verification code")
-                    .hint(format!("{}/6", self.code.encode_utf16().count()))
-                    .render(cx, None, |i| {
-                        self.chained(7, i, cx)
-                            .value(self.code.clone())
-                            .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                                this.code = v.to_owned();
-                                cx.notify();
-                            }))
-                            .keyboard_type(KeyboardType::Number)
-                            .max_length(6)
-                            .placeholder("······")
-                            .letter_spacing(10.0)
-                            .text_size(px(22.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .tabular_nums()
-                            .text_center()
-                    }),
-            )
-    }
-
-    fn address(&self, cx: &RenderCx<'_, Self>) -> Section {
-        Section::new("Shipping address")
-            .note("scrolls into view")
-            .child(field(&self.fx[f::STREET], "Street").render(cx, None, |i| {
-                self.chained(8, i, cx)
-                    .auto_fill(AutoFill::StreetAddress)
-                    .placeholder("12 Analytical Way")
-            }))
-            .child(pair(
-                field(&self.fx[f::CITY], "City")
-                    .render(cx, None, |i| self.chained(9, i, cx).placeholder("London")),
-                field(&self.fx[f::POSTAL], "Postal code").render(cx, None, |i| {
-                    self.chained(10, i, cx)
-                        .auto_capitalize(AutoCapitalize::Characters)
-                        .auto_fill(AutoFill::PostalCode)
-                        .placeholder("SW1A 1AA")
-                }),
-            ))
-            .child(
-                field(&self.fx[f::COUNTRY], "Country").render(cx, None, |i| {
-                    self.chained(11, i, cx).placeholder("United Kingdom")
-                }),
-            )
-    }
-
-    fn texts(&self, cx: &RenderCx<'_, Self>) -> Section {
-        let notes = self.notes.encode_utf16().count();
-        Section::new("Text")
-            .note("Input props")
-            .child(
-                field(&self.fx[f::SHOUT], "Controlled")
-                    .hint("Uppercased as you type")
-                    .render(cx, None, |i| {
-                        self.chained(12, i, cx)
-                            .value(self.shout.clone())
-                            .on_change_text(cx.listener(|this: &mut Self, t: &str, cx| {
-                                this.shout = t.to_uppercase();
-                                cx.notify();
-                            }))
-                            .placeholder("TYPE IN LOWER CASE")
-                    }),
-            )
-            .child(
-                field(&self.fx[f::READ_ONLY], "Read only")
-                    .api("editable={false}")
-                    .read_only()
-                    .render(cx, None, |i| i.value("Not editable")),
-            )
-            .child(
-                field(&self.fx[f::COLORS], "Custom colors")
-                    .api("selectionColor")
-                    .render(cx, None, |i| {
-                        self.chained(13, i, cx)
-                            .placeholder("A blue placeholder, an amber selection")
-                            .placeholder_color(cx.color(colors::INFO))
-                            .selection_color(cx.color(colors::WARN))
-                    }),
-            )
-            .child(
-                view()
-                    .gap_2()
-                    .child(
-                        field(&self.fx[f::NOTES], "Notes")
-                            .hint(format!("{notes}/280"))
-                            .multiline()
-                            .render(cx, None, |i| {
-                                self.chained(14, i, cx)
-                                    .max_length(280)
-                                    .value(self.notes.clone())
-                                    .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                                        this.notes = v.to_owned();
-                                        cx.notify();
-                                    }))
-                                    .placeholder("Return adds a line")
-                                    .min_h(px(100.0))
-                            }),
-                    )
-                    .child(Meter::new(notes as f32 / 280.0).tone(if notes > 250 {
-                        Tone::Warn
-                    } else {
-                        Tone::Accent
-                    })),
-            )
-            .child(AutoGrow::element(()))
-            .child(
-                field(&self.fx[f::CARET], "No caret")
-                    .api("caretHidden")
-                    .render(cx, None, |i| {
-                        i.caret_hidden(true).default_value("No caret here")
-                    }),
-            )
-    }
-
-    fn submit_card(&self, cx: &RenderCx<'_, Self>) -> Card {
-        let submit = cx.listener(|this: &mut Self, _, cx| {
-            this.touched = Touched {
-                name: true,
-                email: true,
-                password: true,
-            };
-            this.check(cx);
-            let issues = [this.name_error(), this.email_error(), this.password_error()]
-                .iter()
-                .flatten()
-                .count();
-            cx.animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-            this.status = Some(if issues > 0 {
-                (
-                    Tone::Danger,
-                    format!(
-                        "{issues} {} attention",
-                        if issues == 1 {
-                            "field needs"
-                        } else {
-                            "fields need"
-                        }
-                    ),
-                )
-            } else {
-                (
-                    Tone::Up,
-                    format!("Account created for {} <{}>", this.name, this.email),
-                )
-            });
-            cx.notify();
-        });
-        let card = Card::new()
-            .icon(IconName::Check)
-            .title("Create the account")
-            .subtitle("Submitting checks every field");
-        let card = match &self.status {
-            Some((tone, _)) => {
-                card.right(Badge::new(if *tone == Tone::Up { "Sent" } else { "Check" }).tone(*tone))
-            }
-            None => card,
-        };
-        card.children(self.status.as_ref().map(|(tone, message)| {
-            let up = *tone == Tone::Up;
-            let fg = if up { colors::UP } else { colors::DANGER };
-            view()
-                .flex_row()
-                .items_center()
-                .gap_2()
-                .p_3()
-                .rounded(px(radius::CONTROL))
-                .bg(if up { tints::UP } else { tints::DANGER })
-                .child(icon(
-                    if up { IconName::Check } else { IconName::Bell },
-                    16.0,
-                    fg,
-                ))
-                .child(
-                    text(message.clone())
-                        .flex_1()
-                        .text_size(px(14.0))
-                        .line_height(px(19.0))
-                        .text_color(fg),
-                )
-        }))
-        .child(pair(
-            Button::new("Submit", submit),
-            Button::new(
-                "Hide keyboard",
-                cx.listener(|_: &mut Self, _, cx| cx.dismiss_keyboard()),
-            )
-            .variant(ButtonVariant::Secondary),
-        ))
-    }
-
-    fn more(&self, cx: &RenderCx<'_, Self>) -> Card {
-        Card::new()
-            .title("More keyboards")
-            .subtitle("Sheets and bars that ride on the keyboard")
-            .flush()
-            .child(
-                Inset::new()
-                    .padding(0.0)
-                    .gap(0.0)
-                    .child(link_row(
-                        IconName::Components,
-                        "Inputs in a sheet",
-                        "presentationStyle=\"pageSheet\"",
-                        true,
-                        cx.listener(|this: &mut Self, _, cx| {
-                            this.sheet = true;
-                            cx.notify();
-                        }),
-                    ))
-                    .child(link_row(
-                        IconName::Text,
-                        "A message bar at the bottom",
-                        "KeyboardAvoidingView",
-                        false,
-                        cx.listener(|_: &mut Self, _, cx| {
-                            nav::push(cx, "message-bar", |cx| {
-                                header(screen().title("Message bar"), cx)
-                                    .child(MessageBar::element(()))
-                            });
-                        }),
-                    )),
-            )
-    }
-
-    /// The sheet of inputs, while it shows.
-    fn sheet(&self, cx: &RenderCx<'_, Self>) -> Option<Modal> {
-        if !self.sheet {
-            return None;
-        }
-        let close = || {
-            cx.listener(|this: &mut Self, _, cx| {
-                this.sheet = false;
-                cx.notify();
-            })
-        };
-        let fields = SHEET_FIELDS.iter().enumerate().map(|(n, label)| {
-            field(&self.fx[f::SHEET + n], *label)
-                .render(cx, None, |i| i.placeholder(format!("{label} field")))
-        });
-        Some(
-            modal()
-                .presentation(ModalPresentation::PageSheet)
-                .on_request_close(close())
-                .child(
-                    SafeAreaView::element(SafeAreaViewProps::default())
-                        .flex_1()
-                        .bg(colors::BACKGROUND)
-                        .child(
-                            scroll()
-                                .flex_1()
-                                .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-                                .child(
-                                    view()
-                                        .p_4()
-                                        .pb(px(40.0))
-                                        .gap_4()
-                                        .child(
-                                            view()
-                                                .flex_row()
-                                                .items_center()
-                                                .gap_3()
-                                                .pt_2()
-                                                .pl_1()
-                                                .child(
-                                                    view()
-                                                        .flex_1()
-                                                        .gap(px(2.0))
-                                                        .child(
-                                                            text("A sheet")
-                                                                .text_size(px(24.0))
-                                                                .font_weight(FontWeight::BOLD)
-                                                                .letter_spacing(-0.4)
-                                                                .text_color(colors::TEXT),
-                                                        )
-                                                        .child(
-                                                            text("Its inputs stay above the keyboard too")
-                                                                .text_size(px(13.0))
-                                                                .text_color(colors::MUTED),
-                                                        ),
-                                                )
-                                                .child(
-                                                    Button::new("Done", close())
-                                                        .variant(ButtonVariant::Secondary),
-                                                ),
-                                        )
-                                        .child(Inset::new().children(fields)),
-                                ),
+                                    }
+                                }),
                         ),
                 ),
         )
-    }
-}
+        .child(field(&fx[f::PHONE], "Phone").api("phone-pad").render(|i| {
+            chained(3, i)
+                .keyboard_type(KeyboardType::Phone)
+                .auto_fill(AutoFill::Tel)
+                .placeholder("+1 555 0100")
+        }))
+        .child(field(&fx[f::WEBSITE], "Website").api("url").render(|i| {
+            chained(4, i)
+                .keyboard_type(KeyboardType::Url)
+                .auto_capitalize(AutoCapitalize::None)
+                .auto_correct(false)
+                .placeholder("https://")
+        }));
 
-impl Component for Form {
-    type Props = ();
-    type Event = NoEvent;
+    let numbers = Section::new("Numbers")
+        .note("keyboardType")
+        .child(pair(
+            field(&fx[f::AGE], "Age").hint("3 digits").render(|i| {
+                chained(5, i)
+                    .keyboard_type(KeyboardType::Number)
+                    .max_length(3)
+                    .placeholder("36")
+            }),
+            field(&fx[f::AMOUNT], "Amount")
+                .api("decimal-pad")
+                .prefix("$")
+                .render(|i| {
+                    chained(6, i)
+                        .keyboard_type(KeyboardType::Decimal)
+                        .placeholder("0.00")
+                }),
+        ))
+        .child(
+            field(&fx[f::OFFSET], "Offset")
+                .api("numbers-and-punctuation")
+                .hint("dark keyboard (iOS)")
+                .render(|i| {
+                    i.keyboard_type(KeyboardType::NumbersAndPunctuation)
+                        .keyboard_appearance(KeyboardAppearance::Dark)
+                        .placeholder("-12.5")
+                }),
+        )
+        .child(
+            field(&fx[f::CODE], "Verification code")
+                .hint(move || format!("{}/6", code.with(|c| c.encode_utf16().count())))
+                .render(|i| {
+                    chained(7, i)
+                        .value(move || code.get())
+                        .on_change_text(set(code))
+                        .keyboard_type(KeyboardType::Number)
+                        .max_length(6)
+                        .placeholder("······")
+                        .letter_spacing(10.0)
+                        .text_size(px(22.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .tabular_nums()
+                        .text_center()
+                }),
+        );
 
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.mode = KeyboardDismissMode::OnDrag;
-        self.refs = (0..CHAIN).map(|_| cx.element_ref()).collect();
-        self.fx = (0..f::COUNT).map(|_| FieldFx::new(cx)).collect();
-    }
+    let address = Section::new("Shipping address")
+        .note("scrolls into view")
+        .child(field(&fx[f::STREET], "Street").render(|i| {
+            chained(8, i)
+                .auto_fill(AutoFill::StreetAddress)
+                .placeholder("12 Analytical Way")
+        }))
+        .child(pair(
+            field(&fx[f::CITY], "City").render(|i| chained(9, i).placeholder("London")),
+            field(&fx[f::POSTAL], "Postal code").render(|i| {
+                chained(10, i)
+                    .auto_capitalize(AutoCapitalize::Characters)
+                    .auto_fill(AutoFill::PostalCode)
+                    .placeholder("SW1A 1AA")
+            }),
+        ))
+        .child(
+            field(&fx[f::COUNTRY], "Country")
+                .render(|i| chained(11, i).placeholder("United Kingdom")),
+        );
 
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let cards = [
-            self.keyboard(cx).into_element(),
-            self.account(cx).into_element(),
-            self.numbers(cx).into_element(),
-            self.address(cx).into_element(),
-            Section::new("Selection and keys")
-                .note("onSelectionChange")
-                .child(SelectionDemo::element(()))
-                .into_element(),
-            self.texts(cx).into_element(),
-            self.submit_card(cx).into_element(),
-            self.more(cx).into_element(),
-        ];
-        view()
+    let note_count = computed(move || notes.with(|n| n.encode_utf16().count()));
+    let texts = Section::new("Text")
+        .note("Input props")
+        .child(
+            field(&fx[f::SHOUT], "Controlled")
+                .hint("Uppercased as you type")
+                .render(|i| {
+                    chained(12, i)
+                        .value(move || shout.get())
+                        .on_change_text(move |t: &str| shout.set(t.to_uppercase()))
+                        .placeholder("TYPE IN LOWER CASE")
+                }),
+        )
+        .child(
+            field(&fx[f::READ_ONLY], "Read only")
+                .api("editable={false}")
+                .read_only()
+                .render(|i| i.value("Not editable")),
+        )
+        .child(
+            field(&fx[f::COLORS], "Custom colors")
+                .api("selectionColor")
+                .render(|i| {
+                    chained(13, i)
+                        .placeholder("A blue placeholder, an amber selection")
+                        .placeholder_color(|| color(colors::INFO))
+                        .selection_color(|| color(colors::WARN))
+                }),
+        )
+        .child(
+            view()
+                .gap_2()
+                .child(
+                    field(&fx[f::NOTES], "Notes")
+                        .hint(move || format!("{}/280", note_count.get()))
+                        .multiline()
+                        .render(|i| {
+                            chained(14, i)
+                                .max_length(280)
+                                .value(move || notes.get())
+                                .on_change_text(set(notes))
+                                .placeholder("Return adds a line")
+                                .min_h(px(100.0))
+                        }),
+                )
+                .child(
+                    Meter::new(move || note_count.get() as f32 / 280.0).tone(move || {
+                        if note_count.get() > 250 {
+                            Tone::Warn
+                        } else {
+                            Tone::Accent
+                        }
+                    }),
+                ),
+        )
+        .child(AutoGrow::element(()))
+        .child(
+            field(&fx[f::CARET], "No caret")
+                .api("caretHidden")
+                .render(|i| i.caret_hidden(true).default_value("No caret here")),
+        );
+
+    let submit = move |_: &()| {
+        touched.set(Touched {
+            name: true,
+            email: true,
+            password: true,
+        });
+        let all = touched.get_untracked();
+        let (name, email) = (name.get_untracked(), email.get_untracked());
+        let issues = [
+            name_error(all, &name),
+            email_error(all, &email),
+            password.with_untracked(|p| password_error(all, p)),
+        ]
+        .iter()
+        .flatten()
+        .count();
+        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+        status.set(Some(if issues > 0 {
+            (
+                Tone::Danger,
+                format!(
+                    "{issues} {} attention",
+                    if issues == 1 {
+                        "field needs"
+                    } else {
+                        "fields need"
+                    }
+                ),
+            )
+        } else {
+            (Tone::Up, format!("Account created for {name} <{email}>"))
+        }));
+    };
+    let submit_card = Card::new()
+        .icon(IconName::Check)
+        .title("Create the account")
+        .subtitle("Submitting checks every field")
+        .right(dynamic(move || {
+            status.with(|s| {
+                s.as_ref().map(|&(tone, _)| {
+                    Badge::new(if tone == Tone::Up { "Sent" } else { "Check" }).tone(tone)
+                })
+            })
+        }))
+        .child(dynamic(move || {
+            status.with(|s| {
+                s.as_ref().map(|(tone, message)| {
+                    let up = *tone == Tone::Up;
+                    let fg = if up { colors::UP } else { colors::DANGER };
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .p_3()
+                        .rounded(px(radius::CONTROL))
+                        .bg(if up { tints::UP } else { tints::DANGER })
+                        .child(icon(
+                            if up { IconName::Check } else { IconName::Bell },
+                            16.0,
+                            fg,
+                        ))
+                        .child(
+                            text(message.clone())
+                                .flex_1()
+                                .text_size(px(14.0))
+                                .line_height(px(19.0))
+                                .text_color(fg),
+                        )
+                })
+            })
+        }))
+        .child(pair(
+            Button::new("Submit", submit),
+            Button::new("Hide keyboard", |_: &()| dismiss_keyboard())
+                .variant(ButtonVariant::Secondary),
+        ));
+
+    let more = Card::new()
+        .title("More keyboards")
+        .subtitle("Sheets and bars that ride on the keyboard")
+        .flush()
+        .child(
+            Inset::new()
+                .padding(0.0)
+                .gap(0.0)
+                .child(link_row(
+                    IconName::Components,
+                    "Inputs in a sheet",
+                    "presentationStyle=\"pageSheet\"",
+                    true,
+                    move |_: &()| sheet.set(true),
+                ))
+                .child(link_row(
+                    IconName::Text,
+                    "A message bar at the bottom",
+                    "KeyboardAvoidingView",
+                    false,
+                    |_: &()| {
+                        nav::push("message-bar", || {
+                            header(screen().title("Message bar")).child(MessageBar::element(()))
+                        });
+                    },
+                )),
+        );
+
+    let cards = [
+        keyboard.into_element(),
+        account.into_element(),
+        numbers.into_element(),
+        address.into_element(),
+        Section::new("Selection and keys")
+            .note("onSelectionChange")
+            .child(SelectionDemo::element(()))
+            .into_element(),
+        texts.into_element(),
+        submit_card.into_element(),
+        more.into_element(),
+    ];
+    let sheet_fx: Vec<FieldFx> = fx[f::SHEET..].to_vec();
+    view().flex_1().child(
+        scroll()
             .flex_1()
+            .bg(colors::BACKGROUND)
+            .keyboard_dismiss_mode(move || MODES[mode.get()].0)
             .child(
-                scroll()
-                    .flex_1()
-                    .bg(colors::BACKGROUND)
-                    .keyboard_dismiss_mode(self.mode)
+                view()
                     .child(
                         view().p_4().pb(px(40.0)).gap_4().children(
                             cards
@@ -996,44 +883,88 @@ impl Component for Form {
                                 .enumerate()
                                 .map(|(i, card)| appear(i as u32).child(card)),
                         ),
-                    ),
-            )
-            .children(self.sheet(cx))
-    }
+                    )
+                    .child(If::new(sheet, move || sheet_view(sheet, &sheet_fx))),
+            ),
+    )
+}
+
+/// The sheet of inputs (`open` while it shows), its fields animated by
+/// `fx`.
+fn sheet_view(open: Signal<bool>, fx: &[FieldFx]) -> Modal {
+    let close = move |_: &()| open.set(false);
+    let fields = SHEET_FIELDS
+        .iter()
+        .zip(fx)
+        .map(|(label, fx)| field(fx, *label).render(|i| i.placeholder(format!("{label} field"))));
+    modal()
+        .presentation(ModalPresentation::PageSheet)
+        .on_request_close(close)
+        .child(
+            SafeAreaView::element(SafeAreaViewProps::default())
+                .flex_1()
+                .bg(colors::BACKGROUND)
+                .child(
+                    scroll()
+                        .flex_1()
+                        .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+                        .child(
+                            view()
+                                .p_4()
+                                .pb(px(40.0))
+                                .gap_4()
+                                .child(
+                                    view()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_3()
+                                        .pt_2()
+                                        .pl_1()
+                                        .child(
+                                            view()
+                                                .flex_1()
+                                                .gap(px(2.0))
+                                                .child(
+                                                    text("A sheet")
+                                                        .text_size(px(24.0))
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .letter_spacing(-0.4)
+                                                        .text_color(colors::TEXT),
+                                                )
+                                                .child(
+                                                    text("Its inputs stay above the keyboard too")
+                                                        .text_size(px(13.0))
+                                                        .text_color(colors::MUTED),
+                                                ),
+                                        )
+                                        .child(
+                                            Button::new("Done", close)
+                                                .variant(ButtonVariant::Secondary),
+                                        ),
+                                )
+                                .child(Inset::new().children(fields)),
+                        ),
+                ),
+        )
 }
 
 /// A multiline input that grows with its text (`on_content_size_change`),
 /// up to 5 lines.
-#[derive(Debug, Default)]
-struct AutoGrow {
-    height: f32,
-    size: String,
-    fx: Option<FieldFx>,
-}
-
-impl Component for AutoGrow {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.size = "–".to_owned();
-        self.fx = Some(FieldFx::new(cx));
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        field(self.fx.as_ref().expect("set up"), "Grows with its text")
-            .hint(self.size.clone())
-            .multiline()
-            .render(cx, None, |i| {
-                i.placeholder("Type several lines")
-                    .on_content_size_change(cx.listener(|this: &mut Self, e: &Size, cx| {
-                        this.size = format!("{}×{}", e.width.round(), e.height.round());
-                        this.height = e.height.min(110.0);
-                        cx.notify();
-                    }))
-                    .h(px(self.height.max(20.0) + 26.0))
-            })
-    }
+#[component]
+fn AutoGrow() -> impl IntoElement {
+    let height = signal(0.0_f32);
+    let size = signal("–".to_owned());
+    field(&FieldFx::new(), "Grows with its text")
+        .hint(move || size.get())
+        .multiline()
+        .render(|i| {
+            i.placeholder("Type several lines")
+                .on_content_size_change(move |e: &Size| {
+                    size.set(format!("{}×{}", e.width.round(), e.height.round()));
+                    height.set(e.height.min(110.0));
+                })
+                .h(move || px(height.get().max(20.0) + 26.0))
+        })
 }
 
 /// `start..end` of `text` in UTF-16 units (as inputs count).
@@ -1045,137 +976,126 @@ fn utf16_slice(text: &str, start: u32, end: u32) -> String {
 }
 
 /// The selection and the keys of an input, and selecting from code: the
-/// controlled `selection` ("Select all") and the ref's `set_selection`.
-#[derive(Debug, Default)]
-struct SelectionDemo {
-    text: String,
-    range: Selection,
-    /// The selection the render sets (TS: the `selection` prop's signal).
-    selection: Option<Selection>,
-    /// The last keys pressed.
-    keys: Vec<String>,
-    input: Option<ElementRef>,
-    /// The text's field and the one-time code's.
-    fx: Vec<FieldFx>,
-}
-
-impl SelectionDemo {
-    fn input(&self) -> &ElementRef {
-        self.input.as_ref().expect("set up")
+/// controlled selection ("Select all") and the ref's `set_selection`.
+#[component]
+fn SelectionDemo() -> impl IntoElement {
+    let content = signal("Select part of this text".to_owned());
+    let range = signal(Selection::default());
+    // The selection "Select all" asks for (TS: the `selection` prop's
+    // signal): set on the input when it changes.
+    let selection = signal(None::<Selection>);
+    // The last keys pressed.
+    let keys = signal(Vec::<String>::new());
+    let input = element_ref();
+    let fx = [FieldFx::new(), FieldFx::new()];
+    {
+        let input = input.clone();
+        effect(move || {
+            if let Some(s) = selection.get() {
+                input.set_selection(s.start, s.end);
+            }
+        });
     }
-}
-
-impl Component for SelectionDemo {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), cx: &mut Context<'_, Self>) {
-        self.text = "Select part of this text".to_owned();
-        self.input = Some(cx.element_ref());
-        self.fx = vec![FieldFx::new(cx), FieldFx::new(cx)];
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let Selection { start, end } = self.range;
-        let keys = view()
-            .flex_row()
-            .flex_wrap()
-            .items_center()
-            .gap(px(6.0))
-            .min_h(px(28.0))
-            .map(|v| {
-                if self.keys.is_empty() {
-                    v.child(
-                        text("Keys you press show here")
-                            .text_size(px(13.0))
-                            .text_color(colors::FAINT),
-                    )
-                } else {
-                    v.children(self.keys.iter().map(|key| {
-                        view()
-                            .min_w(px(28.0))
-                            .h(px(28.0))
-                            .px_2()
-                            .rounded(px(7.0))
-                            .items_center()
-                            .justify_center()
-                            .bg(colors::RAISED)
-                            .border_1()
-                            .border_color(colors::BORDER)
-                            .finish(Finish::Raised)
-                            .child(
-                                text(if key == " " {
+    let keys_view = view()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap(px(6.0))
+        .min_h(px(28.0))
+        .child(If::new(
+            move || keys.with(Vec::is_empty),
+            || {
+                text("Keys you press show here")
+                    .text_size(px(13.0))
+                    .text_color(colors::FAINT)
+            },
+        ))
+        .child(Each::new(
+            move || keys.with(|k| k.iter().cloned().enumerate().collect::<Vec<_>>()),
+            |(i, _): &(usize, String)| *i,
+            |key, _| {
+                view()
+                    .min_w(px(28.0))
+                    .h(px(28.0))
+                    .px_2()
+                    .rounded(px(7.0))
+                    .items_center()
+                    .justify_center()
+                    .bg(colors::RAISED)
+                    .border_1()
+                    .border_color(colors::BORDER)
+                    .finish(Finish::Raised)
+                    .child(
+                        text(move || {
+                            key.with(|(_, key)| {
+                                if key == " " {
                                     "␣".to_owned()
                                 } else {
                                     key.clone()
-                                })
-                                .text_size(px(13.0))
-                                .text_color(colors::TEXT),
-                            )
-                    }))
-                }
-            });
-        view()
-            .gap_3()
-            .child(
-                field(&self.fx[0], "Text")
-                    .hint(format!("{start}–{end}"))
-                    .render(cx, None, |i| {
-                        i.element_ref(self.input())
-                            .value(self.text.clone())
-                            .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                                this.text = v.to_owned();
-                                cx.notify();
-                            }))
-                            .on_selection_change(cx.listener(
-                                |this: &mut Self, s: &Selection, cx| {
-                                    this.range = *s;
-                                    // The input has it: "Select all" sets it again.
-                                    this.selection = None;
-                                    cx.notify();
-                                },
-                            ))
-                            .on_key_press(cx.listener(|this: &mut Self, key: &str, cx| {
-                                this.keys.push(key.to_owned());
-                                let extra = this.keys.len().saturating_sub(8);
-                                this.keys.drain(..extra);
-                                cx.notify();
-                            }))
-                            .auto_fill(AutoFill::Off)
-                            .when_some(self.selection, |input, s| input.selection(s.start, s.end))
-                    }),
-            )
-            .child(caption(
-                "Selected",
-                Some(format!("\"{}\"", utf16_slice(&self.text, start, end))),
-            ))
-            .child(keys)
-            .child(pair(
-                Button::new(
-                    "Select all",
-                    cx.listener(|this: &mut Self, _, cx| {
-                        let end = this.text.encode_utf16().count() as u32;
-                        this.selection = Some(Selection { start: 0, end });
-                        cx.notify();
-                    }),
-                ),
-                Button::new(
-                    "Caret to start",
-                    cx.listener(|this: &mut Self, _, _| this.input().set_selection(0, 0)),
-                )
-                .variant(ButtonVariant::Secondary),
-            ))
-            .child(
-                field(&self.fx[1], "One-time code")
-                    .api("one-time-code")
-                    .render(cx, None, |i| {
-                        i.keyboard_type(KeyboardType::Number)
-                            .auto_fill(AutoFill::OneTimeCode)
-                            .max_length(6)
-                            .placeholder("123456")
-                    }),
-            )
-    }
+                                }
+                            })
+                        })
+                        .text_size(px(13.0))
+                        .text_color(colors::TEXT),
+                    )
+            },
+        ));
+    let caret_input = input.clone();
+    view()
+        .gap_3()
+        .child(
+            field(&fx[0], "Text")
+                .hint(move || {
+                    let Selection { start, end } = range.get();
+                    format!("{start}–{end}")
+                })
+                .render(|i| {
+                    i.element_ref(&input)
+                        .value(move || content.get())
+                        .on_change_text(move |v: &str| content.set(v.to_owned()))
+                        .on_selection_change(move |s: &Selection| {
+                            range.set(*s);
+                            // The input has it: "Select all" sets it again.
+                            selection.set(None);
+                        })
+                        .on_key_press(move |key: &str| {
+                            keys.update(|keys| {
+                                keys.push(key.to_owned());
+                                let extra = keys.len().saturating_sub(8);
+                                keys.drain(..extra);
+                            });
+                        })
+                        .auto_fill(AutoFill::Off)
+                }),
+        )
+        .child(caption(
+            "Selected",
+            Some(move || {
+                let Selection { start, end } = range.get();
+                content.with(|t| format!("\"{}\"", utf16_slice(t, start, end)))
+            }),
+        ))
+        .child(keys_view)
+        .child(pair(
+            Button::new("Select all", move |_: &()| {
+                let end = content.with_untracked(|t| t.encode_utf16().count() as u32);
+                selection.set(Some(Selection { start: 0, end }));
+            }),
+            Button::new("Caret to start", move |_: &()| {
+                caret_input.set_selection(0, 0);
+            })
+            .variant(ButtonVariant::Secondary),
+        ))
+        .child(
+            field(&fx[1], "One-time code")
+                .api("one-time-code")
+                .render(|i| {
+                    i.keyboard_type(KeyboardType::Number)
+                        .auto_fill(AutoFill::OneTimeCode)
+                        .max_length(6)
+                        .placeholder("123456")
+                }),
+        )
 }
 
 /// A message of the message bar's page: mine, and what it says.
@@ -1183,50 +1103,36 @@ type Message = (bool, String);
 
 /// An input pinned to the bottom (outside any scroll view): it rides on the
 /// keyboard.
-#[derive(Debug, Default)]
-struct MessageBar {
-    messages: Vec<Message>,
-    draft: String,
-}
-
-impl MessageBar {
-    fn send(&mut self, cx: &mut Context<'_, Self>) {
-        if self.draft.trim().is_empty() {
+#[component]
+fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
+    let messages = signal::<Vec<Message>>(vec![
+        (
+            false,
+            "The bar below sits outside the scroll view.".to_owned(),
+        ),
+        (
+            false,
+            "KeyboardAvoidingView lifts it with the keyboard. Say something.".to_owned(),
+        ),
+    ]);
+    let draft = signal(String::new());
+    let send = move || {
+        if draft.with_untracked(|d| d.trim().is_empty()) {
             return;
         }
-        self.messages.push((true, std::mem::take(&mut self.draft)));
-        cx.notify();
-    }
-}
-
-impl Component for MessageBar {
-    type Props = ();
-    type Event = NoEvent;
-
-    fn setup(&mut self, _: &(), _: &mut Context<'_, Self>) {
-        self.messages = vec![
-            (
-                false,
-                "The bar below sits outside the scroll view.".to_owned(),
-            ),
-            (
-                false,
-                "KeyboardAvoidingView lifts it with the keyboard. Say something.".to_owned(),
-            ),
-        ];
-    }
-
-    fn render(&self, _: &(), cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let insets = cx.insets();
-        // Above the home indicator, unless the keyboard covers it.
-        let below = if cx.keyboard_height() > 0.0 {
-            0.0
-        } else {
-            insets.bottom
-        };
-        let bubbles = self.messages.iter().enumerate().map(|(i, (mine, m))| {
-            let mine = *mine;
-            appear(0).key(i.to_string()).child(
+        let text = draft.get_untracked();
+        batch(|| {
+            messages.update(|m| m.push((true, text)));
+            draft.set(String::new());
+        });
+    };
+    // Messages are only added: a bubble is known by its place.
+    let bubbles = Each::new(
+        move || messages.with(|m| m.iter().cloned().enumerate().collect::<Vec<_>>()),
+        |(i, _): &(usize, Message)| *i,
+        |m, _| {
+            let mine = m.with_untracked(|(_, (mine, _))| *mine);
+            appear(0).child(
                 view()
                     .map(|v| if mine { v.self_end() } else { v.self_start() })
                     .max_w(relative(0.8))
@@ -1244,7 +1150,7 @@ impl Component for MessageBar {
                         }
                     })
                     .child(
-                        text(m.clone())
+                        text(move || m.with(|(_, (_, text))| text.clone()))
                             .text_size(px(15.0))
                             .line_height(px(20.0))
                             .text_color(if mine {
@@ -1254,73 +1160,77 @@ impl Component for MessageBar {
                             }),
                     ),
             )
-        });
-        view().flex_1().child(
-            KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
-                .flex_1()
-                .bg(colors::BACKGROUND)
-                .child(
-                    scroll()
-                        .flex_1()
-                        .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-                        .child(
-                            view()
-                                .p_4()
-                                .gap_2()
-                                .child(
-                                    text("Today")
-                                        .self_center()
-                                        .text_size(px(12.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(colors::FAINT)
-                                        .pb_2(),
-                                )
-                                .children(bubbles),
-                        ),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .px_4()
-                        .pt_2()
-                        .pb(px(8.0 + below))
-                        .bg(colors::SURFACE)
-                        .border_t_1()
-                        .border_t_color(colors::BORDER)
-                        .child(
-                            input()
-                                .value(self.draft.clone())
-                                .on_change_text(cx.listener(|this: &mut Self, v: &str, cx| {
-                                    this.draft = v.to_owned();
-                                    cx.notify();
-                                }))
-                                .on_submit_editing(
-                                    cx.listener(|this: &mut Self, _: &str, cx| this.send(cx)),
-                                )
-                                .blur_on_submit(false)
-                                .placeholder("Message")
-                                .placeholder_color(cx.color(colors::FAINT))
-                                .selection_color(cx.color(colors::ACCENT))
-                                .return_key_type(ReturnKeyType::Send)
-                                .flex_1()
-                                .h(px(44.0))
-                                .px_4()
-                                .text_size(px(15.0))
-                                .text_color(colors::TEXT)
-                                .bg(colors::INSET)
-                                .border_1()
-                                .border_color(colors::BORDER)
-                                .rounded(px(22.0))
-                                .finish(Finish::Inset),
-                        )
-                        .child(RoundButton::new(
-                            IconName::ArrowUp,
-                            "Send",
-                            cx.listener(|this: &mut Self, _, cx| this.send(cx)),
-                        )),
-                ),
-        )
-    }
+        },
+    );
+    view().flex_1().child(
+        KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
+            .flex_1()
+            .bg(colors::BACKGROUND)
+            .child(
+                scroll()
+                    .flex_1()
+                    .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+                    .child(
+                        view()
+                            .p_4()
+                            .gap_2()
+                            .child(
+                                text("Today")
+                                    .self_center()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(colors::FAINT)
+                                    .pb_2(),
+                            )
+                            .child(bubbles),
+                    ),
+            )
+            .child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .px_4()
+                    .pt_2()
+                    // Above the home indicator, unless the keyboard covers
+                    // it.
+                    .pb(move || {
+                        px(8.0
+                            + if keyboard_height() > 0.0 {
+                                0.0
+                            } else {
+                                cx.insets().bottom
+                            })
+                    })
+                    .bg(colors::SURFACE)
+                    .border_t_1()
+                    .border_t_color(colors::BORDER)
+                    .child(
+                        input()
+                            .value(move || draft.get())
+                            .on_change_text(move |v: &str| draft.set(v.to_owned()))
+                            .on_submit_editing(move |_: &str| send())
+                            .blur_on_submit(false)
+                            .placeholder("Message")
+                            .placeholder_color(|| color(colors::FAINT))
+                            .selection_color(|| color(colors::ACCENT))
+                            .return_key_type(ReturnKeyType::Send)
+                            .flex_1()
+                            .h(px(44.0))
+                            .px_4()
+                            .text_size(px(15.0))
+                            .text_color(colors::TEXT)
+                            .bg(colors::INSET)
+                            .border_1()
+                            .border_color(colors::BORDER)
+                            .rounded(px(22.0))
+                            .finish(Finish::Inset),
+                    )
+                    .child(RoundButton::new(
+                        IconName::ArrowUp,
+                        "Send",
+                        move |_: &()| send(),
+                    )),
+            ),
+    )
 }

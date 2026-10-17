@@ -158,49 +158,54 @@ impl GlyphName {
     }
 }
 
-/// A chat glyph, stroked with its tint.
-#[derive(Debug, Default)]
-pub(crate) struct Glyph;
-
 /// The props of [`Glyph`].
-#[derive(Debug, Clone, PartialEq, Props)]
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub(crate) struct GlyphProps {
-    pub(crate) name: GlyphName,
+    /// The glyph.
+    pub(crate) name: Prop<GlyphName>,
+    /// Its width and height, in points.
     #[prop(default = 20.0)]
     pub(crate) size: f32,
-    pub(crate) tint: Tint,
+    /// Its color.
+    pub(crate) tint: Prop<Tint>,
 }
 
-impl Component for Glyph {
-    type Props = GlyphProps;
-    type Event = NoEvent;
-
-    fn render(&self, props: &GlyphProps, cx: &mut RenderCx<'_, Self>) -> impl IntoElement {
-        let tint = cx.color(AdaptiveColor::new(props.tint.light, props.tint.dark));
-        let scale = props.size / 20.0;
-        let painter = Painter::new()
-            .scale(scale, scale)
-            .stroke_color(tint)
-            .fill_color(tint)
-            .line_width(1.6)
-            .line_cap(LineCap::Round)
-            .line_join(LineJoin::Round);
-        view()
-            .size(px(props.size))
-            .pointer_events(PointerEvents::None)
-            .child(canvas(props.name.draw(painter)).size_full())
-    }
+/// A chat glyph, stroked with its tint (a canvas drawn in a binding: again
+/// when the glyph, its tint or the appearance changes).
+#[component]
+pub(crate) fn Glyph(props: GlyphProps) -> impl IntoElement {
+    let size = props.size;
+    view()
+        .size(px(size))
+        .pointer_events(PointerEvents::None)
+        .child(
+            canvas(move || {
+                let tint = props.tint.get();
+                let tint = color(AdaptiveColor::new(tint.light, tint.dark));
+                let scale = size / 20.0;
+                let painter = Painter::new()
+                    .scale(scale, scale)
+                    .stroke_color(tint)
+                    .fill_color(tint)
+                    .line_width(1.6)
+                    .line_cap(LineCap::Round)
+                    .line_join(LineJoin::Round);
+                props.name.get().draw(painter)
+            })
+            .size_full(),
+        )
 }
 
-/// [`Glyph`] `name` at `size`, in `tint`.
+/// [`Glyph`] `name` at `size`, in `tint` (each a value, or bound: a signal
+/// or a closure).
 pub(crate) fn glyph(
-    name: GlyphName,
+    name: impl Into<Prop<GlyphName>>,
     size: f32,
-    tint: impl Into<AdaptiveColor>,
+    tint: impl IntoReactive<AdaptiveColor>,
 ) -> ComponentElement<Glyph> {
     Glyph::element(GlyphProps {
-        name,
+        name: name.into(),
         size,
-        tint: tint.into().into(),
+        tint: tint.into_reactive().map(Tint::from).into(),
     })
 }

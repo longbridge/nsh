@@ -235,8 +235,8 @@ impl TouchClaim {
     /// Claims only when `listener` does ([`ClaimRequest::claim`]), deciding
     /// with the component's state and the gesture so far (a horizontal
     /// swipe: `request.event.gesture.dx.abs() > 10.0`).
-    pub fn ask(mut self, listener: Listener<ClaimRequest>) -> Self {
-        self.ask = Some(listener);
+    pub fn ask(mut self, listener: impl Into<Listener<ClaimRequest>>) -> Self {
+        self.ask = Some(listener.into());
         self
     }
 

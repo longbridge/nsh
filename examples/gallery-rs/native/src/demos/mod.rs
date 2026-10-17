@@ -23,7 +23,7 @@ mod typed_styles;
 use nsh_core::ui::{AnyElement, Screen, prelude::*};
 
 use crate::{
-    Gallery, nav,
+    nav,
     ui::{IconName, IconTile, MONO, PressProps, appear, colors, header, icon, press_with, radius},
 };
 
@@ -186,18 +186,18 @@ const GROUPS: &[Group] = &[
 ];
 
 /// A demo's row of the index: a tap pushes its screen.
-fn demo_row(demo: &'static Demo, first: bool, cx: &mut RenderCx<'_, Gallery>) -> AnyElement {
-    let open = cx.listener(move |_: &mut Gallery, _: &(), cx| {
+fn demo_row(demo: &'static Demo, first: bool) -> AnyElement {
+    let open = move |_: &()| {
         let (name, content) = (demo.name, demo.content);
-        nav::push(cx, name, move |cx| {
-            header(screen().title(name), cx)
+        nav::push(name, move || {
+            header(screen().title(name))
                 .child(view().flex_1().bg(colors::BACKGROUND).child(content()))
         });
-    });
+    };
     press_with(
         PressProps {
-            scale: 0.98,
-            label: Some(demo.name.into()),
+            scale: 0.98.into(),
+            label: Some(demo.name.into()).into(),
             ..PressProps::default()
         },
         open,
@@ -234,7 +234,7 @@ fn demo_row(demo: &'static Demo, first: bool, cx: &mut RenderCx<'_, Gallery>) ->
 }
 
 /// The index: the demos by group; a tap pushes one.
-pub(crate) fn index(cx: &mut RenderCx<'_, Gallery>) -> Screen {
+pub(crate) fn index() -> Screen {
     let groups: Vec<AnyElement> = GROUPS
         .iter()
         .enumerate()
@@ -243,7 +243,7 @@ pub(crate) fn index(cx: &mut RenderCx<'_, Gallery>) -> Screen {
                 .demos
                 .iter()
                 .enumerate()
-                .map(|(i, demo)| demo_row(demo, i == 0, cx))
+                .map(|(i, demo)| demo_row(demo, i == 0))
                 .collect();
             appear(g as u32 + 1)
                 .child(
@@ -283,7 +283,7 @@ pub(crate) fn index(cx: &mut RenderCx<'_, Gallery>) -> Screen {
                 .into_element()
         })
         .collect();
-    header(screen().key("index").title("Rust Gallery"), cx).child(
+    header(screen().key("index").title("Rust Gallery")).child(
         scroll()
             .flex_1()
             .bg(colors::BACKGROUND)
