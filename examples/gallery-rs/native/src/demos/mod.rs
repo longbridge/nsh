@@ -4,6 +4,7 @@ mod animations;
 mod canvas;
 mod chat;
 mod components;
+mod file_drop;
 mod form;
 mod gestures;
 mod images;
@@ -130,6 +131,12 @@ pub(crate) static GROUPS: &[Group] = &[
     Group {
         title: "Touch and motion",
         demos: &[
+            Demo {
+                name: "File drops",
+                detail: "Desktop file URLs, destination entry and exit",
+                icon: IconName::Gestures,
+                content: || file_drop::FileDrop::element(()).into_element(),
+            },
             Demo {
                 name: "Gestures",
                 detail: "Pinch, rotate, press states, hit slop, pointer events",

@@ -55,7 +55,7 @@ The Tailwind `flex` class follows CSS rather than the style default: `class="fle
 `<View>` has no props of its own beyond the [common props](./index.md#common-props): `style` (`ViewStyle`), `class`,
 `classList`, `disabled`, the press props (`onPress`, `onLongPress`, `onPressIn`, `onPressOut`, `delayLongPress`,
 `activeOpacity`, `underlayColor`, `underlayOpacity`, `hitSlop`, `pointerEvents`), `onHoverIn` / `onHoverOut`,
-`onLayout`, `ref`, `nativeID`,
+`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `onLayout`, `ref`, `nativeID`,
 `testID`, the gesture props (`pan`, `pinch`, `rotation` and their events), the touch and responder props, the
 accessibility props and `ios` / `android` / `desktop`.
 
@@ -92,6 +92,8 @@ On Android, `android={{ ripple: { color: "#0000001f" } }}` adds the material rip
 | `onLongPress` | none | The finger stayed down for `delayLongPress` (500 ms). |
 | `onPressIn` / `onPressOut` | none | A finger went down / lifted or left. |
 | `onHoverIn` / `onHoverOut` | none | The mouse came over the view (or a view inside it) / left it or the window; macOS, Linux and GPUI ([hover](./index.md#hover)). |
+| `onFileDragEnter` / `onFileDragLeave` | none | A local-file drag entered / left the active desktop destination. |
+| `onFileDrop` | `{ uris: string[] }` | Local files or directories were dropped on the desktop destination. |
 | `onLayout` | `{ x, y, width, height }` | The frame relative to the parent changed. |
 | `onPanStart` / `onPanEnd` | `PanEvent` | A drag bound with `pan` started / ended. |
 | `onPinchStart` / `onPinchEnd` | `{ scale, velocity }` | A pinch bound with `pinch` started / ended. |
@@ -99,6 +101,54 @@ On Android, `android={{ ripple: { color: "#0000001f" } }}` adds the material rip
 | `onAccessibilityAction` | `{ actionName }` | A custom accessibility action ran. |
 
 Touch and responder events: see [common props](./index.md#raw-touches-and-the-responder-system).
+
+## Desktop file drops
+
+On AppKit, GTK and Win32, a view with `onFileDrop` receives local files and
+directories dragged from another application. `onFileDragEnter` and
+`onFileDragLeave` track the active destination; `onFileDrop` receives
+`{ uris: string[] }` in the native file-list order. Each entry is an absolute
+`file:` URL with escaped spaces and non-ASCII characters. Parse the URL to
+obtain a filesystem path rather than removing the prefix by hand.
+
+```tsx
+const hovering = signal(false);
+const files = signal<string[]>([]);
+
+<View
+  onFileDragEnter={() => hovering.set(true)}
+  onFileDragLeave={() => hovering.set(false)}
+  onFileDrop={(event) => {
+    files.set(event.uris);
+    hovering.set(false);
+  }}
+  style={{ minHeight: 160, padding: 24 }}
+>
+  <Text>{hovering() ? "Release files here" : "Drop files here"}</Text>
+  <Text>{files().join("\n")}</Text>
+</View>
+```
+
+Rust components use the same events through `Interactive`:
+
+```rust
+use nsh_core::ui::prelude::*;
+
+fn drop_area() -> impl IntoElement {
+    let files = signal(Vec::<String>::new());
+    view()
+        .min_h(px(160.0))
+        .p_6()
+        .on_file_drop(move |event: &FileDropEvent| files.set(event.uris.clone()))
+        .child(text(move || files.get().join("\n")))
+}
+```
+
+The closest enabled ancestor listening to `onFileDrop` receives the drop.
+A modal root bounds that search. `disabled` removes file-drag/drop listeners;
+leaving, cancellation, completion and destination removal clear the active
+state. Acceptance uses the Copy operation and mounted native state. The app
+decides whether to read, open or transfer the received files.
 
 ## Ref methods
 

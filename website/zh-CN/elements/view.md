@@ -48,7 +48,7 @@ Tailwind 的 `flex` 类遵循 CSS 而不是样式的默认值：`class="flex"` �
 
 ## 属性
 
-除[通用属性](./index.md)外，`<View>` 没有自己的属性：`style`（`ViewStyle`）、`class`、`classList`、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressIn`、`onPressOut`、`delayLongPress`、`activeOpacity`、`underlayColor`、`underlayOpacity`、`hitSlop`、`pointerEvents`），`onHoverIn` / `onHoverOut`，`onLayout`、`ref`、`nativeID`、`testID`，手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
+除[通用属性](./index.md)外，`<View>` 没有自己的属性：`style`（`ViewStyle`）、`class`、`classList`、`disabled`，按压属性（`onPress`、`onLongPress`、`onPressIn`、`onPressOut`、`delayLongPress`、`activeOpacity`、`underlayColor`、`underlayOpacity`、`hitSlop`、`pointerEvents`），`onHoverIn` / `onHoverOut`，`onFileDragEnter` / `onFileDragLeave` / `onFileDrop`，`onLayout`、`ref`、`nativeID`、`testID`，手势属性（`pan`、`pinch`、`rotation` 及其事件），触摸与响应者属性，无障碍属性，以及 `ios` / `android` / `desktop`。
 
 ## 按压反馈
 
@@ -81,6 +81,8 @@ Tailwind 的 `flex` 类遵循 CSS 而不是样式的默认值：`class="flex"` �
 | `onLongPress` | 无 | 手指按住达到 `delayLongPress`（500 ms）。 |
 | `onPressIn` / `onPressOut` | 无 | 手指按下 / 抬起或移出。 |
 | `onHoverIn` / `onHoverOut` | 无 | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口；macOS、Linux 和 GPUI（见[悬停](./index.md#悬停)）。 |
+| `onFileDragEnter` / `onFileDragLeave` | 无 | 本地文件拖入 / 离开当前桌面拖放目标。 |
+| `onFileDrop` | `{ uris: string[] }` | 本地文件或目录被放到桌面拖放目标。 |
 | `onLayout` | `{ x, y, width, height }` | 相对父视图的 frame 发生变化。 |
 | `onPanStart` / `onPanEnd` | `PanEvent` | 通过 `pan` 绑定的拖动开始 / 结束。 |
 | `onPinchStart` / `onPinchEnd` | `{ scale, velocity }` | 通过 `pinch` 绑定的捏合开始 / 结束。 |
@@ -88,6 +90,50 @@ Tailwind 的 `flex` 类遵循 CSS 而不是样式的默认值：`class="flex"` �
 | `onAccessibilityAction` | `{ actionName }` | 执行了一个自定义无障碍操作。 |
 
 触摸与响应者事件：参见[通用属性](./index.md)。
+
+## 桌面文件拖放
+
+在 AppKit、GTK 和 Win32 上，带有 `onFileDrop` 的视图可以接收从其他应用拖入的本地文件和目录。
+`onFileDragEnter` 和 `onFileDragLeave` 跟踪当前拖放目标；`onFileDrop` 接收
+`{ uris: string[] }`，顺序与原生文件列表一致。每项都是绝对 `file:` URL，空格和非 ASCII
+字符使用 URL 转义。请解析 URL 获取文件系统路径。
+
+```tsx
+const hovering = signal(false);
+const files = signal<string[]>([]);
+
+<View
+  onFileDragEnter={() => hovering.set(true)}
+  onFileDragLeave={() => hovering.set(false)}
+  onFileDrop={(event) => {
+    files.set(event.uris);
+    hovering.set(false);
+  }}
+  style={{ minHeight: 160, padding: 24 }}
+>
+  <Text>{hovering() ? "松开以接收文件" : "将文件拖到这里"}</Text>
+  <Text>{files().join("\n")}</Text>
+</View>
+```
+
+Rust 组件通过 `Interactive` 使用相同事件：
+
+```rust
+use nsh_core::ui::prelude::*;
+
+fn drop_area() -> impl IntoElement {
+    let files = signal(Vec::<String>::new());
+    view()
+        .min_h(px(160.0))
+        .p_6()
+        .on_file_drop(move |event: &FileDropEvent| files.set(event.uris.clone()))
+        .child(text(move || files.get().join("\n")))
+}
+```
+
+最近的、已启用且监听 `onFileDrop` 的祖先视图接收文件，搜索范围止于模态根节点。
+`disabled` 会移除文件拖入、离开和放下的监听；离开、取消、完成或移除目标会清除当前拖放状态。
+原生侧根据已挂载的状态同步接受 Copy 操作。应用决定如何读取、打开或传输收到的文件。
 
 ## ref 方法
 
