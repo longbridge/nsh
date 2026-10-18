@@ -1,0 +1,58 @@
+name: Examples
+
+# Lints and tests the Rust gallery (`examples/gallery-rs/native`, a member of
+# the workspace): its black-box tests run every demo through the engine,
+# headless. The other workflows only run for `crates/**`, so a change to the
+# gallery alone was never built.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/gallery-rs/**"
+      - ".github/workflows/examples.yml"
+  pull_request:
+    paths:
+      - "examples/gallery-rs/**"
+      - ".github/workflows/examples.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: examples-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # QuickJS is C (bindgen needs libclang); the engine the tests run needs
+      # no platform backend.
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-examples-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-examples-cargo-
+
+      - name: Clippy
+        run: cargo clippy --all-targets -p gallery-native -- -D warnings
+
+      - name: Test
+        run: cargo test -p gallery-native
