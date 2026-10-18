@@ -599,3 +599,89 @@ fn data_is_data_and_classes_are_their_sets() {
         r#"done {"$instance":1,"h":2}|true 6|test/classes test/other"#
     );
 }
+
+/// The texts shown and the views' props, after `secs` seconds.
+fn mounted(rx: &Receiver<MountBatch>, ms: u64) -> (Vec<String>, String) {
+    let deadline = std::time::Instant::now() + Duration::from_millis(ms);
+    let (mut texts, mut items) = (Vec::new(), String::new());
+    while let Ok(batch) = rx.recv_deadline(deadline) {
+        for item in &batch.items {
+            if let MountItem::Text { text, .. } = item {
+                texts.push(text.text.clone());
+            }
+            items.push_str(&format!("{item:?}\n"));
+        }
+    }
+    (texts, items)
+}
+
+/// An app whose `tree` throws as it mounts shows what it threw.
+fn throwing_mount(tree: &str) -> String {
+    format!(
+        r#"import {{ mount, signal, Text }} from "nsh";
+import {{ Gauge }} from "test/classes";
+
+const level = signal(1.5);
+const id = signal("zza");
+const bad = () => {{ throw new Error("boom"); }};
+try {{
+  mount(() => (
+    <>
+      <Text>before</Text>
+      {tree}
+      <Text>after</Text>
+    </>
+  ));
+}} catch (e) {{
+  mount(() => <Text>{{`caught ${{e.name}}: ${{e.message}}`}}</Text>);
+}}
+"#
+    )
+}
+
+#[test]
+fn a_prop_that_fails_at_the_first_render_throws_as_a_render_effect_does() {
+    // A JS binding throwing in the first render: what mounting does.
+    let (_engine, rx) = start(&throwing_mount("<Text>{bad()}</Text>"), vec![registry()]);
+    let (texts, _) = mounted(&rx, 500);
+    assert_eq!(texts, ["caught Error: boom"]);
+    // A Rust component's prop that does not convert: the same.
+    let (_engine, rx) = start(
+        &throwing_mount("<Gauge level={level()} testID={id()} />"),
+        vec![registry()],
+    );
+    let (texts, _) = mounted(&rx, 500);
+    assert_eq!(
+        texts,
+        ["caught TypeError: Gauge.level: expected an integer that fits u32, got 1.5"]
+    );
+}
+
+const LATER: &str = r#"import { mount, signal, Text } from "nsh";
+import { Gauge } from "test/classes";
+
+const level = signal(1);
+const id = signal("zzb");
+const shown = signal("waiting");
+setTimeout(() => {
+  try { level.set(-1); } catch (e) { shown.set(`thrown ${e.name}`); }
+  setTimeout(() => id.set("zzc"), 50);
+}, 50);
+
+mount(() => (
+  <>
+    <Text>{shown()}</Text>
+    <Gauge level={level()} testID={id()} />
+  </>
+));
+"#;
+
+#[test]
+fn a_prop_that_fails_later_holds_back_no_other_prop() {
+    let (_engine, rx) = start(LATER, vec![registry()]);
+    let (texts, items) = mounted(&rx, 800);
+    assert!(texts.iter().any(|t| t == "thrown TypeError"), "{texts:?}");
+    // The props after it still reach the view, right away.
+    assert!(items.contains("zzb") && items.contains("zzc"), "{items}");
+    assert!(texts.iter().any(|t| t == "level 1"), "{texts:?}");
+}

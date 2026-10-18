@@ -77,7 +77,9 @@ child components go with it. The design and its reasons: `reactive-components.md
   (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. A prop JS sets with
   the wrong type throws a `TypeError` at the assignment (``Gauge.level: expected an integer that fits u32, got
   1.5``): the JS face decodes it there and sends the typed value (`Prop::RustProp`, an `AnyValue`); clearing a prop
-  (`undefined`) restores its default. A Rust parent passes a value
+  (`undefined`) restores its default. The other props are set all the same (one effect reads them all, so each stays
+  tracked), and the first error is the effect's, thrown as any render effect's is: by the assignment that ran it,
+  or by `mount` in the first render. A Rust parent passes a value
   (`3.into()`), a signal (`n.into()`) or a closure (`Prop::bind(move || ..)`). Platform-only props are an `android` /
   `ios` prop of a `JsObject` struct (`StatusBar`'s `android={{ backgroundColor }}`), as for host elements.
 - **`Scope<E>`** (`Copy`) is what the component has of its own: `cx.emit(event)` (to the app's `on<Event>`, or to the

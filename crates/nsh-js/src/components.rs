@@ -701,12 +701,29 @@ unsafe extern "C" fn props_run(
         .filter(|p| p.kind == PropKind::Value)
         .map(|p| (p.name, p.decode))
         .chain(HOST_PROPS.iter().map(|&h| (h, None)));
+    // Every prop is read and set whatever another one did, so each stays
+    // tracked and the good ones reach the view; the first error is thrown
+    // at the end (an uncatchable one, an interrupt, at once).
+    let mut first: Option<V> = None;
+    let failed = |first: &mut Option<V>| -> bool {
+        let e = crate::web::js::take_exception(ctx);
+        // SAFETY: a check of a live value.
+        if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
+            let _ = crate::web::js::throw(ctx, e);
+            return true;
+        }
+        first.get_or_insert(e);
+        false
+    };
     for (i, (key, decode)) in keys.enumerate() {
         let value = get(ctx, props, key);
         // SAFETY: live values; the array keeps a dup of the new value.
         unsafe {
             if qjs::JS_IsException(value) {
-                return value;
+                if failed(&mut first) {
+                    return qjs::JS_EXCEPTION;
+                }
+                continue;
             }
             let old = qjs::JS_GetPropertyUint32(ctx, prev, i as u32);
             let same = qjs::JS_IsStrictEqual(ctx, old, value);
@@ -721,14 +738,23 @@ unsafe extern "C" fn props_run(
             // The previous value is what the view has: one that was not
             // sent (it did not convert) leaves it, so assigning it again
             // throws again and `undefined` resets the prop.
-            if let Err(e) = result {
+            if result.is_err() {
                 qjs::JS_FreeValue(ctx, value);
-                return e;
+                if failed(&mut first) {
+                    return qjs::JS_EXCEPTION;
+                }
+                continue;
             }
             qjs::JS_SetPropertyUint32(ctx, prev, i as u32, value);
         }
     }
-    UNDEFINED
+    match first {
+        Some(e) => {
+            let _ = crate::web::js::throw(ctx, e);
+            qjs::JS_EXCEPTION
+        }
+        None => UNDEFINED,
+    }
 }
 
 /// Sets prop `key` of the Rust component on `node` to `value` (borrowed),
