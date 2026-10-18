@@ -153,11 +153,10 @@ impl fmt::Display for PropError {
 impl std::error::Error for PropError {}
 
 /// The named TypeScript types the declarations use (`AlertButton`,
-/// `BarStyle`), declared once each, and the classes they name.
+/// `BarStyle`), declared once each.
 #[derive(Debug, Clone, Default)]
 pub struct TsTypes {
     types: std::collections::BTreeMap<&'static str, String>,
-    classes: Vec<&'static super::ClassDef>,
 }
 
 impl TsTypes {
@@ -178,26 +177,16 @@ impl TsTypes {
     }
 
     /// Class `def`'s type: its name (the class is declared with the set's
-    /// classes, which must include it).
+    /// classes, which include every class a registered signature names:
+    /// [`super::Registry::class`]).
     pub fn class(&mut self, def: &'static super::ClassDef) -> String {
-        if !self.classes.iter().any(|c| std::ptr::eq(*c, def)) {
-            self.classes.push(def);
-        }
         def.name.to_owned()
-    }
-
-    /// The classes the types name.
-    pub(crate) fn classes(&self) -> &[&'static super::ClassDef] {
-        &self.classes
     }
 
     /// Adds `other`'s types.
     pub(crate) fn merge(&mut self, other: &TsTypes) {
         for (name, text) in &other.types {
             self.types.entry(name).or_insert_with(|| text.clone());
-        }
-        for def in &other.classes {
-            self.class(def);
         }
     }
 

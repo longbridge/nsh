@@ -286,9 +286,12 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
 - **Platform native components** (Java, Swift, the embedder's GPUI components) keep JSON (`Prop::ComponentProp`,
   `MountItem::ComponentProps`, `EventPayload::Native`, `Command::Native`): their values cross into another
   language. The two kinds stay apart.
-- **A class a signature names must be registered** in one of the engine's UI sets: `Registry::merged` panics
-  naming the class and the set otherwise (`Registry::unregistered_classes`), since its objects would have no class
-  in JS.
+- **A class a signature names is registered with it**: each member, module function and ref method lists the
+  classes its parameters and result name (`ClassRefs`: `Instance<Other>`, `&Other`, `Other` by value, the
+  arguments of a `Callback`), and `Registry::class` / `module` / `register` register them in turn, so their objects
+  have a class in JS, `import { Other }` and `instanceof` work, and the declarations declare it, in every build
+  (WebAssembly included: the lists are not TypeScript, which those builds leave out). Registering a class again does
+  nothing.
 
 ## The pieces
 

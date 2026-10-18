@@ -16,7 +16,7 @@ use std::{
 
 use super::{
     JsValue, PropError, TsTypes,
-    class::{Arg, Class, Instance, Ret},
+    class::{Arg, Class, ClassDef, Instance, Ret},
     js::{JsHost, JsIn, JsOwned},
     task::Answer,
 };
@@ -204,6 +204,9 @@ pub trait CallbackArgs {
     fn ts_params(types: &mut TsTypes) -> String;
     /// The arguments as JS values.
     fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>;
+    /// Adds the classes the arguments name.
+    #[doc(hidden)]
+    fn classes(out: &mut Vec<&'static ClassDef>);
 }
 
 impl<T: Ret> CallbackArgs for T {
@@ -222,6 +225,10 @@ impl<T: Ret> CallbackArgs for T {
             Ok(vec![Ret::into_js(self, host)?])
         }
     }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        T::classes(out);
+    }
 }
 
 macro_rules! callback_tuple {
@@ -234,6 +241,10 @@ macro_rules! callback_tuple {
             fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
                 let ($($v,)*) = self;
                 Ok(vec![$(Ret::into_js($v, host)?),*])
+            }
+
+            fn classes(out: &mut Vec<&'static ClassDef>) {
+                $($t::classes(out);)*
             }
         }
     )*};
@@ -291,6 +302,10 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R>
             .map(Callback::of)
             .ok_or_else(|| value.expected("a function"))
     }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        A::classes(out);
+    }
 }
 
 /// `null` or `undefined` is `None`.
@@ -304,6 +319,10 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Option<Callbac
             return Ok(None);
         }
         Callback::from_js(value).map(Some)
+    }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        A::classes(out);
     }
 }
 

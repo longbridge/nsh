@@ -1072,6 +1072,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             }
         }
         let mut params = Vec::new();
+        let mut refs = Vec::new();
         let mut decode = Vec::new();
         let mut call_args = Vec::new();
         let typed: Vec<_> = inputs
@@ -1091,6 +1092,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             let name = camel(&name.ident.to_string());
             let local = format_ident!("__arg{}", i);
             params.push(quote!((#name, #private::arg_ts::<#ty>())));
+            refs.push(quote!(#private::arg_classes::<#ty>(__out);));
             decode.push(quote! {
                 let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
             });
@@ -1112,6 +1114,10 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 ),
             },
         };
+        if let ReturnType::Type(_, ty) = &f.sig.output {
+            let ty = result_ok(ty).unwrap_or(&**ty);
+            refs.push(quote!(#private::ret_classes::<#ty>(__out);));
+        }
         let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
         entries.push(quote! {
             #(#cfgs)*
@@ -1120,6 +1126,10 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 doc: #doc,
                 params: &[#(#params),*],
                 returns: #returns,
+                refs: |__out| {
+                    let _ = &__out;
+                    #(#refs)*
+                },
                 call: |host| {
                     let _ = host;
                     #(#decode)*
@@ -1420,6 +1430,18 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 ),
             },
         };
+        // The classes the signature names, registered with the module.
+        let ret_refs = match &f.sig.output {
+            ReturnType::Default => None,
+            ReturnType::Type(_, ty) => {
+                let ty = result_ok(ty).unwrap_or(&**ty);
+                Some(quote!(#private::ret_classes::<#ty>(__out);))
+            }
+        };
+        let refs = params
+            .iter()
+            .map(|ty| quote!(#private::arg_classes::<#ty>(__out);))
+            .chain(ret_refs);
         let locals: Vec<_> = (0..params.len())
             .map(|i| format_ident!("__arg{}", i))
             .collect();
@@ -1489,6 +1511,10 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 doc: #doc,
                 params: &[#(#param_specs),*],
                 returns: #returns,
+                refs: |__out| {
+                    let _ = &__out;
+                    #(#refs)*
+                },
                 call: #call,
             }
         });

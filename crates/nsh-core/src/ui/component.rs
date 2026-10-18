@@ -109,6 +109,8 @@ pub struct Method {
     /// The TypeScript type of its result (`None`: it returns nothing, and
     /// JS does not wait for it).
     pub returns: Option<TsType>,
+    /// The classes its parameters and result name.
+    pub refs: super::ClassRefs,
     /// Its call, the arguments converted in the JS call: what the core
     /// runs with the API, in order with the props set before it.
     pub call: fn(&dyn JsHost) -> Result<MethodCall, Thrown>,
@@ -128,18 +130,25 @@ pub trait Api: Sized + 'static {
 #[derive(Clone, Copy)]
 pub struct Methods {
     specs: fn(&mut TsTypes) -> Vec<MethodSpec>,
+    refs: super::ClassRefs,
 }
 
 impl Methods {
     /// None.
     pub const NONE: Self = Self {
         specs: |_| Vec::new(),
+        refs: |_| {},
     };
 
     /// Those of `A`.
     pub const fn of<A: Api>() -> Self {
         Self {
             specs: specs_of::<A>,
+            refs: |out| {
+                for m in A::METHODS {
+                    (m.refs)(out);
+                }
+            },
         }
     }
 }
@@ -628,7 +637,9 @@ impl Registry {
                 id: TypeId::of::<C>(),
             },
         );
-        self
+        let mut refs = Vec::new();
+        (C::METHODS.refs)(&mut refs);
+        self.classes_named(refs)
     }
 
     /// Registers module `M`: its functions on a JS object named
@@ -667,23 +678,47 @@ impl Registry {
                 type_name,
             },
         );
-        self
+        let mut refs = Vec::new();
+        for f in M::FUNCTIONS {
+            (f.refs)(&mut refs);
+        }
+        self.classes_named(refs)
     }
 
     /// Registers class `C` (`#[class]`): a JS class named [`Class::DEF`]'s
     /// name, which JS makes with `new` (when it has a constructor) and gets
-    /// from the members that return one.
+    /// from the members that return one. The classes its members'
+    /// signatures name are registered with it, as are those a module's
+    /// functions or a component's methods name ([`Registry::module`],
+    /// [`Registry::register`]): their objects reach JS, so they are
+    /// exported and declared. Registering a class again does nothing.
     ///
     /// # Panics
     ///
-    /// When the set has a class, a module or a component of that name
-    /// already.
+    /// When the set has another class, a module or a component of that
+    /// name already.
     #[track_caller]
     pub fn class<C: Class>(&mut self) -> &mut Self {
-        let def = C::DEF;
-        let type_name = std::any::type_name::<C>();
+        self.class_def(C::DEF, std::any::type_name::<C>())
+    }
+
+    /// Registers the classes in `refs` (a signature names them), unless
+    /// the set has them.
+    #[track_caller]
+    fn classes_named(&mut self, refs: Vec<&'static ClassDef>) -> &mut Self {
+        for def in refs {
+            self.class_def(def, def.name);
+        }
+        self
+    }
+
+    #[track_caller]
+    fn class_def(&mut self, def: &'static ClassDef, type_name: &'static str) -> &mut Self {
         let set = self.ui_set.or(self.namespace);
         if let Some(old) = self.classes.get(&(set, def.name)) {
+            if (old.spec.def.type_id)() == (def.type_id)() {
+                return self;
+            }
             panic!("{}", same_class(def.name, old.type_name, type_name, set));
         }
         if self.modules.contains_key(def.name)
@@ -702,7 +737,12 @@ impl Registry {
                 type_name,
             },
         );
-        self
+        // What its members name, in turn (it is registered: a cycle ends).
+        let mut refs = Vec::new();
+        for m in def.members {
+            (m.refs)(&mut refs);
+        }
+        self.classes_named(refs)
     }
 
     /// Exports `values` and `types` of the runtime as they are (accessors
@@ -723,8 +763,7 @@ impl Registry {
     /// # Panics
     ///
     /// When two sets register the same component or two types of the same
-    /// name, or a class one of the sets' signatures names is registered in
-    /// none ([`Registry::unregistered_classes`]).
+    /// name.
     #[track_caller]
     pub fn merged(sets: &[Registry]) -> Self {
         let mut out = Self::default();
@@ -736,54 +775,7 @@ impl Registry {
                 }
             }
         }
-        let registered: Vec<_> = sets
-            .iter()
-            .flat_map(|s| s.classes.values().map(|c| (c.spec.def.type_id)()))
-            .collect();
-        for set in sets {
-            if let Some(def) = set
-                .named_classes()
-                .into_iter()
-                .find(|d| !registered.contains(&(d.type_id)()))
-            {
-                panic!("{}", unregistered(def, set.specifier()));
-            }
-        }
         out
-    }
-
-    /// The classes the set's signatures name (arguments, results, props)
-    /// that no set has registered among `sets`: their objects would have
-    /// no declaration and no export. Known in builds with declarations
-    /// ([`super::DECLARATIONS`]: the names come from the types).
-    pub fn unregistered_classes(sets: &[Registry]) -> Vec<&'static ClassDef> {
-        let registered: Vec<_> = sets
-            .iter()
-            .flat_map(|s| s.classes.values().map(|c| (c.spec.def.type_id)()))
-            .collect();
-        let mut out: Vec<&'static ClassDef> = Vec::new();
-        for def in sets.iter().flat_map(Registry::named_classes) {
-            if !registered.contains(&(def.type_id)()) && !out.iter().any(|d| std::ptr::eq(*d, def))
-            {
-                out.push(def);
-            }
-        }
-        out
-    }
-
-    /// The classes this registry's specs name.
-    fn named_classes(&self) -> Vec<&'static ClassDef> {
-        let mut types = TsTypes::default();
-        for spec in self.types.values() {
-            types.merge(&spec.spec.types);
-        }
-        for m in self.modules.values() {
-            types.merge(&m.spec.types);
-        }
-        for c in self.classes.values() {
-            types.merge(&c.spec.types);
-        }
-        types.classes().to_vec()
     }
 
     /// The registry of a UI set apps import as `specifier`
@@ -897,18 +889,6 @@ fn same_module(name: &str, old: &str, new: &str, set: Option<&str>) -> String {
             of_set(set)
         )
     }
-}
-
-/// The message of a class a set's signatures name that is registered
-/// nowhere.
-fn unregistered(def: &ClassDef, set: Option<&str>) -> String {
-    format!(
-        "class `{}` is named by a signature{} but no UI set registers it (its objects would \
-         have no class in JS): add `registry.class::<{}>()`",
-        def.name,
-        of_set(set),
-        def.name
-    )
 }
 
 /// The message of two classes named `name`.
@@ -1283,29 +1263,20 @@ mod tests {
     }
 
     #[test]
-    fn a_class_a_signature_names_is_registered() {
+    fn the_classes_a_signature_names_are_registered_with_it() {
         let mut r = Registry::ui_set("test/maker");
         r.module::<Maker>();
-        assert_eq!(
-            Registry::unregistered_classes(std::slice::from_ref(&r))
-                .iter()
-                .map(|d| d.name)
-                .collect::<Vec<_>>(),
-            ["Lonely"]
-        );
-        // Registered in another set: fine.
-        let mut other = Registry::ui_set("test/lonely");
-        other.class::<Lonely>();
-        let _ = Registry::merged(&[r.clone(), other]);
-        // Nowhere: the sets do not build.
-        let failed = std::panic::catch_unwind(|| Registry::merged(&[r])).unwrap_err();
-        let message = failed.downcast_ref::<String>().unwrap();
-        assert!(
-            message.starts_with(
-                "class `Lonely` is named by a signature in `test/maker` but no UI set registers it"
-            ),
-            "{message}"
-        );
+        // The module's result names `Lonely`: it is the set's, declared and
+        // exported.
+        let names: Vec<_> = r.class_specs().iter().map(|c| c.name).collect();
+        assert_eq!(names, ["Lonely"]);
+        let ts = declarations(&r, &[]);
+        assert!(ts.contains("export declare class Lonely"), "{ts}");
+        assert!(ts.contains("make(): Lonely;"), "{ts}");
+        // Registering it again does nothing.
+        r.class::<Lonely>();
+        assert_eq!(r.class_specs().len(), 1);
+        let _ = Registry::merged(&[r]);
     }
 
     #[test]

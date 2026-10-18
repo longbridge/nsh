@@ -95,9 +95,17 @@ pub struct Member {
     pub params: &'static [ModuleParam],
     /// The TypeScript type of its result (`None`: nothing).
     pub returns: Option<TsType>,
+    /// The classes its parameters and result name.
+    pub refs: ClassRefs,
     /// How it runs.
     pub call: MemberCall,
 }
+
+/// Adds the classes a signature names (its parameters' and result's
+/// types: [`Arg::classes`], [`Ret::classes`]) to the list: registering it
+/// registers them ([`super::Registry::class`]). Not stripped from builds
+/// without declarations: JS needs the classes there too.
+pub type ClassRefs = fn(&mut Vec<&'static ClassDef>);
 
 /// An `async` member's or function's call, its arguments (and instance)
 /// converted in the JS call: the start of its task.
@@ -342,6 +350,10 @@ pub trait Arg: Sized {
     fn ts_type(types: &mut TsTypes) -> String;
     /// The value of a JS argument.
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError>;
+    /// Adds the classes the type names (an instance's, a callback's
+    /// arguments').
+    #[doc(hidden)]
+    fn classes(_out: &mut Vec<&'static ClassDef>) {}
 }
 
 impl<T: JsValue> Arg for T {
@@ -368,6 +380,10 @@ impl<C: Class> Arg for Instance<C> {
             .and_then(Instance::of)
             .ok_or_else(|| value.expected(&format!("a {}", C::DEF.name)))
     }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
+    }
 }
 
 /// `null` or `undefined` is `None`.
@@ -382,6 +398,10 @@ impl<C: Class> Arg for Option<Instance<C>> {
         }
         Instance::from_js(value).map(Some)
     }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
+    }
 }
 
 /// A result of a class's member: a [`JsValue`] type, `()`, an instance
@@ -394,6 +414,9 @@ pub trait Ret: Sized {
     fn ts_type(types: &mut TsTypes) -> String;
     /// The value for JS.
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
+    /// Adds the classes the type names (an instance's).
+    #[doc(hidden)]
+    fn classes(_out: &mut Vec<&'static ClassDef>) {}
 }
 
 impl<T: JsValue> Ret for T {
@@ -426,6 +449,10 @@ impl<C: Class> Ret for Instance<C> {
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         Ok(JsOwned::new(host, host.wrap(self.erased())?))
     }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
+    }
 }
 
 impl<C: Class> Ret for Option<Instance<C>> {
@@ -438,6 +465,10 @@ impl<C: Class> Ret for Option<Instance<C>> {
             Some(i) => i.into_js(host),
             None => Ok(JsOwned::new(host, host.null())),
         }
+    }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
     }
 }
 
@@ -538,6 +569,21 @@ pub(crate) mod __private {
     /// `C`'s TypeScript type.
     pub fn class_ts<C: Class>(types: &mut TsTypes) -> String {
         types.class(C::DEF)
+    }
+
+    /// The classes parameter type `T` names.
+    pub fn arg_classes<T: Arg>(out: &mut Vec<&'static ClassDef>) {
+        T::classes(out);
+    }
+
+    /// The classes result type `T` names.
+    pub fn ret_classes<T: Ret>(out: &mut Vec<&'static ClassDef>) {
+        T::classes(out);
+    }
+
+    /// Class `C` itself (a struct's value as a result).
+    pub fn class_refs<C: Class>(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
     }
 
     /// Argument `i` of the call (`what`: `Tally.add`, `name`: `by`, for
@@ -866,14 +912,14 @@ export declare const Tools: ToolsModule;
         );
     }
 
+    /// A signature naming a class registers it too: registering it again
+    /// does nothing.
     #[test]
-    #[should_panic(
-        expected = "class `nsh_core::ui::class::tests::Tally` is registered twice in `test/ui`"
-    )]
-    fn a_class_is_registered_once() {
-        Registry::ui_set("test/ui")
-            .class::<Tally>()
-            .class::<Tally>();
+    fn registering_a_class_again_does_nothing() {
+        let mut r = Registry::ui_set("test/ui");
+        r.class::<Tally>().class::<Tally>();
+        let tallies = r.class_specs().iter().filter(|c| c.name == "Tally").count();
+        assert_eq!(tallies, 1);
     }
 
     /// A component exported as `Tally`.

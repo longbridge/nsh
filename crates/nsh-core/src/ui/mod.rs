@@ -102,8 +102,8 @@ pub use self::{
     },
     callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
     class::{
-        Arg, AsyncCall, Class, ClassDef, ClassInstance, ClassSpec, Instance, Member, MemberCall,
-        MemberKind, MemberSpec, Ret, Thrown,
+        Arg, AsyncCall, Class, ClassDef, ClassInstance, ClassRefs, ClassSpec, Instance, Member,
+        MemberCall, MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
         Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,

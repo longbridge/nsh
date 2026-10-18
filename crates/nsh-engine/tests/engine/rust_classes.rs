@@ -283,6 +283,42 @@ impl Component for Fragile {
     }
 }
 
+/// A class no set registers by name: a module's function returns it.
+#[class]
+pub(crate) struct Lonely;
+
+#[class]
+impl Lonely {
+    /// Its twin, another class registered by nobody.
+    pub(crate) fn twin(&self) -> Instance<Twin> {
+        Instance::new(Twin)
+    }
+}
+
+/// Reached through `Lonely` only.
+#[class]
+pub(crate) struct Twin;
+
+#[class]
+impl Twin {
+    /// Its name.
+    #[getter]
+    pub(crate) fn tag(&self) -> String {
+        "twin".to_owned()
+    }
+}
+
+/// Makes `Lonely`s.
+pub(crate) struct Maker;
+
+#[module]
+impl Maker {
+    /// A new one.
+    pub(crate) fn make() -> Instance<Lonely> {
+        Instance::new(Lonely)
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::ui_set("test/classes");
     r.class::<Counter>()
@@ -566,6 +602,22 @@ fn a_prop_whose_conversion_panics_throws_where_it_is_set() {
     assert_eq!(shown(&rx, "done"), "done Error: Fragile.v: panicky");
 }
 
+const LONELY: &str = r#"import { mount, signal, Text } from "nsh";
+import { Lonely, Maker, Twin } from "test/maker";
+
+const l = Maker.make();
+const t = l.twin();
+mount(() => <Text>{`done ${l instanceof Lonely} ${t instanceof Twin} ${t.tag}`}</Text>);
+"#;
+
+#[test]
+fn classes_a_signature_names_are_exported_with_it() {
+    let mut set = Registry::ui_set("test/maker");
+    set.module::<Maker>();
+    let (_engine, rx) = start(LONELY, vec![set]);
+    assert_eq!(shown(&rx, "done"), "done true true twin");
+}
+
 const DATA: &str = r#"import { mount, signal, Text } from "nsh";
 import { Counter } from "test/classes";
 import { Counter as OtherCounter } from "test/other";
@@ -600,7 +652,7 @@ fn data_is_data_and_classes_are_their_sets() {
     );
 }
 
-/// The texts shown and the views' props, after `secs` seconds.
+/// The texts shown and the mount items, for `ms` milliseconds.
 fn mounted(rx: &Receiver<MountBatch>, ms: u64) -> (Vec<String>, String) {
     let deadline = std::time::Instant::now() + Duration::from_millis(ms);
     let (mut texts, mut items) = (Vec::new(), String::new());

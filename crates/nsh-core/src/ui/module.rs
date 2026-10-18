@@ -101,6 +101,8 @@ pub struct Function {
     pub params: &'static [ModuleParam],
     /// The TypeScript type of its result; `None`: nothing to wait for.
     pub returns: Option<TsType>,
+    /// The classes its parameters and result name.
+    pub refs: super::ClassRefs,
     /// How it runs.
     pub call: FunctionCall,
 }

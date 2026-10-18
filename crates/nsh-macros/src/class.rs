@@ -91,6 +91,10 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
                 #ui::__private::class_into_js(self, host)
             }
+
+            fn classes(out: &mut ::std::vec::Vec<&'static #ui::ClassDef>) {
+                #ui::__private::class_refs::<Self>(out);
+            }
         }
     })
 }
@@ -347,6 +351,16 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             quote!((#name, #ts, #optional))
         })
         .collect();
+    // The classes the signature names, registered with this one.
+    let mut refs: Vec<TokenStream2> = params
+        .iter()
+        .map(|p| match p {
+            Param::Value(ty) => quote!(#private::arg_classes::<#ty>(__out);),
+            Param::Borrowed { elem, .. } => {
+                quote!(#private::arg_classes::<#ui::Instance<#elem>>(__out);)
+            }
+        })
+        .collect();
     let (returns, ok_ty, fallible) = match &f.sig.output {
         ReturnType::Default => (quote!(::core::option::Option::None), None, false),
         ReturnType::Type(_, ty) => match result_ok(ty) {
@@ -369,6 +383,9 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         Kind::Setter { .. } => quote!(Setter),
         Kind::Static | Kind::AsyncStatic => quote!(Static),
     };
+    if let Some(ty) = &ok_ty {
+        refs.push(quote!(#private::ret_classes::<#ty>(__out);));
+    }
     if kind == Kind::Constructor {
         let ok_is_self = matches!(&ok_ty, Some(ty) if matches!(last_segment(ty), Some((id, _)) if id == "Self" || id == class));
         if !ok_is_self {
@@ -391,6 +408,10 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             kind: #ui::MemberKind::#member_kind,
             params: &[#(#param_specs),*],
             returns: #returns,
+            refs: |__out| {
+                let _ = &__out;
+                #(#refs)*
+            },
             call: #call,
         }
     })

@@ -301,7 +301,8 @@ statics, and `async fn`s (`this: Instance<Self>` first, for a method) members re
   (chosen by type, so aliases count); the object's mark hook reports them when it is the instance's only owner, so
   a listener that captures its own object is collected; callbacks held elsewhere are roots. Before a collected
   object's value drops, its callbacks are released: its `Drop` calling one finds it gone.
-- **A class a signature names is registered** in one of the host's sets, or `Registry::merged` panics naming it.
+- **A class a signature names is registered with it** (`Registry::module`, `class`, `register` follow the
+  members' `ClassRefs`), so its objects have a class, an export and a declaration.
 
 ## The status bar
 
