@@ -1,7 +1,8 @@
-//! Photos: a long recycled list of rows with images, pull to refresh,
-//! loading more at the end, a hero that fades and slides under the list
-//! and a compact bar that fades in, all driven natively by the list's
-//! scroll offset (as the TSX gallery's `demos/Photos.tsx`).
+//! Photos: a long recycled list of rows with images (a grid of tiles in
+//! the desktop layout), pull to refresh, loading more at the end, a hero
+//! that fades and slides under the list and a compact bar that fades in,
+//! all driven natively by the list's scroll offset (as the TSX gallery's
+//! `demos/Photos.tsx`).
 
 use std::{rc::Rc, time::Duration};
 
@@ -9,7 +10,7 @@ use nsh_core::ui::prelude::*;
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Finish, Finished, IconName, PressProps, Stat, Tone, bind_refresh,
-    colors, icon, radius,
+    colors, columns_for, desktop, icon, pane_width, radius,
 };
 
 /// Photos loaded per page.
@@ -140,19 +141,101 @@ fn row(photo: Memo<Option<Photo>>) -> impl IntoElement {
     )
 }
 
+/// A photo in the desktop layout's grid: the picture over its title and
+/// author, a fill under the pointer (of the photo `photo` reads, as
+/// [`row`]).
+fn tile(photo: Memo<Option<Photo>>) -> impl IntoElement {
+    let field = move |f: fn(&Photo) -> String| {
+        move || photo.with(|p| p.as_ref().map(f).unwrap_or_default())
+    };
+    crate::ui::Press::element(PressProps {
+        scale: 0.97.into(),
+        label: Prop::bind(move || photo.with(|p| p.as_ref().map(|p| p.title.clone().into()))),
+        ..PressProps::default()
+    })
+    .child(
+        view()
+            .p(px(6.0))
+            .gap_2()
+            .rounded(px(radius::CARD))
+            .border_curve(BorderCurve::Continuous)
+            // The card's fill: Tailwind's `paper-card` / `graphite-card`.
+            .hover(|s| s.bg(colors::SURFACE))
+            .child(
+                image(field(|p| {
+                    format!("https://picsum.photos/seed/{}/480/360", p.id)
+                }))
+                .w_full()
+                .aspect_ratio(4.0 / 3.0)
+                .rounded(px(radius::INSET))
+                .border_curve(BorderCurve::Continuous)
+                .border_1()
+                .border_color(colors::BORDER)
+                .bg(colors::RAISED)
+                .finish(Finish::Raised),
+            )
+            .child(
+                view()
+                    .gap(px(3.0))
+                    .px_1()
+                    .pb_1()
+                    .child(
+                        view()
+                            .flex_row()
+                            .items_baseline()
+                            .gap_2()
+                            .child(
+                                text(field(|p| p.title.clone()))
+                                    .number_of_lines(1)
+                                    .flex_1()
+                                    .text_size(px(14.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(colors::TEXT),
+                            )
+                            .child(
+                                text(field(|p| format!("#{}", p.id)))
+                                    .text_size(px(12.0))
+                                    .text_color(colors::FAINT)
+                                    .tabular_nums(),
+                            ),
+                    )
+                    .child(
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(view().size(px(6.0)).rounded(px(3.0)).bg(move || {
+                                photo
+                                    .with(|p| p.as_ref().map_or(Tone::Neutral, |p| p.tone))
+                                    .color()
+                            }))
+                            .child(
+                                text(field(|p| {
+                                    format!("{} · {} views", p.author, compact(p.views))
+                                }))
+                                .number_of_lines(1)
+                                .text_size(px(12.0))
+                                .text_color(colors::MUTED),
+                            ),
+                    ),
+            ),
+    )
+}
+
 /// The list's header: a card of figures and a hint, fading out and moving
-/// at half speed as the list slides over it.
+/// at half speed as the list slides over it (in the desktop layout, on
+/// the grid's gutters instead of its own).
 fn hero(
     count: Memo<usize>,
     refreshes: Signal<u32>,
     refreshing: Signal<bool>,
     refresh: impl Into<Listener<()>>,
     refresh_key: Option<String>,
-    scroll_y: &NativeValue,
+    scroll_y: NativeValue,
+    wide: bool,
 ) -> impl IntoElement {
     view()
-        .px_4()
-        .pt_2()
+        .when(!wide, |v| v.px_4().pt_2())
         .pb_4()
         .bind_opacity(&scroll_y.interpolate(&[0.0, 150.0], &[1.0, 0.0]))
         .bind_translate_y(&scroll_y.interpolate(&[-200.0, 0.0, 300.0], &[0.0, 0.0, 150.0]))
@@ -305,38 +388,75 @@ pub(crate) fn Photos() -> impl IntoElement {
         log::info!("loading more after {}", from - 1);
         photos.update(|p| Rc::make_mut(p).extend(make_photos(from, PAGE)));
     };
-    view()
-        .flex_1()
-        .bg(colors::BACKGROUND)
-        .child(
-            virtual_list(count, move |at| {
-                row(computed(move || {
-                    photos.with(|p| p.get(at.index()).cloned())
-                }))
-            })
-            .estimated_item_size(76.0)
-            .flex_1()
-            .content_padding_bottom(24.0)
-            .scroll_value(&scroll_y)
-            .refreshing(refreshing)
-            .on_refresh(on_refresh)
-            .on_end_reached(load_more)
-            .header(hero(
+    let header = {
+        let scroll_y = scroll_y.clone();
+        move |wide: bool| {
+            hero(
                 count,
                 refreshes,
                 refreshing,
                 on_refresh,
-                refresh_key,
-                &scroll_y,
-            ))
-            .footer(
-                text(format!("Loading {PAGE} more…"))
-                    .text_center()
-                    .text_size(px(13.0))
-                    .text_color(colors::FAINT)
-                    .p_4(),
-            ),
-        )
+                refresh_key.clone(),
+                scroll_y.clone(),
+                wide,
+            )
+        }
+    };
+    let footer = || {
+        text(format!("Loading {PAGE} more…"))
+            .text_center()
+            .text_size(px(13.0))
+            .text_color(colors::FAINT)
+            .p_4()
+    };
+    // The photo a cell shows: another one as the cell is reused.
+    let photo_at =
+        move |at: Position| computed(move || photos.with(|p| p.get(at.index()).cloned()));
+    let phone = {
+        let (header, scroll_y) = (header.clone(), scroll_y.clone());
+        move || {
+            virtual_list(count, move |at| row(photo_at(at)))
+                .estimated_item_size(76.0)
+                .flex_1()
+                .content_padding_bottom(24.0)
+                .scroll_value(&scroll_y)
+                .refreshing(refreshing)
+                .on_refresh(on_refresh)
+                .on_end_reached(load_more)
+                .header(header(false))
+                .footer(footer())
+        }
+    };
+    // As many columns as fit, at least 200 pt each: the list follows the
+    // window in place.
+    let grid = {
+        let scroll_y = scroll_y.clone();
+        move || {
+            let columns = computed(|| columns_for(200.0, 8, pane_width(), 16.0));
+            virtual_list(count, move |at| tile(photo_at(at)))
+                .columns(columns)
+                // A 4:3 picture across the column, its caption under it.
+                .estimated_item_size(move || {
+                    (pane_width() - 48.0) / columns.get() as f32 * 0.75 + 60.0
+                })
+                .flex_1()
+                .content_padding(24.0)
+                .row_gap(16.0)
+                .column_gap(16.0)
+                .scroll_value(&scroll_y)
+                .refreshing(refreshing)
+                .on_refresh(on_refresh)
+                .on_end_reached(load_more)
+                .header(header(true))
+                .footer(footer())
+        }
+    };
+    view()
+        .flex_1()
+        .bg(colors::BACKGROUND)
+        // The Rust gallery's shell does not remount on a resize (the TSX
+        // one does): the demo switches layouts itself.
+        .child(If::new(desktop, grid).otherwise(phone))
         // The compact bar fades in once the hero has scrolled away.
         .child(
             view()
