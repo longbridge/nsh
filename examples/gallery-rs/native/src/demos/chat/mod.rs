@@ -13,13 +13,11 @@ mod markdown;
 mod parts;
 mod scripts;
 
-use std::{
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{rc::Rc, time::Duration};
 
 use nsh_core::{
     LayoutAnimation, Size,
+    time::Instant,
     ui::{ScrollEvent, ScrollOffset, prelude::*},
 };
 use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
@@ -176,9 +174,7 @@ struct Jitter(u64);
 
 impl Jitter {
     fn new() -> Self {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(1, |d| d.as_nanos() as u64);
+        let seed = (nsh_core::time::unix_ms() as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
         Self(seed | 1)
     }
 

@@ -7,7 +7,6 @@
 use std::{
     cell::Cell,
     f32::consts::{FRAC_PI_2, PI, TAU},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use nsh_core::{
@@ -34,10 +33,7 @@ fn sans(size: f32, weight: u32) -> String {
 fn random() -> f64 {
     thread_local! {
         static STATE: Cell<u64> = Cell::new(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0x9e37_79b9_7f4a_7c15, |d| d.as_nanos() as u64)
-                | 1,
+            (nsh_core::time::unix_ms() as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1,
         );
     }
     STATE.with(|state| {

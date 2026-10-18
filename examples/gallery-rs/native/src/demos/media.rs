@@ -3,8 +3,6 @@
 //! with messages both ways, a web site with its navigation state, back and
 //! forward, and a video with controls of the demo's own or the system's.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use nsh_core::ui::prelude::*;
 
 use crate::ui::{
@@ -360,10 +358,7 @@ fn messaging() -> impl IntoElement {
             }),
         ))
         .child(Button::new("Post to the page", move |_: &()| {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default();
-            let n = (now.as_millis() % 1000) as u32;
+            let n = (nsh_core::time::unix_ms() as u64 % 1000) as u32;
             sent.set(n);
             post.post_message(format!("hi #{n}"));
         }))

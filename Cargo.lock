@@ -1095,7 +1095,6 @@ dependencies = [
  "nsh-platform-windows",
  "nsh-ui-mobile",
  "serde_json",
- "ureq",
 ]
 
 [[package]]

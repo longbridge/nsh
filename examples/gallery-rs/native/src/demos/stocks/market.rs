@@ -9,9 +9,12 @@
 //! tick, the tape and the depth chart four times a second, the flow, the
 //! ranges and the stats once a second.
 
-use std::{collections::HashMap, rc::Rc, time::Instant};
+use std::{collections::HashMap, rc::Rc};
 
-use nsh_core::ui::{AdaptiveColor, JsObject};
+use nsh_core::{
+    time::Instant,
+    ui::{AdaptiveColor, JsObject},
+};
 
 use crate::ui::colors;
 
@@ -455,9 +458,7 @@ impl Market {
             .enumerate()
             .map(|(i, row)| make_stock(i, *row))
             .collect();
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(1, |d| d.as_millis() as u32);
+        let seed = nsh_core::time::unix_ms() as u64 as u32;
         let mut market = Self {
             stocks,
             rand: Random(seed),

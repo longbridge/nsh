@@ -21,17 +21,13 @@ mod parts;
 mod tape;
 mod ticket;
 
-use std::{
-    cell::RefCell,
-    f32::consts::TAU,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, f32::consts::TAU, rc::Rc, time::Duration};
 
 use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
     nsh_animation::{Curve, EaseMode},
+    time::Instant,
     ui::{NativeNode, View, prelude::*},
 };
 

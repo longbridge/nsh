@@ -15,7 +15,6 @@ log.workspace = true
 nsh-core.workspace = true
 nsh-ui-mobile.workspace = true
 serde_json.workspace = true
-ureq.workspace = true
 
 [dev-dependencies]
 nsh-engine.workspace = true

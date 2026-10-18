@@ -2,11 +2,12 @@
 //! toast, display frames and timers, the network and logs (as the TSX
 //! gallery's `demos/System.tsx`).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use nsh_core::{
     keymap::When,
     nsh_animation::{Curve, EaseMode},
+    time::Instant,
     ui::{AnyElement, Dialog, DialogButton, DialogButtonStyle, prelude::*},
 };
 use nsh_ui_mobile::{BarStyle, StatusBar, StatusBarProps};
@@ -685,8 +686,8 @@ fn Network() -> impl IntoElement {
     // A request is in progress.
     let loading = signal(false);
     let owner = Owner::current();
-    // Loads three posts (TS: `fetch`, a web API of TS apps; a Rust
-    // component uses an HTTP crate on the runtime's blocking threads).
+    // Loads three posts (TS: `fetch`) with the engine's network stack: the
+    // platform's, or the browser's on the web.
     let load = move |_: &()| {
         batch(|| {
             status.set(Some(Toned {
@@ -698,19 +699,9 @@ fn Network() -> impl IntoElement {
         owner.run(|| {
             spawn(async move {
                 let started = Instant::now();
-                let response = blocking(|| -> Result<(u16, String), String> {
-                    let mut response = ureq::get(POSTS).call().map_err(|e| e.to_string())?;
-                    let status = response.status().as_u16();
-                    let body = response
-                        .body_mut()
-                        .read_to_string()
-                        .map_err(|e| e.to_string())?;
-                    Ok((status, body))
-                });
-                let result = match response.await {
-                    Ok(result) => result,
-                    Err(error) => Err(error.to_string()),
-                };
+                let result = fetch(POSTS)
+                    .await
+                    .map(|response| (response.status(), response.text()));
                 let ms = started.elapsed().as_millis();
                 batch(|| {
                     loading.set(false);
@@ -804,7 +795,7 @@ fn Network() -> impl IntoElement {
     Card::new()
         .icon(IconName::Search)
         .title("Network and logs")
-        .subtitle("ureq · log::info!")
+        .subtitle("fetch · log::info!")
         .child(list)
         .child(status_row)
         .child(
@@ -817,7 +808,7 @@ fn Network() -> impl IntoElement {
                             if loading.get() {
                                 "Loading…"
                             } else {
-                                "ureq::get()"
+                                "fetch()"
                             }
                         },
                         load,
