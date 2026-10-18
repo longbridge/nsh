@@ -23,6 +23,7 @@ mod chrome;
 mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
+mod file_drop;
 mod image;
 mod input;
 mod keymap;

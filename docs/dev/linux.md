@@ -86,6 +86,16 @@ works and its runner only needs GTK.
 | Networking | `net.rs` | ureq (rustls, webpki roots), one thread per request, streaming both ways; only connecting and the response head have deadlines |
 | Dev | `dev.rs` | The dev server client on its own thread; status line and error overlay above the surface; Ctrl+R reloads the latest build |
 
+## File drop destinations
+
+Views listening to `onFileDrop` install a root `GtkDropTarget` for `GdkFileList`
+while at least one enabled destination is mounted. The controller negotiates
+Copy, uses NSH hit testing to choose the closest destination within its modal,
+and emits entry/leave as that destination changes. Dropped `GFile`s with absolute
+local paths are delivered as file URLs, preserving filename escaping. Removing
+the last destination removes the controller; disabling or deleting the current
+target clears its drag state. The implementation lives in `file_drop.rs`.
+
 ## Keyboard
 
 A key goes through the window's controllers in GTK's order: capture from the window down to the focus widget, then

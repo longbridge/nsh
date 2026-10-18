@@ -54,6 +54,9 @@ The shared core and JS protocol tests pass (393 tests); the AppKit crate passes
 46 unit tests and two doctests with JavaScript disabled, including local URL
 filtering and first/last destination registration. AppKit compilation and strict
 Clippy pass. The AppKit destination callbacks are implemented, but a real Finder
-drag and native target switching have not been exercised. GTK and Win32 handling,
-user-facing documentation, complete workspace/platform checks and trace comparison
-remain outstanding. This branch is not ready to merge or consume in Omasend.
+drag and native target switching have not been exercised. GTK destination
+handling now uses a typed GdkFileList controller, the existing hit testing and
+first/last-listener registration. It has not been compiled or exercised on Linux;
+no additional tests were run at the user's request. Win32 handling, user-facing
+documentation, complete workspace/platform checks and trace comparison remain
+outstanding. This branch is not ready to merge or consume in Omasend.
