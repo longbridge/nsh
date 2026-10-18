@@ -148,8 +148,9 @@ their order with the cancel button last and no default; Escape presses the cance
 | Keys | Do |
 |---|---|
 | Return | In an `Input`, what `submitBehavior` says: submit (`onSubmitEditing`), submit and leave the field, or a new line (multiline inputs) |
+| Return, keypad Enter, Space | Activate a focused view with `onPress` once on key-down; auto-repeat is consumed |
 | Shift+Return, Option+Return, Ctrl+Return | A new line in a multiline input whose return submits |
-| Tab, Shift+Tab (Ctrl too) | The next / previous field in screen order, within the newest modal; Option+Tab types a tab in a multiline input |
+| Tab, Shift+Tab (Ctrl too) | The next / previous field or pressable view in screen order, within the newest modal; Option+Tab types a tab in a multiline input |
 | Escape | Leaves the focused field; else clears a text selection, then goes back or asks the newest modal to close |
 | Option+Left, Cmd+[, mouse back button | Go back (not while a field has the focus: there Option+Left moves the caret) |
 | Option / Cmd + arrows, with Shift; Option+Delete, Cmd+Delete; Ctrl+A / E / K | Move, select and delete by word and line in a field, as in every Mac app |
@@ -158,7 +159,7 @@ their order with the cancel button last and no default; Escape presses the cance
 | Cmd+W, Cmd+M, Ctrl+Cmd+F, Cmd+H, Option+Cmd+H, Cmd+Q | Close, minimize, full screen, hide, hide others, quit (`nsh package` and `nsh run` apps' menus) |
 | Cmd+R | Reloads the latest build (`nsh run`) |
 
-The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) come before all of these, except Quit, Hide,
+The app's own shortcuts ([`nsh/keymap`](../modules/nsh-keymap.md)) come before these, except activation keys addressed to a focused pressable view, Quit, Hide,
 Minimize and Full Screen, which cannot be bound.
 
 Shortcuts work with any keyboard layout (on a Cyrillic or Greek one, Cmd+C is the key that types C on a US layout).

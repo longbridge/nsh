@@ -101,6 +101,9 @@ fn pressed(surface: &Rc<Surface>, event: &NSEvent) -> bool {
     let Some(editing) = editing(surface, &window) else {
         return false;
     };
+    if crate::input::control_activation_target(surface, event).is_some() {
+        return false;
+    }
     let Some(keystroke) = keystroke(event) else {
         return false;
     };

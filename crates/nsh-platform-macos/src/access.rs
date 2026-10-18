@@ -182,10 +182,14 @@ pub(crate) fn label(view: &NshView, label: &Option<Arc<str>>) {
     update(view);
 }
 
-/// Moves VoiceOver (and, for an input, the keyboard) focus to `view`.
+/// Moves VoiceOver and, for an input or pressable view, keyboard focus to `view`.
 pub(crate) fn focus(view: &NshView) {
     if view.kind() == ViewKind::Input {
         crate::text_input::focus(view);
+    } else if crate::input::is_key_control(view)
+        && let Some(window) = view.ns().window()
+    {
+        window.makeFirstResponder(Some(view.ns()));
     }
     let elements = NSArray::from_slice(&[AsRef::<AnyObject>::as_ref(view.ns())]);
     // SAFETY: immutable AppKit constants; the user info holds the elements

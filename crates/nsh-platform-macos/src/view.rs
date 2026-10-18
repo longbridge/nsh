@@ -523,8 +523,32 @@ define_class!(
         fn accepts_first_responder(&self) -> bool {
             // A click outside a field that edits leaves the focus in it, as
             // desktop apps do (`blur()` and Escape still hand it over).
-            self.surface()
+            let view = NshView(self.retain());
+            if view.id() != ROOT_ID && !crate::input::is_key_control(&view) {
+                return false;
+            }
+            self.keyboard_surface()
                 .is_some_and(|s| !(crate::text_input::editing(&s) && clicking(self.mtm())))
+        }
+
+        #[unsafe(method(becomeFirstResponder))]
+        fn become_first_responder(&self) -> bool {
+            // SAFETY: NSView's standard responder transition.
+            let accepted: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
+            if accepted && let Some(surface) = self.keyboard_surface() {
+                crate::input::set_state(&surface, &NshView(self.retain()), nsh_core::tailwind::state::FOCUSED, true);
+            }
+            accepted
+        }
+
+        #[unsafe(method(resignFirstResponder))]
+        fn resign_first_responder(&self) -> bool {
+            // SAFETY: NSView's standard responder transition.
+            let accepted: bool = unsafe { msg_send![super(self), resignFirstResponder] };
+            if accepted && let Some(surface) = self.keyboard_surface() {
+                crate::input::set_state(&surface, &NshView(self.retain()), nsh_core::tailwind::state::FOCUSED, false);
+            }
+            accepted
         }
 
         #[unsafe(method(mouseDown:))]
@@ -628,7 +652,7 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
-            let handled = self.surface().is_some_and(|surface| {
+            let handled = self.keyboard_surface().is_some_and(|surface| {
                 surface.measure(false, || {
                     let handled = crate::input::key(&surface, event, true);
                     // Keys scroll too.
@@ -645,7 +669,7 @@ define_class!(
         #[unsafe(method(keyUp:))]
         fn key_up(&self, event: &NSEvent) {
             let handled = self
-                .surface()
+                .keyboard_surface()
                 .is_some_and(|surface| crate::input::key(&surface, event, false));
             if !handled {
                 // SAFETY: NSResponder's own handling.
@@ -698,6 +722,24 @@ define_class!(
 );
 
 impl ViewObj {
+    // Only the root stores a surface. A focused pressable child uses its
+    // ancestors for keyboard handling; drawing and pointer hooks stay root-only.
+    fn keyboard_surface(&self) -> Option<std::rc::Rc<Surface>> {
+        if let Some(surface) = self.surface() {
+            return Some(surface);
+        }
+        let mut parent = superview(self);
+        while let Some(view) = parent {
+            if let Some(root) = view.downcast_ref::<ViewObj>()
+                && let Some(surface) = root.surface()
+            {
+                return Some(surface);
+            }
+            parent = superview(&view);
+        }
+        None
+    }
+
     fn surface(&self) -> Option<std::rc::Rc<Surface>> {
         self.ivars().surface.borrow().upgrade()
     }

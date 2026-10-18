@@ -639,6 +639,17 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
 /// move that way. Fields keep their keys (they reach the root only when
 /// they do not use them).
 pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
+    if let Some(view) = control_activation_target(surface, event) {
+        if down && !event.isARepeat() {
+            let events = view.state().events;
+            for kind in [EventKind::PressIn, EventKind::PressOut, EventKind::Press] {
+                if events.contains(kind) {
+                    press_event(surface, view.id(), kind);
+                }
+            }
+        }
+        return true;
+    }
     if !down {
         return false;
     }
@@ -703,8 +714,39 @@ pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     crate::scroll::key_scroll(surface, &hit.view, horizontal, m)
 }
 
+/// A mounted ordinary view that can be reached and activated by keyboard.
+pub(crate) fn is_key_control(view: &NshView) -> bool {
+    let state = view.state();
+    state.kind != ViewKind::Input
+        && state.events.contains(EventKind::Press)
+        && !state.props.accessibility.state.disabled
+        && view.can_target()
+        && !view.ns().isHiddenOrHasHiddenAncestor()
+}
+
+/// Enter or Space addressed to a focused control inside the current modal.
+/// The keymap leaves these keys to the responder so a global Enter binding
+/// cannot activate an unrelated control underneath keyboard focus.
+pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> Option<NshView> {
+    if !matches!(event.keyCode(), 36 | 49 | 76)
+        || event.modifierFlags().intersects(
+            NSEventModifierFlags::Command
+                | NSEventModifierFlags::Control
+                | NSEventModifierFlags::Option,
+        )
+    {
+        return None;
+    }
+    let responder = surface.root.ns().window()?.firstResponder()?;
+    let native = responder.downcast_ref::<objc2_app_kit::NSView>()?;
+    if !native.isDescendantOf(&crate::navigation::focus_scope(surface)) {
+        return None;
+    }
+    NshView::from_ns(native).filter(is_key_control)
+}
+
 /// Tab / Shift+Tab (or with Control) with the root focused: moves into
-/// AppKit's key view loop (the fields), from the first or the last, so
+/// AppKit's key view loop (fields and pressable views), from the first or last, so
 /// focus never gets stuck on the root.
 fn tab(surface: &Surface, event: &NSEvent) -> bool {
     const TAB: u16 = 48;
@@ -714,12 +756,18 @@ fn tab(surface: &Surface, event: &NSEvent) -> bool {
     {
         return false;
     }
-    // Into the fields of the newest modal, if one is shown.
-    crate::text_input::tab(
-        surface,
-        surface.root.ns(),
-        flags.contains(NSEventModifierFlags::Shift),
-    );
+    // Into the controls of the newest modal, if one is shown.
+    let responder = surface
+        .root
+        .ns()
+        .window()
+        .and_then(|window| window.firstResponder());
+    let from = responder
+        .as_ref()
+        .and_then(|responder| responder.downcast_ref::<objc2_app_kit::NSView>())
+        .filter(|view| NshView::from_ns(view).is_some_and(|view| is_key_control(&view)))
+        .unwrap_or(surface.root.ns());
+    crate::text_input::tab(surface, from, flags.contains(NSEventModifierFlags::Shift));
     true
 }
 

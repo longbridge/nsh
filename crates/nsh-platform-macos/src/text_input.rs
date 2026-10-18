@@ -584,7 +584,8 @@ pub(crate) fn tab(surface: &Surface, from: &NSView, backward: bool) -> bool {
         // A text view's clip view comes right before it in the loop and
         // gives the focus back to it: skip the views around `from`.
         if next.isDescendantOf(&scope)
-            && !crate::view::is_ours(&next)
+            && (!crate::view::is_ours(&next)
+                || NshView::from_ns(&next).is_some_and(|view| crate::input::is_key_control(&view)))
             && !from.isDescendantOf(&next)
         {
             return window.makeFirstResponder(Some(&next));
