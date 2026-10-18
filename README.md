@@ -1,51 +1,27 @@
 # Native Shell (NSH)
 
-**AI-generated UI, native in your app.** Native Shell renders UI written in TSX and Tailwind with each platform's
-own UI: native views on iOS, Android, macOS, Windows and Linux, GPUI in GPUI apps and HTML on the web. Apps load these modules at run time,
-as plugins: written by a model or by your team, delivered as signed packages and run in a sandbox the host
-configures. The same module can also be a standalone app.
+**Native UI in Rust and TSX, embedded in your app or shipped on its own.** Native Shell is a Rust engine for
+cross-platform apps and AI-generated UI. Write your app in Rust, use TSX for dynamically delivered screens, or
+combine both with shared Rust components. Each platform renders with its own UI: native views on iOS, Android,
+macOS, Windows and Linux, GPUI in GPUI apps and HTML on the web.
 
-```tsx
-import { mount, signal, Text, View } from "nsh";
-
-function App() {
-  const count = signal(0);
-  return (
-    <View class="flex-1 items-center justify-center gap-4 bg-white dark:bg-zinc-900">
-      <Text class="text-3xl font-semibold text-zinc-900 dark:text-white">{count()}</Text>
-      <View class="rounded-xl bg-blue-600 px-5 py-3 active:opacity-60" onPress={() => count.update((c) => c + 1)}>
-        <Text class="text-white">Tap</Text>
-      </View>
-    </View>
-  );
-}
-
-mount(App);
-```
+Embed NSH in an existing app or package it as a standalone app. Hosts can load TSX modules at run time as plugins,
+delivered as signed packages and run in a sandbox the host configures.
 
 Documentation, guides and live demos: **[nsh.dev](https://nsh.dev)**.
 
 ## Features
 
-- **Real native UI.** Every element is a platform view (UIKit, Android views, AppKit, Win32 drawn with Direct2D,
-  GTK 4), a GPUI element or HTML, laid out with flexbox and grid ([Taffy](https://github.com/DioxusLabs/taffy)). The
-  system's text, input, scrolling and accessibility just work, and native components such as maps and web views layer
-  naturally with NSH's views.
-- **Plugins, or standalone apps.** Put an `NshAppView` (iOS), `NshView` (Android) or `AppView` (desktop and GPUI) on
-  any screen of an existing app, or `createPlayer` in a web page, and load modules into it at run time, from a bundle,
-  the dev server or a downloaded signed package: features ship on your own schedule, next to the host's own native
-  components. The same module also packages into an installable iOS, Android, macOS, Windows, Linux or GPUI app, or a
-  static website, with one `nsh package` command.
-- **AI-friendly: TSX + Tailwind.** A module is one TSX file of components, signals and Tailwind classes, the format models
-  write best. Every element, prop and module has TypeScript declarations generated from the Rust sources, the docs are
-  served to models as [llms.txt](https://nsh.dev/llms.txt), and `nsh trace` runs a module headless to check
-  it without a device.
-- **Sandboxed and signed.** Each view runs its module in its own QuickJS VM, with memory, call-time and node limits,
-  reaching only the capabilities the host grants. Packages are signed with Ed25519 by release keys an offline root
-  certifies, and the device checks a revocation list.
-- **Fast, all in Rust.** Only the app's code is JavaScript: signals, the renderer, layout, animation and every
-  module apps import are Rust, and each frame crosses to the UI thread as one batch. The single `nsh` binary bundles,
-  type-checks, serves hot reload and packages: it is the whole toolchain module authors need.
+- Write apps in Rust, TSX, or both, and render with each platform's own UI, sharing the same reactive engine,
+  flexbox and grid layout, system text, input and accessibility.
+- Embed in existing native apps alongside components such as maps and web views, or package as standalone apps
+  and static websites.
+- Deliver TSX screens at run time with signed packages and host-controlled sandbox capabilities.
+- Build AI-generated screens with TSX and Tailwind, generated TypeScript declarations and
+  [model-readable documentation](https://nsh.dev/llms.txt).
+- Iterate with TSX hot updates, headless tracing and a single Rust-built `nsh` CLI for building and packaging.
+
+### Platforms
 
 | Platform | Drawn with | Embed with | Requires |
 |---|---|---|---|
@@ -65,72 +41,115 @@ as static sites and runs the website's live demos.
 
 Install the `nsh` command ([other ways](https://nsh.dev/docs/installation)):
 
-```sh
-curl -fsSL https://nsh.dev/install.sh | sh     # macOS, Linux
-irm https://nsh.dev/install.ps1 | iex          # Windows (PowerShell)
-brew install longbridge/tap/nsh                         # Homebrew
-```
-
-Create an app and run it with hot reload:
+<details open>
+<summary>macOS / Linux</summary>
 
 ```sh
-nsh init my-app
-nsh run my-app                     # a window on this machine (on macOS, an iPhone-sized Mac Catalyst window)
-nsh run my-app --target ios        # iOS simulator (needs Xcode)
-nsh run my-app --target android    # Android emulator or device (needs the Android SDK)
-nsh run my-app --target macos      # an AppKit window
-nsh run my-app --target gpui       # a GPUI window (macOS, Windows, Linux)
-nsh run my-app --target web        # in the browser
+curl -fsSL https://nsh.dev/install.sh | sh
 ```
 
-`nsh init` writes `App.tsx`, `nsh.json` and a `tsconfig.json`, and keeps type declarations in `.nsh/types`, so any
-TypeScript editor checks the app on its own. On every save only the edited components render again; the
-rest of the app keeps its state. Logs and errors show in the terminal. What each platform needs:
+</details>
+
+<details>
+<summary>Homebrew</summary>
+
+```sh
+brew install longbridge/tap/nsh
+```
+
+</details>
+
+<details>
+<summary>Windows (PowerShell)</summary>
+
+```powershell
+irm https://nsh.dev/install.ps1 | iex
+```
+
+</details>
+
+Choose how to write your app:
+
+| | Rust | TSX |
+|---|---|---|
+| Create | `nsh init my-app --rust` | `nsh init my-app` |
+| Write | Rust components, typed styles and signals | TSX components, Tailwind classes and signals |
+| Iterate | Rebuild and restart on Rust changes | Hot updates that preserve state |
+| Toolchain | `nsh` and [Rust](https://rustup.rs) | `nsh` |
+
+You can also combine them: TSX screens import your Rust components and modules. See
+[Building with Rust](https://nsh.dev/docs/rust) for Rust apps and mixed projects.
+
+Run either app on your chosen platform:
+
+<details>
+<summary>iOS</summary>
+
+```sh
+nsh run my-app --target ios        # iOS simulator; requires Xcode
+nsh run my-app --target catalyst   # Mac Catalyst window on macOS
+```
+
+</details>
+
+<details>
+<summary>Android</summary>
+
+```sh
+nsh run my-app --target android    # emulator or device; requires the Android SDK
+```
+
+</details>
+
+<details>
+<summary>macOS</summary>
+
+```sh
+nsh run my-app --target macos      # AppKit window
+```
+
+</details>
+
+<details>
+<summary>Windows</summary>
+
+```sh
+nsh run my-app --target windows    # Win32 window
+```
+
+</details>
+
+<details>
+<summary>Linux</summary>
+
+```sh
+nsh run my-app --target linux      # GTK 4 window
+```
+
+</details>
+
+<details>
+<summary>GPUI (macOS, Windows, Linux)</summary>
+
+```sh
+nsh run my-app --target gpui
+```
+
+</details>
+
+<details>
+<summary>Web</summary>
+
+```sh
+nsh run my-app --target web        # open in the browser
+```
+
+</details>
+
+The Rust template includes a Cargo project with its root component in `src/lib.rs`. The TSX template includes
+`App.tsx`, `nsh.json` and `tsconfig.json`, with generated TypeScript declarations in `.nsh/types` for your editor.
+Logs and errors show in the terminal. What each platform needs:
 [Installation](https://nsh.dev/docs/installation#platform-tools).
-
-## Embed it in your app
-
-iOS (Swift):
-
-```swift
-import NativeShell
-
-let app = NshAppView()
-view.addSubview(app)                      // constrain it like any view
-#if DEBUG
-try app.connectDevServer(URL(string: "ws://127.0.0.1:8790/ws")!)   // `nsh dev my-app`
-#else
-try app.loadBundle(at: Bundle.main.url(forResource: "bundle", withExtension: "qbc", subdirectory: "nsh")!)
-#endif
-```
-
-Android (Kotlin):
-
-```kotlin
-val nsh = NshView(this)
-setContentView(nsh)                       // or add it to any layout
-if (BuildConfig.DEBUG) nsh.connectDevServer("ws://127.0.0.1:8790/ws") else nsh.loadAssetBundle("nsh")
-```
-
-`nsh build my-app --release` writes the bundle a release build loads. More:
-[iOS](https://nsh.dev/docs/embedding-ios), [Android](https://nsh.dev/docs/embedding-android),
-[desktops](https://nsh.dev/docs/platforms), [native components](https://nsh.dev/docs/native-components),
-[sandbox and capabilities](https://nsh.dev/docs/sandbox-and-capabilities).
-
-## Ship updates
-
-```sh
-nsh keygen keys/root && nsh keygen keys/release        # a root key kept offline, and a release key
-nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*' -o keys/release.cert
-nsh publish my-app --key keys/release.secret --cert keys/release.cert --build 2   # a signed .nshpkg
-```
-
-The app trusts the root's public key and loads what it downloads with `loadPackage`
-([Signed packages](https://nsh.dev/docs/signed-packages)). To ship the module as an app of its own instead:
-
-```sh
-nsh package my-app --target ios-simulator --run        # also ios, android, macos, windows, linux, gpui, web
-```
 
 ## Examples
 
@@ -140,37 +159,13 @@ nsh package my-app --target ios-simulator --run        # also ios, android, maco
 | [`examples/counter`](examples/counter) | The smallest app |
 | [`examples/hopper`](examples/hopper) | A dark, tabbed dashboard built only from primitives: interactive canvas charts, sliders, menus, animation |
 | [`examples/desktop`](examples/desktop) | A desktop app with a title bar and menus of its own (`nsh/desktop`) |
-| [`examples/gallery-rs`](examples/gallery-rs) | The gallery with its own components written in Rust |
+| [`examples/gallery-rs`](examples/gallery-rs) | The gallery written in Rust, with a TSX entry for mixed development |
 | [`examples/embed-ios`](examples/embed-ios), [`examples/embed-android`](examples/embed-android) | NSH inside existing native apps, with a native component the app registers |
 | [`examples/bench`](examples/bench) | Rust components against the same components in TSX |
 
 ```sh
-nsh run examples/gallery
+cargo run
 ```
-
-## Building from source
-
-With Rust ([rustup](https://rustup.rs); `rust-toolchain.toml` picks the toolchain):
-
-```sh
-git clone https://github.com/longbridge/nsh.git && cd nsh
-cargo run                              # the gallery on this machine's backend, with hot reload
-cargo run -- examples/counter          # another app
-cargo run -- --target ios              # or catalyst, android
-cargo xtask dist                       # the distribution (CLI, runtimes, SDKs) in dist/nsh
-```
-
-[Installation](https://nsh.dev/docs/installation#building-from-a-checkout) lists the hosts and runtimes each
-target needs.
-
-## Contributing
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers pull requests, commits and testing; [AGENTS.md](AGENTS.md) the commands,
-rules and conventions; [docs/dev](docs/dev/README.md) the architecture and internals. The website's sources are in
-[website/](website/README.md).
-
-[GPUI Kit](https://gpui-kit.com) is a sibling project: components and tools for desktop apps built with GPUI. NSH's
-theme colors follow its fields, and NSH's GPUI backend builds on it.
 
 ## License
 
