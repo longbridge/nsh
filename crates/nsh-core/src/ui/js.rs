@@ -74,6 +74,9 @@ pub trait JsHost {
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError>;
     /// A short text showing `v`, for errors (`"abc"`, `{}`).
     fn describe(&self, v: JsRaw) -> String;
+    /// Style `v` (an object or an array of them), decoded as a host
+    /// element's `style` is; what it does not take is logged as there.
+    fn style(&self, v: JsRaw) -> Result<crate::StylePatch, PropError>;
     /// The node `v` is (a `YNode`, a `ref`).
     fn node(&self, v: JsRaw) -> Option<crate::NodeId>;
     /// Node `id`'s JS object (`null` when JS let it go), owned.

@@ -17,8 +17,8 @@ use rustc_hash::FxHashMap;
 
 use super::{Core, Kind, NO_KEY};
 use crate::{
-    ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, JsonValue, NodeId, Op,
-    Prop, ROOT_ID, Tag, TextEngine,
+    ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
+    Tag, TextEngine,
     tailwind::ClassList,
     ui::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
@@ -454,47 +454,23 @@ impl Components {
     }
 }
 
-/// The inline style of `id` from a JS style (an object or an array of
-/// them; keys and values as in React Native). Values that are objects or
-/// arrays (transforms, offsets) are not taken.
+/// The inline style of `id`: the declarations of its `Style` prop, then
+/// the native values bound to it, then (on a host) the app's style.
 fn inline_style(
     id: NodeId,
-    value: Option<&JsonValue>,
+    inline: Option<&crate::StylePatch>,
     animated: &[(crate::StyleDecl, crate::ui::NativeNode)],
     app: Option<&crate::StylePatch>,
 ) -> Op {
-    fn walk(value: &JsonValue, style: &mut crate::Style, patch: &mut crate::StylePatch) {
-        use crate::StyleValue as V;
-        match value {
-            JsonValue::Object(entries) => {
-                for (key, value) in entries {
-                    let v = match value {
-                        JsonValue::Number(n) => V::Number(n.as_f64().unwrap_or(0.0) as f32),
-                        JsonValue::String(s) => V::Str(s),
-                        JsonValue::Null => V::Null,
-                        _ => continue,
-                    };
-                    if patch.set(style, key, v).is_err() {
-                        log::warn!(target: "js", "style `{key}`: not taken");
-                    }
-                }
-            }
-            JsonValue::Array(items) => {
-                for item in items {
-                    walk(item, style, patch);
-                }
-            }
-            _ => {}
-        }
-    }
     let mut style = Box::<crate::Style>::default();
     let mut patch = crate::StylePatch::default();
-    if let Some(value) = value {
-        walk(value, &mut style, &mut patch);
-    }
-    // Native values over the rest, then (on a host) the app's style.
+    let inline = inline.map(|p| p.decls()).unwrap_or_default();
     let app = app.map(|p| p.decls()).unwrap_or_default();
-    for decl in animated.iter().map(|(d, _)| d).chain(app) {
+    for decl in inline
+        .iter()
+        .chain(animated.iter().map(|(d, _)| d))
+        .chain(app)
+    {
         let _ = patch.push(&mut style, decl.clone());
     }
     Op::SetStyle { id, style, patch }
@@ -698,7 +674,7 @@ impl<M: TextEngine> Core<M> {
                 let app = inst.app_style.clone();
                 Ok(Some(inline_style(
                     id,
-                    inline.as_ref(),
+                    inline.as_deref(),
                     &animated,
                     app.as_ref(),
                 )))
@@ -1797,7 +1773,7 @@ impl<M: TextEngine> Core<M> {
         }
         self.components.props = props;
         if new.inline != old.inline || new.animated != old.animated {
-            let _ = self.apply_op(inline_style(id, new.inline.as_ref(), &new.animated, app));
+            let _ = self.apply_op(inline_style(id, new.inline.as_deref(), &new.animated, app));
         }
         if new.drawing != old.drawing
             && let Some(drawing) = &new.drawing

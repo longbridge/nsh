@@ -569,6 +569,11 @@ fn new_node(ctx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> Js
     obj
 }
 
+/// Logs what `warnings` collected, with the VM's (each once).
+pub(crate) fn merge_warnings(ctx: *mut JsContext, warnings: crate::protocol::Warnings) {
+    dom(ctx).shared.warnings.borrow_mut().merge(warnings);
+}
+
 /// Node `id`'s object (owned), or `null` once JS let it go.
 pub(crate) fn node_value(ctx: *mut JsContext, id: NodeId) -> JsValue {
     let p = dom(ctx).by_id(id);

@@ -319,6 +319,25 @@ impl Maker {
     }
 }
 
+/// Applies a style prop to its inner view.
+#[derive(Default)]
+pub(crate) struct Framed;
+
+#[derive(Clone, PartialEq, Props)]
+pub(crate) struct FramedProps {
+    #[prop(default)]
+    inner: nsh_core::ui::Prop<nsh_core::ui::Style>,
+}
+
+impl Component for Framed {
+    type Props = FramedProps;
+    type Event = NoEvent;
+
+    fn view(props: FramedProps, _: Scope<NoEvent>) -> impl IntoElement {
+        view().child(view().inline_style(props.inner).child(text("framed")))
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::ui_set("test/classes");
     r.class::<Counter>()
@@ -326,7 +345,8 @@ fn registry() -> Registry {
         .module::<Tools>()
         .module::<Ints>()
         .register::<Gauge>()
-        .register::<Fragile>();
+        .register::<Fragile>()
+        .register::<Framed>();
     r
 }
 
@@ -616,6 +636,32 @@ fn classes_a_signature_names_are_exported_with_it() {
     set.module::<Maker>();
     let (_engine, rx) = start(LONELY, vec![set]);
     assert_eq!(shown(&rx, "done"), "done true true twin");
+}
+
+const FRAMED: &str = r#"import { mount } from "nsh";
+import { createNativeValue } from "nsh/animated";
+import { Framed } from "test/classes";
+
+const v = createNativeValue(0.25);
+mount(() => (
+  <Framed inner={[{ transform: [{ translateX: 7 }, { scale: 2 }] }, { shadowOffset: { width: 1, height: 2 }, opacity: v }]} />
+));
+"#;
+
+#[test]
+fn a_style_prop_takes_what_a_host_elements_style_does() {
+    let (_engine, rx) = start(FRAMED, vec![registry()]);
+    let (_, items) = mounted(&rx, 500);
+    // The transforms and the shadow offset (objects and arrays), and the
+    // native value bound to the inner view.
+    assert!(
+        items.contains(
+            "transform: [TransformOp { kind: TranslateX, value: 7.0 }, TransformOp { kind: Scale, value: 2.0 }]"
+        ),
+        "{items}"
+    );
+    assert!(items.contains("offset_x: 1.0, offset_y: 2.0"), "{items}");
+    assert!(items.contains("bindings: [(Opacity, "), "{items}");
 }
 
 const DATA: &str = r#"import { mount, signal, Text } from "nsh";

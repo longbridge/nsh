@@ -850,6 +850,18 @@ impl JsHost for CallHost<'_> {
         }
     }
 
+    fn style(&self, v: JsRaw) -> Result<nsh_core::StylePatch, PropError> {
+        // SAFETY: a context reference and a dup for the decoder.
+        let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(self.ctx)) };
+        let value =
+            unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(self.ctx, from_raw(v))) };
+        // Decoding may run JS (getters): no borrow is held meanwhile.
+        let mut warnings = crate::protocol::Warnings::deferred();
+        let decoded = crate::protocol::style_patch(&value, &mut warnings);
+        crate::dom::merge_warnings(self.ctx, warnings);
+        decoded.map_err(|_| self.threw())
+    }
+
     fn node(&self, v: JsRaw) -> Option<nsh_core::NodeId> {
         crate::dom::node_id(self.ctx, from_raw(v))
     }

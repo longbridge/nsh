@@ -72,7 +72,8 @@ child components go with it. The design and its reasons: `reactive-components.md
   value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
   defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
-  `StyleProp<ViewStyle>`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
+  `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
+  values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
   (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. A prop JS sets with
   the wrong type throws a `TypeError` at the assignment (``Gauge.level: expected an integer that fits u32, got

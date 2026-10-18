@@ -380,6 +380,17 @@ pub(crate) fn decode_prop<'js>(
     }
 }
 
+/// Style `value` (an object or an array of them) as a host element's
+/// `style` decodes it: its declarations.
+pub(crate) fn style_patch<'js>(
+    value: &Value<'js>,
+    warnings: &mut Warnings,
+) -> rquickjs::Result<StylePatch> {
+    let mut entries = Vec::new();
+    style_entries(value, &mut entries)?;
+    Ok(decode_style(entries, warnings)?.1)
+}
+
 /// The properties of a style: an object, or (React Native style) an array
 /// of styles, possibly nested, merged left to right; falsy entries are
 /// skipped. A property set by a later style replaces it whole.

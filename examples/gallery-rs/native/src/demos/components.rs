@@ -6,7 +6,7 @@
 use std::hash::{BuildHasher, RandomState};
 
 use nsh_core::{
-    JsonValue, UNDERLAY_OPACITY,
+    PatchValue, StyleKey, UNDERLAY_OPACITY,
     ui::{
         AnyElement, Idiom, Input, KeyboardDismissMode, LayoutAnimation, Orientation, Os, Style,
         prelude::*,
@@ -573,7 +573,7 @@ fn AvoidingPage() -> impl IntoElement {
     let focused = signal(false);
     let picked = move || BEHAVIORS[behavior.get() as usize];
     // The inner view of `position` fills the avoiding view.
-    let fill = Style::new(JsonValue::from_iter([("flex", 1)]));
+    let fill = Style::default().with(StyleKey::Flex, PatchValue::Number(1.0));
     view().flex_1().child(
         KeyboardAvoidingView::element(KeyboardAvoidingViewProps {
             behavior: Prop::bind(move || picked().0),

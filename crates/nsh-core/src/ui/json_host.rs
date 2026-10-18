@@ -133,6 +133,39 @@ impl JsHost for JsonHost {
         }
     }
 
+    /// Objects' numbers, strings and nulls, as the core once read inline
+    /// styles (enough for its tests).
+    fn style(&self, v: JsRaw) -> Result<crate::StylePatch, PropError> {
+        fn walk(value: &JsonValue, style: &mut crate::Style, patch: &mut crate::StylePatch) {
+            use crate::StyleValue as V;
+            match value {
+                JsonValue::Object(entries) => {
+                    for (key, value) in entries {
+                        let v = match value {
+                            JsonValue::Number(n) => V::Number(n.as_f64().unwrap_or(0.0) as f32),
+                            JsonValue::String(s) => V::Str(s),
+                            JsonValue::Null => V::Null,
+                            _ => continue,
+                        };
+                        let _ = patch.set(style, key, v);
+                    }
+                }
+                JsonValue::Array(items) => {
+                    for item in items {
+                        walk(item, style, patch);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut style = crate::Style::default();
+        let mut patch = crate::StylePatch::default();
+        if let Some(json) = self.json_of(v) {
+            walk(&json, &mut style, &mut patch);
+        }
+        Ok(patch)
+    }
+
     fn node(&self, _v: JsRaw) -> Option<NodeId> {
         None
     }

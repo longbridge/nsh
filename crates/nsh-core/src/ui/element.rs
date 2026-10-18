@@ -11,8 +11,8 @@ use super::{
 };
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, EdgeInsets, EventKind, EventPayload,
-    ImageSource, JsonValue, ListContentStyle, NativeProp, NodeId, PointerEvents, Prop, Rect, Size,
-    Tag, TouchEvent, style::Color,
+    ImageSource, ListContentStyle, NativeProp, NodeId, PointerEvents, Prop, Rect, Size, Tag,
+    TouchEvent, style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
@@ -90,8 +90,8 @@ pub struct Attrs {
     pub(crate) src: Option<super::ImageSrc>,
     pub(crate) inset_padding: Option<EdgeInsets>,
     pub(crate) inset_margin: Option<EdgeInsets>,
-    /// An inline style from JS (a `StyleProp` prop), over the styles.
-    pub(crate) inline: Option<JsonValue>,
+    /// An inline style (a `Style` prop), over the styles.
+    pub(crate) inline: Option<Arc<crate::StylePatch>>,
     /// The props of host elements (inputs, scroll views, ...), one per
     /// property ([`super::host`]).
     pub(crate) props: Vec<Prop>,
@@ -653,17 +653,42 @@ pub trait Element: IntoElement + Sized {
     }
 }
 
-/// An inline style from JS: a prop typed `StyleProp<ViewStyle>` in
-/// TypeScript (an object, an array of them, or nothing), applied with
-/// [`Element::inline_style`].
+/// An inline style: a prop typed `StyleProp<ViewStyle>` in TypeScript (an
+/// object, an array of them, or nothing), decoded when JS sets it as a host
+/// element's `style` is (transforms, shadow offsets, native animated
+/// values included), and applied with [`Element::inline_style`]. Rust
+/// makes one from declarations ([`Style::from_decls`], [`Style::with`]).
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Style(pub(crate) Option<JsonValue>);
+pub struct Style(pub(crate) Option<Arc<crate::StylePatch>>);
 
 impl Style {
-    /// An inline style of React Native's names (`{ "flex": 1 }`); `null`
-    /// is none.
-    pub fn new(style: JsonValue) -> Self {
-        Self((!style.is_null()).then_some(style))
+    /// A style of `decls`, applied in order; one that does not apply (a
+    /// value of the wrong type) is left out, as on a host element.
+    pub fn from_decls(decls: impl IntoIterator<Item = crate::StyleDecl>) -> Self {
+        let mut style = crate::Style::default();
+        let mut patch = crate::StylePatch::default();
+        for decl in decls {
+            let _ = patch.push(&mut style, decl);
+        }
+        Self(Some(Arc::new(patch)))
+    }
+
+    /// This style with property `key` set to `value` after the rest
+    /// (`Style::default().with(StyleKey::Flex, PatchValue::Number(1.0))`).
+    pub fn with(self, key: crate::StyleKey, value: crate::PatchValue) -> Self {
+        let decls = self.0.iter().flat_map(|p| p.decls().iter().cloned());
+        Self::from_decls(decls.chain([crate::StyleDecl::Set(key, value)]))
+    }
+
+    /// Its declarations, in order.
+    pub fn decls(&self) -> &[crate::StyleDecl] {
+        self.0.as_deref().map_or(&[], crate::StylePatch::decls)
+    }
+}
+
+impl From<crate::StylePatch> for Style {
+    fn from(patch: crate::StylePatch) -> Self {
+        Self(Some(Arc::new(patch)))
     }
 }
 
@@ -672,21 +697,18 @@ impl JsValue for Style {
         "StyleProp<ViewStyle>".into()
     }
 
-    /// Styles are React Native's objects: read as JSON (as the platform's
-    /// inline styles are).
+    /// Decoded as a host element's `style` is ([`super::JsHost::style`]);
+    /// what it does not take is logged, as there.
     fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
         if value.is_nullish() {
             return Ok(Self(None));
         }
-        Ok(Self(Some(value.to_json()?)))
+        Ok(Self(Some(Arc::new(value.host().style(value.raw())?))))
     }
 
-    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
-        let raw = match &self.0 {
-            Some(json) => host.json(json)?,
-            None => host.null(),
-        };
-        Ok(super::JsOwned::new(host, raw))
+    /// A style is JS's to give, not to get back.
+    fn to_js<'a>(&self, _host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        Err(PropError("a style does not convert back to JS".to_owned()))
     }
 }
 
