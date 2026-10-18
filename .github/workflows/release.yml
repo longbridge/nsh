@@ -145,6 +145,32 @@ jobs:
           fi
           cc="$llvm_bin/clang$suffix"
           ar="$llvm_bin/llvm-ar$suffix"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            # rquickjs-sys canonicalizes its vendored WASI include directory
+            # to a verbatim Windows path. Give clang ordinary drive paths
+            # so nested includes such as bits/alltypes.h resolve correctly.
+            cat > "$RUNNER_TEMP/nsh-wasm-clang.py" <<'PYTHON'
+          import os
+          import subprocess
+          import sys
+
+          def normalize(argument):
+              for prefix in ("-isystem", "-I", "-L", ""):
+                  marker = prefix + "\\\\?\\"
+                  if argument.startswith(marker):
+                      path = argument[len(marker):]
+                      if len(path) > 2 and path[1:3] == ":\\":
+                          return prefix + path.replace("\\", "/")
+              return argument
+
+          if __name__ == "__main__":
+              sys.exit(subprocess.call([os.environ["NSH_WASM_CLANG"], *map(normalize, sys.argv[1:])]))
+          PYTHON
+            printf '@echo off\r\npython "%%~dp0nsh-wasm-clang.py" %%*\r\n' > "$RUNNER_TEMP/nsh-wasm-clang.cmd"
+            export NSH_WASM_CLANG="$cc"
+            echo "NSH_WASM_CLANG=$cc" >> "$GITHUB_ENV"
+            cc="$(cygpath -m "$RUNNER_TEMP")/nsh-wasm-clang.cmd"
+          fi
           printf 'int nsh_wasm_probe(void) { return 0; }\n' | \
             "$cc" --target=wasm32-unknown-unknown -x c -c - -o "$RUNNER_TEMP/wasm-probe.o"
           "$ar" rcs "$RUNNER_TEMP/wasm-probe.a" "$RUNNER_TEMP/wasm-probe.o"
@@ -160,6 +186,27 @@ jobs:
           key: ${{ runner.os }}-release-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-release-cargo-
+
+      # Compile the actual WASI headers before the native runtimes: a bare
+      # clang probe does not exercise rquickjs-sys's vendored include path.
+      - name: Check the Windows web runtime
+        if: runner.os == 'Windows'
+        run: |
+          cargo metadata --locked --format-version 1 --filter-platform wasm32-unknown-unknown > "$RUNNER_TEMP/wasm-metadata.json"
+          python - "$RUNNER_TEMP/wasm-metadata.json" <<'PYTHON'
+          import json
+          import pathlib
+          import sys
+          packages = json.loads(pathlib.Path(sys.argv[1]).read_text())["packages"]
+          package = next(p for p in packages if p["name"] == "rquickjs-sys")
+          include = pathlib.Path(package["manifest_path"]).parent / "vendor/wasi-libc/include"
+          for name in ("stdlib.h", "bits/alltypes.h"):
+              header = include / name
+              if not header.is_file():
+                  sys.exit(f"Missing vendored WASI header: {header}")
+              print(f"Verified WASI header: {header}")
+          PYTHON
+          cargo build --profile web -p nsh-platform-web --target wasm32-unknown-unknown --features bytecode-only
 
       - name: Build the distribution
         run: cargo xtask dist -v
