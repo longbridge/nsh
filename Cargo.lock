@@ -2213,6 +2213,7 @@ dependencies = [
  "nsh-package",
  "nsh-ui-mobile",
  "plist",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

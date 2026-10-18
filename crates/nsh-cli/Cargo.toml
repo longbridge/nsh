@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 dunce.workspace = true
+semver.workspace = true
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-core.workspace = true
 nsh-engine = { workspace = true, features = ["js"] }

@@ -132,9 +132,7 @@ pub(crate) fn init(dir: &Path, name: Option<String>, rust: bool) -> anyhow::Resu
             "run the Rust app with `cargo run --manifest-path {}`",
             ui::path(&dir.join("Cargo.toml"))
         ));
-        ui::note(format!(
-            "run the TSX entry with `{run}` (Rust components use the NSH checkout or NSH_SOURCE)"
-        ));
+        ui::note(format!("run the TSX entry with `{run}`"));
     } else {
         ui::note(format!("run it with `{run}`"));
     }

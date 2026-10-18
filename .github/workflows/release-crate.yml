@@ -1,9 +1,11 @@
 name: Release crates
 
-# Publishes nsh's library crates to crates.io: the main workspace's crates
-# that do not inherit `publish = false` (Cargo.toml), then
-# `nsh-platform-gpui` from the GPUI workspace (`crates/gpui`), which depends
-# on them.
+# Publishes nsh's crates to crates.io: the main workspace's crates that do
+# not inherit `publish = false` (Cargo.toml), the libraries and the
+# development hosts and release runners (`nsh` builds an app with Rust
+# crates of its own from them, at its own version), then the GPUI
+# workspace's (`crates/gpui`: `nsh-platform-gpui` and its host and runner),
+# which depend on them.
 #
 # - Pushing a tag `vX.Y.Z` (the workspace version in Cargo.toml) publishes
 #   that version, alongside `release.yml`'s distribution.
@@ -127,7 +129,7 @@ jobs:
 
       # Packaging it needs the main workspace's crates of this version on
       # crates.io, so a dry run only lists what its package would hold.
-      - name: Publish nsh-platform-gpui
+      - name: Publish the GPUI workspace
         working-directory: crates/gpui
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

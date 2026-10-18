@@ -42,7 +42,7 @@ nsh run            # --target ios、android、web、macos、linux、windows 或 
 cargo run          # 同一个根组件，直接在桌面后端上运行
 ```
 
-`src/lib.rs` 包含界面、状态和事件处理函数，`nsh.json` 指定它的根组件（`"root": "App"`）：`nsh run` 和 `nsh package` 在所有平台（包括浏览器）上直接挂载它，不使用 QuickJS。`src/main.rs` 为 `cargo run` 在 macOS、Windows 或 Linux 上直接挂载同一个根组件。`App.tsx` 从 `app/native` 导入它：`nsh run App.tsx` 运行这个 TSX 入口，用于在 Rust 组件之上用 TSX 编写页面。Rust 开发需要 Rust 工具链（`cargo run` 还需要桌面后端的开发库）；`nsh` 命令从 NSH 源码仓库构建应用的运行器，通过 CLI 所在的仓库或 `NSH_SOURCE` 定位。
+`src/lib.rs` 包含界面、状态和事件处理函数，`nsh.json` 指定它的根组件（`"root": "App"`）：`nsh run` 和 `nsh package` 在所有平台（包括浏览器）上直接挂载它，不使用 QuickJS。`src/main.rs` 为 `cargo run` 在 macOS、Windows 或 Linux 上直接挂载同一个根组件。`App.tsx` 从 `app/native` 导入它：`nsh run App.tsx` 运行这个 TSX 入口，用于在 Rust 组件之上用 TSX 编写页面。Rust 开发需要 Rust 工具链（`cargo run` 还需要桌面后端的开发库）；`nsh` 命令使用 crates.io 上与 CLI 同版本的 NSH crate 构建应用的运行器。
 
 详见[用 Rust 开发](./rust.md)、[CLI 参考](./cli.md#nsh-init)及仓库中的 `examples/gallery-rs`。
 

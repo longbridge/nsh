@@ -15,7 +15,9 @@ homepage = "https://nsh.dev"
 readme = "../../README.md"
 repository = "https://github.com/longbridge/nsh"
 # The crates published to crates.io (the libraries embedders and apps depend
-# on) do not inherit this; they set `homepage`, `readme` and `repository` instead.
+# on, and the development hosts and release runners the CLI builds an app
+# with Rust crates of its own from) do not inherit this; they set
+# `homepage`, `readme` and `repository` instead.
 publish = false
 
 [workspace.lints.rust]

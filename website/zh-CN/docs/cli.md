@@ -61,7 +61,7 @@ nsh init [DIR] [--name <NAME>] [--rust]
 | `--name <NAME>` | 写入 `nsh.json` 的显示名称。默认为目录名。id 会是 `com.example.<name>`（只保留字母和数字，转为小写）。 |
 | `--rust` | 创建 Cargo 项目，提供原生 Rust 入口（`cargo run`）和共享 Rust 组件的 TSX 入口。需要 Rust 工具链及原生桌面后端的开发库。 |
 
-使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."` 和 `"root": "App"`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口；`nsh run` 和 `nsh package` 会在所有目标（包括浏览器）上直接挂载 Rust 根组件，不使用 QuickJS（见[用 Rust 开发](./rust.md)）；`nsh run App.tsx` 运行 TSX 入口。`nsh` 命令使用 NSH 源码仓库（CLI 所在的仓库或 `NSH_SOURCE`）构建应用的运行器。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
+使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."` 和 `"root": "App"`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口；`nsh run` 和 `nsh package` 会在所有目标（包括浏览器）上直接挂载 Rust 根组件，不使用 QuickJS（见[用 Rust 开发](./rust.md)）；`nsh run App.tsx` 运行 TSX 入口。`nsh` 命令使用 crates.io 上与 CLI 同版本的 NSH crate 构建应用的运行器（应用的 crate 依赖这个版本；设置 `NSH_SOURCE` 时改用该 NSH 源码仓库）。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
 
 ## nsh run
 
@@ -269,5 +269,6 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 | `ANDROID_HOME`、`ANDROID_SDK_ROOT` | Android 目标 | Android SDK 位置。后备路径：`~/Library/Android/sdk`。 |
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | keystore 密码。 |
 | `NSH_RUNTIME` | `run`、`package` | 用来替代 CLI 旁边运行时的运行时目录。 |
+| `NSH_SOURCE` | 带 Rust crate 的应用 | 一个 NSH 源码仓库：应用的运行器用它的 crate 构建，而不是 crates.io 上与 CLI 同版本的 crate。 |
 | `NSH_VERBOSE` | 所有命令 | `1`：等同于 `--verbose`。 |
 | `NO_COLOR` | 所有命令 | 设置后，终端输出不带颜色。 |

@@ -14,7 +14,9 @@ homepage = "https://nsh.dev"
 readme = "README.md"
 repository = "https://github.com/longbridge/nsh"
 # The crates published to crates.io (the libraries embedders and apps depend
-# on) do not inherit this; they set `homepage`, `readme` and `repository` instead.
+# on, and the development hosts and release runners the CLI builds an app
+# with Rust crates of its own from) do not inherit this; they set
+# `homepage`, `readme` and `repository` instead.
 publish = false
 
 [workspace.lints.rust]
@@ -73,6 +75,7 @@ ureq = "3.1"
 jni = "0.21"
 windows-sys = "0.61"
 dunce = "1"
+semver = "1"
 # The Windows backend: Win32 windows, Direct2D / DirectWrite drawing, WIC images,
 # UI Automation. Features per area, like the Apple bindings below.
 windows = { version = "0.62", features = [

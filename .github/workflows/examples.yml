@@ -27,6 +27,11 @@ concurrency:
   group: examples-${{ github.ref }}
   cancel-in-progress: true
 
+# gallery-rs has Rust crates: the CLI builds them against this checkout,
+# not the crates.io release of its version.
+env:
+  NSH_SOURCE: ${{ github.workspace }}
+
 jobs:
   check:
     runs-on: ubuntu-24.04
