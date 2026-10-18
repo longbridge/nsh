@@ -1529,6 +1529,7 @@ fn ui_environment(env: &Environment, window: Size) -> nsh_core::ui::Environment 
         os_version: env.os_version,
         idiom: env.idiom,
         locale: env.locale,
+        apple_keyboard: env.apple_keyboard,
     }
 }
 

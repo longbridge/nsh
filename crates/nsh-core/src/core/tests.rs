@@ -6997,6 +6997,68 @@ mod views {
         assert!(press(&mut c).is_empty());
     }
 
+    /// Counts Mod+K while a branch is shown; a press hides the branch.
+    #[component]
+    fn Shortcuts() -> impl IntoElement {
+        let count = signal(0);
+        let shown = signal(true);
+        view()
+            .on_press(move |_: &()| shown.set(false))
+            .child(text(move || format!("k {}", count.get())))
+            .child(If::new(shown, move || {
+                on_key("mod+k", move |_| count.update(|c| *c += 1));
+                view()
+            }))
+    }
+
+    #[test]
+    fn a_views_shortcuts_join_jss_and_run_in_the_core() {
+        use crate::keymap::{KeyBinding, Keymap, Keystroke, When};
+        let tables = |batch: &MountBatch| -> Vec<Vec<u32>> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Keymap(k) => Some(k.bindings().iter().map(|b| b.id).collect()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mut c = core();
+        c.mount_root(&Root::new::<Shortcuts>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let table = tables(&batch);
+        let [ours] = table.last().expect("a table").as_slice() else {
+            panic!("{table:?}");
+        };
+        let ours = *ours;
+        assert!(ours >= crate::ui::keys::FIRST_ID);
+        // JS's table joins it: JS's first, then the views'.
+        let js = KeyBinding::new(
+            1,
+            Keystroke::parse_with("mod+j", true).unwrap(),
+            When::Auto,
+            false,
+        );
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::Keymap(std::sync::Arc::new(Keymap::new(vec![js]))),
+            }],
+        );
+        assert_eq!(tables(&c.commit().unwrap()), [vec![1, ours]]);
+        // The view's runs here; JS's goes to JS.
+        let key = |id: u32| EventPayload::Value(crate::PayloadValue::Number(id as f64));
+        assert!(c.component_event(ROOT_ID, EventKind::KeyCommand, &key(ours)));
+        assert_eq!(texts(&c.commit().unwrap()), ["k 1"]);
+        assert!(!c.component_event(ROOT_ID, EventKind::KeyCommand, &key(1)));
+        // The binding goes with its owner.
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
+    }
+
     /// A leaf in a region of its own.
     #[component]
     fn Leafy() -> impl IntoElement {

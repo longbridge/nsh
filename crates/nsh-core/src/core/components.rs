@@ -317,6 +317,11 @@ pub(super) struct Components {
     insets: FxHashMap<NodeId, EdgeInsets>,
     /// JS listens to the back button (`BackHandler`) on the root.
     js_back: bool,
+    /// JS's keyboard shortcuts (`nsh/keymap`: the root's `Prop::Keymap`),
+    /// which the root's table joins with the views'.
+    js_keymap: Arc<crate::keymap::Keymap>,
+    /// JS listens to the root's `KeyCommand`.
+    js_keys: bool,
     /// The touches the components hear and their responder.
     pub(super) touch: super::touch::TouchState,
     /// Display frames and the layout direction.
@@ -365,6 +370,8 @@ impl Default for Components {
             list_layouts: FxHashMap::default(),
             insets: FxHashMap::default(),
             js_back: false,
+            js_keymap: Arc::new(crate::keymap::Keymap::default()),
+            js_keys: false,
             touch: super::touch::TouchState::default(),
             services: Default::default(),
             // Odd: JS allocates the even ids (1 is the root).
@@ -844,6 +851,30 @@ impl<M: TextEngine> Core<M> {
                 Ok(Some(Op::Listen {
                     id: crate::ROOT_ID,
                     event: EventKind::BackPress,
+                    enabled: enabled || rust,
+                }))
+            }
+            // The surface's shortcuts are JS's and the views'.
+            Op::SetProp {
+                id: crate::ROOT_ID,
+                prop: Prop::Keymap(keymap),
+            } => {
+                self.components.js_keymap = keymap;
+                Ok(Some(Op::SetProp {
+                    id: crate::ROOT_ID,
+                    prop: Prop::Keymap(self.keymap()),
+                }))
+            }
+            Op::Listen {
+                id: crate::ROOT_ID,
+                event: EventKind::KeyCommand,
+                enabled,
+            } => {
+                self.components.js_keys = enabled;
+                let rust = !self.components.executor.keys.borrow().list.is_empty();
+                Ok(Some(Op::Listen {
+                    id: crate::ROOT_ID,
+                    event: EventKind::KeyCommand,
                     enabled: enabled || rust,
                 }))
             }
@@ -3314,6 +3345,26 @@ impl<M: TextEngine> Core<M> {
                     .deliver(number("index").unwrap_or(-1.0) as i32);
                 true
             }
+            // A view's shortcut runs here; JS's go to JS.
+            EventKind::KeyCommand if id == crate::ROOT_ID => {
+                let EventPayload::Value(crate::PayloadValue::Number(binding)) = payload else {
+                    return false;
+                };
+                let binding = *binding as u32;
+                if binding < crate::ui::keys::FIRST_ID {
+                    return false;
+                }
+                let found = self.components.executor.keys.borrow().handler(binding);
+                // A binding removed since the platform matched it.
+                if let Some((text, handler)) = found {
+                    let result = caught(|| handler(&text));
+                    self.apply_actions();
+                    if let Err(message) = result {
+                        log::error!(target: "js", "a keyboard shortcut failed: {message}");
+                    }
+                }
+                true
+            }
             EventKind::BackPress if id == crate::ROOT_ID => {
                 let listeners = self.components.executor.back.borrow().newest_first();
                 for listener in listeners {
@@ -3408,6 +3459,46 @@ impl<M: TextEngine> Core<M> {
             event: EventKind::BackPress,
             enabled: rust || self.components.js_back,
         });
+    }
+
+    /// The root's shortcuts follow the views' bindings coming and going:
+    /// the table JS's and theirs make, listened to while either has one.
+    pub(super) fn sync_keys(&mut self) {
+        let rust = {
+            let mut keys = self.components.executor.keys.borrow_mut();
+            if !std::mem::take(&mut keys.changed) {
+                return;
+            }
+            !keys.list.is_empty()
+        };
+        let keymap = self.keymap();
+        let _ = self.apply_op(Op::SetProp {
+            id: crate::ROOT_ID,
+            prop: Prop::Keymap(keymap),
+        });
+        let _ = self.apply_op(Op::Listen {
+            id: crate::ROOT_ID,
+            event: EventKind::KeyCommand,
+            enabled: rust || self.components.js_keys,
+        });
+    }
+
+    /// The surface's table: JS's bindings, then the views' (the newest that
+    /// may fire wins, so a view's wins over JS's of the same keystroke).
+    fn keymap(&self) -> Arc<crate::keymap::Keymap> {
+        let keys = self.components.executor.keys.borrow();
+        if keys.list.is_empty() {
+            return self.components.js_keymap.clone();
+        }
+        let bindings = self
+            .components
+            .js_keymap
+            .bindings()
+            .iter()
+            .copied()
+            .chain(keys.list.iter().map(|k| k.binding))
+            .collect();
+        Arc::new(crate::keymap::Keymap::new(bindings))
     }
 
     /// The insets where `host` renders: its screen's or modal's, else the

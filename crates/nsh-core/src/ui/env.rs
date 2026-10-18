@@ -37,6 +37,10 @@ pub struct Environment {
     pub idiom: Idiom,
     /// The user's locale, for formatting numbers and dates.
     pub locale: Locale,
+    /// In a browser, it runs on an Apple platform: shortcuts follow Apple's
+    /// conventions ([`crate::keymap::apple_keys`]); the other OSes imply
+    /// theirs.
+    pub apple_keyboard: bool,
 }
 
 impl Default for Environment {
@@ -56,6 +60,7 @@ impl Default for Environment {
             os_version: (0, 0),
             idiom: Idiom::Phone,
             locale: Locale::EN_US,
+            apple_keyboard: false,
         }
     }
 }

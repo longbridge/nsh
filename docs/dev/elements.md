@@ -167,7 +167,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard shortcuts** (`nsh/keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
-  Linux pages' "Keyboard").
+  Linux pages' "Keyboard"). Rust views' bindings (`on_key`) join JS's in that one table, and the core runs
+  their handlers (`docs/dev/components.md`).
 - **System UI**: `StatusBar` (component and static functions; the last mounted wins, prop by prop, over what the
   functions set: the core layers them, `docs/dev/components.md`), `Alert.alert` and `ActionSheet.show` (promises of
   the index chosen, -1 when dismissed; a list dialog on Android), `Toast` (`nsh/android`). Answers come back as the

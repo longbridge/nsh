@@ -1151,6 +1151,7 @@ impl<M: TextEngine> Core<M> {
         // The views' patches and the views to make first.
         self.render_components();
         self.sync_back();
+        self.sync_keys();
         // Platforms animate the frames, insertions and removals that follow
         // in the batch; ops may already have queued some.
         if let Some(animation) = self.layout_animation.take() {

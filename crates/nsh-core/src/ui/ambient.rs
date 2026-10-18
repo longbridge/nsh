@@ -623,6 +623,87 @@ pub fn component_ref<C: super::Component>() -> super::ComponentRef<C> {
     super::ComponentRef::new(&executor())
 }
 
+/// How a keyboard shortcut fires ([`on_key_with`]; TS: `keymap.bind`'s
+/// options).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyOptions {
+    /// While a text input (or a web view) has the keyboard focus: by
+    /// default unless the input uses the keystroke itself.
+    pub when: crate::keymap::When,
+    /// Fires again on the auto-repeats of a held key (default: once until
+    /// the key is released).
+    pub repeat: bool,
+}
+
+/// Whether shortcuts follow Apple's conventions here (`mod` is Command):
+/// the OS, or for a browser the platform it runs on.
+fn apple_keys() -> bool {
+    let (os, apple) = with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| (e.os, e.apple_keyboard));
+    crate::keymap::apple_keys(os, apple)
+}
+
+/// Runs `handler` when `keystroke` is pressed while the current owner
+/// lives (TS: `keymap.bind`): `"mod+k"` (`mod` is Command on Apple
+/// platforms, Control elsewhere), `"shift+mod+l"`, `"escape"`, ... (the
+/// keystrokes of `nsh/keymap`). The handler gets the keystroke as written.
+/// Desktop platforms fire them; elsewhere they are kept but no key does.
+///
+/// # Panics
+///
+/// On a keystroke that is not one, or one the platform keeps (Command+Q
+/// on Apple platforms, Alt+F4 elsewhere, ...), as TS's `bind` throws.
+#[track_caller]
+pub fn on_key(keystroke: &str, handler: impl Fn(&str) + 'static) {
+    on_key_with(keystroke, KeyOptions::default(), handler);
+}
+
+/// [`on_key`] that fires as `options` say.
+///
+/// # Panics
+///
+/// As [`on_key`].
+#[track_caller]
+pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) + 'static) {
+    let os = os();
+    let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())
+        .unwrap_or_else(|e| panic!("on_key: {e}"));
+    if let Some(why) = parsed.reserved(os) {
+        panic!("on_key: {keystroke:?} cannot be bound: {why}");
+    }
+    let owner = Owner::current();
+    let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
+    let keys = executor().keys.clone();
+    let id = keys.borrow_mut().add(
+        |id| crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat),
+        keystroke.into(),
+        handler,
+    );
+    let weak = Rc::downgrade(&keys);
+    cleanup(move || {
+        if let Some(keys) = weak.upgrade() {
+            let removed = keys.borrow_mut().remove(id);
+            drop(removed);
+        }
+    });
+}
+
+/// `keystroke` as menus and hints show it here (TS: `keymap.label`):
+/// `"⇧⌘L"` on Apple platforms (and in a browser on one), `"Ctrl+Shift+L"`
+/// elsewhere, for `"mod+shift+l"`.
+///
+/// # Panics
+///
+/// On a keystroke that is not one.
+#[track_caller]
+pub fn key_label(keystroke: &str) -> String {
+    let apple = apple_keys();
+    crate::keymap::Keystroke::parse_with(keystroke, apple)
+        .unwrap_or_else(|e| panic!("key_label: {e}"))
+        .label(os(), apple)
+}
+
 /// Listens to the Android back button while the current owner lives (TS:
 /// `BackHandler.addEventListener("hardwareBackPress", f)`): when no modal is
 /// shown, `f` runs before the stack pops, newest listener first, and returns
