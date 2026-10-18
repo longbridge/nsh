@@ -1,17 +1,21 @@
 //! Modules: functions a UI set exports to JS without a component
 //! (`Alert.alert(...)`, `Keyboard.dismiss()`), written in Rust with
 //! `#[module]` and generated into the set's JS module like its components.
-//! A call is an op (ordered with the props set before it); a function
-//! returning a value gives JS a `Promise`, an `async fn` runs as a task.
+//! The signature decides how a call runs: a function without a context
+//! runs in the JS call and returns its value (as a class's method does);
+//! one taking `cx: &mut ModuleCx` is an op, ordered with the props set
+//! before it (a `Promise` when it returns a value); an `async fn` runs as a
+//! task of the core (a `Promise`).
 
 use std::{future::Future, pin::Pin};
 
 use super::{
     DialogAnswer, PropError, TsType, TsTypes,
-    class::Wire,
+    class::{Instances, Thrown, Wire, WireArgs},
+    js::{JsHost, JsRaw},
     task::{self, Action},
 };
-use crate::{Command, Dialog, JsonValue, LayoutAnimation, ROOT_ID, StatusBarSetting};
+use crate::{Command, Dialog, LayoutAnimation, ROOT_ID, StatusBarSetting};
 
 /// A JS object of functions (`#[module]` implements it).
 pub trait Module {
@@ -35,13 +39,45 @@ pub type ModuleParam = (&'static str, TsType, bool);
 /// `Promise` rejects with.
 pub type ModuleFuture = Pin<Box<dyn Future<Output = Result<Wire, String>>>>;
 
+/// A function that runs in the JS call: it converts the call's values
+/// directly; its result is an owned JS value.
+pub type SyncCall = fn(&dyn JsHost) -> Result<JsRaw, Thrown>;
+
 /// How a module function runs.
+#[derive(Clone, Copy)]
 pub enum FunctionCall {
-    /// At once, with a [`ModuleCx`]; an error rejects the `Promise`.
-    Sync(fn(Vec<JsonValue>, &mut ModuleCx) -> Result<JsonValue, PropError>),
+    /// In the JS call (no context, not `async`): its value, or what it
+    /// throws.
+    Sync(SyncCall),
+    /// As an op, with a [`ModuleCx`], in order with what JS set before it;
+    /// an error rejects the `Promise`.
+    Op(fn(WireArgs, &Instances, &mut ModuleCx) -> Result<Wire, PropError>),
     /// As a task (its arguments checked first): it reaches the platform with
     /// the same free functions views use (`dialog`, `clipboard_string`, ...).
-    Async(fn(Vec<JsonValue>) -> Result<ModuleFuture, PropError>),
+    Async(fn(WireArgs, &Instances) -> Result<ModuleFuture, PropError>),
+}
+
+impl FunctionCall {
+    /// What it is, for the glue and the declarations.
+    pub fn kind(&self) -> FunctionKind {
+        match self {
+            FunctionCall::Sync(_) => FunctionKind::Sync,
+            FunctionCall::Op(_) => FunctionKind::Op,
+            FunctionCall::Async(_) => FunctionKind::Async,
+        }
+    }
+}
+
+/// How a module function runs ([`FunctionCall`]), for the glue and the
+/// declarations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FunctionKind {
+    /// In the JS call: TS gets the value.
+    Sync,
+    /// An op: TS gets a promise of the value (nothing without one).
+    Op,
+    /// A task: TS gets a promise of the value (nothing without one).
+    Async,
 }
 
 /// A function of a module (`#[module]` makes them).
@@ -69,6 +105,10 @@ pub struct FunctionSpec {
     pub params: Vec<(&'static str, String, bool)>,
     /// The TypeScript type of its result.
     pub returns: Option<String>,
+    /// How it runs.
+    pub kind: FunctionKind,
+    /// The function, when it runs in the JS call.
+    pub sync: Option<SyncCall>,
 }
 
 /// What a module is to JS.
@@ -100,6 +140,11 @@ impl ModuleSpec {
                     .map(|(n, ts, optional)| (*n, ts(&mut types), *optional))
                     .collect(),
                 returns: f.returns.map(|ts| ts(&mut types)),
+                kind: f.call.kind(),
+                sync: match f.call {
+                    FunctionCall::Sync(call) => Some(call),
+                    _ => None,
+                },
             })
             .collect();
         Self {

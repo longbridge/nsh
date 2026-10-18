@@ -34,7 +34,7 @@ pub(crate) mod animated;
 mod asset;
 mod back;
 mod callback;
-mod class;
+pub(crate) mod class;
 mod component;
 pub(crate) mod element;
 mod element_ref;
@@ -96,7 +96,7 @@ pub use self::{
     callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
     class::{
         Arg, AsyncStart, Class, ClassDef, ClassInstance, ClassSpec, Instance, Instances, Member,
-        MemberCall, MemberKind, MemberSpec, Ret, Thrown, Wire, WireArgs,
+        MemberCall, MemberKind, MemberSpec, POST, Ret, Thrown, Wire, WireArgs,
     },
     component::{
         Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,
@@ -121,8 +121,8 @@ pub use self::{
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
     module::{
-        Function, FunctionCall, FunctionSpec, Module, ModuleCx, ModuleFuture, ModuleParam,
-        ModuleSpec,
+        Function, FunctionCall, FunctionKind, FunctionSpec, Module, ModuleCx, ModuleFuture,
+        ModuleParam, ModuleSpec, SyncCall,
     },
     once::Scope,
     prop::Prop,

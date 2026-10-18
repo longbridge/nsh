@@ -955,9 +955,10 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
             .collect::<Vec<_>>()
             .join(", ");
-        let returns = match &f.returns {
-            Some(ts) => format!("Promise<{ts}>"),
-            None => "void".to_owned(),
+        let returns = match (&f.returns, f.kind) {
+            (Some(ts), super::module::FunctionKind::Sync) => ts.clone(),
+            (Some(ts), _) => format!("Promise<{ts}>"),
+            (None, _) => "void".to_owned(),
         };
         (params, returns)
     };

@@ -540,6 +540,40 @@ impl Host {
         });
     }
 
+    /// Applies the `$post` ops JS sent (as the core does) and runs the
+    /// posted calls: for tests without a core.
+    #[cfg(test)]
+    pub(crate) fn run_posted_without_core(&self) {
+        let mut ops = Vec::new();
+        self.take_ops(&mut ops);
+        self.apply_posts(&ops);
+        self.run_posted();
+    }
+
+    /// Queues the calls the `$post` ops among `ops` park (as the core
+    /// does): for tests without a core.
+    #[cfg(test)]
+    pub(crate) fn apply_posts(&self, ops: &[Op]) {
+        for op in ops {
+            if let Op::Command {
+                command: nsh_core::Command::Native { name, args },
+                ..
+            } = op
+                && &**name == nsh_core::ui::POST
+                && let Some(id) = args.get("id").and_then(nsh_core::JsonValue::as_u64)
+            {
+                self.ctx
+                    .with(|ctx| crate::classes::unpark(ctx.as_raw().as_ptr(), id));
+            }
+        }
+    }
+
+    /// Whether calls Rust queued wait for [`Host::run_posted`].
+    pub fn has_posted(&self) -> bool {
+        self.ctx
+            .with(|ctx| crate::classes::has_posted(ctx.as_raw().as_ptr()))
+    }
+
     /// Moves the network requests and cancellations made since the last
     /// call into `out`.
     pub fn take_network(&self, out: &mut NetworkQueue) {

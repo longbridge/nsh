@@ -108,20 +108,68 @@ iOS 的 `AppView` 上用 `AppSource::Rust` 挂载 Rust 根组件。
 ## 用 TSX 扩展 Rust 应用
 
 crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内容：组件（`registry.register::<Chart>()`）、函数模块
-（`registry.module::<Portfolio>()`，一个 `#[module]` `impl`）和资源。它们的 TypeScript 声明由 Rust 类型生成到
-`.nsh/types`，所以 `nsh check` 和编辑器会据此检查 TSX：
+（`registry.module::<Portfolio>()`，一个 `#[module]` `impl`）、类（`registry.class::<Ledger>()`，在结构体及其 `impl` 上标注
+`#[class]`）和资源。它们的 TypeScript 声明（包括文档注释）由 Rust 类型生成到 `.nsh/types`，所以 `nsh check` 和编辑器会据此检查
+TSX：
+
+```rust
+/// A ledger kept in Rust.
+#[class]
+pub struct Ledger {
+    entries: Vec<f64>,
+}
+
+#[class]
+impl Ledger {
+    /// An empty ledger.
+    pub fn new() -> Self {
+        Ledger { entries: Vec::new() }
+    }
+
+    /// Adds `amount`; the new balance.
+    pub fn add(&mut self, amount: f64) -> f64 {
+        self.entries.push(amount);
+        self.balance()
+    }
+
+    /// The balance.
+    #[getter]
+    pub fn balance(&self) -> f64 {
+        self.entries.iter().sum()
+    }
+
+    /// Uploads the entries; resolves when the server has them.
+    pub async fn upload(this: Instance<Ledger>, url: String) -> Result<(), String> {
+        let body = this.with(|l| format!("{:?}", l.entries));
+        fetch(HttpRequest::post(url, body)).await.map(|_| ())
+    }
+}
+
+pub struct Portfolio;
+
+#[module]
+impl Portfolio {
+    /// The value of the holdings.
+    pub fn total() -> f64 {
+        1250.0
+    }
+}
+```
 
 ```tsx
 import { mount, signal, View, Text } from "nsh";
-import { Chart, Portfolio } from "app/native";   // Rust
+import { Button } from "nsh/ui/mobile";
+import { Chart, Ledger, Portfolio } from "app/native";   // Rust
+
+const ledger = new Ledger();   // 状态保存在 Rust 中
 
 function Overview() {
-  const total = signal(0);
-  Portfolio.total().then((value) => total.set(value));   // Rust 函数：在 TSX 中是 Promise
+  const balance = signal(ledger.add(Portfolio.total()));   // Rust，立即调用
   return (
     <View className="p-4 gap-2">
-      <Text>Total: {total()}</Text>
-      <Chart symbol="NSH" range="1M" onSelect={(e) => console.log(e.price)} />
+      <Text>Balance: {balance()}</Text>
+      <Chart symbol="NSH" range="1M" onSelect={(e) => balance.set(ledger.add(e.price))} />
+      <Button title="Upload" onPress={() => ledger.upload("https://example.com/ledger")} />
     </View>
   );
 }
@@ -130,7 +178,14 @@ mount(() => <Overview />);
 ```
 
 props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 组件自己的内容、事件和状态留在
-Rust 中；TSX 传入 props、接收事件。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
+Rust 中；TSX 传入 props、接收事件。
+
+函数和成员按 Rust 签名运行。不是 `async` 的在 TSX 调用中直接运行并返回值（`Portfolio.total()` 是数字，`ledger.balance` 是属性）：
+它们计算并保存状态。`async fn` 返回 Promise，作为任务运行，可以使用 NSH 的服务（`fetch`、`timer`、对话框）；带
+`cx: &mut ModuleCx` 参数的模块函数与 UI 按顺序作用于平台（toast、状态栏），返回其值的 Promise。参数和返回值的类型来自签名：数字、
+字符串、`Option`、`Vec`、你的 `#[derive(JsObject)]` 结构体和 `#[derive(PropEnum)]` 枚举、你的类的实例，以及 TSX 函数
+（`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用）。`Err` 以其消息抛出（或 reject）。类的对象拥有它的
+Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `using ledger = new Ledger()`）立即释放。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
 Rust 的修改会重新构建并重启应用。
 
 仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用，两种入口都有：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`

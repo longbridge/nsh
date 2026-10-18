@@ -5,8 +5,11 @@
 //! as `$name` when they change (one render effect reads them all), its
 //! events delivered to the `on<Event>` handlers, its children inserted when
 //! it takes some, and one holder per named slot the app fills. A module's
-//! function sends a call to the core, in order with the ops before it; one
-//! with a result returns a promise, settled by the core's `$return` event.
+//! function without a context runs in the JS call (`classes.rs`); one with
+//! a context or `async` sends a call to the core, in order with the ops
+//! before it (instances and functions among its arguments held in the
+//! table the core shares); one with a result returns a promise, settled by
+//! the core's `$return` event.
 
 use std::{
     cell::{Cell, RefCell},
@@ -295,18 +298,19 @@ fn call_name(module: &ModuleSpec, namespace: Option<&str>, function: &str) -> St
     }
 }
 
-/// A function of a module: sends its call.
+/// A function of a module: one that runs in the JS call, or one sending
+/// its call.
 pub(crate) fn module_function(
     ctx: *mut JsContext,
     module: &ModuleSpec,
     namespace: Option<&str>,
     function: &str,
 ) -> JsValue {
-    let returns = module
-        .functions
-        .iter()
-        .find(|f| f.name == function)
-        .is_some_and(|f| f.returns.is_some());
+    let spec = module.functions.iter().find(|f| f.name == function);
+    if let Some((f, spec)) = spec.and_then(|s| s.sync.map(|f| (f, s))) {
+        return crate::classes::sync_function(ctx, function, f, spec.params.len());
+    }
+    let returns = spec.is_some_and(|f| f.returns.is_some());
     let mut data = [
         new_string(ctx, &call_name(module, namespace, function)),
         if returns { qjs::JS_TRUE } else { qjs::JS_FALSE },
@@ -335,7 +339,27 @@ unsafe extern "C" fn call_function(
     let args: Vec<JsValue> = (0..argc.max(0) as usize)
         .map(|i| arg(argc, argv, i))
         .collect();
-    send(ctx, 1, &name, &args, returns)
+    // Instances and functions cross in the table the core shares.
+    let Ok((args, held)) = crate::classes::wire_args(ctx, &args) else {
+        return qjs::JS_EXCEPTION;
+    };
+    let call = if returns { next_call(ctx) } else { 0 };
+    let op = Op::Command {
+        id: 1,
+        command: Command::Native {
+            name: name.into(),
+            args: serde_json::json!({ "c": call, "a": args, "held": held }),
+        },
+    };
+    if let Err(e) = dom::push_op(ctx, op) {
+        // Not sent: what it holds goes.
+        crate::classes::release(ctx, &held);
+        return e;
+    }
+    if !returns {
+        return UNDEFINED;
+    }
+    promise(ctx, call, true)
 }
 
 /// A module's object: its functions.

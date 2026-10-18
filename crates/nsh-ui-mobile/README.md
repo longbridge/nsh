@@ -64,8 +64,9 @@ state) stays native. JS only gets the events the component emits.
   (`text(move || options.with(|o| o[at.index()].clone()))`). `SelectList` is the example.
 - **Errors**: `catch_error(|| view, |error, reset| fallback)` is an error boundary.
 - **Modules are functions without a component**: `#[module] impl Alert { pub async fn alert(title: String, ..) -> i32 }`
-  is `await Alert.alert(title)` in JS (`system.rs`; an `async fn` uses the free functions, `dialog(..)`); a sync
-  function may take `cx: &mut ModuleCx`. Option parameters at the end may be left out; options objects are
+  is `await Alert.alert(title)` in JS (`system.rs`; an `async fn` uses the free functions, `dialog(..)`); one that
+  is not `async` takes a last `cx: &mut ModuleCx` to reach the platform in order with the UI (a promise of its value),
+  or none to run in the JS call and return its value. Option parameters at the end may be left out; options objects are
   `#[derive(JsObject)]` structs. A module named like a component adds static functions to it (`StatusBar.setHidden`,
   `status_bar.rs`). Register both in `registry()`.
 - **System UI**: `dialog(..)` (await the index chosen), `dismiss_keyboard()`, `add_status_bar(..)` /

@@ -26,6 +26,7 @@ use crate::{
         Instances, IntoElement, ListConfig, Listener, Member, MemberCall, ModuleCx, ModuleFuture,
         ParentElement, PlaceFn, Position, PropError, Reactive, Registry, Root, SharedString,
         StyleRefinement, Task, Theme, WireArgs, caught,
+        class::POST,
         responder::ResponderEl,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
@@ -618,11 +619,18 @@ impl<M: TextEngine> Core<M> {
     pub fn discard_ops(&mut self, ops: impl IntoIterator<Item = Op>) {
         for op in ops {
             if let Op::Command {
-                command: Command::Native { args, .. },
+                command: Command::Native { name, args },
                 ..
             } = op
             {
-                self.components.class_instances.release_call(&args);
+                let instances = &self.components.class_instances;
+                if &*name == POST {
+                    if let Some(id) = args.get("id").and_then(JsonValue::as_u64) {
+                        instances.drop_parked(id);
+                    }
+                } else {
+                    instances.release_call(&args);
+                }
             }
         }
     }
@@ -944,6 +952,17 @@ impl<M: TextEngine> Core<M> {
                 self.call_function(&name, args);
                 Ok(None)
             }
+            // A JS call posted in a synchronous call from JS, in order with
+            // the ops before it.
+            Op::Command {
+                id: crate::ROOT_ID,
+                command: Command::Native { name, args },
+            } if &*name == POST => {
+                if let Some(id) = args.get("id").and_then(JsonValue::as_u64) {
+                    self.components.class_instances.unpark(id);
+                }
+                Ok(None)
+            }
             // An `async` member of a Rust class: `{ c, this, a }`.
             Op::Command {
                 id: crate::ROOT_ID,
@@ -1031,31 +1050,44 @@ impl<M: TextEngine> Core<M> {
     /// Calls module function `name` (`Alert.alert`); a call JS waits for
     /// gets its result as a `$return` event on the root.
     fn call_function(&mut self, name: &str, args: JsonValue) {
+        let instances = self.components.class_instances.clone();
         let Some(function) = self.function(name) else {
+            instances.release_call(&args);
             return;
         };
         let call = args.get("c").and_then(JsonValue::as_u64).unwrap_or(0);
-        let args = match args.get("a") {
-            Some(JsonValue::Array(a)) => a.clone(),
-            _ => Vec::new(),
-        };
         let root = crate::ROOT_ID;
         match &function.call {
-            FunctionCall::Sync(run) => {
+            // Run in the JS call, never sent.
+            FunctionCall::Sync(_) => instances.release_call(&args),
+            FunctionCall::Op(run) => {
                 let mut cx = ModuleCx::default();
-                let result = run(args, &mut cx);
-                for action in cx.actions {
-                    self.apply_action(action);
-                }
+                // The app's code: a panic rejects the call (its actions are
+                // dropped) instead of unwinding through the engine.
+                let result = match caught(|| run(WireArgs::of(&args), &instances, &mut cx)) {
+                    Ok(result) => {
+                        for action in std::mem::take(&mut cx.actions) {
+                            self.apply_action(action);
+                        }
+                        result.map_err(|e| e.0)
+                    }
+                    Err(message) => Err(message),
+                };
+                instances.release_call(&args);
                 self.apply_actions();
                 if let Err(e) = &result {
                     log::warn!(target: "js", "{name}(): {e}");
                 }
                 if call != 0 {
-                    self.reply(root, call, result.map_err(|e| e.0));
+                    self.reply_wire(root, call, result);
                 }
             }
-            FunctionCall::Async(start) => self.run_call(name, call, start(args)),
+            FunctionCall::Async(start) => {
+                let started = caught(|| start(WireArgs::of(&args), &instances))
+                    .unwrap_or_else(|message| Err(PropError(message)));
+                instances.release_call(&args);
+                self.run_call(name, call, started);
+            }
         }
     }
 
@@ -1117,7 +1149,8 @@ impl<M: TextEngine> Core<M> {
             .get("this")
             .and_then(JsonValue::as_u64)
             .and_then(|id| instances.take_instance(id));
-        let started = start(this, WireArgs::of(&args), &instances);
+        let started = caught(|| start(this, WireArgs::of(&args), &instances))
+            .unwrap_or_else(|message| Err(PropError(message)));
         // What the arguments held and the member did not take (it failed
         // before).
         instances.release_call(&args);

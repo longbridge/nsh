@@ -1285,14 +1285,19 @@ fn module_cx(ty: &Type) -> bool {
 /// `#[module]` on an `impl` block of a unit struct: its functions (no
 /// receiver) become functions of a JS object named after the struct
 /// (`Alert.alert(...)`), documented by their doc comments (the block's doc
-/// comment documents the object). A function takes [`JsValue`] parameters
-/// (an `Option` one is optional), then optionally `cx: &mut ModuleCx` (not
-/// an `async fn`: it reaches the platform with the free functions views
-/// use, `dialog(..)`, `clipboard_string()`, ...); it returns nothing (JS calls it and
-/// moves on) or a [`JsValue`] (JS gets a `Promise`), or a `Result` of one
-/// (an `Err` rejects the `Promise` with its message). A UI set registers
-/// the module (`Registry::module::<Alert>()`); a component exported under
-/// the same name gets the functions too (`StatusBar.setHidden(...)`).
+/// comment documents the object). The signature decides how a call runs:
+/// a function without a context runs in the JS call and returns its value
+/// (`checksum(bytes)`), as a class's method does; one whose last parameter
+/// is `cx: &mut ModuleCx` is an op, run in order with what JS set before it
+/// (a dialog, the status bar, focus), a `Promise` when it returns a value;
+/// an `async fn` runs as a task of the core with the free functions views
+/// use (`dialog(..)`, `clipboard_string()`, ...), a `Promise`. Parameters
+/// are [`JsValue`] types (a trailing `Option` is optional), instances
+/// (`Instance<T>`) and JS functions (`Callback<A, R>`); a function returns
+/// nothing, a [`JsValue`], an instance, or a `Result` of one (an `Err`
+/// throws or rejects with its message). A UI set registers the module
+/// (`Registry::module::<Alert>()`); a component exported under the same
+/// name gets the functions too (`StatusBar.setHidden(...)`).
 /// `#[module(flat)]` exports the functions one by one instead of as an
 /// object.
 #[proc_macro_attribute]
@@ -1352,6 +1357,7 @@ fn result_ok(ty: &Type) -> Option<&Type> {
 
 fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
+    let private = quote!(#ui::__private);
     let self_ty = &item.self_ty;
     let Some((type_name, _)) = last_segment(self_ty) else {
         return Err(syn::Error::new(
@@ -1366,6 +1372,11 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
+        let what = if flat {
+            js.clone()
+        } else {
+            format!("{module_name}.{js}")
+        };
         let doc = decl(&docs(&f.attrs));
         let is_async = f.sig.asyncness.is_some();
         let typed: Vec<_> = f
@@ -1380,9 +1391,9 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 )),
             })
             .collect::<syn::Result<_>>()?;
+        let takes_cx = typed.last().is_some_and(|t| module_cx(&t.ty));
         let mut params = Vec::new();
-        let mut decode = Vec::new();
-        let mut call_args = Vec::new();
+        let mut names = Vec::new();
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
             if module_cx(ty) {
@@ -1393,8 +1404,13 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                          (an `async fn` uses the free functions: `dialog(..)`, ...)",
                     ));
                 }
-                call_args.push(quote!(cx));
                 continue;
+            }
+            if let Type::Reference(_) = &**ty {
+                return Err(syn::Error::new(
+                    ty.span(),
+                    "a module function takes values: an instance as `Instance<T>`",
+                ));
             }
             let Pat::Ident(name) = &*arg.pat else {
                 return Err(syn::Error::new(
@@ -1402,76 +1418,101 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                     "a module function's parameters are named",
                 ));
             };
-            let name = camel(&name.ident.to_string());
-            let local = format_ident!("__arg{}", i);
-            let optional = matches!(last_segment(ty), Some((id, _)) if id == "Option");
-            params.push(quote!((#name, #ui::ts_of::<#ty>(), #optional)));
-            decode.push(quote! {
-                let #local: #ty = <#ty as #ui::JsValue>::from_json(
-                    args.next().unwrap_or(::nsh_core::JsonValue::Null),
-                )
-                .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #name, e)))?;
-            });
-            call_args.push(quote!(#local));
+            names.push(camel(&name.ident.to_string()));
+            params.push(ty);
         }
-        let takes_cx = call_args.len() > decode.len();
-        let unused_cx = (!takes_cx).then(|| quote!(let _ = cx;));
-        let args_iter = if decode.is_empty() {
-            quote!(let _ = args;)
-        } else {
-            quote!(let mut args = args.into_iter();)
-        };
-        // The result as `Result<JsonValue, String>`.
-        let (returns, to_json) = match &f.sig.output {
-            ReturnType::Default => (
-                quote!(::core::option::Option::None),
-                quote!({
-                    let _ = value;
-                    ::core::result::Result::Ok(::nsh_core::JsonValue::Null)
-                }),
-            ),
+        // An `Option` parameter is optional when the ones after it are too.
+        let mut optional = vec![false; params.len()];
+        for i in (0..params.len()).rev() {
+            if !matches!(last_segment(params[i]), Some((id, _)) if id == "Option") {
+                break;
+            }
+            optional[i] = true;
+        }
+        let param_specs =
+            params.iter().zip(&names).zip(&optional).map(
+                |((ty, name), optional)| quote!((#name, #private::arg_ts::<#ty>(), #optional)),
+            );
+        let (returns, fallible) = match &f.sig.output {
+            ReturnType::Default => (quote!(::core::option::Option::None), false),
             ReturnType::Type(_, ty) => match result_ok(ty) {
                 Some(ok) => (
-                    quote!(::core::option::Option::Some(#ui::ts_of::<#ok>())),
-                    quote!(value
-                        .map(|v| #ui::JsValue::to_json(&v))
-                        .map_err(|e| ::std::string::ToString::to_string(&e))),
+                    quote!(::core::option::Option::Some(#private::ret_ts::<#ok>())),
+                    true,
                 ),
                 None => (
-                    quote!(::core::option::Option::Some(#ui::ts_of::<#ty>())),
-                    quote!(::core::result::Result::Ok(#ui::JsValue::to_json(&value))),
+                    quote!(::core::option::Option::Some(#private::ret_ts::<#ty>())),
+                    false,
                 ),
             },
         };
-        let call = if is_async {
+        let locals: Vec<_> = (0..params.len())
+            .map(|i| format_ident!("__arg{}", i))
+            .collect();
+        let call = if !is_async && !takes_cx {
+            // In the JS call, converting the values directly.
+            let decode = params.iter().zip(&names).zip(&locals).enumerate().map(
+                |(i, ((ty, name), local))| {
+                    quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
+                },
+            );
+            let finish = if fallible {
+                quote!(#private::ret_result(host, __result))
+            } else {
+                quote!(#private::ret(host, __result))
+            };
             quote! {
-                #ui::FunctionCall::Async(|args| {
-                    #args_iter
+                #ui::FunctionCall::Sync(|host| {
                     #(#decode)*
-                    ::core::result::Result::Ok(::std::boxed::Box::pin(async move {
-                        let value = #self_ty::#ident(#(#call_args),*).await;
-                        let result: ::core::result::Result<::nsh_core::JsonValue, ::std::string::String> = #to_json;
-                        result.map(#ui::Wire::from)
-                    }))
+                    let __result = #self_ty::#ident(#(#locals),*);
+                    #finish
                 })
             }
         } else {
-            quote! {
-                #ui::FunctionCall::Sync(|args, cx| {
-                    #unused_cx
-                    #args_iter
-                    #(#decode)*
-                    let value = #self_ty::#ident(#(#call_args),*);
-                    let result: ::core::result::Result<::nsh_core::JsonValue, ::std::string::String> = #to_json;
-                    result.map_err(#ui::PropError)
-                })
+            let decode = params.iter().zip(&names).zip(&locals).map(|((ty, name), local)| {
+                quote!(let #local: #ty = __args.next::<#ty>(__instances, #name)?;)
+            });
+            let args_iter = if params.is_empty() {
+                quote!(let _ = __args;)
+            } else {
+                quote!(let mut __args = __args;)
+            };
+            let finish = if fallible {
+                quote!(#private::wire_ret_result(__result, &__instances))
+            } else {
+                quote!(#private::wire_ret(__result, &__instances))
+            };
+            if is_async {
+                quote! {
+                    #ui::FunctionCall::Async(|__args, __instances| {
+                        #args_iter
+                        #(#decode)*
+                        let __instances = ::core::clone::Clone::clone(__instances);
+                        ::core::result::Result::Ok(::std::boxed::Box::pin(async move {
+                            let __result = #self_ty::#ident(#(#locals),*).await;
+                            #finish
+                        }))
+                    })
+                }
+            } else {
+                quote! {
+                    #ui::FunctionCall::Op(|__args, __instances, cx| {
+                        #args_iter
+                        #(#decode)*
+                        let __result = #self_ty::#ident(#(#locals,)* cx);
+                        #finish.map_err(#ui::PropError)
+                    })
+                }
             }
         };
+        // `#[cfg]` of the function applies to its entry too.
+        let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
         entries.push(quote! {
+            #(#cfgs)*
             #ui::Function {
                 name: #js,
                 doc: #doc,
-                params: &[#(#params),*],
+                params: &[#(#param_specs),*],
                 returns: #returns,
                 call: #call,
             }

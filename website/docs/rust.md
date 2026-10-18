@@ -115,21 +115,69 @@ native targets' threads.
 ## Extending a Rust app with TSX
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components
-(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, a `#[module]` `impl`) and
-assets. Their TypeScript declarations are generated from the Rust types into `.nsh/types`, so TSX is checked against
+(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, a `#[module]` `impl`),
+classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. Their TypeScript
+declarations, doc comments included, are generated from the Rust types into `.nsh/types`, so TSX is checked against
 them by `nsh check` and your editor:
+
+```rust
+/// A ledger kept in Rust.
+#[class]
+pub struct Ledger {
+    entries: Vec<f64>,
+}
+
+#[class]
+impl Ledger {
+    /// An empty ledger.
+    pub fn new() -> Self {
+        Ledger { entries: Vec::new() }
+    }
+
+    /// Adds `amount`; the new balance.
+    pub fn add(&mut self, amount: f64) -> f64 {
+        self.entries.push(amount);
+        self.balance()
+    }
+
+    /// The balance.
+    #[getter]
+    pub fn balance(&self) -> f64 {
+        self.entries.iter().sum()
+    }
+
+    /// Uploads the entries; resolves when the server has them.
+    pub async fn upload(this: Instance<Ledger>, url: String) -> Result<(), String> {
+        let body = this.with(|l| format!("{:?}", l.entries));
+        fetch(HttpRequest::post(url, body)).await.map(|_| ())
+    }
+}
+
+pub struct Portfolio;
+
+#[module]
+impl Portfolio {
+    /// The value of the holdings.
+    pub fn total() -> f64 {
+        1250.0
+    }
+}
+```
 
 ```tsx
 import { mount, signal, View, Text } from "nsh";
-import { Chart, Portfolio } from "app/native";   // Rust
+import { Button } from "nsh/ui/mobile";
+import { Chart, Ledger, Portfolio } from "app/native";   // Rust
+
+const ledger = new Ledger();   // its state lives in Rust
 
 function Overview() {
-  const total = signal(0);
-  Portfolio.total().then((value) => total.set(value));   // a Rust function: a Promise in TSX
+  const balance = signal(ledger.add(Portfolio.total()));   // Rust, called at once
   return (
     <View className="p-4 gap-2">
-      <Text>Total: {total()}</Text>
-      <Chart symbol="NSH" range="1M" onSelect={(e) => console.log(e.price)} />
+      <Text>Balance: {balance()}</Text>
+      <Chart symbol="NSH" range="1M" onSelect={(e) => balance.set(ledger.add(e.price))} />
+      <Button title="Upload" onPress={() => ledger.upload("https://example.com/ledger")} />
     </View>
   );
 }
@@ -139,7 +187,17 @@ mount(() => <Overview />);
 
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
-events. Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
+events.
+
+A function or a member runs the way its Rust signature says. One that is not `async` runs inside the TSX call and
+returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
+`async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs); a module function
+taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and returns a Promise
+of its value. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
+`#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
+(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`). An `Err` throws
+(or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
+once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
 updates, Rust edits rebuild and restart the app.
 
 `examples/gallery-rs` in the repository is a complete Rust app with both entries: every demo is Rust,

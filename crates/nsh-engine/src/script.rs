@@ -177,6 +177,10 @@ mod imp {
             self.host.run_posted();
         }
 
+        pub(crate) fn has_posted(&self) -> bool {
+            self.host.has_posted()
+        }
+
         pub(crate) fn next_timer(&self) -> Option<Instant> {
             self.host.next_timer()
         }
@@ -294,6 +298,10 @@ mod stub {
         }
 
         pub(crate) fn run_posted(&self) {
+            match *self {}
+        }
+
+        pub(crate) fn has_posted(&self) -> bool {
             match *self {}
         }
 

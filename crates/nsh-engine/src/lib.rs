@@ -1535,7 +1535,9 @@ impl<M: TextEngine> State<M> {
             }
             self.core.take_list_binds(&mut self.binds);
             self.core.take_events(&mut self.events);
-            if self.binds.is_empty() && self.events.is_empty() {
+            // Posts the ops queued (in program order) run in another round.
+            let posted = script.is_some_and(Script::has_posted);
+            if self.binds.is_empty() && self.events.is_empty() && !posted {
                 break;
             }
         }

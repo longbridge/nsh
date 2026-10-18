@@ -35,7 +35,7 @@ use nsh_core::{
     JsonValue,
     ui::{
         CallbackHandle, ClassDef, ClassInstance, Instances, JsCall, JsHost, JsIn, JsKind, JsRaw,
-        Member, MemberCall, MemberKind, PropError, Thrown, Tracer,
+        Member, MemberCall, MemberKind, PropError, SyncCall, Thrown, Tracer,
     },
 };
 use rquickjs::qjs;
@@ -379,6 +379,72 @@ unsafe extern "C" fn call(
     host.run(def, member)
 }
 
+/// A function running module function `f` in the JS call (owned, or the
+/// exception).
+pub(crate) fn sync_function(ctx: Ctx, name: &str, f: SyncCall, length: usize) -> Raw {
+    let cname = CString::new(name).unwrap_or_default();
+    // SAFETY: the opaque is the function's code (a function pointer, as
+    // large as a data pointer on every target), which needs no finalizer.
+    unsafe {
+        qjs::JS_NewCClosure(
+            ctx,
+            Some(call_sync),
+            cname.as_ptr(),
+            None,
+            length as c_int,
+            0,
+            f as *const () as *mut c_void,
+        )
+    }
+}
+
+unsafe extern "C" fn call_sync(
+    ctx: Ctx,
+    this: Raw,
+    argc: c_int,
+    argv: *mut Raw,
+    _magic: c_int,
+    opaque: *mut c_void,
+) -> Raw {
+    // SAFETY: `sync_function` made the opaque from a `SyncCall`.
+    let f = unsafe { std::mem::transmute::<*const (), SyncCall>(opaque as *const ()) };
+    CallHost::new(ctx, this, UNDEFINED, args(argc, argv)).run_sync(f)
+}
+
+/// An op's arguments and the ids held for them (argument index, id).
+pub(crate) type WiredArgs = (Vec<JsonValue>, Vec<(usize, u64)>);
+
+/// The arguments of an op (a module function's) as JSON: instances and
+/// functions held in the table for the core (released when this fails).
+pub(crate) fn wire_args(ctx: Ctx, args: &[Raw]) -> R<WiredArgs> {
+    let instances = classes(ctx).instances.clone();
+    let mut held = Vec::new();
+    let mut out = Vec::with_capacity(args.len());
+    for (i, &v) in args.iter().enumerate() {
+        match wire_arg(ctx, v, &instances) {
+            Ok((json, id)) => {
+                out.push(json);
+                if let Some(id) = id {
+                    held.push((i, id));
+                }
+            }
+            Err(Throw) => {
+                release(ctx, &held);
+                return Err(Throw);
+            }
+        }
+    }
+    Ok((out, held))
+}
+
+/// Lets go of what an op that was not sent holds.
+pub(crate) fn release(ctx: Ctx, held: &[(usize, u64)]) {
+    let instances = &classes(ctx).instances;
+    for (_, id) in held {
+        instances.release(*id);
+    }
+}
+
 /// The name the core calls `async` member `member` of `def` by
 /// (`Tally#save`, `nsh/x:Tally#save` for a runtime class).
 fn member_name(ctx: Ctx, def: &'static ClassDef, member: &Member) -> String {
@@ -587,10 +653,15 @@ impl<'a> CallHost<'a> {
     /// Runs `member` of `def` (catching a panic): its result, or the
     /// exception; an `async` one's promise.
     fn run(&self, def: &'static ClassDef, member: &'static Member) -> Raw {
-        let f = match member.call {
-            MemberCall::Sync(f) => f,
-            MemberCall::Async(_) => return self.send(def, member),
-        };
+        match member.call {
+            MemberCall::Sync(f) => self.run_sync(f),
+            MemberCall::Async(_) => self.send(def, member),
+        }
+    }
+
+    /// Runs `f` in this call (catching a panic): its result, or the
+    /// exception.
+    fn run_sync(&self, f: SyncCall) -> Raw {
         let depth = &classes(self.ctx).depth;
         depth.set(depth.get() + 1);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)))
@@ -1038,6 +1109,28 @@ impl CallbackHandle for JsCallback {
     }
 
     fn post(&self, call: JsCall) {
+        // Posted inside a synchronous call from JS: queued by an op after
+        // the ones JS sent before, so it runs after what they post.
+        if let Some((ctx, _)) = self.value()
+            // SAFETY: reading the context's opaque pointer.
+            && !crate::state::state(ctx).is_null()
+            && classes(ctx).depth.get() > 0
+        {
+            let id = self.instances.park(call);
+            let op = nsh_core::Op::Command {
+                id: nsh_core::ROOT_ID,
+                command: nsh_core::Command::Native {
+                    name: nsh_core::ui::POST.into(),
+                    args: serde_json::json!({ "id": id }),
+                },
+            };
+            if crate::dom::push_op(ctx, op).is_err() {
+                // Over the op limit (the VM stops): queued as it is.
+                let _ = js::take_exception(ctx);
+                self.instances.unpark(id);
+            }
+            return;
+        }
         self.instances.post(call);
     }
 }
@@ -1179,6 +1272,17 @@ pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
         }
     }
     Ok(())
+}
+
+/// Queues the call parked as `id` (tests without a core).
+#[cfg(test)]
+pub(crate) fn unpark(ctx: Ctx, id: u64) {
+    classes(ctx).instances.unpark(id);
+}
+
+/// Whether JS calls Rust queued are waiting.
+pub(crate) fn has_posted(ctx: Ctx) -> bool {
+    classes(ctx).instances.has_calls()
 }
 
 /// No JS runs any more: the queued calls are dropped, and so are those
@@ -1440,6 +1544,62 @@ pub(crate) mod tests {
     }
 
     thread_local! {
+        /// What `Tools.listen` keeps.
+        static LISTENER: std::cell::RefCell<Option<Callback<String>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// Functions JS calls.
+    pub(crate) struct Tools;
+
+    #[module]
+    impl Tools {
+        /// The sum, at once.
+        pub(crate) fn sum(values: Vec<f64>) -> f64 {
+            values.iter().sum()
+        }
+
+        /// `text` as a number; throws on anything else.
+        pub(crate) fn parse(text: String) -> Result<i64, String> {
+            text.parse().map_err(|_| format!("not a number: {text}"))
+        }
+
+        /// Keeps `listener`.
+        pub(crate) fn listen(listener: Callback<String>) {
+            LISTENER.with(|l| *l.borrow_mut() = Some(listener));
+        }
+
+        /// Tells the listener `text` in the next turn.
+        pub(crate) fn tell(text: String) {
+            LISTENER.with(|l| {
+                if let Some(listener) = &*l.borrow() {
+                    listener.post(text);
+                }
+            });
+        }
+
+        /// Makes a signal (outside the reactive graph: it panics).
+        pub(crate) fn signal_here() {
+            let _ = signal(0);
+        }
+
+        /// A tally at `count`.
+        pub(crate) fn tally(count: i64) -> Instance<Tally> {
+            Instance::new(Tally::new(Some(count)))
+        }
+
+        /// An op (a promise of the length).
+        pub(crate) fn measure(text: String, cx: &mut ModuleCx) -> usize {
+            let _ = cx;
+            text.len()
+        }
+
+        /// An op taking an instance.
+        pub(crate) fn keep_op(tally: Instance<Tally>, cx: &mut ModuleCx) {
+            let _ = (tally, cx);
+        }
+    }
+
+    thread_local! {
         /// What `Asker.ask` awaits; what `Noisy`'s drops saw.
         static ANSWERS: std::cell::RefCell<Vec<Answer<Result<i64, String>>>> =
             const { std::cell::RefCell::new(Vec::new()) };
@@ -1570,7 +1730,8 @@ pub(crate) mod tests {
             .class::<Bomb>()
             .class::<Asker>()
             .class::<Noisy>()
-            .class::<Watcher>();
+            .class::<Watcher>()
+            .module::<Tools>();
         r
     }
 
@@ -1586,11 +1747,12 @@ pub(crate) mod tests {
     /// with `show(...)`.
     pub(crate) fn run(host: &Host, code: &str) -> Result<Vec<String>, String> {
         host.eval_source(&format!(
-            "import {{ text as show }} from \"nsh:rt\";\nimport {{ Tally, Token, Bomb, Asker, Noisy, Watcher }} from \"test/classes\";\n{code}"
+            "import {{ text as show }} from \"nsh:rt\";\nimport {{ Tally, Token, Bomb, Asker, Noisy, Watcher, Tools }} from \"test/classes\";\n{code}"
         ))
         .map_err(|e| e.message)?;
         let mut ops = Vec::new();
         host.take_ops(&mut ops);
+        host.apply_posts(&ops);
         Ok(ops
             .into_iter()
             .filter_map(|op| match op {
@@ -1780,7 +1942,7 @@ pub(crate) mod tests {
             ]
         );
         // The post runs in the next turn.
-        host.run_posted();
+        host.run_posted_without_core();
         assert_eq!(
             run(&host, "show(seen.join(','));").unwrap(),
             ["3,Tally used re-entrantly,3"]
@@ -1845,7 +2007,7 @@ pub(crate) mod tests {
         let host = host();
         run(&host, "Asker.ask(() => 1); Tally.keep(() => {});").unwrap();
         host.stop("over a quota".to_owned());
-        host.run_posted();
+        host.run_posted_without_core();
         let stopped = Some(Err("the JS function was not called (JS stopped)".to_owned()));
         let mut answers = ANSWERS.with(|a| std::mem::take(&mut *a.borrow_mut()));
         assert_eq!(poll(&mut answers[0]), stopped);
@@ -1871,7 +2033,7 @@ pub(crate) mod tests {
             "#,
         )
         .unwrap();
-        host.run_posted();
+        host.run_posted_without_core();
         host.run_jobs();
         assert!(!host.has_exception());
         assert_eq!(run(&host, "show('alive');").unwrap(), ["alive"]);
@@ -1913,7 +2075,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         host.collect_garbage();
-        host.run_posted();
+        host.run_posted_without_core();
         assert_eq!(run(&host, "show(heard.join(','));").unwrap(), [""]);
         assert_eq!(
             NOISE.with(|n| std::mem::take(&mut *n.borrow_mut())),
@@ -1973,6 +2135,86 @@ pub(crate) mod tests {
         run(&host, "Tally.keep(() => 1);").unwrap();
         drop(host);
         Tally::forget();
+    }
+
+    /// An op that cannot be sent lets go of what it holds.
+    #[test]
+    fn an_op_that_is_not_sent_releases_its_instances() {
+        let instances = nsh_core::ui::Instances::new();
+        let host = Host::with_options(HostOptions {
+            ui_sets: vec![registry()],
+            class_instances: instances.clone(),
+            limits: nsh_core::js::Limits {
+                max_op_values: 40,
+                ..Default::default()
+            },
+            ..HostOptions::default()
+        })
+        .unwrap();
+        let _ = host.eval_source(
+            "import { Tally, Tools } from \"test/classes\";\n\
+             const t = new Tally(1); for (let i = 0; i < 100; i++) { try { Tools.keepOp(t); } catch (e) {} }",
+        );
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let sent = ops
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op,
+                    nsh_core::Op::Command {
+                        command: nsh_core::Command::Native { .. },
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(sent < 100, "the op queue filled up");
+        assert_eq!(
+            instances.held(),
+            sent,
+            "only the ops sent hold their instance"
+        );
+    }
+
+    #[test]
+    fn functions_without_a_context_run_in_the_call() {
+        let host = host();
+        let shown = run(
+            &host,
+            r#"
+            const msg = (f) => { try { f(); return "no throw"; } catch (e) { return `${e.name}: ${e.message}`; } };
+            show(String(Tools.sum([1, 2, 3.5]) + 1));
+            show(String(Tools.parse("42") + 1));
+            show(msg(() => Tools.parse("x")));
+            show(msg(() => Tools.sum("x")));
+            const t = Tools.tally(4);
+            show(`${t instanceof Tally} ${t.count}`);
+            show(String(Tools.measure("abc") instanceof Promise));
+            show(msg(() => Tools.signalHere()));
+            globalThis.heard = [];
+            Tools.listen((text) => heard.push(text));
+            Tools.tell("hello");
+            show(String(heard.length));
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            shown,
+            [
+                "7.5",
+                "43",
+                "Error: not a number: x",
+                "TypeError: Tools.sum: `values`: expected an array, got \"x\"",
+                "true 4",
+                "true",
+                "Error: no reactive runtime: signals are used on the engine thread, while components run",
+                "0",
+            ]
+        );
+        host.run_posted_without_core();
+        assert_eq!(run(&host, "show(heard.join(','));").unwrap(), ["hello"]);
+        LISTENER.with(|l| l.borrow_mut().take());
     }
 
     #[test]

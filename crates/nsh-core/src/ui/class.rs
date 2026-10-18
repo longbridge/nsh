@@ -346,6 +346,11 @@ struct InstancesInner {
     notify: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// JS stopped for good: calls are dropped (their replies say so).
     closed: Cell<bool>,
+    /// Calls posted during a synchronous call from JS, waiting for the op
+    /// JS sent after the ones before it (`$post`), so they run in program
+    /// order with what those ops post.
+    parked: RefCell<FxHashMap<u64, JsCall>>,
+    next_parked: Cell<u64>,
 }
 
 enum Held {
@@ -463,6 +468,33 @@ impl Instances {
         self.0.closed.set(true);
         let calls = self.take_calls();
         drop(calls);
+        let parked = std::mem::take(&mut *self.0.parked.borrow_mut());
+        drop(parked);
+    }
+
+    /// Keeps `call` until [`Self::unpark`] (the `$post` op JS sends after
+    /// it): its id.
+    #[doc(hidden)]
+    pub fn park(&self, call: JsCall) -> u64 {
+        let id = self.0.next_parked.get() + 1;
+        self.0.next_parked.set(id);
+        self.0.parked.borrow_mut().insert(id, call);
+        id
+    }
+
+    /// Queues the call parked as `id` (its `$post` op applied).
+    #[doc(hidden)]
+    pub fn unpark(&self, id: u64) {
+        let call = self.0.parked.borrow_mut().remove(&id);
+        if let Some(call) = call {
+            self.post(call);
+        }
+    }
+
+    /// Drops the call parked as `id` (its op was not applied).
+    pub(crate) fn drop_parked(&self, id: u64) {
+        let call = self.0.parked.borrow_mut().remove(&id);
+        drop(call);
     }
 
     /// Whether JS calls are queued.
@@ -476,6 +508,12 @@ impl Instances {
         std::mem::take(&mut *self.0.calls.borrow_mut())
     }
 }
+
+/// The name of the op that queues a JS call parked during a synchronous
+/// call from JS (`nsh-js` sends it after the ops before the call;
+/// [`Instances::park`]).
+#[doc(hidden)]
+pub const POST: &str = "$post";
 
 /// The `held` list of an op: (argument index, id) pairs nsh-js writes
 /// beside the arguments, so the app's data cannot name a held id.
@@ -1095,6 +1133,56 @@ export declare class Token {
   dispose(): void;
   [Symbol.dispose](): void;
 }
+
+"#
+        );
+    }
+
+    /// Functions of the three kinds.
+    struct Tools;
+
+    #[module]
+    impl Tools {
+        /// The sum, at once.
+        fn sum(values: Vec<f64>) -> f64 {
+            values.iter().sum()
+        }
+
+        fn shout(text: String) {
+            let _ = text;
+        }
+
+        /// A promise of the length.
+        fn measure(text: String, cx: &mut ModuleCx) -> usize {
+            let _ = cx;
+            text.len()
+        }
+
+        async fn later(listener: Callback<i64, String>) -> Result<String, String> {
+            listener.call_async(1).await
+        }
+
+        /// Only where it is compiled.
+        #[cfg(any())]
+        fn nowhere() {}
+    }
+
+    #[test]
+    fn functions_without_a_context_return_their_values() {
+        let mut registry = Registry::ui_set("test/ui");
+        registry.module::<Tools>();
+        assert_eq!(
+            declarations(&registry, &[]),
+            r#"export interface ToolsModule {
+  /** The sum, at once. */
+  sum(values: (number)[]): number;
+  shout(text: string): void;
+  /** A promise of the length. */
+  measure(text: string): Promise<number>;
+  later(listener: (a: number) => string): Promise<string>;
+}
+
+export declare const Tools: ToolsModule;
 
 "#
         );

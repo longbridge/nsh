@@ -120,9 +120,61 @@ mod other {
     }
 }
 
+/// Functions of the three kinds.
+pub(crate) struct Tools;
+
+#[module]
+impl Tools {
+    /// Twice `n`, at once.
+    pub(crate) fn twice(n: f64) -> f64 {
+        n * 2.0
+    }
+
+    /// `text` back, as an op (a promise).
+    pub(crate) fn echo(text: String, cx: &mut ModuleCx) -> String {
+        let _ = cx;
+        text
+    }
+
+    /// What `question` answers to "name?".
+    pub(crate) async fn ask(question: Callback<String, String>) -> Result<String, String> {
+        question.call_async("name?".to_owned()).await
+    }
+
+    /// The count of `counter`, later.
+    pub(crate) async fn count_of(counter: Instance<Counter>) -> i64 {
+        timer(Duration::from_millis(1)).await;
+        counter.with(|c| c.count)
+    }
+
+    /// Posts "op" to `heard` when the op is applied.
+    pub(crate) fn post_op(heard: Callback<String>, cx: &mut ModuleCx) {
+        let _ = cx;
+        heard.post("op".to_owned());
+    }
+
+    /// Posts "sync" to `heard` in the call.
+    pub(crate) fn post_sync(heard: Callback<String>) {
+        heard.post("sync".to_owned());
+    }
+
+    /// An op that panics.
+    pub(crate) fn explode(cx: &mut ModuleCx) -> i64 {
+        let _ = cx;
+        panic!("op boom");
+    }
+
+    /// An op calling `f` on the spot (which panics: JS is not running in
+    /// an op).
+    pub(crate) fn call_in_op(f: Callback<(), i64>, cx: &mut ModuleCx) -> Result<i64, String> {
+        let _ = cx;
+        f.call(())
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::ui_set("test/classes");
-    r.class::<Counter>();
+    r.class::<Counter>().module::<Tools>();
     r
 }
 
@@ -235,6 +287,42 @@ fn async_members_run_as_tasks_and_resolve_with_their_results() {
          Counter.addLater: Illegal invocation: not a Counter|0.5,1 at 1|later 1|refused|rejected|\
          `Callback::call` runs the function inside a synchronous call from JS; elsewhere (in a \
          task) use `post` or `call_async`"
+    );
+}
+
+const FUNCTIONS: &str = r#"import { mount, signal, Text } from "nsh";
+import { Counter, Tools } from "test/classes";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const lines = [];
+  lines.push(String(Tools.twice(21)));
+  lines.push(await Tools.echo("op"));
+  lines.push(await Tools.ask((q) => `answer to ${q}`));
+  lines.push(String(await Tools.countOf(new Counter(7))));
+  // Posts arrive in program order: the op's before the call's after it.
+  const heard = [];
+  Tools.postOp((w) => heard.push(w));
+  Tools.postSync((w) => heard.push(w));
+  await new Promise((r) => setTimeout(r, 20));
+  lines.push(heard.join(","));
+  // A panic in an op rejects it; the engine goes on.
+  const msg = async (p) => { try { return String(await p); } catch (e) { return e.message; } };
+  lines.push(await msg(Tools.explode()));
+  lines.push((await msg(Tools.callInOp(() => 1))).split(";")[0]);
+  shown.set(`done ${lines.join("|")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn functions_run_in_the_call_as_ops_or_as_tasks() {
+    let (_engine, rx) = start(FUNCTIONS, vec![registry()]);
+    assert_eq!(
+        shown(&rx, "done"),
+        "done 42|op|answer to name?|7|op,sync|op boom|\
+         `Callback::call` runs the function inside a synchronous call from JS"
     );
 }
 
