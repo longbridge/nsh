@@ -38,12 +38,13 @@ nsh init my-app
 ```sh
 nsh init my-app --rust
 cd my-app
-cargo run
+nsh run            # --target ios、android、web、macos、linux、windows 或 gpui
+cargo run          # 同一个根组件，直接在桌面后端上运行
 ```
 
-`src/lib.rs` 包含界面、状态和事件处理函数，`src/main.rs` 在 macOS、Windows 或 Linux 上直接挂载 Rust 根组件。`App.tsx` 从 `app/native` 导入同一个根组件，提供 TSX 开发与交付入口，包括 iOS 和 Android 开发宿主。Rust 开发需要 Rust 工具链及桌面后端的开发库。TSX 的 Rust 组件命令使用 NSH 源码仓库，通过 CLI 所在的仓库或 `NSH_SOURCE` 定位；首次构建也会生成 `app/native` 的类型声明。
+`src/lib.rs` 包含界面、状态和事件处理函数，`nsh.json` 指定它的根组件（`"root": "App"`）：`nsh run` 和 `nsh package` 在所有平台（包括浏览器）上直接挂载它，不使用 QuickJS。`src/main.rs` 为 `cargo run` 在 macOS、Windows 或 Linux 上直接挂载同一个根组件。`App.tsx` 从 `app/native` 导入它：`nsh run App.tsx` 运行这个 TSX 入口，用于在 Rust 组件之上用 TSX 编写页面。Rust 开发需要 Rust 工具链（`cargo run` 还需要桌面后端的开发库）；`nsh` 命令从 NSH 源码仓库构建应用的运行器，通过 CLI 所在的仓库或 `NSH_SOURCE` 定位。
 
-两个入口和 Rust 引擎测试的用法见[CLI 参考](./cli.md#nsh-init)及仓库中的 `examples/gallery-rs`。
+详见[用 Rust 开发](./rust.md)、[CLI 参考](./cli.md#nsh-init)及仓库中的 `examples/gallery-rs`。
 
 ### 入口模块
 

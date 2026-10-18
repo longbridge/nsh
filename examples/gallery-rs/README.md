@@ -13,9 +13,13 @@ wide window (700 pt on desktops, 900 pt elsewhere) shows a sidebar of the demos 
 
 ```sh
 cargo build -p nsh-cli
-./target/debug/nsh run examples/gallery-rs --target ios   # or android, catalyst, web
-./target/debug/nsh package examples/gallery-rs --target web --run   # a static site, served and opened
+./target/debug/nsh run examples/gallery-rs --target web   # or ios, android, catalyst, macos, linux, windows, gpui
+./target/debug/nsh package examples/gallery-rs --target web --run   # a static site, served on this machine
+./target/debug/nsh run examples/gallery-rs/App.tsx        # the TSX entry instead (QuickJS)
 ```
+
+`nsh.json` names the root (`"root": "Gallery"`), so `nsh run` and `nsh package` of the directory mount `Gallery`
+with no QuickJS on every target: the app is Rust and native code from start to end (`website/docs/rust.md`).
 
 `nsh` builds the app its own command line and hosts with the crate linked in (`docs/dev/tooling.md`, "Apps with Rust
 components of their own"); editing the Rust code builds them again and restarts the app. On the web the crate is

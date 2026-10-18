@@ -325,7 +325,7 @@ struct PackageArgs {
     keystore_password: Option<String>,
     /// Install and launch the app in the simulator or on the Android device
     /// afterwards (Linux, macOS, Windows: launch it; web: serve it on this
-    /// machine and open it in the browser).
+    /// machine at the address it prints).
     #[arg(long)]
     run: bool,
 }
@@ -390,6 +390,22 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     }
     if types && let Some(entry) = command.entry_mut() {
         init::write_types_for(entry);
+    }
+    // A Rust app (`nsh.json` "root") has no bundle: it is packaged and run.
+    let packaged_or_run = matches!(command, Command::Package(_) | Command::Run { .. });
+    if let Some(entry) = command.entry_mut()
+        && rust_app::is_root(entry)
+    {
+        if !packaged_or_run {
+            anyhow::bail!(
+                "{} declares a Rust app (\"root\"): it is run with `nsh run` and packaged with `nsh package`; \
+                 pass its TSX entry (App.tsx) for the other commands",
+                ui::path(entry)
+            );
+        }
+        if rust_app::current().is_none() {
+            anyhow::bail!("nsh.json: \"root\" needs \"rust\", the path of the app's crate");
+        }
     }
     dispatch(command)
 }

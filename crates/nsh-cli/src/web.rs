@@ -32,7 +32,6 @@ use std::{
     fs,
     net::SocketAddr,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     time::Duration,
 };
 
@@ -71,8 +70,8 @@ const DIGEST_LEN: usize = 10;
 /// Ports `--run` tries first (the next free one is used).
 const PORT: u16 = 4173;
 
-/// Writes the site `<out>/<name>/` and, with `--run`, serves it and opens
-/// it in the browser.
+/// Writes the site `<out>/<name>/` and, with `--run`, serves it on this
+/// machine (the address is printed for the user to open).
 pub(crate) fn package(
     options: &PackageOptions<'_>,
     config: &AppConfig,
@@ -110,10 +109,16 @@ pub(crate) fn package(
         "nsh.wasm",
         &fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?,
     )?;
-    let code = site.add(&format!("{}.{}", CODE.0, CODE.1), &built.bytecode)?;
-    // The runtime cannot compile its hardening: it comes compiled by the
-    // QuickJS that compiled the app.
-    let harden = site.add("harden.nshc", &nsh_js::compile_harden()?)?;
+    // A Rust app has no code of its own besides its runtime (no QuickJS):
+    // the page mounts its root.
+    let (code, harden) = if built.rust_root {
+        (String::new(), String::new())
+    } else {
+        let code = site.add(&format!("{}.{}", CODE.0, CODE.1), &built.bytecode)?;
+        // The runtime cannot compile its hardening: it comes compiled by
+        // the QuickJS that compiled the app.
+        (code, site.add("harden.nshc", &nsh_js::compile_harden()?)?)
+    };
     // Chunk id -> URL: the page hands the map to the runtime, which fetches
     // a chunk the first time the app imports it (nothing is preloaded).
     let mut chunks = serde_json::Map::new();
@@ -147,6 +152,7 @@ pub(crate) fn package(
         "code": code,
         "harden": harden,
         "capabilities": built.capabilities_json(),
+        "rust": built.rust_root,
         "assets": assets,
         "fonts": fonts,
         "chunkFonts": chunk_fonts,
@@ -180,7 +186,7 @@ pub(crate) fn package(
 }
 
 /// Serves the site `dir` on this machine, as a CDN would (`nsh_dev::SiteServer`),
-/// opens it in the browser and serves until stopped.
+/// until stopped; prints its address.
 fn serve(dir: &Path) -> anyhow::Result<()> {
     let mut server = None;
     for port in (PORT..PORT + 10).chain([0]) {
@@ -194,35 +200,11 @@ fn serve(dir: &Path) -> anyhow::Result<()> {
     let server = server.context("no free port to serve the site on")?;
     let url = format!("http://127.0.0.1:{}/", server.local_addr().port());
     ui::note(format!("serving {} at {url}", ui::path(dir)));
-    open_browser(&url);
     let _stoppable = ui::Stoppable::new();
     while !ui::stop_requested() {
         std::thread::sleep(Duration::from_millis(200));
     }
     Ok(())
-}
-
-/// Opens `url` in the default browser; says so when it cannot.
-pub(crate) fn open_browser(url: &str) {
-    let mut command = if cfg!(target_os = "macos") {
-        Command::new("open")
-    } else if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.args(["/C", "start", ""]);
-        c
-    } else {
-        Command::new("xdg-open")
-    };
-    let opened = command
-        .arg(url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .is_ok();
-    if !opened {
-        ui::warn(format!("cannot open a browser: open {url}"));
-    }
 }
 
 /// The first [`DIGEST_LEN`] hex digits of the SHA-256 of `bytes`.
@@ -244,7 +226,9 @@ pub(crate) type Files = Vec<(String, Vec<u8>)>;
 /// page was served with: an app with Rust components of its own gets a new
 /// one when its Rust code changes (the session starts again), and a page
 /// that reconnects to a server with another one loads again.
-pub(crate) fn dev_host(runtime: &WebRuntime) -> anyhow::Result<(String, Files)> {
+/// `rust`: a Rust app's runtime (`nsh.json` `"root"`), whose page runs its
+/// root rather than the bundles the server sends.
+pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(String, Files)> {
     let read = |path: &Path| fs::read(path).with_context(|| format!("read {}", path.display()));
     let ui_sets = serde_json::to_string(&ui_sets())?;
     let js = read(&runtime.js)?;
@@ -256,7 +240,8 @@ pub(crate) fn dev_host(runtime: &WebRuntime) -> anyhow::Result<(String, Files)> 
             &nsh_dev::protocol::PROTOCOL_VERSION.to_string(),
         )
         .replace("{{ui_sets}}", &ui_sets)
-        .replace("{{runtime}}", &serde_json::to_string(&version)?);
+        .replace("{{runtime}}", &serde_json::to_string(&version)?)
+        .replace("{{rust}}", if rust { "true" } else { "false" });
     Ok((
         page,
         vec![
@@ -553,6 +538,7 @@ fn page(parts: &PageParts<'_>) -> String {
     // The script asks for these only once the runtime has loaded.
     for url in [parts.wasm, parts.code, parts.harden]
         .into_iter()
+        .filter(|url| !url.is_empty())
         .chain(parts.fonts.iter().map(String::as_str))
     {
         let _ = writeln!(
@@ -635,7 +621,7 @@ mod tests {
         };
         fs::write(&runtime.js, "js").unwrap();
         fs::write(&runtime.wasm, "one").unwrap();
-        let (page, files) = dev_host(&runtime).unwrap();
+        let (page, files) = dev_host(&runtime, false).unwrap();
         let version = |files: &Files| {
             let (_, bytes) = files.iter().find(|(p, _)| p == "nsh.version").unwrap();
             String::from_utf8(bytes.clone()).unwrap()
@@ -649,7 +635,13 @@ mod tests {
         assert!(!page.contains("{{"), "{page}");
         assert!(page.contains("const UI_SETS = [\"nsh/ui/mobile\"];"));
         fs::write(&runtime.wasm, "two").unwrap();
-        assert_ne!(version(&dev_host(&runtime).unwrap().1), first);
+        assert_ne!(version(&dev_host(&runtime, false).unwrap().1), first);
+        assert!(
+            dev_host(&runtime, true)
+                .unwrap()
+                .0
+                .contains("const RUST = true;")
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

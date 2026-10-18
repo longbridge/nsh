@@ -45,7 +45,7 @@ requestAnimationFrame ───────────┘                      
 
 ```sh
 nsh package App.tsx --target web           # out/<Name>/：一个静态站点
-nsh package App.tsx --target web --run     # 并在本机提供服务，在浏览器中打开
+nsh package App.tsx --target web --run     # 并在本机提供服务（打开它打印的地址）
 ```
 
 `nsh package --target web` 写出 `out/<Name>/`（用 `--out` 指定其他目录），结构与前端构建产物相同：一个页面，其余文件都以内容命名。
@@ -92,30 +92,32 @@ Web 上没有嵌入 API：用 `<iframe>` 嵌入已发布的应用，它的尺寸
 nsh run App.tsx --target web
 ```
 
-会启动开发服务器，并在浏览器中打开它的页面 `http://127.0.0.1:8790/`。这个页面和其他开发宿主一样：运行应用的每次构建，就地应用修改（热更新），在应用上方显示构建错误和运行时错误，并把应用的 `console` 输出发送到终端。同一网络中的手机打开 `nsh run` 打印的地址（`browsers on this network: http://192.168.…:8790/`）即可。只要 Web 运行时存在（发行包中总是存在），`nsh dev` 也会提供同一个页面。
+会启动开发服务器，并打印它的页面地址 `http://127.0.0.1:8790/`，在任意浏览器中打开即可。这个页面和其他开发宿主一样：运行应用的每次构建，就地应用修改（热更新），在应用上方显示构建错误和运行时错误，并把应用的 `console` 输出发送到终端。同一网络中的手机打开 `nsh run` 在其下方打印的地址（`on this network: http://192.168.…:8790/`）即可。只要 Web 运行时存在（发行包中总是存在），`nsh dev` 也会提供同一个页面。
 
 ## 带 Rust 组件的应用
 
-`nsh.json` 中指定了 Rust crate（`"rust"`，`nsh init --rust` 和 [`examples/gallery-rs`](https://github.com/longbridge/nsh/tree/main/examples/gallery-rs)
-就是这样）的应用，用同样的命令发布和在浏览器中运行：
+用 Rust 编写的应用（[用 Rust 开发](./rust.md)）用同样的命令发布和在浏览器中运行：
 
 ```sh
-nsh package --target web           # out/<Name>/，crate 编译进 nsh.wasm
+nsh package --target web           # out/<Name>/：应用自己的 nsh.wasm，包含它的 crate
 nsh run --target web               # 开发服务器的页面；修改 Rust 代码会重新构建
 ```
 
-NSH 会为应用构建它自己的运行时：crate 的组件、模块和资源与引擎一起编译成 WebAssembly，所以页面运行的是与原生宿主相同的
-Rust 代码，TSX 入口也像在其他平台上一样导入 crate 的 UI 集合。crate 的资源（`assets!()`）随应用的资源一起发布，其中的字体在第一帧之前加载。
-`nsh run --target web` 期间，修改 crate 的 Rust 代码会重新构建运行时，已打开的页面会自动加载新的运行时；TSX 的修改仍然是热更新。
+当 `nsh.json` 指定了应用的根组件（`"root"`）时，页面只包含应用的 Rust 代码和 NSH 的页面脚本：`nsh.wasm` 包含引擎、组件和应用的
+crate，不含 QuickJS；站点里没有 `app.nshc` 和 `harden.nshc`；运行时和字体加载完后，页面直接挂载根组件。整个 Rust gallery 为
+3.3 MB（gzip 后 1.06 MB，brotli 后 0.75 MB），比 TSX 应用的运行时还小。通过 TSX 入口（`nsh package App.tsx --target web`）时，
+同一个应用像 TSX 应用一样运行在 QuickJS 上，并导入 crate 的组件和模块。
+
+两种方式下，crate 的资源（`assets!()`）都会随应用的资源一起发布，其中的字体在第一帧之前加载。`nsh run --target web`
+期间，修改 crate 的 Rust 代码会重新构建运行时，已打开的页面会自动加载新的运行时；TSX 的修改仍然是热更新。
 
 要在包括 Web 在内的所有平台上运行的 Rust 代码，使用引擎提供的服务：`fetch(url).await` 通过与 JS `fetch` 相同的网络栈发出 HTTP
-请求（这里是浏览器的网络栈，遵循它的 CORS 规则），并受相同的[能力声明](./sandbox-and-capabilities.md)约束；`timer`、`set_timeout`
-和 `set_interval` 用于等待；`nsh_core::time::Instant` 和 `nsh_core::time::unix_ms()` 读取时钟。`background` 和 `blocking`
-在原生目标的线程上运行任务。
+请求（这里是浏览器的网络栈，遵循它的 CORS 规则）；`timer`、`set_timeout` 和 `set_interval` 用于等待；`nsh_core::time::Instant`
+和 `nsh_core::time::unix_ms()` 读取时钟。`background` 和 `blocking` 在原生目标的线程上运行任务。
 
 构建需要 Rust 的目标和能编译到 WebAssembly 的 clang，与运行时本身的构建相同：`rustup target add wasm32-unknown-unknown`，
 以及 `clang` 和 `llvm-ar`（macOS 上使用 LLVM 工具链，例如 Homebrew 的 `llvm`，通过 `CC_wasm32_unknown_unknown` 和
-`AR_wasm32_unknown_unknown` 指定）。crate 的代码会计入 `nsh.wasm`：整个 Rust gallery 让它变为 5.3 MB（brotli 压缩后 1.3 MB）。
+`AR_wasm32_unknown_unknown` 指定）。
 
 ## 构建本站的播放器
 

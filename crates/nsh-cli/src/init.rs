@@ -63,6 +63,9 @@ pub(crate) fn init(dir: &Path, name: Option<String>, rust: bool) -> anyhow::Resu
     });
     if rust {
         config["rust"] = ".".into();
+        // A Rust app: `nsh run` / `nsh package` mount this root with no JS
+        // runtime; `nsh run App.tsx` runs the TSX entry instead.
+        config["root"] = "App".into();
     }
     let mut files = vec![
         ("App.tsx", if rust { RUST_APP } else { APP }.to_owned()),
@@ -280,6 +283,7 @@ mod tests {
         let config: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join("nsh.json")).unwrap()).unwrap();
         assert_eq!(config["rust"], ".");
+        assert_eq!(config["root"], "App");
         assert_eq!(config["name"], "123 My App");
         assert!(
             fs::read_to_string(dir.join("Cargo.toml"))

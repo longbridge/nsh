@@ -91,6 +91,9 @@ pub(crate) struct AppConfig {
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde::de::IgnoredAny>,
+    /// A Rust app's root component in its crate (`rust_app::RootConfig`).
+    #[serde(default, rename = "root")]
+    _root: Option<serde::de::IgnoredAny>,
 }
 
 /// Options of `nsh package`.
@@ -157,13 +160,19 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     };
 
     // Web apps load what `import()` brings in when it is used; native
-    // packages are one bundle.
-    let compile = match options.target {
-        PackageTarget::Web => crate::build::compile_split,
-        _ => crate::build::compile,
+    // packages are one bundle. A Rust app has none: its runner mounts its
+    // root (`rust_app::RustApp::runtime`).
+    let built = if crate::rust_app::is_root(&entry) {
+        crate::build::rust_root()
+    } else {
+        let compile = match options.target {
+            PackageTarget::Web => crate::build::compile_split,
+            _ => crate::build::compile,
+        };
+        let built = compile(&entry, true).map_err(|e| e.into_error(&entry))?;
+        ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
+        built
     };
-    let built = compile(&entry, true).map_err(|e| e.into_error(&entry))?;
-    ui::done(format!("built {} {}", ui::path(&entry), built.summary("")));
     // GPUI apps are packaged as this OS's native ones, with another runner.
     let (target, runner) = match options.target {
         PackageTarget::Gpui => (
@@ -219,7 +228,10 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     fs::create_dir_all(&resources)?;
     fs::copy(&runner, app.join(&executable))
         .with_context(|| format!("copy {}", runner.display()))?;
-    fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
+    // A Rust app has no bundle: the runner mounts its root.
+    if !built.rust_root {
+        fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
+    }
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
@@ -316,7 +328,12 @@ fn package_android(
     use crate::android::{self, Apk, Signing};
     let sdk = android::Sdk::find()?;
     let runtime = runtime::android(false)?;
-    let mut assets = vec![("nsh/bundle.nshc".to_owned(), built.bytecode.clone())];
+    // A Rust app has no bundle: `AppActivity` runs its root (the
+    // manifest's `com.longbridge.nsh.RUST`).
+    let mut assets = Vec::new();
+    if !built.rust_root {
+        assets.push(("nsh/bundle.nshc".to_owned(), built.bytecode.clone()));
+    }
     if let Some(json) = built.capabilities_json() {
         assets.push(("nsh/capabilities.json".to_owned(), json.into_bytes()));
     }
@@ -348,6 +365,7 @@ fn package_android(
             version_code: config.build.unwrap_or(1),
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            rust: built.rust_root,
             dark: config.appearance.as_deref() == Some("dark"),
             runtime: &runtime,
             icon: config.icon.as_deref(),
@@ -408,7 +426,10 @@ fn package_linux(
     fs::create_dir_all(&resources)?;
     fs::copy(&runner, dir.join(executable))
         .with_context(|| format!("copy {}", runner.display()))?;
-    fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
+    // A Rust app has no bundle: the runner mounts its root.
+    if !built.rust_root {
+        fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
+    }
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
@@ -500,7 +521,10 @@ fn package_macos(
     fs::create_dir_all(&nsh)?;
     fs::copy(&runner, macos.join(executable))
         .with_context(|| format!("copy {}", runner.display()))?;
-    fs::write(nsh.join("bundle.nshc"), &built.bytecode)?;
+    // A Rust app has no bundle: the runner mounts its root.
+    if !built.rust_root {
+        fs::write(nsh.join("bundle.nshc"), &built.bytecode)?;
+    }
     if let Some(json) = built.capabilities_json() {
         fs::write(nsh.join("capabilities.json"), json)?;
     }

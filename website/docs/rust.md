@@ -1,0 +1,153 @@
+---
+title: Building with Rust
+description: Write a Native Shell app entirely in Rust, with no QuickJS on any platform, or in Rust with TSX screens on top: when to choose which, and how the two share components and modules.
+order: 5.5
+group: start
+---
+
+# Building with Rust
+
+Native Shell apps are written in TSX, in Rust, or in both. All three run on the same engine: the reactive graph, the
+renderer, Taffy layout and the `nsh/ui/mobile` components are Rust in every case, and every platform renders with its
+own UI. What differs is the language of your own code, and with it whether the app carries a JavaScript VM.
+
+| | TSX | Rust | Rust with TSX |
+|---|---|---|---|
+| Your UI, state and handlers | TSX on QuickJS | Rust | Rust components and modules, TSX screens that use them |
+| The app runs | QuickJS and the engine | the engine and your crate only, on every platform and in the browser | QuickJS and the engine, with your crate |
+| Suits | Apps and modules delivered at run time, quick iteration | Medium and large apps with demanding business logic | A Rust core with parts that change often |
+| Edits | Hot updates | Rebuild and restart | Hot updates for TSX, rebuild and restart for Rust |
+| Start | `nsh init my-app` | `nsh init my-app --rust` | `nsh init my-app --rust`, then `nsh run App.tsx` |
+
+## Choosing
+
+**Rust** suits apps whose business logic is large and demanding: trading, editors, data-heavy tools. You get Rust's
+type system and compile-time checks across the whole app, the crates.io ecosystem, native performance for your own
+code (not only for NSH's), and headless tests of the real UI with `cargo test`. The app is Rust and native code from
+start to end: no JavaScript VM ships with it or runs in it, on iOS, Android, macOS, Windows, Linux, GPUI and the web.
+Components are functions that run once and bind signals to what they show, as in TSX ([Reactivity](./reactivity.md)),
+written with typed styles instead of class strings.
+
+**Rust with TSX** keeps that core and adds TSX where it pays off: screens, settings, onboarding, experiments,
+anything you iterate on with hot updates or deliver at run time as a [signed package](./signed-packages.md). TSX
+imports your Rust components and modules like any NSH module, so the two halves meet at typed interfaces. The TSX
+runs on QuickJS, which the app then carries.
+
+## An app written in Rust
+
+```sh
+nsh init my-app --rust
+cd my-app
+nsh run                        # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
+nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows, gpui
+```
+
+`src/lib.rs` holds the app: components, state, handlers, tasks.
+
+```rust
+use nsh_core::ui::prelude::*;
+use nsh_ui_mobile::{Button, ButtonEvent, ButtonProps};
+
+/// The components available to TSX through `app/native`.
+#[native_module("app/native")]
+fn native(registry: &mut Registry) {
+    registry.register::<App>();
+}
+
+#[component]
+pub fn App() -> impl IntoElement {
+    let count = signal(0_u32);
+    let quote = signal(SharedString::from("…"));
+    // Async work runs in tasks; requests go through NSH's network stack.
+    spawn(async move {
+        if let Ok(response) = fetch("https://api.example.com/quote").await {
+            quote.set(response.text().into());
+        }
+    });
+    view()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .gap_4()
+        .child(text(move || format!("Count: {}", count.get())))
+        .child(text(quote))
+        .child(
+            Button::element(ButtonProps { title: "Tap".into(), ..ButtonProps::default() })
+                .on_event(move |_: &ButtonEvent| count.update(|c| *c += 1)),
+        )
+}
+```
+
+`nsh.json` names the root, and `nsh` mounts it:
+
+```json
+{
+  "name": "My App",
+  "rust": ".",
+  "root": "App",
+  "theme": "theme.json",
+  "appearance": "system"
+}
+```
+
+`"root"` is the component's path in the crate (`App`, `shell::Gallery`); `"theme"` and `"appearance"` apply to it as
+they do to a TSX app. With it, `nsh run` and `nsh package` of the app's directory build the app's own runner for the
+target, with the root mounted and no QuickJS linked in:
+
+| Target | What runs |
+|---|---|
+| macOS, Windows, Linux, GPUI | The release runner with your crate, in a window; `nsh run` runs a debug build and shows the app's logs in the terminal |
+| iOS, the iOS simulator, Mac Catalyst | The iOS runner with your crate, in an app |
+| Android | The app's `libnsh.so` with your crate, started by the runtime's activity |
+| Web | `nsh.wasm` with the engine and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli); the page mounts the root |
+
+During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app; in the browser,
+the open page loads the new runtime by itself. `cargo run` starts the same root directly on the desktop backend
+(`src/main.rs`), and native apps that embed NSH mount a Rust root with `AppSource::Rust` on the `AppView` of macOS,
+Windows, Linux, GPUI and iOS.
+
+Code for every platform, the web included, uses NSH's services: `fetch` for HTTP
+([Networking](./networking.md#from-rust-components)), `timer`, `set_timeout` and `set_interval` for waiting,
+`nsh_core::time::Instant` and `nsh_core::time::unix_ms()` for the clock. `background` and `blocking` run work on the
+native targets' threads.
+
+## Extending a Rust app with TSX
+
+The crate's `#[native_module("app/native")]` function names what TSX may import: components
+(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, a `#[module]` `impl`) and
+assets. Their TypeScript declarations are generated from the Rust types into `.nsh/types`, so TSX is checked against
+them by `nsh check` and your editor:
+
+```tsx
+import { mount, signal, View, Text } from "nsh";
+import { Chart, Portfolio } from "app/native";   // Rust
+
+function Overview() {
+  const total = signal(0);
+  Portfolio.total().then((value) => total.set(value));   // a Rust function: a Promise in TSX
+  return (
+    <View className="p-4 gap-2">
+      <Text>Total: {total()}</Text>
+      <Chart symbol="NSH" range="1M" onSelect={(e) => console.log(e.price)} />
+    </View>
+  );
+}
+
+mount(() => <Overview />);
+```
+
+Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
+both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
+events. Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
+updates, Rust edits rebuild and restart the app.
+
+`examples/gallery-rs` in the repository is a complete Rust app with both entries: every demo is Rust,
+`nsh run examples/gallery-rs --target web` (or `ios`, `android`, …) runs its root, `cargo run -p gallery-native`
+starts it on the desktop backend, and `nsh run examples/gallery-rs/App.tsx` runs it under its TSX entry.
+
+## See also
+
+- [Project structure](./project-structure.md): every key of `nsh.json`.
+- [Web](./web.md#apps-with-rust-components): Rust apps in the browser.
+- [Networking](./networking.md#from-rust-components): `fetch` from Rust.
+- [CLI](./cli.md#nsh-init): `nsh init --rust`.

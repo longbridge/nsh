@@ -172,7 +172,7 @@ cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gp
 ./target/debug/nsh run examples/gallery --target gpui                      # in a GPUI window (macOS, Windows, Linux)
 ./target/debug/nsh package examples/gallery --target gpui                  # packaged as this OS's apps are, with the GPUI runner
 ./target/debug/nsh run examples/gallery --target web                       # in the browser (the dev server serves the page)
-./target/debug/nsh package examples/gallery --target web --run             # a static site (files named by content), served and opened
+./target/debug/nsh package examples/gallery --target web --run             # a static site (files named by content), served on this machine
 ./target/debug/nsh package examples/gallery --target ios-simulator --run   # installable app (.app / .ipa / .apk)
 cargo xtask android [--release] [--dev]                                            # Android runtime into target/android/<profile>[-dev]
 cargo xtask dist                                                                   # the distribution in dist/nsh

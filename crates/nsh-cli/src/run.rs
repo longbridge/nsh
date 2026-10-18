@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
-use crate::{dev::DevSession, ui};
+use crate::{dev::DevSession, runtime::Platform, ui};
 
 const APP_NAME: &str = "NshDev";
 const BUNDLE_ID: &str = "com.longbridge.nsh.host";
@@ -92,6 +92,9 @@ pub(crate) fn run(
         .parent()
         .context("entry has no directory")?
         .join(".nsh");
+    if crate::rust_app::is_root(entry) {
+        return run_rust_app(entry, port, target, device, &work);
+    }
     if target == Target::Android {
         return run_android(entry, port, release, &work, trace);
     }
@@ -114,8 +117,8 @@ pub(crate) fn run(
         | Target::Web
         | Target::Gpui => None,
     };
+    // The host it starts connects by itself: no addresses to show.
     let session = DevSession::start(entry, port, release)?;
-    session.print_urls();
     let host = crate::runtime::file(target.platform(), false)?;
     let mut args = vec!["--dev-server".to_owned(), session.local_url()];
     if trace {
@@ -194,20 +197,199 @@ pub(crate) fn run(
     }
 }
 
-/// Starts a dev session that serves the web host and opens it in the
-/// browser; every browser that opens the page (on this machine or, at the
-/// LAN address, on a phone) runs the app until the session ends.
+/// Starts a dev session that serves the web host and prints its address;
+/// every browser that opens the page (on this machine or, at the LAN
+/// address, on a phone) runs the app until the session ends. The browser
+/// is the user's to open: a session that starts again (the app's Rust code
+/// changed) finds its page still open, and it reloads by itself.
 fn run_web(entry: &Path, port: u16, release: bool) -> anyhow::Result<()> {
     // Built first in a checkout: the session serves the runtime it finds.
     crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
     let session = DevSession::start(entry, port, release)?;
-    session.print_urls();
-    // After a change of the app's Rust code the page that is open loads
-    // the new runtime itself (`web::dev_host`).
-    if !crate::rust_app::restarted() {
-        crate::web::open_browser(&session.web_url());
-    }
+    session.print_web_url();
     session.watch(|| Ok(false))
+}
+
+/// Runs a Rust app (`nsh.json` `"root"`): its own runner, with no JS
+/// runtime, mounts its root. Desktops run the debug runner in place (its
+/// output in this terminal), Catalyst in an app bundle, the iOS simulator
+/// and Android a package of it, the web the dev server's page. A change to
+/// the app's Rust code ends the command with [`crate::rust_app::Restart`]:
+/// `nsh` builds it again and runs it anew.
+fn run_rust_app(
+    entry: &Path,
+    port: u16,
+    target: Target,
+    device: Option<&str>,
+    work: &Path,
+) -> anyhow::Result<()> {
+    let app =
+        crate::rust_app::current().context("nsh.json: \"root\" needs \"rust\", the app's crate")?;
+    let entry = dunce::canonicalize(entry)?;
+    let config = crate::package::read_config(&entry)?;
+    let (name, id) = crate::package::name_and_id(&entry, &config);
+    let built = crate::build::rust_root();
+    // The package's `nsh` directory for the runners that run in place:
+    // the crates' assets and the window's name, id and appearance.
+    let resources = |dir: &Path| -> anyhow::Result<()> {
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+        }
+        for asset in &built.assets {
+            let dest = dir.join("assets").join(&asset.path);
+            fs::create_dir_all(dest.parent().context("asset dir")?)?;
+            fs::copy(&asset.source, &dest).with_context(|| format!("copy {}", asset.path))?;
+        }
+        fs::create_dir_all(dir)?;
+        let mut info = serde_json::json!({ "name": name, "id": id });
+        if let Some(appearance) = &config.appearance {
+            info["appearance"] = appearance.as_str().into();
+        }
+        fs::write(dir.join("app.json"), info.to_string())?;
+        Ok(())
+    };
+    let run = work.join("rust");
+    match target {
+        Target::Linux | Target::Macos | Target::Windows | Target::Gpui => {
+            let runner = crate::runtime::file(target.platform(), false)?;
+            let dir = run.join("run/nsh");
+            resources(&dir)?;
+            let mut command = Command::new(&runner);
+            command.env("NSH_APP_DIR", &dir);
+            if cfg!(target_os = "macos") {
+                // A runner that crashed must not ask to reopen its windows.
+                command.args(["-ApplePersistenceIgnoreState", "YES"]);
+            }
+            ui::done(format!(
+                "running {name} ({})",
+                ui::dim("Rust, no JS runtime")
+            ));
+            run_rust_local(&app, &mut command)
+        }
+        Target::Catalyst => {
+            let runner = crate::runtime::file(Platform::MacCatalyst, false)?;
+            let bundle = package_catalyst(&run.join("catalyst"), &runner)?;
+            let macos = bundle.join("Contents/MacOS");
+            // The iOS runner looks next to itself.
+            resources(&macos.join("nsh"))?;
+            let mut command = Command::new(macos.join("nsh-ios-host"));
+            command
+                .env("NSH_DEVELOPMENT", "1")
+                .args(["-ApplePersistenceIgnoreState", "YES"]);
+            ui::done(format!(
+                "running {name} ({})",
+                ui::dim("Rust, no JS runtime")
+            ));
+            run_rust_local(&app, &mut command)
+        }
+        Target::Ios => {
+            let udid = simulator(device)?;
+            let out = run.join("ios");
+            package_for_run(
+                &entry,
+                crate::package::PackageTarget::IosSimulator,
+                &out,
+                config,
+            )?;
+            let bundle = out.join(format!("{name}.app"));
+            let step = ui::Step::start(format!("installing {id} in the simulator"));
+            simctl(&["install", &udid, &bundle.to_string_lossy()])?;
+            step.finish();
+            // Its output (the app's logs) in this terminal while it runs.
+            let mut command = Command::new("xcrun");
+            command
+                .args([
+                    "simctl",
+                    "launch",
+                    "--console-pty",
+                    "--terminate-running-process",
+                ])
+                .args([&udid, &id])
+                .env("SIMCTL_CHILD_NSH_DEVELOPMENT", "1");
+            let result = run_rust_local(&app, &mut command);
+            let _ = simctl(&["terminate", &udid, &id]);
+            result
+        }
+        Target::Android => {
+            use crate::android;
+            let sdk = android::Sdk::find()?;
+            let serial = android::device(&sdk)?;
+            let out = run.join("android");
+            package_for_run(&entry, crate::package::PackageTarget::Android, &out, config)?;
+            let apk = out.join(format!("{name}.apk"));
+            let step = ui::Step::start(format!("installing {id} on {serial}"));
+            android::adb(&sdk, &serial, &["install", "-r", &apk.to_string_lossy()])?;
+            android::adb(
+                &sdk,
+                &serial,
+                &[
+                    "shell",
+                    "am",
+                    "start",
+                    "-S",
+                    "-n",
+                    &format!("{id}/com.longbridge.nsh.AppActivity"),
+                ],
+            )?;
+            step.done(format!("launched {id} on {serial}"));
+            let _stoppable = ui::Stoppable::new();
+            let result = app.watch(|| Ok(false));
+            let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", &id]);
+            result
+        }
+        Target::Web => {
+            crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
+            let session = DevSession::start(&entry, port, false)?;
+            session.print_web_url();
+            session.watch(|| Ok(false))
+        }
+    }
+}
+
+/// Packages the Rust app at `entry` for `target` into `out` (as `nsh
+/// package` does), for `nsh run` to install.
+fn package_for_run(
+    entry: &Path,
+    target: crate::package::PackageTarget,
+    out: &Path,
+    config: crate::package::AppConfig,
+) -> anyhow::Result<()> {
+    crate::package::package(crate::package::PackageOptions {
+        entry,
+        target,
+        out,
+        config,
+        sign: None,
+        profile: None,
+        keystore: None,
+        run: false,
+    })
+}
+
+/// Runs `command` (a Rust app's runner, its output in this terminal) until
+/// it ends or the app's Rust code changes.
+fn run_rust_local(app: &crate::rust_app::RustApp, command: &mut Command) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .spawn()
+        .with_context(|| format!("launch {}", command.get_program().to_string_lossy()))?;
+    #[cfg(windows)]
+    let _job = KillOnClose::assign(&child);
+    let stoppable = ui::Stoppable::new();
+    let result = app.watch(|| match child.try_wait()? {
+        Some(status) if status.success() => Ok(true),
+        Some(status) => bail!("the app exited with {status}"),
+        None => Ok(false),
+    });
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(stoppable);
+    result
 }
 
 /// Runs `command`, a host in a window on this machine, until its window
@@ -312,7 +494,6 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, port, release)?;
-    session.print_urls();
     let runtime = crate::runtime::android(true)?;
     let apk_path = work.join("android/NshDev.apk");
     fs::create_dir_all(apk_path.parent().context("apk dir")?)?;
@@ -336,6 +517,7 @@ fn run_android(
                 version_code: 1,
                 activity: "com.longbridge.nsh.DevActivity",
                 dev: true,
+                rust: false,
                 dark: false,
                 runtime: &runtime,
                 icon: None,

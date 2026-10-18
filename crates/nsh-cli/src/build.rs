@@ -53,6 +53,25 @@ pub(crate) struct Built {
     pub(crate) ui_sets: Vec<String>,
     /// How long bundling and compiling took.
     pub(crate) elapsed: Duration,
+    /// A Rust app (`nsh.json` `"root"`, [`rust_root`]): no bundle, its
+    /// runners mount its root.
+    pub(crate) rust_root: bool,
+}
+
+/// What a Rust app (`nsh.json` `"root"`) ships besides its runner: the
+/// files its crates register (no bundle: the runner mounts the root).
+pub(crate) fn rust_root() -> Built {
+    Built {
+        code: String::new(),
+        bytecode: Vec::new(),
+        source_map: None,
+        chunks: Vec::new(),
+        assets: crate_assets().collect(),
+        capabilities: None,
+        ui_sets: Vec::new(),
+        elapsed: Duration::ZERO,
+        rust_root: true,
+    }
 }
 
 /// A chunk of a split build: app code `import()` loads on demand.
@@ -207,6 +226,7 @@ fn compile_with(entry: &Path, release: bool, split: bool) -> Result<Built, Build
         capabilities: bundle.capabilities,
         ui_sets: imported_sets(&bundle.natives),
         elapsed: start.elapsed(),
+        rust_root: false,
     })
 }
 
@@ -229,6 +249,7 @@ pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle
         capabilities: hot.capabilities.clone(),
         ui_sets: imported_sets(hot.natives()),
         elapsed: start.elapsed(),
+        rust_root: false,
     };
     Ok((built, hot))
 }

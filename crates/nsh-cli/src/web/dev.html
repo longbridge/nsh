@@ -37,6 +37,9 @@
   // app's Rust code changed and its runtime was built again) loads the
   // page again.
   const RUNTIME = {{runtime}};
+  // A Rust app (`nsh.json` "root"): the runtime mounts its root; there are
+  // no bundles. A change to its Rust code makes another runtime (above).
+  const RUST = {{rust}};
   const status = document.getElementById("status");
   const problem = document.getElementById("problem");
   const decoder = new TextDecoder();
@@ -160,6 +163,10 @@
         case "hello":
           session = message.session ?? 0;
           showStatus("");
+          if (RUST && !running) {
+            running = { session, version: 0 };
+            player.runRust();
+          }
           break;
         case "building":
           showStatus("Building…");

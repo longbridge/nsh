@@ -67,10 +67,10 @@ build to the same file) and takes `nsh.js` from the crate.
   (`build::compile_split`): each chunk is written as `chunks/<name>.<digest>.nshc` (its bytecode) and the page's `chunks` maps its id to
   that URL; nothing preloads them, the runtime fetches one the first time `import()` needs it. An app with a Rust crate of
   its own gets a runtime of its own ("Apps with Rust components"). `--run` serves the directory with `nsh_dev::SiteServer` (the cache headers a CDN should send) and
-  opens the browser.
+  prints its address.
 - **The development host** is a page the dev server serves (`DevServer::serve_web`: the page at `/`, `nsh.js` and
   `nsh.wasm` next to it, all `no-cache`), from `crates/nsh-cli/src/web/dev.html`. `nsh dev` serves it whenever a web
-  runtime exists (`runtime::web(false)`), `nsh run --target web` builds one first and opens the browser. The page
+  runtime exists (`runtime::web(false)`), `nsh run --target web` builds one first and prints the page's address (the user opens it). The page
   speaks the dev protocol over the same port's WebSocket: its hello has platform `web` and an empty
   `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it applies
   patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
@@ -158,12 +158,23 @@ crate's assets, the dev server) already knows the set, as the app's command line
 in its hello) are the command line's own (`crate::ui_sets`). The dev host's files include `nsh.version` (a digest of
 `nsh.js` and the wasm), which `dev.html` also has inlined: a change of the app's Rust code ends the session, the app's
 command line runs again with a new runtime (`rust_app::reexec`), and a page that reconnects and finds another version
-reloads (one that finds none, a session still starting, connects again); the browser is opened only by the first
-session (`rust_app::restarted`).
+reloads (one that finds none, a session still starting, connects again). Neither `nsh run --target web` nor
+`nsh package --target web --run` opens a browser: they print the address.
+
+A Rust app (`nsh.json` `"root"`: `rust_app::RootConfig`, its entry the `nsh.json`, `rust_app::is_root`) has no JS
+at all: its member `rust-web` is `nsh-platform-web` **without the feature `js`** (no `nsh-js`, no `rquickjs`, the
+engine without `js`) and `nsh_platform_web::rust_app!(sets, app_root())`, whose `nsh_app_init` also registers the
+root (`set_root`); `app_root()` is generated from `"root"`, `"theme"` (compiled in with `include_str!`) and
+`"appearance"` (`Root::appearance`). The page calls `player.runRust()` (`nsh_start_rust`) instead of `run`: the
+packaged page when `app.rust` is set (no `app.nshc`, no `harden.nshc`), the dev page (`{{rust}}`) once the dev
+server greets it; the dev session publishes no bundles (`DevSession::rust_root`). The JS exports (`nsh_start`,
+`nsh_start_bytecode`, `nsh_bundle_*`, `nsh_hot_*`, `nsh_chunk`) are `cfg(feature = "js")`. The runtime builds to
+`nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust.wasm`.
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
-(`nsh_core::ui::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does, and
-publishes as the TSX gallery does (5.3 MB, 1.75 MB gzipped, 1.27 MB with brotli; 2026-10).
+(`nsh_core::ui::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
+Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no QuickJS, so smaller than the
+prebuilt runtime; under its TSX entry (`App.tsx`, QuickJS) 5.26 MB (1.75 / 1.27 MB).
 
 ## What WebAssembly changes in the shared crates
 

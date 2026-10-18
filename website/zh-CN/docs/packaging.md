@@ -184,7 +184,7 @@ nsh package App.tsx --target web --run
 
 写出 `out/<Name>/`，一个静态站点：`index.html`、`manifest.webmanifest`，以及运行时（`nsh.<digest>.js`、`nsh.<digest>.wasm`）、应用
 （`app.<digest>.js`，即其 JS 源码）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
-即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务并打开浏览器。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
+即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
 
 ## 图标
 

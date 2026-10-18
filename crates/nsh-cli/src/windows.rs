@@ -53,7 +53,10 @@ pub(crate) fn package(
     fs::create_dir_all(&resources)?;
     let exe = dir.join(format!("{}.exe", file_stem(name)));
     fs::copy(&runner, &exe).with_context(|| format!("copy {}", runner.display()))?;
-    fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
+    // A Rust app has no bundle: the runner mounts its root.
+    if !built.rust_root {
+        fs::write(resources.join("bundle.nshc"), &built.bytecode)?;
+    }
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }

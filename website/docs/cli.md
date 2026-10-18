@@ -35,8 +35,6 @@ Every command prints one line per step, and the details only when something fail
 ```text
 ✓ built the Rust crate gallery-native (5.0s)
 ✓ built App.tsx (500 B js, 809 B bytecode, 21ms)
-→ dev server ws://127.0.0.1:8790/ws
-  devices on this network: ws://192.168.1.20:8790/ws
 ✓ built the development host for the iOS simulator (12.7s)
 • iOS Simulator (iPhone 16 Plus) connected, build 1
 warn iOS Simulator: image failed: An SSL error has occurred and a secure connection to the server cannot be made.
@@ -65,7 +63,7 @@ By default, creates a TSX app in `DIR` (default: the current directory, created 
 | `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case). |
 | `--rust` | Creates a Cargo project with a native Rust entry (`cargo run`) and a TSX entry sharing its Rust components. Requires Rust and the native desktop backend's development libraries. |
 
-With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."`. Run the Rust entry on macOS, Windows or Linux with `cargo run`, or the TSX entry with `nsh run` on the native development hosts, including iOS and Android, and in the browser (`--target web`, [Web](./web.md#apps-with-rust-components)). The TSX Rust-component toolchain uses an NSH source checkout (the CLI's checkout or `NSH_SOURCE`). Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
+With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."` and `"root": "App"`. `nsh run` and `nsh package` then mount the Rust root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly; `nsh run App.tsx` runs the TSX entry. The `nsh` commands build the app's runners from an NSH source checkout (the CLI's checkout or `NSH_SOURCE`). Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
 
 ## nsh run
 
@@ -75,9 +73,11 @@ nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--
 
 Starts the dev server (as `nsh dev`), launches a development host that loads the app from it, and rebuilds on every save. Hot module replacement patches the running app in place; logs and errors from the app are printed in the terminal. Stop it with Ctrl-C (or by closing the Catalyst, macOS, Linux, Windows or GPUI window). However it ends (Ctrl-C, `kill` / `pkill`, an error), it stops the host it started: the Catalyst app, the macOS, Linux, Windows or GPUI host, the development host in the simulator, or on the Android device.
 
+A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no dev server and no QuickJS: `nsh run` builds the app's runner for the target with its root mounted, starts it (on the desktops a debug build, its logs in the terminal; in the simulator and on Android, the app installed), and on a change to the crate's Rust code builds it again and restarts it. With `--target web` it prints the page's address, and the open page loads the new runtime by itself. Name the TSX entry (`nsh run App.tsx`) to run that instead.
+
 | Flag | Default | Description |
 |---|---|---|
-| `--target <TARGET>` | `catalyst` on macOS, `linux` on Linux, `windows` on Windows | `catalyst`: the Mac Catalyst host, an iPhone-sized window (390×844). `ios`: the host in an iOS simulator. `android`: the host on an Android device or emulator. `macos`: the AppKit host, a 1200×800 window ([macOS](./macos.md)). `linux`: the GTK host, a 390×844 window ([Linux](./linux.md)). `windows`: the Win32 host, a 1200×800 window ([Windows](./windows.md)). `gpui`: the GPUI host, a 1200×800 window, on macOS, Windows or Linux ([GPUI](./gpui.md)). `web`: the dev server's page, opened in the browser ([Web](./web.md#develop-in-the-browser)). |
+| `--target <TARGET>` | `catalyst` on macOS, `linux` on Linux, `windows` on Windows | `catalyst`: the Mac Catalyst host, an iPhone-sized window (390×844). `ios`: the host in an iOS simulator. `android`: the host on an Android device or emulator. `macos`: the AppKit host, a 1200×800 window ([macOS](./macos.md)). `linux`: the GTK host, a 390×844 window ([Linux](./linux.md)). `windows`: the Win32 host, a 1200×800 window ([Windows](./windows.md)). `gpui`: the GPUI host, a 1200×800 window, on macOS, Windows or Linux ([GPUI](./gpui.md)). `web`: the dev server's page, at the address it prints ([Web](./web.md#develop-in-the-browser)). |
 | `--device <DEVICE>` | | iOS simulator to use, by name (`"iPhone 16 Pro"`) or UDID. Default: a booted one, else the newest iPhone, which is booted. |
 | `--port <PORT>` | `8790` | Dev server port. If it is taken, the next free one is used. |
 | `--release` | | Minify and strip debug info. Release bundles have no hot module replacement: every save reloads the app. |
@@ -181,7 +181,7 @@ It writes:
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|gpui|web [-o <OUT>] [flags]
 ```
 
-Builds an installable app from the prebuilt runtime, in release mode. No Rust and no Xcode project or Gradle build are involved: NSH assembles the app bundle itself and uses Xcode's `actool` and `codesign` (iOS) or the SDK's `aapt2`, `zipalign` and `apksigner` (Android); for macOS it assembles an ad hoc signed `.app` with `codesign` (and `sips` for the icon); for Linux it copies the runner and writes a `.tar.gz` with `tar`; for Windows it copies the runner, embeds the icon and writes a `.zip`, with no tools; for GPUI it does what it does for this machine's OS, with the GPUI runner; for the web it writes a static site, with no tools. Metadata comes from `nsh.json`, overridden by the flags.
+Builds an installable app from the prebuilt runtime, in release mode. No Rust and no Xcode project or Gradle build are involved: NSH assembles the app bundle itself and uses Xcode's `actool` and `codesign` (iOS) or the SDK's `aapt2`, `zipalign` and `apksigner` (Android); for macOS it assembles an ad hoc signed `.app` with `codesign` (and `sips` for the icon); for Linux it copies the runner and writes a `.tar.gz` with `tar`; for Windows it copies the runner, embeds the icon and writes a `.zip`, with no tools; for GPUI it does what it does for this machine's OS, with the GPUI runner; for the web it writes a static site, with no tools. Metadata comes from `nsh.json`, overridden by the flags. A Rust app (`nsh.json` `"root"`) is packaged with its own runner, built with Rust from an NSH source checkout: no bundle and no QuickJS, its root mounted ([Building with Rust](./rust.md)).
 
 | Flag | Description |
 |---|---|
@@ -197,7 +197,7 @@ Builds an installable app from the prebuilt runtime, in release mode. No Rust an
 | `--keystore <FILE>` | Android: release keystore. Default: the debug key in `~/.android/debug.keystore` (created if missing). |
 | `--key-alias <ALIAS>` | Android: key alias in the keystore. |
 | `--keystore-password <PASSWORD>` | Android: keystore password. Also read from `NSH_KEYSTORE_PASSWORD`. |
-| `--run` | Install and launch the app afterwards: in the simulator (`ios-simulator`) or on the connected Android device; `macos`, `linux`, `windows` and `gpui` launch it; `web` serves the site on this machine and opens it in the browser. |
+| `--run` | Install and launch the app afterwards: in the simulator (`ios-simulator`) or on the connected Android device; `macos`, `linux`, `windows` and `gpui` launch it; `web` serves the site on this machine at the address it prints. |
 
 ```sh
 nsh package App.tsx --target ios-simulator --run

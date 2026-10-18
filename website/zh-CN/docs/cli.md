@@ -34,8 +34,6 @@ nsh <COMMAND>
 ```text
 ✓ built the Rust crate gallery-native (5.0s)
 ✓ built App.tsx (500 B js, 809 B bytecode, 21ms)
-→ dev server ws://127.0.0.1:8790/ws
-  devices on this network: ws://192.168.1.20:8790/ws
 ✓ built the development host for the iOS simulator (12.7s)
 • iOS Simulator (iPhone 16 Plus) connected, build 1
 warn iOS Simulator: image failed: An SSL error has occurred and a secure connection to the server cannot be made.
@@ -63,7 +61,7 @@ nsh init [DIR] [--name <NAME>] [--rust]
 | `--name <NAME>` | 写入 `nsh.json` 的显示名称。默认为目录名。id 会是 `com.example.<name>`（只保留字母和数字，转为小写）。 |
 | `--rust` | 创建 Cargo 项目，提供原生 Rust 入口（`cargo run`）和共享 Rust 组件的 TSX 入口。需要 Rust 工具链及原生桌面后端的开发库。 |
 
-使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口，或通过 `nsh run` 在原生开发宿主（包括 iOS 和 Android）以及浏览器（`--target web`，见 [Web](./web.md#带-rust-组件的应用)）中运行 TSX 入口。TSX 的 Rust 组件工具链使用 NSH 源码仓库（CLI 所在的仓库或 `NSH_SOURCE`）。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
+使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."` 和 `"root": "App"`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口；`nsh run` 和 `nsh package` 会在所有目标（包括浏览器）上直接挂载 Rust 根组件，不使用 QuickJS（见[用 Rust 开发](./rust.md)）；`nsh run App.tsx` 运行 TSX 入口。`nsh` 命令使用 NSH 源码仓库（CLI 所在的仓库或 `NSH_SOURCE`）构建应用的运行器。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
 
 ## nsh run
 
@@ -73,9 +71,11 @@ nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--
 
 启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换会就地修补正在运行的应用；应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
 
+Rust 应用（`nsh.json` 中有 `"root"`，见[用 Rust 开发](./rust.md)）运行时不需要开发服务器，也没有 QuickJS：`nsh run` 为目标平台构建挂载了根组件的应用运行器并启动它（桌面上是 debug 构建，日志打印在终端；模拟器和 Android 上会安装应用），修改 crate 的 Rust 代码后重新构建并重启。使用 `--target web` 时会打印页面地址，已打开的页面会自动加载新的运行时。指定 TSX 入口（`nsh run App.tsx`）则运行 TSX 入口。
+
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `--target <TARGET>` | macOS 上为 `catalyst`，Linux 上为 `linux`，Windows 上为 `windows` | `catalyst`：Mac Catalyst 宿主，一个 iPhone 大小的窗口（390×844）。`ios`：iOS 模拟器中的宿主。`android`：Android 设备或模拟器上的宿主。`macos`：AppKit 宿主，一个 1200×800 的窗口（[macOS](./macos.md)）。`linux`：GTK 宿主，一个 390×844 的窗口（[Linux](./linux.md)）。`windows`：Win32 宿主，一个 1200×800 的窗口（[Windows](./windows.md)）。`gpui`：GPUI 宿主，一个 1200×800 的窗口，可在 macOS、Windows 或 Linux 上运行（[GPUI](./gpui.md)）。`web`：开发服务器的页面，在浏览器中打开（[Web](./web.md#在浏览器里开发)）。 |
+| `--target <TARGET>` | macOS 上为 `catalyst`，Linux 上为 `linux`，Windows 上为 `windows` | `catalyst`：Mac Catalyst 宿主，一个 iPhone 大小的窗口（390×844）。`ios`：iOS 模拟器中的宿主。`android`：Android 设备或模拟器上的宿主。`macos`：AppKit 宿主，一个 1200×800 的窗口（[macOS](./macos.md)）。`linux`：GTK 宿主，一个 390×844 的窗口（[Linux](./linux.md)）。`windows`：Win32 宿主，一个 1200×800 的窗口（[Windows](./windows.md)）。`gpui`：GPUI 宿主，一个 1200×800 的窗口，可在 macOS、Windows 或 Linux 上运行（[GPUI](./gpui.md)）。`web`：开发服务器的页面，地址会打印出来（[Web](./web.md#在浏览器里开发)）。 |
 | `--device <DEVICE>` | | 要使用的 iOS 模拟器，按名称（`"iPhone 16 Pro"`）或 UDID 指定。默认：已启动的模拟器，否则启动最新的 iPhone。 |
 | `--port <PORT>` | `8790` | 开发服务器端口。被占用时使用下一个空闲端口。 |
 | `--release` | | 压缩代码并去掉调试信息。release 包没有热模块替换：每次保存都会重新加载应用。 |
@@ -161,7 +161,7 @@ nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|gpui|web [-o <OUT>] [flags]
 ```
 
-用预构建的运行时以 release 模式构建可安装的应用。整个过程不涉及 Rust，也不需要 Xcode 工程或 Gradle 构建：NSH 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个 ad hoc 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；GPUI 则按本机操作系统的方式打包，只是换成 GPUI 运行器；Web 则写出一个静态站点，同样不需要任何工具。元数据来自 `nsh.json`，可被参数覆盖。
+用预构建的运行时以 release 模式构建可安装的应用。整个过程不涉及 Rust，也不需要 Xcode 工程或 Gradle 构建：NSH 自己组装应用包，并使用 Xcode 的 `actool` 和 `codesign`（iOS）或 SDK 中的 `aapt2`、`zipalign` 和 `apksigner`（Android）；macOS 则用 `codesign` 组装一个 ad hoc 签名的 `.app`（图标用 `sips` 转换）；Linux 则复制运行器并用 `tar` 生成 `.tar.gz`；Windows 则复制运行器、嵌入图标并生成 `.zip`，不需要任何工具；GPUI 则按本机操作系统的方式打包，只是换成 GPUI 运行器；Web 则写出一个静态站点，同样不需要任何工具。元数据来自 `nsh.json`，可被参数覆盖。Rust 应用（`nsh.json` 中有 `"root"`）用它自己的运行器打包，运行器从 NSH 源码仓库用 Rust 构建：没有 bundle，也没有 QuickJS，直接挂载根组件（见[用 Rust 开发](./rust.md)）。
 
 | 参数 | 说明 |
 |---|---|
@@ -177,7 +177,7 @@ nsh package [ENTRY] --target ios|ios-simulator|android|macos|linux|windows|gpui|
 | `--keystore <FILE>` | Android：release keystore。默认使用 `~/.android/debug.keystore` 中的调试密钥（不存在时创建）。 |
 | `--key-alias <ALIAS>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <PASSWORD>` | Android：keystore 密码，也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
-| `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux`、`windows` 和 `gpui` 则直接启动它；`web` 在本机提供站点服务并在浏览器中打开。 |
+| `--run` | 打包完成后安装并启动应用：在模拟器中（`ios-simulator`）或在已连接的 Android 设备上；`macos`、`linux`、`windows` 和 `gpui` 则直接启动它；`web` 在本机提供站点服务，并打印其地址。 |
 
 ```sh
 nsh package App.tsx --target ios-simulator --run

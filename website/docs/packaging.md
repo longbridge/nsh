@@ -197,7 +197,7 @@ nsh package App.tsx --target web --run
 Writes `out/<Name>/`, a static site: `index.html`, `manifest.webmanifest`, and the runtime (`nsh.<digest>.js`,
 `nsh.<digest>.wasm`), the app (`app.<digest>.js`, its JS source), its assets and icons, each named after its content
 so hosts can cache them for good. Deploy the directory to any web server or CDN; `--run` serves it on
-`http://127.0.0.1:4173/` and opens the browser. Cache headers and embedding: [Web](./web.md#publish-an-app).
+`http://127.0.0.1:4173/` for you to open. Cache headers and embedding: [Web](./web.md#publish-an-app).
 
 ## Icons
 

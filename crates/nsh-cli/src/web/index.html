@@ -33,7 +33,8 @@
   // Written by `nsh package --target web`: loads the runtime, the app's
   // code (bytecode, with the hardening it runs first) and its fonts in
   // parallel, then runs the app as a release; a chunk's own fonts come
-  // with it.
+  // with it. A Rust app (`app.rust`) has no code: its runtime mounts its
+  // root.
   import { createPlayer } from "./{{runtime}}";
 
   const app = {{app}};
@@ -81,13 +82,14 @@
           if (!player || player.views.size <= 1) fail("This app could not start.", message);
         },
       }),
-      get(app.code).then((r) => r.arrayBuffer()),
-      get(app.harden).then((r) => r.arrayBuffer()),
+      app.rust ? null : get(app.code).then((r) => r.arrayBuffer()),
+      app.rust ? null : get(app.harden).then((r) => r.arrayBuffer()),
       ...app.fonts.map(loadFont),
     ]);
     player = loaded;
     status.hidden = true;
-    player.run(code, { release: true, harden, capabilities: app.capabilities ?? "", chunks: app.chunks });
+    if (app.rust) player.runRust();
+    else player.run(code, { release: true, harden, capabilities: app.capabilities ?? "", chunks: app.chunks });
   } catch (err) {
     fail("This app could not be loaded.", String(err?.message ?? err));
   }

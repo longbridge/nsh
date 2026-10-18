@@ -38,12 +38,13 @@ Use `nsh init my-app --rust` to create a Cargo project with native Rust UI:
 ```sh
 nsh init my-app --rust
 cd my-app
-cargo run
+nsh run            # --target ios, android, web, macos, linux, windows or gpui
+cargo run          # the same root, straight on the desktop backend
 ```
 
-`src/lib.rs` contains the UI, state and event handlers. `src/main.rs` mounts the Rust root directly on macOS, Windows or Linux. `App.tsx` imports the same root from `app/native`, providing the TSX development and delivery entry, including the iOS and Android development hosts. Rust development requires a Rust toolchain and the desktop backend's development libraries. The TSX Rust-component commands use an NSH source checkout, found through the CLI's checkout or `NSH_SOURCE`; their first build also generates declarations for `app/native`.
+`src/lib.rs` contains the UI, state and event handlers, and `nsh.json` names its root (`"root": "App"`): `nsh run` and `nsh package` mount it on every platform, the browser included, with no QuickJS. `src/main.rs` mounts the same root directly on macOS, Windows or Linux for `cargo run`. `App.tsx` imports it from `app/native`: `nsh run App.tsx` runs that TSX entry, for screens written in TSX on top of the Rust components. Rust development requires a Rust toolchain (and, for `cargo run`, the desktop backend's development libraries); the `nsh` commands build the app's runners from an NSH source checkout, found through the CLI's checkout or `NSH_SOURCE`.
 
-See [the CLI reference](./cli.md#nsh-init) and `examples/gallery-rs` in the repository for both entry points and a Rust engine test.
+See [Building with Rust](./rust.md), [the CLI reference](./cli.md#nsh-init) and `examples/gallery-rs` in the repository.
 
 ### The entry module
 

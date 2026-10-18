@@ -3,5 +3,6 @@
   "icon": "icon.png",
   "appearance": "system",
   "theme": "theme.json",
-  "rust": "native"
+  "rust": "native",
+  "root": "Gallery"
 }

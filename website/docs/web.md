@@ -45,7 +45,7 @@ Published apps behave as desktop apps in desktop browsers and as phone apps in p
 
 ```sh
 nsh package App.tsx --target web           # out/<Name>/: a static site
-nsh package App.tsx --target web --run     # and serve it on this machine, opened in the browser
+nsh package App.tsx --target web --run     # and serve it on this machine (open the address it prints)
 ```
 
 `nsh package --target web` writes `out/<Name>/` (`--out` for another directory), laid out like a frontend build: one
@@ -102,38 +102,40 @@ There is no embedding API on the web: embed the published app with an `<iframe>`
 nsh run App.tsx --target web
 ```
 
-starts the dev server and opens its page, `http://127.0.0.1:8790/`, in the browser. The page is a development host
+starts the dev server and prints its page's address, `http://127.0.0.1:8790/`: open it in any browser. The page is a development host
 like the others: it runs each build of the app, applies edits in place (hot updates), shows build errors and runtime
 errors over the app, and sends the app's `console` output to the terminal. Phones on the same network open the
-address `nsh run` prints (`browsers on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
+address `nsh run` prints under it (`on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
 web runtime is there (in the distribution, always).
 
 ## Apps with Rust components
 
-An app whose `nsh.json` names a Rust crate (`"rust"`, as `nsh init --rust` and [`examples/gallery-rs`](https://github.com/longbridge/nsh/tree/main/examples/gallery-rs)
-set up) publishes and runs in the browser with the same commands:
+An app written in Rust ([Building with Rust](./rust.md)) publishes and runs in the browser with the same commands:
 
 ```sh
-nsh package --target web           # out/<Name>/, with the crate compiled into nsh.wasm
+nsh package --target web           # out/<Name>/: the app's own nsh.wasm, with its crate
 nsh run --target web               # the dev server's page; editing the Rust code builds it again
 ```
 
-NSH builds the app a runtime of its own: the crate's components, modules and assets are compiled to WebAssembly with
-the engine, so the page runs the same Rust code the native hosts run, and the TSX entry imports the crate's UI set as
-it does on every platform. The crate's assets (`assets!()`) are published with the app's, and its fonts load before
-the first frame. During `nsh run --target web`, a change to the crate's Rust code builds the runtime again and the
-open page loads it by itself; TSX edits stay hot updates.
+When `nsh.json` names the app's root component (`"root"`), the page is the app's Rust and NSH's page script, and
+nothing else: `nsh.wasm` holds the engine, the components and the app's crate with no QuickJS, the site has no
+`app.nshc` or `harden.nshc`, and the page mounts the root as soon as the runtime and the fonts are in. The whole Rust
+gallery is 3.3 MB (1.06 MB gzipped, 0.75 MB with brotli), less than the runtime of TSX apps. Under its TSX entry
+(`nsh package App.tsx --target web`), the same app runs as TSX apps do, with QuickJS, and imports the crate's
+components and modules.
+
+Either way the crate's assets (`assets!()`) are published with the app's, and its fonts load before the first frame.
+During `nsh run --target web`, a change to the crate's Rust code builds the runtime again and the open page loads it by
+itself; TSX edits stay hot updates.
 
 Rust code that runs on every platform, the web included, uses the engine's services: `fetch(url).await` makes
-HTTP requests through the same network stack as JS's `fetch` (the browser's here, with its CORS rules) and under the
-same [capabilities](./sandbox-and-capabilities.md); `timer`, `set_timeout` and `set_interval` wait; and
-`nsh_core::time::Instant` and `nsh_core::time::unix_ms()` read the clock. `background` and `blocking` run work on
-the native targets' threads.
+HTTP requests through the same network stack as JS's `fetch` (the browser's here, with its CORS rules); `timer`,
+`set_timeout` and `set_interval` wait; and `nsh_core::time::Instant` and `nsh_core::time::unix_ms()` read the clock.
+`background` and `blocking` run work on the native targets' threads.
 
 The build needs the Rust target and a clang that compiles to WebAssembly, as the runtime's own build does:
 `rustup target add wasm32-unknown-unknown`, plus `clang` and `llvm-ar` (on macOS, an LLVM toolchain such as
-Homebrew's `llvm`, through `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown`). The crate's code adds to
-`nsh.wasm`: the whole Rust gallery makes it 5.3 MB (1.3 MB with brotli).
+Homebrew's `llvm`, through `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown`).
 
 ## Build the website's player
 

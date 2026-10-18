@@ -141,6 +141,9 @@ pub(crate) struct Apk<'a> {
     pub(crate) activity: &'a str,
     /// Development builds: debuggable, cleartext HTTP (the dev server).
     pub(crate) dev: bool,
+    /// A Rust app: its `libnsh.so` has the root, which `AppActivity` runs
+    /// instead of a bundle (manifest meta-data `com.longbridge.nsh.RUST`).
+    pub(crate) rust: bool,
     /// `nsh.json` `"appearance": "dark"`: the window's theme is dark from
     /// the start (no light flash before the first frame).
     pub(crate) dark: bool,
@@ -237,6 +240,11 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
     } else {
         ""
     };
+    let rust = if apk.rust {
+        "\n        <meta-data android:name=\"com.longbridge.nsh.RUST\" android:value=\"true\" />"
+    } else {
+        ""
+    };
     let label = apk
         .label
         .replace('&', "&amp;")
@@ -250,7 +258,7 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material{theme}.NoActionBar">
+        android:theme="@android:style/Theme.Material{theme}.NoActionBar">{rust}
         <activity android:name="{activity}" android:exported="true"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
@@ -454,4 +462,34 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_rust_app_runs_its_root() {
+        let apk = |rust| super::Apk {
+            package: "com.example.app",
+            label: "App",
+            version_name: "1.0",
+            version_code: 1,
+            activity: "com.longbridge.nsh.AppActivity",
+            dev: false,
+            rust,
+            dark: false,
+            runtime: std::path::Path::new("."),
+            icon: None,
+            assets: Vec::new(),
+            signing: super::Signing::Debug,
+        };
+        // `AppActivity` reads it from the application's meta-data.
+        let flag = r#"<meta-data android:name="com.longbridge.nsh.RUST" android:value="true" />"#;
+        let manifest = super::manifest_xml(&apk(true));
+        assert!(manifest.contains(flag), "{manifest}");
+        let application = manifest.find("<application").unwrap();
+        let activity = manifest.find("<activity").unwrap();
+        let at = manifest.find(flag).unwrap();
+        assert!(application < at && at < activity, "{manifest}");
+        assert!(!super::manifest_xml(&apk(false)).contains("com.longbridge.nsh.RUST"));
+    }
 }

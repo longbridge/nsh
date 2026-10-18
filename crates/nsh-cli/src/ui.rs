@@ -297,6 +297,16 @@ pub(crate) fn red(text: impl Display) -> String {
     paint("31", text)
 }
 
+/// `url`, clickable in terminals that support hyperlinks (OSC 8), cyan;
+/// the bare URL where colors are off (terminals linkify it themselves).
+pub(crate) fn link(url: &str) -> String {
+    if color() {
+        format!("\x1b]8;;{url}\x1b\\{}\x1b]8;;\x1b\\", cyan(url))
+    } else {
+        url.to_owned()
+    }
+}
+
 /// `text` without its ANSI escape sequences.
 pub(crate) fn strip_ansi(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -306,13 +316,28 @@ pub(crate) fn strip_ansi(text: &str) -> String {
             out.push(c);
             continue;
         }
-        // CSI: ESC [ parameters final-byte (@ to ~).
-        if chars.next() == Some('[') {
-            for c in chars.by_ref() {
-                if ('@'..='~').contains(&c) {
-                    break;
+        match chars.next() {
+            // CSI: ESC [ parameters final-byte (@ to ~).
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
                 }
             }
+            // OSC (hyperlinks, [`link`]): ESC ] ... ending with BEL or ESC \.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' {
+                        break;
+                    }
+                    if c == '\x1b' {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
         }
     }
     out
@@ -802,6 +827,14 @@ pub(crate) fn quiet(cmd: &mut Command) -> std::io::Result<(std::process::Child, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_and_colors_strip_to_their_text() {
+        let url = "http://127.0.0.1:8790/";
+        let linked = format!("\x1b]8;;{url}\x1b\\\x1b[36m{url}\x1b[0m\x1b]8;;\x1b\\ next");
+        assert_eq!(strip_ansi(&linked), format!("{url} next"));
+        assert_eq!(strip_ansi("\x1b]8;;x\x07y\x1b]8;;\x07"), "y");
+    }
 
     #[test]
     fn cargo_warning_summaries_are_counted() {

@@ -36,6 +36,9 @@ pub(crate) struct DevSession {
     hot: std::cell::RefCell<Option<nsh_bundler::HotBundle>>,
     /// Good builds so far: the first one is "built", the next "rebuilt".
     builds: Cell<u32>,
+    /// A Rust app (`nsh.json` `"root"`): nothing to bundle, the hosts run
+    /// its root; the session serves its assets, its web page and its logs.
+    rust_root: bool,
 }
 
 impl DevSession {
@@ -53,8 +56,9 @@ impl DevSession {
         server.install_commands(install_commands(&src_dir));
         // Browsers too, when there is a web runtime to serve (`nsh run
         // --target web` builds it in a checkout).
+        let rust_root = crate::rust_app::is_root(&entry);
         if let Ok(Some(runtime)) = crate::runtime::web(crate::runtime::WebKind::Dev, false) {
-            let (page, files) = crate::web::dev_host(&runtime)?;
+            let (page, files) = crate::web::dev_host(&runtime, rust_root)?;
             server.serve_web(page, files);
         }
         let session = DevSession {
@@ -65,6 +69,7 @@ impl DevSession {
             devices,
             hot: Default::default(),
             builds: Cell::new(0),
+            rust_root,
         };
         session.rebuild();
         Ok(session)
@@ -103,6 +108,16 @@ impl DevSession {
             if web {
                 ui::detail(format!("browsers on this network: http://{ip}:{port}/"));
             }
+        }
+    }
+
+    /// Prints the page browsers open (`nsh run --target web`): the one
+    /// address to open here, and dimmed, the same on this network (phones).
+    pub(crate) fn print_web_url(&self) {
+        let port = self.server.local_addr().port();
+        ui::note(format!("open in a browser: {}", ui::link(&self.web_url())));
+        if let Some(ip) = lan_ips().first() {
+            ui::detail(ui::dim(format!("on this network: http://{ip}:{port}/")));
         }
     }
 
@@ -162,6 +177,10 @@ impl DevSession {
     }
 
     fn rebuild(&self) {
+        // A Rust app has no JS: its Rust code's changes restart the session.
+        if self.rust_root {
+            return;
+        }
         self.server.building();
         if self.release {
             match build::compile(&self.entry, true) {

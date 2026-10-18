@@ -115,8 +115,20 @@ jobs:
         run: cargo build -p nsh-cli --locked
       - name: Publish the Rust gallery for the web
         run: |
+          # nsh.json "root": a Rust app, mounted with no QuickJS.
           ./target/debug/nsh package examples/gallery-rs --target web -o target/rust-app-web
           site="target/rust-app-web/Rust Gallery"
           test -f "$site/index.html"
-          # The app's runtime registers the crate's UI set.
+          # The app's runtime registers the crate's UI set and root.
           grep -q nsh_app_init "$site"/nsh.*.wasm
+          grep -q nsh_start_rust "$site"/nsh.*.wasm
+          if ls "$site"/app.*.nshc > /dev/null 2>&1 || grep -aq InternalError "$site"/nsh.*.wasm; then
+            echo "The Rust app's web runtime unexpectedly carries JS"
+            exit 1
+          fi
+      - name: Publish its TSX entry for the web
+        run: |
+          # The same crate under its TSX entry: QuickJS runs App.tsx.
+          ./target/debug/nsh package examples/gallery-rs/App.tsx --target web -o target/rust-app-web-tsx
+          site="target/rust-app-web-tsx/Rust Gallery"
+          ls "$site"/app.*.nshc
