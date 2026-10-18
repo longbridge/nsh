@@ -515,7 +515,14 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
 @media (max-width: 640px) {
   .site-nav__inner { width: calc(100% - 2rem); }
   .site-nav__links { left: -1rem; right: -1rem; padding-inline: 1rem; }
-  .site-nav__actions { gap: 0.1rem; }
+  .site-nav__actions { gap: 0; }
+  .site-nav__actions > a[aria-label="GitHub"] { display: none; }
+}
+
+@media (max-width: 380px) {
+  .site-nav__inner { gap: 0.5rem; }
+  .site-nav__projects { display: none; }
+  .site-nav__brand > span { display: none; }
 }
 
 /* ====================================================================
