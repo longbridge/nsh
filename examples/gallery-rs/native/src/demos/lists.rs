@@ -11,8 +11,8 @@ use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 
 use crate::ui::{
     Appear, AppearProps, Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO,
-    Meter, PressProps, PressRole, RoundButton, Section, Segment, SegmentedEvent, Tone, colors,
-    hint, icon, press_with, radius, segmented,
+    Meter, PressProps, PressRole, RoundButton, Section, Segment, SegmentedEvent, Tone,
+    bind_refresh, colors, hint, icon, press_with, radius, segmented,
 };
 
 /// The tones rows cycle through (the last, neutral, only in the grid).
@@ -649,7 +649,12 @@ fn refresh_section(
     refreshing: Signal<bool>,
     refreshed: Signal<u32>,
     refresh: impl Into<Listener<()>>,
+    refresh_key: Option<String>,
 ) -> Section {
+    let desktop_hint: SharedString = match refresh_key {
+        Some(key) => format!("Refresh or {key}").into(),
+        None => "Refresh below".into(),
+    };
     let section = Section::new("Pull to refresh").child(
         view()
             .flex_row()
@@ -667,11 +672,13 @@ fn refresh_section(
                     .flex_1()
                     .gap(px(2.0))
                     .child(
-                        text(move || {
+                        text(move || -> SharedString {
                             if refreshing.get() {
-                                "Refreshing…"
+                                "Refreshing…".into()
+                            } else if is_desktop() {
+                                desktop_hint.clone()
                             } else {
-                                hint("Pull the page down", "Refresh below")
+                                "Pull the page down".into()
                             }
                         })
                         .text_size(px(15.0))
@@ -941,6 +948,7 @@ fn More() -> impl IntoElement {
             old.cancel();
         }
     };
+    let refresh_key = bind_refresh(move || on_refresh(&()));
     view().flex_1().child(
         scroll()
             .flex_1()
@@ -950,7 +958,12 @@ fn More() -> impl IntoElement {
                 view()
                     .p_4()
                     .gap_4()
-                    .child(refresh_section(refreshing, refreshed, on_refresh))
+                    .child(refresh_section(
+                        refreshing,
+                        refreshed,
+                        on_refresh,
+                        refresh_key,
+                    ))
                     .child(ranges(range))
                     .child(cards())
                     .child(empty_list()),

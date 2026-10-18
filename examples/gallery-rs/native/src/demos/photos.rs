@@ -8,8 +8,8 @@ use std::{rc::Rc, time::Duration};
 use nsh_core::ui::prelude::*;
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Finish, Finished, IconName, PressProps, Stat, Tone, colors, icon,
-    radius,
+    Badge, Button, ButtonVariant, Finish, Finished, IconName, PressProps, Stat, Tone, bind_refresh,
+    colors, icon, radius,
 };
 
 /// Photos loaded per page.
@@ -147,6 +147,7 @@ fn hero(
     refreshes: Signal<u32>,
     refreshing: Signal<bool>,
     refresh: impl Into<Listener<()>>,
+    refresh_key: Option<String>,
     scroll_y: &NativeValue,
 ) -> impl IntoElement {
     view()
@@ -242,7 +243,11 @@ fn hero(
                 .child(icon(IconName::ArrowDown, 14.0, colors::FAINT))
                 .child(
                     text(if is_desktop() {
-                        format!("Scrolling to the end loads {PAGE} more.")
+                        let key = refresh_key.map(|k| format!("{k} refreshes. "));
+                        format!(
+                            "{}Scrolling to the end loads {PAGE} more.",
+                            key.unwrap_or_default()
+                        )
                     } else {
                         format!("Pull to refresh. Scrolling to the end loads {PAGE} more.")
                     })
@@ -294,6 +299,7 @@ pub(crate) fn Photos() -> impl IntoElement {
             old.cancel();
         }
     };
+    let refresh_key = bind_refresh(move || on_refresh(&()));
     let load_more = move |_: &()| {
         let from = count.get_untracked() + 1;
         log::info!("loading more after {}", from - 1);
@@ -315,7 +321,14 @@ pub(crate) fn Photos() -> impl IntoElement {
             .refreshing(refreshing)
             .on_refresh(on_refresh)
             .on_end_reached(load_more)
-            .header(hero(count, refreshes, refreshing, on_refresh, &scroll_y))
+            .header(hero(
+                count,
+                refreshes,
+                refreshing,
+                on_refresh,
+                refresh_key,
+                &scroll_y,
+            ))
             .footer(
                 text(format!("Loading {PAGE} more…"))
                     .text_center()

@@ -11,7 +11,8 @@
 //!   [`Card`], [`Section`], [`Inset`], [`Row`], [`Figure`], [`Badge`],
 //!   [`Stat`], [`Meter`], [`IconTile`], [`Button`], [`RoundButton`]; and
 //!   [`caption`], [`legend`], [`code`], [`header`].
-//! - The device's input: [`hint`] (touch or pointer wording).
+//! - The device's input: [`hint`] (touch or pointer wording), [`bind_refresh`]
+//!   (a desktop's refresh key).
 
 mod animated;
 mod controls;
@@ -26,7 +27,7 @@ pub(crate) use self::{
         Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, segmented,
         toggle,
     },
-    device::hint,
+    device::{bind_refresh, hint},
     icons::{IconName, Tint, icon},
     parts::{
         Badge, Button, ButtonVariant, Card, Figure, IconTile, Inset, Meter, RoundButton, Row,

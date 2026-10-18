@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 
 use nsh_core::{
+    keymap::When,
     nsh_animation::{Curve, EaseMode},
     ui::{AnyElement, Dialog, DialogButton, DialogButtonStyle, prelude::*},
 };
@@ -840,6 +841,77 @@ fn Network() -> impl IntoElement {
         )
 }
 
+/// App-level shortcuts: bound while the demo shows (the component's own).
+#[component]
+fn Shortcuts() -> impl IntoElement {
+    let count = signal(0_u32);
+    let on = signal(false);
+    let last = signal(SharedString::default());
+    on_key("mod+k", move |k| {
+        count.update(|c| *c += 1);
+        last.set(k.to_owned().into());
+    });
+    on_key("mod+shift+l", move |k| {
+        on.update(|on| *on = !*on);
+        last.set(k.to_owned().into());
+    });
+    on_key_with(
+        "mod+backspace",
+        KeyOptions {
+            when: When::NotEditing,
+            ..KeyOptions::default()
+        },
+        move |k| {
+            count.set(0);
+            last.set(k.to_owned().into());
+        },
+    );
+    let keys = [
+        (key_label("mod+k"), "Counts"),
+        (key_label("mod+shift+l"), "Switches the light"),
+        (key_label("mod+backspace"), "Resets (not while typing)"),
+    ];
+    Card::new()
+        .icon(IconName::Bell)
+        .title("Keyboard shortcuts")
+        .subtitle("on_key · desktop")
+        .child(
+            view().children(keys.into_iter().enumerate().map(|(i, (key, what))| {
+                Row::new(i == 0)
+                    .child(
+                        text(key)
+                            .w(px(120.0))
+                            .text_size(px(14.0))
+                            .text_color(colors::ACCENT)
+                            .font_family(MONO),
+                    )
+                    .child(
+                        text(what)
+                            .flex_1()
+                            .text_size(px(15.0))
+                            .text_color(colors::TEXT),
+                    )
+            })),
+        )
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(
+                    Badge::new(move || if on.get() { "Light on" } else { "Light off" })
+                        .tone(move || if on.get() { Tone::Up } else { Tone::Neutral }),
+                )
+                .child(view().flex_1().child(caption(
+                    move || format!("Counted {}", count.get()),
+                    Some(move || {
+                        let last = last.get();
+                        if last.is_empty() { "–".into() } else { last }
+                    }),
+                ))),
+        )
+}
+
 /// The demo's page.
 #[component]
 pub(crate) fn System() -> impl IntoElement {
@@ -848,6 +920,7 @@ pub(crate) fn System() -> impl IntoElement {
         StatusBarCard::element(()).into_element(),
         Dialogs::element(()).into_element(),
         FramesAndTimers::element(()).into_element(),
+        Shortcuts::element(()).into_element(),
         Network::element(()).into_element(),
     ];
     view().flex_1().child(
