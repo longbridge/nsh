@@ -345,7 +345,13 @@ impl fmt::Debug for Tracer<'_> {
 /// other value or clone keeps it, as the impls of `Callback` and
 /// `Instance` check with their strong counts): reporting one twice, or one
 /// shared (an `Rc` reached from two instances), lets the collector free a
-/// function still in use.
+/// function still in use. It never panics, allocates JS values or runs
+/// JS: it is called from the collector's mark phase, which a panic would
+/// leave half done (the runtime catches one and logs it, and what was not
+/// reported stays alive, but a panic midway may already have reported part
+/// of a value). It reads only, without borrowing what the app may hold
+/// borrowed (`RefCell::try_borrow`: a value borrowed elsewhere is
+/// skipped).
 pub unsafe trait Trace {
     /// Reports the callbacks to `tracer`.
     fn trace(&self, tracer: &mut Tracer<'_>);

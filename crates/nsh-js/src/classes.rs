@@ -191,6 +191,13 @@ fn native(
     magic: usize,
 ) -> R<V> {
     let name = CString::new(name).unwrap_or_default();
+    // QuickJS keeps a closure's magic in 16 unsigned bits.
+    let Ok(magic) = u16::try_from(magic) else {
+        return Err(js::range_error(
+            ctx,
+            &format!("{}: a class has at most {} members", def.name, u16::MAX),
+        ));
+    };
     // SAFETY: the opaque points to static data.
     V::checked(ctx, unsafe {
         qjs::JS_NewCClosure(
@@ -199,7 +206,7 @@ fn native(
             name.as_ptr(),
             None,
             length as c_int,
-            magic as c_int,
+            c_int::from(magic),
             def as *const ClassDef as *mut c_void,
         )
     })
@@ -209,10 +216,23 @@ fn native(
 /// (`this` is then `new.target`), which finds the class by the index it
 /// carries.
 fn constructor_function(ctx: Ctx, def: &'static ClassDef, length: usize) -> R<V> {
+    // QuickJS keeps a C function's magic in 16 signed bits: an index past
+    // them would name another class.
     let index = {
         let mut defs = classes(ctx).defs.borrow_mut();
+        let Ok(index) = i16::try_from(defs.len()) else {
+            drop(defs);
+            return Err(js::range_error(
+                ctx,
+                &format!(
+                    "{}: a context makes at most {} Rust classes",
+                    def.name,
+                    i16::MAX as usize + 1
+                ),
+            ));
+        };
         defs.push(def);
-        defs.len() - 1
+        index
     };
     let name = CString::new(def.name).unwrap_or_default();
     type Magic = unsafe extern "C" fn(Ctx, Raw, c_int, *mut Raw, c_int) -> Raw;
@@ -231,7 +251,7 @@ fn constructor_function(ctx: Ctx, def: &'static ClassDef, length: usize) -> R<V>
             name.as_ptr(),
             length as c_int,
             qjs::JSCFunctionEnum_JS_CFUNC_constructor_magic,
-            index as c_int,
+            c_int::from(index),
         )
     })
 }
@@ -2101,6 +2121,26 @@ pub(crate) mod tests {
         );
         assert!(!host.has_exception());
         Tally::forget();
+    }
+
+    #[test]
+    fn a_context_makes_as_many_classes_as_constructors_can_name() {
+        use nsh_core::ui::Class as _;
+        let host = host();
+        // As if 32768 classes were made: the next one's index does not fit
+        // its constructor's magic.
+        host.with_raw(|ctx| {
+            super::classes(ctx)
+                .defs
+                .borrow_mut()
+                .extend(std::iter::repeat_n(Token::DEF, 32768));
+        });
+        // Importing the set makes its classes: the import fails.
+        let message = run(&host, "show(\"imported\");").unwrap_err();
+        assert!(
+            message.contains(": a context makes at most 32768 Rust classes"),
+            "{message}"
+        );
     }
 
     #[test]

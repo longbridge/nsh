@@ -251,7 +251,8 @@ impl Downloader {
   instance alone, the instance's callbacks are released before its value drops, so a `Drop` calling or posting
   one finds it gone instead of a function the same collection frees. That includes the callbacks of instances
   it alone holds: a `Drop` that moves such an instance out (into a static, a task) keeps the instance, but its
-  callbacks are dead (calling fails, posting does nothing).
+  callbacks are dead (calling fails, posting does nothing). `Trace` never panics, allocates JS values or runs JS
+  (it runs in the collector's mark phase), part of its safety contract.
 - **Functions take them too:** `fn watch(path: String, on_change: Callback<String>)` (`on_change` kept and posted
   later), and `async` functions and members can `call_async`.
 
@@ -355,6 +356,9 @@ Where the implementation differs from the proposal above, and why:
   waiting), as an `async` member's do.
 - **Module functions take instances and callbacks** in every kind: an op's and a task's ride in its closure like
   an async member's.
+- **A context makes at most 32768 classes** (QuickJS keeps a constructor's index in 16 signed bits) and a class
+  at most 65535 members: past them, making the class throws a `RangeError` instead of a constructor naming
+  another class.
 - **The standard library's classes** (the table above) have not moved yet; the machinery is shared, so each moves
   when it needs nothing more.
 
