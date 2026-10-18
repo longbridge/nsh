@@ -7059,6 +7059,27 @@ mod views {
         assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
     }
 
+    /// A pressable box with the pointing hand.
+    #[component]
+    fn Pointing() -> impl IntoElement {
+        view().size_10().cursor_pointer()
+    }
+
+    #[test]
+    fn a_typed_cursor_reaches_the_view() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Pointing>(|| ()));
+        let batch = c.commit().unwrap();
+        assert!(
+            batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::ViewStyle { style, .. } if style.cursor == crate::Cursor::Pointer
+            )),
+            "{:#?}",
+            batch.items
+        );
+    }
+
     /// A leaf in a region of its own.
     #[component]
     fn Leafy() -> impl IntoElement {

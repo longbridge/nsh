@@ -300,7 +300,7 @@ skews, `.transform_origin(..)` / `.origin_top_left()`, `.backface_hidden()`; dec
 draw both, `.text_decoration_wavy()`, `.text_decoration_color(..)`), `.uppercase()`, `.tabular_nums()`,
 `.writing_direction(..)`; gradients (`.bg_linear_to_br().gradient_from(..).gradient_via(..).gradient_to(..)`,
 `.bg_radial()`, `.bg_conic(..)`), filters and backdrop filters (`.grayscale(1.0)`, `.backdrop_blur(12.0)`),
-`.mix_blend_mode(..)`, transitions (`.transition_colors().duration(150.0).ease_out()`), keyframes (`.animate_spin()`; with TS's own timing keys
+`.mix_blend_mode(..)`, the pointer (`.cursor_pointer()`, `.cursor(Cursor::Text)`), transitions (`.transition_colors().duration(150.0).ease_out()`), keyframes (`.animate_spin()`; with TS's own timing keys
 `.animation(KeyframeAnimation::new(Keyframes::Spin).duration(800.0))`),
 grids (`.grid_cols(3)`, `.col_span(2)`), `.flex_grow(n)`. Tailwind's palette is typed too
 (`ui::palette::SKY.shade(500)`). An element records declarations (`StyleRefinement`); the core lowers them into the

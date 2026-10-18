@@ -141,8 +141,8 @@ pub(crate) use self::{
     task::{Action, AnswerSlot, ClipboardRead, Executor},
 };
 pub use crate::{
-    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow, Dialog,
-    DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode, EventKind, EventPayload,
+    AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow, Cursor,
+    Dialog, DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode, EventKind, EventPayload,
     KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation,
     Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, Measurement,
     ModalAnimation, ModalPresentation, PanActivation, PointerEvents, ResizeMode, ReturnKeyType,
@@ -182,6 +182,7 @@ pub mod prelude {
         ComponentElement,
         ComponentError,
         ComponentRef,
+        Cursor,
         Curve,
         DialogAnswer,
         EaseMode,
