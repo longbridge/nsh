@@ -10,6 +10,7 @@ fn every_demo_opens_from_the_index() {
         "Scrolling",
         "Navigation",
         "Form",
+        "File drops",
         "Gestures",
         "Physics",
         "Animations",
@@ -50,7 +51,7 @@ fn the_index_groups_the_demos() {
     for (title, count) in [
         ("APPS", "3"),
         ("LAYOUT AND LISTS", "4"),
-        ("TOUCH AND MOTION", "3"),
+        ("TOUCH AND MOTION", "4"),
         ("DRAWING AND TYPE", "5"),
         ("PLATFORM", "4"),
     ] {
@@ -66,7 +67,7 @@ fn the_index_groups_the_demos() {
         );
     }
     // Each row has its icon and its chevron drawn.
-    assert!(screen.drawings.len() >= 2 * 19, "{}", screen.drawings.len());
+    assert!(screen.drawings.len() >= 2 * 20, "{}", screen.drawings.len());
 }
 
 #[test]
