@@ -2,7 +2,8 @@
 //! `demos/Stocks.tsx` and `demos/stocks/`): quotes that change every 50 ms
 //! under a one-line market strip, sorted filters that re-sort once a second
 //! with a layout animation; a stock opens its candles, depth, the tape and
-//! a ticket. Leaving the demo stops the market.
+//! a ticket, pushed on phones, beside the list in the desktop layout.
+//! Leaving the demo stops the market.
 //!
 //! The watchlist owns the market and steps it. A tick writes the signals of
 //! what moved ([`Live`]): each stock's quote (only the stocks that traded
@@ -11,7 +12,8 @@
 //! a tick runs only the bindings of what it changed: a row's price, its
 //! sparkline, the strip's figures. A stock's screen is pushed into the
 //! gallery's stack, outside the watchlist; the watchlist hands it the same
-//! [`Live`] as a context.
+//! [`Live`] as a context. In the desktop layout the stock is beside the
+//! watchlist, under it in the view.
 
 mod book;
 mod chart;
@@ -32,11 +34,11 @@ use nsh_core::{
     LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
     nsh_animation::{Curve, EaseMode},
-    ui::{NativeNode, View, prelude::*},
+    ui::{AccessibilityState, NativeNode, View, prelude::*},
 };
 
 use self::{
-    detail::{Detail, DetailProps},
+    detail::{StockView, StockViewProps},
     market::{
         INDEX_BASE, ISSUES, Market, Quote, SECTORS, TICK_MS, grouped, price, signed, time, tone_of,
     },
@@ -46,7 +48,7 @@ use crate::{
     nav,
     ui::{
         IconName, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors,
-        header, icon, motion,
+        desktop, header, icon, motion, pane_width,
     },
 };
 
@@ -169,15 +171,22 @@ fn open(live: &Live, index: usize) {
         provide_context(live.clone());
         header(screen().title(code))
             .header_right(MarketButton::element(()))
-            .child(Detail::element(DetailProps {
+            .child(StockView::element(StockViewProps {
                 stock: index as u32,
+                ..StockViewProps::default()
             }))
     });
 }
 
-/// The watchlist: it owns the market.
+/// The watchlist's width beside the stock in the desktop layout.
+const WATCHLIST: f32 = 380.0;
+
+/// The watchlist: it owns the market. A stock opens its details, pushed on
+/// phones, beside the list on desktops.
 #[component]
 pub(crate) fn Stocks() -> impl IntoElement {
+    // The shell is made again when the layout changes: read once.
+    let wide = untracked(desktop);
     let market = Market::new();
     let quotes: Rc<[Signal<Quote>]> = market.stocks.iter().map(|s| signal(s.quote)).collect();
     let live = Live {
@@ -242,6 +251,8 @@ pub(crate) fn Stocks() -> impl IntoElement {
             })
             .collect::<Vec<_>>()
     });
+    // Desktop: the stock beside the list.
+    let shown = signal(0_usize);
     let stocks = {
         let live = live.clone();
         Each::new(
@@ -253,8 +264,16 @@ pub(crate) fn Stocks() -> impl IntoElement {
                 StockRow::element(StockRowProps {
                     index: index as u32,
                     first: Prop::bind(move || at.get() == 0),
+                    wide,
+                    active: Prop::bind(move || wide && shown.get() == index),
                 })
-                .on_event(move |_: &StockRowEvent| open(&live, index))
+                .on_event(move |_: &StockRowEvent| {
+                    if wide {
+                        shown.set(index);
+                    } else {
+                        open(&live, index);
+                    }
+                })
             },
         )
     };
@@ -267,7 +286,7 @@ pub(crate) fn Stocks() -> impl IntoElement {
             stats.ms, stats.updates
         )
     };
-    view()
+    let watchlist = view()
         .flex_1()
         .bg(colors::BACKGROUND)
         .child(MarketStrip::element(()))
@@ -307,7 +326,35 @@ pub(crate) fn Stocks() -> impl IntoElement {
                         .text_color(colors::FAINT)
                         .tabular_nums(),
                 ),
+        );
+    if !wide {
+        return watchlist.into_element();
+    }
+    // The book and the tape go beside the chart when the stock has the room.
+    let split = computed(|| pane_width() - WATCHLIST >= 860.0);
+    view()
+        .flex_1()
+        .flex_row()
+        .bg(colors::BACKGROUND)
+        .child(
+            view()
+                .w(px(WATCHLIST))
+                .border_r_1()
+                .border_r_color(colors::LINE)
+                .child(watchlist),
         )
+        // A new stock view when another stock is shown.
+        .child(view().flex_1().child(dynamic(move || {
+            let stock = shown.get() as u32;
+            untracked(|| {
+                StockView::element(StockViewProps {
+                    stock,
+                    wide: true,
+                    split: split.into(),
+                })
+            })
+        })))
+        .into_element()
 }
 
 /// The market in one line, on the 16 pt gutters: the composite and its
@@ -637,6 +684,13 @@ struct StockRowProps {
     /// The first row: no hairline above it.
     #[prop(default)]
     first: Prop<bool>,
+    /// The desktop layout: the row shown beside the list is `active`, and
+    /// the others light up under the pointer.
+    #[prop(default)]
+    wide: bool,
+    /// The row's stock is shown beside the list.
+    #[prop(default)]
+    active: Prop<bool>,
 }
 
 /// What a [`StockRow`] reports.
@@ -648,7 +702,9 @@ enum StockRowEvent {
 
 /// A watchlist row: code and name, today's sparkline, the price and its
 /// change, plain text on a flat row. A tick that moved the stock runs its
-/// texts and its sparkline; the others' stay as they are.
+/// texts and its sparkline; the others' stay as they are. In the desktop
+/// layout the row shown beside the list is `active`, and the others light
+/// up under the pointer.
 #[component]
 fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement {
     let live = live();
@@ -701,6 +757,10 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
     });
     let change = computed(move || quote.get().percent());
     let market = live.market;
+    let active = props.active;
+    // TS: `bg-paper-border dark:bg-graphite-raised` when active,
+    // `hover:bg-paper-card dark:hover:bg-graphite-card` otherwise.
+    let fill = AdaptiveColor::new(colors::BORDER.light, colors::RAISED.dark);
     view()
         .h(px(64.0))
         .flex_row()
@@ -712,6 +772,25 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
         .underlay(|| color(colors::SURFACE), 0.85)
         .role(AccessibilityRole::Button)
         .label(name)
+        .when(props.wide, |v| {
+            v.cursor_pointer()
+                .accessibility_state(move || AccessibilityState {
+                    selected: active.get(),
+                    ..AccessibilityState::default()
+                })
+                .style_when(active, |s| s.bg(fill))
+                .hover(|s| s.bg(move || if active.get() { fill } else { colors::SURFACE }))
+        })
+        .child(If::new(active, || {
+            view()
+                .absolute()
+                .top(px(14.0))
+                .bottom(px(14.0))
+                .left_0()
+                .w(px(3.0))
+                .rounded(px(1.5))
+                .bg(colors::ACCENT)
+        }))
         // The hairline above all rows but the first (it stays: rows move).
         .child(
             view()
