@@ -7,7 +7,10 @@ use std::{rc::Rc, time::Duration};
 
 use nsh_core::ui::prelude::*;
 
-use crate::ui::{Badge, Finish, Finished, IconName, PressProps, Stat, Tone, colors, icon, radius};
+use crate::ui::{
+    Badge, Button, ButtonVariant, Finish, Finished, IconName, PressProps, Stat, Tone, colors, icon,
+    radius,
+};
 
 /// Photos loaded per page.
 const PAGE: usize = 200;
@@ -139,7 +142,13 @@ fn row(photo: Memo<Option<Photo>>) -> impl IntoElement {
 
 /// The list's header: a card of figures and a hint, fading out and moving
 /// at half speed as the list slides over it.
-fn hero(count: Memo<usize>, refreshes: Signal<u32>, scroll_y: &NativeValue) -> impl IntoElement {
+fn hero(
+    count: Memo<usize>,
+    refreshes: Signal<u32>,
+    refreshing: Signal<bool>,
+    refresh: impl Into<Listener<()>>,
+    scroll_y: &NativeValue,
+) -> impl IntoElement {
     view()
         .px_4()
         .pt_2()
@@ -232,13 +241,33 @@ fn hero(count: Memo<usize>, refreshes: Signal<u32>, scroll_y: &NativeValue) -> i
                 .pt_3()
                 .child(icon(IconName::ArrowDown, 14.0, colors::FAINT))
                 .child(
-                    text(format!(
-                        "Pull to refresh. Scrolling to the end loads {PAGE} more."
-                    ))
+                    text(if is_desktop() {
+                        format!("Scrolling to the end loads {PAGE} more.")
+                    } else {
+                        format!("Pull to refresh. Scrolling to the end loads {PAGE} more.")
+                    })
                     .flex_1()
                     .text_size(px(13.0))
                     .text_color(colors::FAINT),
-                ),
+                )
+                // The mouse does not pull scroll views down: desktops
+                // refresh here.
+                .when(is_desktop(), |v| {
+                    v.child(
+                        Button::new(
+                            move || {
+                                if refreshing.get() {
+                                    "Refreshing…"
+                                } else {
+                                    "Refresh"
+                                }
+                            },
+                            refresh,
+                        )
+                        .variant(ButtonVariant::Secondary)
+                        .disabled(Prop::bind(move || refreshing.get())),
+                    )
+                }),
         )
 }
 
@@ -286,7 +315,7 @@ pub(crate) fn Photos() -> impl IntoElement {
             .refreshing(refreshing)
             .on_refresh(on_refresh)
             .on_end_reached(load_more)
-            .header(hero(count, refreshes, &scroll_y))
+            .header(hero(count, refreshes, refreshing, on_refresh, &scroll_y))
             .footer(
                 text(format!("Loading {PAGE} more…"))
                     .text_center()
