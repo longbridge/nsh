@@ -70,6 +70,10 @@ pub struct AppOptions {
     pub title: String,
     /// The initial window size in points.
     pub size: (i32, i32),
+    /// Hides the standalone window on close while retaining its engine.
+    /// Reopening from the Dock shows the same window. Quit still stops the app.
+    /// Only used by [`run_app`]; defaults to false.
+    pub keep_alive_on_close: bool,
     /// Steps run once the window shows (`wait 500; shot a.png; tap 10 20;
     /// quit`): for checking a backend change without touching the screen.
     /// See [`crate::script`].
@@ -99,6 +103,7 @@ impl Default for AppOptions {
             asset_base: None,
             title: "nsh".to_owned(),
             size: (1200, 800),
+            keep_alive_on_close: false,
             script: None,
             components: Default::default(),
             appearance: Appearance::System,
@@ -275,6 +280,7 @@ fn initial_environment() -> Environment {
 struct Running {
     window: Retained<NSWindow>,
     view: Rc<AppView>,
+    keep_alive_on_close: bool,
 }
 
 thread_local! {
@@ -303,6 +309,20 @@ define_class!(
             NSApplicationTerminateReply::TerminateCancel
         }
 
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
+            let window = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .map(|running| running.window.clone())
+            });
+            if let Some(window) = window {
+                window.makeKeyAndOrderFront(None);
+            }
+            false
+        }
+
         #[unsafe(method(applicationWillTerminate:))]
         fn will_terminate(&self, _notification: &NSNotification) {
             stop_running();
@@ -310,6 +330,20 @@ define_class!(
     }
 
     unsafe impl NSWindowDelegate for Delegate {
+        #[unsafe(method(windowShouldClose:))]
+        fn should_close(&self, window: &NSWindow) -> bool {
+            let keep_alive = RUNNING.with(|running| {
+                running
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|running| running.keep_alive_on_close)
+            });
+            if keep_alive {
+                window.orderOut(None);
+            }
+            !keep_alive
+        }
+
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _notification: &NSNotification) {
             stop_running();
@@ -323,6 +357,20 @@ define_class!(
         }
     }
 );
+
+/// Quits the standalone runner, including a retained hidden window.
+/// Stops its engine and returns from [`run_app`]. May be called from any thread;
+/// the request is dispatched to AppKit's main thread. With no standalone runner
+/// this has no effect; embedded hosts own their application lifecycle.
+pub fn quit_app() {
+    dispatch2::DispatchQueue::main().exec_async(|| {
+        if RUNNING.with(|running| running.borrow().is_some())
+            && let Some(mtm) = MainThreadMarker::new()
+        {
+            finish_running(&NSApplication::sharedApplication(mtm));
+        }
+    });
+}
 
 /// Ends the standalone event loop, returning process ownership to its caller.
 fn finish_running(app: &NSApplication) {
@@ -391,8 +439,9 @@ fn name_app(name: &str) {
 }
 
 /// Runs `source` in a window until it is closed. Must be called on the
-/// main thread. Closing the window or choosing Quit stops the engine and
-/// returns to the caller, which can finish cleanup or relaunch the app.
+/// main thread. By default closing the window stops the engine and returns;
+/// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
+/// The caller can finish cleanup or relaunch after this function returns.
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
@@ -442,7 +491,13 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     if let Some(script) = &options.script {
         crate::script::run(&window, view.surface().clone(), script);
     }
-    RUNNING.with(|r| *r.borrow_mut() = Some(Running { window, view }));
+    RUNNING.with(|r| {
+        *r.borrow_mut() = Some(Running {
+            window,
+            view,
+            keep_alive_on_close: options.keep_alive_on_close,
+        })
+    });
     app.run();
     stop_running();
     app.setDelegate(None);

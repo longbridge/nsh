@@ -108,7 +108,12 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-macos-上注册rust)。
 
-关闭窗口或选择退出会停止引擎，并从 `run_app` 返回；调用方可以继续完成清理或重新启动可执行文件。
+默认情况下，关闭窗口或选择退出会停止引擎，并从 `run_app` 返回；调用方可以继续完成清理或重新启动可执行文件。
+
+设置 `AppOptions { keep_alive_on_close: true, ..Default::default() }` 可以在关闭窗口后保留独立应用的会话。
+关闭操作会隐藏窗口，从 Dock 重开时会显示同一个窗口和引擎。明确退出或更新重启时，可以从任意线程调用
+`nsh_platform_macos::quit_app()`；它会关闭保留的窗口、停止引擎，并从 `run_app` 返回。
+`nsh_core::ui::desktop::close_window()` 遵循所选的窗口关闭策略。
 
 ## macOS 上的差异
 

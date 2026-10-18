@@ -114,8 +114,16 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 For an app that is only an NSH app, `run_app(source, options)` opens one `AppView` in a window with a standard menu
 (About, Hide, Quit, Edit, Minimize, Zoom, Enter Full Screen, Close), which the app can replace with
 `Menu.setApplicationMenu` ([`nsh/desktop`](../modules/nsh-desktop.md)), and runs until the window closes.
-Closing the window or choosing Quit stops the engine and returns from `run_app`;
+By default, closing the window or choosing Quit stops the engine and returns from `run_app`;
 the caller can then finish cleanup or relaunch its executable.
+
+Set `AppOptions { keep_alive_on_close: true, ..Default::default() }` to keep the
+standalone session alive when its window closes. Closing hides the window;
+reopening from the Dock shows that same window and engine. For an explicit Exit
+or update relaunch, call `nsh_platform_macos::quit_app()` from any thread. It
+closes the retained window, stops the engine and returns from `run_app`.
+`nsh_core::ui::desktop::close_window()` follows the chosen window-close policy.
+
 
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-macos-rust).

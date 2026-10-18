@@ -259,3 +259,22 @@ This lets a Rust host perform final cleanup or execute an installed update after
 delegate and event loop. This change still needs native close, minimized-close,
 Command-Q, script quit, process-exit status and relaunch validation. No tests
 were run for this change at the user's request.
+
+### Retained standalone session design
+
+A standalone host chooses its close policy through
+`AppOptions::keep_alive_on_close` (default false). With retention enabled, the
+close delegate orders out the existing window and declines its destruction.
+`RUNNING` continues owning the same window, AppView and engine. Dock reopen
+orders that window front; it creates neither another engine nor another session.
+
+Explicit application Quit and `quit_app()` always take the stop-and-return
+path, including while the window is hidden. `quit_app()` dispatches to the main
+thread and only affects the standalone runner; an embedded host retains its own
+application lifecycle. The Rust core's `close_window()` remains a window-close
+request, so hosts using retention must use `quit_app()` for Exit/relaunch.
+
+Acceptance requires visible/hidden/minimized close, Dock reopen preserving
+state and transfers, repeated reopen without duplicate windows, Quit while
+hidden, scripted quit, and cleanup after run_app returns. Source implementation
+and CI compilation alone do not prove those runtime behaviors.

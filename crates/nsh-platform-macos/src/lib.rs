@@ -55,7 +55,7 @@ pub use objc2_app_kit;
 pub use objc2_foundation;
 
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, run_app, set_ui_sets},
+    app::{AppOptions, AppSource, AppView, quit_app, run_app, set_ui_sets},
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
     text::CoreTextEngine,
