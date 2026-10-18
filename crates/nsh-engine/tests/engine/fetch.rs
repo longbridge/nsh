@@ -255,3 +255,58 @@ fn fetch_stays_within_the_capabilities() {
             .all(|u| !u.starts_with("https://evil.io"))
     );
 }
+
+/// A Rust component whose task fetches: the echo's text shows, and the slow
+/// request is cancelled with the task that waited for it.
+#[nsh_core::ui::component]
+fn Fetcher() -> impl nsh_core::ui::IntoElement {
+    use nsh_core::ui::prelude::*;
+    let shown = signal(SharedString::from("loading"));
+    spawn(async move {
+        let slow = spawn(fetch("https://example.com/slow"));
+        let echo = fetch(HttpRequest::new("put", "https://example.com/echo").body("hi")).await;
+        slow.cancel();
+        shown.set(match echo {
+            Ok(response) => format!("{} {}", response.status(), response.text()).into(),
+            Err(error) => error.into(),
+        });
+    });
+    text(move || shown.get())
+}
+
+#[test]
+fn rust_components_fetch_through_the_platform_network() {
+    let network = Arc::new(EchoNetwork::default());
+    let cancelled = network.cancelled.clone();
+    let (tx, rx) = mpsc::channel();
+    let config = EngineConfig {
+        app: nsh_engine::App::Rust(nsh_core::ui::Root::of::<Fetcher>()),
+        viewport: Size::new(320.0, 480.0),
+        trace: false,
+        network: Some(network),
+        assets: None,
+        environment: Default::default(),
+        header_heights: (44.0, 96.0),
+        limits: nsh_engine::Limits::default(),
+        ui_sets: Vec::new(),
+        runtime: None,
+    };
+    let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
+    let mut shown = Vec::new();
+    while !shown.iter().any(|t: &String| t.starts_with("200")) {
+        let batch = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("no response");
+        shown.extend(texts(&batch));
+    }
+    assert_eq!(shown.last().unwrap(), "200 PUT https://example.com/echo hi");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while cancelled.lock().unwrap().is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "slow request not cancelled"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(*cancelled.lock().unwrap(), ["https://example.com/slow"]);
+}

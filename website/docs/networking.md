@@ -235,6 +235,31 @@ NSH's `fetch` follows the Fetch standard with the differences that make sense fo
 
 Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`, and no WebSocket API.
 
+## From Rust components
+
+Rust components and modules make requests with `fetch` in a task. It goes through the same network stack as JS's
+`fetch` (the platform's, or the browser's [on the web](./web.md#apps-with-rust-components)) and the same
+capability checks, and gives the whole response:
+
+```rust
+use nsh_core::ui::prelude::*;
+
+spawn(async move {
+    match fetch("https://api.example.com/items").await {
+        Ok(response) if response.ok() => items.set(parse(&response.text())),
+        Ok(response) => error.set(format!("HTTP {}", response.status())),
+        Err(message) => error.set(message),
+    }
+});
+
+// Other methods, headers and bodies:
+let request = HttpRequest::post("https://api.example.com/items", body)
+    .header("content-type", "application/json");
+let response = fetch(request).await?;
+```
+
+The URL is absolute. A request whose task ends (the component goes, or the task is cancelled) is cancelled with it.
+
 ## Related
 
 - [Global APIs](../modules/globals.md): every global, with its members.

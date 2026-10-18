@@ -235,6 +235,30 @@ NSH 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 
 基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`，也没有 WebSocket API。
 
+## 在 Rust 组件中
+
+Rust 组件和模块在任务里用 `fetch` 发请求。它与 JS 的 `fetch` 走同一个网络栈（平台的网络栈，或者[在 Web 上](./web.md#带-rust-组件的应用)是浏览器的），
+经过相同的能力检查，返回完整的响应：
+
+```rust
+use nsh_core::ui::prelude::*;
+
+spawn(async move {
+    match fetch("https://api.example.com/items").await {
+        Ok(response) if response.ok() => items.set(parse(&response.text())),
+        Ok(response) => error.set(format!("HTTP {}", response.status())),
+        Err(message) => error.set(message),
+    }
+});
+
+// 其他方法、请求头和请求体：
+let request = HttpRequest::post("https://api.example.com/items", body)
+    .header("content-type", "application/json");
+let response = fetch(request).await?;
+```
+
+URL 需为绝对地址。任务结束时（组件被移除或任务被取消），它发出的请求也随之取消。
+
 ## 相关内容
 
 - [全局 API](../modules/globals.md)：所有全局对象及其成员。

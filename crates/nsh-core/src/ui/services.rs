@@ -14,7 +14,11 @@ use super::{
     Answer, ImageSize, PropEnum,
     task::{Action, AnswerSlot, ClipboardRead},
 };
-use crate::{Command, ROOT_ID, time::Instant};
+use crate::{
+    Command, ROOT_ID,
+    platform::{HttpHead, HttpRequest},
+    time::Instant,
+};
 
 /// How long a toast shows.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
@@ -38,6 +42,63 @@ impl Future for Prefetch {
     fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<bool> {
         Pin::new(&mut self.0).poll(cx).map(|size| size.is_ok())
     }
+}
+
+/// The response to a [`super::ambient::fetch`]: its status line, headers
+/// and whole body.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HttpResponse {
+    /// The status, final URL and headers.
+    pub head: HttpHead,
+    /// The body.
+    pub body: Vec<u8>,
+}
+
+impl HttpResponse {
+    /// The status code.
+    pub fn status(&self) -> u16 {
+        self.head.status
+    }
+
+    /// Whether the status is a success (200–299).
+    pub fn ok(&self) -> bool {
+        (200..300).contains(&self.head.status)
+    }
+
+    /// The first header named `name` (case-insensitively).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.head
+            .headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The body as text (UTF-8; invalid sequences become U+FFFD).
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(&self.body).into_owned()
+    }
+}
+
+/// A request in flight ([`super::ambient::fetch`]): awaited, its response,
+/// or why there is none (the network failed, or the app's capabilities do
+/// not grant the host).
+#[must_use = "a request does nothing unless awaited"]
+#[derive(Debug)]
+pub struct Fetch(pub(crate) Answer<Result<HttpResponse, String>>);
+
+impl Future for Fetch {
+    type Output = Result<HttpResponse, String>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+/// Makes `request` through the engine's network stack.
+pub(crate) fn fetch(request: HttpRequest) -> (Fetch, Action) {
+    let (answer, slot) = Answer::new();
+    (Fetch(answer), Action::Fetch(Box::new(request), slot))
 }
 
 /// A change of the layout direction's policy (TS: `I18nManager`).

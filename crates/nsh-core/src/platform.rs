@@ -294,7 +294,8 @@ impl std::fmt::Display for Locale {
     }
 }
 
-/// An HTTP request for the platform's network stack (made by JS `fetch`).
+/// An HTTP request for the platform's network stack (made by JS `fetch`
+/// and by Rust components' [`crate::ui::ambient::fetch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpRequest {
     /// Upper-case method (`GET`, `POST`, ...).
@@ -307,6 +308,56 @@ pub struct HttpRequest {
     pub body: HttpBody,
     /// Follow redirects (`redirect: "follow"`, the default).
     pub follow_redirects: bool,
+}
+
+impl HttpRequest {
+    /// A request of `method` (`GET`, `POST`, ...; upper-cased) to `url`,
+    /// with no headers or body, following redirects.
+    pub fn new(method: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            method: method.into().to_ascii_uppercase(),
+            url: url.into(),
+            headers: Vec::new(),
+            body: HttpBody::Empty,
+            follow_redirects: true,
+        }
+    }
+
+    /// A `GET` of `url`.
+    pub fn get(url: impl Into<String>) -> Self {
+        Self::new("GET", url)
+    }
+
+    /// A `POST` of `body` to `url`.
+    pub fn post(url: impl Into<String>, body: impl Into<Vec<u8>>) -> Self {
+        Self::new("POST", url).body(body)
+    }
+
+    /// Adds the header `name: value`.
+    #[must_use]
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// Sends `body`.
+    #[must_use]
+    pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
+        self.body = HttpBody::Bytes(body.into());
+        self
+    }
+}
+
+impl From<&str> for HttpRequest {
+    fn from(url: &str) -> Self {
+        Self::get(url)
+    }
+}
+
+impl From<String> for HttpRequest {
+    fn from(url: String) -> Self {
+        Self::get(url)
+    }
 }
 
 /// The body of an [`HttpRequest`].

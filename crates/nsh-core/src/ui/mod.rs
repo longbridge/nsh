@@ -123,7 +123,7 @@ pub use self::{
     },
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     scrollable::Scrollable,
-    services::{Prefetch, ToastDuration},
+    services::{Fetch, HttpResponse, Prefetch, ToastDuration},
     status_bar::StatusBarEntry,
     style::{
         AdaptiveColor, BorderCurve, FontWeight, Length, StyleRefinement, Styled, WritingDirection,
@@ -148,7 +148,7 @@ pub use crate::{
     ModalAnimation, ModalPresentation, PanActivation, PointerEvents, ResizeMode, ReturnKeyType,
     ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
     SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
-    platform::{Appearance, Idiom, Locale, Os},
+    platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Locale, Os},
     style::{Color, OriginLen},
 };
 
@@ -200,6 +200,9 @@ pub mod prelude {
         FontWeight,
         // Typed events.
         GestureEvent,
+        // The network.
+        HttpRequest,
+        HttpResponse,
         ImageAsset,
         Input,
         InputAccessoryView,
@@ -306,13 +309,13 @@ pub mod prelude {
         ambient::{
             Delay, KeyOptions, Spawned, add_status_bar, allow_rtl, animate_layout,
             announce_for_accessibility, clipboard_has_string, clipboard_string, color,
-            component_ref, dark, dialog, dismiss_keyboard, element_ref, font_scale, force_rtl,
-            global, idiom, image_size, is_desktop, key_label, keyboard_duration, keyboard_height,
-            locale, measure_text, native_value, next_frame, on_back_press, on_key, on_key_with, os,
-            os_version, pixel_ratio, prefetch_image, reduce_motion, request_animation_frame,
-            round_to_nearest_pixel, rtl, safe_area, screen_reader, set_clipboard, set_color_scheme,
-            set_interval, set_timeout, spawn, theme, timer, timer_until, toast, update_status_bar,
-            window,
+            component_ref, dark, dialog, dismiss_keyboard, element_ref, fetch, font_scale,
+            force_rtl, global, idiom, image_size, is_desktop, key_label, keyboard_duration,
+            keyboard_height, locale, measure_text, native_value, next_frame, on_back_press, on_key,
+            on_key_with, os, os_version, pixel_ratio, prefetch_image, reduce_motion,
+            request_animation_frame, round_to_nearest_pixel, rtl, safe_area, screen_reader,
+            set_clipboard, set_color_scheme, set_interval, set_timeout, spawn, theme, timer,
+            timer_until, toast, update_status_bar, window,
         },
         batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context, signal,
         signal_with, stored, untracked, use_context,

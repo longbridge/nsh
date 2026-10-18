@@ -540,7 +540,7 @@ enum Message {
     FontsChanged,
     /// An event of a request (by the hop it is for: events of a hop the
     /// engine left are dropped).
-    Fetch(RequestId, u64, FetchEvent),
+    Fetch(Requester, u64, FetchEvent),
     Hot(HotUpdate),
     /// A chunk [`MountSink::load_chunk`] was asked for, or why it could
     /// not be loaded (its id and the message).
@@ -963,6 +963,8 @@ impl<M: TextEngine + 'static> Driver<M> {
                 tx,
                 queue: NetworkQueue::default(),
                 inflight: FxHashMap::default(),
+                tasks: Vec::new(),
+                abandoned: Vec::new(),
                 access: access.clone(),
                 hops: 0,
             },
@@ -1024,7 +1026,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             sink.submit(batch);
         }
-        state.net.pump(script);
+        state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         driver.check_stopped();
@@ -1094,7 +1096,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         if let Some(size) = state.resized.take() {
             sink.resized(size);
         }
-        state.net.pump(script);
+        state.net.pump(script, &mut state.core);
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         self.check_stopped();
@@ -1168,12 +1170,25 @@ struct State<M: TextEngine> {
     resized: Option<Size>,
 }
 
-/// Requests between JS and the platform's network stack.
+/// Who made a request: JS (`fetch`), or a Rust component's task
+/// (`nsh_core::ui::fetch`, [`Core::take_fetches`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Requester {
+    Js(RequestId),
+    Task(u32),
+}
+
+/// Requests between the app (JS and Rust components' tasks) and the
+/// platform's network stack.
 struct Net {
     network: Option<Arc<dyn Network>>,
     tx: Sender<Message>,
     queue: NetworkQueue,
-    inflight: FxHashMap<RequestId, Inflight>,
+    inflight: FxHashMap<Requester, Inflight>,
+    /// The tasks' requests taken from the core, and those they gave up
+    /// (reused buffers).
+    tasks: Vec<(u32, HttpRequest)>,
+    abandoned: Vec<u32>,
     /// What the app may reach.
     access: Arc<nsh_core::access::Access>,
     /// Hops started so far (the id of the next).
@@ -1190,55 +1205,77 @@ struct Inflight {
 }
 
 impl Net {
-    /// Hands what JS asked of its requests to the network.
-    fn pump(&mut self, script: Option<&Script>) {
+    /// Hands what JS and the components' tasks asked of their requests to
+    /// the network.
+    fn pump<M: TextEngine>(&mut self, script: Option<&Script>, core: &mut Core<M>) {
+        let mut abandoned = std::mem::take(&mut self.abandoned);
+        core.take_fetches(&mut self.tasks, &mut abandoned);
+        for id in abandoned.drain(..) {
+            self.cancel(Requester::Task(id));
+        }
+        self.abandoned = abandoned;
+        let mut tasks = std::mem::take(&mut self.tasks);
+        for (id, request) in tasks.drain(..) {
+            if let Err(refused) = self.request(Requester::Task(id), request) {
+                core.fetch_event(id, FetchEvent::Failed(refused));
+            }
+        }
+        self.tasks = tasks;
         let Some(script) = script else { return };
         script.take_network(&mut self.queue);
         for (id, op) in std::mem::take(&mut self.queue.ops) {
+            let who = Requester::Js(id);
             match op {
-                FetchOp::Start(request) => self.request(script, id, request),
+                FetchOp::Start(request) => {
+                    if let Err(refused) = self.request(who, request) {
+                        script.fetch_event(id, FetchEvent::Failed(refused));
+                    }
+                }
                 FetchOp::Send(chunk) => {
-                    if let Some(i) = self.inflight.get_mut(&id) {
+                    if let Some(i) = self.inflight.get_mut(&who) {
                         i.task.send(chunk);
                     }
                 }
                 FetchOp::Finish => {
-                    if let Some(i) = self.inflight.get_mut(&id) {
+                    if let Some(i) = self.inflight.get_mut(&who) {
                         i.task.finish();
                     }
                 }
                 FetchOp::Pause(paused) => {
-                    if let Some(i) = self.inflight.get_mut(&id) {
+                    if let Some(i) = self.inflight.get_mut(&who) {
                         i.task.pause(paused);
                     }
                 }
-                FetchOp::Cancel => {
-                    if let Some(i) = self.inflight.remove(&id) {
-                        i.task.cancel();
-                    }
-                }
+                FetchOp::Cancel => self.cancel(who),
             }
         }
     }
 
-    /// Makes request `id`, if the app may.
-    fn request(&mut self, script: &Script, id: RequestId, request: HttpRequest) {
-        if self.access.is_unrestricted() {
-            self.start(id, request, None);
-        } else if !self.access.allows_http(&request.method, &request.url) {
-            let refused = access::refused(&request.method, &request.url);
-            script.fetch_event(id, FetchEvent::Failed(refused));
-        } else if request.follow_redirects {
-            let hop = access::hop(&request);
-            let followed = access::Followed { request, hops: 0 };
-            self.start(id, hop, Some(followed));
-        } else {
-            self.start(id, request, None);
+    /// Aborts `who`'s request.
+    fn cancel(&mut self, who: Requester) {
+        if let Some(i) = self.inflight.remove(&who) {
+            i.task.cancel();
         }
     }
 
+    /// Makes `who`'s request, if the app may (else why not).
+    fn request(&mut self, who: Requester, request: HttpRequest) -> Result<(), String> {
+        if self.access.is_unrestricted() {
+            self.start(who, request, None);
+        } else if !self.access.allows_http(&request.method, &request.url) {
+            return Err(access::refused(&request.method, &request.url));
+        } else if request.follow_redirects {
+            let hop = access::hop(&request);
+            let followed = access::Followed { request, hops: 0 };
+            self.start(who, hop, Some(followed));
+        } else {
+            self.start(who, request, None);
+        }
+        Ok(())
+    }
+
     /// Hands one request (or redirect hop) to the network.
-    fn start(&mut self, id: RequestId, request: HttpRequest, followed: Option<access::Followed>) {
+    fn start(&mut self, id: Requester, request: HttpRequest, followed: Option<access::Followed>) {
         self.hops += 1;
         let hop = self.hops;
         let Some(network) = &self.network else {
@@ -1264,7 +1301,7 @@ impl Net {
     /// An event of hop `hop` of request `id`: what JS is told, if anything
     /// (`None` for events of hops left behind, and redirects the engine
     /// follows).
-    fn event(&mut self, id: RequestId, hop: u64, event: FetchEvent) -> Option<FetchEvent> {
+    fn event(&mut self, id: Requester, hop: u64, event: FetchEvent) -> Option<FetchEvent> {
         if self.network.is_none() {
             return Some(event);
         }
@@ -1642,11 +1679,20 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         Message::States(id, states) => state.core.set_states(id, states),
         Message::FontsChanged => state.core.fonts_changed(),
-        Message::Fetch(id, hop, event) => {
-            if let Some(event) = state.net.event(id, hop, event)
-                && let Some(script) = script
-            {
-                script.fetch_event(id, event);
+        Message::Fetch(who, hop, event) => {
+            if let Some(event) = state.net.event(who, hop, event) {
+                match who {
+                    Requester::Js(id) => {
+                        if let Some(script) = script {
+                            script.fetch_event(id, event);
+                        }
+                    }
+                    Requester::Task(id) => {
+                        if !state.core.fetch_event(id, event) {
+                            state.net.cancel(who);
+                        }
+                    }
+                }
             }
         }
         Message::Hot(update) => state.hot.push(update),

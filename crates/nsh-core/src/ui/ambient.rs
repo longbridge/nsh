@@ -399,6 +399,18 @@ pub fn prefetch_image(uri: impl Into<String>) -> super::Prefetch {
     answer
 }
 
+/// Makes an HTTP request (in a task: await its response; TS: `fetch`) with
+/// the engine's network stack, the one JS's `fetch` uses: the platform's
+/// on native targets and the browser's on the web, under the app's
+/// `capabilities.network`. `request` is a URL (`GET`) or an
+/// [`HttpRequest`](crate::platform::HttpRequest); the URL is absolute.
+/// The whole body arrives with the response.
+pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
+    let (answer, action) = super::services::fetch(request.into());
+    act(action);
+    answer
+}
+
 /// Shows the surface in `appearance` whatever the system's (TS:
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {
@@ -579,7 +591,9 @@ pub fn next_frame() -> Answer<Instant> {
 }
 
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
-/// its result; `tokio::task::spawn_blocking`). Not in WebAssembly.
+/// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
+/// that should also run on the web uses the engine's services instead
+/// ([`fetch`], [`timer`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn blocking<R: Send + 'static>(
     f: impl FnOnce() -> R + Send + 'static,

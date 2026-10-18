@@ -257,6 +257,13 @@ enum Awaited {
     Value(AnswerSlot<f32>),
 }
 
+/// An HTTP request of a task in flight ([`Core::fetch_event`]).
+struct PendingFetch {
+    /// What arrived so far.
+    response: crate::ui::HttpResponse,
+    answer: AnswerSlot<Result<crate::ui::HttpResponse, String>>,
+}
+
 /// The core's component state.
 pub(super) struct Components {
     registry: Registry,
@@ -298,6 +305,12 @@ pub(super) struct Components {
     /// id: their answers.
     clipboard_reads: FxHashMap<u32, ClipboardRead>,
     next_clipboard_read: u32,
+    /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
+    /// so far and the answer.
+    fetches: FxHashMap<u32, PendingFetch>,
+    /// Requests not handed to the engine's network stack yet.
+    fetch_requests: Vec<(u32, crate::platform::HttpRequest)>,
+    next_fetch: u32,
     /// The ends of the animations components started and the values they
     /// read, by id.
     animations: FxHashMap<nsh_animation::AnimationId, Awaited>,
@@ -362,6 +375,9 @@ impl Default for Components {
             next_image_info: 1,
             clipboard_reads: FxHashMap::default(),
             next_clipboard_read: 1,
+            fetches: FxHashMap::default(),
+            fetch_requests: Vec::new(),
+            next_fetch: 1,
             animations: FxHashMap::default(),
             measures: Vec::new(),
             virtual_lists: FxHashMap::default(),
@@ -3255,6 +3271,18 @@ impl<M: TextEngine> Core<M> {
                     command: Command::ImageInfo { id, uri },
                 });
             }
+            Action::Fetch(request, answer) => {
+                let id = self.components.next_fetch;
+                self.components.next_fetch += 1;
+                self.components.fetches.insert(
+                    id,
+                    PendingFetch {
+                        response: crate::ui::HttpResponse::default(),
+                        answer,
+                    },
+                );
+                self.components.fetch_requests.push((id, *request));
+            }
             Action::ReadClipboard(read) => {
                 let id = self.components.next_clipboard_read;
                 self.components.next_clipboard_read += 1;
@@ -3290,6 +3318,64 @@ impl<M: TextEngine> Core<M> {
         if let Some(answer) = self.components.image_infos.remove(&id) {
             answer.borrow_mut().deliver(size);
         }
+    }
+
+    /// Moves the HTTP requests tasks made (`ui::fetch`) since the last call
+    /// to `start`, by request id: the engine makes them with its network
+    /// stack and reports what happens with [`Core::fetch_event`]. Requests
+    /// nothing waits for any more (their task ended) go to `abandoned`, for
+    /// the engine to cancel.
+    pub fn take_fetches(
+        &mut self,
+        start: &mut Vec<(u32, crate::platform::HttpRequest)>,
+        abandoned: &mut Vec<u32>,
+    ) {
+        start.append(&mut self.components.fetch_requests);
+        if self.components.fetches.is_empty() {
+            return;
+        }
+        self.components.fetches.retain(|&id, pending| {
+            // Only the slot is left: the task awaiting it is gone.
+            let wanted = Rc::strong_count(&pending.answer) > 1;
+            if !wanted {
+                abandoned.push(id);
+            }
+            wanted
+        });
+        start.retain(|(id, _)| !abandoned.contains(id));
+    }
+
+    /// What happened to the tasks' request `id`; false when nothing waits
+    /// for it any more (the task ended, or the request is over): the engine
+    /// then cancels it.
+    pub fn fetch_event(&mut self, id: u32, event: crate::platform::FetchEvent) -> bool {
+        use crate::platform::FetchEvent;
+        let Some(pending) = self.components.fetches.get_mut(&id) else {
+            return false;
+        };
+        // Only the slot is left: the task awaiting it is gone.
+        if Rc::strong_count(&pending.answer) == 1 {
+            self.components.fetches.remove(&id);
+            return false;
+        }
+        match event {
+            FetchEvent::BodyWanted => {}
+            FetchEvent::Head(head) => pending.response.head = head,
+            FetchEvent::Data(data) => pending.response.body.extend_from_slice(&data),
+            FetchEvent::End => {
+                if let Some(pending) = self.components.fetches.remove(&id) {
+                    pending.answer.borrow_mut().deliver(Ok(pending.response));
+                }
+                return false;
+            }
+            FetchEvent::Failed(error) => {
+                if let Some(pending) = self.components.fetches.remove(&id) {
+                    pending.answer.borrow_mut().deliver(Err(error));
+                }
+                return false;
+            }
+        }
+        true
     }
 
     /// The answer to clipboard read `id`: the text, `None` when it holds

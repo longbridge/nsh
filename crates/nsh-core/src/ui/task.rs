@@ -67,6 +67,12 @@ pub(crate) enum Action {
     /// The pixel size of the image at the URI (its bytes stay loaded); the
     /// answer resolves the slot.
     ImageInfo(String, AnswerSlot<Result<ImageSize, String>>),
+    /// An HTTP request for the engine's network stack; the response (or
+    /// its failure) resolves the slot.
+    Fetch(
+        Box<crate::platform::HttpRequest>,
+        AnswerSlot<Result<super::services::HttpResponse, String>>,
+    ),
     /// Reads the system clipboard; the answer resolves the slot.
     ReadClipboard(ClipboardRead),
     /// An operation on the native animation graph.
