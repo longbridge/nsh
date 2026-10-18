@@ -1,15 +1,18 @@
 //! Async tasks ([`super::spawn`]): futures run on the engine thread (they
 //! may hold signals and other `!Send` handles) by a small executor of the
 //! core, polled inside a tokio runtime's context, so the tokio ecosystem
-//! works in them: `tokio::time` for timers, network and file IO, channels;
-//! `Send` work goes to the runtime's threads ([`super::background`]).
+//! works in them: network and file IO, channels; `Send` work goes to the
+//! runtime's threads ([`super::background`]). Their timers
+//! ([`super::timer`]) are the executor's own: the core fires them as they
+//! come due and the engine's loop wakes for the soonest, as for JS's.
 //! Wakers may fire on any thread: they wake the engine. A task changes
 //! what it wants by writing signals; it ends with the owner it was made
 //! under.
 
 use std::{
     cell::RefCell,
-    collections::VecDeque,
+    cmp::Reverse,
+    collections::{BinaryHeap, VecDeque},
     future::Future,
     pin::Pin,
     rc::{Rc, Weak},
@@ -144,6 +147,39 @@ pub(crate) struct Executor {
     derived: RefCell<super::animated::Derived>,
     /// The components' listeners of the back button.
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
+    /// The timers tasks wait for ([`super::timer`]), soonest first: the core
+    /// fires them as they come due, and the engine's loop wakes for the
+    /// soonest, as it does for JS's timers.
+    timers: RefCell<BinaryHeap<Reverse<Timer>>>,
+    next_timer_seq: std::cell::Cell<u64>,
+}
+
+/// A task's timer: when, and whom to wake (in the order they were made
+/// among timers due at once).
+struct Timer {
+    at: Instant,
+    seq: u64,
+    waker: Waker,
+}
+
+impl PartialEq for Timer {
+    fn eq(&self, other: &Self) -> bool {
+        (self.at, self.seq) == (other.at, other.seq)
+    }
+}
+
+impl Eq for Timer {}
+
+impl PartialOrd for Timer {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Timer {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.at, self.seq).cmp(&(other.at, other.seq))
+    }
 }
 
 impl Executor {
@@ -161,6 +197,36 @@ impl Executor {
         node: &Rc<super::animated::Node>,
     ) {
         self.derived.borrow_mut().0.push((key, Rc::downgrade(node)));
+    }
+
+    /// Wakes `waker` at `at`.
+    pub(crate) fn add_timer(&self, at: Instant, waker: Waker) {
+        let seq = self.next_timer_seq.get();
+        self.next_timer_seq.set(seq + 1);
+        self.timers
+            .borrow_mut()
+            .push(Reverse(Timer { at, seq, waker }));
+    }
+
+    /// When the soonest timer is due.
+    pub(crate) fn next_timer(&self) -> Option<Instant> {
+        self.timers.borrow().peek().map(|Reverse(t)| t.at)
+    }
+
+    /// Wakes the timers due at `now`.
+    pub(crate) fn fire_timers(&self, now: Instant) {
+        let mut due = Vec::new();
+        {
+            let mut timers = self.timers.borrow_mut();
+            while timers.peek().is_some_and(|Reverse(t)| t.at <= now) {
+                if let Some(Reverse(timer)) = timers.pop() {
+                    due.push(timer.waker);
+                }
+            }
+        }
+        for waker in due {
+            waker.wake();
+        }
     }
 
     /// A new id for a native animation node or animation.
@@ -416,7 +482,7 @@ pub(crate) fn act_after(
     let id = executor.spawn(
         host,
         Box::pin(async move {
-            tokio::time::sleep(delay).await;
+            super::ambient::timer(delay).await;
             if let Some(executor) = acting.upgrade() {
                 executor.act(action);
             }

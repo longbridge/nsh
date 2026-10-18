@@ -303,7 +303,7 @@ pub mod prelude {
         Each, If, IntoElements, IntoReactive, Memo, Owner, Prop, Reactive, ReadSignal, Scope,
         Signal, SignalEquals, Stored,
         ambient::{
-            Spawned, add_status_bar, allow_rtl, animate_layout, announce_for_accessibility,
+            Delay, Spawned, add_status_bar, allow_rtl, animate_layout, announce_for_accessibility,
             clipboard_has_string, clipboard_string, color, component_ref, dark, dialog,
             dismiss_keyboard, element_ref, font_scale, force_rtl, global, idiom, image_size,
             keyboard_duration, keyboard_height, locale, measure_text, native_value, next_frame,

@@ -496,21 +496,69 @@ pub fn request_animation_frame(f: impl FnOnce(Instant) + 'static) -> Spawned<()>
 }
 
 /// Waits `delay` (in a task; TS: what `setTimeout` waits for).
-pub fn timer(delay: Duration) -> impl Future<Output = ()> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let sleep = tokio::time::sleep(delay);
-    #[cfg(target_arch = "wasm32")]
-    let sleep = crate::time::sleep(delay);
-    sleep
+pub fn timer(delay: Duration) -> Delay {
+    timer_until(Instant::now() + delay)
 }
 
 /// Waits until `at` (in a task).
-pub fn timer_until(at: Instant) -> impl Future<Output = ()> {
+pub fn timer_until(at: Instant) -> Delay {
+    Delay {
+        at,
+        registered: false,
+        #[cfg(not(target_arch = "wasm32"))]
+        elsewhere: None,
+    }
+}
+
+/// What [`timer`] and [`timer_until`] wait for. In the engine's tasks the
+/// core keeps it and the engine's loop wakes for it, as for JS's timers
+/// (on time, with no other thread involved); awaited off the engine's
+/// thread (in [`background`]), it is tokio's.
+#[derive(Debug)]
+pub struct Delay {
+    at: Instant,
+    /// The core keeps it.
+    registered: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    let sleep = tokio::time::sleep_until(at.into());
-    #[cfg(target_arch = "wasm32")]
-    let sleep = crate::time::sleep_until(at);
-    sleep
+    elsewhere: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl Future for Delay {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(sleep) = &mut self.elsewhere {
+            return sleep.as_mut().poll(cx);
+        }
+        if Instant::now() >= self.at {
+            return std::task::Poll::Ready(());
+        }
+        if self.registered {
+            return std::task::Poll::Pending;
+        }
+        match super::reactive::try_with_data(|d| d.ambient.executor.clone()).flatten() {
+            Some(executor) => {
+                executor.add_timer(self.at, cx.waker().clone());
+                self.registered = true;
+                std::task::Poll::Pending
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            None => {
+                let at = self.at;
+                let sleep = self
+                    .elsewhere
+                    .insert(Box::pin(tokio::time::sleep_until(at.into())));
+                sleep.as_mut().poll(cx)
+            }
+            // WebAssembly runs everything on the engine's thread.
+            #[cfg(target_arch = "wasm32")]
+            None => std::task::Poll::Pending,
+        }
+    }
 }
 
 /// The next display frame's start (in a task; TS: what

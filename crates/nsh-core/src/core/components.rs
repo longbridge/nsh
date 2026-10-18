@@ -597,11 +597,18 @@ impl<M: TextEngine> Core<M> {
         self.components.executor.set_runtime(runtime);
     }
 
+    /// When the components' soonest timer is due ([`crate::ui::timer`]):
+    /// the engine wakes then and runs their tasks.
+    pub fn next_task_timer(&self) -> Option<crate::time::Instant> {
+        self.components.executor.next_timer()
+    }
+
     /// Runs the components' woken tasks, with the state changes they ask
     /// for, until they all wait.
     pub fn run_component_tasks(&mut self) {
         let _entered = self.components.runtime.enter();
         let executor = self.components.executor.clone();
+        executor.fire_timers(crate::time::Instant::now());
         // A task that keeps waking itself cannot hold the engine.
         for _ in 0..MAX_TASK_ROUNDS {
             let polled = executor.poll_ready();

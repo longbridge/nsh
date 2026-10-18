@@ -132,6 +132,15 @@ pub(crate) fn with_data<R>(f: impl FnOnce(&mut RustData) -> R) -> R {
     f(&mut graph().data)
 }
 
+/// [`with_data`] where a graph is entered (the engine's thread, while it
+/// runs Rust code), else `None`.
+pub(crate) fn try_with_data<R>(f: impl FnOnce(&mut RustData) -> R) -> Option<R> {
+    let graph = CURRENT.with(Cell::get);
+    // SAFETY: an entered graph lives until its guard drops; the borrow
+    // ends with `f`.
+    (!graph.is_null()).then(|| f(unsafe { &mut (*graph).data }))
+}
+
 /// Queues `event` of the component on `host` for the core.
 pub(crate) fn emit(host: crate::NodeId, event: Box<dyn super::element::AnyEvent>) {
     graph().data.emits.push((host, event));

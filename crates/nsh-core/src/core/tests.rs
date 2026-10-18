@@ -6194,6 +6194,32 @@ mod views {
         assert_eq!(INTROS.with(Cell::get), 2);
     }
 
+    /// Shows "late" 10 ms after it is made.
+    #[component]
+    fn Later() -> impl IntoElement {
+        let shown = signal("soon");
+        set_timeout(std::time::Duration::from_millis(10), move || {
+            shown.set("late")
+        });
+        text(move || shown.get())
+    }
+
+    #[test]
+    fn the_core_keeps_its_tasks_timers() {
+        // No tokio runtime: the core fires its tasks' timers itself, and
+        // tells the engine when to wake for the next.
+        let mut c = core();
+        c.mount_root(&Root::new::<Later>(|| ()));
+        assert_eq!(texts(&c.commit().unwrap()), ["soon"]);
+        c.run_component_tasks();
+        let due = c.next_task_timer().expect("a timer waits");
+        assert!(due > std::time::Instant::now());
+        std::thread::sleep(due.saturating_duration_since(std::time::Instant::now()));
+        c.run_component_tasks();
+        assert_eq!(texts(&c.commit().unwrap()), ["late"]);
+        assert_eq!(c.next_task_timer(), None);
+    }
+
     /// A box bordered while a signal holds.
     #[component]
     fn Framed() -> impl IntoElement {

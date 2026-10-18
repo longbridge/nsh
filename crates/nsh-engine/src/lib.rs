@@ -1037,10 +1037,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         let script = self.script.as_ref();
         let gc_deadline = (script.is_some() && self.state.committed_since_gc)
             .then(|| self.last_gc + IDLE_GC_INTERVAL);
-        #[cfg(target_arch = "wasm32")]
-        let task_timer = nsh_core::time::next_timer();
-        #[cfg(not(target_arch = "wasm32"))]
-        let task_timer = None;
+        let task_timer = self.state.core.next_task_timer();
         [
             script.and_then(Script::next_timer),
             gc_deadline,
@@ -1078,8 +1075,6 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
             script.run_timers(Instant::now());
         }
-        #[cfg(target_arch = "wasm32")]
-        nsh_core::time::fire_timers(Instant::now());
         state.core.run_component_tasks();
         // What JS timers and Rust component tasks took; a Rust component
         // renders in the commit.

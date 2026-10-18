@@ -252,9 +252,13 @@ from an effect on the props); the most recently added wins, field by field. Each
 `ui/task.rs`: a small executor of the core runs futures on the engine thread, so they may hold signals and other
 `!Send` handles. Each poll runs inside a tokio runtime's context (`Core::set_task_runtime`; the engine's
 `EngineConfig::runtime`, else one runtime of two threads shared by the process), so the tokio ecosystem works in a
-task: `tokio::time` timers (`timer(d)`, `timer_until(at)`), network and file IO, channels; `background(fut)` /
-`blocking(f)` run `Send` work on the runtime's threads. A waker may fire on any thread: it sends the engine a `Wake`
-message, and the loop runs the woken tasks (`Core::run_component_tasks`). A task changes what it wants by writing
+task: network and file IO, channels; `background(fut)` / `blocking(f)` run `Send` work on the runtime's threads. A
+waker may fire on any thread: it sends the engine a `Wake` message, and the loop runs the woken tasks
+(`Core::run_component_tasks`). Timers (`timer(d)`, `timer_until(at)`, and `set_timeout` / `set_interval` on them)
+are the executor's own, not tokio's: the core fires them as they come due and the engine's loop waits for the
+soonest (`Core::next_task_timer`), as it does for JS's, so they are as punctual as JS's on the engine thread (a
+tokio timer wakes the engine from another thread, which the OS may run late); awaited off the engine thread (in
+`background`), a `Delay` is tokio's. A task changes what it wants by writing
 signals, inside the graph like any other Rust code of the view; the patches that makes go out with the next commit.
 `spawn`, `set_timeout`, `set_interval` and `request_animation_frame` return a `Spawned`: the task belongs to the owner
 current when it was made and ends with it (or at `.cancel()`); awaiting a `Spawned` gives its output.

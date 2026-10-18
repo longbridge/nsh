@@ -3,15 +3,13 @@
 //! `std::time::Instant::now` panics on `wasm32-unknown-unknown`, which has
 //! no clock of its own. Off WebAssembly [`Instant`] is the standard one; in
 //! WebAssembly it counts from the page's time origin (`performance.now()`,
-//! the `nsh.now_ms` import the web runtime provides), and [`Sleep`] is a
-//! timer whose wakers the host fires ([`next_timer`], [`fire_timers`]), as
-//! tokio's timers need a runtime that the browser's main thread cannot run.
+//! the `nsh.now_ms` import the web runtime provides).
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use std::time::Instant;
 
 #[cfg(target_arch = "wasm32")]
-pub use self::wasm::{Instant, Sleep, fire_timers, next_timer, sleep, sleep_until};
+pub use self::wasm::Instant;
 
 /// Milliseconds since the Unix epoch (wall clock: `Date.now()`).
 #[cfg(not(target_arch = "wasm32"))]
@@ -35,13 +33,7 @@ pub fn unix_ms() -> f64 {
 #[cfg(target_arch = "wasm32")]
 mod wasm {
     use std::{
-        cell::RefCell,
-        cmp::Reverse,
-        collections::BinaryHeap,
-        future::Future,
         ops::{Add, AddAssign, Sub, SubAssign},
-        pin::Pin,
-        task::{Context, Poll, Waker},
         time::Duration,
     };
 
@@ -119,87 +111,6 @@ mod wasm {
         type Output = Duration;
         fn sub(self, rhs: Instant) -> Duration {
             self.duration_since(rhs)
-        }
-    }
-
-    thread_local! {
-        /// Pending timers: their deadline and waker (sorted by deadline).
-        static TIMERS: RefCell<BinaryHeap<Reverse<Timer>>> = RefCell::default();
-    }
-
-    struct Timer {
-        at: Instant,
-        waker: Waker,
-    }
-
-    impl PartialEq for Timer {
-        fn eq(&self, other: &Self) -> bool {
-            self.at == other.at
-        }
-    }
-    impl Eq for Timer {}
-    impl PartialOrd for Timer {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-    impl Ord for Timer {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            self.at.cmp(&other.at)
-        }
-    }
-
-    /// The earliest pending timer.
-    pub fn next_timer() -> Option<Instant> {
-        TIMERS.with(|t| t.borrow().peek().map(|Reverse(t)| t.at))
-    }
-
-    /// Wakes the timers due at `now`.
-    pub fn fire_timers(now: Instant) {
-        let due: Vec<Waker> = TIMERS.with(|t| {
-            let mut timers = t.borrow_mut();
-            let mut due = Vec::new();
-            while timers.peek().is_some_and(|Reverse(t)| t.at <= now) {
-                if let Some(Reverse(timer)) = timers.pop() {
-                    due.push(timer.waker);
-                }
-            }
-            due
-        });
-        // Woken outside the borrow: a waker may register another timer.
-        for waker in due {
-            waker.wake();
-        }
-    }
-
-    /// Completes after `delay`.
-    pub fn sleep(delay: Duration) -> Sleep {
-        sleep_until(Instant::now() + delay)
-    }
-
-    /// Completes at `at`.
-    pub fn sleep_until(at: Instant) -> Sleep {
-        Sleep { at }
-    }
-
-    /// A timer (tokio's `Sleep` elsewhere).
-    #[derive(Debug)]
-    pub struct Sleep {
-        at: Instant,
-    }
-
-    impl Future for Sleep {
-        type Output = ();
-        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-            if Instant::now() >= self.at {
-                return Poll::Ready(());
-            }
-            let timer = Timer {
-                at: self.at,
-                waker: cx.waker().clone(),
-            };
-            TIMERS.with(|t| t.borrow_mut().push(Reverse(timer)));
-            Poll::Pending
         }
     }
 }
