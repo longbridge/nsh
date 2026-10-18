@@ -1,4 +1,5 @@
-//! Lists: three columns with a header of the viewable rows, a footer and
+//! Lists: three columns (as many as fit in the desktop layout) with a
+//! header of the viewable rows, a footer and
 //! jumps, contacts under sticky letters, an inverted chat that loads older
 //! messages, horizontal lists, pull to refresh on a scroll view and an
 //! empty list with separators, each under a tab (as the TSX gallery's
@@ -12,7 +13,8 @@ use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 use crate::ui::{
     Appear, AppearProps, Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO,
     Meter, PressProps, PressRole, RoundButton, Section, Segment, SegmentedEvent, Tone,
-    bind_refresh, colors, hint, icon, press_with, radius, segmented,
+    bind_refresh, colors, columns_for, desktop, hint, icon, pane_width, press_with, radius,
+    segmented,
 };
 
 /// The tones rows cycle through (the last, neutral, only in the grid).
@@ -83,8 +85,13 @@ fn item_height(id: usize) -> usize {
 }
 
 /// The grid's header: the viewable rows (`visible`, the first and the
-/// last), a meter of how far down they are, and the jumps.
-fn grid_header(visible: Signal<Option<(usize, usize)>>, list: &ElementRef) -> impl IntoElement {
+/// last), a meter of how far down they are, and the jumps; the grid has
+/// `columns`.
+fn grid_header(
+    visible: Signal<Option<(usize, usize)>>,
+    list: &ElementRef,
+    columns: u32,
+) -> impl IntoElement {
     let progress = computed(move || {
         visible
             .get()
@@ -138,7 +145,7 @@ fn grid_header(visible: Signal<Option<(usize, usize)>>, list: &ElementRef) -> im
                         ),
                 )
                 .child(
-                    text("90 items, 3 columns")
+                    text(format!("{ITEMS} items, {columns} columns"))
                         .text_size(px(13.0))
                         .text_color(colors::FAINT)
                         .pb(px(6.0)),
@@ -158,14 +165,18 @@ fn grid_header(visible: Signal<Option<(usize, usize)>>, list: &ElementRef) -> im
         )
 }
 
-/// Three columns, a header and a footer, padding and gaps, viewability.
+/// Three columns (as many as fit in the desktop layout, at least 130 pt
+/// each), a header and a footer, padding and gaps, viewability.
 #[component]
 fn Grid() -> impl IntoElement {
     // The first and last viewable rows.
     let visible = signal(None::<(usize, usize)>);
-    let list = element_ref();
-    let header = grid_header(visible, &list);
-    view().flex_1().child(
+    // The shell is made again when the layout changes: read once.
+    let wide = untracked(desktop);
+    let grid = move |columns: u32| {
+        let list = element_ref();
+        let header = grid_header(visible, &list, columns);
+        let (padding, gap) = if wide { (24.0, 12.0) } else { (16.0, 8.0) };
         // A cell shows other items as it is reused: what differs between
         // items is bound to its position.
         virtual_list(ITEMS, |at| {
@@ -209,11 +220,11 @@ fn Grid() -> impl IntoElement {
                         ),
                 )
         })
-        .columns(3)
+        .columns(columns)
         .estimated_item_size(110.0)
-        .content_padding(16.0)
-        .row_gap(8.0)
-        .column_gap(8.0)
+        .content_padding(padding)
+        .row_gap(gap)
+        .column_gap(gap)
         .viewability(Viewability {
             item_visible_percent: Some(50.0),
             ..Viewability::default()
@@ -228,8 +239,18 @@ fn Grid() -> impl IntoElement {
                 .p_4(),
         )
         .flex_1()
-        .element_ref(&list),
-    )
+        .element_ref(&list)
+    };
+    if !wide {
+        return view().flex_1().child(grid(3));
+    }
+    // Made again when the number of columns changes: a new list (its own
+    // key, so nothing of the old one's, such as its scroll, stays).
+    let columns = computed(|| columns_for(130.0, 10, pane_width(), 12.0));
+    view().flex_1().child(dynamic(move || {
+        let columns = columns.get();
+        untracked(|| grid(columns).key(format!("grid-{columns}")))
+    }))
 }
 
 /// The people of the contacts: first and last name, what they made.
@@ -996,18 +1017,28 @@ pub(crate) fn Lists() -> impl IntoElement {
         .flex_1()
         .bg(colors::BACKGROUND)
         .child(
-            view().px_4().pt_2().pb_2().child(
-                segmented(
-                    TABS.map(|t| Segment::new(t.1)),
-                    Prop::bind(move || {
-                        TABS.iter().position(|t| t.0 == tab.get()).unwrap_or(0) as u32
+            view()
+                .map(|v| {
+                    // The shell is made again when the layout changes: read
+                    // once.
+                    if untracked(desktop) {
+                        v.px_6().pt_4().pb_1().w(relative(1.0)).max_w(px(600.0))
+                    } else {
+                        v.px_4().pt_2().pb_2()
+                    }
+                })
+                .child(
+                    segmented(
+                        TABS.map(|t| Segment::new(t.1)),
+                        Prop::bind(move || {
+                            TABS.iter().position(|t| t.0 == tab.get()).unwrap_or(0) as u32
+                        }),
+                    )
+                    .on_event(move |e: &SegmentedEvent| {
+                        let SegmentedEvent::Change(i) = *e;
+                        tab.set(TABS[i as usize].0);
                     }),
-                )
-                .on_event(move |e: &SegmentedEvent| {
-                    let SegmentedEvent::Change(i) = *e;
-                    tab.set(TABS[i as usize].0);
-                }),
-            ),
+                ),
         )
         // A tab's list is made when it is chosen, and comes in.
         .child(dynamic(move || {
