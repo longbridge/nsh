@@ -476,8 +476,11 @@ impl<M: TextEngine> Core<M> {
         if state.children.iter().any(|e| e.part == Part::Children) {
             inst.children_at = Placement::None;
         }
+        // What a run made goes with it unapplied once a later run replaced
+        // it or its row went.
         let new = elements
             .into_iter()
+            .filter(RegionElement::applies)
             .map(|e| (e.owner, e.element.0))
             .collect();
         let (out, placeholder) = self.match_children(parent, state.children, new, host, &mut inst);

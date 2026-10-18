@@ -44,6 +44,39 @@ pub(crate) enum Region {
 pub(crate) struct RegionElement {
     pub(crate) owner: Option<Owner>,
     pub(crate) element: AnyElement,
+    /// Whether the run that made it is still the region's current one
+    /// (none: an [`Each`]'s, whose rows go with their owners).
+    pub(crate) current: Option<Current>,
+}
+
+impl RegionElement {
+    /// Whether it can still be applied: the run that made it was not
+    /// replaced, nor its row disposed, before the core applied it (a
+    /// listener that flips a branch there and back queues both runs; what
+    /// the first made, its props too, went with it).
+    pub(crate) fn applies(&self) -> bool {
+        self.current.as_ref().is_none_or(Current::holds)
+            && self.owner.is_none_or(|owner| owner.is_live())
+    }
+}
+
+/// Whether a run of a region is still its current one: ends when the
+/// region runs again or goes (the run's owner cleans up).
+#[derive(Clone)]
+pub(crate) struct Current(Rc<Cell<bool>>);
+
+impl Current {
+    /// The run under way's (in the region's binding).
+    fn of_run() -> Self {
+        let current = Rc::new(Cell::new(true));
+        let ended = current.clone();
+        cleanup(move || ended.set(false));
+        Current(current)
+    }
+
+    fn holds(&self) -> bool {
+        self.0.get()
+    }
 }
 
 impl Region {
@@ -55,11 +88,13 @@ impl Region {
                 let f = f.clone();
                 super::reactive::render_effect(move || {
                     let owner = Owner::current();
+                    let current = Current::of_run();
                     let elements = f()
                         .into_iter()
                         .map(|element| RegionElement {
                             owner: Some(owner),
                             element,
+                            current: Some(current.clone()),
                         })
                         .collect();
                     show(elements);
@@ -81,11 +116,13 @@ impl Region {
                         otherwise.as_ref()
                     };
                     let owner = Owner::current();
+                    let current = Current::of_run();
                     let elements = untracked(|| branch.map(|f| f()).unwrap_or_default())
                         .into_iter()
                         .map(|element| RegionElement {
                             owner: Some(owner),
                             element,
+                            current: Some(current.clone()),
                         })
                         .collect();
                     show(elements);
@@ -103,6 +140,7 @@ impl Region {
                         super::reactive::register_boundary(failed);
                     }
                     let owner = Owner::current();
+                    let current = Current::of_run();
                     let elements = untracked(|| match error {
                         Some(error) => fallback(error, Reset(failed)),
                         None => view(),
@@ -111,6 +149,7 @@ impl Region {
                     .map(|element| RegionElement {
                         owner: Some(owner),
                         element,
+                        current: Some(current.clone()),
                     })
                     .collect();
                     show(elements);
@@ -336,6 +375,7 @@ impl<T: Clone + PartialEq + 'static, K: Hash + Eq + Clone + 'static> Rows<T, K> 
                         out.push(RegionElement {
                             owner: None,
                             element: AnyElement(kept),
+                            current: None,
                         });
                     }
                     rows.push(row);
@@ -355,6 +395,7 @@ impl<T: Clone + PartialEq + 'static, K: Hash + Eq + Clone + 'static> Rows<T, K> 
                         out.push(RegionElement {
                             owner: Some(owner),
                             element,
+                            current: None,
                         });
                     }
                     rows.push(Row {
