@@ -278,6 +278,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 
 Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 
+- **All changes go through a pull request. Never push commits directly to `main`.** This includes code,
+  documentation, release / version updates and CI / workflow fixes. Create a topic branch, push it and open a PR
+  targeting `main`; merge through the PR after required checks pass. Do not use administrator bypass to skip this
+  workflow. A request to release or push changes does not authorize a direct push to `main`.
+
 - Subjects and PR titles are `<area>: <What the change does>`: the area in lower case (a crate without `nsh-`:
   `core`, `js`, `engine`, `bundler`, `cli`, `ui-mobile`, ...; one platform: `ios`, `android`, `macos`, `windows`,
   `linux`; `desktop` for macOS, Windows and Linux together, `mobile` for iOS and Android together; `runtime`, a module;
