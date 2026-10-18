@@ -1,5 +1,6 @@
-//! The gallery's navigation: the screens pushed over the index, a global
-//! every component of the gallery can push to.
+//! The gallery's navigation: the screens pushed over the index (over the
+//! selected demo in the desktop layout), a global every component of the
+//! gallery can push to.
 
 use std::rc::Rc;
 
@@ -35,10 +36,14 @@ pub(crate) fn routes() -> Signal<Routes> {
 
 /// Pushes the screen `screen` makes (`key`: unique in the stack).
 pub(crate) fn push(key: impl Into<SharedString>, screen: impl Fn() -> Screen + 'static) {
-    let route = Route {
+    push_route(Route {
         key: key.into(),
         screen: Rc::new(screen),
-    };
+    });
+}
+
+/// Pushes `route`.
+pub(crate) fn push_route(route: Route) {
     routes().update(|routes| {
         // A screen already in the stack (a double tap) is not pushed twice.
         if !routes.0.iter().any(|r| r.key == route.key) {
@@ -57,6 +62,11 @@ pub(crate) fn pop() {
 /// Pops every screen: back to the index.
 pub(crate) fn pop_to_top() {
     routes().update(|routes| routes.0.clear());
+}
+
+/// Replaces the pushed screens with `routes`.
+pub(crate) fn reset(routes: Vec<Route>) {
+    self::routes().set(Routes(routes));
 }
 
 /// Pops to `depth` screens over the index.

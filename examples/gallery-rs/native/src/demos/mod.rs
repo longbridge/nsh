@@ -20,30 +20,61 @@ mod system;
 mod text_demo;
 mod typed_styles;
 
+use std::rc::Rc;
+
 use nsh_core::ui::{AnyElement, Screen, prelude::*};
 
 use crate::{
-    nav,
+    nav::{self, Route},
     ui::{IconName, IconTile, MONO, PressProps, appear, colors, header, icon, press_with, radius},
 };
 
 /// A demo of the index: its name, what it shows, its icon and its
 /// screen's content.
-struct Demo {
-    name: &'static str,
-    detail: &'static str,
-    icon: IconName,
-    content: fn() -> AnyElement,
+pub(crate) struct Demo {
+    pub(crate) name: &'static str,
+    pub(crate) detail: &'static str,
+    pub(crate) icon: IconName,
+    pub(crate) content: fn() -> AnyElement,
+}
+
+impl Demo {
+    /// Its group's title.
+    pub(crate) fn group(&'static self) -> &'static str {
+        GROUPS
+            .iter()
+            .find(|g| g.demos.iter().any(|d| std::ptr::eq(d, self)))
+            .map_or("", |g| g.title)
+    }
+
+    /// Its screen as the phone layout pushes it over the index: its name
+    /// in the header over its content.
+    pub(crate) fn route(&'static self) -> Route {
+        let (name, content) = (self.name, self.content);
+        Route {
+            key: self.key().into(),
+            screen: Rc::new(move || {
+                header(screen().title(name))
+                    .child(view().flex_1().bg(colors::BACKGROUND).child(content()))
+            }),
+        }
+    }
+
+    /// Its route's key: apart from the keys of the screens demos push.
+    pub(crate) fn key(&self) -> String {
+        format!("demo:{}", self.name)
+    }
 }
 
 /// A group of the index.
-struct Group {
-    title: &'static str,
-    demos: &'static [Demo],
+pub(crate) struct Group {
+    pub(crate) title: &'static str,
+    pub(crate) demos: &'static [Demo],
 }
 
-/// The demos, by what they show.
-const GROUPS: &[Group] = &[
+/// The demos, by what they show (a static: the shell tells them apart by
+/// address).
+pub(crate) static GROUPS: &[Group] = &[
     Group {
         title: "Apps",
         demos: &[
@@ -187,13 +218,7 @@ const GROUPS: &[Group] = &[
 
 /// A demo's row of the index: a tap pushes its screen.
 fn demo_row(demo: &'static Demo, first: bool) -> AnyElement {
-    let open = move |_: &()| {
-        let (name, content) = (demo.name, demo.content);
-        nav::push(name, move || {
-            header(screen().title(name))
-                .child(view().flex_1().bg(colors::BACKGROUND).child(content()))
-        });
-    };
+    let open = move |_: &()| nav::push_route(demo.route());
     press_with(
         PressProps {
             scale: 0.98.into(),

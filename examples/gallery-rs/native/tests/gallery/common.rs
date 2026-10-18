@@ -188,13 +188,19 @@ pub fn logger() {
     log::set_max_level(log::LevelFilter::Warn);
 }
 
-/// A headless engine running the gallery, and its batches.
+/// A headless engine running the gallery on a phone, and its batches.
 pub fn start() -> (nsh_engine::Engine, Receiver<MountBatch>) {
+    start_at(Size::new(390.0, 844.0))
+}
+
+/// A headless engine running the gallery in a window of `viewport`, and
+/// its batches.
+pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     logger();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         app: App::Rust(Root::of::<gallery_native::Gallery>()),
-        viewport: Size::new(390.0, 844.0),
+        viewport,
         trace: false,
         network: None,
         assets: None,

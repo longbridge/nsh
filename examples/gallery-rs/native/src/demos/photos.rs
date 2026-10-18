@@ -454,9 +454,12 @@ pub(crate) fn Photos() -> impl IntoElement {
     view()
         .flex_1()
         .bg(colors::BACKGROUND)
-        // The Rust gallery's shell does not remount on a resize (the TSX
-        // one does): the demo switches layouts itself.
-        .child(If::new(desktop, grid).otherwise(phone))
+        // The shell is made again when the layout changes: read once.
+        .child(if untracked(desktop) {
+            grid().into_element()
+        } else {
+            phone().into_element()
+        })
         // The compact bar fades in once the hero has scrolled away.
         .child(
             view()

@@ -7,6 +7,7 @@ mod animations;
 mod canvas;
 mod chat;
 mod components;
+mod desktop;
 mod form;
 mod gestures;
 mod images;

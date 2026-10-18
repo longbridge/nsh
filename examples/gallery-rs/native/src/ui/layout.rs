@@ -1,22 +1,26 @@
-//! The gallery's desktop layout (as the TSX gallery's `desktop`,
-//! `paneWidth` and `columnsFor`): wide windows show demos in columns.
+//! The gallery's desktop layout (as the TSX gallery's `SIDEBAR`,
+//! `desktop`, `paneWidth` and `columnsFor`): wide windows show a sidebar of
+//! the demos and the open one beside it, in columns.
 
 use nsh_core::ui::prelude::*;
 
-/// Whether the gallery takes its desktop layout: demos in columns, hover
-/// states. Desktops take it from 700 pt wide, other platforms from 900 pt
-/// (an iPad in landscape, a wide Mac Catalyst window); phones never do.
-/// Below that it is the phone layout, unchanged. Reading it in a binding
-/// subscribes to the window's size.
+/// The width of the desktop layout's sidebar.
+pub(crate) const SIDEBAR: f32 = 264.0;
+
+/// Whether the gallery takes its desktop layout: a sidebar of the demos
+/// next to the open one, demos in columns, hover states. Desktops take it
+/// from 700 pt wide, other platforms from 900 pt (an iPad in landscape, a
+/// wide Mac Catalyst window); phones never do. Below that it is the phone
+/// layout, unchanged. The shell is made again when it changes, so demos
+/// read it once; reading it in a binding subscribes to the window's size.
 pub(crate) fn desktop() -> bool {
     window().width >= if is_desktop() { 700.0 } else { 900.0 }
 }
 
-/// The width of a demo's content pane: the window's, as the Rust gallery's
-/// shell has no sidebar (the TSX gallery's `paneWidth` is the window's
-/// less its sidebar). Reading it in a binding subscribes.
+/// The width of the desktop layout's content pane, right of the sidebar.
+/// Reading it in a binding subscribes to the window's size.
 pub(crate) fn pane_width() -> f32 {
-    window().width
+    window().width - SIDEBAR
 }
 
 /// How many columns at least `min` pt wide fit in `width` (the content

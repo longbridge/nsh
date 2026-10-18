@@ -13,8 +13,8 @@
 //!   [`caption`], [`legend`], [`code`], [`header`].
 //! - The device's input: [`hint`] (touch or pointer wording), [`bind_refresh`]
 //!   (a desktop's refresh key).
-//! - The desktop layout of wide windows: [`desktop`], [`pane_width`],
-//!   [`columns_for`].
+//! - The desktop layout of wide windows: [`SIDEBAR`], [`desktop`],
+//!   [`pane_width`], [`columns_for`].
 
 mod animated;
 mod controls;
@@ -32,7 +32,7 @@ pub(crate) use self::{
     },
     device::{bind_refresh, hint},
     icons::{IconName, Tint, icon},
-    layout::{columns_for, desktop, pane_width},
+    layout::{SIDEBAR, columns_for, desktop, pane_width},
     parts::{
         Badge, Button, ButtonVariant, Card, Figure, IconTile, Inset, Meter, RoundButton, Row,
         Section, Stat, caption, code, header, legend,

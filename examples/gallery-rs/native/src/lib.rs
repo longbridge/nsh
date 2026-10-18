@@ -7,12 +7,13 @@
 mod assets;
 mod demos;
 mod nav;
+mod shell;
 mod ui;
 
 use nsh_core::ui::prelude::*;
 use nsh_ui_mobile::{BarStyle, StatusBar, StatusBarProps};
 
-use crate::{nav::Route, ui::colors};
+use crate::ui::{colors, desktop};
 
 /// The UI set of the gallery: what `App.tsx` imports from `gallery/native`.
 #[native_module("gallery/native")]
@@ -21,22 +22,11 @@ fn native(registry: &mut Registry) {
     registry.assets(assets!());
 }
 
-/// The gallery: a native stack of its index and the screens pushed on it,
-/// in the gallery's design for the system's appearance.
+/// The gallery, in the gallery's design for the system's appearance: on
+/// phones a native stack of its index and the screens pushed on it; in wide
+/// windows a sidebar of the demos and the selected one beside it.
 #[component]
 pub fn Gallery() -> impl IntoElement {
-    let routes = nav::routes();
-    // A screen is made when it is pushed and goes when it is popped.
-    let pushed = Each::new(
-        move || routes.with(|r| r.0.clone()),
-        |route: &Route| route.key.clone(),
-        |route, depth| {
-            let route = route.get_untracked();
-            (route.screen)()
-                // The user popped it natively: it and what is above it go.
-                .on_dismiss(move |_: &()| nav::truncate(depth.get_untracked()))
-        },
-    );
     view()
         .flex_1()
         .bg(colors::BACKGROUND)
@@ -52,5 +42,7 @@ pub fn Gallery() -> impl IntoElement {
             }),
             ..StatusBarProps::default()
         }))
-        .child(stack().flex_1().child(demos::index()).child(pushed))
+        // Made again when the window crosses the threshold, as TS remounts
+        // its shell: what is open carries over.
+        .child(If::new(desktop, shell::desktop_layout).otherwise(shell::phone))
 }
