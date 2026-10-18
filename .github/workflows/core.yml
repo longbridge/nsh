@@ -1,0 +1,73 @@
+name: Core
+
+# Lints and tests the crates every platform shares: the core, the animation
+# graph, the macros, the JS runtime, the engine, the bundler, signed packages
+# and `nsh/ui/mobile`. The platform workflows test their backends and the
+# tooling only, so these ran nowhere but on developers' machines.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/core.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The bundler as the command line builds it (`bundle`: rolldown and the
+  # whole pipeline), so its tests all run.
+  PACKAGES: >-
+    -p nsh-core -p nsh-animation -p nsh-macros -p nsh-js -p nsh-engine
+    -p nsh-bundler -p nsh-package -p nsh-ui-mobile --features nsh-bundler/bundle
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # QuickJS is C (bindgen needs libclang); none of these crates needs a
+      # platform backend.
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-core-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-core-cargo-
+
+      - name: Clippy
+        run: cargo clippy --all-targets $PACKAGES -- -D warnings
+
+      - name: Test
+        run: cargo test $PACKAGES
