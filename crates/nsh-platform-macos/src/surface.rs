@@ -197,6 +197,7 @@ pub(crate) struct Surface {
     pub(crate) native: crate::native::NativeState,
     /// The app's keyboard shortcuts ([`crate::keymap`]).
     pub(crate) keymap: crate::keymap::KeymapState,
+    pub(crate) file_drop: crate::file_drop::State,
 }
 
 /// A per-frame callback ([`Surface::add_frame_callback`]): gets the frame
@@ -237,6 +238,7 @@ impl Surface {
             asset_base: RefCell::new(None),
             native: Default::default(),
             keymap: Default::default(),
+            file_drop: Default::default(),
             chrome: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));

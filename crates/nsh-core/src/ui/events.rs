@@ -6,6 +6,13 @@ use std::{borrow::Cow, rc::Rc, sync::Arc};
 use super::element::Listener;
 use crate::{EventPayload, JsonValue, PayloadValue, Rect, Size, TouchEvent};
 
+/// Local files or directories dropped on an element (`on_file_drop`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileDropEvent {
+    /// Absolute `file:` URLs in platform order; encoded filenames are preserved.
+    pub uris: Vec<String>,
+}
+
 /// A scroll view moved (`on_scroll`): the offset, and the sizes it moves in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollEvent {
@@ -368,5 +375,27 @@ pub(crate) fn native(p: &EventPayload) -> Option<Cow<'_, NativeEvent>> {
             data: data.clone(),
         })),
         _ => None,
+    }
+}
+
+pub(crate) fn file_drop(p: &EventPayload) -> Option<Cow<'_, FileDropEvent>> {
+    match p {
+        EventPayload::FileDrop(uris) => Some(Cow::Owned(FileDropEvent { uris: uris.clone() })),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn file_drop_requires_the_file_payload() {
+        assert!(super::file_drop(&crate::EventPayload::None).is_none());
+        let uris = vec!["file:///tmp/a%20b".into(), "file:///tmp/empty/".into()];
+        assert_eq!(
+            super::file_drop(&crate::EventPayload::FileDrop(uris.clone()))
+                .unwrap()
+                .uris,
+            uris
+        );
     }
 }

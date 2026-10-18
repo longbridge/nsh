@@ -322,6 +322,7 @@ impl VelocityTracker {
 
 /// The app stopped: forgets the pointer, hovered views and gestures.
 pub(crate) fn reset(surface: &Surface) {
+    crate::file_drop::reset(surface);
     let input = &surface.input;
     input.pointer.borrow_mut().take();
     input.pinch.borrow_mut().take();
@@ -2118,6 +2119,20 @@ pub(crate) fn native_at(
                 && ly < r.y + r.height
         })
         .map(|n| n.view.clone())
+}
+
+/// The closest file-drop listener under the pointer, within its modal root.
+pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    let mut view = pick(&surface.root, x, y)?.view;
+    loop {
+        if view.state().events.contains(EventKind::FileDrop) {
+            return Some(view);
+        }
+        if view.kind() == ViewKind::Modal || view.id() == ROOT_ID {
+            return None;
+        }
+        view = view.parent_view()?;
+    }
 }
 
 #[cfg(test)]

@@ -61,6 +61,9 @@ final class Native {
     static final int KEY_COMMAND = 49;
     static final int HOVER_IN = 51;
     static final int HOVER_OUT = 52;
+    static final int FILE_DRAG_ENTER = 53;
+    static final int FILE_DRAG_LEAVE = 54;
+    static final int FILE_DROP = 55;
 
     static native long create(NshView view, float density, boolean trace);
 

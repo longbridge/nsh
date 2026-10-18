@@ -29,6 +29,7 @@ mod chrome;
 mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
+mod file_drop;
 mod fps;
 mod gpu;
 mod image;

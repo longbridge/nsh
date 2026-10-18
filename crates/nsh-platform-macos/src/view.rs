@@ -35,11 +35,13 @@ use nsh_core::{
 };
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
-    rc::Retained, runtime::AnyObject,
+    rc::Retained,
+    runtime::{AnyObject, ProtocolObject},
 };
 use objc2_app_kit::{
-    NSEvent, NSEventType, NSResponder, NSTrackingArea, NSTrackingAreaOptions, NSView,
-    NSViewLayerContentsRedrawPolicy, NSWindowOrderingMode,
+    NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventType, NSResponder,
+    NSTrackingArea, NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy,
+    NSWindowOrderingMode,
 };
 use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
@@ -403,6 +405,51 @@ define_class!(
     pub(crate) struct ViewObj;
 
     unsafe impl NSObjectProtocol for ViewObj {}
+
+    // SAFETY: AppKit invokes these SDK-typed callbacks on the main thread.
+    unsafe impl NSDraggingDestination for ViewObj {
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            self.ivars().surface.borrow().upgrade().map_or(NSDragOperation::None, |surface| {
+                crate::file_drop::begin(&surface, sender)
+            })
+        }
+
+        #[unsafe(method(draggingUpdated:))]
+        fn dragging_updated(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            self.ivars().surface.borrow().upgrade().map_or(NSDragOperation::None, |surface| {
+                crate::file_drop::update(&surface, sender)
+            })
+        }
+
+        #[unsafe(method(draggingExited:))]
+        fn dragging_exited(&self, _sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+                crate::file_drop::clear(&surface);
+            }
+        }
+
+        #[unsafe(method(prepareForDragOperation:))]
+        fn prepare_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            self.ivars().surface.borrow().upgrade().is_some_and(|surface| {
+                crate::file_drop::update(&surface, sender) == NSDragOperation::Copy
+            })
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> bool {
+            self.ivars().surface.borrow().upgrade().is_some_and(|surface| {
+                crate::file_drop::perform(&surface, sender)
+            })
+        }
+
+        #[unsafe(method(draggingEnded:))]
+        fn dragging_ended(&self, _sender: &ProtocolObject<dyn NSDraggingInfo>) {
+            if let Some(surface) = self.ivars().surface.borrow().upgrade() {
+                crate::file_drop::clear(&surface);
+            }
+        }
+    }
 
     impl ViewObj {
         #[unsafe(method(isFlipped))]

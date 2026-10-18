@@ -741,6 +741,13 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
                 obj.set(*key, payload_value(ctx, value)?)?;
             }
         }
+        EventPayload::FileDrop(uris) => {
+            let list = rquickjs::Array::new(ctx.clone())?;
+            for (index, uri) in uris.iter().enumerate() {
+                list.set(index, uri.as_str())?;
+            }
+            obj.set("uris", list)?;
+        }
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(ctx, data)?)?;
@@ -1033,6 +1040,20 @@ const report = (v) => text(String(v));
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn file_drop_payload_keeps_the_native_uri_list() {
+        let host = Host::new().unwrap();
+        let uris = vec![
+            "file:///tmp/a%20b.txt".into(),
+            "file:///tmp/%E4%B8%AD%E6%96%87/".into(),
+        ];
+        host.ctx.with(|ctx| {
+            let value = payload_object(&ctx, &EventPayload::FileDrop(uris.clone())).unwrap();
+            let actual: Vec<String> = value.as_object().unwrap().get("uris").unwrap();
+            assert_eq!(actual, uris);
+        });
     }
 
     #[test]

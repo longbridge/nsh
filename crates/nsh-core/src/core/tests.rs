@@ -7621,3 +7621,62 @@ mod rust_desktop {
         assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Close)));
     }
 }
+
+#[test]
+fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
+    use crate::ui::prelude::*;
+    #[component]
+    fn DropView() -> impl IntoElement {
+        let received = signal(String::new());
+        let disabled = signal(false);
+        view()
+            .disabled(move || disabled.get())
+            .on_press(move |_: &()| disabled.set(true))
+            .on_file_drag_enter(|_: &()| {})
+            .on_file_drag_leave(|_: &()| {})
+            .on_file_drop(move |event: &crate::ui::FileDropEvent| {
+                received.set(event.uris.join("\n"))
+            })
+            .child(text(move || received.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::ui::Root::of::<DropView>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::FileDrop) => Some(*id),
+            _ => None,
+        })
+        .unwrap();
+    let uris = vec![
+        "file:///tmp/a%20b.txt".into(),
+        "file:///tmp/%E4%B8%AD%E6%96%87/".into(),
+    ];
+    assert!(c.component_event(
+        host,
+        EventKind::FileDrop,
+        &EventPayload::FileDrop(uris.clone())
+    ));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == uris.join("\n"))));
+    assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+    let disabled = c.commit().unwrap();
+    let events = disabled
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if *id == host => Some(*events),
+            _ => None,
+        })
+        .unwrap();
+    for event in [
+        EventKind::FileDragEnter,
+        EventKind::FileDragLeave,
+        EventKind::FileDrop,
+    ] {
+        assert!(!events.contains(event));
+    }
+}

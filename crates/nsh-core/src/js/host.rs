@@ -391,6 +391,24 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "() => void",
         "The mouse left the view and the views inside it, or the window (macOS and Linux).",
     ),
+    (
+        EventKind::FileDragEnter,
+        on::ALL,
+        "() => void",
+        "A local file drag entered this desktop destination.",
+    ),
+    (
+        EventKind::FileDragLeave,
+        on::ALL,
+        "() => void",
+        "A local file drag left this desktop destination.",
+    ),
+    (
+        EventKind::FileDrop,
+        on::ALL,
+        "(e: { uris: string[] }) => void",
+        "Local file URLs dropped on this desktop destination.",
+    ),
     (EventKind::Layout, on::ALL, "(e: LayoutEvent) => void", ""),
     (EventKind::PanStart, on::ALL, "(e: PanEvent) => void", ""),
     (

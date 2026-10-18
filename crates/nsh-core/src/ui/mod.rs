@@ -119,8 +119,8 @@ pub use self::{
     element_ref::{ComponentRef, ElementRef},
     env::Environment,
     events::{
-        GestureEvent, ImageProgress, NativeEvent, PanEvent, ScrollEvent, ScrollOffset, Selection,
-        VideoInfo, VideoProgress, WebNavigation,
+        FileDropEvent, GestureEvent, ImageProgress, NativeEvent, PanEvent, ScrollEvent,
+        ScrollOffset, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic},
     host::{
@@ -216,10 +216,11 @@ pub mod prelude {
         EventKind,
         EventPayload,
         Extrapolate,
+        // Typed events.
+        FileDropEvent,
         FluentBuilder,
         FontAsset,
         FontWeight,
-        // Typed events.
         GestureEvent,
         // The network.
         HttpRequest,

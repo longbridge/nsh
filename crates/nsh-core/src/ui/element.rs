@@ -828,6 +828,30 @@ pub trait Accessible: Element {
 
 /// Elements that take touches.
 pub trait Interactive: Element {
+    /// A local file drag entered this desktop drop destination.
+    fn on_file_drag_enter(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::FileDragEnter,
+            events::typed(listener.into(), events::unit),
+        )
+    }
+
+    /// A local file drag left this desktop drop destination.
+    fn on_file_drag_leave(self, listener: impl Into<Listener<()>>) -> Self {
+        self.on(
+            EventKind::FileDragLeave,
+            events::typed(listener.into(), events::unit),
+        )
+    }
+
+    /// Local files or directories were dropped on this desktop destination.
+    fn on_file_drop(self, listener: impl Into<Listener<events::FileDropEvent>>) -> Self {
+        self.on(
+            EventKind::FileDrop,
+            events::typed(listener.into(), events::file_drop),
+        )
+    }
+
     /// Handles presses.
     fn on_press(self, listener: impl Into<Listener<()>>) -> Self {
         self.on(

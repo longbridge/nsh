@@ -423,7 +423,11 @@ impl Node {
     fn mounted_events(&self) -> EventMask {
         let mut events = self.events;
         if self.states & crate::tailwind::state::DISABLED != 0 {
-            for e in PRESSES {
+            for e in PRESSES.into_iter().chain([
+                EventKind::FileDragEnter,
+                EventKind::FileDragLeave,
+                EventKind::FileDrop,
+            ]) {
                 events.set(e, false);
             }
         }
