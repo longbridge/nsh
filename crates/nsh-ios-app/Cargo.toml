@@ -13,8 +13,14 @@ workspace = true
 name = "nsh-ios-app"
 path = "src/main.rs"
 
+[features]
+default = ["js"]
+# JS apps (the bundle in the app). Without it the runner runs a Rust app
+# only (`run_rust`) and links no QuickJS.
+js = ["nsh-platform-ios/js"]
+
 [dependencies]
 log.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
-nsh-platform-ios = { workspace = true, features = ["js"] }
+nsh-platform-ios.workspace = true

@@ -46,7 +46,7 @@ mod visual;
 mod web;
 mod zoom;
 
-pub use nsh_engine::Bundle;
+pub use nsh_engine::{Bundle, Root};
 
 /// The UI sets apps import ([`set_ui_sets`]; by default the mobile UI).
 static UI_SETS: std::sync::RwLock<Option<Vec<nsh_core::ui::Registry>>> =

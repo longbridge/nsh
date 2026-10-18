@@ -9,14 +9,20 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["js"]
+# JS apps (the bundle in the package). Without it the runner runs a Rust
+# app only (`run_rust`) and links no QuickJS.
+js = ["nsh-platform-gpui/js"]
+
 [dependencies]
 log.workspace = true
 
-# What packaged apps use: JS apps and web views; videos on Linux (GStreamer).
+# What packaged apps use: web views; videos on Linux (GStreamer).
 # Never `dev` or `shot` (GPUI's test support) in the release runner.
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
-nsh-platform-gpui = { workspace = true, features = ["js", "webview"] }
+nsh-platform-gpui = { workspace = true, features = ["webview"] }
 serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nsh-platform-gpui = { workspace = true, features = ["js", "webview", "video"] }
+nsh-platform-gpui = { workspace = true, features = ["webview", "video"] }

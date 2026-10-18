@@ -9,9 +9,15 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["js"]
+# JS apps (the bundle in the app's resources). Without it the runner runs a
+# Rust app only (`run_rust`) and links no QuickJS.
+js = ["nsh-platform-macos/js"]
+
 [dependencies]
 log.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nsh-platform-macos = { workspace = true, features = ["js"] }
+nsh-platform-macos.workspace = true
 serde_json.workspace = true
