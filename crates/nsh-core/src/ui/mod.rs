@@ -329,11 +329,11 @@ pub mod __private {
     pub use serde_json::Map as JsonMap;
 
     /// Implemented by nothing: what the generated workspace of an app
-    /// calls when the app's crate has no `#[native_module]`
+    /// calls when a crate of the app has no `#[native_module]`
     /// ([`no_native_module`]) fails the build with this message.
     #[diagnostic::on_unimplemented(
-        message = "the app's crate (nsh.json \"rust\") has no `#[native_module(\"…\")]` at its root",
-        label = "the app's UI set",
+        message = "a crate of the app (nsh.json \"rust\") has no `#[native_module(\"…\")]` at its root",
+        label = "the crate's UI set",
         note = "add to the crate's lib.rs, with the specifier its TSX imports the set by: `#[native_module(\"my-app/native\")] fn native(registry: &mut Registry) {{ registry.register::<MyComponent>(); }}` (`use nsh_core::ui::prelude::*`)"
     )]
     pub trait NoNativeModule {}

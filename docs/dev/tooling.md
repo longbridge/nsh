@@ -211,7 +211,9 @@ app root. Custom TypeScript declarations are generated when the app's command li
 
 `"rust": "<crate dir>"` names a library crate of the app with a `#[native_module("<specifier>")]` function at its
 root, which registers the crate's Rust components, modules and assets into its UI set, imported by the app's TSX by
-that specifier (`examples/gallery-rs`: `import { Gallery } from "gallery/native"`):
+that specifier (`examples/gallery-rs`: `import { Gallery } from "gallery/native"`). `"rust": ["native/charts",
+"native/storage"]` lists several, each a UI set of its own with its own `#[native_module]` and specifier
+(`import { Chart } from "app/charts"`, `import { Store } from "app/storage"`; `docs/dev/rust-modules.md`):
 
 ```rust
 use nsh_core::ui::prelude::*;
@@ -227,51 +229,63 @@ The attribute (`nsh-macros` `native_module.rs`) checks the specifier at compile 
 `nsh` or `nsh/...`) and makes a hidden entry of a fixed name, `__nsh_native_module() -> Registry`
 (`Registry::ui_set(specifier)`, then the function), which the generated code below calls. A second one in the crate
 fails as that name defined twice; one outside the crate's root fails at the attribute (a glob of `crate::*` in a
-block finds the entry or a stand-in whose bound reports where it goes: `#[diagnostic::on_unimplemented]`). A crate
-without one fails the generated workspace's build with what to add, the same way: the generated code glob-imports
-the app's crate in a block, which shadows its import of NSH's stand-in (`nsh_core::ui::__private`). The prebuilt
-toolchain cannot know the set, so `nsh` builds the app its own (`crates/nsh-cli/src/rust_app.rs`):
+block finds the entry or a stand-in whose bound reports where it goes: `#[diagnostic::on_unimplemented]`). The
+generated code links each listed crate under a name of its own (`app_<package>`, `-` as `_`: `app_gallery_native`)
+and makes its set in a function of its own (`set_app_gallery_native()`), whose body glob-imports that crate, which
+shadows the file's one import of NSH's stand-in (`nsh_core::ui::__private`): a crate without an entry fails the
+generated workspace's build with what to add, on the line of that crate (it names the package). The prebuilt
+toolchain cannot know the sets, so `nsh` builds the app its own (`crates/nsh-cli/src/rust_app.rs`):
 
-- A Cargo workspace in `<app>/.nsh/rust`, written on every command (files only when they change): `cli` (the
-  command line, `nsh_cli::main_with` of the mobile UI and the app's set), `ios-host` / `ios-app` (the development
-  host and the release runner: `nsh_platform_ios::set_ui_sets`, then `nsh_ios_host::main` / `nsh_ios_app::main`),
-  `linux-host` / `linux-app`, `macos-host` / `macos-app` and `windows-host` / `windows-app` (the same on Linux, macOS
-  and Windows, `nsh_platform_linux` / `nsh_platform_macos` / `nsh_platform_windows::set_ui_sets`; `windows-app` is a
-  windowed program, with no console), `android` (the app's `libnsh.so`: `nsh::ui_sets!`, which the Android
-  runtime looks up when an engine starts) and `web` (the app's web runtime, a `cdylib` for `wasm32-unknown-unknown`
-  built with the `web` profile: `nsh_platform_web::ui_sets!`, whose `nsh_app_init` export `nsh.js` calls;
-  `docs/dev/web.md`, "Apps with Rust components"). `gpui-host` / `gpui-app` (`nsh_platform_gpui::set_ui_sets`, under
-  `cfg(any(target_os = "linux", target_os = "macos", windows))`; `gpui-app` is a windowed program on Windows too) are
-  a workspace of their own in `.nsh/rust/gpui` (excluded from the main one), written only when a GPUI host or runner is
-  built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates. They
-  build against NSH's sources (the checkout the running `nsh` was built in, or `NSH_SOURCE`) with NSH's `Cargo.lock`
-  and target directory, so only the app's code and what links it compile; the binaries are named after the app
-  (`nsh-app-<package>-cli`).
+- `rust_app::crates` reads `"rust"` (a string or a non-empty list of strings) and checks the list when the
+  workspace is written: a crate listed twice (by any path), two packages of one name (Cargo takes `-` and `_` as
+  one) or two crates whose `#[native_module("…")]` has the same specifier (read from the crate's `[lib] path` or
+  `src/lib.rs`) fail with the two paths and what to change. `Registry::merged` refuses two sets registering
+  components or modules of the same name when an engine starts. Crates may depend on each other, or on crates not
+  listed (a shared crate of components), through plain Cargo path dependencies; only listed ones export to TS.
+- A Cargo workspace in `<app>/.nsh/rust`, written on every command (files only when they change), each member depending
+  on every listed crate and passing their sets in `"rust"`'s order after the mobile UI's
+  (`vec![nsh_ui_mobile::registry(), set_app_charts(), set_app_storage()]`): `cli` (the command line,
+  `nsh_cli::main_with` of the mobile UI and the app's sets), `ios-host` / `ios-app` (the development host and the
+  release runner: `nsh_platform_ios::set_ui_sets`, then `nsh_ios_host::main` / `nsh_ios_app::main`), `linux-host` /
+  `linux-app`, `macos-host` / `macos-app` and `windows-host` / `windows-app` (the same on Linux, macOS and Windows,
+  `nsh_platform_linux` / `nsh_platform_macos` / `nsh_platform_windows::set_ui_sets`; `windows-app` is a windowed
+  program, with no console), `android` (the app's `libnsh.so`: `nsh::ui_sets!`, which the Android runtime looks up when
+  an engine starts) and `web` (the app's web runtime, a `cdylib` for `wasm32-unknown-unknown` built with the `web`
+  profile: `nsh_platform_web::ui_sets!`, whose `nsh_app_init` export `nsh.js` calls; `docs/dev/web.md`, "Apps with Rust
+  components"). `gpui-host` / `gpui-app` (`nsh_platform_gpui::set_ui_sets`, under `cfg(any(target_os = "linux",
+  target_os = "macos", windows))`; `gpui-app` is a windowed program on Windows too) are a workspace of their own in
+  `.nsh/rust/gpui` (excluded from the main one), written only when a GPUI host or runner is built
+  (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates. They build against NSH's
+  sources (the checkout the running `nsh` was built in, or `NSH_SOURCE`) with NSH's `Cargo.lock` and target directory,
+  so only the app's code and what links it compile; the binaries are named after the app (`nsh-app-<package>-cli`; with
+  several crates all their packages, `nsh-app-charts-storage-cli`). `.nsh/rust/app.json` keeps the crates (package and
+  directory), the watched directories and the root for the app's command line (`rust_app::current`).
 - A command on the app (`build`, `trace`, `dev`, `run`, `package`, `publish`) builds `cli` and runs again in it
-  (`NSH_RUST_APP` names the workspace). Everything then knows the app's set: the bundler keeps its imports, bytecode
-  links against its exports, `.nsh/types` declares it (`.nsh/types/<specifier>.d.ts`, found through tsconfig's `"*"`
-  path, which falls back to `node_modules`), `nsh trace` renders it. The hosts `run` and `package` need are built
-  for the app instead of taken from the runtime (iOS `--target` triples; Linux's, macOS's, Windows' and GPUI's
-  `*-host` / `*-app` for this machine; Android: the prebuilt `classes.dex` with
-  the app's `libnsh.so` for each ABI of the prebuilt runtime, cross-compiled with the NDK; the web: the app's
-  `nsh.wasm` / `nsh-dev.wasm`, with nsh's `nsh.js`).
-- `nsh dev` / `nsh run` watch the crate too: a change to its `.rs` files, `Cargo.toml` or `assets/` ends the app's
+  (`NSH_RUST_APP` names the workspace). Everything then knows the app's sets: the bundler keeps their imports, bytecode
+  links against their exports, `.nsh/types` declares each set (`.nsh/types/<specifier>.d.ts`, found through tsconfig's
+  `"*"` path, which falls back to `node_modules`), `nsh trace` renders it. The hosts `run` and `package` need are built
+  for the app instead of taken from the runtime (iOS `--target` triples; Linux's, macOS's, Windows' and GPUI's `*-host`
+  / `*-app` for this machine; Android: the prebuilt `classes.dex` with the app's `libnsh.so` for each ABI of the
+  prebuilt runtime, cross-compiled with the NDK; the web: the app's `nsh.wasm` / `nsh-dev.wasm`, with nsh's `nsh.js`).
+- `nsh dev` / `nsh run` watch the crates too, and the local crates they depend on by path (`path = "…"` in
+  `[dependencies]` / `[build-dependencies]`, per target too, transitively; not NSH's own crates nor
+  dev-dependencies: `RustApp::watched`): a change to their `.rs` files, `Cargo.toml` or `assets/` ends the app's
   command line with exit code 75, and `nsh` builds it and runs the command again (the app restarts; JS and TSX edits
   stay hot).
-- **Rust apps.** With `"root": "<path in the crate>"` in `nsh.json`, the app's directory resolves to its `nsh.json`
-  (`entry::resolve`; a named `App.tsx` stays the TSX entry), and the app runs with no JS: `rust_app::RootConfig`
-  (with `"theme"` and `"appearance"`, also kept in `.nsh/rust/app.json` for the app's command line) adds the members
-  `rust-linux`, `rust-macos`, `rust-windows`, `rust-ios` (each the platform's release runner library without its
-  feature `js`, whose `run_rust` mounts the generated `app_root()`), `rust-android` (`nsh::ui_sets!` and `nsh::main!`,
-  `nsh-platform-android` without `js`; the APK's manifest gets the `com.longbridge.nsh.RUST` meta-data `AppActivity`
-  reads) and `rust-web` (`docs/dev/web.md`), and `gpui/rust-gpui`. `RustApp::runtime`, `android` and `web` build
-  those instead; `nsh package` ships no bundle (`build::rust_root`: the crates' assets only); `nsh run` runs the
-  desktops' runner in debug in place (`NSH_APP_DIR`: its `nsh` directory, and the app's logs on stderr), Catalyst's in
-  an app bundle (`NSH_DEVELOPMENT`), and installs a package on the simulator and Android; on the web a dev session
-  without builds serves the page. A crate change ends the command with `Restart` (`RustApp::watch`). The other
-  commands refuse a Rust app's entry. `examples/gallery-rs` is one (`"root": "Gallery"`).
+- **Rust apps.** With `"root": "<path in the crate>"` in `nsh.json` (in the first crate `"rust"` lists), the app's
+  directory resolves to its `nsh.json` (`entry::resolve`; a named `App.tsx` stays the TSX entry), and the app runs with
+  no JS: `rust_app::RootConfig` (with `"theme"` and `"appearance"`, also kept in `.nsh/rust/app.json` for the app's
+  command line) adds the members `rust-linux`, `rust-macos`, `rust-windows`, `rust-ios` (each the platform's release
+  runner library without its feature `js`, whose `run_rust` mounts the generated `app_root()`), `rust-android`
+  (`nsh::ui_sets!` and `nsh::main!`, `nsh-platform-android` without `js`; the APK's manifest gets the
+  `com.longbridge.nsh.RUST` meta-data `AppActivity` reads) and `rust-web` (`docs/dev/web.md`), and `gpui/rust-gpui`.
+  `RustApp::runtime`, `android` and `web` build those instead; `nsh package` ships no bundle (`build::rust_root`: the
+  crates' assets only); `nsh run` runs the desktops' runner in debug in place (`NSH_APP_DIR`: its `nsh` directory, and
+  the app's logs on stderr), Catalyst's in an app bundle (`NSH_DEVELOPMENT`), and installs a package on the simulator
+  and Android; on the web a dev session without builds serves the page. A crate change ends the command with `Restart`
+  (`RustApp::watch`). The other commands refuse a Rust app's entry. `examples/gallery-rs` is one (`"root": "Gallery"`).
 - The files the sets' crates ship (`Registry::assets(assets!())`: a crate's `assets/` directory, published as
-  `asset:/@<package>/<path>`) go with the app's imported assets: the dev server serves them
+  `asset:/@<package>/<path>`, so each crate's are apart) go with the app's imported assets: the dev server serves them
   (`DevServer::serve_files`), `nsh build` / `package` / `publish` copy them (`build::Built::assets`: each file's path
   and where it is), `nsh trace` reads them; the engine registers their fonts before the first render.
 

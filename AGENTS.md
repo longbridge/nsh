@@ -97,8 +97,8 @@ crates/
   nsh-ios-host/        Development host app (Catalyst / iOS simulator); connects to a dev server or runs a local bundle
   nsh-ios-app/         Release runner: the executable of iOS apps built by `nsh package`
   nsh-cli/             The `nsh` command line (a library: `main_with(ui_sets)`): init / build / trace / check / dev / run / package; keygen /
-                       certify / publish / verify / revoke; apps with Rust components of their own (`rust_app.rs`: the crate
-                       nsh.json `"rust"` names has a `#[native_module("…")]` fn; docs/dev/tooling.md); web packages and the
+                       certify / publish / verify / revoke; apps with Rust components of their own (`rust_app.rs`: each crate
+                       nsh.json `"rust"` names, one or a list, has a `#[native_module("…")]` fn; docs/dev/tooling.md); web packages and the
                        browser host's pages (`web.rs`, `web/`); what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),

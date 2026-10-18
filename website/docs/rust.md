@@ -90,9 +90,10 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-`"root"` is the component's path in the crate (`App`, `shell::Gallery`); `"theme"` and `"appearance"` apply to it as
-they do to a TSX app. With it, `nsh run` and `nsh package` of the app's directory build the app's own runner for the
-target, with the root mounted and no QuickJS linked in:
+`"root"` is the component's path in the crate (`App`, `shell::Gallery`; in the first one with
+[several crates](#several-crates)); `"theme"` and `"appearance"` apply to it as they do to a TSX app. With it,
+`nsh run` and `nsh package` of the app's directory build the app's own runner for the target, with the root mounted
+and no QuickJS linked in:
 
 | Target | What runs |
 |---|---|
@@ -144,6 +145,30 @@ updates, Rust edits rebuild and restart the app.
 `examples/gallery-rs` in the repository is a complete Rust app with both entries: every demo is Rust,
 `nsh run examples/gallery-rs --target web` (or `ios`, `android`, …) runs its root, `cargo run -p gallery-native`
 starts it on the desktop backend, and `nsh run examples/gallery-rs/App.tsx` runs it under its TSX entry.
+
+## Several crates
+
+An app's Rust code can be split into crates, each imported by its own specifier: `"rust"` takes a list of crate
+paths, and each crate in it has its own `#[native_module]` function.
+
+```json
+{
+  "rust": ["native/charts", "native/storage"],
+  "root": "App"
+}
+```
+
+```tsx
+import { Chart } from "app/charts";        // native/charts: #[native_module("app/charts")]
+import { Store } from "app/storage";       // native/storage: #[native_module("app/storage")]
+```
+
+Every runner and host links all of them, and `.nsh/types` declares each specifier. Crates share code through Cargo
+path dependencies (`shared = { path = "../shared" }`): a crate of company components can be used by several crates
+and listed by several apps, and only the crates listed in `"rust"` export to TSX. Each listed crate has a package
+name and a specifier of its own; `nsh` reports a repeated one with the two paths that share it. A Rust app's
+`"root"` is a component of the first crate listed. During `nsh run` and `nsh dev`, a change to any of them, or to a
+crate they depend on by path, rebuilds the app and restarts it.
 
 ## See also
 

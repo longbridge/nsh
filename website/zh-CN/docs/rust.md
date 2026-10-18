@@ -87,7 +87,7 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
-`"root"` 是组件在 crate 中的路径（`App`、`shell::Gallery`）；`"theme"` 和 `"appearance"` 和 TSX 应用一样作用于它。
+`"root"` 是组件在 crate 中的路径（`App`、`shell::Gallery`；有[多个 crate](#多个-crate) 时在第一个中）；`"theme"` 和 `"appearance"` 和 TSX 应用一样作用于它。
 有了它，对应用目录执行 `nsh run` 和 `nsh package` 时，会为目标平台构建应用自己的运行器，直接挂载根组件，不链接 QuickJS：
 
 | 目标 | 运行的内容 |
@@ -136,6 +136,29 @@ Rust 的修改会重新构建并重启应用。
 仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用，两种入口都有：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
 （或 `ios`、`android` 等）运行它的根组件，`cargo run -p gallery-native` 在桌面后端上启动它，`nsh run examples/gallery-rs/App.tsx`
 通过 TSX 入口运行它。
+
+## 多个 crate
+
+应用的 Rust 代码可以拆分成多个 crate，每个 crate 用自己的名称导入：`"rust"` 可以是 crate 路径的列表，列表中的每个 crate
+都有自己的 `#[native_module]` 函数。
+
+```json
+{
+  "rust": ["native/charts", "native/storage"],
+  "root": "App"
+}
+```
+
+```tsx
+import { Chart } from "app/charts";        // native/charts：#[native_module("app/charts")]
+import { Store } from "app/storage";       // native/storage：#[native_module("app/storage")]
+```
+
+每个运行器和宿主都链接全部这些 crate，`.nsh/types` 为每个名称生成声明。crate 之间通过 Cargo 路径依赖共享代码
+（`shared = { path = "../shared" }`）：一个公司组件 crate 可以被多个 crate 使用、被多个应用列出，只有 `"rust"` 中列出的
+crate 会导出给 TSX。列出的每个 crate 都有自己的包名和导入名称；重复时 `nsh` 会报告共用它的两个路径。Rust 应用的
+`"root"` 是列出的第一个 crate 中的组件。`nsh run` 和 `nsh dev` 期间，修改其中任何一个 crate，或它们通过路径依赖的
+crate，都会重新构建并重启应用。
 
 ## 另请参阅
 

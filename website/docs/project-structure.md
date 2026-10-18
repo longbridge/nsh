@@ -75,8 +75,8 @@ mount(App);
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
 | `theme` | string or object | every build | The theme of the `nsh/ui/mobile` components: a theme file's path relative to `nsh.json`, or the theme inline ([Components](../components/index.md)). |
 | `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
-| `rust` | string | every command | The app's Rust crate, relative to `nsh.json`: its components and modules, which TSX imports by its `#[native_module]` specifier ([Building with Rust](./rust.md)). |
-| `root` | string | `run`, `package` | A Rust app's root component, its path in the `rust` crate (`App`, `shell::Gallery`): `nsh run` and `nsh package` of the app's directory mount it with no QuickJS, on every platform; `nsh run App.tsx` still runs the TSX entry ([Building with Rust](./rust.md)). |
+| `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
+| `root` | string | `run`, `package` | A Rust app's root component, its path in the `rust` crate, the first one of a list (`App`, `shell::Gallery`): `nsh run` and `nsh package` of the app's directory mount it with no QuickJS, on every platform; `nsh run App.tsx` still runs the TSX entry ([Building with Rust](./rust.md)). |
 
 The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`) override the file's values ([CLI](./cli.md)).
 

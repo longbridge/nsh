@@ -1,7 +1,7 @@
 //! The `nsh` command line tool, as a library: [`main_with`] runs it with
 //! the UI sets the hosts serve. `nsh` itself is `main_with` of the mobile
 //! UI; an app with Rust components of its own (`nsh.json` `"rust"`) gets a
-//! build of it with the app's set too.
+//! build of it with the app's sets too, one per crate.
 
 mod android;
 mod build;
@@ -351,7 +351,7 @@ impl Command {
 }
 
 /// Runs the command line with `ui_sets` (`nsh_ui_mobile::registry()` and
-/// an app's own registry); errors are printed.
+/// the registries of an app's own crates); errors are printed.
 pub fn main_with(ui_sets: Vec<Registry>) -> ExitCode {
     let _ = UI_SETS.set(ui_sets);
     let cli = Cli::parse();

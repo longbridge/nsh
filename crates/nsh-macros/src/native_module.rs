@@ -6,8 +6,9 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
 use syn::{FnArg, ItemFn, LitStr, ReturnType, spanned::Spanned};
 
-/// The entry the generated workspace calls (`app::__nsh_native_module()`);
-/// keep in sync with `rust_app.rs`.
+/// The entry the generated workspace calls
+/// (`app_<package>::__nsh_native_module()`); keep in sync with
+/// `rust_app.rs`.
 const ENTRY: &str = "__nsh_native_module";
 
 pub(crate) fn expand(specifier: LitStr, item: ItemFn) -> syn::Result<TokenStream2> {
@@ -58,11 +59,11 @@ pub(crate) fn expand(specifier: LitStr, item: ItemFn) -> syn::Result<TokenStream
     let span = Span::call_site();
     let entry = syn::Ident::new(ENTRY, span);
     let ui = quote!(::nsh_core::ui);
-    // The generated workspace calls `app::__nsh_native_module`, so the
-    // entry has to be at the crate's root. A glob in a block shadows the
-    // names of the module around it: in a module of its own, `crate::*`
-    // finds the entry when it is at the root, the fallback says where it
-    // goes when not.
+    // The generated workspace calls `app_<package>::__nsh_native_module`,
+    // so the entry has to be at the crate's root. A glob in a block shadows
+    // the names of the module around it: in a module of its own,
+    // `crate::*` finds the entry when it is at the root, the fallback says
+    // where it goes when not.
     let at_root = quote_spanned! {span=>
         const _: () = {
             mod __nsh_native_module_at_root {

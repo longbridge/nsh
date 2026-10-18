@@ -142,10 +142,10 @@ impl DevSession {
         ui::debug(format!("watching {}", ui::path(&self.src_dir)));
         // The app's Rust code: a change builds the app's hosts again.
         let rust = crate::rust_app::current();
-        if let Some(app) = &rust
-            && !app.crate_dir().starts_with(&self.src_dir)
-        {
-            watcher.watch(app.crate_dir(), RecursiveMode::Recursive)?;
+        for dir in rust.iter().flat_map(|app| app.watched()) {
+            if !dir.starts_with(&self.src_dir) {
+                watcher.watch(dir, RecursiveMode::Recursive)?;
+            }
         }
         loop {
             if ui::stop_requested() || stop()? {
