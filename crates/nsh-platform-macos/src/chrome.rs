@@ -496,6 +496,21 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
         NSWindowTitleVisibility::Visible
     });
     update_area(surface);
+    // AppKit can restore the old content size after setStyleMask returns.
+    // Reconcile it after that pass, using the current window and style so
+    // another title bar change in the same batch takes precedence.
+    let key = surface.key();
+    DispatchQueue::main().exec_async(move || {
+        if let Some(surface) = Surface::with_key(key)
+            && let Some(window) = surface.root.ns().window()
+            && let Some(content) = window.contentView()
+        {
+            let size = window.contentRectForFrameRect(window.frame()).size;
+            if content.frame().size != size {
+                content.setFrameSize(size);
+            }
+        }
+    });
 }
 
 // --- Drag regions -----------------------------------------------------------------------

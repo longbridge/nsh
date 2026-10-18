@@ -215,6 +215,11 @@ Things that were found the hard way. Read the section of the area you change bef
 
 ## macOS, AppKit
 
+- **Changing `FullSizeContentView` can leave the content at its old size after `setStyleMask:` returns**:
+  a hidden title bar then leaves a strip of window background until the next resize. `chrome::apply_title_bar`
+  reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
+  current frame and style (including any later title bar change in the same batch).
+
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
   opacity, every time; a transform set elsewhere is lost on the next move.
