@@ -181,7 +181,7 @@ impl Component for Counter {
 - Listeners are plain closures (`move |e| ..`) that capture signals. They no longer receive `&mut Self` and props, so
   `cx.listener(..)` and `Listener::map` go.
 
-**Props** are reactive. `#[derive(Props)]` keeps its attributes (`default`, `rename`, `lazy`) and its JSON decoding, and
+**Props** are reactive. `#[derive(Props)]` keeps its attributes (`default`, `rename`, `lazy`) and its decoding (now typed, below), and
 each field becomes readable in a binding:
 
 ```rust
@@ -195,8 +195,9 @@ pub struct StepperProps {
 // In render, `props.max` is a `Prop<f64>`: `props.max.get()` tracks it.
 ```
 
-- From JS, a changed prop writes that prop's signal (the core decodes `Op::SetProp { ComponentProp }` into it, as it
-  decodes into the props struct today). Only the bindings that read it run.
+- From JS, a changed prop writes that prop's signal: the JS face decodes it into the field's type when JS sets it
+  (`PropSpec::decode`, a wrong type throws there) and sends the value (`Op::SetProp { RustProp }`, an `AnyValue`),
+  which the core moves into the signal. Only the bindings that read it run.
 - From Rust, a parent passes each prop as a value, a signal or a closure: `ButtonProps { title: "Save".into(),
   disabled: busy.into(), .. }`. The field type is `Prop<T>`, built from any `Into<Reactive<T>>`.
 - `Props: Clone + PartialEq` and the parent-side equality skip go: there is nothing to skip.

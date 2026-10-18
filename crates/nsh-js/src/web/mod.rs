@@ -254,8 +254,9 @@ pub(crate) fn web<'a>(ctx: Ctx) -> &'a mut Web {
 struct Slot(RefCell<Box<dyn Object>>);
 
 thread_local! {
-    /// The finalizers running on this thread (QuickJS is collecting
-    /// garbage): no JS may run and no value be made until they return.
+    /// The finalizers running on this thread: in a collection, or freeing
+    /// an object whose last reference went (any release of a JS value may
+    /// run one). No JS may run and no op be made until they return.
     static FINALIZING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 

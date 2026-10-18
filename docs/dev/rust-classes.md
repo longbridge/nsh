@@ -236,10 +236,13 @@ impl Downloader {
   JS is still busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
   dropped and their replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
   out of memory) when the synchronous call around it returns, whatever Rust made of its `Err`.
-- **In a collection:** a value the collector frees drops inside the collection, where no JS may run (QuickJS is
-  collecting garbage; `nsh-js` raises a counter around every finalizer's drop, `web::finalizing`). A callback's
-  `call` there fails (`Err`: called while JS collects garbage, use `post`) and `post` queues the call without an
-  op; both are about callbacks the dropping value does not own, since its own were released first (below).
+- **In a finalizer:** a value whose JS object goes drops inside QuickJS's finalizer, where no JS may run. That is
+  every finalizer, not only a collection's sweep: an object freed because its last reference went (a refcount
+  free, at any point JS releases a value) finalizes the same way. `nsh-js` raises a counter around every
+  finalizer's drop (`web::finalizing`); while it is raised, a callback's `call` fails (`Err`: called while JS
+  collects garbage, use `post`) and `post` is not parked in program order: it goes to the end of the queue, without
+  an op, and runs in the next turn. Both are about callbacks the dropping value does not own, since its own were
+  released first (below).
 - **Keeping it:** a `Callback` can be stored (in an instance's field, a `Vec`, a global) and called any number of
   times; dropping the last clone releases the JS function. A callback an instance keeps is reported to QuickJS's
   collector through the class's mark hook, as the web classes report the JS values they hold. `#[class]` traces
