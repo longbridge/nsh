@@ -170,7 +170,7 @@ pub(crate) fn deliver(ctx: *mut JsContext, event: JsEvent) -> Result<(), JsValue
             let data = match data {
                 Ok(Ok(data)) => data,
                 Ok(Err(e)) => {
-                    crate::classes::host_outside_calls(ctx).clear_pending();
+                    // What a conversion threw (the error says it).
                     let _ = crate::web::js::take_exception(ctx);
                     log::error!(target: "js", "the data of event `{name}` did not convert: {e}");
                     return Ok(());

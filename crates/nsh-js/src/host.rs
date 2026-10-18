@@ -226,9 +226,9 @@ impl Host {
         if self.shared.fatal.borrow().is_some() {
             return None;
         }
-        let started = self.budget.begin(phase);
+        let running = self.budget.run(phase);
         let result = f();
-        self.budget.end(started);
+        drop(running);
         // The app may have caught running out (it is an `InternalError`):
         // the VM stops all the same.
         if self.exhausted.load(Ordering::Relaxed) && self.shared.fatal.borrow().is_none() {

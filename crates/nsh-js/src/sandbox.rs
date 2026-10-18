@@ -198,6 +198,18 @@ pub(crate) struct Budget {
     phase: Rc<Cell<Phase>>,
 }
 
+/// A call's clock ([`Budget::run`]), stopped when it drops.
+pub(crate) struct Running<'a> {
+    budget: &'a Budget,
+    started: bool,
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.budget.end(self.started);
+    }
+}
+
 impl Budget {
     pub(crate) fn new(limits: Limits) -> Self {
         Self {
@@ -213,9 +225,16 @@ impl Budget {
     }
 
     /// Starts the clock of a call, unless one is running (nested calls
-    /// share the outermost call's budget). Returns whether it started one,
-    /// which the caller passes to [`Budget::end`].
-    pub(crate) fn begin(&self, phase: Phase) -> bool {
+    /// share the outermost call's budget), until the guard drops: an unwind
+    /// out of the call stops it too.
+    pub(crate) fn run(&self, phase: Phase) -> Running<'_> {
+        Running {
+            budget: self,
+            started: self.begin(phase),
+        }
+    }
+
+    fn begin(&self, phase: Phase) -> bool {
         if self.deadline.get().is_some() {
             return false;
         }
@@ -229,7 +248,7 @@ impl Budget {
         true
     }
 
-    pub(crate) fn end(&self, started: bool) {
+    fn end(&self, started: bool) {
         if started {
             self.deadline.set(None);
         }
@@ -420,4 +439,21 @@ pub(crate) unsafe fn harden_from(ctx: &Ctx<'_>, bytecode: &[u8]) -> rquickjs::Re
         qjs::JS_FreeValue(raw, result);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unwind_out_of_a_call_stops_its_clock() {
+        let budget = Budget::new(Limits::default());
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _running = budget.run(Phase::Call);
+            panic!("out of the call");
+        }));
+        assert!(unwound.is_err());
+        // No clock left running: the next call starts its own.
+        assert!(budget.run(Phase::Call).started);
+    }
 }
