@@ -23,7 +23,7 @@ use crate::{
     ui::{
         Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, IconTile, Inset, MONO,
         Meter, PressProps, RoundButton, Section, Segment, SegmentedEvent, Tone, appear, caption,
-        colors, header, icon, press_with, radius, segmented, tints,
+        colors, header, hint, icon, press_with, radius, segmented, tints,
     },
 };
 
@@ -521,7 +521,10 @@ pub(crate) fn Form() -> impl IntoElement {
             }),
         )
         .child(caption(
-            "Drag the form with the keyboard up",
+            hint(
+                "Drag the form with the keyboard up",
+                "Desktops have no on-screen keyboard to dismiss",
+            ),
             Some(move || MODES[mode.get()].2),
         ));
 

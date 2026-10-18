@@ -22,7 +22,7 @@ use nsh_core::{
 
 use crate::ui::{
     Button, ButtonVariant, Card, Figure, Finish, Finished, IconName, Segment, SegmentedEvent, Stat,
-    Tone, appear, caption, colors, legend, segmented,
+    Tone, appear, caption, colors, hint, legend, segmented,
 };
 
 /// A canvas font of the system family (TS `SANS(size, weight)`).
@@ -1189,7 +1189,7 @@ fn Sketch() -> impl IntoElement {
     Card::new()
         .icon(IconName::Gestures)
         .title("Sketch")
-        .subtitle("Touch → draw from Rust")
+        .subtitle(hint("Touch → draw from Rust", "Drag → draw from Rust"))
         .right(
             header_button("Clear", move |_: &()| strokes.set(Vec::new()))
                 .disabled(Prop::bind(move || strokes.with(Vec::is_empty))),

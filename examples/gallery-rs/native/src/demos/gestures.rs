@@ -13,7 +13,8 @@ use nsh_core::{
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, IconTile, MONO, PressProps,
-    Row, Stat, Tone, appear, caption, colors, icon, inset_shadow, press_with, radius, rgb_a, tints,
+    Row, Stat, Tone, appear, caption, colors, hint, icon, inset_shadow, press_with, radius, rgb_a,
+    tints,
 };
 
 /// A dot matrix behind a stage, drawn for its size (again when it or the
@@ -195,10 +196,13 @@ fn Transformable() -> impl IntoElement {
                 ),
         )
         .child(
-            text("Pinch and rotate with two fingers (Option-drag in the simulator).")
-                .text_size(px(13.0))
-                .line_height(px(18.0))
-                .text_color(colors::MUTED),
+            text(hint(
+                "Pinch and rotate with two fingers (Option-drag in the simulator).",
+                "Drag with the mouse; pinch and rotate on a touchpad or a touch screen.",
+            ))
+            .text_size(px(13.0))
+            .line_height(px(18.0))
+            .text_color(colors::MUTED),
         )
         .child(Button::new("Reset", reset).variant(ButtonVariant::Secondary))
 }
@@ -379,7 +383,10 @@ fn TouchPad() -> impl IntoElement {
     Card::new()
         .icon(IconName::System)
         .title("Touch events")
-        .subtitle("Start, move, end and cancel, for every finger")
+        .subtitle(hint(
+            "Start, move, end and cancel, for every finger",
+            "Start, move, end and cancel, for the mouse and every finger",
+        ))
         .right(
             Badge::new(move || format!("{} down", down.get())).tone(move || {
                 if down.get() > 0 {
@@ -399,9 +406,12 @@ fn TouchPad() -> impl IntoElement {
                 .child(If::new(
                     move || down.get() == 0,
                     || {
-                        text("Touch here, try two fingers")
-                            .text_size(px(14.0))
-                            .text_color(colors::MUTED)
+                        text(hint(
+                            "Touch here, try two fingers",
+                            "Press and drag here with the mouse",
+                        ))
+                        .text_size(px(14.0))
+                        .text_color(colors::MUTED)
                     },
                 ))
                 .child(Each::new(
@@ -536,7 +546,7 @@ fn PressEvents() -> impl IntoElement {
                 .items_center()
                 .justify_center()
                 .child(
-                    text("Tap, hold, or slide off")
+                    text(hint("Tap, hold, or slide off", "Click, hold, or slide off"))
                         .text_size(px(15.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(colors::ON_LIGHT),
@@ -603,7 +613,10 @@ fn HitSlop() -> impl IntoElement {
     Card::new()
         .icon(IconName::Search)
         .title("Hit slop")
-        .subtitle("A 12 pt dot that takes taps 30 pt around it")
+        .subtitle(hint(
+            "A 12 pt dot that takes taps 30 pt around it",
+            "A 12 pt dot that takes clicks 30 pt around it",
+        ))
         .right(
             Badge::new(move || format!("{} taps", taps.get())).tone(move || {
                 if taps.get() > 0 {
@@ -651,7 +664,13 @@ fn HitSlop() -> impl IntoElement {
                     ),
                 ),
         )
-        .child(api("The dashed ring is the touch area", "hitSlop={30}"))
+        .child(api(
+            hint(
+                "The dashed ring is the touch area",
+                "The dashed ring is the click area",
+            ),
+            "hitSlop={30}",
+        ))
 }
 
 /// The items labelled for screen readers: label, hint, icon.
@@ -701,7 +720,10 @@ fn pointer_events() -> impl IntoElement {
     Card::new()
         .icon(IconName::Nav)
         .title("Pointer events")
-        .subtitle("An overlay that lets taps through")
+        .subtitle(hint(
+            "An overlay that lets taps through",
+            "An overlay that lets clicks through",
+        ))
         .right(Badge::new(move || through.get().to_string()).tone(Tone::Up))
         .child(
             view()
@@ -742,7 +764,10 @@ fn pointer_events() -> impl IntoElement {
                 ),
         )
         .child(api(
-            "Taps on the hatched band reach the button",
+            hint(
+                "Taps on the hatched band reach the button",
+                "Clicks on the hatched band reach the button",
+            ),
             "pointerEvents=\"none\"",
         ))
 }

@@ -22,8 +22,8 @@ use crate::{
     ui::{
         self, Badge, ButtonVariant as UiVariant, Finish, Finished, IconName, IconTile, Inset, MONO,
         PressProps, Row, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize,
-        ToggleEvent, Tone, appear, caption, colors, header, icon, inset_shadow, press_with, radius,
-        rgb_a, segmented, tints, toggle,
+        ToggleEvent, Tone, appear, caption, colors, header, hint, icon, inset_shadow, press_with,
+        radius, rgb_a, segmented, tints, toggle,
     },
 };
 
@@ -110,7 +110,12 @@ fn MobileComponents() -> impl IntoElement {
         .right(
             Badge::new(move || {
                 let presses = presses.get();
-                format!("{presses} {}", if presses == 1 { "tap" } else { "taps" })
+                let unit = if presses == 1 {
+                    hint("tap", "click")
+                } else {
+                    hint("taps", "clicks")
+                };
+                format!("{presses} {unit}")
             })
             .tone(move || {
                 if presses.get() > 0 {
@@ -228,7 +233,10 @@ fn PressFeedback() -> impl IntoElement {
     ui::Card::new()
         .icon(IconName::Gestures)
         .title("Press feedback")
-        .subtitle("Drawn natively while the finger is down")
+        .subtitle(hint(
+            "Drawn natively while the finger is down",
+            "Drawn natively while the button is down",
+        ))
         .child(
             tile()
                 .active_opacity(0.4)
@@ -315,10 +323,13 @@ fn PressableSheet() -> impl IntoElement {
                             .gap_4()
                             .child(
                                 title_block("pageSheet", "A sheet").px_1().pt_2().child(
-                                    text("Swipe down (iOS) or press back (Android) to close.")
-                                        .text_size(px(15.0))
-                                        .line_height(px(21.0))
-                                        .text_color(colors::MUTED),
+                                    text(hint(
+                                        "Swipe down (iOS) or press back (Android) to close.",
+                                        "Press Escape or click outside the card to close.",
+                                    ))
+                                    .text_size(px(15.0))
+                                    .line_height(px(21.0))
+                                    .text_color(colors::MUTED),
                                 ),
                             )
                             .child(view().flex_1())

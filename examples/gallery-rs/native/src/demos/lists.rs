@@ -12,7 +12,7 @@ use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 use crate::ui::{
     Appear, AppearProps, Badge, Button, ButtonVariant, Finish, Finished, IconName, IconTile, MONO,
     Meter, PressProps, PressRole, RoundButton, Section, Segment, SegmentedEvent, Tone, colors,
-    icon, press_with, radius, segmented,
+    hint, icon, press_with, radius, segmented,
 };
 
 /// The tones rows cycle through (the last, neutral, only in the grid).
@@ -861,9 +861,12 @@ fn empty_list() -> Section {
             .h(px(194.0))
             .child(IconTile::new(IconName::Lists).tint(colors::FAINT))
             .child(
-                text("Nothing here yet: tap Add")
-                    .text_size(px(13.0))
-                    .text_color(colors::MUTED),
+                text(hint(
+                    "Nothing here yet: tap Add",
+                    "Nothing here yet: click Add",
+                ))
+                .text_size(px(13.0))
+                .text_color(colors::MUTED),
             ),
     )
     .separator(|| view().h(px(1.0)).ml(px(14.0)).bg(colors::LINE))

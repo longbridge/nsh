@@ -16,7 +16,7 @@ use nsh_ui_mobile::{
 };
 
 use crate::ui::{
-    Badge, Card, IconName, MONO, Row, ToggleEvent, Tone, appear, caption, colors, toggle,
+    Badge, Card, IconName, MONO, Row, ToggleEvent, Tone, appear, caption, colors, hint, toggle,
 };
 
 /// A row of the list.
@@ -178,12 +178,21 @@ fn Header(props: HeaderProps, cx: Scope<HeaderEvent>) -> impl IntoElement {
                 Card::new()
                     .icon(IconName::Components)
                     .title("Sheet")
-                    .subtitle("Follows the finger natively, springs back")
+                    .subtitle(hint(
+                        "Follows the finger natively, springs back",
+                        "Follows the pointer natively, springs back",
+                    ))
                     .child(
                         mobile_button("Open the sheet".into(), ButtonVariant::Primary)
                             .on_event(move |_: &ButtonEvent| sheet.set(true)),
                     )
-                    .child(caption("Drag, tap outside or press back", Some("onClose"))),
+                    .child(caption(
+                        hint(
+                            "Drag, tap outside or press back",
+                            "Drag it down or click outside",
+                        ),
+                        Some("onClose"),
+                    )),
             ),
         )
         .child(
@@ -198,10 +207,12 @@ fn Header(props: HeaderProps, cx: Scope<HeaderEvent>) -> impl IntoElement {
                     .font_weight(FontWeight::SEMIBOLD),
             )
             .child(
-                text(
+                text(hint(
                     "It follows the finger natively and springs back; drag it down, tap outside \
                      or press back to close.",
-                )
+                    "It follows the pointer natively and springs back; drag it down or click \
+                     outside to close.",
+                ))
                 .opacity(0.7),
             )
             .child(

@@ -5,7 +5,7 @@
 
 use nsh_core::{
     Dialog, DialogButton, DialogButtonStyle, ModalPresentation,
-    ui::{AnyElement, Screen, prelude::*},
+    ui::{AnyElement, Os, Screen, prelude::*},
 };
 use nsh_ui_mobile::{SafeAreaView, SafeAreaViewProps};
 
@@ -13,8 +13,8 @@ use crate::{
     nav,
     ui::{
         Badge, Button, ButtonVariant, Card, Figure, Finish, Finished, IconName, IconTile, Inset,
-        MONO, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors, header, icon, motion,
-        press_with, radius, tints, toggle,
+        MONO, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors, header, hint, icon,
+        motion, press_with, radius, tints, toggle,
     },
 };
 
@@ -242,8 +242,12 @@ fn locked() -> Screen {
     header(screen().title("No swipe back"))
         .gesture_enabled(false)
         .child(page(
-            "The back gesture is off on this screen: no swipe on iOS, no predictive animation on \
-             Android. The back buttons still work.",
+            hint(
+                "The back gesture is off on this screen: no swipe on iOS, no predictive animation \
+                 on Android. The back buttons still work.",
+                "The back gesture is off on this screen (touch screens only). The back button, \
+                 Escape and Alt+Left still work.",
+            ),
             [Section::new("Leaving")
                 .note("gestureEnabled={false}")
                 .child(
@@ -352,8 +356,12 @@ fn unsaved() -> Screen {
             });
         })
         .child(page(
-            "Type something, then go back (header button, swipe, Android back): the screen asks \
-             first.",
+            hint(
+                "Type something, then go back (header button, swipe, Android back): the screen \
+                 asks first.",
+                "Type something, then go back (header button, Escape, Alt+Left, the mouse's back \
+                 button): the screen asks first.",
+            ),
             [DraftCard::element(()).into_element()],
         ))
 }
@@ -522,45 +530,54 @@ enum Presented {
     Dismissible,
 }
 
-/// The modals: what they are, their note, their icon.
-const MODALS: [(Presented, &str, &str, &str, IconName); 6] = [
-    (
-        Presented::FullScreen,
-        "fullScreen",
-        "Full screen",
-        "Slides up",
-        IconName::Mobile,
-    ),
-    (
-        Presented::PageSheet,
-        "pageSheet",
-        "Page sheet",
-        "iOS sheet",
-        IconName::Components,
-    ),
-    (
-        Presented::FormSheet,
-        "formSheet",
-        "Form sheet",
-        "iOS, centered",
-        IconName::Form,
-    ),
-    (Presented::Fade, "fade", "Fade", "Fades in", IconName::Spark),
-    (
-        Presented::Dialog,
-        "dialog",
-        "Dialog",
-        "See-through",
-        IconName::Bell,
-    ),
-    (
-        Presented::Dismissible,
-        "dismissible",
-        "Dismissible",
-        "Swipe to close",
-        IconName::ArrowDown,
-    ),
-];
+/// The modals: what they are, their note (for the device's input), their
+/// icon.
+fn modals() -> [(
+    Presented,
+    &'static str,
+    &'static str,
+    &'static str,
+    IconName,
+); 6] {
+    [
+        (
+            Presented::FullScreen,
+            "fullScreen",
+            "Full screen",
+            "Slides up",
+            IconName::Mobile,
+        ),
+        (
+            Presented::PageSheet,
+            "pageSheet",
+            "Page sheet",
+            hint("iOS sheet", "A tall centered card"),
+            IconName::Components,
+        ),
+        (
+            Presented::FormSheet,
+            "formSheet",
+            "Form sheet",
+            hint("iOS, centered", "A smaller centered card"),
+            IconName::Form,
+        ),
+        (Presented::Fade, "fade", "Fade", "Fades in", IconName::Spark),
+        (
+            Presented::Dialog,
+            "dialog",
+            "Dialog",
+            "See-through",
+            IconName::Bell,
+        ),
+        (
+            Presented::Dismissible,
+            "dismissible",
+            "Dismissible",
+            hint("Swipe to close", "Escape or click outside"),
+            IconName::ArrowDown,
+        ),
+    ]
+}
 
 /// A modal's content: what it is, its safe area, a close button.
 fn modal_body(
@@ -692,7 +709,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
         )
         .into_element(),
     );
-    let tiles = MODALS.map(|(presented, _, title, note, icon_name)| {
+    let tiles = modals().map(|(presented, _, title, note, icon_name)| {
         let pop = pop.clone();
         press_with(
             PressProps {
@@ -747,7 +764,7 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     Presented::FormSheet => ModalPresentation::FormSheet,
                     _ => ModalPresentation::FullScreen,
                 };
-                let (_, key, title, ..) = MODALS
+                let (_, key, title, ..) = modals()
                     .into_iter()
                     .find(|m| m.0 == presented)
                     .expect("a modal");
@@ -762,8 +779,15 @@ pub(crate) fn Navigation() -> impl IntoElement {
                     .child(modal_body(
                         title,
                         key,
-                        "Close with the button, the back button (Android) or a swipe down \
-                         (iOS sheets).",
+                        hint(
+                            "Close with the button, the back button (Android) or a swipe down \
+                             (iOS sheets).",
+                            if presentation == ModalPresentation::FullScreen {
+                                "Close with the button or Escape."
+                            } else {
+                                "Close with the button, Escape or a click outside the card."
+                            },
+                        ),
                         close,
                     ))
                     .into_element()
@@ -776,8 +800,11 @@ pub(crate) fn Navigation() -> impl IntoElement {
                 .child(modal_body(
                     "Dismissible",
                     "dismissible",
-                    "Swipe it down (iOS) or press back (Android): it closes natively, then \
-                     tells the app.",
+                    hint(
+                        "Swipe it down (iOS) or press back (Android): it closes natively, then \
+                         tells the app.",
+                        "Press Escape or click outside: it closes natively, then tells the app.",
+                    ),
                     close,
                 ))
                 .into_element(),
@@ -838,7 +865,14 @@ pub(crate) fn Navigation() -> impl IntoElement {
                                 .icon(IconName::Nav)
                                 .title("Native stack")
                                 .subtitle("Headers, transitions, the safe area")
-                                .right(Badge::new("UIKit / View"))
+                                .right(Badge::new(hint(
+                                    "UIKit / View",
+                                    if os() == Os::Linux {
+                                        "GTK 4"
+                                    } else {
+                                        "Native views"
+                                    },
+                                )))
                                 .child(insets()),
                         ),
                     )
@@ -872,7 +906,10 @@ pub(crate) fn Navigation() -> impl IntoElement {
                             Card::new()
                                 .icon(IconName::System)
                                 .title("Back button")
-                                .subtitle("Android: BackHandler")
+                                .subtitle(hint(
+                                    "Android: BackHandler",
+                                    "BackHandler: Escape, Alt+Left",
+                                ))
                                 .right(toggle(intercepting, "Intercept the back button").on_event(
                                     move |e: &ToggleEvent| {
                                         let ToggleEvent::Change(on) = *e;
@@ -909,7 +946,11 @@ pub(crate) fn Navigation() -> impl IntoElement {
                                             "The handler returns true: back presses stay on \
                                              this screen."
                                         } else {
-                                            "Off: the back button pops this screen."
+                                            hint(
+                                                "Off: the back button pops this screen.",
+                                                "Off: Escape pops this screen, or the app's \
+                                                 last screen does nothing.",
+                                            )
                                         }
                                     })
                                     .text_size(px(13.0))

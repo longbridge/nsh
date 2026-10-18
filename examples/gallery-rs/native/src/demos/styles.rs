@@ -10,8 +10,8 @@ use nsh_core::{
 
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, MONO, PressProps, Segment,
-    SegmentedEvent, ToggleEvent, appear, caption, colors, inset_shadow, press_with, radius, rgb_a,
-    segmented, tints, toggle,
+    SegmentedEvent, ToggleEvent, appear, caption, colors, hint, inset_shadow, press_with, radius,
+    rgb_a, segmented, tints, toggle,
 };
 
 /// The stage every specimen stands on: the card's light, without its
@@ -247,7 +247,7 @@ fn FlipCard() -> impl IntoElement {
                         ],
                         Badge::new("front").tone(crate::ui::Tone::Info),
                         "0°",
-                        "Tap to flip",
+                        hint("Tap to flip", "Click to flip"),
                         "A spring turns it on the UI thread",
                     )
                     .bind_transform(TransformKind::RotateY, &angle),
@@ -577,7 +577,7 @@ fn layers() -> Card {
                         })
                         .into_reactive(),
                     ),
-                    some("Tap to switch"),
+                    some(hint("Tap to switch", "Click to switch")),
                     Some(switch.into()),
                     specimen_box()
                         .bg(tints::WARN)
@@ -594,7 +594,7 @@ fn layers() -> Card {
                                 .rounded(px(36.0))
                                 .bg(colors::DANGER),
                         )
-                        .child(label("Tap", colors::WARN)),
+                        .child(label(hint("Tap", "Click"), colors::WARN)),
                 ))
                 .child(tile(
                     "Stacking order",

@@ -11,9 +11,11 @@
 //!   [`Card`], [`Section`], [`Inset`], [`Row`], [`Figure`], [`Badge`],
 //!   [`Stat`], [`Meter`], [`IconTile`], [`Button`], [`RoundButton`]; and
 //!   [`caption`], [`legend`], [`code`], [`header`].
+//! - The device's input: [`hint`] (touch or pointer wording).
 
 mod animated;
 mod controls;
+mod device;
 mod icons;
 mod parts;
 mod theme;
@@ -24,6 +26,7 @@ pub(crate) use self::{
         Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, segmented,
         toggle,
     },
+    device::hint,
     icons::{IconName, Tint, icon},
     parts::{
         Badge, Button, ButtonVariant, Card, Figure, IconTile, Inset, Meter, RoundButton, Row,

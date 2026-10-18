@@ -11,7 +11,7 @@ use nsh_core::{
 use crate::ui::{
     Badge, Button, ButtonVariant, Figure, Finish, Finished, IconName, Meter, PressProps, Section,
     Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, Tone, caption,
-    code, colors, press_with, radius, toggle,
+    code, colors, hint, press_with, radius, toggle,
 };
 
 /// The tones cards, tiles and posts cycle through.
@@ -835,7 +835,7 @@ pub(crate) fn Scrolling() -> impl IntoElement {
             .justify_center()
             .gap_2()
             .child(
-                text("Tap me")
+                text(hint("Tap me", "Click me"))
                     .text_size(px(15.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors::ON_LIGHT),
@@ -860,7 +860,10 @@ pub(crate) fn Scrolling() -> impl IntoElement {
         )
         .child(
             input()
-                .placeholder("Type here, then tap the button")
+                .placeholder(hint(
+                    "Type here, then tap the button",
+                    "Type here, then click the button",
+                ))
                 .placeholder_color(|| color(colors::FAINT))
                 .selection_color(|| color(colors::ACCENT))
                 .h(px(44.0))
@@ -898,7 +901,10 @@ pub(crate) fn Scrolling() -> impl IntoElement {
                     )
                     .child(
                         Section::new("Zoom")
-                            .note("Pinch or tap a tile")
+                            .note(hint(
+                                "Pinch or tap a tile",
+                                "Pinch on a touchpad or click a tile",
+                            ))
                             .child(api("maximumZoomScale · zoomTo()"))
                             .child(Zoom::element(())),
                     )

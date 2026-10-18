@@ -9,7 +9,8 @@ use nsh_core::{Rect, ui::prelude::*};
 
 use crate::ui::{
     Badge, Finish, Finished, IconName, IconTile, MONO, Segment, Segmented, SegmentedEvent,
-    SegmentedProps, SegmentedSize, Stat, Tone, appear, colors, icon, radius, segmented, tints,
+    SegmentedProps, SegmentedSize, Stat, Tone, appear, colors, hint, icon, radius, segmented,
+    tints,
 };
 
 /// The card's width and height.
@@ -261,10 +262,13 @@ pub(crate) fn Physics() -> impl IntoElement {
                                     .text_color(colors::TEXT),
                             )
                             .child(
-                                text("Tap to pulse, long press to reset")
-                                    .number_of_lines(1)
-                                    .text_size(px(13.0))
-                                    .text_color(colors::MUTED),
+                                text(hint(
+                                    "Tap to pulse, long press to reset",
+                                    "Click to pulse, press and hold to reset",
+                                ))
+                                .number_of_lines(1)
+                                .text_size(px(13.0))
+                                .text_color(colors::MUTED),
                             ),
                     )
                     .child(Badge::new("UI thread").tone(Tone::Accent)),
