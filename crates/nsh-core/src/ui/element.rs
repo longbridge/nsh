@@ -658,6 +658,10 @@ pub trait Element: IntoElement + Sized {
 /// element's `style` is (transforms, shadow offsets, native animated
 /// values included), and applied with [`Element::inline_style`]. Rust
 /// makes one from declarations ([`Style::from_decls`], [`Style::with`]).
+/// Its native animated values are node ids, valid while the style is the
+/// prop's current value (JS keeps the values alive with it, as a host
+/// element's `style` does); a component that keeps an older `Style`
+/// beyond that may hold ids of values JS has collected.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Style(pub(crate) Option<Arc<crate::StylePatch>>);
 
