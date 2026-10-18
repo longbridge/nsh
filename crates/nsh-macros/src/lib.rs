@@ -1318,15 +1318,17 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `&self` / `&mut self` functions are methods, `#[getter]` / `#[setter]`
 /// ones (`count`, `set_count`) the property `count`; functions without a
 /// receiver are statics. They run in the JS call: their parameters are
-/// [`JsValue`] types (a trailing `Option` is optional) and instances
-/// (`&Other` / `&mut Other` borrowed for the call, `Instance<Other>` kept);
+/// [`JsValue`] types (a trailing `Option` is optional), instances
+/// (`&Other` / `&mut Other` borrowed for the call, `Instance<Other>` kept)
+/// and JS functions (`Callback<A, R>`);
 /// they return nothing, a value, `Self` or another class's value (a new JS
 /// object), an `Instance` (its JS object), or a `Result` of one (an `Err`
 /// throws). An `async fn` (`this: Instance<Self>` first, for a method)
 /// returns a promise and runs as a task of the core, with the free
 /// functions (`dialog(..)`, `timer(..)`, ...); its parameters are owned
 /// (`Instance<Other>`, not `&Other`). Doc comments document the class and
-/// its members.
+/// its members. On the struct, the fields whose types name `Callback` or
+/// `Instance` report the callbacks they keep to JS's collector.
 #[proc_macro_attribute]
 pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {

@@ -33,6 +33,7 @@ pub mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
+mod callback;
 mod class;
 mod component;
 pub(crate) mod element;
@@ -92,6 +93,7 @@ pub use self::{
         NativeValue, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
+    callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
     class::{
         Arg, AsyncStart, Class, ClassDef, ClassInstance, ClassSpec, Instance, Instances, Member,
         MemberCall, MemberKind, MemberSpec, Ret, Thrown, Wire, WireArgs,
@@ -181,6 +183,7 @@ pub mod prelude {
         BlendMode,
         BorderCurve,
         BoxShadow,
+        Callback,
         CanvasView,
         Child,
         Children,

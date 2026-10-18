@@ -1,11 +1,12 @@
 //! `#[class]`: a Rust type TypeScript uses as a class. On the struct it
-//! makes the struct a result (a new instance); on the `impl` block it
-//! makes the class's members (`Class`).
+//! reports the callbacks the fields keep (`Trace`) and makes the struct a
+//! result (a new instance); on the `impl` block it makes the class's
+//! members (`Class`).
 
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type,
+    Attribute, Fields, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type,
     spanned::Spanned,
 };
 
@@ -32,8 +33,47 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let name = &item.ident;
     let doc = decl(&docs(&item.attrs));
+    // Every field, traced when its type implements `Trace` (by its type,
+    // not its name: aliases and wrappers that implement it are traced,
+    // other types skipped).
+    let members: Vec<TokenStream2> = match &item.fields {
+        Fields::Named(fields) => fields
+            .named
+            .iter()
+            .map(|f| {
+                let ident = f.ident.as_ref().expect("named");
+                quote!(#ident)
+            })
+            .collect(),
+        Fields::Unnamed(fields) => (0..fields.unnamed.len())
+            .map(|i| {
+                let index = syn::Index::from(i);
+                quote!(#index)
+            })
+            .collect(),
+        Fields::Unit => Vec::new(),
+    };
+    let traced: Vec<TokenStream2> = members
+        .iter()
+        .map(|m| quote!((&&#ui::__private::Field(&self.#m)).trace_field(tracer);))
+        .collect();
+    let tracer = if traced.is_empty() {
+        quote!(_tracer)
+    } else {
+        quote!(tracer)
+    };
     Ok(quote! {
         #item
+
+        // SAFETY: each field is reported through its own type's `Trace`,
+        // once.
+        unsafe impl #ui::Trace for #name {
+            fn trace(&self, #tracer: &mut #ui::Tracer<'_>) {
+                #[allow(unused_imports)]
+                use #ui::__private::{SkipField as _, TraceField as _};
+                #(#traced)*
+            }
+        }
 
         impl #ui::__private::ClassDoc for #name {
             const DOC: &'static str = #doc;

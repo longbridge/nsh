@@ -69,6 +69,24 @@ impl Counter {
         })
     }
 
+    /// Reports progress to `progress` (a post, then a call awaited);
+    /// resolves with its last answer.
+    pub(crate) async fn fetch(
+        this: Instance<Self>,
+        progress: Callback<f64, String>,
+    ) -> Result<String, String> {
+        let _ = this;
+        progress.post(0.5);
+        progress.call_async(1.0).await
+    }
+
+    /// Calls `f` on the spot from a task (which panics: JS is not
+    /// running there).
+    pub(crate) async fn misuse(this: Instance<Self>, f: Callback) -> Result<(), String> {
+        let _ = this;
+        f.call(())
+    }
+
     /// A counter at `start`, later.
     pub(crate) async fn make(start: i64) -> Instance<Counter> {
         timer(Duration::from_millis(1)).await;
@@ -195,6 +213,13 @@ setTimeout(async () => {
   gone.dispose();
   lines.push(await msg(later));
   lines.push(await msg(Counter.prototype.addLater.call({}, 1, 1)));
+  const steps = [];
+  const answer = await c.fetch((p) => { steps.push(p); return `at ${p}`; });
+  lines.push(`${steps.join(",")} ${answer}`);
+  lines.push(await c.fetch(async (p) => { await null; return `later ${p}`; }));
+  lines.push(await msg(c.fetch((p) => { if (p === 1) throw new Error("refused"); return ""; })));
+  lines.push(await msg(c.fetch(async () => { throw new Error("rejected"); })));
+  lines.push(await msg(c.misuse(() => {})));
   shown.set(`done ${lines.join("|")}`);
 }, 0);
 
@@ -207,7 +232,9 @@ fn async_members_run_as_tasks_and_resolve_with_their_results() {
     assert_eq!(
         shown(&rx, "done"),
         "done 1|3|no, at 3|boom|true 6|9|true 5|11|Counter is disposed|\
-         Counter.addLater: Illegal invocation: not a Counter"
+         Counter.addLater: Illegal invocation: not a Counter|0.5,1 at 1|later 1|refused|rejected|\
+         `Callback::call` runs the function inside a synchronous call from JS; elsewhere (in a \
+         task) use `post` or `call_async`"
     );
 }
 

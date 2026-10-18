@@ -12,19 +12,23 @@
 //! a re-entrant use of it throws instead of aliasing. `async` members
 //! (`this: Instance<Self>`) are ops like `async` module functions: JS gets
 //! a promise and the core runs them as tasks, finding the instance in the
-//! table both sides share ([`Instances`], made by the engine).
+//! table both sides share ([`Instances`], made by the engine). JS
+//! functions cross as callbacks (`super::callback`).
 
 use std::{
     any::{Any, TypeId},
     cell::{Cell, Ref, RefCell, RefMut},
+    collections::VecDeque,
     fmt,
     rc::Rc,
+    sync::Arc,
 };
 
 use rustc_hash::FxHashMap;
 
 use super::{
     JsValue, PropError, TsType, TsTypes,
+    callback::{CallbackHandle, JsCall, Trace, Tracer},
     js::{JsHost, JsIn, JsOwned, JsRaw},
     module::{ModuleFuture, ModuleParam},
 };
@@ -32,9 +36,9 @@ use crate::JsonValue;
 
 // --- The class -----------------------------------------------------------------------
 
-/// A Rust type JS uses as a class. `#[class]` on the struct and on its
-/// `impl` block implements it.
-pub trait Class: Sized + 'static {
+/// A Rust type JS uses as a class. `#[class]` on the struct (its
+/// [`Trace`]) and on its `impl` block (this) implements it.
+pub trait Class: Trace + Sized + 'static {
     /// The class: its JS name (the type's), documentation and members.
     const DEF: &'static ClassDef;
 }
@@ -257,6 +261,17 @@ impl<C: Class> Instance<C> {
             .map_err(|_| Thrown::Type(format!("{} is disposed", C::DEF.name)))
     }
 
+    /// Whether this is the only handle of the instance (no JS object, task
+    /// or other value holds it).
+    pub(super) fn only_handle(&self) -> bool {
+        Rc::strong_count(&self.cell) == 1
+    }
+
+    /// Reports the callbacks the value keeps.
+    pub(super) fn trace_value(&self, tracer: &mut Tracer<'_>) {
+        self.cell.trace(tracer);
+    }
+
     /// The instance, type-erased (what JS objects and the table hold).
     fn erased(&self) -> Rc<dyn ClassInstance> {
         self.cell.clone()
@@ -280,6 +295,9 @@ pub trait ClassInstance: Any {
     fn dispose(&self) -> Result<(), String>;
     /// Whether it was disposed.
     fn disposed(&self) -> bool;
+    /// Reports the callbacks the value keeps (nothing while it is
+    /// borrowed).
+    fn trace(&self, tracer: &mut Tracer<'_>);
 }
 
 impl<C: Class> ClassInstance for InstanceCell<C> {
@@ -301,12 +319,22 @@ impl<C: Class> ClassInstance for InstanceCell<C> {
     fn disposed(&self) -> bool {
         matches!(self.value.try_borrow().as_deref(), Ok(None))
     }
+
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Ok(value) = self.value.try_borrow()
+            && let Some(value) = &*value
+        {
+            value.trace(tracer);
+        }
+    }
 }
 
-/// Instances on their way between JS and the core (an `async` member's
-/// `this` and arguments, its result): each is held under an id the op
-/// carries until the other side takes it. One table per engine, made by it
-/// and handed to `nsh-js` and the core. Cheap to clone.
+/// Instances and callbacks on their way between JS and the core (an
+/// `async` member's `this` and arguments, its result): each is held under
+/// an id the op carries until the other side takes it; and the calls of JS
+/// functions queued for the next JS turn ([`super::Callback::post`]). One
+/// table per engine, made by it and handed to `nsh-js` and the core. Cheap
+/// to clone.
 #[derive(Clone, Default)]
 pub struct Instances(Rc<InstancesInner>);
 
@@ -314,16 +342,22 @@ pub struct Instances(Rc<InstancesInner>);
 struct InstancesInner {
     held: RefCell<FxHashMap<u64, Held>>,
     next: Cell<u64>,
+    calls: RefCell<VecDeque<JsCall>>,
+    notify: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// JS stopped for good: calls are dropped (their replies say so).
+    closed: Cell<bool>,
 }
 
 enum Held {
     Instance(Rc<dyn ClassInstance>),
+    Callback(Rc<dyn CallbackHandle>),
 }
 
 impl fmt::Debug for Instances {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Instances")
             .field("held", &self.0.held.borrow().len())
+            .field("calls", &self.0.calls.borrow().len())
             .finish()
     }
 }
@@ -332,6 +366,11 @@ impl Instances {
     /// An empty table.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Calls `notify` when a JS call is queued (it wakes the engine).
+    pub fn set_notify(&self, notify: Arc<dyn Fn() + Send + Sync>) {
+        *self.0.notify.borrow_mut() = Some(notify);
     }
 
     fn hold(&self, held: Held) -> u64 {
@@ -347,13 +386,35 @@ impl Instances {
         self.hold(Held::Instance(instance))
     }
 
+    /// Holds `callback` until taken; its id.
+    #[doc(hidden)]
+    pub fn hold_callback(&self, callback: Rc<dyn CallbackHandle>) -> u64 {
+        self.hold(Held::Callback(callback))
+    }
+
     /// Takes the instance held as `id`.
     #[doc(hidden)]
     pub fn take_instance(&self, id: u64) -> Option<Rc<dyn ClassInstance>> {
-        let taken = self.0.held.borrow_mut().remove(&id);
-        match taken {
-            Some(Held::Instance(i)) => Some(i),
-            None => None,
+        let mut held = self.0.held.borrow_mut();
+        match held.get(&id)? {
+            Held::Instance(_) => match held.remove(&id) {
+                Some(Held::Instance(i)) => Some(i),
+                _ => None,
+            },
+            Held::Callback(_) => None,
+        }
+    }
+
+    /// Takes the callback held as `id`.
+    #[doc(hidden)]
+    pub fn take_callback(&self, id: u64) -> Option<Rc<dyn CallbackHandle>> {
+        let mut held = self.0.held.borrow_mut();
+        match held.get(&id)? {
+            Held::Callback(_) => match held.remove(&id) {
+                Some(Held::Callback(c)) => Some(c),
+                _ => None,
+            },
+            Held::Instance(_) => None,
         }
     }
 
@@ -376,9 +437,43 @@ impl Instances {
         }
     }
 
-    /// The number of instances held.
+    /// The number of instances and callbacks held.
     pub fn held(&self) -> usize {
         self.0.held.borrow().len()
+    }
+
+    /// Queues `call` for the next JS turn and wakes the engine.
+    #[doc(hidden)]
+    pub fn post(&self, call: JsCall) {
+        if self.0.closed.get() {
+            // Dropped: a reply waiting for it is told JS stopped.
+            drop(call);
+            return;
+        }
+        self.0.calls.borrow_mut().push_back(call);
+        let notify = self.0.notify.borrow().clone();
+        if let Some(notify) = notify {
+            notify();
+        }
+    }
+
+    /// No JS runs any more (the VM stopped or went): the queued calls are
+    /// dropped, and so are those posted later (their replies say so).
+    pub fn close(&self) {
+        self.0.closed.set(true);
+        let calls = self.take_calls();
+        drop(calls);
+    }
+
+    /// Whether JS calls are queued.
+    pub fn has_calls(&self) -> bool {
+        !self.0.calls.borrow().is_empty()
+    }
+
+    /// The queued JS calls, in order.
+    #[doc(hidden)]
+    pub fn take_calls(&self) -> VecDeque<JsCall> {
+        std::mem::take(&mut *self.0.calls.borrow_mut())
     }
 }
 
@@ -450,8 +545,9 @@ impl From<JsonValue> for Wire {
 
 // --- What crosses -----------------------------------------------------------------
 
-/// A parameter of a class's member: a [`JsValue`] type or an instance
-/// ([`Instance`]; `&Other` / `&mut Other` borrow one for the call).
+/// A parameter of a class's member: a [`JsValue`] type, an instance
+/// ([`Instance`]; `&Other` / `&mut Other` borrow one for the call) or a
+/// [`super::Callback`].
 pub trait Arg: Sized {
     /// Its TypeScript type.
     fn ts_type(types: &mut TsTypes) -> String;
@@ -539,6 +635,8 @@ impl<C: Class> Arg for Option<Instance<C>> {
 /// (the JS object it has, or a new one), or a class's value (`#[class]`
 /// implements it for the struct: a new instance).
 pub trait Ret: Sized {
+    /// `()`: nothing (a callback taking it has no parameters).
+    const UNIT: bool = false;
     /// Its TypeScript type.
     fn ts_type(types: &mut TsTypes) -> String;
     /// The value for JS (a synchronous call).
@@ -563,6 +661,8 @@ impl<T: JsValue> Ret for T {
 }
 
 impl Ret for () {
+    const UNIT: bool = true;
+
     fn ts_type(_types: &mut TsTypes) -> String {
         "void".into()
     }
@@ -809,6 +909,34 @@ pub(crate) mod __private {
         const DOC: &'static str;
     }
 
+    /// A field of a class's struct, traced when its type implements
+    /// [`Trace`] (`#[class]` calls `(&&Field(&self.x)).trace_field(t)`: the
+    /// method of `TraceField` applies to types that implement it, the one
+    /// of `SkipField` to the others).
+    pub struct Field<'a, T>(pub &'a T);
+
+    /// Traces a field whose type implements [`Trace`].
+    pub trait TraceField {
+        /// Reports the field's callbacks.
+        fn trace_field(&self, tracer: &mut Tracer<'_>);
+    }
+
+    impl<T: Trace> TraceField for &Field<'_, T> {
+        fn trace_field(&self, tracer: &mut Tracer<'_>) {
+            self.0.trace(tracer);
+        }
+    }
+
+    /// Skips a field whose type does not implement [`Trace`].
+    pub trait SkipField {
+        /// Nothing.
+        fn trace_field(&self, tracer: &mut Tracer<'_>);
+    }
+
+    impl<T> SkipField for Field<'_, T> {
+        fn trace_field(&self, _tracer: &mut Tracer<'_>) {}
+    }
+
     /// The `TypeId` of `T` (what a [`ClassDef`] tells types apart by).
     pub fn type_id<T: 'static>() -> TypeId {
         TypeId::of::<T>()
@@ -903,6 +1031,15 @@ mod tests {
                 label: None,
             }
         }
+
+        /// Sorts with the app's comparison.
+        fn sort_by(&mut self, compare: Callback<(String, String), f64>) {
+            let _ = compare;
+        }
+
+        fn on(&mut self, listener: Option<Callback<i64>>, done: Option<Callback>) {
+            let _ = (listener, done);
+        }
     }
 
     /// Made by its members only.
@@ -941,6 +1078,9 @@ export declare class Tally {
   /** Saves the count; resolves when it is written. */
   save(path: string): Promise<void>;
   static later(start: number): Promise<Tally>;
+  /** Sorts with the app's comparison. */
+  sortBy(compare: (a: string, b: string) => number): void;
+  on(listener?: ((a: number) => void) | null, done?: (() => void) | null): void;
   /** Frees the Rust value now (else when the object is collected); the object throws after. */
   dispose(): void;
   [Symbol.dispose](): void;

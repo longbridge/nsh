@@ -173,6 +173,10 @@ mod imp {
             self.host.take_ops(out);
         }
 
+        pub(crate) fn run_posted(&self) {
+            self.host.run_posted();
+        }
+
         pub(crate) fn next_timer(&self) -> Option<Instant> {
             self.host.next_timer()
         }
@@ -286,6 +290,10 @@ mod stub {
         }
 
         pub(crate) fn take_ops(&self, _: &mut Vec<Op>) {
+            match *self {}
+        }
+
+        pub(crate) fn run_posted(&self) {
             match *self {}
         }
 

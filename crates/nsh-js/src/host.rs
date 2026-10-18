@@ -513,6 +513,33 @@ impl Host {
         });
     }
 
+    /// Whether an exception is pending outside any call (none should be).
+    #[cfg(test)]
+    pub(crate) fn has_exception(&self) -> bool {
+        // SAFETY: a check on the live context.
+        self.ctx
+            .with(|ctx| unsafe { qjs::JS_HasException(ctx.as_raw().as_ptr()) })
+    }
+
+    /// Runs the calls of JS functions Rust queued (`Callback::post`,
+    /// `Callback::call_async`), in order; those queued meanwhile wait for
+    /// the next call. The engine calls it each turn, after the core's work.
+    pub fn run_posted(&self) {
+        if self.fatal().is_some() {
+            // Stopped for good: what waits for these calls is told so.
+            self.ctx
+                .with(|ctx| crate::classes::close(ctx.as_raw().as_ptr()));
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.ctx.with(|ctx| {
+                let ran = crate::classes::run_posted(ctx.as_raw().as_ptr());
+                self.report(&ctx, ran.map_err(|_| rquickjs::Error::Exception));
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Moves the network requests and cancellations made since the last
     /// call into `out`.
     pub fn take_network(&self, out: &mut NetworkQueue) {

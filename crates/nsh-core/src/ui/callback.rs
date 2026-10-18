@@ -1,0 +1,455 @@
+//! JS functions Rust takes ([`Callback`]): called on the spot inside a
+//! synchronous call from JS, or queued for the next JS turn from anywhere
+//! on the engine thread ([`Callback::post`], [`Callback::call_async`]: the
+//! engine hands the queue, [`super::Instances`], to the script after the
+//! core's work). A callback an instance keeps is reported to QuickJS's
+//! collector through the class's [`Trace`], so a cycle through the
+//! instance's JS object is collected.
+
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, VecDeque},
+    fmt,
+    marker::PhantomData,
+    rc::Rc,
+};
+
+use super::{
+    JsValue, PropError, TsTypes,
+    class::{Arg, Class, Instance, Instances, Ret},
+    js::{JsHost, JsIn, JsOwned},
+    task::Answer,
+};
+use crate::JsonValue;
+
+/// A JS function as Rust keeps it (`nsh-js` implements it).
+#[doc(hidden)]
+pub trait CallbackHandle: std::any::Any {
+    /// Runs `call` now: inside a synchronous call from JS.
+    ///
+    /// # Panics
+    ///
+    /// Outside one (in a task): JS is not running there.
+    fn call_now(&self, call: JsCall);
+    /// Queues `call` for the next JS turn.
+    fn post(&self, call: JsCall);
+}
+
+type ArgsFn = Box<dyn for<'a> FnOnce(&'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>>;
+type ReplyFn = Box<dyn for<'a> FnOnce(Result<JsIn<'a>, String>)>;
+
+/// A call of a JS function: its arguments, made when it runs, and what
+/// receives its result.
+#[doc(hidden)]
+pub struct JsCall {
+    callback: Rc<dyn CallbackHandle>,
+    args: Option<ArgsFn>,
+    reply: Option<ReplyFn>,
+    /// The reply waits for a promise the function returns.
+    settles: bool,
+}
+
+impl JsCall {
+    fn new<A: CallbackArgs + 'static>(
+        callback: Rc<dyn CallbackHandle>,
+        args: A,
+        reply: Option<ReplyFn>,
+        settles: bool,
+    ) -> Self {
+        Self {
+            callback,
+            args: Some(Box::new(move |host| args.into_js_args(host))),
+            reply,
+            settles,
+        }
+    }
+
+    /// The function to call.
+    pub fn callback(&self) -> &Rc<dyn CallbackHandle> {
+        &self.callback
+    }
+
+    /// The arguments, as values of `host`.
+    pub fn args<'a>(&mut self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
+        match self.args.take() {
+            Some(args) => args(host),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Whether the result is wanted (`call`, `call_async`).
+    pub fn wants_reply(&self) -> bool {
+        self.reply.is_some()
+    }
+
+    /// Whether the reply waits for a promise the function returns
+    /// (`call_async`).
+    pub fn settles(&self) -> bool {
+        self.settles
+    }
+
+    /// Delivers the result (or the message of what the function threw).
+    pub fn reply(mut self, result: Result<JsIn<'_>, String>) {
+        if let Some(reply) = self.reply.take() {
+            reply(result);
+        }
+    }
+}
+
+impl Drop for JsCall {
+    fn drop(&mut self) {
+        if let Some(reply) = self.reply.take() {
+            reply(Err("the JS function was not called (JS stopped)".to_owned()));
+        }
+    }
+}
+
+impl fmt::Debug for JsCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("JsCall")
+            .field("reply", &self.reply.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A JS function a class's member or a function takes (TS:
+/// `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`):
+/// `A` is its argument (a [`JsValue`] type, an instance, a tuple of them
+/// for several, `()` for none), `R` what it returns. Cheap to clone; the JS
+/// function is released when the last clone goes. Kept in an instance's
+/// field, it is reported to QuickJS's collector, so a cycle through the
+/// instance's JS object is collected; kept elsewhere, it keeps the
+/// function alive until dropped.
+pub struct Callback<A = (), R = ()> {
+    handle: Rc<dyn CallbackHandle>,
+    _types: PhantomData<fn(A) -> R>,
+}
+
+impl<A, R> Clone for Callback<A, R> {
+    fn clone(&self) -> Self {
+        Self {
+            handle: self.handle.clone(),
+            _types: PhantomData,
+        }
+    }
+}
+
+impl<A, R> fmt::Debug for Callback<A, R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Callback")
+    }
+}
+
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
+    fn of(handle: Rc<dyn CallbackHandle>) -> Self {
+        Self {
+            handle,
+            _types: PhantomData,
+        }
+    }
+
+    /// Calls the function now, inside a synchronous call from JS (a
+    /// method, a function, the constructor), as `Array.prototype.sort`
+    /// calls its comparison: its result, or what it threw (its message).
+    /// The instance the call is on stays borrowed meanwhile: the function
+    /// using it again throws.
+    ///
+    /// # Panics
+    ///
+    /// Outside a synchronous call from JS (in a task): use
+    /// [`Callback::post`] or [`Callback::call_async`] there.
+    pub fn call(&self, args: A) -> Result<R, String> {
+        let out: Rc<RefCell<Option<Result<R, String>>>> = Rc::default();
+        let slot = out.clone();
+        let call = JsCall::new(
+            self.handle.clone(),
+            args,
+            Some(Box::new(move |result| {
+                *slot.borrow_mut() = Some(result.and_then(|v| R::from_js(v).map_err(|e| e.0)));
+            })),
+            false,
+        );
+        self.handle.call_now(call);
+        let result = out.borrow_mut().take();
+        result.unwrap_or_else(|| Err("the JS function was not called".to_owned()))
+    }
+
+    /// Calls the function in the next JS turn, in order with the other
+    /// posts, forgetting its result (what it throws is reported as
+    /// uncaught). From anywhere on the engine thread.
+    pub fn post(&self, args: A) {
+        self.handle
+            .post(JsCall::new(self.handle.clone(), args, None, false));
+    }
+
+    /// Calls the function in the next JS turn: its result (a promise it
+    /// returns, settled), or the message of what it threw.
+    pub fn call_async(&self, args: A) -> Answer<Result<R, String>> {
+        let (answer, slot) = Answer::new();
+        self.handle.post(JsCall::new(
+            self.handle.clone(),
+            args,
+            Some(Box::new(move |result| {
+                let value = result.and_then(|v| R::from_js(v).map_err(|e| e.0));
+                slot.borrow_mut().deliver(value);
+            })),
+            true,
+        ));
+        answer
+    }
+}
+
+/// The arguments of a [`Callback`]: one value, `()` for none, or a tuple.
+pub trait CallbackArgs {
+    /// Its TypeScript parameters (`a: string, b: number`).
+    fn ts_params(types: &mut TsTypes) -> String;
+    /// The arguments as JS values.
+    fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>;
+}
+
+impl<T: Ret> CallbackArgs for T {
+    fn ts_params(types: &mut TsTypes) -> String {
+        if T::UNIT {
+            String::new()
+        } else {
+            format!("a: {}", T::ts_type(types))
+        }
+    }
+
+    fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
+        if T::UNIT {
+            Ok(Vec::new())
+        } else {
+            Ok(vec![Ret::into_js(self, host)?])
+        }
+    }
+}
+
+macro_rules! callback_tuple {
+    ($(($($t:ident $v:ident $n:literal),*)),*) => {$(
+        impl<$($t: Ret),*> CallbackArgs for ($($t,)*) {
+            fn ts_params(types: &mut TsTypes) -> String {
+                [$(format!("{}: {}", $n, $t::ts_type(types))),*].join(", ")
+            }
+
+            fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
+                let ($($v,)*) = self;
+                Ok(vec![$(Ret::into_js($v, host)?),*])
+            }
+        }
+    )*};
+}
+
+callback_tuple!(
+    (A a "a", B b "b"),
+    (A a "a", B b "b", C c "c"),
+    (A a "a", B b "b", C c "c", D d "d")
+);
+
+/// What a [`Callback`] returns: a [`JsValue`] type, or `()` (its result
+/// ignored).
+pub trait CallbackRet: Sized {
+    /// Its TypeScript type.
+    fn ts_type(types: &mut TsTypes) -> String;
+    /// The value the function returned.
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError>;
+}
+
+impl<T: JsValue> CallbackRet for T {
+    fn ts_type(types: &mut TsTypes) -> String {
+        T::ts_type(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        T::from_js(value)
+    }
+}
+
+impl CallbackRet for () {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "void".into()
+    }
+
+    fn from_js(_value: JsIn<'_>) -> Result<Self, PropError> {
+        Ok(())
+    }
+}
+
+/// The TypeScript type of a callback: `(a: string) => void`.
+fn callback_ts<A: CallbackArgs, R: CallbackRet>(types: &mut TsTypes) -> String {
+    format!("({}) => {}", A::ts_params(types), R::ts_type(types))
+}
+
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        callback_ts::<A, R>(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .host()
+            .callback(value.raw())
+            .map(Callback::of)
+            .ok_or_else(|| value.expected("a function"))
+    }
+
+    fn from_wire(
+        value: JsonValue,
+        held: Option<u64>,
+        instances: &Instances,
+    ) -> Result<Self, PropError> {
+        held.and_then(|id| instances.take_callback(id))
+            .map(Callback::of)
+            .ok_or_else(|| PropError::expected("a function", &value))
+    }
+}
+
+/// `null` or `undefined` is `None`.
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Option<Callback<A, R>> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("({}) | null", callback_ts::<A, R>(types))
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.is_nullish() {
+            return Ok(None);
+        }
+        Callback::from_js(value).map(Some)
+    }
+
+    fn from_wire(
+        value: JsonValue,
+        held: Option<u64>,
+        instances: &Instances,
+    ) -> Result<Self, PropError> {
+        if held.is_none() && value.is_null() {
+            return Ok(None);
+        }
+        Callback::from_wire(value, held, instances).map(Some)
+    }
+}
+
+// --- Tracing ----------------------------------------------------------------------
+
+/// Where a class reports the callbacks its value keeps, for QuickJS's
+/// collector: a callback whose function reaches the instance's own JS
+/// object would keep both alive forever otherwise.
+pub struct Tracer<'a> {
+    mark: &'a mut dyn FnMut(&dyn CallbackHandle),
+}
+
+impl<'a> Tracer<'a> {
+    /// Reports callbacks to `mark`.
+    #[doc(hidden)]
+    pub fn new(mark: &'a mut dyn FnMut(&dyn CallbackHandle)) -> Self {
+        Self { mark }
+    }
+}
+
+impl fmt::Debug for Tracer<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Tracer")
+    }
+}
+
+/// What reports the callbacks a value keeps, for QuickJS's collector.
+/// `#[class]` on a struct implements it from the fields whose types
+/// implement it (`Callback`, `Instance`, and `Option`, `Box`, `RefCell`,
+/// `Vec`, `VecDeque`, `HashMap` / `BTreeMap` values and pairs of them);
+/// other fields are not reported, which is always safe: what they keep
+/// stays alive while they do.
+///
+/// # Safety
+///
+/// The collector counts each reported function as one reference held by
+/// the instance's JS object. An implementation reports, on each call, a
+/// callback at most once, and only one held through this value alone (no
+/// other value or clone keeps it, as the impls of `Callback` and
+/// `Instance` check with their strong counts): reporting one twice, or one
+/// shared (an `Rc` reached from two instances), lets the collector free a
+/// function still in use.
+pub unsafe trait Trace {
+    /// Reports the callbacks to `tracer`.
+    fn trace(&self, tracer: &mut Tracer<'_>);
+}
+
+/// A callback held only here: shared ones are kept alive by whoever else
+/// holds them (reporting those would let the collector free a function
+/// still in use).
+unsafe impl<A, R> Trace for Callback<A, R> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if Rc::strong_count(&self.handle) == 1 {
+            (tracer.mark)(&*self.handle);
+        }
+    }
+}
+
+/// An instance held only here: the callbacks its value keeps.
+unsafe impl<C: Class> Trace for Instance<C> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if self.only_handle() {
+            self.trace_value(tracer);
+        }
+    }
+}
+
+unsafe impl<T: Trace> Trace for Option<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Some(v) = self {
+            v.trace(tracer);
+        }
+    }
+}
+
+unsafe impl<T: Trace> Trace for Box<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        (**self).trace(tracer);
+    }
+}
+
+unsafe impl<T: Trace> Trace for RefCell<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        if let Ok(v) = self.try_borrow() {
+            v.trace(tracer);
+        }
+    }
+}
+
+unsafe impl<T: Trace> Trace for Vec<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for v in self {
+            v.trace(tracer);
+        }
+    }
+}
+
+unsafe impl<T: Trace> Trace for VecDeque<T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for v in self {
+            v.trace(tracer);
+        }
+    }
+}
+
+unsafe impl<K, T: Trace, S> Trace for HashMap<K, T, S> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for v in self.values() {
+            v.trace(tracer);
+        }
+    }
+}
+
+unsafe impl<K, T: Trace> Trace for BTreeMap<K, T> {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        for v in self.values() {
+            v.trace(tracer);
+        }
+    }
+}
+
+unsafe impl<A: Trace, B: Trace> Trace for (A, B) {
+    fn trace(&self, tracer: &mut Tracer<'_>) {
+        self.0.trace(tracer);
+        self.1.trace(tracer);
+    }
+}

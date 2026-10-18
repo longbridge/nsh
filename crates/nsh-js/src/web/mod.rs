@@ -325,9 +325,21 @@ unsafe extern "C" fn call_closure(
         let Some(c) = p.as_ref() else {
             return qjs::JS_UNDEFINED;
         };
-        match (c.f)(ctx, &c.captures, Args::new(argc, argv)) {
-            Ok(v) => v.take(),
-            Err(Throw) => qjs::JS_EXCEPTION,
+        // Rust code (a callback's reply converts the app's values): a panic
+        // throws instead of unwinding into QuickJS.
+        let args = Args::new(argc, argv);
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (c.f)(ctx, &c.captures, args)
+        })) {
+            Ok(Ok(v)) => v.take(),
+            Ok(Err(Throw)) => qjs::JS_EXCEPTION,
+            Err(_) => {
+                let e = qjs::JS_NewError(ctx);
+                if let Ok(m) = js::string(ctx, "a Rust function panicked") {
+                    qjs::JS_SetPropertyStr(ctx, e, c"message".as_ptr(), m.take());
+                }
+                qjs::JS_Throw(ctx, e)
+            }
         }
     }
 }

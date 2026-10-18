@@ -9,7 +9,7 @@
 
 use std::{fmt, rc::Rc};
 
-use super::{PropError, class::ClassInstance};
+use super::{PropError, callback::CallbackHandle, class::ClassInstance};
 use crate::JsonValue;
 
 /// A JS value as the host holds it, copied in: meaningful to the host
@@ -77,6 +77,8 @@ pub trait JsHost {
     fn node(&self, v: JsRaw) -> Option<crate::NodeId>;
     /// The instance of a class `v` holds (any class's).
     fn instance(&self, v: JsRaw) -> Option<Rc<dyn ClassInstance>>;
+    /// The JS function `v` is, as a callback Rust keeps.
+    fn callback(&self, v: JsRaw) -> Option<Rc<dyn CallbackHandle>>;
 
     /// Frees owned value `v`.
     fn free(&self, v: JsRaw);

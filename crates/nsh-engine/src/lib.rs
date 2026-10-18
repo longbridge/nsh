@@ -946,9 +946,14 @@ impl<M: TextEngine + 'static> Driver<M> {
                 sink.report_error(&format!("font failed: {}: {err}", font.uri));
             }
         }
-        // A task woken on any thread wakes the loop.
+        // A task woken on any thread wakes the loop, and so does a JS call
+        // Rust queues.
         let wake = tx.clone();
         core.set_task_notify(Arc::new(move || {
+            let _ = wake.send(Message::Wake);
+        }));
+        let wake = tx.clone();
+        class_instances.set_notify(Arc::new(move || {
             let _ = wake.send(Message::Wake);
         }));
         let state = State {
@@ -1480,6 +1485,11 @@ impl<M: TextEngine> State<M> {
                 }
             } else {
                 drop(binds);
+            }
+            // The JS calls Rust queued (callbacks' posts), in order, before
+            // the events: a task's posts come before its result.
+            if let Some(script) = script {
+                script.run_posted();
             }
             // The core's events (layouts, ends reached, ...) on a Rust
             // component's nodes are the component's; the rest are JS's.

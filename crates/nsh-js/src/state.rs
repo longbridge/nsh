@@ -116,10 +116,12 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         STATES.with(|m| m.borrow_mut().remove(&(rt as usize)));
         qjs::JS_SetContextOpaque(raw, ptr::null_mut());
         let mut state = Box::from_raw(p);
+        // First: what the frees below finalize finds Rust's callbacks
+        // released and their calls refused.
+        state.classes.free_all();
         state.hot.free_all();
         state.chunks.free_all();
         state.keymap.free_all();
-        state.classes.free_all();
         state.web.free_all();
         state.canvases.free_all(raw);
         state.animations.free_all(raw);

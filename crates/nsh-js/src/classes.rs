@@ -16,9 +16,16 @@
 //! and the instances among its arguments wait in the table the core shares
 //! (`nsh_core::ui::Instances`) under the ids the op carries, and so do the
 //! instances it resolves with.
+//!
+//! A JS function Rust takes is a [`JsCallback`]: a key into the context's
+//! table of functions ([`Functions`], freed with the context), called on
+//! the spot inside a synchronous call, or queued in the shared table and
+//! run by [`run_posted`] in the engine's next turn. An instance whose only
+//! handle is its object reports the callbacks it keeps from the object's
+//! mark hook, so the collector sees through them.
 
 use std::{
-    any::TypeId,
+    any::{Any, TypeId},
     cell::{Cell, RefCell},
     ffi::{CString, c_int, c_void},
     rc::Rc,
@@ -27,8 +34,8 @@ use std::{
 use nsh_core::{
     JsonValue,
     ui::{
-        ClassDef, ClassInstance, Instances, JsHost, JsKind, JsRaw, Member, MemberCall, MemberKind,
-        PropError, Thrown,
+        CallbackHandle, ClassDef, ClassInstance, Instances, JsCall, JsHost, JsIn, JsKind, JsRaw,
+        Member, MemberCall, MemberKind, PropError, Thrown, Tracer,
     },
 };
 use rquickjs::qjs;
@@ -55,6 +62,15 @@ pub(crate) struct Classes {
     /// The specifier of each class's set (its `async` members are called
     /// by it).
     specifiers: RefCell<FxHashMap<TypeId, Option<&'static str>>>,
+    /// The JS functions callbacks hold.
+    functions: Rc<Functions>,
+    /// Synchronous calls from JS running now (a callback is called on the
+    /// spot only inside one).
+    depth: Cell<u32>,
+    /// An uncatchable exception (the CPU budget's interrupt, running out of
+    /// memory) a callback ended with: the synchronous call around it
+    /// rethrows it, whatever Rust returned.
+    uncatchable: RefCell<Option<V>>,
 }
 
 impl Classes {
@@ -65,12 +81,19 @@ impl Classes {
             defs: RefCell::default(),
             instances,
             specifiers: RefCell::default(),
+            functions: Rc::default(),
+            depth: Cell::new(0),
+            uncatchable: RefCell::default(),
         }
     }
 
     /// Frees the values held (the state is unregistered).
     pub(crate) fn free_all(&mut self) {
         self.built.borrow_mut().clear();
+        self.functions.free_all();
+        self.uncatchable.borrow_mut().take();
+        // Queued calls are dropped (their replies say JS stopped).
+        self.instances.close();
     }
 }
 
@@ -97,11 +120,36 @@ impl Drop for ClassObject {
         if let Ok(mut wrappers) = self.wrappers.try_borrow_mut() {
             wrappers.remove(&key(&self.instance));
         }
+        // The last owner: the value drops after this. The functions of the
+        // callbacks it keeps alone may be freed in the same collection, so
+        // they are released first: its drop calling or posting one finds
+        // it gone instead of a freed function.
+        if Rc::strong_count(&self.instance) == 1 {
+            self.instance.trace(&mut Tracer::new(&mut |handle| {
+                if let Some(callback) = (handle as &dyn Any).downcast_ref::<JsCallback>() {
+                    callback.release();
+                }
+            }));
+        }
     }
 }
 
+/// The callbacks the instance keeps, when the object is its only owner
+/// (otherwise a task or another instance keeps them alive, and they are
+/// roots).
 impl Trace for ClassObject {
-    fn trace(&self, _mark: &mut dyn FnMut(Raw)) {}
+    fn trace(&self, mark: &mut dyn FnMut(Raw)) {
+        if Rc::strong_count(&self.instance) != 1 {
+            return;
+        }
+        self.instance.trace(&mut Tracer::new(&mut |handle| {
+            if let Some(callback) = (handle as &dyn Any).downcast_ref::<JsCallback>()
+                && let Some(v) = callback.peek()
+            {
+                mark(v);
+            }
+        }));
+    }
 }
 
 impl Object for ClassObject {}
@@ -349,11 +397,16 @@ fn member_name(ctx: Ctx, def: &'static ClassDef, member: &Member) -> String {
     }
 }
 
-/// An argument of an op as JSON: an instance is held in the table (its id
-/// the second value, the JSON `null`), a node is `{ $node: id }`.
-fn wire_arg(ctx: Ctx, v: Raw, instances: &Instances) -> R<(JsonValue, Option<u64>)> {
+/// An argument of an op as JSON: an instance or a function is held in the
+/// table (its id the second value, the JSON `null`), a node is
+/// `{ $node: id }`.
+pub(crate) fn wire_arg(ctx: Ctx, v: Raw, instances: &Instances) -> R<(JsonValue, Option<u64>)> {
     if let Some(instance) = instance_of(ctx, v) {
         return Ok((JsonValue::Null, Some(instances.hold_instance(instance))));
+    }
+    if js::is_function(ctx, v) {
+        let id = instances.hold_callback(new_callback(ctx, v));
+        return Ok((JsonValue::Null, Some(id)));
     }
     if let Some(id) = crate::dom::node_id(ctx, v) {
         return Ok((serde_json::json!({ "$node": id }), None));
@@ -538,8 +591,12 @@ impl<'a> CallHost<'a> {
             MemberCall::Sync(f) => f,
             MemberCall::Async(_) => return self.send(def, member),
         };
+        let depth = &classes(self.ctx).depth;
+        depth.set(depth.get() + 1);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)))
             .unwrap_or_else(|payload| Err(Thrown::Error(panic_message(payload))));
+        let depth = &classes(self.ctx).depth;
+        depth.set(depth.get() - 1);
         self.finish(result)
     }
 
@@ -607,6 +664,19 @@ impl<'a> CallHost<'a> {
     /// The JS result of a call: its value or what it throws.
     pub(crate) fn finish(&self, result: Result<JsRaw, Thrown>) -> Raw {
         let ctx = self.ctx;
+        // A callback was interrupted: JS must not go on, whatever Rust
+        // made of its `Err`.
+        let interrupted = classes(ctx).uncatchable.borrow_mut().take();
+        if let Some(e) = interrupted {
+            if let Ok(v) = result {
+                self.free(v);
+            }
+            if self.pending.get() {
+                let _ = js::take_exception(ctx);
+            }
+            let _ = js::throw(ctx, e);
+            return qjs::JS_EXCEPTION;
+        }
         match result {
             Ok(v) => {
                 if self.pending.get() {
@@ -773,6 +843,11 @@ impl JsHost for CallHost<'_> {
         instance_of(self.ctx, from_raw(v))
     }
 
+    fn callback(&self, v: JsRaw) -> Option<Rc<dyn CallbackHandle>> {
+        let v = from_raw(v);
+        js::is_function(self.ctx, v).then(|| new_callback(self.ctx, v))
+    }
+
     fn free(&self, v: JsRaw) {
         // SAFETY: an owned value.
         unsafe { qjs::JS_FreeValue(self.ctx, from_raw(v)) };
@@ -858,11 +933,265 @@ impl JsHost for CallHost<'_> {
     }
 }
 
+// --- Callbacks ----------------------------------------------------------------------
+
+/// The JS functions Rust's callbacks hold, by key: one reference each,
+/// freed when the callback goes or, with whatever Rust still holds, with
+/// the context.
+#[derive(Default)]
+pub(crate) struct Functions {
+    /// Null once the context is gone.
+    ctx: Cell<Ctx>,
+    values: RefCell<FxHashMap<u64, Raw>>,
+    next: Cell<u64>,
+}
+
+impl Functions {
+    /// Frees the functions (the context goes): callbacks Rust still holds
+    /// do nothing after.
+    fn free_all(&self) {
+        let ctx = self.ctx.replace(std::ptr::null_mut());
+        let values: Vec<Raw> = self.values.borrow_mut().drain().map(|(_, v)| v).collect();
+        if !ctx.is_null() {
+            for v in values {
+                // SAFETY: references the table owned.
+                unsafe { qjs::JS_FreeValue(ctx, v) };
+            }
+        }
+    }
+}
+
+/// A JS function as Rust keeps it.
+pub(crate) struct JsCallback {
+    functions: Rc<Functions>,
+    key: u64,
+    instances: Instances,
+}
+
+impl JsCallback {
+    /// The function and its context, while the context lives.
+    fn value(&self) -> Option<(Ctx, Raw)> {
+        let ctx = self.functions.ctx.get();
+        if ctx.is_null() {
+            return None;
+        }
+        let v = *self.functions.values.borrow().get(&self.key)?;
+        Some((ctx, v))
+    }
+
+    /// The function, for the collector (nothing while the table is busy).
+    fn peek(&self) -> Option<Raw> {
+        self.functions
+            .values
+            .try_borrow()
+            .ok()?
+            .get(&self.key)
+            .copied()
+    }
+}
+
+impl Drop for JsCallback {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+impl JsCallback {
+    /// Lets go of the function (calls after find it gone).
+    fn release(&self) {
+        let ctx = self.functions.ctx.get();
+        // Taken out first: freeing it may finalize objects whose callbacks
+        // leave the table too.
+        let v = self
+            .functions
+            .values
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut values| values.remove(&self.key));
+        if let Some(v) = v
+            && !ctx.is_null()
+        {
+            // SAFETY: the reference the table owned.
+            unsafe { qjs::JS_FreeValue(ctx, v) };
+        }
+    }
+}
+
+impl CallbackHandle for JsCallback {
+    fn call_now(&self, call: JsCall) {
+        let Some((ctx, _)) = self.value() else {
+            // The function or the VM is gone: the call is dropped (its
+            // reply says so).
+            return;
+        };
+        // SAFETY: reading the context's opaque pointer.
+        if crate::state::state(ctx).is_null() {
+            // The VM is being torn down.
+            return;
+        }
+        assert!(
+            classes(ctx).depth.get() > 0,
+            "`Callback::call` runs the function inside a synchronous call from JS; \
+             elsewhere (in a task) use `post` or `call_async`"
+        );
+        run_call(ctx, call);
+    }
+
+    fn post(&self, call: JsCall) {
+        self.instances.post(call);
+    }
+}
+
+/// A callback holding JS function `v`.
+fn new_callback(ctx: Ctx, v: Raw) -> Rc<dyn CallbackHandle> {
+    let c = classes(ctx);
+    let functions = c.functions.clone();
+    functions.ctx.set(ctx);
+    let key = functions.next.get() + 1;
+    functions.next.set(key);
+    // SAFETY: the table owns the new reference.
+    let v = unsafe { qjs::JS_DupValue(ctx, v) };
+    functions.values.borrow_mut().insert(key, v);
+    Rc::new(JsCallback {
+        functions,
+        key,
+        instances: c.instances.clone(),
+    })
+}
+
+/// The message of what JS threw.
+fn message_of(ctx: Ctx, e: Raw) -> String {
+    if js::is_object(e)
+        && let Ok(m) = js::get(ctx, e, "message")
+        && let Ok(Some(m)) = js::opt_string(ctx, m.raw())
+    {
+        return m;
+    }
+    let message = js::to_string(ctx, e).unwrap_or_else(|_| "an exception".to_owned());
+    let _ = js::take_exception(ctx);
+    message
+}
+
+/// A host for conversions outside a call.
+fn host_outside_calls<'a>(ctx: Ctx) -> CallHost<'a> {
+    CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()))
+}
+
+/// Runs `call` of a callback of this context: its reply gets the result
+/// (a promise's, when it settles) or the message of what it threw; without
+/// a reply, what it throws is reported as uncaught.
+pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
+    let callback = call.callback().clone();
+    let function = (callback.as_ref() as &dyn Any)
+        .downcast_ref::<JsCallback>()
+        .and_then(JsCallback::value)
+        .filter(|(c, _)| *c == ctx);
+    let Some((_, function)) = function else {
+        call.reply(Err("the function belongs to another VM".to_owned()));
+        return;
+    };
+    let function = V::dup(ctx, function);
+    let host = host_outside_calls(ctx);
+    let args = match call.args(&host) {
+        Ok(args) => args
+            .into_iter()
+            .map(|a| V::own(ctx, from_raw(a.into_raw())))
+            .collect::<Vec<V>>(),
+        Err(e) => {
+            if host.pending.get() {
+                let _ = js::take_exception(ctx);
+            }
+            call.reply(Err(e.0));
+            return;
+        }
+    };
+    let raws: Vec<Raw> = args.iter().map(V::raw).collect();
+    match js::call(ctx, function.raw(), UNDEFINED, &raws) {
+        Ok(result) => {
+            if !call.wants_reply() {
+                return;
+            }
+            // SAFETY: a tag check of a live value.
+            if call.settles() && unsafe { qjs::JS_IsPromise(result.raw()) } {
+                let waiting = Rc::new(RefCell::new(Some(call)));
+                let rejected = waiting.clone();
+                let reacted = js::upon(
+                    ctx,
+                    result.raw(),
+                    Vec::new(),
+                    move |ctx, _, value| {
+                        if let Some(call) = waiting.borrow_mut().take() {
+                            let host = host_outside_calls(ctx);
+                            call.reply(Ok(JsIn::new(&host, to_raw(value))));
+                            // What converting the value threw (the reply has
+                            // the error).
+                            if host.pending.get() {
+                                let _ = js::take_exception(ctx);
+                            }
+                        }
+                        Ok(())
+                    },
+                    move |ctx, _, reason| {
+                        if let Some(call) = rejected.borrow_mut().take() {
+                            call.reply(Err(message_of(ctx, reason)));
+                        }
+                        Ok(())
+                    },
+                );
+                if reacted.is_err() {
+                    js::report_exception(ctx);
+                }
+                return;
+            }
+            call.reply(Ok(JsIn::new(&host, to_raw(result.raw()))));
+            if host.pending.get() {
+                let _ = js::take_exception(ctx);
+            }
+        }
+        Err(Throw) => {
+            let e = js::take_exception(ctx);
+            // SAFETY: a check of a live value.
+            if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
+                // Kept for the call around it to rethrow.
+                let message = message_of(ctx, e.raw());
+                classes(ctx).uncatchable.borrow_mut().get_or_insert(e);
+                call.reply(Err(message));
+            } else if call.wants_reply() {
+                call.reply(Err(message_of(ctx, e.raw())));
+            } else {
+                js::report(ctx, e);
+            }
+        }
+    }
+}
+
+/// Runs the JS calls Rust queued ([`nsh_core::ui::Callback::post`],
+/// `call_async`), in order. Those queued meanwhile wait for the next turn.
+/// An uncatchable exception (an interrupt) stops them: it is pending when
+/// this fails, and the calls left are dropped.
+pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
+    let calls = classes(ctx).instances.take_calls();
+    for call in calls {
+        run_call(ctx, call);
+        let interrupted = classes(ctx).uncatchable.borrow_mut().take();
+        if let Some(e) = interrupted {
+            return Err(js::throw(ctx, e));
+        }
+    }
+    Ok(())
+}
+
+/// No JS runs any more: the queued calls are dropped, and so are those
+/// posted later (their replies say JS stopped).
+pub(crate) fn close(ctx: Ctx) {
+    classes(ctx).instances.close();
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::cell::Cell;
+    use std::{cell::Cell, rc::Rc};
 
-    use nsh_core::ui::{PropError, Registry, prelude::*};
+    use nsh_core::ui::{Answer, PropError, Registry, prelude::*};
 
     use crate::{Host, HostOptions};
 
@@ -870,6 +1199,11 @@ pub(crate) mod tests {
         /// The `Tally`s dropped so far on this thread (each test runs on
         /// one, with its own host).
         pub(crate) static DROPPED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    thread_local! {
+        /// The callbacks `Tally.keep` keeps.
+        static KEPT: std::cell::RefCell<Vec<Callback>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
     pub(crate) fn dropped() -> usize {
@@ -882,6 +1216,7 @@ pub(crate) mod tests {
         count: i64,
         log: Vec<String>,
         badge: Option<Instance<Token>>,
+        on_change: Option<Callback<i64>>,
     }
 
     impl Drop for Tally {
@@ -912,6 +1247,7 @@ pub(crate) mod tests {
                 count: start.unwrap_or(0),
                 log: Vec::new(),
                 badge: None,
+                on_change: None,
             }
         }
 
@@ -919,6 +1255,9 @@ pub(crate) mod tests {
         pub(crate) fn add(&mut self, by: i64) -> i64 {
             self.count += by;
             self.log.push(format!("+{by}"));
+            if let Some(listener) = &self.on_change {
+                let _ = listener.call(self.count);
+            }
             self.count
         }
 
@@ -982,6 +1321,47 @@ pub(crate) mod tests {
         #[getter]
         pub(crate) fn badge(&self) -> Option<Instance<Token>> {
             self.badge.clone()
+        }
+
+        /// Calls `listener` with each new count.
+        pub(crate) fn watch(&mut self, listener: Option<Callback<i64>>) {
+            self.on_change = listener;
+        }
+
+        /// Tells the listener the count in the next turn.
+        pub(crate) fn announce(&self) {
+            if let Some(listener) = &self.on_change {
+                listener.post(self.count);
+            }
+        }
+
+        /// `items` sorted by `compare`.
+        pub(crate) fn sort(
+            mut items: Vec<String>,
+            compare: Callback<(String, String), f64>,
+        ) -> Result<Vec<String>, String> {
+            let mut failed = None;
+            items.sort_by(|a, b| match compare.call((a.clone(), b.clone())) {
+                Ok(order) => order.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal),
+                Err(e) => {
+                    failed.get_or_insert(e);
+                    std::cmp::Ordering::Equal
+                }
+            });
+            match failed {
+                Some(e) => Err(e),
+                None => Ok(items),
+            }
+        }
+
+        /// Keeps `callback` until [`Tally::forget`] (a root).
+        pub(crate) fn keep(callback: Callback) {
+            KEPT.with(|k| k.borrow_mut().push(callback));
+        }
+
+        /// Drops the kept callbacks.
+        pub(crate) fn forget() {
+            KEPT.with(|k| k.borrow_mut().clear());
         }
 
         /// Raises `token`'s id.
@@ -1059,10 +1439,138 @@ pub(crate) mod tests {
         }
     }
 
+    thread_local! {
+        /// What `Asker.ask` awaits; what `Noisy`'s drops saw.
+        static ANSWERS: std::cell::RefCell<Vec<Answer<Result<i64, String>>>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+        static NOISE: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+        static WATCHERS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A value whose reading panics.
+    pub(crate) struct Panicky;
+
+    impl JsValue for Panicky {
+        fn ts_type(_types: &mut nsh_core::ui::TsTypes) -> String {
+            "unknown".into()
+        }
+
+        fn from_json(_value: nsh_core::JsonValue) -> Result<Self, PropError> {
+            Ok(Panicky)
+        }
+
+        fn to_json(&self) -> nsh_core::JsonValue {
+            nsh_core::JsonValue::Null
+        }
+
+        fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, PropError> {
+            panic!("panicky");
+        }
+    }
+
+    /// Calls JS functions later.
+    #[class]
+    pub(crate) struct Asker;
+
+    #[class]
+    impl Asker {
+        /// Asks `question` in the next turn; the answer kept for the test.
+        pub(crate) fn ask(question: Callback<(), i64>) {
+            let answer = question.call_async(());
+            ANSWERS.with(|a| a.borrow_mut().push(answer));
+        }
+
+        /// Asks for a change in the next turn.
+        pub(crate) fn ask_change(question: Callback<(), Change>) {
+            drop(question.call_async(()));
+        }
+
+        /// Asks for a value whose reading panics.
+        pub(crate) fn ask_panicky(question: Callback<(), Panicky>) {
+            drop(question.call_async(()));
+        }
+
+        /// Calls `f` at once, and goes on whatever it did.
+        pub(crate) fn call_through(f: Callback<(), i64>) -> i64 {
+            f.call(()).unwrap_or(-1)
+        }
+    }
+
+    /// Calls and posts its callback as it drops.
+    #[class]
+    pub(crate) struct Noisy {
+        on_drop: Callback<String>,
+    }
+
+    impl Drop for Noisy {
+        fn drop(&mut self) {
+            let called = self.on_drop.call("drop".to_owned());
+            NOISE.with(|n| n.borrow_mut().push(format!("{called:?}")));
+            self.on_drop.post("posted".to_owned());
+        }
+    }
+
+    #[class]
+    impl Noisy {
+        pub(crate) fn new(on_drop: Callback<String>) -> Self {
+            Noisy { on_drop }
+        }
+    }
+
+    /// A type named `Instance` that is not a class's.
+    mod gpu {
+        pub(crate) struct Instance;
+    }
+
+    /// An alias of a callback type.
+    type Listener = Option<Callback<i64>>;
+
+    /// Keeps callbacks in fields of several types.
+    #[class]
+    pub(crate) struct Watcher {
+        on: Listener,
+        _gpu: gpu::Instance,
+        shared: Rc<std::cell::RefCell<Vec<Callback>>>,
+    }
+
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            WATCHERS.with(|w| w.set(w.get() + 1));
+        }
+    }
+
+    #[class]
+    impl Watcher {
+        pub(crate) fn new(on: Callback<i64>) -> Self {
+            Watcher {
+                on: Some(on),
+                _gpu: gpu::Instance,
+                shared: Rc::default(),
+            }
+        }
+
+        /// Keeps `f` in the shared list (a root: what it reaches stays).
+        pub(crate) fn share(&mut self, f: Callback) {
+            self.shared.borrow_mut().push(f);
+        }
+
+        /// Calls the listener.
+        pub(crate) fn fire(&self, n: i64) {
+            if let Some(on) = &self.on {
+                let _ = on.call(n);
+            }
+        }
+    }
+
     /// The set the tests import as `test/classes`.
     pub(crate) fn registry() -> Registry {
         let mut r = Registry::ui_set("test/classes");
-        r.class::<Tally>().class::<Token>().class::<Bomb>();
+        r.class::<Tally>()
+            .class::<Token>()
+            .class::<Bomb>()
+            .class::<Asker>()
+            .class::<Noisy>()
+            .class::<Watcher>();
         r
     }
 
@@ -1078,7 +1586,7 @@ pub(crate) mod tests {
     /// with `show(...)`.
     pub(crate) fn run(host: &Host, code: &str) -> Result<Vec<String>, String> {
         host.eval_source(&format!(
-            "import {{ text as show }} from \"nsh:rt\";\nimport {{ Tally, Token, Bomb }} from \"test/classes\";\n{code}"
+            "import {{ text as show }} from \"nsh:rt\";\nimport {{ Tally, Token, Bomb, Asker, Noisy, Watcher }} from \"test/classes\";\n{code}"
         ))
         .map_err(|e| e.message)?;
         let mut ops = Vec::new();
@@ -1235,6 +1743,236 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(shown, ["9 undefined true"]);
+    }
+
+    #[test]
+    fn callbacks_are_called_on_the_spot_and_later() {
+        let host = host();
+        let shown = run(
+            &host,
+            r#"
+            const msg = (f) => { try { f(); return "no throw"; } catch (e) { return `${e.name}: ${e.message}`; } };
+            show(Tally.sort(["b", "c", "a"], (x, y) => x < y ? -1 : x > y ? 1 : 0).join(""));
+            show(msg(() => Tally.sort(["b", "a"], () => { throw new Error("no order"); })));
+            show(msg(() => Tally.sort(["b", "a"], 3)));
+            const t = new Tally(1);
+            const seen = [];
+            t.watch((n) => {
+                seen.push(n);
+                try { t.count; } catch (e) { seen.push(e.message); }
+            });
+            t.add(2);
+            show(seen.join(","));
+            t.announce();
+            show(String(seen.length));
+            globalThis.seen = seen;
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            shown,
+            [
+                "abc",
+                "Error: no order",
+                "TypeError: Tally.sort: `compare`: expected a function, got 3",
+                "3,Tally used re-entrantly",
+                "2",
+            ]
+        );
+        // The post runs in the next turn.
+        host.run_posted();
+        assert_eq!(
+            run(&host, "show(seen.join(','));").unwrap(),
+            ["3,Tally used re-entrantly,3"]
+        );
+    }
+
+    #[test]
+    fn a_cycle_through_a_kept_callback_is_collected() {
+        let host = host();
+        let before = dropped();
+        run(
+            &host,
+            r#"
+            (() => {
+                const t = new Tally(1);
+                t.watch(() => t.count);
+            })();
+            "#,
+        )
+        .unwrap();
+        assert_eq!(dropped(), before, "the cycle waits for the collector");
+        host.collect_garbage();
+        assert_eq!(
+            dropped(),
+            before + 1,
+            "the instance's callback was reported"
+        );
+        // Kept elsewhere, a callback is a root.
+        run(
+            &host,
+            r#"
+            (() => {
+                const t = new Tally(1);
+                Tally.keep(() => t.count);
+            })();
+            "#,
+        )
+        .unwrap();
+        host.collect_garbage();
+        assert_eq!(
+            dropped(),
+            before + 1,
+            "a kept callback keeps what it reaches"
+        );
+        run(&host, "Tally.forget();").unwrap();
+        host.collect_garbage();
+        assert_eq!(dropped(), before + 2);
+    }
+
+    /// `answer`, now.
+    fn poll(answer: &mut Answer<Result<i64, String>>) -> Option<Result<i64, String>> {
+        use std::future::Future;
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        match std::pin::Pin::new(answer).poll(&mut cx) {
+            std::task::Poll::Ready(v) => Some(v),
+            std::task::Poll::Pending => None,
+        }
+    }
+
+    #[test]
+    fn calls_queued_for_a_stopped_vm_are_dropped_and_say_so() {
+        let host = host();
+        run(&host, "Asker.ask(() => 1); Tally.keep(() => {});").unwrap();
+        host.stop("over a quota".to_owned());
+        host.run_posted();
+        let stopped = Some(Err("the JS function was not called (JS stopped)".to_owned()));
+        let mut answers = ANSWERS.with(|a| std::mem::take(&mut *a.borrow_mut()));
+        assert_eq!(poll(&mut answers[0]), stopped);
+        // Posted after it stopped: dropped at once.
+        let mut late = KEPT.with(|k| k.borrow()[0].call_async(()));
+        use std::future::Future;
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert_eq!(
+            std::pin::Pin::new(&mut late).poll(&mut cx),
+            std::task::Poll::Ready(Err("the JS function was not called (JS stopped)".to_owned()))
+        );
+        Tally::forget();
+    }
+
+    #[test]
+    fn a_reply_that_throws_or_panics_leaves_no_exception_behind() {
+        let host = host();
+        run(
+            &host,
+            r#"
+            Asker.askChange(async () => ({ get by() { throw new Error("no"); } }));
+            Asker.askPanicky(async () => 1);
+            "#,
+        )
+        .unwrap();
+        host.run_posted();
+        host.run_jobs();
+        assert!(!host.has_exception());
+        assert_eq!(run(&host, "show('alive');").unwrap(), ["alive"]);
+    }
+
+    #[test]
+    fn an_interrupted_callback_stops_the_call_around_it() {
+        let host = Host::with_options(HostOptions {
+            ui_sets: vec![registry()],
+            limits: nsh_core::js::Limits {
+                load_budget: std::time::Duration::from_millis(100),
+                ..Default::default()
+            },
+            ..HostOptions::default()
+        })
+        .unwrap();
+        let interrupted = run(
+            &host,
+            "globalThis.after = Asker.callThrough(() => { for (;;) {} });",
+        );
+        assert!(interrupted.is_err(), "the script was stopped");
+        assert_eq!(
+            run(&host, "show(String(globalThis.after));").unwrap(),
+            ["undefined"]
+        );
+    }
+
+    #[test]
+    fn a_drop_reaching_its_callbacks_finds_them_gone_when_collected() {
+        let host = host();
+        run(
+            &host,
+            r#"
+            globalThis.heard = [];
+            (() => {
+                const n = new Noisy((what) => { heard.push(what); return n; });
+            })();
+            "#,
+        )
+        .unwrap();
+        host.collect_garbage();
+        host.run_posted();
+        assert_eq!(run(&host, "show(heard.join(','));").unwrap(), [""]);
+        assert_eq!(
+            NOISE.with(|n| std::mem::take(&mut *n.borrow_mut())),
+            ["Err(\"the JS function was not called (JS stopped)\")"]
+        );
+        // Dropped with the VM: the same.
+        run(&host, "globalThis.kept = new Noisy(() => {});").unwrap();
+        drop(host);
+        assert_eq!(
+            NOISE.with(|n| std::mem::take(&mut *n.borrow_mut())),
+            ["Err(\"the JS function was not called (JS stopped)\")"]
+        );
+    }
+
+    #[test]
+    fn fields_are_traced_by_their_types() {
+        let host = host();
+        let before = WATCHERS.with(Cell::get);
+        run(
+            &host,
+            r#"
+            (() => {
+                const w = new Watcher(() => w);
+                w.fire(1);
+            })();
+            "#,
+        )
+        .unwrap();
+        host.collect_garbage();
+        assert_eq!(
+            WATCHERS.with(Cell::get),
+            before + 1,
+            "the alias's callback was traced"
+        );
+        // A shared list is not traced: a root, kept with what it reaches.
+        run(
+            &host,
+            r#"
+            (() => {
+                const w = new Watcher(() => 0);
+                w.share(() => w);
+            })();
+            "#,
+        )
+        .unwrap();
+        host.collect_garbage();
+        assert_eq!(
+            WATCHERS.with(Cell::get),
+            before + 1,
+            "the shared callback is a root"
+        );
+    }
+
+    #[test]
+    fn callbacks_rust_keeps_outlive_their_vm_harmlessly() {
+        let host = host();
+        run(&host, "Tally.keep(() => 1);").unwrap();
+        drop(host);
+        Tally::forget();
     }
 
     #[test]
