@@ -1,16 +1,20 @@
 ---
-title: Web (WebAssembly)
-description: Run NSH apps in a browser with the WebAssembly build of the runtime, which renders to the DOM; publish them as static sites with NSH package --target web, develop them with NSH run --target web.
+title: Web
+description: Build web apps with Native Shell components rendered as HTML and CSS, develop in the browser, and publish to any static host or CDN.
 order: 16
 group: platforms
 demo: counter
 ---
 
-# Web (WebAssembly)
+# Web
 
-The NSH runtime also compiles to WebAssembly. The same engine runs in a browser page and renders to the DOM instead of UIKit or Android views: the core, the reactive graph, the renderer, Taffy layout, the `nsh/ui/mobile` components and QuickJS itself. `nsh package --target web` publishes an app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)), and every live demo on this site is an app bundle from `nsh build` running on this runtime.
+Build web apps with Native Shell using the same components, styles and application logic as on native platforms. NSH renders the interface as HTML elements and CSS: text, images, inputs, scrolling, visual styles and interactions use the browser's DOM and web APIs.
+
+`nsh package --target web` publishes the app as a static site for any web server or CDN ([Publish an app](#publish-an-app)), and `nsh run --target web` runs it in the browser while you edit it ([Develop in the browser](#develop-in-the-browser)). Every live demo on this site uses this web backend.
 
 ## What runs where
+
+The page is built from HTML elements styled with CSS. NSH turns component updates into batches of DOM changes, while the browser displays the interface and handles scrolling, text selection and input. WebAssembly hosts the shared Rust engine for component state, layout and updates.
 
 On every native platform the engine has its own thread and hands one `MountBatch` per commit to the main thread. A browser page has one thread, so the web build drives the same engine step by step from the page's event loop (`nsh_engine::LocalEngine`):
 

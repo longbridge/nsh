@@ -1,16 +1,20 @@
 ---
-title: Web（WebAssembly）
-description: 用 WebAssembly 版运行时在浏览器里运行 NSH 应用，渲染到 DOM；用 NSH package --target web 发布为静态站点，用 NSH run --target web 开发。
+title: Web
+description: 用 Native Shell 组件构建 HTML 和 CSS 界面，在浏览器里开发 Web 应用，并发布到任意静态托管服务或 CDN。
 order: 16
 group: platforms
 demo: counter
 ---
 
-# Web（WebAssembly）
+# Web
 
-NSH 运行时也能编译成 WebAssembly。同一个引擎跑在浏览器页面里，只是渲染目标从 UIKit 或 Android 视图换成了 DOM：核心、响应式图、渲染器、Taffy 布局、`nsh/ui/mobile` 组件，以及 QuickJS 本身，全都一样。`nsh package --target web` 把应用发布成可放在任何 Web 服务器或 CDN 上的静态站点（[发布应用](#发布应用)），`nsh run --target web` 在你编辑时把它运行在浏览器里（[在浏览器里开发](#在浏览器里开发)），本站每一个实时演示，都是 `nsh build` 打出的应用包运行在这个运行时上。
+用 Native Shell 构建 Web 应用，沿用原生平台上的组件、样式和业务逻辑。NSH 将界面渲染为 HTML 元素和 CSS：文字、图片、输入框、滚动、视觉样式和交互都使用浏览器的 DOM 和 Web API。
+
+`nsh package --target web` 把应用发布成可放在任何 Web 服务器或 CDN 上的静态站点（[发布应用](#发布应用)），`nsh run --target web` 在你编辑时把它运行在浏览器里（[在浏览器里开发](#在浏览器里开发)）。本站每一个实时演示都使用这个 Web 后端。
 
 ## 各部分在哪里运行
+
+页面由 HTML 元素和 CSS 样式构成。NSH 将组件更新转换为批量 DOM 操作，浏览器负责界面显示、滚动、文字选择和输入。WebAssembly 承载共享的 Rust 引擎，负责组件状态、布局计算和更新。
 
 在每个原生平台上，引擎都有自己的线程，每次提交把一个 `MountBatch` 交给主线程。浏览器页面只有一个线程，所以 Web 版由页面的事件循环一步步驱动同一个引擎（`nsh_engine::LocalEngine`）：
 
