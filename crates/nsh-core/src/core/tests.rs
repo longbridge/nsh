@@ -6151,6 +6151,75 @@ mod views {
         );
     }
 
+    thread_local! {
+        static INTROS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct IntroProps {
+        label: SharedString,
+    }
+
+    /// Counts its views: what a component does as it is made (an entrance)
+    /// happens each time.
+    #[component]
+    fn Intro(props: IntroProps) -> impl IntoElement {
+        INTROS.with(|n| n.set(n.get() + 1));
+        text(props.label)
+    }
+
+    /// Shows an `Intro` for the tab chosen; a press switches tabs.
+    #[component]
+    fn Tabs() -> impl IntoElement {
+        let first = signal(true);
+        view()
+            .on_press(move |_: &()| first.update(|f| *f = !*f))
+            .child(dynamic(move || {
+                Intro::element(IntroProps {
+                    label: if first.get() { "one" } else { "two" }.into(),
+                })
+            }))
+    }
+
+    #[test]
+    fn a_component_a_region_makes_again_runs_again() {
+        INTROS.with(|n| n.set(0));
+        let mut c = core();
+        c.mount_root(&Root::new::<Tabs>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["one"]);
+        let host = root_host(&batch);
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["two"]);
+        assert_eq!(INTROS.with(Cell::get), 2);
+    }
+
+    /// A box bordered while a signal holds.
+    #[component]
+    fn Framed() -> impl IntoElement {
+        let on = signal(false);
+        view()
+            .size_10()
+            .on_press(move |_: &()| on.set(true))
+            .style_when(on, |s| s.border_1().border_color(rgb(0xff0000)))
+    }
+
+    #[test]
+    fn a_bound_style_layer_draws_its_border() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Framed>(|| ()));
+        let host = root_host(&c.commit().unwrap());
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let style = batch.items.iter().find_map(|i| match i {
+            MountItem::ViewStyle { style, .. } if style.borders.widths[0] > 0.0 => {
+                Some(style.clone())
+            }
+            _ => None,
+        });
+        assert!(style.is_some(), "{:#?}", batch.items);
+    }
+
     /// A track whose color moves between two theme colors natively.
     #[component]
     fn Track() -> impl IntoElement {
@@ -6863,7 +6932,7 @@ mod views {
     }
 
     /// Passes `Shown` a binding, then, from the second press, a value: its
-    /// region makes the element again and the instance stays.
+    /// region makes the element again, a new `Shown`.
     #[component]
     fn Passer() -> impl IntoElement {
         let n = signal(0);
@@ -6886,7 +6955,7 @@ mod views {
     }
 
     #[test]
-    fn a_prop_follows_a_binding_until_it_is_given_a_value() {
+    fn a_prop_follows_a_binding_and_a_region_made_again_makes_a_new_component() {
         let mut c = core();
         c.mount_root(&Root::new::<Passer>(|| ()));
         let batch = c.commit().unwrap();
@@ -6898,7 +6967,7 @@ mod views {
         };
         assert_eq!(press(&mut c), ["n 1"]);
         assert_eq!(press(&mut c), ["fixed"]);
-        // The binding is no longer followed.
+        // The old `Shown` went with its binding.
         assert!(press(&mut c).is_empty());
     }
 

@@ -115,8 +115,9 @@ child components go with it. The design and its reasons: `reactive-components.md
   applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured.
 - **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
   the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option` or a `Vec`) is made
-  again whenever what it read changes; `Each::new(items, |item| key, |item, index| row)` makes a row when its key
-  comes and keeps it, its `item` and `index` signals updated, while the key stays; `catch_error(|| view, |error,
+  again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
+  `Each::new(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
+  `index` signals updated, while the key stays; `catch_error(|| view, |error,
   reset| fallback)` shows the fallback once something under it panicked (a binding, a listener, an effect, a
   component's view: the failed part is disposed; `reset.reset()` makes the view again; unhandled errors are logged,
   `js` target). A modal is presented while it is in the view (an `If` of it), a screen pushed while it is in its

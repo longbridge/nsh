@@ -2139,7 +2139,11 @@ impl<M: TextEngine> Core<M> {
                     ElKind::Raw => Part::Raw,
                     _ => Part::Node,
                 };
-                let matches = |o: &Expanded| o.tag == el.tag && o.part == part;
+                // A component made again is a new one, as in TSX: it runs
+                // once, so an old instance cannot take a new element (its
+                // view would keep what it made from the old props).
+                let component = matches!(part, Part::Component(_));
+                let matches = |o: &Expanded| !component && o.tag == el.tag && o.part == part;
                 let at = match &el.key {
                     Some(k) => old.iter().position(|o| {
                         o.as_ref()

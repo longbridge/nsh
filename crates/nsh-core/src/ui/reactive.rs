@@ -44,8 +44,6 @@ pub(crate) struct RustData {
     emits: Vec<super::once::Emitted>,
     /// What components read of the core ([`super::ambient`]).
     pub(crate) ambient: super::ambient::Ambient,
-    /// The props instances hold, by their memo ([`super::Prop`]).
-    pub(crate) held: rustc_hash::FxHashMap<Node, Box<dyn Any>>,
     /// The APIs views registered, by host ([`super::Scope::methods`]).
     apis: rustc_hash::FxHashMap<crate::NodeId, ApiEntry>,
     /// The error boundaries ([`super::catch_error`]): what fails under the

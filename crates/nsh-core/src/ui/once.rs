@@ -2,8 +2,9 @@
 //! and their [`Scope`].
 //!
 //! The instance makes the component's view once, under an owner of its
-//! own, with its props held in signals: a prop from JS, or from a parent's
-//! region making the element again, updates what read it. The core mounts
+//! own, with its props held in signals: a prop from JS (or a parent's
+//! binding) updates what read it. A region that makes the element again
+//! makes a new instance, as TSX does. The core mounts
 //! the view with its bindings and never asks for it again; releasing the
 //! host disposes the owner, and with it everything the component made.
 
@@ -106,19 +107,13 @@ impl<C: Component> super::component::AnyInstance for OnceInstance<C> {
                     None => props.update_from(p),
                 };
             }
-            // After: held props update their readers; a binding is followed
-            // under the component's owner.
-            Some(p) => {
-                let owner = self.owner.expect("the view is made");
-                let props = &mut self.props;
-                if owner.run(|| props.update_from(p)) {
-                    log::warn!(
-                        target: "js",
-                        "{}: a prop that is not a `Prop` changed; it runs once and keeps the first",
-                        super::component::name_of::<C>()
-                    );
-                }
-            }
+            // After: a new element is a new instance (the core never
+            // matches one with an old one).
+            Some(_) => log::error!(
+                target: "js",
+                "{}: props given after its view was made",
+                super::component::name_of::<C>()
+            ),
             None => {}
         }
     }
