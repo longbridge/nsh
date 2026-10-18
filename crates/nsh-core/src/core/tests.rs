@@ -3683,6 +3683,73 @@ mod components {
         );
     }
 
+    thread_local! {
+        /// The runs of `Echo`'s text binding.
+        static ECHOES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Shows its label, counting the runs of the binding that reads it.
+    #[derive(Default)]
+    struct Echo;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct EchoProps {
+        #[prop(default)]
+        label: crate::ui::Prop<SharedString>,
+    }
+
+    impl Component for Echo {
+        type Props = EchoProps;
+        type Event = crate::ui::NoEvent;
+
+        fn view(props: EchoProps, _: Scope<crate::ui::NoEvent>) -> impl IntoElement {
+            text(move || {
+                ECHOES.with(|e| e.set(e.get() + 1));
+                props.label.get()
+            })
+        }
+    }
+
+    #[test]
+    fn a_prop_set_to_an_equal_value_runs_nothing() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Echo>();
+        c.set_components(registry);
+        let label = |v: &str| Op::SetProp {
+            id: 2,
+            prop: rust_prop::<EchoProps>("label", Some(json!(v))),
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Echo>().into()),
+                },
+                label("a"),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["a"]);
+        let runs = ECHOES.with(Cell::get);
+        // The same value again (a new decoded value, equal): nothing runs.
+        apply(&mut c, vec![label("a")]);
+        assert!(c.commit().is_none());
+        assert_eq!(ECHOES.with(Cell::get), runs);
+        apply(&mut c, vec![label("b")]);
+        assert_eq!(texts(&c.commit().unwrap()), ["b"]);
+        assert_eq!(ECHOES.with(Cell::get), runs + 1);
+    }
+
     fn core_with_tally() -> Core<FakeEngine> {
         let mut c = core();
         let mut registry = Registry::new();

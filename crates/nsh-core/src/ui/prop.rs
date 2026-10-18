@@ -189,8 +189,12 @@ impl<T: Clone + PartialEq + 'static> Prop<T> {
     pub fn __set(&mut self, value: Reactive<T>) -> bool {
         match (self.origin, value) {
             (Origin::Value | Origin::Held, Reactive::Static(v)) => {
+                // An equal value is no change: nothing is written (the
+                // prop's signal would compare it again and notify no one).
                 let changed = self.with_untracked(|old| *old != v);
-                self.node.set::<T>(v);
+                if changed {
+                    self.node.set::<T>(v);
+                }
                 changed
             }
             (Origin::Held, Reactive::Bound(_)) => {
