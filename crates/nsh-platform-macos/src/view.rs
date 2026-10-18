@@ -524,11 +524,10 @@ define_class!(
             // A click outside a field that edits leaves the focus in it, as
             // desktop apps do (`blur()` and Escape still hand it over).
             let view = NshView(self.retain());
-            if view.id() != ROOT_ID && !crate::input::is_key_control(&view) {
-                return false;
-            }
-            self.keyboard_surface()
-                .is_some_and(|s| !(crate::text_input::editing(&s) && clicking(self.mtm())))
+            (view.id() == ROOT_ID || crate::input::is_key_control(&view))
+                && self.keyboard_surface().is_some_and(|s| {
+                    !(crate::text_input::editing(&s) && clicking(self.mtm()))
+                })
         }
 
         #[unsafe(method(becomeFirstResponder))]
