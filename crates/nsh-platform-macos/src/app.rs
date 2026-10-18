@@ -14,9 +14,10 @@ use objc2::{
     runtime::ProtocolObject, sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSAutoresizingMaskOptions,
-    NSBackingStoreType, NSEventModifierFlags, NSMenu, NSMenuItem, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate,
+    NSApplicationTerminateReply, NSAutoresizingMaskOptions, NSBackingStoreType, NSEvent,
+    NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSView, NSWindow, NSWindowDelegate,
+    NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -292,7 +293,14 @@ define_class!(
     unsafe impl NSApplicationDelegate for Delegate {
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
         fn should_terminate_after_last_window_closed(&self, _app: &NSApplication) -> bool {
-            true
+            false
+        }
+
+        #[unsafe(method(applicationShouldTerminate:))]
+        fn should_terminate(&self, app: &NSApplication) -> NSApplicationTerminateReply {
+            finish_running(app);
+            // The caller owns process termination after run_app returns.
+            NSApplicationTerminateReply::TerminateCancel
         }
 
         #[unsafe(method(applicationWillTerminate:))]
@@ -305,17 +313,38 @@ define_class!(
         #[unsafe(method(windowWillClose:))]
         fn window_will_close(&self, _notification: &NSNotification) {
             stop_running();
-            // AppKit ends the app after its last window closes only if the
-            // window was on screen: not a minimized one. The app ends with
-            // its window either way (once the close is done).
+            // Leave AppKit's close callback before stopping its event loop,
+            // including when the window closed while minimized.
             dispatch2::DispatchQueue::main().exec_async(|| {
                 if let Some(mtm) = MainThreadMarker::new() {
-                    NSApplication::sharedApplication(mtm).terminate(None);
+                    finish_running(&NSApplication::sharedApplication(mtm));
                 }
             });
         }
     }
 );
+
+/// Ends the standalone event loop, returning process ownership to its caller.
+fn finish_running(app: &NSApplication) {
+    stop_running();
+    app.stop(None);
+    // stop: takes effect after the next event. A close can arrive through a
+    // dispatch block rather than an AppKit event, so wake nextEventMatchingMask
+    // explicitly instead of waiting for the user to move the mouse.
+    if let Some(event) = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+        NSEventType::ApplicationDefined,
+        NSPoint::new(0.0, 0.0),
+        NSEventModifierFlags::empty(),
+        0.0,
+        0,
+        None,
+        0,
+        0,
+        0,
+    ) {
+        app.postEvent_atStart(&event, true);
+    }
+}
 
 /// Stops the standalone app's engine (its window closes).
 fn stop_running() {
@@ -350,7 +379,8 @@ fn name_app(name: &str) {
 }
 
 /// Runs `source` in a window until it is closed. Must be called on the
-/// main thread.
+/// main thread. Closing the window or choosing Quit stops the engine and
+/// returns to the caller, which can finish cleanup or relaunch the app.
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
@@ -402,6 +432,8 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     }
     RUNNING.with(|r| *r.borrow_mut() = Some(Running { window, view }));
     app.run();
+    stop_running();
+    app.setDelegate(None);
     drop(delegate);
     std::process::ExitCode::SUCCESS
 }
