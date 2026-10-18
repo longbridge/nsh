@@ -1052,14 +1052,15 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
     let self_ty = &item.self_ty;
-    let api_name = last_segment(self_ty).map_or_else(String::new, |(id, _)| id.to_string());
     let (impl_generics, _, where_clause) = item.generics.split_for_impl();
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
-        let what = format!("{api_name}.{js}");
+        // The method's name: the host puts its component's before it (an
+        // API may serve several components).
+        let what = js.clone();
         let doc = decl(&docs(&f.attrs));
         let mut inputs = f.sig.inputs.iter();
         match inputs.next() {

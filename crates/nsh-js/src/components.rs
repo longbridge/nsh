@@ -833,8 +833,16 @@ unsafe extern "C" fn call_method(
     // SAFETY: QuickJS passes `argc` live arguments.
     let args = unsafe { crate::web::js::Args::new(argc, argv) };
     let make = method.call;
+    // A wrong argument's error names the component (`Stepper.setValue`).
     crate::classes::send(ctx, this, args, method.returns.is_some(), |host| {
-        make(host).map(|call| RustCall::Method(id, call))
+        make(host)
+            .map(|call| RustCall::Method(id, call))
+            .map_err(|e| match e {
+                nsh_core::ui::Thrown::Type(m) => {
+                    nsh_core::ui::Thrown::Type(format!("{}.{m}", spec.export))
+                }
+                other => other,
+            })
     })
 }
 

@@ -516,9 +516,11 @@ import { Stepper, type StepperRef } from "nsh/ui/mobile";
 const shown = signal("waiting");
 let stepper!: StepperRef;
 setTimeout(async () => {
+  let refused = "";
+  try { (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
   stepper.setValue(42.4);
   const value = await stepper.value();
-  shown.set(`got ${value}`);
+  shown.set(`got ${value} | ${refused}`);
 }, 0);
 
 mount(() => (
@@ -544,7 +546,14 @@ fn calls_of_a_components_methods() {
         }
     }
     assert!(shown.contains(&"42".to_owned()), "{shown:?}");
-    assert!(shown.contains(&"got 42".to_owned()), "{shown:?}");
+    // A wrong argument's error names the component.
+    assert!(
+        shown.contains(
+            &"got 42 | TypeError: Stepper.setValue: `value`: expected a number, got \"x\""
+                .to_owned()
+        ),
+        "{shown:?}"
+    );
 }
 
 const ALERT: &str = r#"import { mount, signal, Text } from "nsh";

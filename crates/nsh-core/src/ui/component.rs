@@ -112,7 +112,9 @@ pub struct Method {
     /// The classes its parameters and result name.
     pub refs: super::ClassRefs,
     /// Its call, the arguments converted in the JS call: what the core
-    /// runs with the API, in order with the props set before it.
+    /// runs with the API, in order with the props set before it. A wrong
+    /// argument's error starts with the method's name; the host puts its
+    /// component's before it (`Stepper.setValue: ...`).
     pub call: fn(&dyn JsHost) -> Result<MethodCall, Thrown>,
 }
 
