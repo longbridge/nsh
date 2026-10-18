@@ -640,6 +640,9 @@ fn shot(window: &NSWindow, path: &str) {
     let Some(view) = window.contentView() else {
         return;
     };
+    if let Some(layer) = view.layer() {
+        crate::surface::quiet(|| order_by_z(&layer));
+    }
     let bounds = view.bounds();
     let Some(rep) = view.bitmapImageRepForCachingDisplayInRect(bounds) else {
         return log::error!("script: cannot make a bitmap for {path}");
@@ -652,6 +655,34 @@ fn shot(window: &NSWindow, path: &str) {
     match data.map(|d| std::fs::write(path, d.to_vec())) {
         Some(Ok(())) => log::info!("script: saved {path}"),
         other => log::error!("script: cannot save {path}: {other:?}"),
+    }
+}
+
+/// Orders the sublayers of `layer` and its sublayers by their `zPosition`
+/// (keeping their order where it is equal), as Core Animation composites
+/// them: `cacheDisplayInRect:` draws sublayers in their order and ignores
+/// `zPosition`, so a decoration added before a layer it is above (a
+/// border's stroke before a gradient) would look covered in the shot. The
+/// window looks the same either way.
+fn order_by_z(layer: &objc2_quartz_core::CALayer) {
+    // SAFETY: the main thread reads the layer tree, which nothing else
+    // changes meanwhile.
+    let Some(sublayers) = (unsafe { layer.sublayers() }) else {
+        return;
+    };
+    let layers: Vec<Retained<objc2_quartz_core::CALayer>> = sublayers.to_vec();
+    let sorted = layers
+        .windows(2)
+        .all(|w| w[0].zPosition() <= w[1].zPosition());
+    if !sorted {
+        let mut by_z = layers.clone();
+        by_z.sort_by(|a, b| a.zPosition().total_cmp(&b.zPosition()));
+        for (i, l) in by_z.iter().enumerate() {
+            layer.insertSublayer_atIndex(l, i as u32);
+        }
+    }
+    for l in &layers {
+        order_by_z(l);
     }
 }
 

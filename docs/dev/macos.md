@@ -224,7 +224,9 @@ nsh build examples/gallery -o /tmp/gallery
 ```
 
 `shot` renders the window's content in process (`cacheDisplayInRect:`), so it needs no Screen Recording permission and
-works while the screen is locked. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts masks at
+works while the screen is locked. `cacheDisplayInRect:` draws sublayers in their order and ignores `zPosition`, so `shot` first orders every
+layer's sublayers by `zPosition` (as Core Animation composites them; the window does not change): without that, a
+decoration added before a layer it sits above (a border's stroke before a finish's gradient) looked covered. That rendering is not Core Animation's own: it ignores `maskedCorners`, cuts masks at
 their layer's bounds, ignores `shadowPath` and Core Image filters, flattens 3D transforms (perspective, `rotateX`,
 `rotateY`), and does not show backdrop blur, sheets or `AVPlayerLayer` content (`WKWebView` pages show: WebKit draws
 them for `cacheDisplayInRect:`, as of macOS 27). `decor.rs` avoids the first three (shape layers for differing corners, masked holders for box
