@@ -238,3 +238,22 @@ immediate. `Window.setLevel` uses `HWND_TOPMOST`, `HWND_NOTOPMOST` or `HWND_BOTT
 the last moves to the bottom of the current z-order, and later activation can
 raise the window. The top-level guard keeps these commands out of embedded child
 windows.
+
+## Local file drops
+
+Views listening to `onFileDrop` register an OLE `IDropTarget` for their surface
+window. The embedding UI thread must initialize OLE, as for other embedded COM
+features (`OleInitialize`); the standalone runner already does so. Registration
+ends when the last destination disappears or the surface stops.
+
+`DragEnter` checks for `CF_HDROP` without retrieving the file list. Enter and
+over callbacks convert screen pixels to client points and use retained view hit
+testing, stopping at a modal root. Eligible targets advertise Copy. Drop reads
+the local file list in native order and converts absolute paths to escaped file
+URLs, then releases the storage medium with `ReleaseStgMedium`. Leave, drop,
+disablement and deletion clear the active destination. Applications decide what
+to do with the URLs; receiving a drop does not itself open or transfer a file.
+
+This implementation still needs compilation and Explorer drag verification on
+Windows, including target switching, cancellation, modal isolation, directories
+and non-ASCII filenames.

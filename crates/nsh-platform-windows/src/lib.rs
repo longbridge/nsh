@@ -31,6 +31,7 @@ mod compose;
 mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
+mod file_drop;
 mod geom;
 mod gfx;
 mod image;

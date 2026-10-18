@@ -2492,6 +2492,7 @@ dependencies = [
  "serde_json",
  "ttf-parser",
  "ureq",
+ "url",
  "webview2-com",
  "windows",
  "windows-core",

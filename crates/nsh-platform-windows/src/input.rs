@@ -584,6 +584,7 @@ unsafe extern "system" fn on_timer(
 
 /// Forgets every gesture (the app stopped).
 pub(crate) fn reset(surface: &Surface) {
+    crate::file_drop::reset(surface);
     let input = &surface.input;
     input.pointers.borrow_mut().clear();
     input.two.borrow_mut().take();
@@ -1091,6 +1092,20 @@ struct Hit {
     view: NshView,
     /// The item it hosts that the point is on.
     item: Option<Native>,
+}
+
+/// Finds the nearest mounted destination, bounded by the native modal root.
+pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshView> {
+    let mut view = pick(&surface.root, x, y, false)?.view;
+    loop {
+        if view.state().events.contains(EventKind::FileDrop) {
+            return Some(view);
+        }
+        if view.kind() == ViewKind::Modal || view.id() == ROOT_ID {
+            return None;
+        }
+        view = view.parent_view()?;
+    }
 }
 
 /// The innermost view at `(x, y)` (root coordinates); hosted items are

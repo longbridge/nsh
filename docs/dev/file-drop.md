@@ -57,6 +57,9 @@ Clippy pass. The AppKit destination callbacks are implemented, but a real Finder
 drag and native target switching have not been exercised. GTK destination
 handling now uses a typed GdkFileList controller, the existing hit testing and
 first/last-listener registration. It has not been compiled or exercised on Linux;
-no additional tests were run at the user's request. Win32 handling, user-facing
+no additional tests were run at the user's request. Win32 now implements an OLE
+IDropTarget with CF_HDROP delivery, screen-to-client coordinates, modal-bounded
+hit testing and destination revocation. It has not been compiled or exercised
+on Windows. User-facing
 documentation, complete workspace/platform checks and trace comparison remain
 outstanding. This branch is not ready to merge or consume in Omasend.
