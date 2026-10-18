@@ -99,9 +99,10 @@ pub enum RustCall {
     Task(TaskStart),
     /// A method of the ref of the component on node `0`.
     Method(NodeId, MethodCall),
-    /// The JS call posted during a synchronous call from JS, parked as
-    /// `0` ([`Posts::park`]): it runs after what the ops before it post.
-    Post(u64),
+    /// The place of a JS call posted during a synchronous call from JS
+    /// ([`Posts::park`]): applied (dropped), the call runs after what the
+    /// ops before it post.
+    Post(ParkedPost),
 }
 
 /// A call JS made into Rust ([`crate::Op::Rust`]): what it does, and the
@@ -177,6 +178,27 @@ impl fmt::Debug for JsEvent {
 
 // --- Posts ----------------------------------------------------------------------
 
+/// The place in [`Posts`] of a call posted during a synchronous call from
+/// JS, which [`RustCall::Post`] carries: dropping it lets the call run
+/// there, whichever path drops it (the op applied, or dropped unapplied).
+#[doc(hidden)]
+pub struct ParkedPost {
+    posts: Posts,
+    id: u64,
+}
+
+impl Drop for ParkedPost {
+    fn drop(&mut self) {
+        self.posts.release(self.id);
+    }
+}
+
+impl fmt::Debug for ParkedPost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ParkedPost({})", self.id)
+    }
+}
+
 /// The calls of JS functions Rust posts ([`super::Callback::post`],
 /// `call_async`) for the next JS turn, in one ordered queue. One per
 /// engine, made by it and handed to `nsh-js` and the core. Cheap to clone.
@@ -188,7 +210,8 @@ impl fmt::Debug for JsEvent {
 /// core applies them goes before it. So a call a task posts after the
 /// synchronous call runs after it, and one an op JS sent before the call
 /// posts runs before it. The queue runs up to the first place not
-/// released yet.
+/// released yet; a place is released whichever way its op goes (applied,
+/// or dropped unapplied: [`ParkedPost`]), so no lost op stalls it.
 #[derive(Clone, Default)]
 pub struct Posts(Rc<PostsInner>);
 
@@ -205,7 +228,7 @@ struct PostsInner {
 
 enum Entry {
     Ready(JsCall),
-    /// Parked as `id`; released (runnable) once its op is applied.
+    /// Parked as `id`; released (runnable) once its op goes.
     Parked {
         id: u64,
         call: JsCall,
@@ -287,27 +310,31 @@ impl Posts {
         f()
     }
 
-    /// Queues `call` parked until [`Self::release`] (the op JS sends after
-    /// the ones before it): its id.
+    /// Queues `call` parked in its place until the place it returns is
+    /// dropped: when its op is applied, or dropped by any other path (the
+    /// call then runs in its place, or with the queue when it closes), so
+    /// a lost op never holds back the calls after it.
     #[doc(hidden)]
-    pub fn park(&self, call: JsCall) -> u64 {
+    pub fn park(&self, call: JsCall) -> ParkedPost {
         let id = self.0.next_parked.get() + 1;
         self.0.next_parked.set(id);
         if self.0.closed.get() {
             drop(call);
-            return id;
+        } else {
+            self.0.queue.borrow_mut().push_back(Entry::Parked {
+                id,
+                call,
+                released: false,
+            });
         }
-        self.0.queue.borrow_mut().push_back(Entry::Parked {
+        ParkedPost {
+            posts: self.clone(),
             id,
-            call,
-            released: false,
-        });
-        id
+        }
     }
 
     /// Lets the call parked as `id` run in its place.
-    #[doc(hidden)]
-    pub fn release(&self, id: u64) {
+    fn release(&self, id: u64) {
         let found = self.0.queue.borrow_mut().iter_mut().any(|e| match e {
             Entry::Parked {
                 id: parked,
@@ -322,21 +349,6 @@ impl Posts {
         if found {
             self.wake();
         }
-    }
-
-    /// Drops the call parked as `id` (its op was not applied; its reply
-    /// says JS stopped).
-    pub(crate) fn drop_parked(&self, id: u64) {
-        let dropped = {
-            let mut queue = self.0.queue.borrow_mut();
-            let at = queue
-                .iter()
-                .position(|e| matches!(e, Entry::Parked { id: parked, .. } if *parked == id));
-            at.and_then(|at| queue.remove(at))
-        };
-        drop(dropped);
-        // What waited behind it may run now.
-        self.wake();
     }
 
     /// No JS runs any more (the VM stopped or went): the queued calls are

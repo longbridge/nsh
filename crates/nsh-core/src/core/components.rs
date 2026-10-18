@@ -597,10 +597,7 @@ impl<M: TextEngine> Core<M> {
     pub fn discard_ops(&mut self, ops: impl IntoIterator<Item = Op>) {
         for op in ops {
             if let Op::Rust(RustOp { call, run }) = op {
-                if let RustCall::Post(id) = run {
-                    self.components.posts.drop_parked(id);
-                }
-                // What the call holds (its arguments: instances, callbacks)
+                // What the call holds (a post's place: released) (its arguments: instances, callbacks)
                 // goes now.
                 drop_caught(run);
                 self.settle(call, Err("the script stopped before the call ran".into()));
@@ -1057,7 +1054,8 @@ impl<M: TextEngine> Core<M> {
                 }
                 self.settle(call, result);
             }
-            RustCall::Post(id) => self.components.posts.release(id),
+            // Its place, released: the call runs there.
+            RustCall::Post(place) => drop(place),
         }
     }
 

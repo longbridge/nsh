@@ -1089,15 +1089,15 @@ impl CallbackHandle for JsCallback {
             && !crate::state::state(ctx).is_null()
             && classes(ctx).depth.get() > 0
         {
-            let id = self.posts.park(call);
+            let place = self.posts.park(call);
             let op = nsh_core::Op::Rust(RustOp {
                 call: 0,
-                run: RustCall::Post(id),
+                run: RustCall::Post(place),
             });
             if crate::dom::push_op(ctx, op).is_err() {
-                // Over the op limit (the VM stops): queued as it is.
+                // Over the op limit (the VM stops): the dropped op released
+                // the place.
                 let _ = js::take_exception(ctx);
-                self.posts.release(id);
             }
             return;
         }
@@ -1250,12 +1250,6 @@ pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
         }
     }
     Ok(())
-}
-
-/// Lets the call parked as `id` run (tests without a core).
-#[cfg(test)]
-pub(crate) fn release_post(ctx: Ctx, id: u64) {
-    classes(ctx).posts.release(id);
 }
 
 /// Whether JS calls Rust queued are waiting.
@@ -1829,7 +1823,7 @@ pub(crate) mod tests {
         .map_err(|e| e.message)?;
         let mut ops = Vec::new();
         host.take_ops(&mut ops);
-        host.apply_posts(&ops);
+        host.apply_posts(&mut ops);
         Ok(ops
             .into_iter()
             .filter_map(|op| match op {
@@ -2328,7 +2322,7 @@ pub(crate) mod tests {
                 _ => None,
             })
             .expect("the op's promise");
-        host.apply_posts(&ops);
+        host.apply_posts(&mut ops);
         drop(ops);
         // The result's conversion panics: the promise rejects with it.
         host.deliver(JsEvent::Reply {
@@ -2351,6 +2345,41 @@ pub(crate) mod tests {
         host.run_jobs();
         assert!(!host.has_exception());
         assert_eq!(run(&host, "show(seen.join(','));").unwrap(), ["brittle"]);
+    }
+
+    #[test]
+    fn a_post_whose_op_is_lost_holds_back_no_later_post() {
+        let host = host();
+        host.eval_source(
+            "import { Tools } from \"test/classes\";\n\
+             globalThis.heard = [];\n\
+             Tools.listen((text) => heard.push(text));\n\
+             Tools.tell(\"parked\");",
+        )
+        .unwrap();
+        // The op holding the post's place goes without being applied.
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            nsh_core::Op::Rust(nsh_core::ui::RustOp {
+                run: nsh_core::ui::RustCall::Post(_),
+                ..
+            })
+        )));
+        drop(ops);
+        // Posted later, outside a call: both run, in order.
+        LISTENER.with(|l| {
+            if let Some(listener) = &*l.borrow() {
+                listener.post("later".to_owned());
+            }
+        });
+        host.run_posted();
+        assert_eq!(
+            run(&host, "show(heard.join(','));").unwrap(),
+            ["parked,later"]
+        );
+        LISTENER.with(|l| l.borrow_mut().take());
     }
 
     #[test]

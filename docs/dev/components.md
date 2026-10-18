@@ -295,7 +295,8 @@ statics, and `async fn`s (`this: Instance<Self>` first, for a method) members re
   and the core (`HostOptions::posts`, `Core::set_posts`), which the engine runs (`Host::run_posted`) at each
   commit round before the core's events, so a task's posts reach JS before its result. A post made inside a
   synchronous call from JS is parked in its place until an op after the ops JS sent before it is applied
-  (`RustCall::Post`), and what those ops post goes before it, so posts run in program order. `call_async` settles a
+  (`RustCall::Post`: the op's place releases it whichever way the op goes), and what those ops post goes before it,
+  so posts run in program order. `call_async` settles a
   promise the function returns; once the VM stops, queued and later calls are dropped and their replies say so.
   `nsh-js` keeps the functions in a table of the context (freed with it, so callbacks Rust keeps longer do
   nothing). `#[class]` on the struct implements the `unsafe trait Trace` from every field whose type implements it

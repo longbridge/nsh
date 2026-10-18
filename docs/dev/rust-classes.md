@@ -230,9 +230,10 @@ impl Downloader {
   before the core's events (`Host::run_posted`), so a task's posts reach JS before its result and cost one turn,
   not a thread hop. They run in the order they were posted, keeping JS's program order: a post made inside a
   synchronous call from JS is parked in its place until an op JS sends after it is applied
-  (`RustCall::Post`), and what the ops JS sent before it post while the core applies them goes before it. So an op
-  function posting and then a synchronous one posting arrive in that order, and a task posting while JS is still
-  busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
+  (`RustCall::Post`, whose place is released when the op goes by any path, applied or dropped, so a lost op
+  never holds back later posts), and what the ops JS sent before it post while the core applies them goes before
+  it. So an op function posting and then a synchronous one posting arrive in that order, and a task posting while
+  JS is still busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
   dropped and their replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
   out of memory) when the synchronous call around it returns, whatever Rust made of its `Err`.
 - **In a collection:** a value the collector frees drops inside the collection, where no JS may run (QuickJS is

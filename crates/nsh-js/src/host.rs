@@ -580,24 +580,23 @@ impl Host {
     pub(crate) fn run_posted_without_core(&self) {
         let mut ops = Vec::new();
         self.take_ops(&mut ops);
-        self.apply_posts(&ops);
+        self.apply_posts(&mut ops);
         self.run_posted();
     }
 
-    /// Releases the posts parked by the ops among `ops` (as the core
-    /// does): for tests without a core.
+    /// Applies the posts' ops among `ops` (as the core does: dropped, they
+    /// release their places): for tests without a core.
     #[cfg(test)]
-    pub(crate) fn apply_posts(&self, ops: &[Op]) {
-        for op in ops {
-            if let Op::Rust(nsh_core::ui::RustOp {
-                run: nsh_core::ui::RustCall::Post(id),
-                ..
-            }) = op
-            {
-                self.ctx
-                    .with(|ctx| crate::classes::release_post(ctx.as_raw().as_ptr(), *id));
-            }
-        }
+    pub(crate) fn apply_posts(&self, ops: &mut Vec<Op>) {
+        ops.retain(|op| {
+            !matches!(
+                op,
+                Op::Rust(nsh_core::ui::RustOp {
+                    run: nsh_core::ui::RustCall::Post(_),
+                    ..
+                })
+            )
+        });
     }
 
     /// Whether calls Rust queued wait for [`Host::run_posted`].

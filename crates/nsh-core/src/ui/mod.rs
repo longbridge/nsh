@@ -97,8 +97,8 @@ pub use self::{
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     call::{
-        AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, Posts, RustCall, RustOp,
-        TaskStart, ToJs,
+        AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,
+        RustOp, TaskStart, ToJs,
     },
     callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
     class::{
