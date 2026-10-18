@@ -23,8 +23,10 @@ others and registered them all under its specifier.
   what to add on the line of that crate (the file's one import of nsh's stand-in is what the glob shadows).
 - Checked when the workspace is written (`rust_app::crates`): a crate listed twice, two crates with the same package
   name (Cargo takes `-` and `_` as one), or two whose `#[native_module("…")]` has the same specifier (read from the
-  crate's `[lib] path` or `src/lib.rs`) fail with the two paths and what to change. `Registry::merged` already
-  refuses two sets registering components or modules of the same name when an engine starts.
+  crate's `[lib] path` or `src/lib.rs`) fail with the two paths and what to change. That reading is early and
+  friendly; the authority is the command line itself, which refuses two of its sets with one specifier when it
+  starts (`main_with`), however the entry was written. `Registry::merged` already refuses two sets registering
+  components or modules of the same name when an engine starts.
 - Each specifier gets its declarations (`.nsh/types/<specifier>.d.ts`) and its assets (`asset:/@<package>/...`,
   already per package), as both come from the registries the app's command line has.
 - `nsh dev` / `nsh run` watch every listed crate and the local crates they depend on by path, transitively

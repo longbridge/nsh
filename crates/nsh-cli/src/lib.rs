@@ -353,11 +353,20 @@ impl Command {
 /// Runs the command line with `ui_sets` (`nsh_ui_mobile::registry()` and
 /// the registries of an app's own crates); errors are printed.
 pub fn main_with(ui_sets: Vec<Registry>) -> ExitCode {
+    let duplicate = duplicate_specifier(&ui_sets);
     let _ = UI_SETS.set(ui_sets);
     let cli = Cli::parse();
     ui::init(cli.verbose);
     logger::init();
-    let result = run(cli.command);
+    let result = match duplicate {
+        // A second set of one specifier would never be imported: refused,
+        // whatever the crates' sources looked like when the workspace was
+        // written.
+        Some(specifier) => Err(anyhow::anyhow!(
+            "two UI sets are imported as {specifier:?}: give each crate of the app a `#[native_module(\"…\")]` specifier of its own"
+        )),
+        None => run(cli.command),
+    };
     // A signal stopped the command (`ui::Stoppable`): it ends as the signal
     // would have, and what failed as it stopped (a tool it interrupted) is
     // no news.
@@ -552,5 +561,29 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             packages,
             out,
         } => sign::revoke_list(&root, extend.as_deref(), sequence, &keys, &packages, &out),
+    }
+}
+
+/// The first import specifier two of `sets` share.
+fn duplicate_specifier(sets: &[Registry]) -> Option<&'static str> {
+    let mut seen = std::collections::HashSet::new();
+    sets.iter()
+        .filter_map(Registry::specifier)
+        .find(|specifier| !seen.insert(*specifier))
+}
+
+#[cfg(test)]
+mod duplicate_tests {
+    use super::*;
+
+    #[test]
+    fn two_sets_of_one_specifier_are_refused() {
+        let a = Registry::ui_set("app/a");
+        let b = Registry::ui_set("app/b");
+        assert_eq!(duplicate_specifier(&[a.clone(), b.clone()]), None);
+        assert_eq!(
+            duplicate_specifier(&[a, b, Registry::ui_set("app/a")]),
+            Some("app/a")
+        );
     }
 }
