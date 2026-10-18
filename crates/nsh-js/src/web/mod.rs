@@ -253,7 +253,39 @@ pub(crate) fn web<'a>(ctx: Ctx) -> &'a mut Web {
 /// What an object's opaque points to.
 struct Slot(RefCell<Box<dyn Object>>);
 
+thread_local! {
+    /// The finalizers running on this thread (QuickJS is collecting
+    /// garbage): no JS may run and no value be made until they return.
+    static FINALIZING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Raised while a finalizer of this thread drops Rust values (a Rust
+/// class's value, a closure's captures): their drops are the app's code,
+/// and what they do with JS waits ([`finalizing`]).
+pub(crate) struct Finalizing(());
+
+impl Finalizing {
+    pub(crate) fn enter() -> Self {
+        FINALIZING.with(|f| f.set(f.get() + 1));
+        Finalizing(())
+    }
+}
+
+impl Drop for Finalizing {
+    fn drop(&mut self) {
+        FINALIZING.with(|f| f.set(f.get() - 1));
+    }
+}
+
+/// Whether a finalizer of this thread is dropping Rust values: a callback
+/// must not run JS now (QuickJS is collecting garbage), and a post must
+/// not make an op.
+pub(crate) fn finalizing() -> bool {
+    FINALIZING.with(|f| f.get() > 0)
+}
+
 unsafe extern "C" fn finalize(_rt: *mut qjs::JSRuntime, obj: Raw) {
+    let _finalizing = Finalizing::enter();
     // SAFETY: the opaque of these classes is a boxed slot; its values free
     // themselves through the runtime.
     let slot = unsafe {
@@ -291,6 +323,7 @@ unsafe extern "C" fn mark(rt: *mut qjs::JSRuntime, obj: Raw, mark: qjs::JS_MarkF
 }
 
 unsafe extern "C" fn finalize_closure(_rt: *mut qjs::JSRuntime, obj: Raw) {
+    let _finalizing = Finalizing::enter();
     // SAFETY: the opaque of closures is a boxed closure.
     unsafe {
         let p = qjs::JS_GetAnyOpaque(obj, &mut 0);

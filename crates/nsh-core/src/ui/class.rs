@@ -149,6 +149,14 @@ impl fmt::Display for Thrown {
 /// An instance of class `C`: a handle of the value its JS object owns
 /// (cheap to clone). [`Instance::with`] / [`Instance::with_mut`] borrow
 /// the value: in an `async` member, between awaits.
+///
+/// A value the collector frees drops inside the collection, where no JS
+/// runs: a callback's `call` fails there and `post` queues the call for
+/// the next turn. Before it drops, the callbacks the value alone keeps
+/// (its traced fields, and the instances it alone holds) are released. So
+/// a `Drop` that moves out an instance it held as the only handle (into a
+/// static, a task) keeps that instance, but with dead callbacks: calling
+/// them fails and posting them does nothing.
 pub struct Instance<C: 'static> {
     cell: Rc<InstanceCell<C>>,
 }

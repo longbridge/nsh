@@ -287,7 +287,7 @@ statics, and `async fn`s (`this: Instance<Self>` first, for a method) members re
   their promises (`Core::discard_ops`).
 - **Callbacks** (`callback.rs`): a `Callback<A, R>` parameter is a JS function (`A` one value, `()` or a tuple;
   `(a: string, b: number) => boolean`). `call` runs it on the spot, only inside a synchronous call from JS (it
-  panics in a task, and rethrows an uncatchable interrupt when the call returns);
+  panics in a task, and rethrows an uncatchable interrupt when the call returns, and fails inside a collection);
   `post` and `call_async` queue a `JsCall` in `Posts`, one ordered queue the engine makes and hands to the script
   and the core (`HostOptions::posts`, `Core::set_posts`), which the engine runs (`Host::run_posted`) at each
   commit round before the core's events, so a task's posts reach JS before its result. A post made inside a

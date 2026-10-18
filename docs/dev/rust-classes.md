@@ -235,6 +235,10 @@ impl Downloader {
   busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
   dropped and their replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
   out of memory) when the synchronous call around it returns, whatever Rust made of its `Err`.
+- **In a collection:** a value the collector frees drops inside the collection, where no JS may run (QuickJS is
+  collecting garbage; `nsh-js` raises a counter around every finalizer's drop, `web::finalizing`). A callback's
+  `call` there fails (`Err`: called while JS collects garbage, use `post`) and `post` queues the call without an
+  op; both are about callbacks the dropping value does not own, since its own were released first (below).
 - **Keeping it:** a `Callback` can be stored (in an instance's field, a `Vec`, a global) and called any number of
   times; dropping the last clone releases the JS function. A callback an instance keeps is reported to QuickJS's
   collector through the class's mark hook, as the web classes report the JS values they hold. `#[class]` traces
@@ -245,7 +249,9 @@ impl Downloader {
   elsewhere (an `Rc` shared by two instances included) are roots until dropped. The functions belong to the VM:
   freed with it, a callback Rust keeps longer does nothing. When the collector frees an object that owns its
   instance alone, the instance's callbacks are released before its value drops, so a `Drop` calling or posting
-  one finds it gone instead of a function the same collection frees.
+  one finds it gone instead of a function the same collection frees. That includes the callbacks of instances
+  it alone holds: a `Drop` that moves such an instance out (into a static, a task) keeps the instance, but its
+  callbacks are dead (calling fails, posting does nothing).
 - **Functions take them too:** `fn watch(path: String, on_change: Callback<String>)` (`on_change` kept and posted
   later), and `async` functions and members can `call_async`.
 

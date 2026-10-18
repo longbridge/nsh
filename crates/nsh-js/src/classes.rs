@@ -24,7 +24,9 @@
 //! queue ([`nsh_core::ui::Posts`]) and run by [`run_posted`] in its next
 //! turn. An instance whose only handle is its object reports the
 //! callbacks it keeps from the object's mark hook, so the collector sees
-//! through them.
+//! through them. While a finalizer drops Rust values (QuickJS is
+//! collecting garbage, `web::finalizing`), a callback runs no JS: `call`
+//! fails and `post` queues without an op.
 
 use std::{
     any::{Any, TypeId},
@@ -1021,6 +1023,16 @@ impl CallbackHandle for JsCallback {
             // reply says so).
             return;
         };
+        if web::finalizing() {
+            // A drop in a finalizer: QuickJS is collecting garbage, and no
+            // JS may run in it.
+            call.reply(Err(
+                "a JS function cannot be called while JS collects garbage (a value dropped \
+                 by the collector): use `post`"
+                    .to_owned(),
+            ));
+            return;
+        }
         // SAFETY: reading the context's opaque pointer.
         if crate::state::state(ctx).is_null() {
             // The VM is being torn down.
@@ -1037,8 +1049,10 @@ impl CallbackHandle for JsCallback {
     fn post(&self, call: JsCall) {
         // Posted inside a synchronous call from JS: its place in the queue
         // waits for an op after the ones JS sent before, so it runs after
-        // what they post.
-        if let Some((ctx, _)) = self.value()
+        // what they post. Not from a finalizer: an op is a JS value's
+        // work, and QuickJS is collecting garbage (it queues as it is).
+        if !web::finalizing()
+            && let Some((ctx, _)) = self.value()
             // SAFETY: reading the context's opaque pointer.
             && !crate::state::state(ctx).is_null()
             && classes(ctx).depth.get() > 0
@@ -1596,6 +1610,42 @@ pub(crate) mod tests {
         }
     }
 
+    thread_local! {
+        /// What `Shouter`s' drops got from calling the kept callbacks.
+        static SHOUTS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Calls and posts the callbacks `Tally.keep` keeps as it drops (ones
+    /// it does not own: they live on).
+    #[class]
+    pub(crate) struct Shouter {
+        watcher: Option<Callback>,
+    }
+
+    impl Drop for Shouter {
+        fn drop(&mut self) {
+            KEPT.with(|k| {
+                for f in k.borrow().iter() {
+                    let called = f.call(());
+                    SHOUTS.with(|s| s.borrow_mut().push(format!("{called:?}")));
+                    f.post(());
+                }
+            });
+        }
+    }
+
+    #[class]
+    impl Shouter {
+        pub(crate) fn new() -> Self {
+            Shouter { watcher: None }
+        }
+
+        /// Keeps `f`.
+        pub(crate) fn watch(&mut self, f: Callback) {
+            self.watcher = Some(f);
+        }
+    }
+
     /// A type named `Instance` that is not a class's.
     mod gpu {
         pub(crate) struct Instance;
@@ -1650,6 +1700,7 @@ pub(crate) mod tests {
             .class::<Asker>()
             .class::<Noisy>()
             .class::<Watcher>()
+            .class::<Shouter>()
             .module::<Tools>();
         r
     }
@@ -1666,7 +1717,7 @@ pub(crate) mod tests {
     /// with `show(...)`.
     pub(crate) fn run(host: &Host, code: &str) -> Result<Vec<String>, String> {
         host.eval_source(&format!(
-            "import {{ text as show }} from \"nsh:rt\";\nimport {{ Tally, Token, Bomb, Asker, Noisy, Watcher, Tools }} from \"test/classes\";\n{code}"
+            "import {{ text as show }} from \"nsh:rt\";\nimport {{ Tally, Token, Bomb, Asker, Noisy, Watcher, Shouter, Tools }} from \"test/classes\";\n{code}"
         ))
         .map_err(|e| e.message)?;
         let mut ops = Vec::new();
@@ -2007,6 +2058,49 @@ pub(crate) mod tests {
             NOISE.with(|n| std::mem::take(&mut *n.borrow_mut())),
             ["Err(\"the JS function was not called (JS stopped)\")"]
         );
+    }
+
+    #[test]
+    fn a_drop_in_a_collection_runs_no_js_and_posts_without_an_op() {
+        let host = host();
+        // Cycles only the collector frees (each through its own callback),
+        // then a callback allocating enough for it to run inside a
+        // synchronous call: the drops call and post a live function there.
+        let shown = run(
+            &host,
+            r#"
+            globalThis.heard = 0;
+            Tally.keep(() => { heard++; return 1; });
+            for (let i = 0; i < 20; i++) {
+                const n = new Shouter();
+                n.watch(() => n);
+            }
+            show(String(Asker.callThrough(() => {
+                const junk = [];
+                for (let i = 0; i < 300000; i++) junk.push({ i });
+                return junk.length;
+            })));
+            "#,
+        )
+        .unwrap();
+        assert_eq!(shown, ["300000"]);
+        let shouts = SHOUTS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+        // (The loop's last binding may outlive it.)
+        assert!(shouts.len() >= 19, "collected in the call: {shouts:?}");
+        assert!(
+            shouts
+                .iter()
+                .all(|s| s.contains("cannot be called while JS collects garbage")),
+            "{shouts:?}"
+        );
+        // The posts were queued as they were (no op), and run now.
+        host.run_posted_without_core();
+        assert_eq!(
+            run(&host, "show(String(heard));").unwrap(),
+            [shouts.len().to_string()]
+        );
+        assert!(!host.has_exception());
+        Tally::forget();
     }
 
     #[test]
