@@ -272,7 +272,8 @@ statics, and `async fn`s (`this: Instance<Self>` first, for a method) members re
 - **Members that are not `async` run in the JS call** (`MemberCall::Sync`), outside the core: `nsh-js`'s `CallHost`
   implements `JsHost`, and the generated code converts the arguments and the result directly
   (`JsValue::from_js` / `to_js`, no JSON: the derives implement them too), borrows its instance for the call (a
-  re-entrant use throws "used re-entrantly") and catches a panic as an `Error`. A wrong argument is a `TypeError`
+  re-entrant use throws "used re-entrantly") and catches a panic as an `Error` (where Rust unwinds: the web runtime
+  aborts on a panic). A wrong argument is a `TypeError`
   naming the member and the parameter (``Tally.add: `by`: expected a number, got "x"``). `&Other` / `&mut Other`
   parameters borrow another instance for the call, `Instance<Other>` keeps one; results `Self`, `Other` and
   `Instance<Other>` are objects. Another class's object is refused.

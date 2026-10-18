@@ -139,6 +139,7 @@ on any platform or JS crate.
 | a hot path | `docs/dev/performance.md` (baselines) |
 | anything platform-specific | `docs/dev/pitfalls.md` (verified constraints, by area) |
 | components (`nsh/ui/mobile`) | `docs/dev/components.md`, `crates/nsh-ui-mobile/README.md` |
+| Rust classes TS uses (`#[class]`), module functions' kinds, callbacks | `docs/dev/rust-classes.md`, `docs/dev/components.md` |
 
 Keep them current: a change that alters documented behavior updates its page (or the module doc) in the same commit,
 including the user-facing pages in `website/` (English and `zh-CN`). User-facing pages and the README are written in
