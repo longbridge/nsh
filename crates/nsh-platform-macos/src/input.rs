@@ -410,12 +410,32 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
 pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
     update_hover_tracking(surface, view);
     refresh_cursor(surface);
+    release_invalid_control_focus(surface, view);
 }
 
 /// The view's props changed.
-pub(crate) fn props_changed(_surface: &Rc<Surface>, _view: &NshView) {
+pub(crate) fn props_changed(surface: &Rc<Surface>, view: &NshView) {
     // `pointerEvents`, `hitSlop`, `activeOpacity` and `delayLongPress` are
     // read from the state when the pointer goes down.
+    release_invalid_control_focus(surface, view);
+}
+
+fn release_invalid_control_focus(surface: &Surface, view: &NshView) {
+    if view.kind() == ViewKind::Input || is_key_control(view) {
+        return;
+    }
+    let Some(window) = view.ns().window() else {
+        return;
+    };
+    let focused = window.firstResponder().is_some_and(|responder| {
+        responder
+            .downcast_ref::<objc2_app_kit::NSView>()
+            .and_then(NshView::from_ns)
+            .is_some_and(|focused| focused == *view)
+    });
+    if focused && view.id() != ROOT_ID {
+        window.makeFirstResponder(Some(surface.root.ns()));
+    }
 }
 
 /// The view's style changed (cursor). The cursor follows on the next mouse
