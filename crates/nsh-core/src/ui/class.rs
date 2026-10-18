@@ -47,6 +47,8 @@ pub struct ClassDef {
     pub doc: &'static str,
     /// The type, telling two classes of the same name apart.
     pub type_id: fn() -> TypeId,
+    /// The type's Rust path, for messages (`app::ledger::Ledger`).
+    pub type_name: fn() -> &'static str,
     /// Its members: the constructor, methods, accessors and statics.
     pub members: &'static [Member],
 }
@@ -703,6 +705,11 @@ pub(crate) mod __private {
     /// The `TypeId` of `T` (what a [`ClassDef`] tells types apart by).
     pub fn type_id<T: 'static>() -> TypeId {
         TypeId::of::<T>()
+    }
+
+    /// `T`'s Rust path.
+    pub fn type_name<T: 'static>() -> &'static str {
+        std::any::type_name::<T>()
     }
 }
 

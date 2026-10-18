@@ -239,6 +239,7 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
                 name: #class_name,
                 doc: <Self as #ui::__private::ClassDoc>::DOC,
                 type_id: #ui::__private::type_id::<Self>,
+                type_name: #ui::__private::type_name::<Self>,
                 members: &[#(#members),*],
             };
         }

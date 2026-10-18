@@ -701,7 +701,7 @@ impl Registry {
     /// name already.
     #[track_caller]
     pub fn class<C: Class>(&mut self) -> &mut Self {
-        self.class_def(C::DEF, std::any::type_name::<C>())
+        self.class_def(C::DEF)
     }
 
     /// Registers the classes in `refs` (a signature names them), unless
@@ -709,13 +709,14 @@ impl Registry {
     #[track_caller]
     fn classes_named(&mut self, refs: Vec<&'static ClassDef>) -> &mut Self {
         for def in refs {
-            self.class_def(def, def.name);
+            self.class_def(def);
         }
         self
     }
 
     #[track_caller]
-    fn class_def(&mut self, def: &'static ClassDef, type_name: &'static str) -> &mut Self {
+    fn class_def(&mut self, def: &'static ClassDef) -> &mut Self {
+        let type_name = (def.type_name)();
         let set = self.ui_set.or(self.namespace);
         if let Some(old) = self.classes.get(&(set, def.name)) {
             if (old.spec.def.type_id)() == (def.type_id)() {
@@ -1280,6 +1281,36 @@ mod tests {
         r.class::<Lonely>();
         assert_eq!(r.class_specs().len(), 1);
         let _ = Registry::merged(&[r]);
+    }
+
+    mod clash {
+        /// Another class named `Lonely`.
+        #[crate::ui::class]
+        pub(super) struct Lonely;
+
+        #[crate::ui::class]
+        impl Lonely {
+            pub(super) fn new() -> Self {
+                Lonely
+            }
+        }
+    }
+
+    #[test]
+    fn a_clash_through_a_signature_names_both_types() {
+        let mut r = Registry::ui_set("test/maker");
+        r.class::<clash::Lonely>();
+        // `Maker.make` names the other `Lonely`.
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            r.module::<Maker>();
+        }))
+        .unwrap_err();
+        let message = failed.downcast_ref::<String>().unwrap();
+        assert!(
+            message.contains("`nsh_core::ui::component::tests::clash::Lonely`")
+                && message.contains("`nsh_core::ui::component::tests::Lonely`"),
+            "{message}"
+        );
     }
 
     #[test]
