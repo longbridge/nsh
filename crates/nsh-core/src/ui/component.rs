@@ -12,6 +12,7 @@ use rustc_hash::FxHashMap;
 
 use super::{
     Children, IntoElement, PropError, Slot, TsType, TsTypes,
+    class::{Class, ClassSpec, MemberKind},
     element::{ComponentElement, ElNode},
     module::{Function, FunctionSpec, Module, ModuleSpec},
 };
@@ -531,12 +532,20 @@ struct ModuleType {
     type_name: &'static str,
 }
 
+#[derive(Clone)]
+struct ClassType {
+    spec: Arc<ClassSpec>,
+    /// The type that implements it.
+    type_name: &'static str,
+}
+
 /// What a UI set exports to JS: its components and modules, and what it
 /// passes on from the runtime. Cheap to clone.
 #[derive(Clone, Default)]
 pub struct Registry {
     types: Arc<FxHashMap<&'static str, ComponentType>>,
     modules: Arc<FxHashMap<&'static str, ModuleType>>,
+    classes: Arc<FxHashMap<&'static str, ClassType>>,
     /// Values and types of `nsh/_core` exported as they are.
     reexports: Arc<(Vec<&'static str>, Vec<&'static str>)>,
     /// Values `nsh-js` makes for the set (declared by hand, not generated
@@ -579,6 +588,14 @@ impl Registry {
             let set = self.ui_set.or(self.namespace);
             panic!("{}", same_name(spec.name, old.id, TypeId::of::<C>(), set));
         }
+        if self.classes.contains_key(spec.export.as_str()) {
+            panic!(
+                "component `{}` is exported as `{}` like a class{}: rename one",
+                spec.name,
+                spec.export,
+                of_set(self.ui_set.or(self.namespace)),
+            );
+        }
         if let Some(other) = types.values().find(|t| t.spec.export == spec.export) {
             panic!(
                 "components `{}` and `{}` are both exported as `{}`{}: rename one",
@@ -609,6 +626,13 @@ impl Registry {
     #[track_caller]
     pub fn module<M: Module>(&mut self) -> &mut Self {
         let type_name = std::any::type_name::<M>();
+        if self.classes.contains_key(M::NAME) {
+            panic!(
+                "module `{type_name}` is named `{}` like a class{}: rename one",
+                M::NAME,
+                of_set(self.ui_set.or(self.namespace))
+            );
+        }
         let modules = Arc::make_mut(&mut self.modules);
         if let Some(old) = modules.get(M::NAME) {
             panic!(
@@ -626,6 +650,41 @@ impl Registry {
             ModuleType {
                 spec: Arc::new(ModuleSpec::of::<M>()),
                 functions: M::FUNCTIONS,
+                type_name,
+            },
+        );
+        self
+    }
+
+    /// Registers class `C` (`#[class]`): a JS class named [`Class::DEF`]'s
+    /// name, which JS makes with `new` (when it has a constructor) and gets
+    /// from the members that return one.
+    ///
+    /// # Panics
+    ///
+    /// When the set has a class, a module or a component of that name
+    /// already.
+    #[track_caller]
+    pub fn class<C: Class>(&mut self) -> &mut Self {
+        let def = C::DEF;
+        let type_name = std::any::type_name::<C>();
+        let set = self.ui_set.or(self.namespace);
+        if let Some(old) = self.classes.get(def.name) {
+            panic!("{}", same_class(def.name, old.type_name, type_name, set));
+        }
+        if self.modules.contains_key(def.name)
+            || self.types.values().any(|t| t.spec.export == def.name)
+        {
+            panic!(
+                "class `{type_name}` is named `{}` like a module or a component{}: rename one",
+                def.name,
+                of_set(set)
+            );
+        }
+        Arc::make_mut(&mut self.classes).insert(
+            def.name,
+            ClassType {
+                spec: Arc::new(ClassSpec::of(def)),
                 type_name,
             },
         );
@@ -666,6 +725,15 @@ impl Registry {
                     panic!(
                         "{}, by two UI sets",
                         same_module(name, old.type_name, m.type_name, None)
+                    );
+                }
+            }
+            let classes = Arc::make_mut(&mut out.classes);
+            for (name, c) in set.classes.iter() {
+                if let Some(old) = classes.insert(name, c.clone()) {
+                    panic!(
+                        "{}, by two UI sets",
+                        same_class(name, old.type_name, c.type_name, None)
                     );
                 }
             }
@@ -750,6 +818,13 @@ impl Registry {
             .find(|f| f.name == function)
     }
 
+    /// The registered classes, by name.
+    pub fn class_specs(&self) -> Vec<Arc<ClassSpec>> {
+        let mut specs: Vec<_> = self.classes.values().map(|c| c.spec.clone()).collect();
+        specs.sort_by_key(|s| s.name);
+        specs
+    }
+
     /// The registered modules, by name.
     pub fn module_specs(&self) -> Vec<Arc<ModuleSpec>> {
         let mut specs: Vec<_> = self.modules.values().map(|m| m.spec.clone()).collect();
@@ -794,6 +869,18 @@ fn same_module(name: &str, old: &str, new: &str, set: Option<&str>) -> String {
     }
 }
 
+/// The message of two classes named `name`.
+fn same_class(name: &str, old: &str, new: &str, set: Option<&str>) -> String {
+    if old == new {
+        format!("class `{old}` is registered twice{}", of_set(set))
+    } else {
+        format!(
+            "classes `{old}` and `{new}` are both named `{name}`{}: rename one",
+            of_set(set)
+        )
+    }
+}
+
 /// ` in `nsh/ui/mobile`` for a registry with a specifier.
 fn of_set(set: Option<&str>) -> String {
     set.map(|s| format!(" in `{s}`")).unwrap_or_default()
@@ -802,13 +889,15 @@ fn of_set(set: Option<&str>) -> String {
 /// The declarations of what `registry`'s specs export: one component per
 /// spec (by its [`ComponentSpec::export`] name), one object per module
 /// (its type `<Name>Module`; merged into a component of the same name; a
-/// flat module's functions one by one), and the named types they use.
+/// flat module's functions one by one), one class per class, and the
+/// named types they use.
 /// Exports named in `omit` are left out (their types stay): `nsh-js`
 /// declares them, building on the module (`BackHandlerModule & ...`), as
 /// it declares the re-exports and native values it makes.
 pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
     let specs = registry.specs();
     let modules = registry.module_specs();
+    let classes = registry.class_specs();
     use std::fmt::Write as _;
     let mut out = String::new();
     let doc = |out: &mut String, indent: &str, doc: &str| {
@@ -823,6 +912,9 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
     }
     for m in &modules {
         types.merge(&m.types);
+    }
+    for c in &classes {
+        types.merge(&c.types);
     }
     for declaration in types.declarations() {
         let _ = write!(out, "{declaration}\n\n");
@@ -952,7 +1044,45 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             let _ = write!(out, "export declare const {0}: {0}Module;\n\n", m.name);
         }
     }
+    for c in classes.iter().filter(|c| !omit.contains(&c.name)) {
+        class_declaration(&mut out, c);
+    }
     out
+}
+
+/// `export declare class Name { ... }`.
+fn class_declaration(out: &mut String, c: &ClassSpec) {
+    use std::fmt::Write as _;
+    let doc = |out: &mut String, indent: &str, doc: &str| {
+        if !doc.is_empty() {
+            let _ = writeln!(out, "{indent}/** {doc} */");
+        }
+    };
+    doc(out, "", c.doc);
+    let _ = writeln!(out, "export declare class {} {{", c.name);
+    if !c.members.iter().any(|m| m.kind == MemberKind::Constructor) {
+        out.push_str("  /** Made by the class's members only. */\n  private constructor();\n");
+    }
+    for m in &c.members {
+        doc(out, "  ", m.doc);
+        let params = m
+            .params
+            .iter()
+            .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let returns = m.returns.clone().unwrap_or_else(|| "void".to_owned());
+        let _ = match m.kind {
+            MemberKind::Constructor => writeln!(out, "  constructor({params});"),
+            MemberKind::Method => writeln!(out, "  {}({params}): {returns};", m.name),
+            MemberKind::Getter => writeln!(out, "  get {}(): {returns};", m.name),
+            MemberKind::Setter => writeln!(out, "  set {}({params});", m.name),
+            MemberKind::Static => writeln!(out, "  static {}({params}): {returns};", m.name),
+        };
+    }
+    out.push_str(
+        "  /** Frees the Rust value now (else when the object is collected); the object throws after. */\n  dispose(): void;\n  [Symbol.dispose](): void;\n}\n\n",
+    );
 }
 
 /// `press` -> `onPress`.

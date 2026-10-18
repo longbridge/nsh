@@ -752,16 +752,24 @@ mod tests {
         }
     }
 
-    /// What each module exports at run time is what its declarations say.
+    /// What each module exports at run time is what its declarations say
+    /// (with a set of classes besides the UI set).
     #[test]
     fn declarations_match_the_modules() {
         let ui = nsh_ui_mobile::registry();
+        let classes = crate::classes::tests::registry();
         let host = crate::Host::with_options(crate::HostOptions {
-            ui_sets: vec![ui.clone()],
+            ui_sets: vec![ui.clone(), classes.clone()],
             ..crate::HostOptions::default()
         })
         .unwrap();
-        for (path, body) in bodies(&[ui]) {
+        let files = bodies(&[ui, classes]);
+        assert!(
+            files.iter().any(|(path, body)| path == "test/classes.d.ts"
+                && body.contains("export declare class Tally {")),
+            "the classes are declared"
+        );
+        for (path, body) in files {
             if path == "nsh/types.d.ts" {
                 continue;
             }

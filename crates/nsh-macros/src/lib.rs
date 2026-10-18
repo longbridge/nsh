@@ -11,6 +11,10 @@
 //! - `#[methods]` on an `impl` block of a component: its functions become
 //!   methods of the component's ref in JS (`ref.setValue(5)`,
 //!   `await ref.value()`).
+//! - `#[module]` on an `impl` block of a unit struct: functions of a JS
+//!   object (`Alert.alert(...)`).
+//! - `#[class]` on a struct and on its `impl` block: a JS class backed by
+//!   the Rust value (`new Tally(3)`, `tally.add(2)`).
 //!
 //! - `asset!("logo@2x.png")` / `assets!()`: the files a crate ships in its
 //!   `assets/` directory, read at compile time.
@@ -22,6 +26,7 @@
 //! internal to `nsh-core`: the spacing and sizing methods of `Styled`.
 
 mod assets;
+mod class;
 mod host_props;
 mod js_ops;
 mod native_module;
@@ -590,6 +595,23 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
                     #(Self::#idents => #names,)*
                 }))
             }
+
+            fn from_js(value: #ui::JsIn<'_>) -> ::core::result::Result<Self, #ui::PropError> {
+                ::core::result::Result::Ok(match value.as_string().as_deref() {
+                    #(::core::option::Option::Some(#patterns) => Self::#idents,)*
+                    _ => return ::core::result::Result::Err(value.expected(#expected)),
+                })
+            }
+
+            fn to_js<'a>(
+                &self,
+                host: &'a dyn #ui::JsHost,
+            ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
+                let name = match self {
+                    #(Self::#idents => #names,)*
+                };
+                ::core::result::Result::Ok(#ui::JsOwned::new(host, host.new_string(name)?))
+            }
         }
 
         impl ::nsh_core::js::host::HostValue for #name {
@@ -1150,6 +1172,8 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut ts = Vec::new();
     let mut from = Vec::new();
     let mut to = Vec::new();
+    let mut from_js = Vec::new();
+    let mut to_js = Vec::new();
     for field in &fields.named {
         let ident = field.ident.as_ref().expect("named");
         let ty = &field.ty;
@@ -1187,6 +1211,21 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
         to.push(quote! {
             object.insert(::std::string::String::from(#js), #ui::JsValue::to_json(&self.#ident));
         });
+        from_js.push(quote! {
+            #ident: {
+                let v = value.field(#js)?;
+                let v = v.get();
+                if v.kind() != #ui::JsKind::Undefined && (#is_option || !v.is_nullish()) {
+                    <#ty as #ui::JsValue>::from_js(v)
+                        .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #js, e)))?
+                } else {
+                    #missing
+                }
+            }
+        });
+        to_js.push(quote! {
+            host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
+        });
     }
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let type_name = name.to_string();
@@ -1216,6 +1255,23 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 let mut object = ::nsh_core::ui::__private::JsonMap::new();
                 #(#to)*
                 ::nsh_core::JsonValue::Object(object)
+            }
+
+            fn from_js(value: #ui::JsIn<'_>) -> ::core::result::Result<Self, #ui::PropError> {
+                if value.kind() != #ui::JsKind::Object {
+                    return ::core::result::Result::Err(value.expected("an object"));
+                }
+                ::core::result::Result::Ok(Self { #(#from_js),* })
+            }
+
+            fn to_js<'a>(
+                &self,
+                host: &'a dyn #ui::JsHost,
+            ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
+                let owned = #ui::JsOwned::new(host, host.new_object()?);
+                let object = owned.get().raw();
+                #(#to_js)*
+                ::core::result::Result::Ok(owned)
             }
         }
     })
@@ -1252,6 +1308,29 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let item = parse_macro_input!(item as ItemImpl);
     module_impl(item, flat)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// `#[class]` on a struct and on its `impl` block: a JS class (the
+/// struct's name) whose objects hold the Rust value. In the block, `new` is
+/// the constructor (a class without one is made by its members only);
+/// `&self` / `&mut self` functions are methods, `#[getter]` / `#[setter]`
+/// ones (`count`, `set_count`) the property `count`; functions without a
+/// receiver are statics. They run in the JS call: their parameters are
+/// [`JsValue`] types (a trailing `Option` is optional); they return
+/// nothing, a value, `Self` or another class's value (a new JS object), or
+/// a `Result` of one (an `Err` throws). Doc comments document the class
+/// and its members.
+#[proc_macro_attribute]
+pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
+    if !attr.is_empty() {
+        return syn::Error::new(Span::call_site(), "`#[class]` takes no arguments")
+            .into_compile_error()
+            .into();
+    }
+    let item = parse_macro_input!(item as syn::Item);
+    class::class(item)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

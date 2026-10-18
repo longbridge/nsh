@@ -356,6 +356,8 @@ enum Made {
     Module(Arc<ModuleSpec>, Option<&'static str>),
     /// One function of a flat module.
     Function(Arc<ModuleSpec>, Option<&'static str>, &'static str),
+    /// A Rust class (`#[class]`).
+    Class(&'static nsh_core::ui::ClassDef),
     /// A runtime value a registry exports as it is (`safeArea`).
     Reexport(&'static str),
 }
@@ -448,6 +450,9 @@ impl ModuleTable {
                 } else {
                     out.push((m.name.to_owned(), Made::Module(m.clone(), namespace)));
                 }
+            }
+            for class in registry.class_specs() {
+                out.push((class.name.to_owned(), Made::Class(class.def)));
             }
             for &value in registry
                 .reexports()
@@ -606,6 +611,10 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
                 Made::Function(spec, namespace, f) => {
                     components::module_function(ctx, &spec, namespace, f)
                 }
+                Made::Class(def) => match crate::classes::constructor(ctx, def) {
+                    Ok(ctor) => ctor.take(),
+                    Err(_) => qjs::JS_EXCEPTION,
+                },
                 Made::Reexport(value) => env::reexport(ctx, value),
             };
             if qjs::JS_IsException(value) {

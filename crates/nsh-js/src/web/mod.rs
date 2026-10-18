@@ -10,7 +10,8 @@
 //! briefly and never across a call into JS, so a re-entrant call throws
 //! instead of aliasing. Constructors honor `new.target`, so the classes can
 //! be subclassed (`class Channel extends EventTarget`). The classes are
-//! made when an app first reads one of the globals.
+//! made when an app first reads one of the globals. The objects of Rust's
+//! `#[class]` classes (`classes.rs`) are of the same QuickJS class.
 
 pub(crate) mod js;
 
@@ -255,11 +256,16 @@ struct Slot(RefCell<Box<dyn Object>>);
 unsafe extern "C" fn finalize(_rt: *mut qjs::JSRuntime, obj: Raw) {
     // SAFETY: the opaque of these classes is a boxed slot; its values free
     // themselves through the runtime.
-    unsafe {
+    let slot = unsafe {
         let p = qjs::JS_GetAnyOpaque(obj, &mut 0);
-        if !p.is_null() {
-            drop(Box::from_raw(p as *mut Slot));
-        }
+        (!p.is_null()).then(|| Box::from_raw(p as *mut Slot))
+    };
+    // A Rust class's value drops here: a panic in the app's drop must not
+    // unwind into the collector.
+    if let Some(slot) = slot
+        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(slot))).is_err()
+    {
+        log::error!(target: "js", "a value of a Rust class panicked while it was dropped");
     }
 }
 
@@ -272,7 +278,14 @@ unsafe extern "C" fn mark(rt: *mut qjs::JSRuntime, obj: Raw, mark: qjs::JS_MarkF
         if let Some(slot) = p.as_ref()
             && let Ok(data) = slot.0.try_borrow()
         {
-            data.trace(&mut |v| qjs::JS_MarkValue(rt, v, mark));
+            // A Rust class's tracing is the app's code: a panic must not
+            // unwind into the collector (what it did not mark stays alive).
+            let traced = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                data.trace(&mut |v| qjs::JS_MarkValue(rt, v, mark));
+            }));
+            if traced.is_err() {
+                log::error!(target: "js", "a value of a Rust class panicked while it was traced");
+            }
         }
     }
 }
@@ -411,10 +424,17 @@ pub(crate) fn instance(ctx: Ctx, new_target: Raw, class: Class, data: impl Objec
     } else {
         proto(ctx, class)?
     };
+    instance_of_proto(ctx, proto.raw(), data)
+}
+
+/// A new object holding `data` with prototype `proto` (the classes of
+/// Rust's `#[class]`, `classes.rs`, whose prototypes are made at run time).
+pub(crate) fn instance_of_proto(ctx: Ctx, proto: Raw, data: impl Object) -> R<V> {
+    register(ctx);
     let id = web(ctx).object_class;
     // SAFETY: an object of the web class owning its slot.
     unsafe {
-        let obj = V::checked(ctx, qjs::JS_NewObjectProtoClass(ctx, proto.raw(), id))?;
+        let obj = V::checked(ctx, qjs::JS_NewObjectProtoClass(ctx, proto, id))?;
         let slot: Box<Slot> = Box::new(Slot(RefCell::new(Box::new(data))));
         qjs::JS_SetOpaque(obj.raw(), Box::into_raw(slot) as *mut c_void);
         Ok(obj)
@@ -442,6 +462,14 @@ pub(crate) fn data<'a, T: Object>(ctx: Ctx, v: Raw, what: &str) -> R<RefMut<'a, 
         .map_err(|_| js::type_error(ctx, &format!("{what} used re-entrantly")))?;
     RefMut::filter_map(b, |d| (d.as_mut() as &mut dyn Any).downcast_mut::<T>())
         .map_err(|_| illegal(ctx))
+}
+
+/// `f` of the data of `v` as a `T`, without throwing (`None`: another
+/// value, or one in use).
+pub(crate) fn peek<T: Object, R>(ctx: Ctx, v: Raw, f: impl FnOnce(&T) -> R) -> Option<R> {
+    let slot = slot(ctx, v)?;
+    let data = slot.0.try_borrow().ok()?;
+    (data.as_ref() as &dyn Any).downcast_ref::<T>().map(f)
 }
 
 /// Whether `v` holds a `T`.

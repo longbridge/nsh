@@ -13,6 +13,7 @@ mod animated;
 mod bytecode;
 mod canvas;
 mod chunks;
+mod classes;
 mod components;
 mod console;
 mod declarations;

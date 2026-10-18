@@ -827,7 +827,7 @@ fn decode_composite(
 /// Deepest nesting of a value sent to a native component.
 const JSON_DEPTH: usize = 64;
 /// Most entries (array items, object fields) in such a value.
-const JSON_ENTRIES: usize = 1 << 20;
+pub(crate) const JSON_ENTRIES: usize = 1 << 20;
 
 /// A JS value as JSON for a native component (like `JSON.stringify`:
 /// functions and symbols become `null`, non-finite numbers too). Values

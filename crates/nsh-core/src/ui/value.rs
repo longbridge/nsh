@@ -4,6 +4,7 @@
 
 use std::{borrow::Borrow, fmt, ops::Deref, sync::Arc};
 
+use super::js::{JsHost, JsIn, JsKind, JsOwned};
 use crate::{JsonValue, style::Color};
 
 /// A cheaply cloned string: a static string or a shared one.
@@ -203,6 +204,11 @@ pub const fn ts_of<T: JsValue>() -> TsType {
 /// A type props and event data can have: how it converts from and to JSON,
 /// and its TypeScript type. `#[derive(PropEnum)]` implements it for enums
 /// of unit variants, `#[derive(JsObject)]` for structs.
+///
+/// Synchronous calls (classes' members, functions without a context)
+/// convert JS values directly ([`JsValue::from_js`], [`JsValue::to_js`]):
+/// the types here and the derived ones do so without JSON; a type that
+/// implements only the JSON conversions goes through JSON there.
 pub trait JsValue: Sized {
     /// Its TypeScript type (`string`, `AlertButton`), declaring the named
     /// types it uses in `types`.
@@ -213,6 +219,19 @@ pub trait JsValue: Sized {
 
     /// The value for JS.
     fn to_json(&self) -> JsonValue;
+
+    /// The value of JS value `value`, read directly (by default through
+    /// its JSON).
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        Self::from_json(value.to_json()?)
+    }
+
+    /// The value as a JS value of `host`, made directly (by default from
+    /// its JSON).
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let raw = host.json(&self.to_json())?;
+        Ok(JsOwned::new(host, raw))
+    }
 }
 
 impl JsValue for bool {
@@ -229,10 +248,32 @@ impl JsValue for bool {
     fn to_json(&self) -> JsonValue {
         JsonValue::Bool(*self)
     }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value.as_bool().ok_or_else(|| value.expected("a boolean"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_bool(*self)))
+    }
+}
+
+/// Whether `n` is a whole number in the range of a `bits`-bit integer.
+fn fits(n: f64, signed: bool, bits: u32) -> bool {
+    if !n.is_finite() || n.fract() != 0.0 {
+        return false;
+    }
+    let (lo, hi) = if signed {
+        let half = 2f64.powi(bits as i32 - 1);
+        (-half, half)
+    } else {
+        (0.0, 2f64.powi(bits as i32))
+    };
+    n >= lo && n < hi
 }
 
 macro_rules! number {
-    ($to_json:ident: $($ty:ty),*) => {$(
+    ($to_json:ident, $check:ident: $($ty:ty),*) => {$(
         impl JsValue for $ty {
             fn ts_type(_types: &mut TsTypes) -> String {
                 "number".into()
@@ -248,8 +289,28 @@ macro_rules! number {
             fn to_json(&self) -> JsonValue {
                 $to_json(*self)
             }
+
+            fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+                let n = value.as_number().ok_or_else(|| value.expected("a number"))?;
+                number!(@$check $ty, n, value);
+                Ok(n as $ty)
+            }
+
+            fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+                Ok(JsOwned::new(host, host.new_number(*self as f64)))
+            }
         }
     )*};
+    // A float takes any number.
+    (@any $ty:ty, $n:ident, $value:ident) => {};
+    // An integer takes a whole number in its range: a fraction, `NaN`,
+    // `Infinity` or a value out of range is a mistake, not something to
+    // round or clamp.
+    (@whole $ty:ty, $n:ident, $value:ident) => {
+        if !fits($n, <$ty>::MIN != 0, <$ty>::BITS) {
+            return Err($value.expected(concat!("an integer that fits ", stringify!($ty))));
+        }
+    };
 }
 
 fn float(n: impl Into<f64>) -> JsonValue {
@@ -265,9 +326,9 @@ fn uint(n: impl TryInto<u64>) -> JsonValue {
         .map_or(JsonValue::Null, |n: u64| JsonValue::Number(n.into()))
 }
 
-number!(float: f32, f64);
-number!(int: i32, i64);
-number!(uint: u32, u64, usize);
+number!(float, any: f32, f64);
+number!(int, whole: i32, i64);
+number!(uint, whole: u32, u64, usize);
 
 impl JsValue for SharedString {
     fn ts_type(_types: &mut TsTypes) -> String {
@@ -283,6 +344,17 @@ impl JsValue for SharedString {
 
     fn to_json(&self) -> JsonValue {
         JsonValue::String(self.as_str().to_owned())
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .as_string()
+            .map(Into::into)
+            .ok_or_else(|| value.expected("a string"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_string(self.as_str())?))
     }
 }
 
@@ -301,6 +373,14 @@ impl JsValue for String {
     fn to_json(&self) -> JsonValue {
         JsonValue::String(self.clone())
     }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value.as_string().ok_or_else(|| value.expected("a string"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_string(self)?))
+    }
 }
 
 /// A CSS color string from JS (`"#2563eb"`, `"rgb(0 0 0 / 0.5)"`).
@@ -318,6 +398,14 @@ impl JsValue for Color {
 
     fn to_json(&self) -> JsonValue {
         JsonValue::String(format!("#{:08x}", self.0))
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .as_string()
+            .as_deref()
+            .and_then(Color::parse)
+            .ok_or_else(|| value.expected("a color"))
     }
 }
 
@@ -343,11 +431,26 @@ impl JsValue for NodeRef {
     fn to_json(&self) -> JsonValue {
         serde_json::json!({ "$node": self.0 })
     }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .host()
+            .node(value.raw())
+            .map(NodeRef)
+            .ok_or_else(|| value.expected("a node"))
+    }
 }
 
 impl JsValue for JsonValue {
     fn ts_type(_types: &mut TsTypes) -> String {
         "unknown".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        match value.kind() {
+            JsKind::Undefined => Ok(JsonValue::Null),
+            _ => value.to_json(),
+        }
     }
 
     fn from_json(value: JsonValue) -> Result<Self, PropError> {
@@ -359,7 +462,7 @@ impl JsValue for JsonValue {
     }
 }
 
-/// `null` is `None`.
+/// `null` is `None` (and `undefined`, from JS).
 impl<T: JsValue> JsValue for Option<T> {
     fn ts_type(types: &mut TsTypes) -> String {
         format!("{} | null", T::ts_type(types))
@@ -374,6 +477,21 @@ impl<T: JsValue> JsValue for Option<T> {
 
     fn to_json(&self) -> JsonValue {
         self.as_ref().map_or(JsonValue::Null, T::to_json)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.is_nullish() {
+            Ok(None)
+        } else {
+            T::from_js(value).map(Some)
+        }
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        match self {
+            Some(v) => v.to_js(host),
+            None => Ok(JsOwned::new(host, host.null())),
+        }
     }
 }
 
@@ -391,5 +509,30 @@ impl<T: JsValue> JsValue for Vec<T> {
 
     fn to_json(&self) -> JsonValue {
         JsonValue::Array(self.iter().map(T::to_json).collect())
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        let len = value
+            .array_len()?
+            .ok_or_else(|| value.expected("an array"))?;
+        // The length is JS's (the host limits what it reads): reserve a
+        // bounded amount up front.
+        let mut out = Vec::with_capacity(len.min(1024));
+        for i in 0..len {
+            let item = value.index(i)?;
+            out.push(T::from_js(item.get()).map_err(|e| PropError(format!("[{i}]: {e}")))?);
+        }
+        Ok(out)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        // Owned until the array takes them: an item failing frees the
+        // ones made before.
+        let mut items = Vec::with_capacity(self.len());
+        for item in self {
+            items.push(item.to_js(host)?);
+        }
+        let raws = items.into_iter().map(JsOwned::into_raw).collect();
+        Ok(JsOwned::new(host, host.new_array(raws)?))
     }
 }

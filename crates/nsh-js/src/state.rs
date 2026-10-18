@@ -30,6 +30,7 @@ pub(crate) struct State {
     pub(crate) animations: crate::animated::Animations,
     pub(crate) canvases: crate::canvas::Canvases,
     pub(crate) web: crate::web::Web,
+    pub(crate) classes: crate::classes::Classes,
     pub(crate) hot: crate::hot::Hot,
     pub(crate) keymap: crate::keymap::Keymap,
     pub(crate) chunks: crate::chunks::Chunks,
@@ -79,6 +80,7 @@ pub(crate) fn install(ctx: &Ctx<'_>, shared: Rc<Shared>, ui_sets: &[Registry]) {
             animations: Default::default(),
             canvases: Default::default(),
             web: Default::default(),
+            classes: Default::default(),
             hot: Default::default(),
             keymap: Default::default(),
             chunks: Default::default(),
@@ -111,6 +113,7 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         state.hot.free_all();
         state.chunks.free_all();
         state.keymap.free_all();
+        state.classes.free_all();
         state.web.free_all();
         state.canvases.free_all(raw);
         state.animations.free_all(raw);

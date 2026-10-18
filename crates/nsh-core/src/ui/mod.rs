@@ -33,6 +33,7 @@ pub mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
+mod class;
 mod component;
 pub(crate) mod element;
 mod element_ref;
@@ -40,6 +41,7 @@ pub(crate) mod env;
 mod events;
 pub(crate) mod flow;
 pub(crate) mod host;
+mod js;
 pub(crate) mod keys;
 mod module;
 mod once;
@@ -80,7 +82,8 @@ pub use nsh_animation::{
     Curve, EaseMode, Easing, Extrapolate, Output as AnimationOutput, sample_easing,
 };
 pub use nsh_macros::{
-    Event, JsObject, PropEnum, Props, asset, assets, component, methods, module, native_module,
+    Event, JsObject, PropEnum, Props, asset, assets, class, component, methods, module,
+    native_module,
 };
 
 pub use self::{
@@ -89,6 +92,10 @@ pub use self::{
         NativeValue, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
+    class::{
+        Arg, Class, ClassDef, ClassInstance, ClassSpec, Instance, Member, MemberCall, MemberKind,
+        MemberSpec, Ret, Thrown,
+    },
     component::{
         Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,
         Methods, NoEvent, Param, PropKind, PropSpec, Props, Registry, Root, declarations,
@@ -110,6 +117,7 @@ pub use self::{
         Orientation, Painter, Screen, Scroll, Stack, Video, WebView, canvas, input,
         input_accessory_view, modal, native, screen, scroll, stack, video, web_view, web_view_html,
     },
+    js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
     module::{
         Function, FunctionCall, FunctionSpec, Module, ModuleCx, ModuleFuture, ModuleParam,
         ModuleSpec,
@@ -207,6 +215,7 @@ pub mod prelude {
         ImageAsset,
         Input,
         InputAccessoryView,
+        Instance,
         Interactive,
         Interpolation,
         IntoElement,
@@ -282,6 +291,7 @@ pub mod prelude {
         asset,
         assets,
         canvas,
+        class,
         image,
         input,
         input_accessory_view,
@@ -327,6 +337,8 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use serde_json::Map as JsonMap;
+
+    pub use super::class::__private::*;
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`
