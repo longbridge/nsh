@@ -1,6 +1,6 @@
 ---
 title: Building with Rust
-description: Write a Native Shell app entirely in Rust, with no QuickJS on any platform, or in Rust with TSX screens on top: when to choose which, and how the two share components and modules.
+description: "Write a Native Shell app entirely in Rust, with no QuickJS on any platform, or in Rust with TSX screens on top: when to choose which, and how the two share components and modules."
 order: 5.5
 group: start
 ---

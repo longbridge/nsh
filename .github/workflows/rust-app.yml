@@ -96,9 +96,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nsh-test-tmp"
           echo "TMPDIR=$RUNNER_TEMP/nsh-test-tmp" >> "$GITHUB_ENV"
       # QuickJS is C: bindgen needs libclang, its WebAssembly build clang
-      # and llvm-ar.
-      - name: Install clang and LLVM
-        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev
+      # and llvm-ar. The app's command line links the gallery's crate,
+      # whose native entry (`cargo run`) uses GTK 4 on Linux.
+      - name: Install clang, LLVM and GTK 4
+        run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
