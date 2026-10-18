@@ -16,6 +16,7 @@ fn main() -> impl std::process::Termination {
         platform::AppSource::Rust(platform::Root::of::<nsh_rust_app::App>()),
         platform::AppOptions {
             title: "Rust App".to_owned(),
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             app_id: "com.example.rustapp".to_owned(),
             size: (480, 640),
             script: std::env::var("NSH_SCRIPT").ok(),
