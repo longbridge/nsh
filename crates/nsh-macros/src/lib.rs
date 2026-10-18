@@ -601,10 +601,16 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
                 &self,
                 host: &'a dyn #ui::JsHost,
             ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
-                let name = match self {
-                    #(Self::#idents => #names,)*
-                };
+                let name = <Self as #ui::PropEnum>::js_name(self);
                 ::core::result::Result::Ok(#ui::JsOwned::new(host, host.new_string(name)?))
+            }
+        }
+
+        impl #ui::PropEnum for #name {
+            fn js_name(&self) -> &'static str {
+                match self {
+                    #(Self::#idents => #names,)*
+                }
             }
         }
 

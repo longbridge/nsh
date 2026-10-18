@@ -149,7 +149,7 @@ pub use self::{
     },
     task::{Answer, DialogAnswer, ImageSize, Task},
     theme::{Theme, ThemeColors, ThemeError},
-    value::{JsValue, NodeRef, PropError, SharedString, TsType, TsTypes, ts_of},
+    value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };
 pub(crate) use self::{

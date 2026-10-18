@@ -10,7 +10,7 @@ use nsh_core::{
         CanvasFont, CanvasOp, Composite, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num,
         Paint, PathOp,
     },
-    ui::JsValue,
+    ui::PropEnum,
 };
 
 use crate::encode::css_color;
@@ -173,11 +173,8 @@ fn font(f: &CanvasFont) -> String {
     )
 }
 
-fn name(v: &impl JsValue) -> String {
-    match v.to_json() {
-        serde_json::Value::String(s) => s,
-        other => other.to_string(),
-    }
+fn name(v: &impl PropEnum) -> &'static str {
+    v.js_name()
 }
 
 /// The drawing as `[[op, ...args], ...]`.
@@ -247,8 +244,8 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
             // Browsers' canvases draw no number forms (the shorthand only
             // takes `small-caps`).
             CanvasOp::FontVariantNumeric(_) => {}
-            CanvasOp::TextAlign(a) => w.op("=textAlign", |w| w.str(&name(a))),
-            CanvasOp::TextBaseline(b) => w.op("=textBaseline", |w| w.str(&name(b))),
+            CanvasOp::TextAlign(a) => w.op("=textAlign", |w| w.str(name(a))),
+            CanvasOp::TextBaseline(b) => w.op("=textBaseline", |w| w.str(name(b))),
             CanvasOp::FillText {
                 text,
                 x,

@@ -210,6 +210,13 @@ pub const fn ts_of<T: JsValue>() -> TsType {
     }
 }
 
+/// An enum of unit variants that is a string union in JS
+/// (`#[derive(PropEnum)]` implements it).
+pub trait PropEnum: JsValue {
+    /// The variant's JS name (`SemiBold` is `"semiBold"`).
+    fn js_name(&self) -> &'static str;
+}
+
 /// A type props, event data, and the arguments and results of classes and
 /// functions can have: how it converts from and to JS values (directly,
 /// in the JS call or when JS receives it) and its TypeScript type.

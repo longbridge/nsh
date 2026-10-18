@@ -15,7 +15,7 @@ use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
     OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
-    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource, ui::JsValue,
+    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource, ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
 
@@ -288,11 +288,8 @@ fn kebab(name: &str) -> String {
     out
 }
 
-fn enum_name(v: &impl JsValue) -> String {
-    match v.to_json() {
-        nsh_core::JsonValue::String(s) => s,
-        other => other.to_string(),
-    }
+fn enum_name(v: &impl PropEnum) -> &'static str {
+    v.js_name()
 }
 
 /// The CSS transform functions of a transform list (`value(i)` overrides
@@ -688,7 +685,7 @@ fn props_json(p: &ViewProps) -> String {
     let _ = write!(
         s,
         "\"pointerEvents\":{}",
-        json_str(&enum_name(&p.pointer_events))
+        json_str(enum_name(&p.pointer_events))
     );
     let h = p.hit_slop;
     let _ = write!(
@@ -774,13 +771,13 @@ fn input_json(c: &InputConfig) -> String {
         "\"placeholder\":{},\"secure\":{},\"keyboard\":{},\"returnKey\":{},\"multiline\":{},\"editable\":{},\"submit\":{},\"autoFocus\":{},\"autoCapitalize\":{},\"autoCorrect\":{},\"placeholderColor\":{}",
         json_str(&c.placeholder),
         c.secure,
-        json_str(&enum_name(&c.keyboard)),
-        json_str(&enum_name(&c.return_key)),
+        json_str(enum_name(&c.keyboard)),
+        json_str(enum_name(&c.return_key)),
         c.multiline,
         c.editable,
-        json_str(&enum_name(&c.submit())),
+        json_str(enum_name(&c.submit())),
         c.auto_focus,
-        json_str(&enum_name(&c.auto_capitalize)),
+        json_str(enum_name(&c.auto_capitalize)),
         c.auto_correct,
         c.placeholder_color.is_some(),
     );
@@ -819,7 +816,7 @@ fn behavior_json(b: &ScrollBehavior) -> String {
         b.paging,
         b.snap_interval,
         offsets.join(","),
-        json_str(&enum_name(&b.snap_alignment)),
+        json_str(enum_name(&b.snap_alignment)),
         b.enabled,
         b.bounces,
         b.content_inset.top,
@@ -1165,10 +1162,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::ModalConfig { id, config } => {
             out.item("mc")
                 .num(*id)
-                .str(&enum_name(&config.animation))
+                .str(enum_name(&config.animation))
                 .bool(config.transparent)
                 .bool(config.dismissible)
-                .str(&enum_name(&config.presentation))
+                .str(enum_name(&config.presentation))
                 .end();
         }
         MountItem::NativeProps { id, props } => match props {
