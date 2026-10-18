@@ -715,6 +715,7 @@ pub(crate) mod tests {
     pub(crate) struct Tally {
         count: i64,
         log: Vec<String>,
+        badge: Option<Instance<Token>>,
     }
 
     impl Drop for Tally {
@@ -744,6 +745,7 @@ pub(crate) mod tests {
             Tally {
                 count: start.unwrap_or(0),
                 log: Vec::new(),
+                badge: None,
             }
         }
 
@@ -798,6 +800,28 @@ pub(crate) mod tests {
         /// Panics.
         pub(crate) fn explode(&self) {
             panic!("boom");
+        }
+
+        /// Adds `other`'s count; the new count.
+        pub(crate) fn absorb(&mut self, other: &Tally) -> i64 {
+            self.add(other.count)
+        }
+
+        /// Keeps `token`.
+        pub(crate) fn pin(&mut self, token: Option<Instance<Token>>) {
+            self.badge = token;
+        }
+
+        /// The token kept.
+        #[getter]
+        pub(crate) fn badge(&self) -> Option<Instance<Token>> {
+            self.badge.clone()
+        }
+
+        /// Raises `token`'s id.
+        pub(crate) fn bump(token: &mut Token) -> u32 {
+            token.id += 1;
+            token.id
         }
 
         /// Values whose third does not convert.
@@ -984,6 +1008,67 @@ pub(crate) mod tests {
                 "1",
             ]
         );
+    }
+
+    #[test]
+    fn instances_are_arguments_and_results() {
+        let host = host();
+        let shown = run(
+            &host,
+            r#"
+            const msg = (f) => { try { f(); return "no throw"; } catch (e) { return `${e.name}: ${e.message}`; } };
+            const a = new Tally(2), b = new Tally(3);
+            show(String(a.absorb(b)));
+            show(msg(() => a.absorb(a)));
+            const k = Token.mint(7);
+            a.pin(k);
+            show(String(a.badge === k) + " " + a.badge.id);
+            show(String(Tally.bump(k)) + " " + a.badge.id);
+            show(msg(() => a.absorb(k)));
+            show(msg(() => a.pin({})));
+            a.pin(Token.mint(9));
+            globalThis.a = a;
+            a.pin(undefined);
+            show(String(a.badge));
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            shown,
+            [
+                "5",
+                "TypeError: Tally used re-entrantly",
+                "true 7",
+                "8 8",
+                "TypeError: Tally.absorb: `other`: expected a Tally, got a Token",
+                "TypeError: Tally.pin: `token`: expected a Token, got an object",
+                "null",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_instance_rust_keeps_gets_a_new_object_after_its_own_is_collected() {
+        let host = host();
+        run(
+            &host,
+            r#"
+            globalThis.a = new Tally(1);
+            let k = Token.mint(9);
+            k.extra = "on the object";
+            a.pin(k);
+            k = null;
+            show(String(a.badge.extra));
+            "#,
+        )
+        .unwrap();
+        host.collect_garbage();
+        let shown = run(
+            &host,
+            "show(`${a.badge.id} ${a.badge.extra} ${a.badge === a.badge}`);",
+        )
+        .unwrap();
+        assert_eq!(shown, ["9 undefined true"]);
     }
 
     #[test]

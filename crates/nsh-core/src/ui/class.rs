@@ -284,7 +284,8 @@ impl<C: Class> ClassInstance for InstanceCell<C> {
 
 // --- What crosses -----------------------------------------------------------------
 
-/// A parameter of a class's member: a [`JsValue`] type.
+/// A parameter of a class's member: a [`JsValue`] type or an instance
+/// ([`Instance`]; `&Other` / `&mut Other` borrow one for the call).
 pub trait Arg: Sized {
     /// Its TypeScript type.
     fn ts_type(types: &mut TsTypes) -> String;
@@ -302,8 +303,39 @@ impl<T: JsValue> Arg for T {
     }
 }
 
-/// A result of a class's member: a [`JsValue`] type, `()`, or a class's
-/// value (`#[class]` implements it for the struct: a new instance).
+/// The instance a JS object of `C` holds (another class's, or another
+/// value, is refused).
+impl<C: Class> Arg for Instance<C> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        C::DEF.name.to_owned()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .host()
+            .instance(value.raw())
+            .and_then(Instance::of)
+            .ok_or_else(|| value.expected(&format!("a {}", C::DEF.name)))
+    }
+}
+
+/// `null` or `undefined` is `None`.
+impl<C: Class> Arg for Option<Instance<C>> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("{} | null", <Instance<C> as Arg>::ts_type(types))
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.is_nullish() {
+            return Ok(None);
+        }
+        Instance::from_js(value).map(Some)
+    }
+}
+
+/// A result of a class's member: a [`JsValue`] type, `()`, an instance
+/// (the JS object it has, or a new one), or a class's value (`#[class]`
+/// implements it for the struct: a new instance).
 pub trait Ret: Sized {
     /// Its TypeScript type.
     fn ts_type(types: &mut TsTypes) -> String;
@@ -328,6 +360,29 @@ impl Ret for () {
 
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         Ok(JsOwned::new(host, host.undefined()))
+    }
+}
+
+impl<C: Class> Ret for Instance<C> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        C::DEF.name.to_owned()
+    }
+
+    fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.wrap(self.erased())?))
+    }
+}
+
+impl<C: Class> Ret for Option<Instance<C>> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("{} | null", <Instance<C> as Ret>::ts_type(types))
+    }
+
+    fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        match self {
+            Some(i) => i.into_js(host),
+            None => Ok(JsOwned::new(host, host.null())),
+        }
     }
 }
 
@@ -419,10 +474,7 @@ pub(crate) mod __private {
 
     /// The class a struct's value makes a new instance of.
     pub fn class_into_js<C: Class>(value: C, host: &dyn JsHost) -> Result<JsOwned<'_>, PropError> {
-        Ok(JsOwned::new(
-            host,
-            host.wrap(Instance::new(value).erased())?,
-        ))
+        Instance::new(value).into_js(host)
     }
 
     /// `C`'s TypeScript type.
@@ -578,6 +630,11 @@ mod tests {
         fn reset(&mut self, to: Option<i64>, by: i64) {
             self.count = to.unwrap_or(0) + by;
         }
+
+        fn absorb(&mut self, other: &Tally, token: Option<Instance<Token>>) -> Instance<Token> {
+            self.count += other.count;
+            token.unwrap_or_else(|| Instance::new(Token))
+        }
     }
 
     /// Made by its members only.
@@ -612,6 +669,7 @@ export declare class Tally {
   /** A tally from `"12"`; throws on anything else. */
   static parse(text: string): Tally;
   reset(to: number | null, by: number): void;
+  absorb(other: Tally, token?: Token | null): Token;
   /** Frees the Rust value now (else when the object is collected); the object throws after. */
   dispose(): void;
   [Symbol.dispose](): void;

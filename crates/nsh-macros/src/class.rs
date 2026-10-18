@@ -129,6 +129,14 @@ fn kind_of(f: &ImplItemFn) -> syn::Result<Kind> {
     })
 }
 
+/// A parameter: how the generated code gets it.
+enum Param<'a> {
+    /// An `Arg`.
+    Value(&'a Type),
+    /// `&Other` / `&mut Other`: an instance borrowed for the call.
+    Borrowed { elem: &'a Type, mutable: bool },
+}
+
 fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     if !item.generics.params.is_empty() || item.trait_.is_some() {
@@ -213,7 +221,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         Kind::Method { .. } | Kind::Getter | Kind::Setter { .. } => 1,
         _ => 0,
     };
-    let mut params: Vec<&Type> = Vec::new();
+    let mut params = Vec::new();
     let mut names = Vec::new();
     for arg in f.sig.inputs.iter().skip(skip) {
         let FnArg::Typed(t) = arg else {
@@ -232,13 +240,13 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             ));
         };
         names.push(camel(&name.ident.to_string()));
-        if let Type::Reference(_) = &*t.ty {
-            return Err(syn::Error::new(
-                t.ty.span(),
-                "a class member's parameters are values (`JsValue` types)",
-            ));
-        }
-        params.push(&t.ty);
+        params.push(match &*t.ty {
+            Type::Reference(r) => Param::Borrowed {
+                elem: &r.elem,
+                mutable: r.mutability.is_some(),
+            },
+            ty => Param::Value(ty),
+        });
     }
     // An `Option` parameter is optional when the ones after it are too (a
     // setter's value never is: TypeScript requires it).
@@ -247,7 +255,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         if matches!(kind, Kind::Setter { .. }) {
             break;
         }
-        let is_option = matches!(last_segment(params[i]), Some((id, _)) if id == "Option");
+        let is_option = matches!(&params[i], Param::Value(ty) if matches!(last_segment(ty), Some((id, _)) if id == "Option"));
         if !is_option {
             break;
         }
@@ -257,7 +265,13 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .iter()
         .zip(&names)
         .zip(&optional)
-        .map(|((ty, name), optional)| quote!((#name, #private::arg_ts::<#ty>(), #optional)))
+        .map(|((p, name), optional)| {
+            let ts = match p {
+                Param::Value(ty) => quote!(#private::arg_ts::<#ty>()),
+                Param::Borrowed { elem, .. } => quote!(#private::arg_ts::<#ui::Instance<#elem>>()),
+            };
+            quote!((#name, #ts, #optional))
+        })
         .collect();
     let (returns, ok_ty, fallible) = match &f.sig.output {
         ReturnType::Default => (quote!(::core::option::Option::None), None, false),
@@ -307,7 +321,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
 fn sync_call(
     f: &ImplItemFn,
     kind: Kind,
-    params: &[&Type],
+    params: &[Param<'_>],
     names: &[String],
     what: &str,
     fallible: bool,
@@ -316,13 +330,34 @@ fn sync_call(
     let private = quote!(#ui::__private);
     let ident = &f.sig.ident;
     let mut decode = Vec::new();
+    let mut borrow = Vec::new();
+    let mut release = Vec::new();
     let mut args = Vec::new();
-    for (i, (ty, name)) in params.iter().zip(names).enumerate() {
+    for (i, (p, name)) in params.iter().zip(names).enumerate() {
         let local = format_ident!("__arg{}", i);
-        decode.push(quote! {
-            let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
-        });
-        args.push(quote!(#local));
+        match p {
+            Param::Value(ty) => {
+                decode.push(quote! {
+                    let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
+                });
+                args.push(quote!(#local));
+            }
+            Param::Borrowed { elem, mutable } => {
+                let held = format_ident!("__held{}", i);
+                decode.push(quote! {
+                    let #held: #ui::Instance<#elem> =
+                        #private::arg::<#ui::Instance<#elem>>(host, #i, #what, #name)?;
+                });
+                if *mutable {
+                    borrow.push(quote!(let mut #local = #private::borrow_mut::<#elem>(&#held)?;));
+                    args.push(quote!(&mut *#local));
+                } else {
+                    borrow.push(quote!(let #local = #private::borrow::<#elem>(&#held)?;));
+                    args.push(quote!(&*#local));
+                }
+                release.push(quote!(::core::mem::drop(#local);));
+            }
+        }
     }
     let (this, receiver) = match kind {
         Kind::Method { mutable } | Kind::Setter { mutable } => {
@@ -363,18 +398,19 @@ fn sync_call(
     };
     // The borrows end before the result reaches JS (making its object may
     // run the collector, which reads the instance).
-    let release = match kind {
-        Kind::Method { .. } | Kind::Setter { .. } | Kind::Getter => {
-            quote!(::core::mem::drop(__value);)
-        }
-        _ => quote!(),
-    };
+    if matches!(
+        kind,
+        Kind::Method { .. } | Kind::Setter { .. } | Kind::Getter
+    ) {
+        release.push(quote!(::core::mem::drop(__value);));
+    }
     quote! {
         #ui::MemberCall::Sync(|host| {
             #(#decode)*
             #this
+            #(#borrow)*
             let __result = Self::#ident(#(#call_args),*);
-            #release
+            #(#release)*
             #finish
         })
     }

@@ -1318,10 +1318,11 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `&self` / `&mut self` functions are methods, `#[getter]` / `#[setter]`
 /// ones (`count`, `set_count`) the property `count`; functions without a
 /// receiver are statics. They run in the JS call: their parameters are
-/// [`JsValue`] types (a trailing `Option` is optional); they return
-/// nothing, a value, `Self` or another class's value (a new JS object), or
-/// a `Result` of one (an `Err` throws). Doc comments document the class
-/// and its members.
+/// [`JsValue`] types (a trailing `Option` is optional) and instances
+/// (`&Other` / `&mut Other` borrowed for the call, `Instance<Other>` kept);
+/// they return nothing, a value, `Self` or another class's value (a new JS
+/// object), an `Instance` (its JS object), or a `Result` of one (an `Err`
+/// throws). Doc comments document the class and its members.
 #[proc_macro_attribute]
 pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
