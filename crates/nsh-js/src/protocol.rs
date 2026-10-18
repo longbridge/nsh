@@ -44,6 +44,12 @@ impl Warnings {
         }
     }
 
+    /// Whether `message` was reported (tests).
+    #[cfg(test)]
+    pub(crate) fn reported(&self, message: &str) -> bool {
+        self.seen.contains(message)
+    }
+
     /// Logs what `other` collected and was not reported yet.
     pub(crate) fn merge(&mut self, other: Warnings) {
         for message in other.deferred.unwrap_or_default() {

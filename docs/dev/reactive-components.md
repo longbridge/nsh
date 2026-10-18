@@ -196,7 +196,7 @@ pub struct StepperProps {
 ```
 
 - From JS, a changed prop writes that prop's signal: the JS face decodes it into the field's type when JS sets it
-  (`PropSpec::decode`, a wrong type throws there) and sends the value (`Op::SetProp { RustProp }`, an `AnyValue`),
+  (`PropSpec::decode`; a wrong type is a warning, as a host prop's, and the prop keeps its value) and sends the value (`Op::SetProp { RustProp }`, an `AnyValue`),
   which the core moves into the signal. Only the bindings that read it run.
 - From Rust, a parent passes each prop as a value, a signal or a closure: `ButtonProps { title: "Save".into(),
   disabled: busy.into(), .. }`. The field type is `Prop<T>`, built from any `Into<Reactive<T>>`.

@@ -541,6 +541,12 @@ impl Host {
         });
     }
 
+    /// Whether warning `message` was logged (tests).
+    #[cfg(test)]
+    pub(crate) fn warned(&self, message: &str) -> bool {
+        self.shared.warnings.borrow().reported(message)
+    }
+
     /// Runs `f` with the raw context (tests).
     #[cfg(test)]
     pub(crate) fn with_raw<R>(&self, f: impl FnOnce(*mut qjs::JSContext) -> R) -> R {

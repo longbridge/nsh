@@ -3810,8 +3810,8 @@ mod components {
                 .iter()
                 .any(|i| matches!(i, MountItem::Create { .. }))
         );
-        // A value of the wrong type does not convert (JS's assignment
-        // throws); one decoded for another type is refused (and logged),
+        // A value of the wrong type does not convert (JS warns and sends
+        // nothing); one decoded for another type is refused (and logged),
         // nothing changes.
         let specs = <TallyProps as Props>::spec(&mut crate::ui::TsTypes::default());
         let decode = specs

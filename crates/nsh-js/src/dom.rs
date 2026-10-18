@@ -569,6 +569,11 @@ fn new_node(ctx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> Js
     obj
 }
 
+/// Logs `message` with the VM's warnings (once), as a host prop's.
+pub(crate) fn warn(ctx: *mut JsContext, message: String) {
+    dom(ctx).shared.warnings.borrow_mut().warn(message);
+}
+
 /// Logs what `warnings` collected, with the VM's (each once).
 pub(crate) fn merge_warnings(ctx: *mut JsContext, warnings: crate::protocol::Warnings) {
     dom(ctx).shared.warnings.borrow_mut().merge(warnings);

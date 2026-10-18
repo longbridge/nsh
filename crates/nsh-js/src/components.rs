@@ -3,8 +3,8 @@
 //!
 //! A component is a host view naming it (`component`), its own props
 //! converted into their Rust types when they change (one render effect
-//! reads them all; a value of the wrong type throws a `TypeError` there)
-//! and set as `Prop::RustProp`, its events delivered to the `on<Event>`
+//! reads them all; a value of the wrong type is a warning, as a host
+//! element's, and keeps the prop's value) and set as `Prop::RustProp`, its events delivered to the `on<Event>`
 //! handlers, its children inserted when it takes some, and one holder per
 //! named slot the app fills. A module's function without a context runs in
 //! the JS call (`classes.rs`); one with a context or `async`, and a
@@ -758,8 +758,11 @@ unsafe extern "C" fn props_run(
 }
 
 /// Sets prop `key` of the Rust component on `node` to `value` (borrowed),
-/// converted into the prop's type now: a value of another type throws a
-/// `TypeError`; `undefined` resets the prop to its default.
+/// converted into the prop's type now. A value of another type is a
+/// warning, as a host element's is (`Gauge.level: expected ...`), and the
+/// prop keeps its value (its default in the first render); `undefined`
+/// resets it to its default. A getter that throws, or a decoder's panic,
+/// throws.
 fn set_rust_prop(
     ctx: *mut JsContext,
     node: JsValue,
@@ -798,8 +801,8 @@ fn set_rust_prop(
             // A getter threw: its exception goes on.
             Err(_) if host.has_pending() => return Err(qjs::JS_EXCEPTION),
             Err(e) => {
-                let _ = crate::web::js::type_error(ctx, &format!("{}.{key}: {e}", spec.export));
-                return Err(qjs::JS_EXCEPTION);
+                dom::warn(ctx, format!("{}.{key}: {e}", spec.export));
+                return Ok(());
             }
         }
     };

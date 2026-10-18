@@ -178,7 +178,7 @@ mount(() => <Overview />);
 ```
 
 props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 组件自己的内容、事件和状态留在
-Rust 中；TSX 传入 props、接收事件。类型不对的 prop 在 TSX 设置它的地方抛出 `TypeError`（`u32` 类型的 prop 传 `level={1.5}`）。
+Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型的 prop 传 `level={1.5}`）和内置元素上一样给出警告：这个 prop 保持原值，组件的其余部分照常渲染。
 
 函数和成员按 Rust 签名运行。不是 `async` 的在 TSX 调用中直接运行并返回值（`Portfolio.total()` 是数字，`ledger.balance` 是属性）：
 它们计算并保存状态。`async fn` 返回 Promise，作为任务运行，可以使用 NSH 的服务（`fetch`、`timer`、对话框）；带

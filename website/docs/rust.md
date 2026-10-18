@@ -187,7 +187,8 @@ mount(() => <Overview />);
 
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
-events. A prop of the wrong type throws a `TypeError` where TSX sets it (`level={1.5}` for a `u32` prop).
+events. A prop of the wrong type (`level={1.5}` for a `u32` prop) is a warning, as on a built-in element: the
+prop keeps its value and the rest of the component renders.
 
 A function or a member runs the way its Rust signature says. One that is not `async` runs inside the TSX call and
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An

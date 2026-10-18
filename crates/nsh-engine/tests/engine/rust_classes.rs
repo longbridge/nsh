@@ -541,7 +541,7 @@ setTimeout(async () => {
       await msg(() => Ints.later(v)),
       await msg(() => dial.set(v)),
       await msg(() => dial.setLater(v)),
-      // Thrown by the assignment.
+      // A prop warns instead (as a host element's), keeping its value.
       await msg(() => { level.set(v); return "set"; }),
     ];
     lines.push(kinds.join(" / "));
@@ -591,7 +591,7 @@ fn integers_take_the_same_values_in_every_kind_of_call_and_prop() {
                 refused("Ints.later: `n`"),
                 refused("Dial.set: `at`"),
                 refused("Dial.setLater: `at`"),
-                refused("Gauge.level"),
+                "set".to_owned(),
             ]
             .join(" / ")
         );
@@ -713,46 +713,28 @@ fn mounted(rx: &Receiver<MountBatch>, ms: u64) -> (Vec<String>, String) {
     (texts, items)
 }
 
-/// An app whose `tree` throws as it mounts shows what it threw.
-fn throwing_mount(tree: &str) -> String {
-    format!(
-        r#"import {{ mount, signal, Text }} from "nsh";
-import {{ Gauge }} from "test/classes";
+const FIRST: &str = r#"import { mount, signal, Text } from "nsh";
+import { Gauge } from "test/classes";
 
 const level = signal(1.5);
-const id = signal("zza");
-const bad = () => {{ throw new Error("boom"); }};
-try {{
-  mount(() => (
-    <>
-      <Text>before</Text>
-      {tree}
-      <Text>after</Text>
-    </>
-  ));
-}} catch (e) {{
-  mount(() => <Text>{{`caught ${{e.name}}: ${{e.message}}`}}</Text>);
-}}
-"#
-    )
-}
+setTimeout(() => level.set(3), 50);
+mount(() => (
+  <>
+    <Text>before</Text>
+    <Gauge level={level()} testID="gauge" />
+    <Text>after</Text>
+  </>
+));
+"#;
 
 #[test]
-fn a_prop_that_fails_at_the_first_render_throws_as_a_render_effect_does() {
-    // A JS binding throwing in the first render: what mounting does.
-    let (_engine, rx) = start(&throwing_mount("<Text>{bad()}</Text>"), vec![registry()]);
-    let (texts, _) = mounted(&rx, 500);
-    assert_eq!(texts, ["caught Error: boom"]);
-    // A Rust component's prop that does not convert: the same.
-    let (_engine, rx) = start(
-        &throwing_mount("<Gauge level={level()} testID={id()} />"),
-        vec![registry()],
-    );
-    let (texts, _) = mounted(&rx, 500);
-    assert_eq!(
-        texts,
-        ["caught TypeError: Gauge.level: expected an integer that fits u32, got 1.5"]
-    );
+fn a_prop_that_fails_at_the_first_render_keeps_its_default_and_the_app_mounts() {
+    let (_engine, rx) = start(FIRST, vec![registry()]);
+    let (texts, items) = mounted(&rx, 500);
+    // A warning, as a host element's bad value: everything mounts, the
+    // prop at its default, the others set; a valid value later applies.
+    assert_eq!(texts, ["before", "level 0", "after", "level 3"]);
+    assert!(items.contains("gauge"), "{items}");
 }
 
 const LATER: &str = r#"import { mount, signal, Text } from "nsh";
@@ -762,7 +744,7 @@ const level = signal(1);
 const id = signal("zzb");
 const shown = signal("waiting");
 setTimeout(() => {
-  try { level.set(-1); } catch (e) { shown.set(`thrown ${e.name}`); }
+  try { level.set(-1); shown.set("not thrown"); } catch (e) { shown.set(`thrown ${e.name}`); }
   setTimeout(() => id.set("zzc"), 50);
 }, 50);
 
@@ -775,10 +757,10 @@ mount(() => (
 "#;
 
 #[test]
-fn a_prop_that_fails_later_holds_back_no_other_prop() {
+fn a_prop_that_fails_later_keeps_its_value_and_holds_back_no_other_prop() {
     let (_engine, rx) = start(LATER, vec![registry()]);
     let (texts, items) = mounted(&rx, 800);
-    assert!(texts.iter().any(|t| t == "thrown TypeError"), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "not thrown"), "{texts:?}");
     // The props after it still reach the view, right away.
     assert!(items.contains("zzb") && items.contains("zzc"), "{items}");
     assert!(texts.iter().any(|t| t == "level 1"), "{texts:?}");

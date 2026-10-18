@@ -1227,8 +1227,9 @@ mod tests {
                 .unwrap()
         );
         assert!(props.size == StepperSize::ExtraLarge);
-        // A value of another type: the conversion fails (JS's assignment
-        // throws), and so does a decoded value of another prop's type.
+        // A value of another type: the conversion fails (JS warns, the prop
+        // keeps its value), and so does a decoded value of another prop's
+        // type.
         assert!(size(serde_json::json!("huge")).is_err());
         assert!(props.set("size", Some(AnyValue::new(1.0f64))).is_err());
         assert!(props.set("size", None).unwrap());

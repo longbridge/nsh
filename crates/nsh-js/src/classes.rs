@@ -1747,6 +1747,25 @@ pub(crate) mod tests {
         }
     }
 
+    /// Shows a `u32` prop.
+    #[derive(Default)]
+    pub(crate) struct Meter;
+
+    #[derive(Clone, PartialEq, Props)]
+    pub(crate) struct MeterProps {
+        #[prop(default)]
+        level: nsh_core::ui::Prop<u32>,
+    }
+
+    impl Component for Meter {
+        type Props = MeterProps;
+        type Event = NoEvent;
+
+        fn view(props: MeterProps, _: Scope<NoEvent>) -> impl IntoElement {
+            text(move || format!("level {}", props.level.get()))
+        }
+    }
+
     /// A type named `Instance` that is not a class's.
     mod gpu {
         pub(crate) struct Instance;
@@ -1802,7 +1821,8 @@ pub(crate) mod tests {
             .class::<Noisy>()
             .class::<Watcher>()
             .class::<Shouter>()
-            .module::<Tools>();
+            .module::<Tools>()
+            .register::<Meter>();
         r
     }
 
@@ -2380,6 +2400,33 @@ pub(crate) mod tests {
             ["parked,later"]
         );
         LISTENER.with(|l| l.borrow_mut().take());
+    }
+
+    #[test]
+    fn a_prop_of_the_wrong_type_is_a_warning_as_a_host_props_is() {
+        let host = host();
+        host.eval_source(
+            "import { mount } from \"nsh\";\n\
+             import { Meter } from \"test/classes\";\n\
+             mount(() => Meter({ level: 1.5, testID: \"meter\" }));",
+        )
+        .unwrap();
+        assert!(host.warned("Meter.level: expected an integer that fits u32, got 1.5"));
+        // The other props are set; the bad one is not sent.
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            nsh_core::Op::SetProp { prop: nsh_core::Prop::TestId(Some(id)), .. } if &**id == "meter"
+        )));
+        assert!(!ops.iter().any(|op| matches!(
+            op,
+            nsh_core::Op::SetProp {
+                prop: nsh_core::Prop::RustProp("level", _),
+                ..
+            }
+        )));
+        assert!(!host.has_exception());
     }
 
     #[test]

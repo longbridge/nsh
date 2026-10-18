@@ -75,12 +75,13 @@ child components go with it. The design and its reasons: `reactive-components.md
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
-  (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. A prop JS sets with
-  the wrong type throws a `TypeError` at the assignment (``Gauge.level: expected an integer that fits u32, got
-  1.5``): the JS face decodes it there and sends the typed value (`Prop::RustProp`, an `AnyValue`); clearing a prop
-  (`undefined`) restores its default. The other props are set all the same (one effect reads them all, so each stays
-  tracked), and the first error is the effect's, thrown as any render effect's is: by the assignment that ran it,
-  or by `mount` in the first render. A Rust parent passes a value
+  (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. The JS face
+  decodes a prop when JS sets it and sends the typed value (`Prop::RustProp`, an `AnyValue`); one of the wrong type
+  is a warning, as a host element's bad value is (``Gauge.level: expected an integer that fits u32, got 1.5``,
+  through the VM's warnings and the dev overlay), and the prop keeps its value (its default in the first render)
+  while every other prop is set (one effect reads them all, so each stays tracked); clearing a prop (`undefined`)
+  restores its default. Only a decoder's panic or a getter's exception throws, as a render effect's error: by the
+  assignment that ran it, or by `mount` in the first render. A Rust parent passes a value
   (`3.into()`), a signal (`n.into()`) or a closure (`Prop::bind(move || ..)`). Platform-only props are an `android` /
   `ios` prop of a `JsObject` struct (`StatusBar`'s `android={{ backgroundColor }}`), as for host elements.
 - **`Scope<E>`** (`Copy`) is what the component has of its own: `cx.emit(event)` (to the app's `on<Event>`, or to the
