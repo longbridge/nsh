@@ -130,6 +130,10 @@ pub struct HostOptions {
     /// The UI sets apps import as native modules
     /// (`nsh_ui_mobile::registry()`, served as `nsh/ui/mobile`).
     pub ui_sets: Vec<nsh_core::ui::Registry>,
+    /// The table the instances of Rust classes cross in between the VM and
+    /// the core (`async` members): the engine hands the core the same one
+    /// ([`nsh_core::Core::set_class_instances`]).
+    pub class_instances: nsh_core::ui::Instances,
     /// The URL relative request URLs (`fetch("/api")`, `new Request("x")`)
     /// resolve against: the page's on the web. `None` (native hosts):
     /// they are invalid, as there is no document they belong to.
@@ -161,7 +165,12 @@ impl Host {
             ..Shared::default()
         });
         ctx.with(|ctx| {
-            crate::state::install(&ctx, shared.clone(), &options.ui_sets);
+            crate::state::install(
+                &ctx,
+                shared.clone(),
+                &options.ui_sets,
+                options.class_instances.clone(),
+            );
             web::web(ctx.as_raw().as_ptr()).base_url = options
                 .base_url
                 .as_deref()

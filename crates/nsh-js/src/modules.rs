@@ -404,6 +404,15 @@ impl ModuleTable {
         }
     }
 
+    /// The specifier of the set class `def` belongs to (its `async`
+    /// members are called by it).
+    pub(crate) fn specifier_of_class(&self, def: &nsh_core::ui::ClassDef) -> Option<&'static str> {
+        self.registries
+            .iter()
+            .find(|r| r.has_class(def))?
+            .specifier()
+    }
+
     /// The exports of module `name`, if it is one.
     fn exports(&self, name: &str) -> Option<Vec<(String, Made)>> {
         let mut out: Vec<(String, Made)> = Vec::new();

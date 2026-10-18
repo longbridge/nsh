@@ -24,7 +24,7 @@ use std::{
 use rustc_hash::FxHashMap;
 use tokio::runtime::Handle;
 
-use crate::{Command, Dialog, JsonValue, NodeId, ROOT_ID, StatusBarSetting, time::Instant};
+use crate::{Command, Dialog, NodeId, ROOT_ID, StatusBarSetting, time::Instant};
 
 type LocalFuture = Pin<Box<dyn Future<Output = ()>>>;
 
@@ -63,7 +63,7 @@ pub(crate) enum Action {
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<i32>>>),
     /// The result of a module function JS waits for.
-    Return(u64, Result<JsonValue, String>),
+    Return(u64, Result<super::class::Wire, String>),
     /// The pixel size of the image at the URI (its bytes stay loaded); the
     /// answer resolves the slot.
     ImageInfo(String, AnswerSlot<Result<ImageSize, String>>),

@@ -39,10 +39,16 @@ mod imp {
     impl Script {
         /// Starts a VM for `bundle` and evaluates it (errors go to `sink`);
         /// also the time evaluation took. `None`: the VM did not start.
+        /// Rust classes' instances cross to the core in `class_instances`.
+        #[allow(
+            clippy::too_many_arguments,
+            reason = "the VM's setup, from the engine's"
+        )]
         pub(crate) fn start<M: TextEngine + 'static>(
             bundle: &Bundle,
             limits: Limits,
             ui_sets: &[nsh_core::ui::Registry],
+            class_instances: nsh_core::ui::Instances,
             environment: &Environment,
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
@@ -53,6 +59,7 @@ mod imp {
                 harden: bundle.policy.harden,
                 harden_bytecode: bundle.harden_bytecode.clone(),
                 ui_sets: ui_sets.to_vec(),
+                class_instances,
                 base_url: bundle.base_url.as_deref().map(str::to_owned),
             };
             let mut host = match Host::with_options(options) {
@@ -233,10 +240,12 @@ mod stub {
     }
 
     impl Script {
+        #[allow(clippy::too_many_arguments, reason = "as the real one's")]
         pub(crate) fn start<M: TextEngine + 'static>(
             _: &Bundle,
             _: Limits,
             _: &[nsh_core::ui::Registry],
+            _: nsh_core::ui::Instances,
             _: &Environment,
             _: Rc<M>,
             _: Arc<AtomicBool>,

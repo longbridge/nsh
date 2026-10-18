@@ -155,6 +155,34 @@ fn send(ctx: *mut JsContext, id: u32, name: &str, args: &[JsValue], returns: boo
     promise(ctx, call, id == 1)
 }
 
+/// Sends a call of `async` member `name` (`app/native:Tally#save`) to the
+/// core: `this` and the instances among `args` are ids in the table the
+/// core shares (`held`: argument index and id). A promise of its result.
+pub(crate) fn send_member(
+    ctx: *mut JsContext,
+    name: &str,
+    this: Option<u64>,
+    args: Vec<nsh_core::JsonValue>,
+    held: &[(usize, u64)],
+) -> JsValue {
+    let call = next_call(ctx);
+    let mut json = serde_json::json!({ "c": call, "a": args, "held": held });
+    if let Some(this) = this {
+        json["this"] = this.into();
+    }
+    let op = Op::Command {
+        id: 1,
+        command: Command::Native {
+            name: name.into(),
+            args: json,
+        },
+    };
+    if let Err(e) = dom::push_op(ctx, op) {
+        return e;
+    }
+    promise(ctx, call, true)
+}
+
 /// A new call number (never 0: no reply).
 fn next_call(ctx: *mut JsContext) -> u32 {
     let c = components(ctx);
@@ -226,7 +254,7 @@ fn settle(ctx: *mut JsContext, event: JsValue) -> Result<bool, JsValue> {
                 qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), message);
                 (reject, error)
             } else {
-                (resolve, get(ctx, data, "v"))
+                (resolve, crate::classes::reply_value(ctx, data))
             };
             let mut args = [value];
             let r = qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr());

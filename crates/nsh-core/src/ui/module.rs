@@ -8,6 +8,7 @@ use std::{future::Future, pin::Pin};
 
 use super::{
     DialogAnswer, PropError, TsType, TsTypes,
+    class::Wire,
     task::{self, Action},
 };
 use crate::{Command, Dialog, JsonValue, LayoutAnimation, ROOT_ID, StatusBarSetting};
@@ -32,7 +33,7 @@ pub type ModuleParam = (&'static str, TsType, bool);
 
 /// The future of an `async` module function: its result, or the error the
 /// `Promise` rejects with.
-pub type ModuleFuture = Pin<Box<dyn Future<Output = Result<JsonValue, String>>>>;
+pub type ModuleFuture = Pin<Box<dyn Future<Output = Result<Wire, String>>>>;
 
 /// How a module function runs.
 pub enum FunctionCall {
@@ -109,6 +110,27 @@ impl ModuleSpec {
             types,
         }
     }
+}
+
+/// `future`, with a panic in it as its error (a promise JS waits for
+/// rejects with the message).
+pub(crate) async fn catching(future: ModuleFuture) -> Result<Wire, String> {
+    struct Caught(ModuleFuture);
+    impl Future for Caught {
+        type Output = Result<Wire, String>;
+
+        fn poll(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            let future = &mut self.0;
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| future.as_mut().poll(cx)))
+                .unwrap_or_else(|payload| {
+                    std::task::Poll::Ready(Err(super::component::panic_message(payload)))
+                })
+        }
+    }
+    Caught(future).await
 }
 
 /// The context of a module function that is not `async`: the platform's

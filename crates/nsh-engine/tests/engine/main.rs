@@ -29,6 +29,7 @@ mod package;
 mod platform;
 mod rust_animation;
 mod rust_app;
+mod rust_classes;
 mod rust_lists;
 mod rust_platform;
 mod rust_styles;

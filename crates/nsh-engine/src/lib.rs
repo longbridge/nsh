@@ -895,6 +895,10 @@ impl<M: TextEngine + 'static> Driver<M> {
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
         core.set_components(nsh_core::ui::Registry::merged(&config.ui_sets));
+        // Rust classes' instances cross between the script and the core
+        // in one table.
+        let class_instances = nsh_core::ui::Instances::new();
+        core.set_class_instances(class_instances.clone());
         if let App::Js(_) = &config.app {
             // Only JS is limited (Rust code is as trusted as the platform).
             core.set_max_nodes(config.limits.max_nodes);
@@ -990,6 +994,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     bundle,
                     config.limits,
                     &config.ui_sets,
+                    class_instances,
                     &environment,
                     text_engine,
                     stop,
@@ -1490,11 +1495,14 @@ impl<M: TextEngine> State<M> {
             }
             js += js_start.elapsed();
             op_count += self.ops.len();
-            // A stop drops the rest of the ops (`drain` clears them).
-            for op in self.ops.drain(..) {
+            // A stop drops the rest of the ops, releasing what they hold
+            // for Rust classes.
+            let mut ops = self.ops.drain(..);
+            while let Some(op) = ops.next() {
                 match self.core.apply(op) {
                     Ok(()) => {}
                     Err(err) if err.is_fatal() => {
+                        self.core.discard_ops(ops.by_ref());
                         let Some(script) = script else { break };
                         script.stop(match err {
                             ApplyError::TooManyNodes(max) => {

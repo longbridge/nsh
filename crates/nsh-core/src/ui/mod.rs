@@ -43,7 +43,7 @@ pub(crate) mod flow;
 pub(crate) mod host;
 mod js;
 pub(crate) mod keys;
-mod module;
+pub(crate) mod module;
 mod once;
 pub mod palette;
 mod prop;
@@ -93,8 +93,8 @@ pub use self::{
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     class::{
-        Arg, Class, ClassDef, ClassInstance, ClassSpec, Instance, Member, MemberCall, MemberKind,
-        MemberSpec, Ret, Thrown,
+        Arg, AsyncStart, Class, ClassDef, ClassInstance, ClassSpec, Instance, Instances, Member,
+        MemberCall, MemberKind, MemberSpec, Ret, Thrown, Wire, WireArgs,
     },
     component::{
         Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,

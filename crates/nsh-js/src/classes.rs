@@ -8,9 +8,14 @@
 //! `Rc` of the Rust instance, so collection, `instanceof`, `new.target`
 //! and re-entrancy work as for `URL` or `Blob`. The instance remembers its
 //! object while both live (one object per instance: a member returning the
-//! same instance twice gives the same object). Members run in the JS call:
-//! [`CallHost`] reads the call's arguments and makes its result for the
-//! generated code, converting QuickJS values directly.
+//! same instance twice gives the same object). Members that are not
+//! `async` run in the JS call: [`CallHost`] reads the call's arguments and
+//! makes its result for the generated code, converting QuickJS values
+//! directly. An `async` member is an op (`Command::Native` named
+//! `Tally#save`, `{ c, this, a }`) the core runs as a task: its instance
+//! and the instances among its arguments wait in the table the core shares
+//! (`nsh_core::ui::Instances`) under the ids the op carries, and so do the
+//! instances it resolves with.
 
 use std::{
     any::TypeId,
@@ -22,8 +27,8 @@ use std::{
 use nsh_core::{
     JsonValue,
     ui::{
-        ClassDef, ClassInstance, JsHost, JsKind, JsRaw, Member, MemberCall, MemberKind, PropError,
-        Thrown,
+        ClassDef, ClassInstance, Instances, JsHost, JsKind, JsRaw, Member, MemberCall, MemberKind,
+        PropError, Thrown,
     },
 };
 use rquickjs::qjs;
@@ -39,16 +44,30 @@ use crate::web::{
 type Wrappers = Rc<RefCell<FxHashMap<usize, Raw>>>;
 
 /// The classes' part of a context's state.
-#[derive(Default)]
 pub(crate) struct Classes {
     /// Prototype and constructor of each class made so far.
     built: RefCell<FxHashMap<TypeId, (V, V)>>,
     wrappers: Wrappers,
     /// The classes made, by the index their constructors carry.
     defs: RefCell<Vec<&'static ClassDef>>,
+    /// Where instances cross to the core.
+    instances: Instances,
+    /// The specifier of each class's set (its `async` members are called
+    /// by it).
+    specifiers: RefCell<FxHashMap<TypeId, Option<&'static str>>>,
 }
 
 impl Classes {
+    pub(crate) fn new(instances: Instances) -> Self {
+        Self {
+            built: RefCell::default(),
+            wrappers: Wrappers::default(),
+            defs: RefCell::default(),
+            instances,
+            specifiers: RefCell::default(),
+        }
+    }
+
     /// Frees the values held (the state is unregistered).
     pub(crate) fn free_all(&mut self) {
         self.built.borrow_mut().clear();
@@ -113,10 +132,18 @@ fn built(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
     Ok((proto, ctor))
 }
 
-/// A function calling `f` with `opaque` (a definition, `'static`).
-fn native(ctx: Ctx, name: &str, f: qjs::JSCClosure, length: usize, opaque: *const c_void) -> R<V> {
+/// A function calling `f` with `def` (static, so it needs no finalizer)
+/// and `magic` (a member's index).
+fn native(
+    ctx: Ctx,
+    name: &str,
+    f: qjs::JSCClosure,
+    length: usize,
+    def: &'static ClassDef,
+    magic: usize,
+) -> R<V> {
     let name = CString::new(name).unwrap_or_default();
-    // SAFETY: the opaque points to static data, so it needs no finalizer.
+    // SAFETY: the opaque points to static data.
     V::checked(ctx, unsafe {
         qjs::JS_NewCClosure(
             ctx,
@@ -124,8 +151,8 @@ fn native(ctx: Ctx, name: &str, f: qjs::JSCClosure, length: usize, opaque: *cons
             name.as_ptr(),
             None,
             length as c_int,
-            0,
-            opaque as *mut c_void,
+            magic as c_int,
+            def as *const ClassDef as *mut c_void,
         )
     })
 }
@@ -174,21 +201,34 @@ fn make(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
     unsafe { qjs::JS_SetConstructor(ctx, ctor.raw(), proto.raw()) };
     // Accessors by name: getter and setter.
     let mut accessors: Vec<(&'static str, Option<V>, Option<V>)> = Vec::new();
-    for member in def.members {
-        let opaque = member as *const Member as *const c_void;
+    for (index, member) in def.members.iter().enumerate() {
         match member.kind {
             MemberKind::Constructor => {}
             MemberKind::Method => {
-                let f = native(ctx, member.name, Some(call), member.params.len(), opaque)?;
+                let f = native(
+                    ctx,
+                    member.name,
+                    Some(call),
+                    member.params.len(),
+                    def,
+                    index,
+                )?;
                 define_method(ctx, proto.raw(), member.name, f)?;
             }
             MemberKind::Static => {
-                let f = native(ctx, member.name, Some(call), member.params.len(), opaque)?;
+                let f = native(
+                    ctx,
+                    member.name,
+                    Some(call),
+                    member.params.len(),
+                    def,
+                    index,
+                )?;
                 define_method(ctx, ctor.raw(), member.name, f)?;
             }
             MemberKind::Getter | MemberKind::Setter => {
                 let length = usize::from(member.kind == MemberKind::Setter);
-                let f = native(ctx, member.name, Some(call), length, opaque)?;
+                let f = native(ctx, member.name, Some(call), length, def, index)?;
                 let at = match accessors.iter().position(|a| a.0 == member.name) {
                     Some(at) => at,
                     None => {
@@ -221,13 +261,7 @@ fn make(ctx: Ctx, def: &'static ClassDef) -> R<(V, V)> {
         }
     }
     // `dispose()` and `[Symbol.dispose]()`: one function.
-    let dispose = native(
-        ctx,
-        "dispose",
-        Some(dispose),
-        0,
-        def as *const ClassDef as *const c_void,
-    )?;
+    let dispose = native(ctx, "dispose", Some(dispose), 0, def, 0)?;
     // SAFETY: the property takes its own reference.
     unsafe {
         qjs::JS_DefinePropertyValue(
@@ -278,7 +312,7 @@ unsafe extern "C" fn construct(
         return qjs::JS_EXCEPTION;
     };
     let host = CallHost::new(ctx, UNDEFINED, new_target, args(argc, argv));
-    host.run(member)
+    host.run(def, member)
 }
 
 unsafe extern "C" fn call(
@@ -286,13 +320,80 @@ unsafe extern "C" fn call(
     this: Raw,
     argc: c_int,
     argv: *mut Raw,
-    _magic: c_int,
+    magic: c_int,
     opaque: *mut c_void,
 ) -> Raw {
-    // SAFETY: the opaque of members' functions is their static member.
-    let member = unsafe { &*(opaque as *const Member) };
+    // SAFETY: the opaque of members' functions is their class's static
+    // definition, the magic the member's index.
+    let def = unsafe { &*(opaque as *const ClassDef) };
+    let member = &def.members[magic as usize];
     let host = CallHost::new(ctx, this, UNDEFINED, args(argc, argv));
-    host.run(member)
+    host.run(def, member)
+}
+
+/// The name the core calls `async` member `member` of `def` by
+/// (`Tally#save`, `nsh/x:Tally#save` for a runtime class).
+fn member_name(ctx: Ctx, def: &'static ClassDef, member: &Member) -> String {
+    let id = (def.type_id)();
+    let cached = classes(ctx).specifiers.borrow().get(&id).copied();
+    let set = cached.unwrap_or_else(|| {
+        // SAFETY: the state's module table, read briefly.
+        let modules = unsafe { &(*crate::state::state(ctx)).modules };
+        let set = modules.specifier_of_class(def);
+        classes(ctx).specifiers.borrow_mut().insert(id, set);
+        set
+    });
+    match set {
+        Some(set) => format!("{set}:{}#{}", def.name, member.name),
+        None => format!("{}#{}", def.name, member.name),
+    }
+}
+
+/// An argument of an op as JSON: an instance is held in the table (its id
+/// the second value, the JSON `null`), a node is `{ $node: id }`.
+fn wire_arg(ctx: Ctx, v: Raw, instances: &Instances) -> R<(JsonValue, Option<u64>)> {
+    if let Some(instance) = instance_of(ctx, v) {
+        return Ok((JsonValue::Null, Some(instances.hold_instance(instance))));
+    }
+    if let Some(id) = crate::dom::node_id(ctx, v) {
+        return Ok((serde_json::json!({ "$node": id }), None));
+    }
+    // SAFETY: a context reference and a dup for the converter.
+    let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(ctx)) };
+    let value = unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(ctx, v)) };
+    Ok((crate::protocol::to_json(&value).map_err(|_| Throw)?, None))
+}
+
+/// The value of a `$return` (its data, borrowed): `v`, or the object of the
+/// instance the core holds for it (`h`, beside `v`, so no value of the app
+/// reads as one). Owned.
+pub(crate) fn reply_value(ctx: Ctx, data: Raw) -> Raw {
+    let id = js::get(ctx, data, "h")
+        .ok()
+        .filter(|h| !h.is_undefined())
+        .and_then(|h| js::to_number(ctx, h.raw()).ok());
+    let _ = js::take_exception(ctx);
+    let Some(id) = id else {
+        return match js::get(ctx, data, "v") {
+            Ok(v) => v.take(),
+            Err(Throw) => {
+                let _ = js::take_exception(ctx);
+                UNDEFINED
+            }
+        };
+    };
+    let taken = classes(ctx).instances.take_instance(id as u64);
+    let Some(instance) = taken else {
+        return js::NULL;
+    };
+    let host = CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()));
+    match host.wrap(instance) {
+        Ok(obj) => from_raw(obj),
+        Err(_) => {
+            let _ = js::take_exception(ctx);
+            js::NULL
+        }
+    }
 }
 
 unsafe extern "C" fn dispose(
@@ -430,12 +531,77 @@ impl<'a> CallHost<'a> {
         r.map(|v| to_raw(v.take())).map_err(|Throw| self.threw())
     }
 
-    /// Runs `member` (catching a panic): its result, or the exception.
-    fn run(&self, member: &'static Member) -> Raw {
-        let MemberCall::Sync(f) = member.call;
+    /// Runs `member` of `def` (catching a panic): its result, or the
+    /// exception; an `async` one's promise.
+    fn run(&self, def: &'static ClassDef, member: &'static Member) -> Raw {
+        let f = match member.call {
+            MemberCall::Sync(f) => f,
+            MemberCall::Async(_) => return self.send(def, member),
+        };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)))
             .unwrap_or_else(|payload| Err(Thrown::Error(panic_message(payload))));
         self.finish(result)
+    }
+
+    /// Sends a call of `async` member `member` to the core: its promise
+    /// (rejected when `this` or an argument cannot cross).
+    fn send(&self, def: &'static ClassDef, member: &'static Member) -> Raw {
+        let ctx = self.ctx;
+        let instances = classes(ctx).instances.clone();
+        // The ids held for the call: `this` and the arguments'.
+        let mut held = Vec::new();
+        let mut arg_held = Vec::new();
+        let made = (|| -> R<(Option<u64>, Vec<JsonValue>)> {
+            let this = if member.kind == MemberKind::Static {
+                None
+            } else {
+                let instance = instance_of(ctx, self.this)
+                    .filter(|i| (i.def().type_id)() == (def.type_id)())
+                    .ok_or_else(|| {
+                        js::type_error(
+                            ctx,
+                            &format!(
+                                "{}.{}: Illegal invocation: not a {}",
+                                def.name, member.name, def.name
+                            ),
+                        )
+                    })?;
+                let id = instances.hold_instance(instance);
+                held.push(id);
+                Some(id)
+            };
+            let mut list = Vec::with_capacity(member.params.len());
+            for i in 0..member.params.len() {
+                let (json, id) = wire_arg(ctx, self.args.get(i), &instances)?;
+                if let Some(id) = id {
+                    held.push(id);
+                    arg_held.push((i, id));
+                }
+                list.push(json);
+            }
+            Ok((this, list))
+        })();
+        let promise = match made {
+            Ok((this, list)) => crate::components::send_member(
+                ctx,
+                &member_name(ctx, def, member),
+                this,
+                list,
+                &arg_held,
+            ),
+            Err(Throw) => qjs::JS_EXCEPTION,
+        };
+        // SAFETY: an inline tag check.
+        if unsafe { qjs::JS_IsException(promise) } {
+            for id in held {
+                instances.release(id);
+            }
+            return match js::rejected_with_exception(ctx) {
+                Ok(p) => p.take(),
+                Err(Throw) => qjs::JS_EXCEPTION,
+            };
+        }
+        promise
     }
 
     /// The JS result of a call: its value or what it throws.

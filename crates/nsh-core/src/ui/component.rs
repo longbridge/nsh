@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 
 use super::{
     Children, IntoElement, PropError, Slot, TsType, TsTypes,
-    class::{Class, ClassSpec, MemberKind},
+    class::{Class, ClassSpec, Member, MemberKind},
     element::{ComponentElement, ElNode},
     module::{Function, FunctionSpec, Module, ModuleSpec},
 };
@@ -545,7 +545,9 @@ struct ClassType {
 pub struct Registry {
     types: Arc<FxHashMap<&'static str, ComponentType>>,
     modules: Arc<FxHashMap<&'static str, ModuleType>>,
-    classes: Arc<FxHashMap<&'static str, ClassType>>,
+    /// By the specifier of their set and their name: the sets merged for
+    /// the core may have classes of the same name.
+    classes: Arc<FxHashMap<(Option<&'static str>, &'static str), ClassType>>,
     /// Values and types of `nsh/_core` exported as they are.
     reexports: Arc<(Vec<&'static str>, Vec<&'static str>)>,
     /// Values `nsh-js` makes for the set (declared by hand, not generated
@@ -588,7 +590,7 @@ impl Registry {
             let set = self.ui_set.or(self.namespace);
             panic!("{}", same_name(spec.name, old.id, TypeId::of::<C>(), set));
         }
-        if self.classes.contains_key(spec.export.as_str()) {
+        if self.classes.keys().any(|(_, name)| *name == spec.export) {
             panic!(
                 "component `{}` is exported as `{}` like a class{}: rename one",
                 spec.name,
@@ -626,7 +628,7 @@ impl Registry {
     #[track_caller]
     pub fn module<M: Module>(&mut self) -> &mut Self {
         let type_name = std::any::type_name::<M>();
-        if self.classes.contains_key(M::NAME) {
+        if self.classes.keys().any(|(_, name)| *name == M::NAME) {
             panic!(
                 "module `{type_name}` is named `{}` like a class{}: rename one",
                 M::NAME,
@@ -669,7 +671,7 @@ impl Registry {
         let def = C::DEF;
         let type_name = std::any::type_name::<C>();
         let set = self.ui_set.or(self.namespace);
-        if let Some(old) = self.classes.get(def.name) {
+        if let Some(old) = self.classes.get(&(set, def.name)) {
             panic!("{}", same_class(def.name, old.type_name, type_name, set));
         }
         if self.modules.contains_key(def.name)
@@ -682,7 +684,7 @@ impl Registry {
             );
         }
         Arc::make_mut(&mut self.classes).insert(
-            def.name,
+            (set, def.name),
             ClassType {
                 spec: Arc::new(ClassSpec::of(def)),
                 type_name,
@@ -729,11 +731,11 @@ impl Registry {
                 }
             }
             let classes = Arc::make_mut(&mut out.classes);
-            for (name, c) in set.classes.iter() {
-                if let Some(old) = classes.insert(name, c.clone()) {
+            for (key, c) in set.classes.iter() {
+                if let Some(old) = classes.insert(*key, c.clone()) {
                     panic!(
                         "{}, by two UI sets",
-                        same_class(name, old.type_name, c.type_name, None)
+                        same_class(key.1, old.type_name, c.type_name, key.0)
                     );
                 }
             }
@@ -818,11 +820,37 @@ impl Registry {
             .find(|f| f.name == function)
     }
 
+    /// The `async` member `name` of a class, called by its set's
+    /// specifier: `app/native:Tally#save` (`Tally#save` for a set without
+    /// one). Two sets may have classes of the same name.
+    pub(crate) fn class_member(&self, name: &str) -> Option<&'static Member> {
+        let (set, name) = match name.rsplit_once(':') {
+            Some((set, name)) => (Some(set), name),
+            None => (None, name),
+        };
+        let (class, member) = name.split_once('#')?;
+        self.classes
+            .iter()
+            .find(|((s, n), _)| *s == set && *n == class)?
+            .1
+            .spec
+            .def
+            .members
+            .iter()
+            .find(|m| m.name == member && m.call.is_async())
+    }
+
     /// The registered classes, by name.
     pub fn class_specs(&self) -> Vec<Arc<ClassSpec>> {
         let mut specs: Vec<_> = self.classes.values().map(|c| c.spec.clone()).collect();
         specs.sort_by_key(|s| s.name);
         specs
+    }
+
+    /// Whether class `def` is one of the registry's.
+    pub fn has_class(&self, def: &crate::ui::ClassDef) -> bool {
+        let id = (def.type_id)();
+        self.classes.values().any(|c| (c.spec.def.type_id)() == id)
     }
 
     /// The registered modules, by name.
@@ -1071,7 +1099,12 @@ fn class_declaration(out: &mut String, c: &ClassSpec) {
             .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
             .collect::<Vec<_>>()
             .join(", ");
-        let returns = m.returns.clone().unwrap_or_else(|| "void".to_owned());
+        let value = m.returns.clone().unwrap_or_else(|| "void".to_owned());
+        let returns = if m.is_async {
+            format!("Promise<{value}>")
+        } else {
+            value
+        };
         let _ = match m.kind {
             MemberKind::Constructor => writeln!(out, "  constructor({params});"),
             MemberKind::Method => writeln!(out, "  {}({params}): {returns};", m.name),

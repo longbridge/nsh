@@ -51,6 +51,10 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
                 #ui::__private::class_into_js(self, host)
             }
+
+            fn into_wire(self, instances: &#ui::Instances) -> #ui::Wire {
+                #ui::__private::class_into_wire(self, instances)
+            }
         }
     })
 }
@@ -68,6 +72,8 @@ enum Kind {
     Getter,
     Setter { mutable: bool },
     Static,
+    AsyncMethod,
+    AsyncStatic,
 }
 
 /// The `&self` / `&mut self` receiver of `f`: `Some(mutable)`.
@@ -86,16 +92,36 @@ fn receiver(f: &ImplItemFn) -> syn::Result<Option<bool>> {
     }
 }
 
+/// Whether `pat: ty` is `this: Instance<..>` (an `async` method's).
+fn is_this(arg: &FnArg) -> bool {
+    let FnArg::Typed(t) = arg else { return false };
+    let named_this = matches!(&*t.pat, Pat::Ident(p) if p.ident == "this");
+    named_this && matches!(last_segment(&t.ty), Some((id, _)) if id == "Instance")
+}
+
 fn kind_of(f: &ImplItemFn) -> syn::Result<Kind> {
     let getter = has_attr(&f.attrs, "getter");
     let setter = has_attr(&f.attrs, "setter");
-    if f.sig.asyncness.is_some() {
-        return Err(syn::Error::new(
-            f.sig.span(),
-            "a class's members are not `async` (they run in the JS call)",
-        ));
-    }
     let receiver = receiver(f)?;
+    if f.sig.asyncness.is_some() {
+        if receiver.is_some() {
+            return Err(syn::Error::new(
+                f.sig.span(),
+                "an `async` method takes `this: Instance<Self>` (a handle: borrow the value \
+                 between awaits with `this.with(..)` / `this.with_mut(..)`)",
+            ));
+        }
+        if getter || setter {
+            return Err(syn::Error::new(
+                f.sig.span(),
+                "getters and setters are not `async`",
+            ));
+        }
+        return Ok(match f.sig.inputs.first() {
+            Some(arg) if is_this(arg) => Kind::AsyncMethod,
+            _ => Kind::AsyncStatic,
+        });
+    }
     if getter || setter {
         let Some(mutable) = receiver else {
             return Err(syn::Error::new(
@@ -216,11 +242,12 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .iter()
         .filter(|a| a.path().is_ident("cfg"))
         .collect();
-    // The parameters JS passes (not the receiver).
+    // The parameters JS passes (not the receiver nor `this`).
     let skip = match kind {
-        Kind::Method { .. } | Kind::Getter | Kind::Setter { .. } => 1,
+        Kind::Method { .. } | Kind::Getter | Kind::Setter { .. } | Kind::AsyncMethod => 1,
         _ => 0,
     };
+    let is_async = matches!(kind, Kind::AsyncMethod | Kind::AsyncStatic);
     let mut params = Vec::new();
     let mut names = Vec::new();
     for arg in f.sig.inputs.iter().skip(skip) {
@@ -230,7 +257,8 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         if module_cx(&t.ty) {
             return Err(syn::Error::new(
                 t.span(),
-                "a class's member takes no `ModuleCx` (it computes in the JS call)",
+                "a class's member takes no `ModuleCx` (a synchronous member computes; an `async` \
+                 one uses the free functions: `dialog(..)`, ...)",
             ));
         }
         let Pat::Ident(name) = &*t.pat else {
@@ -241,6 +269,12 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         };
         names.push(camel(&name.ident.to_string()));
         params.push(match &*t.ty {
+            Type::Reference(_) if is_async => {
+                return Err(syn::Error::new(
+                    t.ty.span(),
+                    "an `async` member keeps its arguments: take `Instance<T>`, not a reference",
+                ));
+            }
             Type::Reference(r) => Param::Borrowed {
                 elem: &r.elem,
                 mutable: r.mutability.is_some(),
@@ -290,10 +324,10 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     };
     let member_kind = match kind {
         Kind::Constructor => quote!(Constructor),
-        Kind::Method { .. } => quote!(Method),
+        Kind::Method { .. } | Kind::AsyncMethod => quote!(Method),
         Kind::Getter => quote!(Getter),
         Kind::Setter { .. } => quote!(Setter),
-        Kind::Static => quote!(Static),
+        Kind::Static | Kind::AsyncStatic => quote!(Static),
     };
     if kind == Kind::Constructor {
         let ok_is_self = matches!(&ok_ty, Some(ty) if matches!(last_segment(ty), Some((id, _)) if id == "Self" || id == class));
@@ -304,7 +338,11 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             ));
         }
     }
-    let call = sync_call(f, kind, &params, &names, &what, fallible);
+    let call = if is_async {
+        async_call(f, kind, &params, &names, fallible)
+    } else {
+        sync_call(f, kind, &params, &names, &what, fallible)
+    };
     Ok(quote! {
         #(#cfgs)*
         #ui::Member {
@@ -412,6 +450,57 @@ fn sync_call(
             let __result = Self::#ident(#(#call_args),*);
             #(#release)*
             #finish
+        })
+    }
+}
+
+fn async_call(
+    f: &ImplItemFn,
+    kind: Kind,
+    params: &[Param<'_>],
+    names: &[String],
+    fallible: bool,
+) -> TokenStream2 {
+    let ui = quote!(::nsh_core::ui);
+    let private = quote!(#ui::__private);
+    let ident = &f.sig.ident;
+    let mut decode = Vec::new();
+    let mut args = Vec::new();
+    for (i, (p, name)) in params.iter().zip(names).enumerate() {
+        let local = format_ident!("__arg{}", i);
+        if let Param::Value(ty) = p {
+            decode.push(quote! {
+                let #local: #ty = __args.next::<#ty>(__instances, #name)?;
+            });
+            args.push(quote!(#local));
+        }
+    }
+    let this = if kind == Kind::AsyncMethod {
+        args.insert(0, quote!(__this));
+        quote!(let __this = #private::async_this::<Self>(__this)?;)
+    } else {
+        quote!(let _ = __this;)
+    };
+    let args_iter = if decode.is_empty() {
+        quote!(let _ = __args;)
+    } else {
+        quote!(let mut __args = __args;)
+    };
+    let finish = if fallible {
+        quote!(#private::wire_ret_result(__result, &__instances))
+    } else {
+        quote!(#private::wire_ret(__result, &__instances))
+    };
+    quote! {
+        #ui::MemberCall::Async(|__this, __args, __instances| {
+            #this
+            #args_iter
+            #(#decode)*
+            let __instances = ::core::clone::Clone::clone(__instances);
+            ::core::result::Result::Ok(::std::boxed::Box::pin(async move {
+                let __result = Self::#ident(#(#args),*).await;
+                #finish
+            }))
         })
     }
 }

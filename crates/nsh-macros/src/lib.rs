@@ -1322,7 +1322,11 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// (`&Other` / `&mut Other` borrowed for the call, `Instance<Other>` kept);
 /// they return nothing, a value, `Self` or another class's value (a new JS
 /// object), an `Instance` (its JS object), or a `Result` of one (an `Err`
-/// throws). Doc comments document the class and its members.
+/// throws). An `async fn` (`this: Instance<Self>` first, for a method)
+/// returns a promise and runs as a task of the core, with the free
+/// functions (`dialog(..)`, `timer(..)`, ...); its parameters are owned
+/// (`Instance<Other>`, not `&Other`). Doc comments document the class and
+/// its members.
 #[proc_macro_attribute]
 pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
@@ -1444,7 +1448,8 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                     #(#decode)*
                     ::core::result::Result::Ok(::std::boxed::Box::pin(async move {
                         let value = #self_ty::#ident(#(#call_args),*).await;
-                        #to_json
+                        let result: ::core::result::Result<::nsh_core::JsonValue, ::std::string::String> = #to_json;
+                        result.map(#ui::Wire::from)
                     }))
                 })
             }

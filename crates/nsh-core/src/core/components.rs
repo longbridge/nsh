@@ -23,8 +23,9 @@ use crate::{
     ui::{
         Action, AnswerSlot, AnyInstance, Attrs, Child, ClipboardRead, ComponentError,
         ComponentSpec, ElKind, ElNode, Environment, Executor, Function, FunctionCall, ImageSize,
-        IntoElement, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, PropError,
-        Reactive, Registry, Root, SharedString, StyleRefinement, Task, Theme, caught,
+        Instances, IntoElement, ListConfig, Listener, Member, MemberCall, ModuleCx, ModuleFuture,
+        ParentElement, PlaceFn, Position, PropError, Reactive, Registry, Root, SharedString,
+        StyleRefinement, Task, Theme, WireArgs, caught,
         responder::ResponderEl,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
@@ -350,6 +351,9 @@ pub(super) struct Components {
     /// Their views' regions, by id.
     pub(super) regions: FxHashMap<u32, super::views::RegionState>,
     pub(super) next_region: u32,
+    /// The instances of Rust classes on their way from JS (the engine's
+    /// table, shared with the script).
+    class_instances: Instances,
 }
 
 impl Default for Components {
@@ -398,6 +402,7 @@ impl Default for Components {
             patches: super::views::Patches::default(),
             regions: FxHashMap::default(),
             next_region: 1,
+            class_instances: Instances::default(),
         }
     }
 }
@@ -606,6 +611,27 @@ impl<M: TextEngine> Core<M> {
             ..self.components.environment
         };
         self.apply_environment(environment);
+    }
+
+    /// Drops `ops` without applying them (the script was stopped): what
+    /// they hold in the class instances' table is released.
+    pub fn discard_ops(&mut self, ops: impl IntoIterator<Item = Op>) {
+        for op in ops {
+            if let Op::Command {
+                command: Command::Native { args, .. },
+                ..
+            } = op
+            {
+                self.components.class_instances.release_call(&args);
+            }
+        }
+    }
+
+    /// The table instances of Rust classes cross in between the script and
+    /// the core (`async` members' `this`, arguments and results): the one
+    /// the engine hands the script too.
+    pub fn set_class_instances(&mut self, instances: Instances) {
+        self.components.class_instances = instances;
     }
 
     /// Wakes the engine when a component's task is woken (from any
@@ -918,6 +944,14 @@ impl<M: TextEngine> Core<M> {
                 self.call_function(&name, args);
                 Ok(None)
             }
+            // An `async` member of a Rust class: `{ c, this, a }`.
+            Op::Command {
+                id: crate::ROOT_ID,
+                command: Command::Native { name, args },
+            } if name.contains('#') => {
+                self.call_member(&name, args);
+                Ok(None)
+            }
             // A method of the component's ref: `{ c, a }`, the call (0: no
             // reply) and the arguments.
             Op::Command {
@@ -1021,35 +1055,73 @@ impl<M: TextEngine> Core<M> {
                     self.reply(root, call, result.map_err(|e| e.0));
                 }
             }
-            FunctionCall::Async(start) => {
+            FunctionCall::Async(start) => self.run_call(name, call, start(args)),
+        }
+    }
+
+    /// Runs `started` (an `async` function's or member's future) as a task
+    /// of the root; a call JS waits for gets its result (or its panic's
+    /// message) as a `$return` event.
+    fn run_call(&mut self, name: &str, call: u64, started: Result<ModuleFuture, PropError>) {
+        let root = crate::ROOT_ID;
+        match started {
+            Ok(future) => {
                 let executor = Rc::downgrade(&self.components.executor);
-                match start(args) {
-                    Ok(future) => {
-                        // A task of the root: it never goes away.
-                        crate::ui::task::spawn_raw(
-                            &self.components.executor,
-                            root,
-                            Box::pin(async move {
-                                let result = future.await;
-                                if call == 0 {
-                                    if let Err(e) = &result {
-                                        log::warn!(target: "js", "{}(): {e}", function.name);
-                                    }
-                                } else if let Some(executor) = executor.upgrade() {
-                                    executor.act(Action::Return(call, result));
-                                }
-                            }),
-                        );
-                    }
-                    Err(e) => {
-                        log::warn!(target: "js", "{name}(): {e}");
-                        if call != 0 {
-                            self.reply(root, call, Err(e.0));
+                let name = name.to_owned();
+                // A task of the root: it never goes away.
+                crate::ui::task::spawn_raw(
+                    &self.components.executor,
+                    root,
+                    Box::pin(async move {
+                        let result = crate::ui::module::catching(future).await;
+                        if call == 0 {
+                            if let Err(e) = &result {
+                                log::warn!(target: "js", "{name}(): {e}");
+                            }
+                        } else if let Some(executor) = executor.upgrade() {
+                            executor.act(Action::Return(call, result));
                         }
-                    }
+                    }),
+                );
+            }
+            Err(e) => {
+                log::warn!(target: "js", "{name}(): {e}");
+                if call != 0 {
+                    self.reply(root, call, Err(e.0));
                 }
             }
         }
+    }
+
+    /// The `async` member `name` of a Rust class (`app/native:Tally#save`):
+    /// the UI sets', else the runtime's.
+    fn class_member(&self, name: &str) -> Option<&'static Member> {
+        self.components
+            .registry
+            .class_member(name)
+            .or_else(|| crate::runtime::class_member(name))
+    }
+
+    /// Calls `async` member `name` (`app/native:Tally#save`) with `{ c,
+    /// this, a, held }`: the instance and the instances among the arguments
+    /// are ids in the table the script shares.
+    fn call_member(&mut self, name: &str, args: JsonValue) {
+        let instances = self.components.class_instances.clone();
+        let Some(MemberCall::Async(start)) = self.class_member(name).map(|m| m.call) else {
+            log::warn!(target: "js", "{name}(): no such member");
+            instances.release_call(&args);
+            return;
+        };
+        let call = args.get("c").and_then(JsonValue::as_u64).unwrap_or(0);
+        let this = args
+            .get("this")
+            .and_then(JsonValue::as_u64)
+            .and_then(|id| instances.take_instance(id));
+        let started = start(this, WireArgs::of(&args), &instances);
+        // What the arguments held and the member did not take (it failed
+        // before).
+        instances.release_call(&args);
+        self.run_call(name, call, started);
     }
 
     /// Calls method `name` of `host`'s component; a call JS waits for gets
@@ -3237,7 +3309,7 @@ impl<M: TextEngine> Core<M> {
                     command: Command::Dialog(Box::new(dialog)),
                 });
             }
-            Action::Return(call, result) => self.reply(crate::ROOT_ID, call, result),
+            Action::Return(call, result) => self.reply_wire(crate::ROOT_ID, call, result),
             Action::Animation(op) => {
                 let _ = self.apply_op(Op::Animation(op));
             }
@@ -3391,6 +3463,24 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The answer to a call JS waits for, as a `$return` event on `host`.
+    /// [`Self::reply`] of an op's value: an instance it is goes as its id
+    /// (`h`), beside the value, so no value of the app reads as one.
+    pub(super) fn reply_wire(
+        &mut self,
+        host: NodeId,
+        call: u64,
+        result: Result<crate::ui::Wire, String>,
+    ) {
+        let instance = result.as_ref().ok().and_then(|w| w.instance);
+        self.reply(host, call, result.map(|w| w.json));
+        if let Some(id) = instance
+            && let Some((_, _, EventPayload::Native { data, .. })) = self.events.last_mut()
+            && let JsonValue::Object(reply) = data
+        {
+            reply.insert("h".into(), id.into());
+        }
+    }
+
     pub(super) fn reply(&mut self, host: NodeId, call: u64, result: Result<JsonValue, String>) {
         let mut reply = serde_json::Map::new();
         reply.insert("c".into(), call.into());

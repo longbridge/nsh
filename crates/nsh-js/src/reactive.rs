@@ -1084,7 +1084,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
         let ctx = Context::full(&rt).unwrap();
         ctx.with(|ctx| {
-            crate::state::install(&ctx, std::rc::Rc::default(), &[]);
+            crate::state::install(&ctx, std::rc::Rc::default(), &[], Default::default());
             super::install_globals(&ctx);
             let out: String = ctx
                 .eval(format!(
@@ -1242,7 +1242,7 @@ mod tests {
             g.slots()
         };
         let before = ctx.with(|ctx| {
-            crate::state::install(&ctx, std::rc::Rc::default(), &[]);
+            crate::state::install(&ctx, std::rc::Rc::default(), &[], Default::default());
             super::install_globals(&ctx);
             let before = live(ctx.as_raw().as_ptr()).0;
             let _: () = ctx
