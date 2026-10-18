@@ -326,6 +326,18 @@ define_class!(
 
 /// Ends the standalone event loop, returning process ownership to its caller.
 fn finish_running(app: &NSApplication) {
+    let window = RUNNING.with(|running| {
+        running
+            .borrow()
+            .as_ref()
+            .map(|running| running.window.clone())
+    });
+    if let Some(window) = window {
+        // Quit has no window-close callback yet. Close without re-entering
+        // this delegate, and keep the window alive until close returns.
+        window.setDelegate(None);
+        window.close();
+    }
     stop_running();
     app.stop(None);
     // stop: takes effect after the next event. A close can arrive through a
