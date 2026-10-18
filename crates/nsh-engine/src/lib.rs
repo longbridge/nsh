@@ -1589,6 +1589,7 @@ fn ui_environment(env: &Environment, window: Size) -> nsh_core::ui::Environment 
     nsh_core::ui::Environment {
         window,
         safe_area: insets(env),
+        title_bar: env.title_bar,
         keyboard_height: env.keyboard_height,
         keyboard_duration: env.keyboard_duration,
         dark: env.color_scheme == ColorScheme::Dark,
@@ -1772,6 +1773,24 @@ fn extend_frame(frame: &mut Vec<nsh_core::MountItem>, items: Vec<nsh_core::Mount
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rust_environment_preserves_native_title_bar_insets() {
+        let title_bar = nsh_core::platform::Insets {
+            top: 42.0,
+            left: 78.0,
+            right: 138.0,
+            bottom: 0.0,
+        };
+        let environment = super::Environment {
+            title_bar,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::ui_environment(&environment, nsh_core::Size::new(840.0, 630.0)).title_bar,
+            title_bar
+        );
+    }
+
     use nsh_core::{MountItem, Size};
 
     #[test]

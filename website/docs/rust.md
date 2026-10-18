@@ -112,6 +112,40 @@ Code for every platform, the web included, uses NSH's services: `fetch` for HTTP
 `nsh_core::time::Instant` and `nsh_core::time::unix_ms()` for the clock. `background` and `blocking` run work on the
 native targets' threads.
 
+## Desktop title bars
+
+Rust apps draw their own title bars with `nsh_core::ui::desktop`. Call
+`set_title_bar(TitleBarStyle::Hidden, Some(height))`, mark the bar's background
+with `.window_drag(true)`, and reserve the native window controls' space with
+`title_bar()`. Its `top` is the bar's height, and `left` and `right` are the widths
+occupied by the system controls. Reading it subscribes to changes, including full
+screen. The platform handles window dragging and the user's title-bar double-click
+behavior; `.window_drag(false)` keeps a child out of its parent's drag region.
+
+```rust
+use nsh_core::{
+    desktop::TitleBarStyle,
+    ui::{desktop::{close_window, set_title_bar, title_bar}, prelude::*},
+};
+
+#[component]
+fn TitleBar() -> impl IntoElement {
+    set_title_bar(TitleBarStyle::Hidden, Some(42.0));
+    view()
+        .h(px(42.0))
+        .flex_row()
+        .items_center()
+        .window_drag(true)
+        .pl(move || px(title_bar().left + 12.0))
+        .pr(move || px(title_bar().right + 12.0))
+        .child(text("My app").flex_1())
+        .child(text("Close").window_drag(false).on_press(|_: &()| close_window()))
+}
+```
+
+`set_title_bar(TitleBarStyle::Default, None)` restores the system title bar.
+`close_window()` follows the embedding host's normal window-close behavior.
+
 ## Extending a Rust app with TSX
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components

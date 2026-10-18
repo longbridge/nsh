@@ -617,9 +617,30 @@ pub enum DesktopCommand {
     },
 }
 
+pub(crate) fn title_bar_height(height: Option<f32>) -> Option<f32> {
+    height
+        .filter(|h| h.is_finite() && *h > 0.0)
+        .map(|h| h.min(200.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_title_bar_height_is_finite_positive_and_bounded() {
+        for height in [
+            None,
+            Some(0.0),
+            Some(-1.0),
+            Some(f32::NAN),
+            Some(f32::INFINITY),
+        ] {
+            assert_eq!(title_bar_height(height), None);
+        }
+        assert_eq!(title_bar_height(Some(42.0)), Some(42.0));
+        assert_eq!(title_bar_height(Some(300.0)), Some(200.0));
+    }
 
     #[test]
     fn shortcuts_parse() {

@@ -13,6 +13,8 @@ pub struct Environment {
     pub window: Size,
     /// The edges system UI covers.
     pub safe_area: EdgeInsets,
+    /// Space reserved for system controls in a custom desktop title bar.
+    pub title_bar: crate::platform::Insets,
     /// The software keyboard's height, 0 when hidden.
     pub keyboard_height: f32,
     /// How long the keyboard's show / hide animation takes, in seconds.
@@ -48,6 +50,7 @@ impl Default for Environment {
         Self {
             window: Size::new(0.0, 0.0),
             safe_area: EdgeInsets::default(),
+            title_bar: crate::platform::Insets::default(),
             keyboard_height: 0.0,
             keyboard_duration: 0.0,
             dark: false,

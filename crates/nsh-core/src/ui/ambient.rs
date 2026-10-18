@@ -62,6 +62,7 @@ struct EnvSignals {
     env: Signal<Environment>,
     window: Memo<Size>,
     safe_area: Memo<EdgeInsets>,
+    title_bar: Memo<crate::platform::Insets>,
     keyboard_height: Memo<f32>,
     keyboard_duration: Memo<f32>,
     dark: Memo<bool>,
@@ -86,6 +87,7 @@ impl EnvSignals {
                 env: signal,
                 window: part!(window),
                 safe_area: part!(safe_area),
+                title_bar: part!(title_bar),
                 keyboard_height: part!(keyboard_height),
                 keyboard_duration: part!(keyboard_duration),
                 dark: part!(dark),
@@ -730,4 +732,15 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
     let id = back.borrow_mut().add(listener);
     let subscription = super::back::BackSubscription::new(back, id);
     cleanup(move || drop(subscription));
+}
+
+pub(crate) fn title_bar() -> crate::platform::Insets {
+    env(|e| e.title_bar)
+}
+
+pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
+    act(Action::Command(
+        crate::ROOT_ID,
+        Command::Desktop(Box::new(command)),
+    ));
 }

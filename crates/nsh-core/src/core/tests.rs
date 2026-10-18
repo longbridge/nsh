@@ -7485,3 +7485,139 @@ mod views {
         );
     }
 }
+
+mod rust_desktop {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::{
+        desktop::{DesktopCommand, TitleBarStyle},
+        platform::Insets,
+        ui::{
+            Root,
+            desktop::{close_window, set_title_bar, title_bar},
+            prelude::*,
+        },
+    };
+
+    thread_local! {
+        static DRAG: Cell<Option<Signal<bool>>> = const {Cell::new(None)};
+        static READS: Cell<u32> = const {Cell::new(0)};
+    }
+
+    #[component]
+    fn Chrome() -> impl IntoElement {
+        set_title_bar(TitleBarStyle::Hidden, Some(42.0));
+        let drag = signal(true);
+        DRAG.set(Some(drag));
+        view()
+            .window_drag(move || drag.get())
+            .child(text(move || {
+                READS.set(READS.get() + 1);
+                let area = title_bar();
+                format!("{} {} {}", area.top, area.left, area.right)
+            }))
+            .child(
+                text("Close window")
+                    .window_drag(false)
+                    .on_press(|_: &()| close_window()),
+            )
+    }
+
+    #[test]
+    fn rust_title_bar_commands_and_reactive_drag_props_reach_the_platform() {
+        let mut c = core();
+        READS.set(0);
+        c.set_environment(crate::ui::Environment {
+            title_bar: Insets {
+                top: 42.0,
+                left: 78.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<Chrome>());
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id: crate::ROOT_ID, command: Command::Desktop(command)} if **command == DesktopCommand::SetTitleBar {style:TitleBarStyle::Hidden, height:Some(42.0)})));
+        let header = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.window_drag == Some(true) => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        let close = batch
+            .items
+            .iter()
+            .find_map(|item| match item {
+                MountItem::Text { id, text, .. } if text.text == "Close window" => Some(*id),
+                _ => None,
+            })
+            .unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::ViewProps {id, props} if *id == close && props.window_drag == Some(false))));
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "42 78 0"))
+        );
+        {
+            let _entered = c.components.runtime.enter();
+            DRAG.get().unwrap().set(false);
+        }
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::ViewProps {id, props} if *id == header && props.window_drag == Some(false))));
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Create { .. }))
+        );
+        let reads = READS.get();
+        c.set_environment(crate::ui::Environment {
+            dark: true,
+            title_bar: Insets {
+                top: 42.0,
+                left: 78.0,
+                right: 0.0,
+                bottom: 0.0,
+            },
+            ..Default::default()
+        });
+        assert!(c.commit().is_none());
+        assert_eq!(
+            READS.get(),
+            reads,
+            "other environment changes do not rerun title_bar readers"
+        );
+        c.set_environment(crate::ui::Environment {
+            title_bar: Insets {
+                top: 42.0,
+                left: 0.0,
+                right: 138.0,
+                bottom: 0.0,
+            },
+            ..Default::default()
+        });
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "42 0 138"))
+        );
+        c.set_environment(crate::ui::Environment::default());
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|item| matches!(item, MountItem::Text {text, ..} if text.text == "0 0 0"))
+        );
+        assert!(c.component_event(close, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(|item| matches!(item, MountItem::Command {id:crate::ROOT_ID, command:Command::Desktop(command)} if **command == DesktopCommand::Close)));
+    }
+}

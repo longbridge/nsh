@@ -1092,6 +1092,17 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Whether a desktop press drags the window and a double click follows
+    /// the system's title-bar behavior. The nearest explicit value wins;
+    /// inputs and press/touch handlers inside a drag region stay interactive.
+    /// Set false on a child to exclude it from its parent's drag region.
+    fn window_drag(mut self, enabled: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(self.node(), enabled, |enabled| {
+            Prop::WindowDrag(Some(enabled))
+        });
+        self
+    }
+
     /// The id inputs name an input accessory by (`nativeID`).
     fn native_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::NativeId(Some(id.into())));

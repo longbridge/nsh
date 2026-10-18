@@ -35,9 +35,7 @@ impl Window {
     /// in points: the controls are centered in it (Windows' caption buttons
     /// fill it); the platform's own without it.
     pub(crate) fn set_title_bar(style: TitleBarStyle, height: Option<f32>, cx: &mut ModuleCx) {
-        let height = height
-            .filter(|h| h.is_finite() && *h > 0.0)
-            .map(|h| h.min(200.0));
+        let height = crate::desktop::title_bar_height(height);
         desktop(cx, DesktopCommand::SetTitleBar { style, height });
     }
 
