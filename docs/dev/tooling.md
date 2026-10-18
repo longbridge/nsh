@@ -195,7 +195,7 @@ at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` k
 are target-specific and disable default features, so `cargo run` mounts the Rust root directly.
 `App.tsx` imports that same component; `nsh.json` sets `"rust": "."`, so the existing Rust-component
 build / development / packaging path serves it on the selected platform. The generated app accepts
-`NSH_SCRIPT` for native desktop window checks. `examples/rust-app` exercises both entry points and
+`NSH_SCRIPT` for native desktop window checks. `examples/gallery-rs` exercises both entry points and
 has a headless test of the Rust root's input handling.
 
 The display name becomes a normalized Cargo package name prefixed with `nsh-app-`; the main entry

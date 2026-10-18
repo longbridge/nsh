@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "examples/rust-app/**"
+      - "examples/gallery-rs/**"
       - "crates/nsh-core/**"
       - "crates/nsh-engine/**"
       - "crates/nsh-macros/**"
@@ -16,7 +16,7 @@ on:
       - ".github/workflows/rust-app.yml"
   pull_request:
     paths:
-      - "examples/rust-app/**"
+      - "examples/gallery-rs/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
       - "crates/nsh-engine/**"
@@ -67,16 +67,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-rust-app-${{ hashFiles('examples/rust-app/Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ runner.os }}-rust-app-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-rust-app-
       - name: Clippy
-        run: cargo clippy --manifest-path examples/rust-app/Cargo.toml --target-dir target --all-targets --locked -- -D warnings
+        run: cargo clippy -p gallery-native --all-targets --locked -- -D warnings
       - name: Test the Rust root
-        run: cargo test --manifest-path examples/rust-app/Cargo.toml --target-dir target --locked
+        run: cargo test -p gallery-native --locked
       - name: Check the native dependency graph
         run: |
-          cargo tree --manifest-path examples/rust-app/Cargo.toml --locked -e normal > "$RUNNER_TEMP/rust-app-dependencies.txt"
+          cargo tree -p gallery-native --locked -e normal > "$RUNNER_TEMP/rust-app-dependencies.txt"
           if grep -E 'nsh-js |rquickjs' "$RUNNER_TEMP/rust-app-dependencies.txt"; then
             echo "The Rust executable unexpectedly links a JS runtime"
             exit 1

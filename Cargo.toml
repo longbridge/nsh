@@ -44,6 +44,7 @@ clap = { version = "4.6", features = ["derive"] }
 crossbeam-channel = "0.5"
 notify = "8.2"
 log = "0.4"
+env_logger = "0.11"
 libc = "0.2"
 imagesize = "0.15"
 ttf-parser = "0.25"

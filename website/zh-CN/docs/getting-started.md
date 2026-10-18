@@ -43,7 +43,7 @@ cargo run
 
 `src/lib.rs` 包含界面、状态和事件处理函数，`src/main.rs` 在 macOS、Windows 或 Linux 上直接挂载 Rust 根组件。`App.tsx` 从 `app/native` 导入同一个根组件，提供 TSX 开发与交付入口，包括 iOS 和 Android 开发宿主。Rust 开发需要 Rust 工具链及桌面后端的开发库。TSX 的 Rust 组件命令使用 NSH 源码仓库，通过 CLI 所在的仓库或 `NSH_SOURCE` 定位；首次构建也会生成 `app/native` 的类型声明。
 
-两个入口和 Rust 引擎测试的用法见[CLI 参考](./cli.md#nsh-init)及仓库中的 `examples/rust-app`。
+两个入口和 Rust 引擎测试的用法见[CLI 参考](./cli.md#nsh-init)及仓库中的 `examples/gallery-rs`。
 
 ### 入口模块
 

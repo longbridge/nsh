@@ -1,5 +1,5 @@
-//! The Rust gallery (`examples/gallery-rs`): the app's TSX mounts one
-//! component of this crate, [`Gallery`], and everything it shows is written
+//! The Rust gallery (`examples/gallery-rs`): both the native executable
+//! and the TSX entry mount [`Gallery`], and everything it shows is written
 //! in Rust: the same demos as the TSX gallery (`examples/gallery`), on
 //! nsh's Rust component API. The app imports the set as `gallery/native`
 //! (`nsh.json` `"rust"`).
