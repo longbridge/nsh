@@ -390,15 +390,22 @@ impl Host {
             self.dispatch_event(*id, *kind, payload);
             return;
         }
-        self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
-                let raw = ctx.as_raw().as_ptr();
-                if crate::components::deliver(raw, event).is_err() {
-                    self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
-                }
-            });
-            self.run_jobs();
-        });
+        // What it carries is the app's (a result, an event): dropped
+        // unused (JS stopped), its `Drop` must not unwind into the engine.
+        let delivered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.guarded(Phase::Call, || {
+                self.ctx.with(|ctx| {
+                    let raw = ctx.as_raw().as_ptr();
+                    if crate::components::deliver(raw, event).is_err() {
+                        self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
+                    }
+                });
+                self.run_jobs();
+            })
+        }));
+        if delivered.is_err() {
+            log::error!(target: "js", "a value for JS panicked as it dropped");
+        }
     }
 
     /// Delivers a native event (and its data) to the node's JS handler.

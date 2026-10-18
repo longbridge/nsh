@@ -626,6 +626,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 // What the call holds (its arguments: instances, callbacks)
                 // goes now.
+                drop_caught(run);
                 self.settle(call, Err("the script stopped before the call ran".into()));
             }
         }
@@ -1069,7 +1070,10 @@ impl<M: TextEngine> Core<M> {
                             Err(message)
                         }
                     },
-                    _ => Err(format!("node {host} hosts no Rust component")),
+                    _ => {
+                        drop_caught(method);
+                        Err(format!("node {host} hosts no Rust component"))
+                    }
                 };
                 self.apply_actions();
                 if let Some(message) = failed {
@@ -1088,6 +1092,7 @@ impl<M: TextEngine> Core<M> {
             if let Err(e) = &result {
                 log::warn!(target: "js", "a call into Rust failed: {e}");
             }
+            drop_caught(result);
             return;
         }
         self.events.push(JsEvent::Reply { call, result });
@@ -3623,6 +3628,15 @@ impl<M: TextEngine> Core<M> {
             }
             None => self.events.push(JsEvent::Component { host, event }),
         }
+    }
+}
+
+/// Drops `value`, which holds the app's values (a call's arguments or
+/// result): a panic in their `Drop` is logged instead of unwinding
+/// through the core.
+fn drop_caught<T>(value: T) {
+    if let Err(message) = caught(move || drop(value)) {
+        log::error!(target: "js", "a value of a call into Rust panicked as it dropped: {message}");
     }
 }
 

@@ -147,6 +147,59 @@ fn calls_into_rust_settle_their_promises_whatever_happens() {
     );
 }
 
+#[test]
+fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
+    use crate::ui::{JsHost, JsOwned, JsValue, PropError, RustCall, RustOp, ToJs, TsTypes};
+    /// Panics as it drops.
+    struct Grenade;
+    impl Drop for Grenade {
+        fn drop(&mut self) {
+            panic!("grenade");
+        }
+    }
+    impl JsValue for Grenade {
+        fn ts_type(_: &mut TsTypes) -> String {
+            "null".into()
+        }
+        fn from_js(_: crate::ui::JsIn<'_>) -> Result<Self, PropError> {
+            Ok(Grenade)
+        }
+        fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+            Ok(JsOwned::new(host, host.null()))
+        }
+    }
+    let mut c = core();
+    // A result nobody waits for.
+    c.apply(Op::Rust(RustOp {
+        call: 0,
+        run: RustCall::Op(Box::new(|_| Ok(Box::new(Grenade) as Box<dyn ToJs>))),
+    }))
+    .unwrap();
+    // A method's arguments when no component takes them.
+    let grenade = Grenade;
+    c.apply(Op::Rust(RustOp {
+        call: 0,
+        run: RustCall::Method(
+            40,
+            Box::new(move |_| {
+                let _ = &grenade;
+                None
+            }),
+        ),
+    }))
+    .unwrap();
+    // A call's arguments when the script stopped.
+    let grenade = Grenade;
+    c.discard_ops(vec![Op::Rust(RustOp {
+        call: 0,
+        run: RustCall::Op(Box::new(move |_| {
+            let _ = &grenade;
+            Err(String::new())
+        })),
+    })]);
+    assert!(js_events(&mut c).is_empty());
+}
+
 fn core() -> Core<FakeEngine> {
     Core::new(FakeEngine::default(), Size::new(320.0, 480.0))
 }

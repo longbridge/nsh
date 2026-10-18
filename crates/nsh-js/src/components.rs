@@ -16,6 +16,7 @@
 use std::{
     cell::{Cell, RefCell},
     ffi::{CString, c_int},
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
 };
 
@@ -29,6 +30,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     dom::{self, string_arg},
     reactive::{self, arg},
+    web::js::V,
 };
 
 type JsValue = qjs::JSValue;
@@ -153,21 +155,37 @@ pub(crate) fn measure(ctx: *mut JsContext, id: u32) -> JsValue {
 /// Delivers what the core hands JS besides nodes' events: a Rust
 /// component's event (to its `on<Event>` handler), whether its lazy
 /// children are placed, a call's result (its promise settles, the value
-/// converted now). `Err`: the exception a handler threw.
+/// converted now). `Err`: the exception a handler threw. The Rust code it
+/// runs (conversions, drops) cannot unwind out: a panic there is logged,
+/// or rejects the call's promise.
 pub(crate) fn deliver(ctx: *mut JsContext, event: JsEvent) -> Result<(), JsValue> {
     match event {
         JsEvent::Event(..) => Ok(()),
         JsEvent::Component { host, event } => {
             let host_js = crate::classes::host_outside_calls(ctx);
-            let data = match event.data_js(&host_js) {
-                Ok(data) => data.into_raw(),
-                Err(e) => {
-                    host_js.clear_pending();
-                    log::error!(target: "js", "the data of event `{}` did not convert: {e}", event.name());
+            let name = event.name();
+            let data = catch_unwind(AssertUnwindSafe(move || {
+                event.data_js(&host_js).map(|d| d.into_raw())
+            }));
+            let data = match data {
+                Ok(Ok(data)) => data,
+                Ok(Err(e)) => {
+                    crate::classes::host_outside_calls(ctx).clear_pending();
+                    let _ = crate::web::js::take_exception(ctx);
+                    log::error!(target: "js", "the data of event `{name}` did not convert: {e}");
+                    return Ok(());
+                }
+                Err(payload) => {
+                    let _ = crate::web::js::take_exception(ctx);
+                    log::error!(
+                        target: "js",
+                        "the data of event `{name}` panicked as it converted: {}",
+                        crate::classes::panic_message(payload)
+                    );
                     return Ok(());
                 }
             };
-            component_event(ctx, host, event.name(), crate::classes::from_raw(data))
+            component_event(ctx, host, name, crate::classes::from_raw(data))
         }
         JsEvent::Children { host, wanted } => {
             let data = if wanted { qjs::JS_TRUE } else { qjs::JS_FALSE };
@@ -214,41 +232,50 @@ fn component_event(
 
 /// Settles call `call` with `result`: resolved with the value (converted
 /// now), or rejected with an `Error` of the message (also when the value
-/// does not convert).
+/// does not convert, or its conversion panics).
 fn settle(ctx: *mut JsContext, call: u32, result: JsResult) -> Result<(), JsValue> {
     let pending = components(ctx).pending.borrow_mut().remove(&call);
-    // Nobody waits (the promise's VM state was reset): the value drops.
+    // Nobody waits (the promise's VM state was reset): the value drops,
+    // its `Drop` (the app's code) caught.
     let Some((resolve, reject)) = pending else {
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(move || drop(result))) {
+            log::error!(
+                target: "js",
+                "a call's result panicked as it dropped: {}",
+                crate::classes::panic_message(payload)
+            );
+        }
         return Ok(());
     };
+    // Owned from here: freed whatever happens.
+    let (resolve, reject) = (V::own(ctx, resolve), V::own(ctx, reject));
     let host = crate::classes::host_outside_calls(ctx);
-    let converted = result.and_then(|value| value.to_js_value(&host).map_err(|e| e.0));
+    let converted = catch_unwind(AssertUnwindSafe(|| {
+        result.and_then(|value| {
+            value
+                .to_js_value(&host)
+                .map(|v| V::own(ctx, crate::classes::from_raw(v.into_raw())))
+                .map_err(|e| e.0)
+        })
+    }))
+    .unwrap_or_else(|payload| Err(crate::classes::panic_message(payload)));
     let (f, value) = match converted {
-        Ok(value) => (resolve, crate::classes::from_raw(value.into_raw())),
+        Ok(value) => (resolve, value),
         Err(message) => {
             host.clear_pending();
             // SAFETY: a new error taking its message.
-            unsafe {
+            let error = unsafe {
                 let error = qjs::JS_NewError(ctx);
                 qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), new_string(ctx, &message));
-                (reject, error)
-            }
+                V::own(ctx, error)
+            };
+            (reject, error)
         }
     };
-    // SAFETY: the table's functions (ours now) and the value, freed after
-    // the call.
-    unsafe {
-        let mut args = [value];
-        let r = qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr());
-        qjs::JS_FreeValue(ctx, value);
-        qjs::JS_FreeValue(ctx, resolve);
-        qjs::JS_FreeValue(ctx, reject);
-        if qjs::JS_IsException(r) {
-            return Err(r);
-        }
-        qjs::JS_FreeValue(ctx, r);
+    match crate::web::js::call(ctx, f.raw(), UNDEFINED, &[value.raw()]) {
+        Ok(_) => Ok(()),
+        Err(_) => Err(qjs::JS_EXCEPTION),
     }
-    Ok(())
 }
 
 // --- Modules ------------------------------------------------------------------------
@@ -723,7 +750,21 @@ fn set_rust_prop(
         None
     } else {
         let host = crate::classes::host_outside_calls(ctx);
-        match decode(JsIn::new(&host, crate::classes::to_raw(value))) {
+        // The app's conversion: a panic in it throws, as in a call.
+        let decoded = catch_unwind(AssertUnwindSafe(|| {
+            decode(JsIn::new(&host, crate::classes::to_raw(value)))
+        }));
+        let decoded = match decoded {
+            Ok(decoded) => decoded,
+            Err(payload) => {
+                host.clear_pending();
+                let message = crate::classes::panic_message(payload);
+                let _ =
+                    crate::classes::throw_error(ctx, &format!("{}.{key}: {message}", spec.export));
+                return Err(qjs::JS_EXCEPTION);
+            }
+        };
+        match decoded {
             Ok(v) => {
                 host.clear_pending();
                 Some(v)

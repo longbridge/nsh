@@ -243,13 +243,54 @@ impl Component for Gauge {
     }
 }
 
+/// A value whose conversion from JS panics.
+#[derive(Clone, PartialEq, Default)]
+pub(crate) struct Panicky;
+
+impl JsValue for Panicky {
+    fn ts_type(_types: &mut nsh_core::ui::TsTypes) -> String {
+        "number".into()
+    }
+
+    fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, nsh_core::ui::PropError> {
+        panic!("panicky");
+    }
+
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn nsh_core::ui::JsHost,
+    ) -> Result<nsh_core::ui::JsOwned<'a>, nsh_core::ui::PropError> {
+        Ok(nsh_core::ui::JsOwned::new(host, host.undefined()))
+    }
+}
+
+/// Takes a prop whose conversion panics.
+#[derive(Default)]
+pub(crate) struct Fragile;
+
+#[derive(Clone, PartialEq, Props)]
+pub(crate) struct FragileProps {
+    #[prop(default)]
+    v: Panicky,
+}
+
+impl Component for Fragile {
+    type Props = FragileProps;
+    type Event = NoEvent;
+
+    fn view(_: FragileProps, _: Scope<NoEvent>) -> impl IntoElement {
+        text("fragile")
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::ui_set("test/classes");
     r.class::<Counter>()
         .class::<Dial>()
         .module::<Tools>()
         .module::<Ints>()
-        .register::<Gauge>();
+        .register::<Gauge>()
+        .register::<Fragile>();
     r
 }
 
@@ -500,6 +541,29 @@ fn integers_take_the_same_values_in_every_kind_of_call_and_prop() {
         );
     }
     assert_eq!(rows.len(), 5, "{done}");
+}
+
+const FRAGILE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Fragile } from "test/classes";
+
+const shown = signal("waiting");
+const v = signal(undefined);
+setTimeout(() => {
+  try { v.set(2); shown.set("done set"); } catch (e) { shown.set(`done ${e.name}: ${e.message}`); }
+}, 0);
+
+mount(() => (
+  <>
+    <Text>{shown()}</Text>
+    <Fragile v={v()} />
+  </>
+));
+"#;
+
+#[test]
+fn a_prop_whose_conversion_panics_throws_where_it_is_set() {
+    let (_engine, rx) = start(FRAGILE, vec![registry()]);
+    assert_eq!(shown(&rx, "done"), "done Error: Fragile.v: panicky");
 }
 
 const DATA: &str = r#"import { mount, signal, Text } from "nsh";

@@ -498,7 +498,7 @@ unsafe extern "C" fn dispose(
 }
 
 /// Throws an `Error` with `message`.
-fn throw_error(ctx: Ctx, message: &str) -> Throw {
+pub(crate) fn throw_error(ctx: Ctx, message: &str) -> Throw {
     // SAFETY: a new error the exception takes.
     unsafe {
         let error = qjs::JS_NewError(ctx);
@@ -517,7 +517,7 @@ fn throw_error(ctx: Ctx, message: &str) -> Throw {
 }
 
 /// The message of a panic's payload.
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+pub(crate) fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     match payload.downcast::<String>() {
         Ok(s) => *s,
         Err(payload) => match payload.downcast::<&'static str>() {
@@ -1223,7 +1223,15 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
 pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
     let calls = classes(ctx).posts.take_calls();
     for call in calls {
-        run_call(ctx, call);
+        // The app's conversions (the arguments, the result) run here, with
+        // nothing around to catch a panic: it is logged, and the call
+        // dropped (its reply says so).
+        if let Err(payload) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_call(ctx, call)))
+        {
+            let _ = js::take_exception(ctx);
+            log::error!(target: "js", "a posted call panicked: {}", panic_message(payload));
+        }
         let interrupted = classes(ctx).uncatchable.borrow_mut().take();
         if let Some(e) = interrupted {
             return Err(js::throw(ctx, e));
@@ -1550,6 +1558,73 @@ pub(crate) mod tests {
         /// An op taking an instance.
         pub(crate) fn keep_op(tally: Instance<Tally>, cx: &mut ModuleCx) {
             let _ = (tally, cx);
+        }
+
+        /// Posts a value whose conversion panics to `f`.
+        pub(crate) fn post_brittle(f: Callback<Brittle>) {
+            f.post(Brittle);
+        }
+    }
+
+    /// A value whose conversion to JS panics.
+    pub(crate) struct Brittle;
+
+    impl JsValue for Brittle {
+        fn ts_type(_types: &mut nsh_core::ui::TsTypes) -> String {
+            "object".into()
+        }
+
+        fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, PropError> {
+            Ok(Brittle)
+        }
+
+        fn to_js<'a>(
+            &self,
+            _host: &'a dyn nsh_core::ui::JsHost,
+        ) -> Result<nsh_core::ui::JsOwned<'a>, PropError> {
+            panic!("brittle");
+        }
+    }
+
+    /// A value whose drop panics.
+    pub(crate) struct Grenade;
+
+    impl Drop for Grenade {
+        fn drop(&mut self) {
+            panic!("grenade");
+        }
+    }
+
+    impl JsValue for Grenade {
+        fn ts_type(_types: &mut nsh_core::ui::TsTypes) -> String {
+            "object".into()
+        }
+
+        fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, PropError> {
+            Ok(Grenade)
+        }
+
+        fn to_js<'a>(
+            &self,
+            host: &'a dyn nsh_core::ui::JsHost,
+        ) -> Result<nsh_core::ui::JsOwned<'a>, PropError> {
+            Ok(nsh_core::ui::JsOwned::new(host, host.null()))
+        }
+    }
+
+    /// An event whose data panics as it converts.
+    struct BrittleEvent;
+
+    impl nsh_core::ui::EventToJs for BrittleEvent {
+        fn name(&self) -> &'static str {
+            "brittle"
+        }
+
+        fn data_js<'a>(
+            &self,
+            _host: &'a dyn nsh_core::ui::JsHost,
+        ) -> Result<nsh_core::ui::JsOwned<'a>, PropError> {
+            panic!("brittle event");
         }
     }
 
@@ -2219,6 +2294,51 @@ pub(crate) mod tests {
         assert_eq!(dropped(), before, "the ops sent hold the tally");
         drop(ops);
         assert_eq!(dropped(), before + 1, "nothing else holds it");
+    }
+
+    #[test]
+    fn panics_in_what_the_core_hands_back_stay_in_rust() {
+        use nsh_core::ui::{JsEvent, RustOp};
+        let host = host();
+        host.eval_source(
+            "import { Tools } from \"test/classes\";\n\
+             globalThis.seen = [];\n\
+             Tools.measure(\"a\").then((v) => seen.push(`resolved ${v}`), (e) => seen.push(e.message));\n\
+             Tools.postBrittle(() => seen.push(\"called\"));",
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let call = ops
+            .iter()
+            .find_map(|op| match op {
+                nsh_core::Op::Rust(RustOp { call, .. }) if *call != 0 => Some(*call),
+                _ => None,
+            })
+            .expect("the op's promise");
+        host.apply_posts(&ops);
+        drop(ops);
+        // The result's conversion panics: the promise rejects with it.
+        host.deliver(JsEvent::Reply {
+            call,
+            result: Ok(Box::new(Brittle)),
+        });
+        // Nobody waits for this one: the value drops there, and panics.
+        host.deliver(JsEvent::Reply {
+            call: 999,
+            result: Ok(Box::new(Grenade)),
+        });
+        // An event's data panics as it converts: logged.
+        host.deliver(JsEvent::Component {
+            host: 2,
+            event: Box::new(BrittleEvent),
+        });
+        // A posted call's arguments panic as they convert: logged, and the
+        // function is not called.
+        host.run_posted();
+        host.run_jobs();
+        assert!(!host.has_exception());
+        assert_eq!(run(&host, "show(seen.join(','));").unwrap(), ["brittle"]);
     }
 
     #[test]

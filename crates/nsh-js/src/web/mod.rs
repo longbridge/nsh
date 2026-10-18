@@ -325,11 +325,16 @@ unsafe extern "C" fn mark(rt: *mut qjs::JSRuntime, obj: Raw, mark: qjs::JS_MarkF
 unsafe extern "C" fn finalize_closure(_rt: *mut qjs::JSRuntime, obj: Raw) {
     let _finalizing = Finalizing::enter();
     // SAFETY: the opaque of closures is a boxed closure.
-    unsafe {
+    let closure = unsafe {
         let p = qjs::JS_GetAnyOpaque(obj, &mut 0);
-        if !p.is_null() {
-            drop(Box::from_raw(p as *mut Closure));
-        }
+        (!p.is_null()).then(|| Box::from_raw(p as *mut Closure))
+    };
+    // Its captures may hold the app's values (a call's reply): a panic in
+    // their drop must not unwind into the collector.
+    if let Some(closure) = closure
+        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(closure))).is_err()
+    {
+        log::error!(target: "js", "a Rust value a JS function held panicked while it was dropped");
     }
 }
 
