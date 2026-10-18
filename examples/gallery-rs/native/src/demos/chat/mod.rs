@@ -1,7 +1,9 @@
 //! AI Chat (as the TSX gallery's `demos/Chat.tsx` and `demos/chat/`): a
 //! simulated assistant whose replies stream token by token (batched per
 //! frame), think first, call tools, fail and recover; every scenario
-//! comes from local scripts and timers.
+//! comes from local scripts and timers. The desktop layout adds a list of
+//! conversations on the left and keeps messages and the composer in a
+//! readable column.
 //!
 //! The conversation is a signal of messages; its rows are a virtualized
 //! list whose cells bind to the message they show. The reply being written
@@ -18,7 +20,7 @@ use std::{rc::Rc, time::Duration};
 use nsh_core::{
     LayoutAnimation, Size,
     time::Instant,
-    ui::{ScrollEvent, ScrollOffset, prelude::*},
+    ui::{AccessibilityState, ScrollEvent, ScrollOffset, View, prelude::*},
 };
 use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 
@@ -36,9 +38,14 @@ use self::{
 };
 use crate::ui::{
     Badge, Finish, Finished, IconName, IconTile, PressProps, RoundButton, Segment, Segmented,
-    SegmentedEvent, SegmentedProps, SegmentedSize, Tone, appear, colors, icon, motion, press_with,
-    radius, rgb_a,
+    SegmentedEvent, SegmentedProps, SegmentedSize, Tone, appear, colors, desktop, icon, motion,
+    press_with, radius, rgb_a,
 };
+
+/// Desktop: messages and the composer in a centered column.
+fn column(v: View) -> View {
+    v.w(relative(1.0)).max_w(px(820.0)).self_center()
+}
 
 /// The reply being written, as signals only its row reads. Finished
 /// replies are plain data in the chat's messages.
@@ -774,9 +781,12 @@ impl ChatState {
     }
 }
 
-/// The chat: the conversation, the menu, the banner and the composer.
+/// The chat: the conversation, the menu, the banner and the composer; in
+/// the desktop layout, the scenarios as conversations beside them.
 #[component]
 pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
+    // The shell is made again when the layout changes: read once.
+    let wide = untracked(desktop);
     let list = element_ref();
     let chat = ChatState {
         owner: Owner::current(),
@@ -829,10 +839,11 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .map(|s| (s.id, s.chip))
         .chain([("history", "Load a long conversation")])
         .collect();
+    let conversations = chips.clone();
 
     let content = If::new(
         move || !messages.with(Vec::is_empty),
-        move || chat.list_view(list.clone()),
+        move || chat.list_view(list.clone(), wide),
     )
     .otherwise(move || chat.empty());
 
@@ -1024,6 +1035,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             ))
     };
     let composer = view()
+        .when(wide, column)
         .px_4()
         .pt_2()
         .pb(move || {
@@ -1158,7 +1170,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 ),
         );
 
-    view().flex_1().bg(colors::BACKGROUND).child(
+    let pane = view().flex_1().bg(colors::BACKGROUND).child(
         KeyboardAvoidingView::element(KeyboardAvoidingViewProps::default())
             .flex_1()
             .child(
@@ -1172,7 +1184,122 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             )
             .child(suggestions)
             .child(composer),
-    )
+    );
+    if !wide {
+        return pane;
+    }
+
+    // Desktop: the scenarios as conversations, each opened afresh.
+    let current = signal(None::<&'static str>);
+    let new_chat = move || {
+        chat.stop();
+        batch(|| {
+            messages.set(Vec::new());
+            attachment.set(false);
+            menu.set(false);
+            current.set(None);
+        });
+    };
+    let open_chat = move |id: &'static str| {
+        new_chat();
+        current.set(Some(id));
+        chat.play(id);
+    };
+    let all = scenarios();
+    // TS: `bg-paper-border dark:bg-graphite-raised` when selected,
+    // `hover:bg-paper-card active:bg-paper-border dark:hover:bg-graphite-card
+    // dark:active:bg-graphite-raised` otherwise.
+    let fill = AdaptiveColor::new(colors::BORDER.light, colors::RAISED.dark);
+    let rows = conversations.iter().map(|&(id, label)| {
+        let selected = move || current.get() == Some(id);
+        let prompt = all
+            .iter()
+            .find(|s| s.id == id)
+            .map_or("Weeks of messages, loaded at once", |s| s.prompt);
+        view()
+            .on_press(move |_: &()| open_chat(id))
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .accessibility_state(move || AccessibilityState {
+                selected: selected(),
+                ..AccessibilityState::default()
+            })
+            .style_when(selected, |s| s.bg(fill))
+            .hover(|s| s.bg(move || if selected() { fill } else { colors::SURFACE }))
+            .active(|s| s.bg(fill))
+            .px_3()
+            .py(px(9.0))
+            .rounded(px(radius::CONTROL))
+            .gap(px(2.0))
+            .cursor_pointer()
+            .child(
+                text(label)
+                    .number_of_lines(1)
+                    .text_size(px(14.0))
+                    .style_when(selected, |s| s.font_weight(FontWeight::SEMIBOLD))
+                    .text_color(colors::TEXT),
+            )
+            .child(
+                text(prompt)
+                    .number_of_lines(1)
+                    .text_size(px(12.0))
+                    .text_color(colors::MUTED),
+            )
+    });
+    let sidebar = view()
+        .w(px(280.0))
+        .border_r_1()
+        .border_r_color(colors::LINE)
+        .p_3()
+        .gap(px(2.0))
+        .child(
+            press_with(
+                PressProps {
+                    label: Some("New chat".into()).into(),
+                    ..PressProps::default()
+                },
+                move |_: &()| new_chat(),
+            )
+            .child(
+                view()
+                    .h(px(40.0))
+                    .rounded(px(radius::CONTROL))
+                    .border_curve(BorderCurve::Continuous)
+                    .flex_row()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .bg(colors::RAISED)
+                    .finish(Finish::Raised)
+                    .border_1()
+                    .border_color(colors::BORDER)
+                    .cursor_pointer()
+                    .child(icon(IconName::Plus, 15.0, colors::TEXT))
+                    .child(
+                        text("New chat")
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors::TEXT),
+                    ),
+            ),
+        )
+        .child(
+            text("CONVERSATIONS")
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(colors::FAINT)
+                .letter_spacing(0.6)
+                .px_3()
+                .pt(px(18.0))
+                .pb(px(6.0)),
+        )
+        .children(rows);
+    view()
+        .flex_1()
+        .flex_row()
+        .bg(colors::BACKGROUND)
+        .child(sidebar)
+        .child(pane)
 }
 
 impl ChatState {
@@ -1329,8 +1456,9 @@ impl ChatState {
     }
 
     /// The conversation, virtualized: a cell binds to the message it shows,
-    /// and is made again only when it shows another kind of message.
-    fn list_view(self, list: ElementRef) -> VirtualList {
+    /// and is made again only when it shows another kind of message. `wide`
+    /// (the desktop layout) keeps the rows in a centered column.
+    fn list_view(self, list: ElementRef, wide: bool) -> VirtualList {
         let messages = self.messages;
         let count = messages.with_untracked(Vec::len);
         let (following, dragging) = (self.following, self.dragging);
@@ -1339,7 +1467,7 @@ impl ChatState {
             move |at: Position| {
                 let item = computed(move || messages.with(|m| m.get(at.index()).cloned()));
                 let kind = computed(move || item.with(|m| m.as_ref().map(RowKind::of)));
-                view().child(dynamic(move || {
+                view().when(wide, column).child(dynamic(move || {
                     let kind = kind.get()?;
                     Some(untracked(|| match kind {
                         RowKind::Date => date_separator(move || {

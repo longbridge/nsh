@@ -10,8 +10,8 @@ use nsh_core::{
 use crate::{
     assets::{BOUNCE, LOGO, SPINNER},
     ui::{
-        Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, MONO, Meter, Tone, appear,
-        caption, colors, radius,
+        Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, Meter,
+        Tone, appear, caption, colors, radius,
     },
 };
 
@@ -465,25 +465,14 @@ fn events() -> AnyElement {
 pub(crate) fn Images() -> impl IntoElement {
     // Asks for images that are not cached yet ("Reload").
     let seed = signal(1_u32);
-    let cards = [
-        resize_modes(),
-        corners(),
-        assets(),
-        animated(),
-        placeholders(seed),
-        blur(),
-        info(),
-        events(),
-    ];
-    // The page scrolls inside the component's view.
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                cards
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .columns(3)
+        .card(resize_modes)
+        .card(corners)
+        .card(assets)
+        .card(animated)
+        .card(move || placeholders(seed))
+        .card(blur)
+        .card(info)
+        .card(events)
 }

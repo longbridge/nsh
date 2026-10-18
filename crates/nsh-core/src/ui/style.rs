@@ -21,7 +21,7 @@ use std::{
 
 use super::{IntoReactive, Reactive, SharedString};
 use crate::{
-    BlendMode, BoxShadow, FontVariant, TransformOrigin, TransitionProps,
+    BlendMode, BoxShadow, Cursor, FontVariant, TransformOrigin, TransitionProps,
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     style::{Color, OriginLen, PatchValue, StyleDecl, StyleKey},
     tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
@@ -2241,6 +2241,19 @@ pub trait Styled: Sized {
     fn mix_blend_mode(mut self, mode: BlendMode) -> Self {
         self.style().keyword(StyleKey::MixBlendMode, mode.name());
         self
+    }
+
+    /// The pointer's look over the element (`cursor`; desktops, and iPad
+    /// and Android with a mouse).
+    fn cursor(mut self, cursor: Cursor) -> Self {
+        self.style().keyword(StyleKey::Cursor, cursor.name());
+        self
+    }
+
+    /// The pointing hand over the element: something to press (Tailwind's
+    /// `cursor-pointer`).
+    fn cursor_pointer(self) -> Self {
+        self.cursor(Cursor::Pointer)
     }
 
     /// Changes of colors, opacity, shadows and transforms animate

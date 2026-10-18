@@ -12,7 +12,6 @@ use nsh_core::{
 };
 
 use super::{
-    detail::StockProps,
     live,
     market::{Candle, OPEN, Quote, SESSION, compact, price, signed, time, tone_of},
     parts::{Calm, GRID, dashed, hatch, pulse, run_pulse},
@@ -64,6 +63,7 @@ const AVERAGES: [(usize, AdaptiveColor); 3] =
 const PAD_RIGHT: f32 = 54.0;
 const PAD_TOP: f32 = 8.0;
 const PAD_BOTTOM: f32 = 18.0;
+/// The plot's height unless [`ChartProps::height`] says otherwise.
 const HEIGHT: f32 = 216.0;
 const VOL_H: f32 = 40.0;
 
@@ -161,11 +161,12 @@ struct LivePoint {
 }
 
 impl Plot {
-    /// `data` of `period` at `width`, in a frame of its range; candles
-    /// scroll, so their range eases in through `scale` rather than jumping.
+    /// `data` of `period` at `width` × `height`, in a frame of its range;
+    /// candles scroll, so their range eases in through `scale` rather than
+    /// jumping.
     fn fit(
         period: Period,
-        width: f32,
+        (width, height): (f32, f32),
         data: Vec<Candle>,
         prev_close: f64,
         scale: &mut Calm,
@@ -201,7 +202,7 @@ impl Plot {
         } else {
             scale.fit(lo - margin, hi + margin)
         };
-        let main_h = HEIGHT - PAD_TOP - PAD_BOTTOM - VOL_H - 12.0;
+        let main_h = height - PAD_TOP - PAD_BOTTOM - VOL_H - 12.0;
         plot.frame = Some(Frame {
             first,
             count,
@@ -514,11 +515,22 @@ impl Plot {
     }
 }
 
-/// The chart.
+/// The props of [`Chart`].
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
+pub(crate) struct ChartProps {
+    /// The stock's index in the market.
+    pub(crate) stock: u32,
+    /// The plot's height (the desktop layout draws it taller).
+    #[prop(default = HEIGHT)]
+    pub(crate) height: f32,
+}
+
+/// The chart, its plot 216 pt tall unless `height` says otherwise.
 #[component]
-pub(crate) fn Chart(props: StockProps) -> impl IntoElement {
+pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
     let live = live();
     let index = props.stock as usize;
+    let height = props.height;
     let quote = live.quotes[index];
     let (code, decimals) = {
         let market = live.market.borrow();
@@ -554,7 +566,7 @@ pub(crate) fn Chart(props: StockProps) -> impl IntoElement {
                 let stock = &market.stocks[index];
                 candles(&stock.minutes, &stock.days, q, period)
             };
-            scale.with(|scale| Plot::fit(period, width, data, prev_close, scale))
+            scale.with(|scale| Plot::fit(period, (width, height), data, prev_close, scale))
         })
     };
     let intraday = computed(move || period.get() == Period::Intraday);
@@ -721,10 +733,10 @@ pub(crate) fn Chart(props: StockProps) -> impl IntoElement {
         )
         .child(
             view()
-                .h(px(HEIGHT))
+                .h(px(height))
                 .child(
                     canvas(move || plot.with(|p| p.draw(prev_close, decimals, &ring)))
-                        .h(px(HEIGHT))
+                        .h(px(height))
                         .label(move || {
                             let name = PERIODS
                                 .iter()

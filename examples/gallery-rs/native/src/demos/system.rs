@@ -13,9 +13,9 @@ use nsh_core::{
 use nsh_ui_mobile::{BarStyle, StatusBar, StatusBarProps};
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, Figure, Finish, Finished, IconName, IconTile, Inset, MONO,
-    Meter, PressProps, Row, Segment, SegmentedEvent, Stat, ToggleEvent, Tone, appear, caption,
-    colors, icon, inset_shadow, legend, press_with, rgb_a, segmented, tints, toggle,
+    Badge, Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, IconTile,
+    Inset, MONO, Meter, PressProps, Row, Segment, SegmentedEvent, Stat, ToggleEvent, Tone, appear,
+    caption, colors, icon, inset_shadow, legend, press_with, rgb_a, segmented, tints, toggle,
 };
 
 /// The status bar's styles, in the segments' order.
@@ -906,22 +906,11 @@ fn Shortcuts() -> impl IntoElement {
 /// The demo's page.
 #[component]
 pub(crate) fn System() -> impl IntoElement {
-    let sections = [
-        environment(),
-        StatusBarCard::element(()).into_element(),
-        Dialogs::element(()).into_element(),
-        FramesAndTimers::element(()).into_element(),
-        Shortcuts::element(()).into_element(),
-        Network::element(()).into_element(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                sections
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, section)| appear(i as u32).child(section)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .card(environment)
+        .card(|| StatusBarCard::element(()))
+        .card(|| Dialogs::element(()))
+        .card(|| FramesAndTimers::element(()))
+        .card(|| Shortcuts::element(()))
+        .card(|| Network::element(()))
 }

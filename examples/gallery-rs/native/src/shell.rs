@@ -124,6 +124,7 @@ fn sidebar_row(demo: &'static Demo) -> AnyElement {
         .gap(px(10.0))
         .px(px(10.0))
         .rounded(px(radius::CONTROL))
+        .cursor_pointer()
         .role(AccessibilityRole::Button)
         .label(demo.name)
         .accessibility_state(move || AccessibilityState {

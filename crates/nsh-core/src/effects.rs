@@ -463,6 +463,29 @@ pub enum Cursor {
 }
 
 impl Cursor {
+    /// Its CSS name ([`Cursor::parse`]'s input).
+    pub fn name(self) -> &'static str {
+        match self {
+            Cursor::Auto => "auto",
+            Cursor::Default => "default",
+            Cursor::Pointer => "pointer",
+            Cursor::Text => "text",
+            Cursor::Wait => "wait",
+            Cursor::Progress => "progress",
+            Cursor::Help => "help",
+            Cursor::Crosshair => "crosshair",
+            Cursor::Move => "move",
+            Cursor::Grab => "grab",
+            Cursor::Grabbing => "grabbing",
+            Cursor::NotAllowed => "not-allowed",
+            Cursor::ZoomIn => "zoom-in",
+            Cursor::ZoomOut => "zoom-out",
+            Cursor::ColResize => "col-resize",
+            Cursor::RowResize => "row-resize",
+            Cursor::None => "none",
+        }
+    }
+
     /// Parses a CSS cursor name (unknown resize directions map to their
     /// axis).
     pub fn parse(s: &str) -> Option<Cursor> {

@@ -9,9 +9,9 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Figure, Finish, Finished, IconName, Meter, PressProps, Section,
-    Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, Tone, caption,
-    code, colors, hint, press_with, radius, toggle,
+    Badge, Button, ButtonVariant, DemoPage, Figure, Finish, Finished, IconName, Meter, PressProps,
+    Section, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, Tone,
+    caption, code, colors, hint, press_with, radius, toggle,
 };
 
 /// The tones cards, tiles and posts cycle through.
@@ -816,105 +816,102 @@ pub(crate) fn Scrolling() -> impl IntoElement {
         }
         KeyboardTaps::Always => "Taps never hide the keyboard.",
     };
-    let tap_me = press_with(
-        PressProps {
-            label: Some("Count a tap".into()).into(),
-            ..PressProps::default()
-        },
-        move |_: &()| presses.update(|p| *p += 1),
-    )
-    .child(
-        view()
-            .h(px(44.0))
-            .rounded(px(radius::CONTROL))
-            .border_curve(BorderCurve::Continuous)
-            .bg(colors::LIGHT)
-            .finish(Finish::Light)
-            .flex_row()
-            .items_center()
-            .justify_center()
-            .gap_2()
+    let tap_me = move || {
+        press_with(
+            PressProps {
+                label: Some("Count a tap".into()).into(),
+                ..PressProps::default()
+            },
+            move |_: &()| presses.update(|p| *p += 1),
+        )
+        .child(
+            view()
+                .h(px(44.0))
+                .rounded(px(radius::CONTROL))
+                .border_curve(BorderCurve::Continuous)
+                .bg(colors::LIGHT)
+                .finish(Finish::Light)
+                .flex_row()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child(
+                    text(hint("Tap me", "Click me"))
+                        .text_size(px(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors::ON_LIGHT),
+                )
+                .child(
+                    text(move || presses.get().to_string())
+                        .text_size(px(15.0))
+                        .text_color(AdaptiveColor::new(rgb(0x9a9ea4), rgb(0x55595f)))
+                        .tabular_nums(),
+                ),
+        )
+    };
+    let taps_section = move || {
+        Section::new("Taps with the keyboard up")
+            .child(api("keyboardShouldPersistTaps"))
+            .child(choice(&TAPS.map(|t| t.1), taps, move |i: &u32| {
+                taps.set(*i as usize);
+            }))
             .child(
-                text(hint("Tap me", "Click me"))
-                    .text_size(px(15.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors::ON_LIGHT),
+                text(explained)
+                    .text_color(colors::MUTED)
+                    .text_size(px(13.0))
+                    .line_height(px(18.0)),
             )
             .child(
-                text(move || presses.get().to_string())
+                input()
+                    .placeholder(hint(
+                        "Type here, then tap the button",
+                        "Type here, then click the button",
+                    ))
+                    .placeholder_color(|| color(colors::FAINT))
+                    .selection_color(|| color(colors::ACCENT))
+                    .h(px(44.0))
                     .text_size(px(15.0))
-                    .text_color(AdaptiveColor::new(rgb(0x9a9ea4), rgb(0x55595f)))
-                    .tabular_nums(),
-            ),
-    );
-    let taps_section = Section::new("Taps with the keyboard up")
-        .child(api("keyboardShouldPersistTaps"))
-        .child(choice(&TAPS.map(|t| t.1), taps, move |i: &u32| {
-            taps.set(*i as usize);
-        }))
-        .child(
-            text(explained)
-                .text_color(colors::MUTED)
-                .text_size(px(13.0))
-                .line_height(px(18.0)),
-        )
-        .child(
-            input()
-                .placeholder(hint(
-                    "Type here, then tap the button",
-                    "Type here, then click the button",
+                    .text_color(colors::TEXT)
+                    .bg(colors::SURFACE)
+                    .finish(Finish::Inset)
+                    .border_1()
+                    .border_color(colors::BORDER)
+                    .rounded(px(radius::CONTROL))
+                    .px(px(14.0)),
+            )
+            .child(tap_me())
+            .child(view().h(px(300.0)))
+    };
+    DemoPage::new()
+        .appear(false)
+        .bottom(16.0)
+        .keyboard_taps(move || TAPS[taps.get()].0)
+        .card(|| {
+            Section::new("Paging")
+                .note("5 pages")
+                .child(api("pagingEnabled · scrollValue"))
+                .child(Pager::element(()))
+        })
+        .card(|| {
+            Section::new("Snapping")
+                .note("20 cards")
+                .child(api("snapToInterval · snapToAlignment"))
+                .child(Cards::element(()))
+        })
+        .card(|| {
+            Section::new("Zoom")
+                .note(hint(
+                    "Pinch or tap a tile",
+                    "Pinch on a touchpad or click a tile",
                 ))
-                .placeholder_color(|| color(colors::FAINT))
-                .selection_color(|| color(colors::ACCENT))
-                .h(px(44.0))
-                .text_size(px(15.0))
-                .text_color(colors::TEXT)
-                .bg(colors::SURFACE)
-                .finish(Finish::Inset)
-                .border_1()
-                .border_color(colors::BORDER)
-                .rounded(px(radius::CONTROL))
-                .px(px(14.0)),
-        )
-        .child(tap_me)
-        .child(view().h(px(300.0)));
-    view().flex_1().child(
-        scroll()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .keyboard_taps(move || TAPS[taps.get()].0)
-            .child(
-                view()
-                    .p_4()
-                    .gap_4()
-                    .child(
-                        Section::new("Paging")
-                            .note("5 pages")
-                            .child(api("pagingEnabled · scrollValue"))
-                            .child(Pager::element(())),
-                    )
-                    .child(
-                        Section::new("Snapping")
-                            .note("20 cards")
-                            .child(api("snapToInterval · snapToAlignment"))
-                            .child(Cards::element(())),
-                    )
-                    .child(
-                        Section::new("Zoom")
-                            .note(hint(
-                                "Pinch or tap a tile",
-                                "Pinch on a touchpad or click a tile",
-                            ))
-                            .child(api("maximumZoomScale · zoomTo()"))
-                            .child(Zoom::element(())),
-                    )
-                    .child(
-                        Section::new("Events and behavior")
-                            .child(api("onScroll · onScrollBeginDrag · onMomentumScrollEnd"))
-                            .child(Events::element(())),
-                    )
-                    .child(Section::new("Prepending keeps the position").child(Feed::element(())))
-                    .child(taps_section),
-            ),
-    )
+                .child(api("maximumZoomScale · zoomTo()"))
+                .child(Zoom::element(()))
+        })
+        .card(|| {
+            Section::new("Events and behavior")
+                .child(api("onScroll · onScrollBeginDrag · onMomentumScrollEnd"))
+                .child(Events::element(()))
+        })
+        .card(|| Section::new("Prepending keeps the position").child(Feed::element(())))
+        .card(taps_section)
 }

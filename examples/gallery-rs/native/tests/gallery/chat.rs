@@ -68,6 +68,9 @@ fn chat_streams_fails_retries_and_thinks() {
     until(&rx, &mut screen, 10, |s| {
         has(s, "Tuesday, November 3") && !shows(s, "Waiting for a connection")
     });
+    // The words show as they stream: the reply is done when it can no
+    // longer be stopped.
+    until(&rx, &mut screen, 5, |s| !s.labelled("Stop generating"));
 
     // A reply that thinks first: the reasoning streams, then folds into
     // its label once the answer is done; the label opens it again.

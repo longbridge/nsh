@@ -3,7 +3,10 @@
 
 #![allow(dead_code, unreachable_pub)]
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
@@ -11,13 +14,49 @@ use nsh_core::{
     MountBatch, MountItem, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing,
     ui::Root,
 };
-use nsh_engine::{App, Engine, EngineConfig, Environment, MountSink};
+use nsh_engine::{App, Engine, EngineConfig, EngineControl, Environment, MountSink};
 
-pub struct Sink(crossbeam_channel::Sender<MountBatch>);
+/// Takes the engine's batches, and gives it display frames as a platform
+/// does (60 Hz while it asks for them), so what waits for a frame (a
+/// stream drawn per frame, `request_animation_frame`) runs as it does on
+/// screen.
+pub struct Sink {
+    batches: crossbeam_channel::Sender<MountBatch>,
+    /// Set once the engine runs.
+    control: Arc<OnceLock<EngineControl>>,
+}
+
+impl Sink {
+    pub fn new(batches: crossbeam_channel::Sender<MountBatch>) -> Self {
+        Self {
+            batches,
+            control: Arc::default(),
+        }
+    }
+
+    /// Starts `config`'s app with this sink driving its frames.
+    pub fn start(config: EngineConfig, batches: crossbeam_channel::Sender<MountBatch>) -> Engine {
+        let sink = Sink::new(batches);
+        let control = sink.control.clone();
+        let engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
+        let _ = control.set(engine.control());
+        engine
+    }
+}
 
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
-        let _ = self.0.send(batch);
+        let _ = self.batches.send(batch);
+    }
+
+    fn request_frame(&self) {
+        let control = self.control.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_micros(16_667));
+            if let Some(control) = control.get() {
+                control.frame();
+            }
+        });
     }
 }
 
@@ -42,6 +81,8 @@ pub struct Screen {
     pub behaviors: std::collections::HashMap<u32, nsh_core::ScrollBehavior>,
     /// Lists with sticky cells.
     pub sticky: std::collections::HashSet<u32>,
+    /// Accessibility labels, by node.
+    pub labels: std::collections::HashMap<u32, String>,
 }
 
 impl Screen {
@@ -84,7 +125,16 @@ impl Screen {
                 MountItem::StickyCells { id, cells } if !cells.is_empty() => {
                     self.sticky.insert(*id);
                 }
+                MountItem::ViewProps { id, props } => match &props.accessibility.label {
+                    Some(label) => {
+                        self.labels.insert(*id, label.to_string());
+                    }
+                    None => {
+                        self.labels.remove(id);
+                    }
+                },
                 MountItem::Delete { id } => {
+                    self.labels.remove(id);
                     self.texts.retain(|t| t.0 != *id);
                     self.blocks.retain(|t| t.0 != *id);
                     self.titles.retain(|t| t.0 != *id);
@@ -104,6 +154,11 @@ impl Screen {
             .collect();
         ids.sort();
         ids
+    }
+
+    /// Whether a view with accessibility label `label` exists.
+    pub fn labelled(&self, label: &str) -> bool {
+        self.labels.values().any(|l| l == label)
     }
 
     /// The pressable node around text `label` (the text or a parent).
@@ -210,7 +265,7 @@ pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
         ui_sets: Vec::new(),
         runtime: None,
     };
-    let engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
+    let engine = Sink::start(config, tx);
     (engine, rx)
 }
 

@@ -24,7 +24,7 @@ use nsh_core::ui::{
 
 use crate::{
     assets::LOGO,
-    ui::{Finish, Finished, IconName, MONO, appear, colors, icon, inset_shadow, rgb_a},
+    ui::{DemoPage, Finish, Finished, IconName, MONO, colors, icon, inset_shadow, rgb_a},
 };
 
 /// The photo of the filters' card.
@@ -155,32 +155,11 @@ fn captioned(gap: f32, sample: impl IntoElement, caption: &'static str) -> AnyEl
 /// The demo's page: the Tailwind demo's cards in typed styles.
 #[component]
 pub(crate) fn TypedStyles() -> impl IntoElement {
-    let sections: [AnyElement; CARDS] = [
-        hero(),
-        stats(),
-        buttons(),
-        cards(),
-        layout(),
-        shadows(),
-        gradients(),
-        typography(),
-        effects(),
-        motion(),
-        lists(),
-        inputs(),
-        palette(),
+    let sections: [fn() -> AnyElement; CARDS] = [
+        hero, stats, buttons, cards, layout, shadows, gradients, typography, effects, motion,
+        lists, inputs, palette,
     ];
-    // The page scrolls inside the component's view.
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().gap_4().p_4().pb_10().children(
-                sections
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, section)| appear(i as u32).child(section)),
-            ),
-        ),
-    )
+    DemoPage::new().cards(sections)
 }
 
 /// A gradient hero lit by a citrus glow, with a big tabular figure and two

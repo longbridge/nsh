@@ -6060,6 +6060,50 @@ mod views {
         assert_eq!(CLEANED.with(Cell::get), 1, "the branch's cleanup ran");
     }
 
+    /// Flips its branch there and back in one listener: each branch is a
+    /// component with a prop.
+    #[derive(Default)]
+    struct Flicker;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct FlickerProps {}
+
+    impl Component for Flicker {
+        type Props = FlickerProps;
+        type Event = NoEvent;
+
+        fn view(_: FlickerProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let on = signal(false);
+            view()
+                .on_press(move |_: &()| {
+                    on.set(true);
+                    on.set(false);
+                })
+                .child(
+                    If::new(on, || Counter::element(CounterProps { label: "On".into() }))
+                        .otherwise(|| {
+                            Counter::element(CounterProps {
+                                label: "Off".into(),
+                            })
+                        }),
+                )
+        }
+    }
+
+    #[test]
+    fn a_region_run_replaced_before_it_applied_is_never_applied() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Flicker>(|| FlickerProps {}));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["Off 0", "static"]);
+        let host = root_host(&batch);
+        // The "on" run's props went with it before the core applied it:
+        // only the "off" run applies, to the same counter.
+        c.component_event(host, EventKind::Press, &EventPayload::None);
+        let texts = c.commit().map(|batch| texts(&batch)).unwrap_or_default();
+        assert!(!texts.iter().any(|t| t.starts_with("On")), "{texts:?}");
+    }
+
     /// A list of rows by key.
     #[derive(Default)]
     struct Rows;
@@ -7057,6 +7101,27 @@ mod views {
         // The binding goes with its owner.
         assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
         assert_eq!(tables(&c.commit().unwrap()), [vec![1]]);
+    }
+
+    /// A pressable box with the pointing hand.
+    #[component]
+    fn Pointing() -> impl IntoElement {
+        view().size_10().cursor_pointer()
+    }
+
+    #[test]
+    fn a_typed_cursor_reaches_the_view() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Pointing>(|| ()));
+        let batch = c.commit().unwrap();
+        assert!(
+            batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::ViewStyle { style, .. } if style.cursor == crate::Cursor::Pointer
+            )),
+            "{:#?}",
+            batch.items
+        );
     }
 
     /// A leaf in a region of its own.

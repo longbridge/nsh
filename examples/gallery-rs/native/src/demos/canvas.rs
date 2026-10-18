@@ -20,8 +20,8 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Button, ButtonVariant, Card, Figure, Finish, Finished, IconName, Segment, SegmentedEvent, Stat,
-    Tone, appear, caption, colors, hint, legend, segmented,
+    Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, Segment,
+    SegmentedEvent, Stat, Tone, caption, colors, hint, legend, segmented,
 };
 
 /// A canvas font of the system family (TS `SANS(size, weight)`).
@@ -1205,25 +1205,15 @@ fn Sketch() -> impl IntoElement {
 /// The demo's page.
 #[component]
 pub(crate) fn CanvasDemo() -> impl IntoElement {
-    let cards = [
-        Dial::element(()).into_element(),
-        AreaChart::element(()).into_element(),
-        Ridgeline::element(()).into_element(),
-        DotMatrix::element(()).into_element(),
-        Dumbbell::element(()).into_element(),
-        Clock::element(()).into_element(),
-        Glyphs::element(()).into_element(),
-        Compositing::element(()).into_element(),
-        Sketch::element(()).into_element(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                cards
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .columns(3)
+        .card(|| Dial::element(()))
+        .card(|| AreaChart::element(()))
+        .card(|| Ridgeline::element(()))
+        .card(|| DotMatrix::element(()))
+        .card(|| Dumbbell::element(()))
+        .card(|| Clock::element(()))
+        .card(|| Glyphs::element(()))
+        .card(|| Compositing::element(()))
+        .card(|| Sketch::element(()))
 }

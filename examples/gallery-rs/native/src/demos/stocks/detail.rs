@@ -1,12 +1,12 @@
-//! A stock's screen (as the TSX gallery's `demos/stocks/Detail.tsx`):
-//! quote and chart on the first screen, then the book, the tape, depth,
-//! the flow and the ranges, all live. Buy / Sell at the bottom open the
-//! order ticket in a sheet.
+//! A stock (as the TSX gallery's `demos/stocks/Detail.tsx`): quote and
+//! chart on the first screen, then the book, the tape, depth, the flow and
+//! the ranges, all live. Buy / Sell at the bottom open the order ticket in
+//! a sheet. Pushed on phones; beside the watchlist in the desktop layout.
 
 use std::f32::consts::TAU;
 
 use nsh_core::{
-    Rect,
+    ModalPresentation, Rect,
     canvas::{CanvasTextAlign, CanvasTextBaseline, LineCap},
     nsh_animation::{Curve, EaseMode},
     ui::prelude::*,
@@ -15,7 +15,7 @@ use nsh_ui_mobile::{Sheet, SheetEvent, SheetProps};
 
 use super::{
     book::{Depth, OrderBook},
-    chart::Chart,
+    chart::{Chart, ChartProps},
     live,
     market::{HORIZONS, Quote, Range, compact, price, signed, time, tone_of},
     parts::{Block, live_dot},
@@ -31,19 +31,43 @@ pub(crate) struct StockProps {
     pub(crate) stock: u32,
 }
 
-/// The props of [`Detail`].
-pub(crate) type DetailProps = StockProps;
+/// The props of [`StockView`].
+#[derive(Debug, Clone, Copy, PartialEq, Props)]
+pub(crate) struct StockViewProps {
+    /// The stock's index in the market.
+    pub(crate) stock: u32,
+    /// The desktop layout: beside the watchlist, whose strip has the pause
+    /// button.
+    #[prop(default)]
+    pub(crate) wide: bool,
+    /// Wide, with the room for the book, the tape, depth and flow in a
+    /// column of their own.
+    #[prop(default)]
+    pub(crate) split: Prop<bool>,
+}
 
-/// A stock's screen: it focuses the stock while it is shown.
+/// A stock: it focuses the stock while it is shown. `wide` heads it with
+/// the code, draws the chart taller and, while `split` holds, puts the
+/// book, the tape, depth and flow in a column right of the quote, chart and
+/// ranges; the ticket is then a card in the window instead of a sheet.
 #[component]
-pub(crate) fn Detail(props: StockProps, cx: Scope<NoEvent>) -> impl IntoElement {
+pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoElement {
     let live = live();
     let index = props.stock as usize;
+    let (wide, split) = (props.wide, props.split);
+    let props = StockProps { stock: props.stock };
     // The market keeps the stock's book, tape and flow while it is shown.
     live.market.borrow_mut().focus(Some(index));
     {
         let market = live.market.clone();
-        cleanup(move || market.borrow_mut().focus(None));
+        // Another stock may be focused already (the desktop layout shows
+        // the next one as this one goes): only this one's focus ends.
+        cleanup(move || {
+            let mut market = market.borrow_mut();
+            if market.focused == Some(index) {
+                market.focus(None);
+            }
+        });
     }
     let quote = live.quotes[index];
     let (code, tick, decimals) = {
@@ -91,31 +115,73 @@ pub(crate) fn Detail(props: StockProps, cx: Scope<NoEvent>) -> impl IntoElement 
     };
     let bottom = move || cx.insets().bottom;
     let (second, market) = (live.second, live.market.clone());
-    let content = scroll()
-        .flex_1()
-        .child(QuoteSection::element(props))
-        .child(Block::new().child(Chart::element(props)))
-        .child(OrderBook::element(props))
-        .child(tape(&live, index))
-        .child(Depth::element(props))
-        .child(Flow::element(()))
-        .child(Ranges::element(props))
-        .child(
-            text(move || {
-                second.get();
-                let stats = market.borrow().stats;
-                format!(
-                    "simulated · {:.2} ms Rust/tick · {} quotes/s",
-                    stats.ms, stats.updates
-                )
-            })
-            .px_4()
-            .pt_2()
-            .pb(move || px(96.0 + bottom()))
-            .text_size(px(12.0))
-            .text_color(colors::FAINT)
-            .tabular_nums(),
-        );
+    let footer = text(move || {
+        second.get();
+        let stats = market.borrow().stats;
+        format!(
+            "simulated · {:.2} ms Rust/tick · {} quotes/s",
+            stats.ms, stats.updates
+        )
+    })
+    .px_4()
+    .pt_2()
+    .pb(move || px(96.0 + bottom()))
+    .text_size(px(12.0))
+    .text_color(colors::FAINT)
+    .tabular_nums();
+    let chart = move |props: ChartProps| Block::new().child(Chart::element(props));
+    let content = if wide {
+        scroll()
+            .flex_1()
+            .child(
+                text(code)
+                    .px_4()
+                    .pt(px(14.0))
+                    .text_size(px(22.0))
+                    .font_weight(FontWeight::BOLD)
+                    .letter_spacing(-0.3)
+                    .text_color(colors::TEXT),
+            )
+            .child(
+                view()
+                    .style_when(split, |s| s.flex_row().items_start())
+                    .child(
+                        view()
+                            .min_w(px(0.0))
+                            .style_when(split, |s| s.flex_1())
+                            .child(QuoteSection::element(props))
+                            .child(chart(ChartProps {
+                                stock: props.stock,
+                                height: 340.0,
+                            }))
+                            .child(Ranges::element(props)),
+                    )
+                    .child(
+                        view()
+                            .border_l_color(colors::LINE)
+                            .style_when(split, |s| s.w(px(380.0)).border_l_1())
+                            .child(OrderBook::element(props))
+                            .child(tape(&live, index))
+                            .child(Depth::element(props))
+                            .child(Flow::element(())),
+                    ),
+            )
+            .child(footer)
+    } else {
+        scroll()
+            .flex_1()
+            .child(QuoteSection::element(props))
+            .child(chart(ChartProps {
+                stock: props.stock,
+                ..ChartProps::default()
+            }))
+            .child(OrderBook::element(props))
+            .child(tape(&live, index))
+            .child(Depth::element(props))
+            .child(Flow::element(()))
+            .child(Ranges::element(props))
+            .child(footer)
+    };
     let change = computed(move || quote.get().percent());
     // The trade bar, over the content.
     let bar = view()
@@ -205,13 +271,9 @@ pub(crate) fn Detail(props: StockProps, cx: Scope<NoEvent>) -> impl IntoElement 
                         .text_color(AdaptiveColor::new(rgb(0xa4a8ae), rgb(0x4a4e55))),
                 ),
         );
-    // The ticket is the sheet's content: made fresh each time it opens.
-    let sheet = Sheet::element(SheetProps {
-        open: ticket.into(),
-        ..SheetProps::default()
-    })
-    .on_event(move |_: &SheetEvent| ticket.set(false))
-    .child(
+    // The ticket: made fresh each time it opens.
+    let ticket_view = move || {
+        let show_banner = show_banner.clone();
         Ticket::element(TicketProps {
             code: code.into(),
             tick,
@@ -228,15 +290,42 @@ pub(crate) fn Detail(props: StockProps, cx: Scope<NoEvent>) -> impl IntoElement 
                 ticket.set(false);
                 show_banner(title.clone(), detail.clone(), *side);
             }
-        }),
-    );
+        })
+    };
+    // A bottom sheet on phones, a card in the window on desktops (Escape or
+    // a click outside closes it).
+    let ticket_shown = if wide {
+        If::new(ticket, move || {
+            modal()
+                .when(is_desktop(), |m| {
+                    m.presentation(ModalPresentation::FormSheet)
+                })
+                .on_request_close(move |_: &()| ticket.set(false))
+                .child(
+                    view()
+                        .flex_1()
+                        .p_5()
+                        .bg(colors::SURFACE)
+                        .child(ticket_view()),
+                )
+        })
+        .into_element()
+    } else {
+        Sheet::element(SheetProps {
+            open: ticket.into(),
+            ..SheetProps::default()
+        })
+        .on_event(move |_: &SheetEvent| ticket.set(false))
+        .child(ticket_view())
+        .into_element()
+    };
     view()
         .flex_1()
         .bg(colors::BACKGROUND)
         .child(content)
         .child(bar)
         .child(banner)
-        .child(sheet)
+        .child(ticket_shown)
 }
 
 /// The figures under the quote: their labels.
