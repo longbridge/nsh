@@ -1,8 +1,9 @@
 //! Text: spans and links, inline views and images, type (custom fonts,
-//! weights, decorations, transforms, shadows), the system text size and
-//! truncation, each on a card (as the TSX gallery's `demos/TextDemo.tsx`).
+//! weights, decorations, transforms, shadows), the system text size,
+//! truncation, Chinese and Japanese, right-to-left text and alignment, each
+//! on a card (as the TSX gallery's `demos/TextDemo.tsx`).
 
-use nsh_core::ui::{EllipsizeMode, prelude::*};
+use nsh_core::ui::{EllipsizeMode, WritingDirection, prelude::*};
 
 use crate::{
     assets::{LOGO, PACIFICO},
@@ -13,6 +14,10 @@ use crate::{
 };
 
 const LOREM: &str = "Native text, typeset once on the engine thread with CoreText and drawn on the main thread without any layout work.";
+
+const CHINESE: &str = "原生文本在引擎线程上一次排版，在主线程上直接绘制。中文在任意两个汉字之间都可以换行，但句号、逗号和右括号不会出现在行首，左括号也不会留在行尾（就像这样）。";
+const JAPANESE: &str = "日本語の文章は、ひらがな・カタカナ・漢字に Latin の単語や数字（2024年）を混ぜて組みます。句読点は行頭に来ません。";
+const ARABIC: &str = "النص الأصلي يُنضَّد مرة واحدة على خيط المحرك ثم يُرسم على الخيط الرئيسي دون أي عمل إضافي في التخطيط.";
 
 /// Body text.
 fn body(content: impl Into<SharedString>) -> Text {
@@ -351,6 +356,114 @@ fn truncation() -> Card {
         ))
 }
 
+/// Chinese and Japanese: line breaks between characters, kept away from
+/// closing punctuation.
+fn cjk() -> Card {
+    Card::new()
+        .icon(IconName::Text)
+        .title("Chinese and Japanese")
+        .subtitle("Lines break between characters, never before closing punctuation")
+        .child(specimen("Chinese paragraph", None, true, body(CHINESE)))
+        .child(specimen(
+            "Japanese: kana, kanji and Latin",
+            None,
+            false,
+            body(JAPANESE),
+        ))
+        .child(specimen(
+            "Two lines, tail",
+            Some("numberOfLines={2}"),
+            false,
+            body(CHINESE).number_of_lines(2),
+        ))
+        .child(specimen(
+            "One line, middle",
+            Some("ellipsizeMode=\"middle\""),
+            false,
+            body(JAPANESE)
+                .number_of_lines(1)
+                .ellipsize_mode(EllipsizeMode::Middle),
+        ))
+}
+
+/// Arabic and Hebrew, mixed with Latin text and numbers.
+fn right_to_left() -> Card {
+    Card::new()
+        .icon(IconName::Text)
+        .title("Right to left")
+        .subtitle("Arabic and Hebrew, mixed with Latin text and numbers")
+        .child(specimen(
+            "Arabic paragraph",
+            Some("writingDirection=\"rtl\""),
+            true,
+            body(ARABIC).writing_direction(WritingDirection::Rtl),
+        ))
+        .child(specimen(
+            "Arabic, English and numbers in one line",
+            None,
+            false,
+            body("تم شحن الطلب رقم 4521 عبر DHL في 12 مارس، والتسليم خلال 3 أيام."),
+        ))
+        .child(specimen(
+            "Hebrew",
+            None,
+            false,
+            body("שלום! הגרסה 2.0 של nsh זמינה עכשיו (גם ב-Linux)."),
+        ))
+        .child(specimen(
+            "One line, tail",
+            Some("numberOfLines={1}"),
+            false,
+            body(ARABIC).number_of_lines(1),
+        ))
+}
+
+/// `textAlign` in left-to-right and right-to-left text.
+fn alignment() -> Card {
+    const SENTENCE: &str = "Short, aligned in its box";
+    const PARAGRAPH: &str = "Justified text spreads the spaces of every line across the box, except on the last line of a paragraph, which stays at its start.";
+    Card::new()
+        .icon(IconName::Lists)
+        .title("Alignment")
+        .subtitle("textAlign in left-to-right and right-to-left text")
+        .child(specimen(
+            "Left",
+            Some("textAlign=\"left\""),
+            true,
+            body(SENTENCE).text_left(),
+        ))
+        .child(specimen(
+            "Center",
+            Some("textAlign=\"center\""),
+            false,
+            body(SENTENCE).text_center(),
+        ))
+        .child(specimen(
+            "Right",
+            Some("textAlign=\"right\""),
+            false,
+            body(SENTENCE).text_right(),
+        ))
+        .child(specimen(
+            "Justify",
+            Some("textAlign=\"justify\""),
+            false,
+            body(PARAGRAPH).text_justify(),
+        ))
+        .child(specimen(
+            "Justify, Chinese",
+            Some("textAlign=\"justify\""),
+            false,
+            body(CHINESE).text_justify(),
+        ))
+        .child(specimen(
+            "Left, in Arabic",
+            Some("textAlign=\"left\""),
+            false,
+            body(ARABIC).text_left(),
+        ))
+}
+
 /// The demo's page.
 #[component]
 pub(crate) fn TextDemo() -> impl IntoElement {
@@ -364,6 +477,9 @@ pub(crate) fn TextDemo() -> impl IntoElement {
         fonts(),
         scaling(),
         truncation(),
+        cjk(),
+        right_to_left(),
+        alignment(),
     ];
     view().flex_1().child(
         scroll().flex_1().bg(colors::BACKGROUND).child(

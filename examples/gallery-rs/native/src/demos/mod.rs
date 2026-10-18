@@ -142,7 +142,7 @@ const GROUPS: &[Group] = &[
             },
             Demo {
                 name: "Text",
-                detail: "Fonts, spans, inline views and images, decorations, truncation",
+                detail: "Fonts, spans, inline views and images, decorations, truncation, languages",
                 icon: IconName::Text,
                 content: || text_demo::TextDemo::element(()).into_element(),
             },

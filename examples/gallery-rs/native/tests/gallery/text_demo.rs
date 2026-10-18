@@ -1,6 +1,6 @@
 //! The Text demo on a headless engine: its sentences are one paragraph
 //! each (spans, links, inline views), links and the button inside a
-//! sentence take presses.
+//! sentence take presses, other languages and alignments have cards.
 
 use nsh_core::{EventKind, TextDecoration};
 
@@ -32,6 +32,15 @@ fn text_renders_its_samples() {
         "Truncation",
         "One line, middle",
         "Centered, three lines",
+        "Chinese and Japanese",
+        "Japanese: kana, kanji and Latin",
+        "Right to left",
+        "Arabic paragraph",
+        "writingDirection=\"rtl\"",
+        "Hebrew",
+        "Alignment",
+        "Justify, Chinese",
+        "Left, in Arabic",
     ] {
         assert!(shows(&screen, text), "{text}: {:?}", screen.texts);
     }
