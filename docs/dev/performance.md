@@ -45,6 +45,24 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
+- Calls into Rust from JS (`class_bench`: `cargo test --release -p nsh-engine --test engine bench_calls -- --ignored
+  --nocapture`, min / median of 20 runs, per call, the JS loop included). A member or function that is not `async`
+  runs in the call and converts its values directly (`docs/dev/rust-classes.md`); one awaited is an op, the core's
+  work and a `$return` event settling its promise (thousands issued in one turn, so this is their throughput, not one
+  call's latency, which also waits for the engine's turn):
+
+  | call | per call |
+  |---|---|
+  | a JS method (the floor) | 34ns / 38ns |
+  | `#[class]` method taking and returning a number | 34ns / 34ns |
+  | the same taking a `#[derive(JsObject)]` `{ x, y }` | 139ns / 140ns |
+  | `#[module]` function without a context | 27ns / 27ns |
+  | `#[module]` function with `cx` (an op), awaited | 1.60µs / 1.60µs |
+  | `async` `#[module]` function, awaited | 1.69µs / 1.70µs |
+  | `async` `#[class]` member, awaited | 2.08µs / 2.12µs |
+
+  A synchronous call costs what a JS method call does, ~45× less than an awaited one; reading an object's fields is
+  most of the object case (one property read through QuickJS each).
 - Canvas recording (release `nsh trace`, minimum of the runs): in the former JS runtime, 2500 iterations of
   `beginPath`, `moveTo`, `lineTo`, `lineWidth =`, `strokeStyle =`, `stroke`, `fillRect` (17 500 calls) recorded into a
   JS array in ~1.4ms, the same with methods generated from the specs as with a hand-written class (an A/B of the two
