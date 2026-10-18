@@ -65,8 +65,8 @@ build to the same file) and takes `nsh.js` from the crate.
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as bytecode
   (`web::CODE`, `app.<digest>.nshc`), with the hardening's (`harden.<digest>.nshc`). The app is built split
   (`build::compile_split`): each chunk is written as `chunks/<name>.<digest>.nshc` (its bytecode) and the page's `chunks` maps its id to
-  that URL; nothing preloads them, the runtime fetches one the first time `import()` needs it. Apps with a Rust crate of their own are refused: the prebuilt wasm has only
-  `nsh/ui/mobile`. `--run` serves the directory with `nsh_dev::SiteServer` (the cache headers a CDN should send) and
+  that URL; nothing preloads them, the runtime fetches one the first time `import()` needs it. An app with a Rust crate of
+  its own gets a runtime of its own ("Apps with Rust components"). `--run` serves the directory with `nsh_dev::SiteServer` (the cache headers a CDN should send) and
   opens the browser.
 - **The development host** is a page the dev server serves (`DevServer::serve_web`: the page at `/`, `nsh.js` and
   `nsh.wasm` next to it, all `no-cache`), from `crates/nsh-cli/src/web/dev.html`. `nsh dev` serves it whenever a web
@@ -138,6 +138,33 @@ Measure with names kept (`CARGO_PROFILE_WEB_STRIP=false`) and `twiggy top` / `tw
 (`RUSTFLAGS="-C link-arg=--Map=map.txt"`, which also sizes the data segment by symbol). Compare raw, `gzip -9` and
 `brotli -q 11` sizes: pages are served compressed, and a change can shrink the raw module and not the compressed one.
 
+### Apps with Rust components
+
+The prebuilt runtime serves `nsh/ui/mobile` only; an app with a Rust crate of its own (`nsh.json` `"rust"`,
+`docs/dev/tooling.md`) gets one built with its set, as it gets its own native hosts. `runtime::web` asks the app
+(`rust_app::RustApp::web`), whose generated workspace (`.nsh/rust`) has a member `web`: a `cdylib` of
+`nsh-platform-web` and the app's crate whose code is `nsh_platform_web::ui_sets!(vec![nsh_ui_mobile::registry(),
+app_set()])`. The macro exports `nsh_app_init`, which `nsh.js` calls right after instantiating the module (there is
+no `main` to call `set_ui_sets` in a wasm module, nor a `dlsym` as Android's `ui_sets!` uses); a module without it
+(the prebuilt runtime) keeps the mobile UI. The `nsh_*` exports come from `nsh-platform-web`'s rlib: a `cdylib`
+exports its dependencies' `#[no_mangle]` functions. The workspace has the same `web` profile as nsh's `Cargo.toml`, and
+the crate's `build.rs` passes the 8 MiB stack as a link argument of its own (nsh's `.cargo/config.toml` may not apply
+where the app builds, and target-wide `rustflags` would rebuild every dependency instead of sharing nsh's builds).
+Both kinds build to `target/wasm32-unknown-unknown/web/nsh_app_<package>_web.wasm` and are copied to
+`.nsh/rust/web-runtime/nsh.wasm` / `nsh-dev.wasm`; `nsh.js` is nsh's. Everything else (bundling, bytecode, the
+crate's assets, the dev server) already knows the set, as the app's command line does.
+
+`web::ui_sets` (the sets the runtime serves, which `package` checks the app's imports against and the dev page sends
+in its hello) are the command line's own (`crate::ui_sets`). The dev host's files include `nsh.version` (a digest of
+`nsh.js` and the wasm), which `dev.html` also has inlined: a change of the app's Rust code ends the session, the app's
+command line runs again with a new runtime (`rust_app::reexec`), and a page that reconnects and finds another version
+reloads (one that finds none, a session still starting, connects again); the browser is opened only by the first
+session (`rust_app::restarted`).
+
+Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
+(`nsh_core::ui::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does, and
+publishes as the TSX gallery does (5.3 MB, 1.75 MB gzipped, 1.27 MB with brotli; 2026-10).
+
 ## What WebAssembly changes in the shared crates
 
 - **No threads.** `nsh_engine::LocalEngine` drives the engine from the host's event loop: `pump()` handles what was
@@ -147,7 +174,10 @@ Measure with names kept (`CARGO_PROFILE_WEB_STRIP=false`) and `twiggy top` / `tw
 - **No clock.** `std::time::Instant::now` panics on `wasm32-unknown-unknown`. Shared code uses
   `nsh_core::time::Instant` (std's elsewhere; `performance.now()` through the `nsh.now_ms` import there) and
   `nsh_core::time::unix_ms`. Rust components' `cx.timer()` returns `nsh_core::time::Sleep` there, whose wakers the
-  driver fires (`next_timer`, `fire_timers`); `background` / `blocking` do not exist.
+  driver fires (`next_timer`, `fire_timers`); `background` / `blocking` do not exist. Rust components' HTTP goes
+  through the engine (`nsh_core::ui::fetch`: `Action::Fetch`, `Core::take_fetches` / `fetch_event`, the engine's
+  `Net` with `Requester::Task`), so it is the browser's `fetch` here (`net.rs`) and the platforms' stacks elsewhere,
+  under the same capability checks as JS's.
 - **QuickJS** uses rquickjs' pregenerated bindings (its bindgen run misses `JS_ToCStringLen2` for wasm32) and its
   vendored wasi-libc; the only libc import is `env.__rquickjs_host_now_us`.
 - **32-bit pointers.** The reactive graph packs node handles into QuickJS opaque pointers: 32 bits of id and 32 of

@@ -63,7 +63,7 @@ nsh init [DIR] [--name <NAME>] [--rust]
 | `--name <NAME>` | 写入 `nsh.json` 的显示名称。默认为目录名。id 会是 `com.example.<name>`（只保留字母和数字，转为小写）。 |
 | `--rust` | 创建 Cargo 项目，提供原生 Rust 入口（`cargo run`）和共享 Rust 组件的 TSX 入口。需要 Rust 工具链及原生桌面后端的开发库。 |
 
-使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口，或通过 `nsh run` 在原生开发宿主（包括 iOS 和 Android）中运行 TSX 入口。TSX 的 Rust 组件工具链使用 NSH 源码仓库（CLI 所在的仓库或 `NSH_SOURCE`）。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
+使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口，或通过 `nsh run` 在原生开发宿主（包括 iOS 和 Android）以及浏览器（`--target web`，见 [Web](./web.md#带-rust-组件的应用)）中运行 TSX 入口。TSX 的 Rust 组件工具链使用 NSH 源码仓库（CLI 所在的仓库或 `NSH_SOURCE`）。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
 
 ## nsh run
 

@@ -237,8 +237,10 @@ toolchain cannot know the set, so `nsh` builds the app its own (`crates/nsh-cli/
   host and the release runner: `nsh_platform_ios::set_ui_sets`, then `nsh_ios_host::main` / `nsh_ios_app::main`),
   `linux-host` / `linux-app`, `macos-host` / `macos-app` and `windows-host` / `windows-app` (the same on Linux, macOS
   and Windows, `nsh_platform_linux` / `nsh_platform_macos` / `nsh_platform_windows::set_ui_sets`; `windows-app` is a
-  windowed program, with no console) and `android` (the app's `libnsh.so`: `nsh::ui_sets!`, which the Android
-  runtime looks up when an engine starts). `gpui-host` / `gpui-app` (`nsh_platform_gpui::set_ui_sets`, under
+  windowed program, with no console), `android` (the app's `libnsh.so`: `nsh::ui_sets!`, which the Android
+  runtime looks up when an engine starts) and `web` (the app's web runtime, a `cdylib` for `wasm32-unknown-unknown`
+  built with the `web` profile: `nsh_platform_web::ui_sets!`, whose `nsh_app_init` export `nsh.js` calls;
+  `docs/dev/web.md`, "Apps with Rust components"). `gpui-host` / `gpui-app` (`nsh_platform_gpui::set_ui_sets`, under
   `cfg(any(target_os = "linux", target_os = "macos", windows))`; `gpui-app` is a windowed program on Windows too) are
   a workspace of their own in `.nsh/rust/gpui` (excluded from the main one), written only when a GPUI host or runner is
   built (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates. They
@@ -251,7 +253,8 @@ toolchain cannot know the set, so `nsh` builds the app its own (`crates/nsh-cli/
   path, which falls back to `node_modules`), `nsh trace` renders it. The hosts `run` and `package` need are built
   for the app instead of taken from the runtime (iOS `--target` triples; Linux's, macOS's, Windows' and GPUI's
   `*-host` / `*-app` for this machine; Android: the prebuilt `classes.dex` with
-  the app's `libnsh.so` for each ABI of the prebuilt runtime, cross-compiled with the NDK).
+  the app's `libnsh.so` for each ABI of the prebuilt runtime, cross-compiled with the NDK; the web: the app's
+  `nsh.wasm` / `nsh-dev.wasm`, with nsh's `nsh.js`).
 - `nsh dev` / `nsh run` watch the crate too: a change to its `.rs` files, `Cargo.toml` or `assets/` ends the app's
   command line with exit code 75, and `nsh` builds it and runs the command again (the app restarts; JS and TSX edits
   stay hot).

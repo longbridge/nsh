@@ -108,6 +108,33 @@ errors over the app, and sends the app's `console` output to the terminal. Phone
 address `nsh run` prints (`browsers on this network: http://192.168.…:8790/`). `nsh dev` serves the same page once the
 web runtime is there (in the distribution, always).
 
+## Apps with Rust components
+
+An app whose `nsh.json` names a Rust crate (`"rust"`, as `nsh init --rust` and [`examples/gallery-rs`](https://github.com/longbridge/nsh/tree/main/examples/gallery-rs)
+set up) publishes and runs in the browser with the same commands:
+
+```sh
+nsh package --target web           # out/<Name>/, with the crate compiled into nsh.wasm
+nsh run --target web               # the dev server's page; editing the Rust code builds it again
+```
+
+NSH builds the app a runtime of its own: the crate's components, modules and assets are compiled to WebAssembly with
+the engine, so the page runs the same Rust code the native hosts run, and the TSX entry imports the crate's UI set as
+it does on every platform. The crate's assets (`assets!()`) are published with the app's, and its fonts load before
+the first frame. During `nsh run --target web`, a change to the crate's Rust code builds the runtime again and the
+open page loads it by itself; TSX edits stay hot updates.
+
+Rust code that runs on every platform, the web included, uses the engine's services: `fetch(url).await` makes
+HTTP requests through the same network stack as JS's `fetch` (the browser's here, with its CORS rules) and under the
+same [capabilities](./sandbox-and-capabilities.md); `timer`, `set_timeout` and `set_interval` wait; and
+`nsh_core::time::Instant` and `nsh_core::time::unix_ms()` read the clock. `background` and `blocking` run work on
+the native targets' threads.
+
+The build needs the Rust target and a clang that compiles to WebAssembly, as the runtime's own build does:
+`rustup target add wasm32-unknown-unknown`, plus `clang` and `llvm-ar` (on macOS, an LLVM toolchain such as
+Homebrew's `llvm`, through `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown`). The crate's code adds to
+`nsh.wasm`: the whole Rust gallery makes it 5.3 MB (1.3 MB with brotli).
+
 ## Build the website's player
 
 ```sh

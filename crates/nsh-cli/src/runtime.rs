@@ -234,7 +234,7 @@ pub(crate) enum WebKind {
 impl WebKind {
     /// Its file in the distribution (`runtime/web/`) and, in a checkout,
     /// next to the build's output.
-    fn file(self) -> &'static str {
+    pub(crate) fn file(self) -> &'static str {
         match self {
             WebKind::Release => "nsh.wasm",
             WebKind::Dev => "nsh-dev.wasm",
@@ -247,6 +247,10 @@ impl WebKind {
 /// (`None`).
 pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntime>> {
     const WASM: &str = "wasm32-unknown-unknown";
+    // An app with Rust components of its own: a runtime with its set.
+    if let Some(app) = crate::rust_app::current() {
+        return app.web(kind, build);
+    }
     let found = |dir: PathBuf| {
         let runtime = WebRuntime {
             wasm: dir.join(kind.file()),

@@ -202,7 +202,11 @@ fn run_web(entry: &Path, port: u16, release: bool) -> anyhow::Result<()> {
     crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
     let session = DevSession::start(entry, port, release)?;
     session.print_urls();
-    crate::web::open_browser(&session.web_url());
+    // After a change of the app's Rust code the page that is open loads
+    // the new runtime itself (`web::dev_host`).
+    if !crate::rust_app::restarted() {
+        crate::web::open_browser(&session.web_url());
+    }
     session.watch(|| Ok(false))
 }
 

@@ -13,11 +13,15 @@ wide window (700 pt on desktops, 900 pt elsewhere) shows a sidebar of the demos 
 
 ```sh
 cargo build -p nsh-cli
-./target/debug/nsh run examples/gallery-rs --target ios   # or android, catalyst
+./target/debug/nsh run examples/gallery-rs --target ios   # or android, catalyst, web
+./target/debug/nsh package examples/gallery-rs --target web --run   # a static site, served and opened
 ```
 
 `nsh` builds the app its own command line and hosts with the crate linked in (`docs/dev/tooling.md`, "Apps with Rust
-components of their own"); editing the Rust code builds them again and restarts the app.
+components of their own"); editing the Rust code builds them again and restarts the app. On the web the crate is
+compiled into the app's `nsh.wasm` (`docs/dev/web.md`, "Apps with Rust components"): the demos use the engine's
+services (`fetch`, timers, `nsh_core::time`) rather than threads and the standard clock, so the same code runs in the
+browser.
 
 Run the gallery directly on the machine's native desktop backend (GTK 4 on Linux, AppKit on macOS, Win32 on Windows):
 

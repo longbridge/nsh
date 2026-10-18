@@ -33,6 +33,10 @@
 
   const PROTOCOL = {{protocol}};
   const UI_SETS = {{ui_sets}};
+  // The runtime this page loaded: a server that serves another one (the
+  // app's Rust code changed and its runtime was built again) loads the
+  // page again.
+  const RUNTIME = {{runtime}};
   const status = document.getElementById("status");
   const problem = document.getElementById("problem");
   const decoder = new TextDecoder();
@@ -123,9 +127,20 @@
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     socket = new WebSocket(`${scheme}://${location.host}/ws`);
     socket.binaryType = "arraybuffer";
-    socket.onopen = () => {
+    socket.onopen = async () => {
       retry = 100;
       pending = null;
+      const served = await fetch("./nsh.version", { cache: "no-store" }).then((r) => (r.ok ? r.text() : null), () => null);
+      // A session still starting serves no runtime yet: connect again.
+      if (served === null) {
+        socket.close();
+        return;
+      }
+      if (served !== RUNTIME) {
+        showStatus("The runtime changed — reloading…");
+        location.reload();
+        return;
+      }
       // No bytecode version: this host runs JS source.
       send({ type: "hello", protocol: PROTOCOL, bytecode_version: "", device: device(), platform: "web", ui_sets: UI_SETS });
     };

@@ -51,8 +51,15 @@ const PAGE: &str = include_str!("web/index.html");
 /// The development host's page, which the dev server serves at `/`.
 const DEV_PAGE: &str = include_str!("web/dev.html");
 
-/// The UI sets the web runtime serves.
-const UI_SETS: &[&str] = &["nsh/ui/mobile"];
+/// The UI sets the web runtime serves: the mobile UI, and for an app with
+/// Rust components of its own the app's set too (its runtime is built with
+/// the sets this command line has, `rust_app::RustApp::web`).
+fn ui_sets() -> Vec<&'static str> {
+    crate::ui_sets()
+        .iter()
+        .filter_map(nsh_core::ui::Registry::specifier)
+        .collect()
+}
 
 /// The app's code: its bundle compiled to bytecode (`nsh_start_bytecode`),
 /// the only form the runtime of published apps runs.
@@ -73,14 +80,12 @@ pub(crate) fn package(
     id: &str,
     built: &Built,
 ) -> anyhow::Result<()> {
-    if crate::rust_app::current().is_some() {
-        bail!("apps with Rust components of their own cannot be packaged for the web yet");
-    }
+    let served = ui_sets();
     let missing: Vec<&str> = built
         .ui_sets
         .iter()
         .map(String::as_str)
-        .filter(|set| !UI_SETS.contains(set))
+        .filter(|set| !served.contains(set))
         .collect();
     if !missing.is_empty() {
         bail!(
@@ -220,25 +225,44 @@ pub(crate) fn open_browser(url: &str) {
     }
 }
 
+/// The first [`DIGEST_LEN`] hex digits of the SHA-256 of `bytes`.
+fn digest(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(DIGEST_LEN);
+    for byte in digest.iter().take(DIGEST_LEN.div_ceil(2)) {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex.truncate(DIGEST_LEN);
+    hex
+}
+
 /// Files by their path on the server.
 pub(crate) type Files = Vec<(String, Vec<u8>)>;
 
 /// The dev server's web host: its page and the runtime's files, for
-/// `nsh_dev::DevServer::serve_web`.
+/// `nsh_dev::DevServer::serve_web`. `nsh.version` names the runtime the
+/// page was served with: an app with Rust components of its own gets a new
+/// one when its Rust code changes (the session starts again), and a page
+/// that reconnects to a server with another one loads again.
 pub(crate) fn dev_host(runtime: &WebRuntime) -> anyhow::Result<(String, Files)> {
     let read = |path: &Path| fs::read(path).with_context(|| format!("read {}", path.display()));
-    let ui_sets = serde_json::to_string(UI_SETS)?;
+    let ui_sets = serde_json::to_string(&ui_sets())?;
+    let js = read(&runtime.js)?;
+    let wasm = read(&runtime.wasm)?;
+    let version = digest(&[digest(&js), digest(&wasm)].concat().into_bytes());
     let page = DEV_PAGE
         .replace(
             "{{protocol}}",
             &nsh_dev::protocol::PROTOCOL_VERSION.to_string(),
         )
-        .replace("{{ui_sets}}", &ui_sets);
+        .replace("{{ui_sets}}", &ui_sets)
+        .replace("{{runtime}}", &serde_json::to_string(&version)?);
     Ok((
         page,
         vec![
-            ("nsh.js".to_owned(), read(&runtime.js)?),
-            ("nsh.wasm".to_owned(), read(&runtime.wasm)?),
+            ("nsh.js".to_owned(), js),
+            ("nsh.wasm".to_owned(), wasm),
+            ("nsh.version".to_owned(), version.into_bytes()),
         ],
     ))
 }
@@ -302,12 +326,7 @@ impl Site {
 /// extension), the digest being the first [`DIGEST_LEN`] hex digits of
 /// the SHA-256 of `bytes`.
 fn hashed_name(path: &str, bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut hex = String::with_capacity(DIGEST_LEN);
-    for byte in digest.iter().take(DIGEST_LEN.div_ceil(2)) {
-        let _ = write!(hex, "{byte:02x}");
-    }
-    hex.truncate(DIGEST_LEN);
+    let hex = digest(bytes);
     let (dir, file) = match path.rsplit_once('/') {
         Some((dir, file)) => (format!("{dir}/"), file),
         None => (String::new(), path),
@@ -604,6 +623,34 @@ mod tests {
             "LICENSE.".len() + DIGEST_LEN
         );
         assert!(hashed_name(".env", b"x").starts_with(".env."));
+    }
+
+    #[test]
+    fn the_dev_page_knows_its_runtime() {
+        let dir = std::env::temp_dir().join(format!("nsh-web-dev-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let runtime = WebRuntime {
+            wasm: dir.join("nsh-dev.wasm"),
+            js: dir.join("nsh.js"),
+        };
+        fs::write(&runtime.js, "js").unwrap();
+        fs::write(&runtime.wasm, "one").unwrap();
+        let (page, files) = dev_host(&runtime).unwrap();
+        let version = |files: &Files| {
+            let (_, bytes) = files.iter().find(|(p, _)| p == "nsh.version").unwrap();
+            String::from_utf8(bytes.clone()).unwrap()
+        };
+        let first = version(&files);
+        // A page reloads when the server's runtime is not the one it has.
+        assert!(
+            page.contains(&format!("const RUNTIME = \"{first}\";")),
+            "{page}"
+        );
+        assert!(!page.contains("{{"), "{page}");
+        assert!(page.contains("const UI_SETS = [\"nsh/ui/mobile\"];"));
+        fs::write(&runtime.wasm, "two").unwrap();
+        assert_ne!(version(&dev_host(&runtime).unwrap().1), first);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

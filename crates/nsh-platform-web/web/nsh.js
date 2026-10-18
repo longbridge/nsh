@@ -557,6 +557,9 @@ class Player {
     }
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     this.wasm = (await WebAssembly.instantiate(module, imports)).exports;
+    // An app's own runtime (Rust components: nsh.json "rust") registers
+    // its UI sets before anything starts.
+    this.wasm.nsh_app_init?.();
     // Relative request URLs (`fetch("/api")`) are the page's, as in the browser.
     this.withStrings([document.baseURI], (p, l) => this.wasm.nsh_set_base_url(p, l));
     new ResizeObserver(() => this.resized()).observe(this.root);

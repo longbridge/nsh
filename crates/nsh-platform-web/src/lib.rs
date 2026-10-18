@@ -68,9 +68,44 @@ thread_local! {
     /// [`nsh_key`] while a key event is being handled. Apart from [`APP`]
     /// so that matching never needs the engine.
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
+    /// The UI sets apps import ([`set_ui_sets`]; by default the mobile UI).
+    static UI_SETS: RefCell<Option<Vec<nsh_core::ui::Registry>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// What [`ui_sets!`] gives.
+pub use nsh_core::ui::Registry;
+
+/// Sets the UI sets the apps started from now on serve: the mobile UI and
+/// an app's own Rust components (`nsh.json` `"rust"`). A runtime built for
+/// the app ([`ui_sets!`]) passes them before the page starts anything.
+pub fn set_ui_sets(sets: Vec<Registry>) {
+    UI_SETS.with(|s| *s.borrow_mut() = Some(sets));
+}
+
+/// The UI sets engines serve: [`set_ui_sets`]'s, else the mobile UI.
+fn ui_sets() -> Vec<Registry> {
+    UI_SETS
+        .with(|s| s.borrow().clone())
+        .unwrap_or_else(|| vec![nsh_ui_mobile::registry()])
+}
+
+/// Makes this module an app's web runtime that serves `$sets` (an
+/// expression giving the `Vec<Registry>` of the mobile UI and the app's own
+/// Rust components): `nsh` builds one for apps with `"rust"` in `nsh.json`.
+/// It exports `nsh_app_init`, which `nsh.js` calls once the module is
+/// instantiated.
+#[macro_export]
+macro_rules! ui_sets {
+    ($sets:expr) => {
+        /// Registers the app's UI sets (`nsh.js` calls it first).
+        #[unsafe(no_mangle)]
+        pub extern "C" fn nsh_app_init() {
+            $crate::set_ui_sets($sets);
+        }
+    };
 }
 
 /// What [`nsh_bundle_options`] set for the next [`nsh_start`].
@@ -394,7 +429,7 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
             (44.0, 96.0)
         },
         limits: Limits::default(),
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: ui_sets(),
         runtime: None,
     };
     let text = Rc::new(WebTextEngine::default());
@@ -567,7 +602,7 @@ pub unsafe extern "C" fn nsh_compile(
 ) -> u32 {
     // SAFETY: guaranteed by the caller.
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
-    let result = nsh_bundler::compile_module(&name, &source, &[nsh_ui_mobile::registry()]);
+    let result = nsh_bundler::compile_module(&name, &source, &ui_sets());
     let ok = result.is_ok();
     COMPILED.with(|c| *c.borrow_mut() = result.unwrap_or_else(|e| e));
     ok as u32
