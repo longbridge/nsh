@@ -915,6 +915,9 @@ impl<M: TextEngine + 'static> Driver<M> {
             if let Some(theme) = root.theme_ref() {
                 core.set_theme(theme.clone());
             }
+            if let Some(appearance) = root.appearance_ref() {
+                core.set_appearance(appearance);
+            }
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");

@@ -100,6 +100,35 @@ fn a_rust_app_renders_handles_presses_and_runs_tasks() {
     assert_eq!(text, "Taps 1 (1 ticks)");
 }
 
+#[test]
+fn a_rust_app_starts_in_its_appearance() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        // `nsh.json` `"appearance": "dark"` of a Rust app (`nsh.json` "root").
+        app: App::Rust(Root::of::<WithCard>().appearance(nsh_core::platform::Appearance::Dark)),
+        viewport: Size::new(390.0, 844.0),
+        trace: false,
+        network: None,
+        assets: None,
+        environment: Environment::default(),
+        header_heights: (44.0, 96.0),
+        limits: nsh_engine::Limits::default(),
+        ui_sets: Vec::new(),
+        runtime: None,
+    };
+    let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        first.items.iter().any(|item| matches!(
+            item,
+            MountItem::Appearance {
+                appearance: nsh_core::platform::Appearance::Dark
+            }
+        )),
+        "the first frame sets the appearance"
+    );
+}
+
 /// A Rust navigation stack: a screen per route, keyed by it.
 #[component]
 fn Navigation() -> impl IntoElement {

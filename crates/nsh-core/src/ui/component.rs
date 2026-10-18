@@ -439,6 +439,7 @@ pub struct Root {
     make: Arc<dyn Fn() -> super::AnyElement + Send + Sync>,
     theme: Option<Arc<super::Theme>>,
     fonts: Vec<Arc<[u8]>>,
+    appearance: Option<crate::platform::Appearance>,
 }
 
 impl Root {
@@ -448,6 +449,7 @@ impl Root {
             make: Arc::new(move || super::IntoElement::into_element(C::element(props()))),
             theme: None,
             fonts: Vec::new(),
+            appearance: None,
         }
     }
 
@@ -462,6 +464,20 @@ impl Root {
     pub fn font(mut self, data: impl Into<Arc<[u8]>>) -> Self {
         self.fonts.push(data.into());
         self
+    }
+
+    /// Shows the app in `appearance` whatever the system's (`nsh.json`
+    /// `"appearance"`; later [`super::ambient::set_color_scheme`] calls
+    /// change it).
+    pub fn appearance(mut self, appearance: crate::platform::Appearance) -> Self {
+        self.appearance = Some(appearance);
+        self
+    }
+
+    /// The appearance it starts in ([`Root::appearance`]; `None`: the
+    /// system's).
+    pub fn appearance_ref(&self) -> Option<crate::platform::Appearance> {
+        self.appearance
     }
 
     /// The theme it renders with.
