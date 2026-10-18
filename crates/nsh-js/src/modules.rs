@@ -346,16 +346,12 @@ const IMAGE_EXPORTS: &[Item] = &[(
 /// One export of a module, as it is made.
 enum Made {
     Own(Export),
-    /// A Rust component, with the functions of a module of the same name
-    /// (and that module's namespace).
-    Component(
-        Arc<ComponentSpec>,
-        Option<(Arc<ModuleSpec>, Option<&'static str>)>,
-    ),
-    /// A module object (its namespace for calls).
-    Module(Arc<ModuleSpec>, Option<&'static str>),
+    /// A Rust component, with the functions of a module of the same name.
+    Component(Arc<ComponentSpec>, Option<Arc<ModuleSpec>>),
+    /// A module object.
+    Module(Arc<ModuleSpec>),
     /// One function of a flat module.
-    Function(Arc<ModuleSpec>, Option<&'static str>, &'static str),
+    Function(Arc<ModuleSpec>, &'static str),
     /// A Rust class (`#[class]`).
     Class(&'static nsh_core::ui::ClassDef),
     /// A runtime value a registry exports as it is (`safeArea`).
@@ -404,15 +400,6 @@ impl ModuleTable {
         }
     }
 
-    /// The specifier of the set class `def` belongs to (its `async`
-    /// members are called by it).
-    pub(crate) fn specifier_of_class(&self, def: &nsh_core::ui::ClassDef) -> Option<&'static str> {
-        self.registries
-            .iter()
-            .find(|r| r.has_class(def))?
-            .specifier()
-    }
-
     /// The exports of module `name`, if it is one.
     fn exports(&self, name: &str) -> Option<Vec<(String, Made)>> {
         let mut out: Vec<(String, Made)> = Vec::new();
@@ -435,14 +422,10 @@ impl ModuleTable {
             .filter(|r| r.specifier() == Some(name))
         {
             found = true;
-            let namespace = registry.namespace();
             let modules = registry.module_specs();
             let specs = registry.specs();
             for spec in &specs {
-                let module = modules
-                    .iter()
-                    .find(|m| m.name == spec.export)
-                    .map(|m| (m.clone(), namespace));
+                let module = modules.iter().find(|m| m.name == spec.export).cloned();
                 out.push((spec.export.clone(), Made::Component(spec.clone(), module)));
             }
             for m in &modules {
@@ -451,13 +434,10 @@ impl ModuleTable {
                 }
                 if m.flat {
                     for f in &m.functions {
-                        out.push((
-                            f.name.to_owned(),
-                            Made::Function(m.clone(), namespace, f.name),
-                        ));
+                        out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
                     }
                 } else {
-                    out.push((m.name.to_owned(), Made::Module(m.clone(), namespace)));
+                    out.push((m.name.to_owned(), Made::Module(m.clone())));
                 }
             }
             for class in registry.class_specs() {
@@ -616,10 +596,8 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
                 }
                 Made::Own(Export::Value(make)) => make(ctx),
                 Made::Component(spec, module) => components::component(ctx, spec, module),
-                Made::Module(spec, namespace) => components::module(ctx, &spec, namespace),
-                Made::Function(spec, namespace, f) => {
-                    components::module_function(ctx, &spec, namespace, f)
-                }
+                Made::Module(spec) => components::module(ctx, &spec),
+                Made::Function(spec, f) => components::module_function(ctx, &spec, f),
                 Made::Class(def) => match crate::classes::constructor(ctx, def) {
                     Ok(ctor) => ctor.take(),
                     Err(_) => qjs::JS_EXCEPTION,

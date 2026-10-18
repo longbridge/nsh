@@ -979,9 +979,9 @@ pub enum Command {
     /// Move the screen reader's focus to this view.
     AccessibilityFocus,
     /// Measure the view with this commit's layout (`ref.measure()`):
-    /// answered by the core as a `$return` event on the root for call
-    /// `call` ([`crate::Measurement`] as JSON, or null when the view is not
-    /// laid out); never mounted.
+    /// answered by the core in its events for promise `call`
+    /// ([`crate::ui::JsEvent::Reply`]: a [`crate::Measurement`], or null
+    /// when the view is not laid out); never mounted.
     Measure {
         /// The call to answer.
         call: u32,
@@ -1115,6 +1115,10 @@ pub enum Prop {
     /// A property of a registered native component (`$name` from JS):
     /// any JSON value, `None` to remove it.
     ComponentProp(Arc<str>, Option<crate::JsonValue>),
+    /// A prop of a Rust component's host, decoded in the JS call into the
+    /// prop's Rust type ([`crate::ui::PropSpec::decode`]); `None` resets it
+    /// to its default.
+    RustProp(&'static str, Option<crate::ui::AnyValue>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
     #[prop(js = "src", on = IMAGE)]
     Source(Option<ImageSource>),
@@ -1565,4 +1569,10 @@ pub enum Op {
         /// The call.
         command: Command,
     },
+    /// A call JS made into Rust that runs in order with the UI's ops: a
+    /// module function with a context, the start of an `async` function or
+    /// member, a method of a component's ref, or the place of a JS call
+    /// posted during a synchronous call ([`crate::ui::RustCall`]). Never
+    /// reaches a platform.
+    Rust(crate::ui::RustOp),
 }

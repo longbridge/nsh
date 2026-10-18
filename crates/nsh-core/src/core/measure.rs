@@ -3,13 +3,7 @@
 //! hit-test ([`MountItem::Overflow`]).
 
 use super::{Core, Key, Kind, NO_KEY};
-use crate::{
-    JsonValue,
-    geometry::Rect,
-    mount::MountItem,
-    ops::{NodeId, ROOT_ID},
-    text::TextEngine,
-};
+use crate::{JsonValue, geometry::Rect, mount::MountItem, ops::NodeId, text::TextEngine};
 
 /// Where a view is, from the last layout (`ref.measure()`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,7 +108,7 @@ impl<M: TextEngine> Core<M> {
         let value = self
             .measure(id)
             .map_or(JsonValue::Null, Measurement::to_json);
-        self.reply(ROOT_ID, call as u64, Ok(value));
+        self.settle(call, Ok(Box::new(value)));
     }
 
     /// Updates the area `key`'s descendants cover outside its bounds (its

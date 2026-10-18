@@ -573,7 +573,7 @@ fn AvoidingPage() -> impl IntoElement {
     let focused = signal(false);
     let picked = move || BEHAVIORS[behavior.get() as usize];
     // The inner view of `position` fills the avoiding view.
-    let fill = Style::from_json(JsonValue::from_iter([("flex", 1)])).unwrap_or_default();
+    let fill = Style::new(JsonValue::from_iter([("flex", 1)]));
     view().flex_1().child(
         KeyboardAvoidingView::element(KeyboardAvoidingViewProps {
             behavior: Prop::bind(move || picked().0),

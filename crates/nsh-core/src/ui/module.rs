@@ -5,13 +5,16 @@
 //! runs in the JS call and returns its value (as a class's method does);
 //! one taking `cx: &mut ModuleCx` is an op, ordered with the props set
 //! before it (a `Promise` when it returns a value); an `async fn` runs as a
-//! task of the core (a `Promise`).
+//! task of the core (a `Promise`). In every kind the arguments are
+//! converted in the JS call, and the op carries a closure holding them
+//! (`super::call`).
 
 use std::{future::Future, pin::Pin};
 
 use super::{
-    DialogAnswer, PropError, TsType, TsTypes,
-    class::{Instances, Thrown, Wire, WireArgs},
+    DialogAnswer, TsType, TsTypes,
+    call::{JsResult, OpCall},
+    class::{AsyncCall, Thrown},
     js::{JsHost, JsRaw},
     task::{self, Action},
 };
@@ -35,9 +38,9 @@ pub trait Module {
 /// whether it may be left out.
 pub type ModuleParam = (&'static str, TsType, bool);
 
-/// The future of an `async` module function: its result, or the error the
-/// `Promise` rejects with.
-pub type ModuleFuture = Pin<Box<dyn Future<Output = Result<Wire, String>>>>;
+/// The future of an `async` function or member: its result, or the
+/// message the `Promise` rejects with.
+pub type ModuleFuture = Pin<Box<dyn Future<Output = JsResult>>>;
 
 /// A function that runs in the JS call: it converts the call's values
 /// directly; its result is an owned JS value.
@@ -49,12 +52,20 @@ pub enum FunctionCall {
     /// In the JS call (no context, not `async`): its value, or what it
     /// throws.
     Sync(SyncCall),
-    /// As an op, with a [`ModuleCx`], in order with what JS set before it;
-    /// an error rejects the `Promise`.
-    Op(fn(WireArgs, &Instances, &mut ModuleCx) -> Result<Wire, PropError>),
-    /// As a task (its arguments checked first): it reaches the platform with
-    /// the same free functions views use (`dialog`, `clipboard_string`, ...).
-    Async(fn(WireArgs, &Instances) -> Result<ModuleFuture, PropError>),
+    /// As an op, with a [`ModuleCx`], in order with what JS set before it
+    /// (its arguments converted in the JS call); an error rejects the
+    /// `Promise`.
+    Op(fn(&dyn JsHost) -> Result<OpCall, Thrown>),
+    /// As a task started in order with the UI's ops (its arguments
+    /// converted in the JS call): it reaches the platform with the same free
+    /// functions views use (`dialog`, `clipboard_string`, ...).
+    Async(AsyncCall),
+}
+
+impl std::fmt::Debug for FunctionCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.kind())
+    }
 }
 
 impl FunctionCall {
@@ -107,8 +118,8 @@ pub struct FunctionSpec {
     pub returns: Option<String>,
     /// How it runs.
     pub kind: FunctionKind,
-    /// The function, when it runs in the JS call.
-    pub sync: Option<SyncCall>,
+    /// The call.
+    pub call: FunctionCall,
 }
 
 /// What a module is to JS.
@@ -141,10 +152,7 @@ impl ModuleSpec {
                     .collect(),
                 returns: f.returns.map(|ts| ts(&mut types)),
                 kind: f.call.kind(),
-                sync: match f.call {
-                    FunctionCall::Sync(call) => Some(call),
-                    _ => None,
-                },
+                call: f.call,
             })
             .collect();
         Self {
@@ -159,10 +167,10 @@ impl ModuleSpec {
 
 /// `future`, with a panic in it as its error (a promise JS waits for
 /// rejects with the message).
-pub(crate) async fn catching(future: ModuleFuture) -> Result<Wire, String> {
+pub(crate) async fn catching(future: ModuleFuture) -> JsResult {
     struct Caught(ModuleFuture);
     impl Future for Caught {
-        type Output = Result<Wire, String>;
+        type Output = JsResult;
 
         fn poll(
             mut self: Pin<&mut Self>,

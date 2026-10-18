@@ -322,14 +322,18 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         optional: #optional,
                         doc: #field_doc,
                         kind: #ui::PropKind::Value,
+                        decode: ::core::option::Option::Some(|v| {
+                            <#ty as #ui::JsValue>::from_js(v).map(#ui::AnyValue::new)
+                        }),
                     }
                 });
                 let take = assign(quote!(value));
                 set_arms.push(quote! {
                     #js => {
                         let value: #ty = match value {
-                            ::core::option::Option::Some(v) => <#ty as #ui::JsValue>::from_json(v)
-                                .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #js, e)))?,
+                            ::core::option::Option::Some(v) => v.take::<#ty>().ok_or_else(|| {
+                                #ui::PropError(::std::format!("`{}`: a value of another type", #js))
+                            })?,
                             ::core::option::Option::None => #init,
                         };
                         ::core::result::Result::Ok(#take)
@@ -344,6 +348,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         optional: true,
                         doc: #field_doc,
                         kind: #ui::PropKind::Slot,
+                        decode: ::core::option::Option::None,
                     }
                 });
                 let take = assign(quote!(slot));
@@ -365,6 +370,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         optional: false,
                         doc: #field_doc,
                         kind: #ui::PropKind::Items,
+                        decode: ::core::option::Option::None,
                     }
                 });
                 items = Some(ident.clone());
@@ -384,6 +390,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         optional: true,
                         doc: #field_doc,
                         kind: #ui::PropKind::Children,
+                        decode: ::core::option::Option::None,
                     }
                 });
                 children = Some((ident.clone(), assign(quote!(children))));
@@ -453,7 +460,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             fn set(
                 &mut self,
                 name: &str,
-                value: ::core::option::Option<::nsh_core::JsonValue>,
+                value: ::core::option::Option<#ui::AnyValue>,
             ) -> ::core::result::Result<bool, #ui::PropError> {
                 match name {
                     #(#set_arms)*
@@ -583,19 +590,6 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
                 types.declare(#type_name, |_| ::std::string::String::from(#declaration))
             }
 
-            fn from_json(value: ::nsh_core::JsonValue) -> ::core::result::Result<Self, #ui::PropError> {
-                ::core::result::Result::Ok(match value.as_str() {
-                    #(::core::option::Option::Some(#patterns) => Self::#idents,)*
-                    _ => return ::core::result::Result::Err(#ui::PropError::expected(#expected, &value)),
-                })
-            }
-
-            fn to_json(&self) -> ::nsh_core::JsonValue {
-                ::nsh_core::JsonValue::String(::std::string::String::from(match self {
-                    #(Self::#idents => #names,)*
-                }))
-            }
-
             fn from_js(value: #ui::JsIn<'_>) -> ::core::result::Result<Self, #ui::PropError> {
                 ::core::result::Result::Ok(match value.as_string().as_deref() {
                     #(::core::option::Option::Some(#patterns) => Self::#idents,)*
@@ -669,7 +663,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                     #ui::EventSpec { name: #js, data: ::std::string::String::from("void"), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident => #js));
-                data_arms.push(quote!(Self::#ident => ::nsh_core::JsonValue::Null));
+                data_arms.push(quote!(Self::#ident => ::core::result::Result::Ok(#ui::JsOwned::new(host, host.undefined()))));
             }
             Fields::Unnamed(f) if f.unnamed.len() == 1 => {
                 let ty = &f.unnamed[0].ty;
@@ -677,7 +671,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                     #ui::EventSpec { name: #js, data: #ui::ts_of::<#ty>()(types), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
-                data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_json(v)));
+                data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_js(v, host)));
             }
             Fields::Named(f) => {
                 let idents: Vec<_> = f
@@ -704,9 +698,10 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 name_arms.push(quote!(Self::#ident { .. } => #js));
                 data_arms.push(quote! {
                     Self::#ident { #(#idents),* } => {
-                        let mut map = ::nsh_core::ui::__private::JsonMap::new();
-                        #(map.insert(::std::string::String::from(#keys), #ui::JsValue::to_json(#idents));)*
-                        ::nsh_core::JsonValue::Object(map)
+                        let owned = #ui::JsOwned::new(host, host.new_object()?);
+                        let object = owned.get().raw();
+                        #(host.set_field(object, #keys, #ui::JsValue::to_js(#idents, host)?.into_raw())?;)*
+                        ::core::result::Result::Ok(owned)
                     }
                 });
             }
@@ -732,7 +727,10 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 }
             }
 
-            fn data(&self) -> ::nsh_core::JsonValue {
+            fn data_js<'a>(
+                &self,
+                host: &'a dyn #ui::JsHost,
+            ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
                 match self {
                     #(#data_arms,)*
                 }
@@ -1052,13 +1050,16 @@ pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
+    let private = quote!(#ui::__private);
     let self_ty = &item.self_ty;
+    let api_name = last_segment(self_ty).map_or_else(String::new, |(id, _)| id.to_string());
     let (impl_generics, _, where_clause) = item.generics.split_for_impl();
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
+        let what = format!("{api_name}.{js}");
         let doc = decl(&docs(&f.attrs));
         let mut inputs = f.sig.inputs.iter();
         match inputs.next() {
@@ -1089,46 +1090,44 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             };
             let name = camel(&name.ident.to_string());
             let local = format_ident!("__arg{}", i);
-            params.push(quote!((#name, #ui::ts_of::<#ty>())));
+            params.push(quote!((#name, #private::arg_ts::<#ty>())));
             decode.push(quote! {
-                let #local: #ty = <#ty as #ui::JsValue>::from_json(
-                    args.next().unwrap_or(::nsh_core::JsonValue::Null),
-                )
-                .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #name, e)))?;
+                let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
             });
             call_args.push(quote!(#local));
         }
-        let (returns, result) = match &f.sig.output {
+        let (returns, finish) = match &f.sig.output {
             ReturnType::Default => (
                 quote!(::core::option::Option::None),
-                quote! {
-                    this.#ident(#(#call_args),*);
-                    ::core::result::Result::Ok(::nsh_core::JsonValue::Null)
-                },
+                quote!(#private::boxed(__result)),
             ),
-            ReturnType::Type(_, ty) => (
-                quote!(::core::option::Option::Some(#ui::ts_of::<#ty>())),
-                quote! {
-                    let value: #ty = this.#ident(#(#call_args),*);
-                    ::core::result::Result::Ok(#ui::JsValue::to_json(&value))
-                },
-            ),
+            ReturnType::Type(_, ty) => match result_ok(ty) {
+                Some(ok) => (
+                    quote!(::core::option::Option::Some(#private::ret_ts::<#ok>())),
+                    quote!(#private::boxed_result(__result)),
+                ),
+                None => (
+                    quote!(::core::option::Option::Some(#private::ret_ts::<#ty>())),
+                    quote!(#private::boxed(__result)),
+                ),
+            },
         };
-        let args_iter = if decode.is_empty() {
-            quote!(let _ = args;)
-        } else {
-            quote!(let mut args = args.into_iter();)
-        };
+        let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
         entries.push(quote! {
+            #(#cfgs)*
             #ui::Method {
                 name: #js,
                 doc: #doc,
                 params: &[#(#params),*],
                 returns: #returns,
-                call: |this, args| {
-                    #args_iter
+                call: |host| {
+                    let _ = host;
                     #(#decode)*
-                    #result
+                    ::core::result::Result::Ok(::std::boxed::Box::new(move |api: &dyn ::core::any::Any| {
+                        let this = api.downcast_ref::<Self>()?;
+                        let __result = Self::#ident(this, #(#call_args),*);
+                        ::core::option::Option::Some(#finish)
+                    }))
                 },
             }
         });
@@ -1137,7 +1136,7 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
         #item
 
         impl #impl_generics #ui::Api for #self_ty #where_clause {
-            const METHODS: &'static [#ui::Method<Self>] = &[#(#entries),*];
+            const METHODS: &'static [#ui::Method] = &[#(#entries),*];
         }
     })
 }
@@ -1170,8 +1169,6 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
     };
     let ui = quote!(::nsh_core::ui);
     let mut ts = Vec::new();
-    let mut from = Vec::new();
-    let mut to = Vec::new();
     let mut from_js = Vec::new();
     let mut to_js = Vec::new();
     for field in &fields.named {
@@ -1201,16 +1198,6 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 return ::core::result::Result::Err(#ui::PropError(::std::format!("`{}` is missing", #js)))
             },
         };
-        from.push(quote! {
-            #ident: match object.remove(#js) {
-                ::core::option::Option::Some(v) if !v.is_null() || #is_option => <#ty as #ui::JsValue>::from_json(v)
-                    .map_err(|e| #ui::PropError(::std::format!("`{}`: {}", #js, e)))?,
-                _ => { #missing }
-            }
-        });
-        to.push(quote! {
-            object.insert(::std::string::String::from(#js), #ui::JsValue::to_json(&self.#ident));
-        });
         from_js.push(quote! {
             #ident: {
                 let v = value.field(#js)?;
@@ -1242,19 +1229,6 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                     let fields: ::std::vec::Vec<::std::string::String> = ::std::vec![#(#ts),*];
                     ::std::format!("{}\n{}\n}}", #head, fields.join("\n"))
                 })
-            }
-
-            fn from_json(value: ::nsh_core::JsonValue) -> ::core::result::Result<Self, #ui::PropError> {
-                let ::nsh_core::JsonValue::Object(mut object) = value else {
-                    return ::core::result::Result::Err(#ui::PropError::expected("an object", &value));
-                };
-                ::core::result::Result::Ok(Self { #(#from),* })
-            }
-
-            fn to_json(&self) -> ::nsh_core::JsonValue {
-                let mut object = ::nsh_core::ui::__private::JsonMap::new();
-                #(#to)*
-                ::nsh_core::JsonValue::Object(object)
             }
 
             fn from_js(value: #ui::JsIn<'_>) -> ::core::result::Result<Self, #ui::PropError> {
@@ -1469,38 +1443,39 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 })
             }
         } else {
-            let decode = params.iter().zip(&names).zip(&locals).map(|((ty, name), local)| {
-                quote!(let #local: #ty = __args.next::<#ty>(__instances, #name)?;)
-            });
-            let args_iter = if params.is_empty() {
-                quote!(let _ = __args;)
-            } else {
-                quote!(let mut __args = __args;)
-            };
+            // Converted in the JS call; the op carries them.
+            let decode = params.iter().zip(&names).zip(&locals).enumerate().map(
+                |(i, ((ty, name), local))| {
+                    quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
+                },
+            );
             let finish = if fallible {
-                quote!(#private::wire_ret_result(__result, &__instances))
+                quote!(#private::boxed_result(__result))
             } else {
-                quote!(#private::wire_ret(__result, &__instances))
+                quote!(#private::boxed(__result))
             };
             if is_async {
                 quote! {
-                    #ui::FunctionCall::Async(|__args, __instances| {
-                        #args_iter
+                    #ui::FunctionCall::Async(|host| {
+                        let _ = host;
                         #(#decode)*
-                        let __instances = ::core::clone::Clone::clone(__instances);
-                        ::core::result::Result::Ok(::std::boxed::Box::pin(async move {
-                            let __result = #self_ty::#ident(#(#locals),*).await;
-                            #finish
+                        ::core::result::Result::Ok(::std::boxed::Box::new(move || {
+                            ::std::boxed::Box::pin(async move {
+                                let __result = #self_ty::#ident(#(#locals),*).await;
+                                #finish
+                            })
                         }))
                     })
                 }
             } else {
                 quote! {
-                    #ui::FunctionCall::Op(|__args, __instances, cx| {
-                        #args_iter
+                    #ui::FunctionCall::Op(|host| {
+                        let _ = host;
                         #(#decode)*
-                        let __result = #self_ty::#ident(#(#locals,)* cx);
-                        #finish.map_err(#ui::PropError)
+                        ::core::result::Result::Ok(::std::boxed::Box::new(move |cx| {
+                            let __result = #self_ty::#ident(#(#locals,)* cx);
+                            #finish
+                        }))
                     })
                 }
             }

@@ -109,8 +109,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (`Command::Measure`, `Core::measure`: the frames it mounted, summed up the tree), never by asking the platform: the
   scroll views and lists around subtract their content offsets (as the platforms last reported them, `set_scroll_offset`)
   and apply their zoom scales; transforms, native animations included, are not applied, nor is the mirroring of
-  right-to-left horizontal lists (scaleX −1). The answer is a `$return` on the root, like a module call's
-  (`nsh-js` `components.rs`). There is no `measureInWindow`: the root view is the window for a full-screen surface, and
+  right-to-left horizontal lists (scaleX −1). The answer settles the promise from the core's events
+  (`JsEvent::Reply`), like a module call's (`nsh-js` `components.rs`). There is no `measureInWindow`: the root view is the window for a full-screen surface, and
   an embedding app knows where it put the surface.
 - **Touch** (React Native semantics): `pointerEvents`, `hitSlop`, `activeOpacity`, `delayLongPress`, `android={{ ripple }}`
   (`{ color, borderless, radius, foreground }`, Android only); press-in waits ~130ms inside scroll views; only the innermost

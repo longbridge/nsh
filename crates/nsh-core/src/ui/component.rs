@@ -12,11 +12,12 @@ use rustc_hash::FxHashMap;
 
 use super::{
     Children, IntoElement, PropError, Slot, TsType, TsTypes,
-    class::{Class, ClassSpec, Member, MemberKind},
+    call::{AnyValue, JsResult, MethodCall},
+    class::{Class, ClassDef, ClassSpec, MemberKind, Thrown},
     element::{ComponentElement, ElNode},
-    module::{Function, FunctionSpec, Module, ModuleSpec},
+    js::{JsHost, JsIn, JsOwned},
+    module::{FunctionSpec, Module, ModuleSpec},
 };
-use crate::JsonValue;
 
 /// A component written in Rust: a function that runs once ([`Self::view`])
 /// and makes its view, binding what changes to signals. Its props come from
@@ -98,7 +99,7 @@ pub(crate) fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 
 /// A method JS calls on a component's ref: one of its API's
 /// ([`Api`]; `#[methods]` makes them).
-pub struct Method<A: 'static> {
+pub struct Method {
     /// Its JS name (`setValue`).
     pub name: &'static str,
     /// Documentation.
@@ -108,8 +109,9 @@ pub struct Method<A: 'static> {
     /// The TypeScript type of its result (`None`: it returns nothing, and
     /// JS does not wait for it).
     pub returns: Option<TsType>,
-    /// Calls it with JS's arguments.
-    pub call: fn(&A, Vec<JsonValue>) -> Result<JsonValue, PropError>,
+    /// Its call, the arguments converted in the JS call: what the core
+    /// runs with the API, in order with the props set before it.
+    pub call: fn(&dyn JsHost) -> Result<MethodCall, Thrown>,
 }
 
 /// What a component's ref does in JS: a handle its view makes, holding the
@@ -118,7 +120,7 @@ pub struct Method<A: 'static> {
 /// it.
 pub trait Api: Sized + 'static {
     /// Its methods.
-    const METHODS: &'static [Method<Self>];
+    const METHODS: &'static [Method];
 }
 
 /// The methods a component's ref has, for its spec and declarations:
@@ -150,6 +152,7 @@ fn specs_of<A: Api>(types: &mut TsTypes) -> Vec<MethodSpec> {
             doc: m.doc,
             params: m.params.iter().map(|(n, ts)| (*n, ts(types))).collect(),
             returns: m.returns.map(|ts| ts(types)),
+            call: m.call,
         })
         .collect()
 }
@@ -168,12 +171,15 @@ pub struct MethodSpec {
     pub params: Vec<(&'static str, String)>,
     /// The TypeScript type of its result; `None`: nothing to wait for.
     pub returns: Option<String>,
+    /// Its call (the arguments converted in the JS call).
+    pub call: fn(&dyn JsHost) -> Result<MethodCall, Thrown>,
 }
 
 /// What a prop is to the glue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropKind {
-    /// A value, sent as `$name`.
+    /// A value: decoded in the JS call ([`PropSpec::decode`]), set by the
+    /// core.
     Value,
     /// A named slot: JSX in a holder node.
     Slot,
@@ -183,6 +189,11 @@ pub enum PropKind {
     /// `List` (the glue makes the list, the component places it).
     Items,
 }
+
+/// What converts a JS value into a prop's Rust type (the prop's
+/// [`super::JsValue::from_js`], type-erased): `nsh-js` calls it when JS
+/// sets the prop.
+pub type PropDecode = fn(JsIn<'_>) -> Result<AnyValue, PropError>;
 
 /// One prop, for the glue and its declarations.
 #[derive(Debug, Clone)]
@@ -197,6 +208,8 @@ pub struct PropSpec {
     pub doc: &'static str,
     /// What it is.
     pub kind: PropKind,
+    /// A value prop's value from JS (`None` for slots, children and rows).
+    pub decode: Option<PropDecode>,
 }
 
 /// One event, for the glue and its declarations.
@@ -230,9 +243,9 @@ pub trait Props: Clone + PartialEq + 'static {
     /// Every prop at its default.
     fn initial() -> Self;
 
-    /// Prop `name` (its JS name) from JS; `None` restores its default.
-    /// Returns whether it changed.
-    fn set(&mut self, name: &str, value: Option<JsonValue>) -> Result<bool, PropError>;
+    /// Prop `name` (its JS name) from JS, as [`PropSpec::decode`] made it;
+    /// `None` restores its default. Returns whether it changed.
+    fn set(&mut self, name: &str, value: Option<AnyValue>) -> Result<bool, PropError>;
 
     /// Slot `name` filled (`Some`) or not; returns whether it changed.
     fn set_slot(&mut self, name: &str, slot: Option<Slot>) -> bool;
@@ -272,7 +285,7 @@ impl Props for () {
 
     fn initial() -> Self {}
 
-    fn set(&mut self, name: &str, _: Option<JsonValue>) -> Result<bool, PropError> {
+    fn set(&mut self, name: &str, _: Option<AnyValue>) -> Result<bool, PropError> {
         Err(PropError(format!("unknown prop `{name}`")))
     }
 
@@ -293,8 +306,8 @@ pub trait Event: 'static {
     /// This event's name.
     fn name(&self) -> &'static str;
 
-    /// Its data for JS.
-    fn data(&self) -> JsonValue;
+    /// Its data as a JS value of `host` (converted when JS hears it).
+    fn data_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
 }
 
 /// The events of a component that has none.
@@ -310,7 +323,7 @@ impl Event for NoEvent {
         match *self {}
     }
 
-    fn data(&self) -> JsonValue {
+    fn data_js<'a>(&self, _host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         match *self {}
     }
 }
@@ -406,7 +419,7 @@ fn export_name(type_name: &str) -> &str {
 
 /// An instance: a component's props and view, their types erased.
 pub(crate) trait AnyInstance {
-    fn set_prop(&mut self, name: &str, value: Option<JsonValue>) -> Result<bool, PropError>;
+    fn set_prop(&mut self, name: &str, value: Option<AnyValue>) -> Result<bool, PropError>;
     /// Props from the component whose view has this one.
     fn set_props(&mut self, props: &dyn Any);
     fn set_slot(&mut self, name: &'static str, filled: bool);
@@ -417,8 +430,9 @@ pub(crate) trait AnyInstance {
     fn view(&mut self) -> ElNode;
     /// Its registered name.
     fn name(&self) -> &'static str;
-    /// Method `name` of its ref; `None` when it has none of that name.
-    fn call(&mut self, name: &str, args: Vec<JsonValue>) -> Option<Result<JsonValue, PropError>>;
+    /// A method of its ref (its arguments decoded); `None` when it has no
+    /// ref of the method's type.
+    fn call(&mut self, call: MethodCall) -> Option<JsResult>;
     /// Its view's owner, once its view is made.
     fn owner(&self) -> Option<super::Owner>;
     /// Where a failure of its code goes first: its owner, or where it is
@@ -527,7 +541,6 @@ struct ComponentType {
 #[derive(Clone)]
 struct ModuleType {
     spec: Arc<ModuleSpec>,
-    functions: &'static [Function],
     /// The type that implements it.
     type_name: &'static str,
 }
@@ -651,7 +664,6 @@ impl Registry {
             M::NAME,
             ModuleType {
                 spec: Arc::new(ModuleSpec::of::<M>()),
-                functions: M::FUNCTIONS,
                 type_name,
             },
         );
@@ -702,15 +714,17 @@ impl Registry {
         self
     }
 
-    /// The components and modules of all of `sets`, for finding them by
-    /// name (the core's view of the sets a host serves). Not a module of its
-    /// own. Components of different sets may share an export (JS imports
-    /// them from different modules), not a name.
+    /// The components of all of `sets`, for making them by name (the
+    /// core's view of the sets a host serves). Not a module of its own.
+    /// Components of different sets may share an export (JS imports them
+    /// from different modules), not a name. Modules and classes are not
+    /// in it: their calls carry what they run.
     ///
     /// # Panics
     ///
-    /// When two sets register the same component, two types of the same
-    /// name, or modules of the same name (JS calls their functions by it).
+    /// When two sets register the same component or two types of the same
+    /// name, or a class one of the sets' signatures names is registered in
+    /// none ([`Registry::unregistered_classes`]).
     #[track_caller]
     pub fn merged(sets: &[Registry]) -> Self {
         let mut out = Self::default();
@@ -721,26 +735,55 @@ impl Registry {
                     panic!("{}, by two UI sets", same_name(name, old.id, ty.id, None));
                 }
             }
-            let modules = Arc::make_mut(&mut out.modules);
-            for (name, m) in set.modules.iter() {
-                if let Some(old) = modules.insert(name, m.clone()) {
-                    panic!(
-                        "{}, by two UI sets",
-                        same_module(name, old.type_name, m.type_name, None)
-                    );
-                }
-            }
-            let classes = Arc::make_mut(&mut out.classes);
-            for (key, c) in set.classes.iter() {
-                if let Some(old) = classes.insert(*key, c.clone()) {
-                    panic!(
-                        "{}, by two UI sets",
-                        same_class(key.1, old.type_name, c.type_name, key.0)
-                    );
-                }
+        }
+        let registered: Vec<_> = sets
+            .iter()
+            .flat_map(|s| s.classes.values().map(|c| (c.spec.def.type_id)()))
+            .collect();
+        for set in sets {
+            if let Some(def) = set
+                .named_classes()
+                .into_iter()
+                .find(|d| !registered.contains(&(d.type_id)()))
+            {
+                panic!("{}", unregistered(def, set.specifier()));
             }
         }
         out
+    }
+
+    /// The classes the set's signatures name (arguments, results, props)
+    /// that no set has registered among `sets`: their objects would have
+    /// no declaration and no export. Known in builds with declarations
+    /// ([`super::DECLARATIONS`]: the names come from the types).
+    pub fn unregistered_classes(sets: &[Registry]) -> Vec<&'static ClassDef> {
+        let registered: Vec<_> = sets
+            .iter()
+            .flat_map(|s| s.classes.values().map(|c| (c.spec.def.type_id)()))
+            .collect();
+        let mut out: Vec<&'static ClassDef> = Vec::new();
+        for def in sets.iter().flat_map(Registry::named_classes) {
+            if !registered.contains(&(def.type_id)()) && !out.iter().any(|d| std::ptr::eq(*d, def))
+            {
+                out.push(def);
+            }
+        }
+        out
+    }
+
+    /// The classes this registry's specs name.
+    fn named_classes(&self) -> Vec<&'static ClassDef> {
+        let mut types = TsTypes::default();
+        for spec in self.types.values() {
+            types.merge(&spec.spec.types);
+        }
+        for m in self.modules.values() {
+            types.merge(&m.spec.types);
+        }
+        for c in self.classes.values() {
+            types.merge(&c.spec.types);
+        }
+        types.classes().to_vec()
     }
 
     /// The registry of a UI set apps import as `specifier`
@@ -805,52 +848,11 @@ impl Registry {
         self.namespace
     }
 
-    /// Function `name` of a module (`Alert.alert`; with a namespace,
-    /// `nsh/android:Toast.show`).
-    pub(crate) fn function(&self, name: &str) -> Option<&'static Function> {
-        let name = match self.namespace {
-            Some(namespace) => name.strip_prefix(namespace)?.strip_prefix(':')?,
-            None => name,
-        };
-        let (module, function) = name.split_once('.')?;
-        self.modules
-            .get(module)?
-            .functions
-            .iter()
-            .find(|f| f.name == function)
-    }
-
-    /// The `async` member `name` of a class, called by its set's
-    /// specifier: `app/native:Tally#save` (`Tally#save` for a set without
-    /// one). Two sets may have classes of the same name.
-    pub(crate) fn class_member(&self, name: &str) -> Option<&'static Member> {
-        let (set, name) = match name.rsplit_once(':') {
-            Some((set, name)) => (Some(set), name),
-            None => (None, name),
-        };
-        let (class, member) = name.split_once('#')?;
-        self.classes
-            .iter()
-            .find(|((s, n), _)| *s == set && *n == class)?
-            .1
-            .spec
-            .def
-            .members
-            .iter()
-            .find(|m| m.name == member && m.call.is_async())
-    }
-
     /// The registered classes, by name.
     pub fn class_specs(&self) -> Vec<Arc<ClassSpec>> {
         let mut specs: Vec<_> = self.classes.values().map(|c| c.spec.clone()).collect();
         specs.sort_by_key(|s| s.name);
         specs
-    }
-
-    /// Whether class `def` is one of the registry's.
-    pub fn has_class(&self, def: &crate::ui::ClassDef) -> bool {
-        let id = (def.type_id)();
-        self.classes.values().any(|c| (c.spec.def.type_id)() == id)
     }
 
     /// The registered modules, by name.
@@ -895,6 +897,18 @@ fn same_module(name: &str, old: &str, new: &str, set: Option<&str>) -> String {
             of_set(set)
         )
     }
+}
+
+/// The message of a class a set's signatures name that is registered
+/// nowhere.
+fn unregistered(def: &ClassDef, set: Option<&str>) -> String {
+    format!(
+        "class `{}` is named by a signature{} but no UI set registers it (its objects would \
+         have no class in JS): add `registry.class::<{}>()`",
+        def.name,
+        of_set(set),
+        def.name
+    )
 }
 
 /// The message of two classes named `name`.
@@ -1215,21 +1229,83 @@ mod tests {
             assert!(ts.contains(line), "missing {line:?} in\n{ts}");
         }
         let mut props = StepperProps::initial();
+        let size = |json| {
+            let specs = StepperProps::spec(&mut TsTypes::default());
+            let decode = specs
+                .iter()
+                .find(|p| p.name == "size")
+                .unwrap()
+                .decode
+                .unwrap();
+            super::super::json_host::decode(decode, json)
+        };
         assert!(
             props
-                .set("size", Some(serde_json::json!("extraLarge")))
+                .set("size", Some(size(serde_json::json!("extraLarge")).unwrap()))
                 .unwrap()
         );
         assert!(props.size == StepperSize::ExtraLarge);
-        assert!(props.set("size", Some(serde_json::json!("huge"))).is_err());
+        // A value of another type: the conversion fails (JS's assignment
+        // throws), and so does a decoded value of another prop's type.
+        assert!(size(serde_json::json!("huge")).is_err());
+        assert!(props.set("size", Some(AnyValue::new(1.0f64))).is_err());
         assert!(props.set("size", None).unwrap());
         assert!(props.size == StepperSize::Regular);
+        let data = |e: &StepperEvent| super::super::json_host::event_data(e);
         assert_eq!(
-            StepperEvent::Change { new_value: 2.5 }.data(),
-            serde_json::json!({ "newValue": 2.5 })
+            data(&StepperEvent::Change { new_value: 2.5 }),
+            Some(serde_json::json!({ "newValue": 2.5 }))
         );
-        assert_eq!(StepperEvent::Limit(3).data(), serde_json::json!(3));
+        assert_eq!(data(&StepperEvent::Limit(3)), Some(serde_json::json!(3)));
+        assert_eq!(data(&StepperEvent::Reset), None);
         assert_eq!(StepperEvent::Reset.name(), "reset");
+    }
+
+    /// A class no set registers.
+    #[crate::ui::class]
+    struct Lonely;
+
+    #[crate::ui::class]
+    impl Lonely {
+        fn new() -> Self {
+            Lonely
+        }
+    }
+
+    /// Makes a `Lonely`.
+    struct Maker;
+
+    #[crate::ui::module]
+    impl Maker {
+        fn make() -> Instance<Lonely> {
+            Instance::new(Lonely)
+        }
+    }
+
+    #[test]
+    fn a_class_a_signature_names_is_registered() {
+        let mut r = Registry::ui_set("test/maker");
+        r.module::<Maker>();
+        assert_eq!(
+            Registry::unregistered_classes(std::slice::from_ref(&r))
+                .iter()
+                .map(|d| d.name)
+                .collect::<Vec<_>>(),
+            ["Lonely"]
+        );
+        // Registered in another set: fine.
+        let mut other = Registry::ui_set("test/lonely");
+        other.class::<Lonely>();
+        let _ = Registry::merged(&[r.clone(), other]);
+        // Nowhere: the sets do not build.
+        let failed = std::panic::catch_unwind(|| Registry::merged(&[r])).unwrap_err();
+        let message = failed.downcast_ref::<String>().unwrap();
+        assert!(
+            message.starts_with(
+                "class `Lonely` is named by a signature in `test/maker` but no UI set registers it"
+            ),
+            "{message}"
+        );
     }
 
     #[test]

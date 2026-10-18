@@ -1,7 +1,8 @@
 //! Benchmark of calls into Rust from JS: a synchronous class method and
 //! module function (run in the JS call, values converted directly) against
-//! an op and an `async` module function or member (a `Command::Native` op,
-//! the core's work, a `$return` event settling a promise), with a JS
+//! an op and an `async` module function or member (arguments converted in
+//! the JS call into the closure an `Op::Rust` carries, the core's work, the
+//! boxed result in the core's events settling a promise), with a JS
 //! function as the floor.
 //!
 //! Run with `cargo test --release -p nsh-engine --test engine bench_calls -- --ignored --nocapture`;
@@ -10,8 +11,8 @@
 use std::time::{Duration, Instant};
 
 use nsh_core::{
-    ApproxTextEngine, Core, EventKind, EventPayload, NodeId, Size,
-    ui::{Instances, Registry, prelude::*},
+    ApproxTextEngine, Core, Size,
+    ui::{JsEvent, Posts, Registry, prelude::*},
 };
 use nsh_js::Host;
 
@@ -87,21 +88,21 @@ struct App {
     host: Host,
     core: Core<ApproxTextEngine>,
     ops: Vec<nsh_core::Op>,
-    events: Vec<(NodeId, EventKind, EventPayload)>,
+    events: Vec<JsEvent>,
 }
 
 impl App {
     fn new() -> Self {
-        let instances = Instances::new();
+        let posts = Posts::new();
         let host = Host::with_options(nsh_js::HostOptions {
             ui_sets: vec![registry()],
-            class_instances: instances.clone(),
+            posts: posts.clone(),
             ..Default::default()
         })
         .unwrap();
         let mut core = Core::new(ApproxTextEngine, Size::new(390.0, 844.0));
         core.set_components(registry());
-        core.set_class_instances(instances);
+        core.set_posts(posts);
         let app = Self {
             host,
             core,
@@ -149,8 +150,8 @@ impl App {
             self.core.run_component_tasks();
             let _ = self.core.commit();
             self.core.take_events(&mut self.events);
-            for (id, event, payload) in self.events.drain(..) {
-                self.host.dispatch_event(id, event, &payload);
+            for event in self.events.drain(..) {
+                self.host.deliver(event);
             }
         }
         let elapsed = t.elapsed();

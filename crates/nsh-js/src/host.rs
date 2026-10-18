@@ -130,10 +130,11 @@ pub struct HostOptions {
     /// The UI sets apps import as native modules
     /// (`nsh_ui_mobile::registry()`, served as `nsh/ui/mobile`).
     pub ui_sets: Vec<nsh_core::ui::Registry>,
-    /// The table the instances of Rust classes cross in between the VM and
-    /// the core (`async` members): the engine hands the core the same one
-    /// ([`nsh_core::Core::set_class_instances`]).
-    pub class_instances: nsh_core::ui::Instances,
+    /// The queue of the JS calls Rust posts (`Callback::post`,
+    /// `call_async`): the engine hands the core the same one
+    /// ([`nsh_core::Core::set_posts`]), which releases the calls posted
+    /// during a synchronous call in order with the ops.
+    pub posts: nsh_core::ui::Posts,
     /// The URL relative request URLs (`fetch("/api")`, `new Request("x")`)
     /// resolve against: the page's on the web. `None` (native hosts):
     /// they are invalid, as there is no document they belong to.
@@ -169,7 +170,7 @@ impl Host {
                 &ctx,
                 shared.clone(),
                 &options.ui_sets,
-                options.class_instances.clone(),
+                options.posts.clone(),
             );
             web::web(ctx.as_raw().as_ptr()).base_url = options
                 .base_url
@@ -380,6 +381,26 @@ impl Host {
         });
     }
 
+    /// Delivers what the core hands JS after a commit
+    /// ([`nsh_core::Core::take_events`]): a node's event to its handler, a
+    /// Rust component's event to its `on<Event>` prop, a call's result to
+    /// its promise (converted now).
+    pub fn deliver(&self, event: nsh_core::ui::JsEvent) {
+        if let nsh_core::ui::JsEvent::Event(id, kind, payload) = &event {
+            self.dispatch_event(*id, *kind, payload);
+            return;
+        }
+        self.guarded(Phase::Call, || {
+            self.ctx.with(|ctx| {
+                let raw = ctx.as_raw().as_ptr();
+                if crate::components::deliver(raw, event).is_err() {
+                    self.report::<()>(&ctx, Err(rquickjs::Error::Exception));
+                }
+            });
+            self.run_jobs();
+        });
+    }
+
     /// Delivers a native event (and its data) to the node's JS handler.
     pub fn dispatch_event(&self, id: NodeId, event: EventKind, payload: &EventPayload) {
         self.guarded(Phase::Call, || {
@@ -513,6 +534,12 @@ impl Host {
         });
     }
 
+    /// Runs `f` with the raw context (tests).
+    #[cfg(test)]
+    pub(crate) fn with_raw<R>(&self, f: impl FnOnce(*mut qjs::JSContext) -> R) -> R {
+        self.ctx.with(|ctx| f(ctx.as_raw().as_ptr()))
+    }
+
     /// Whether an exception is pending outside any call (none should be).
     #[cfg(test)]
     pub(crate) fn has_exception(&self) -> bool {
@@ -540,7 +567,7 @@ impl Host {
         });
     }
 
-    /// Applies the `$post` ops JS sent (as the core does) and runs the
+    /// Releases the posts JS's ops park (as the core does) and runs the
     /// posted calls: for tests without a core.
     #[cfg(test)]
     pub(crate) fn run_posted_without_core(&self) {
@@ -550,20 +577,18 @@ impl Host {
         self.run_posted();
     }
 
-    /// Queues the calls the `$post` ops among `ops` park (as the core
+    /// Releases the posts parked by the ops among `ops` (as the core
     /// does): for tests without a core.
     #[cfg(test)]
     pub(crate) fn apply_posts(&self, ops: &[Op]) {
         for op in ops {
-            if let Op::Command {
-                command: nsh_core::Command::Native { name, args },
+            if let Op::Rust(nsh_core::ui::RustOp {
+                run: nsh_core::ui::RustCall::Post(id),
                 ..
-            } = op
-                && &**name == nsh_core::ui::POST
-                && let Some(id) = args.get("id").and_then(nsh_core::JsonValue::as_u64)
+            }) = op
             {
                 self.ctx
-                    .with(|ctx| crate::classes::unpark(ctx.as_raw().as_ptr(), id));
+                    .with(|ctx| crate::classes::release_post(ctx.as_raw().as_ptr(), *id));
             }
         }
     }

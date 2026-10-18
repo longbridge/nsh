@@ -7,7 +7,7 @@
 
 use std::sync::OnceLock;
 
-use crate::ui::{Function, Member, Registry};
+use crate::ui::Registry;
 
 mod accessibility;
 mod android;
@@ -35,18 +35,4 @@ pub fn registries() -> &'static [Registry] {
         desktop.module::<desktop::Window>();
         vec![android, accessibility, image, clipboard, desktop]
     })
-}
-
-/// The `async` member `name` of a runtime class (`nsh/x:Name#member`).
-pub(crate) fn class_member(name: &str) -> Option<&'static Member> {
-    registries().iter().find_map(|r| r.class_member(name))
-}
-
-/// Function `name` of a runtime module (`nsh/android:Toast.show`).
-pub(crate) fn function(name: &str) -> Option<&'static Function> {
-    let (namespace, _) = name.split_once(':')?;
-    registries()
-        .iter()
-        .find(|r| r.namespace() == Some(namespace))?
-        .function(name)
 }

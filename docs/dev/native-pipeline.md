@@ -43,9 +43,10 @@ loader). Where each one is implemented and declared: `js-modules.md`.
 - The modules of registries (`Registry::specifier`): the UI sets a host serves (`HostOptions::ui_sets`,
   `nsh/ui/mobile`) and the runtime's (the registry parts of `nsh/android`, `nsh/accessibility` and `nsh/image`). Their
   components, modules and re-exports become exports (`components.rs`): a component is a host view naming it, with its
-  props sent as `$name` by one render effect, events delivered to `on<Event>` handlers, children and slot holders; a
-  module function sends a call to the core and, when it has a result, returns a promise settled by the core's
-  `$return` event. Values a registry names natively (`Registry::native_values`: the mobile UI's navigation) and
+  props converted into their Rust types and sent by one render effect, events delivered to `on<Event>` handlers,
+  children and slot holders; a module function runs in the call, or converts its arguments there and sends what it
+  runs to the core as an op, returning a promise the core's events settle when it has a result
+  (`docs/dev/rust-classes.md`, "How calls cross"). Values a registry names natively (`Registry::native_values`: the mobile UI's navigation) and
   re-exports (`safeArea`, `useSafeAreaInsets`) come from the runtime. NSH's own export wins over a registry's of the
   same name.
 

@@ -1,7 +1,8 @@
 # Classes and functions from Rust
 
-Status: implemented (`nsh_core::ui` `class.rs`, `callback.rs`, `js.rs`; `nsh-macros` `class.rs`; `nsh-js`
-`classes.rs`); "Implementation notes" at the end says where it differs from the proposal.
+Status: implemented (`nsh_core::ui` `class.rs`, `callback.rs`, `call.rs`, `js.rs`; `nsh-macros` `class.rs`;
+`nsh-js` `classes.rs`, `components.rs`); "Implementation notes" at the end says where it differs from the
+proposal.
 
 An app's Rust crate (`nsh.json` `"rust"`) exports components, modules (`#[module]`: functions) and classes. This
 describes classes: a Rust type that TypeScript uses as a class, with a constructor, methods, getters and setters, statics and
@@ -112,12 +113,10 @@ so a class's methods can run directly inside the JS call, as the web classes nsh
 - **`async` members are core tasks.** An `async fn` method gets `this: Instance<Self>` (a handle: `with` /
   `with_mut` borrow the value between awaits) and returns a promise; it runs as a task of the core, where the free
   functions work (`dialog`, `timer`, `blocking`, `background`, the clipboard), as an `async` module function does.
-  The call is an op like a module function's (`Command::Native { name: "app/native:Tally#save", args: { c, this,
-  a, held } }`, named by the class's set, so two sets may have classes of one name); the instance reaches the core
-  through a table both sides share (`Instances`, made by the engine and handed to `nsh-js` and the core:
-  `HostOptions::class_instances`, `Core::set_class_instances`), held under an id the op carries beside the
-  arguments (`this`, `held: [[index, id]]`, never inside the app's data) until the core takes it. The task keeps
-  the instance alive until it ends.
+  `this` and the arguments are converted in the JS call, as a synchronous member's are (a wrong one rejects the
+  promise with the same `TypeError`), into the start of the task: a closure holding the typed values, the
+  instance among them, that an op carries to the core ([below](#how-calls-cross)). The task keeps the instance
+  alive until it ends.
 - **One object per instance.** While both live, an instance has one JS object (`nsh-js` remembers it by the `Rc`'s
   address): a member returning an instance Rust keeps gives the object it has, so `a.badge === a.badge`.
 - **Errors.** `Result<T, E: Display>` throws (`Error` with the message) or rejects; a wrong argument throws a
@@ -171,8 +170,9 @@ For that, two choices of the first version change:
 
 - **Values convert directly**, QuickJS value to Rust type and back, not through `JsonValue`: a synchronous call is
   what makes these classes worth using, and a JSON round trip per call would cost more than the call (the canvas'
-  recording is a native list for that reason). `JsValue` gains the direct conversions; modules' ops keep JSON,
-  since they cross to the core as data.
+  recording is a native list for that reason). `JsValue` has only the direct conversions; what crosses to the
+  core (ops, `async` calls, Rust components' props, events and methods) crosses typed too
+  ([below](#how-calls-cross)).
 - **The machinery is shared from the start**: `#[class]` instances are the web classes' slots, so `instanceof`,
   re-entrancy, finalization and (later) `new.target` behave the same for NSH's classes and an app's.
 
@@ -225,13 +225,16 @@ impl Downloader {
 - **Calling it later** (`post(args)`, `call_async(args).await -> Result<R, String>`): from anywhere on the engine
   thread (an async member's task, a timer, a stored callback), the call is queued for JS and runs in the engine's
   next JS turn, in order with the other posts: `post` forgets the result, `call_async` waits for it (and settles a
-  promise the function returns). The calls wait in the shared table (`Instances`), which the engine hands to the
-  script at each commit round before the core's events (`Host::run_posted`), so a task's posts reach JS before its
-  result and cost one turn, not a thread hop. A post made inside a synchronous call from JS is parked until a
-  `$post` op JS sends after it is applied, so posts keep program order with the ops before them (an op function
-  posting, then a synchronous one). Once the VM stops, queued calls and those posted later are dropped and their
-  replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running out of memory)
-  when the synchronous call around it returns, whatever Rust made of its `Err`.
+  promise the function returns). The calls wait in one ordered queue (`Posts`, made by the engine and handed to
+  `nsh-js` and the core: `HostOptions::posts`, `Core::set_posts`), which the engine runs at each commit round
+  before the core's events (`Host::run_posted`), so a task's posts reach JS before its result and cost one turn,
+  not a thread hop. They run in the order they were posted, keeping JS's program order: a post made inside a
+  synchronous call from JS is parked in its place until an op JS sends after it is applied
+  (`RustCall::Post`), and what the ops JS sent before it post while the core applies them goes before it. So an op
+  function posting and then a synchronous one posting arrive in that order, and a task posting while JS is still
+  busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
+  dropped and their replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
+  out of memory) when the synchronous call around it returns, whatever Rust made of its `Err`.
 - **Keeping it:** a `Callback` can be stored (in an instance's field, a `Vec`, a global) and called any number of
   times; dropping the last clone releases the JS function. A callback an instance keeps is reported to QuickJS's
   collector through the class's mark hook, as the web classes report the JS values they hold. `#[class]` traces
@@ -247,6 +250,36 @@ impl Downloader {
   later), and `async` functions and members can `call_async`.
 
 
+## How calls cross
+
+Nothing crosses between JS and the core as JSON for a Rust component, module or class (`nsh_core::ui::call`):
+
+- **Arguments are converted in the JS call** by the generated decoders (`JsValue::from_js`), for every kind of
+  call: a synchronous member or function runs on them; a function with `cx`, an `async` function or member and a
+  component's ref method become a closure holding the typed values (`OpCall`, `TaskStart`, `MethodCall`) that an
+  op carries (`Op::Rust(RustOp { call, run })`, `RustCall::Op` / `Task` / `Method`). The core runs it in order with
+  the UI's ops: a function with a `ModuleCx` (its actions applied after it), the start of a task, the method with
+  the API the component registered. Instances and callbacks ride in the closure as the `Rc`s they are: no table,
+  no ids. A value of the wrong type throws a `TypeError` in the call, or rejects the promise of a call that returns
+  one, with the same message whatever the kind (``Ints.op: `n`: expected an integer that fits u32, got 1.5``).
+- **Results are boxed Rust values** (`JsResult = Result<Box<dyn ToJs>, String>`): the core hands them back in its
+  event stream (`JsEvent::Reply { call, result }`, `Core::take_events`), in order with the nodes' events, and
+  `nsh-js` converts the value (`Ret::into_js`) when it settles the promise (`Host::deliver`). Every path that drops
+  a call settles its promise: a panic or an error rejects it, a method of a node hosting no component rejects, and
+  the ops the engine drops when the script stops reject theirs (`Core::discard_ops`).
+- **A Rust component's props** are decoded when JS sets them (`PropSpec::decode`, one per prop, generated by
+  `derive(Props)` from the field's type) into a type-erased value (`AnyValue`) that `Prop::RustProp` carries; the
+  core's instance takes it out (`Props::set`). A value of the wrong type throws a `TypeError` at the assignment
+  (`Gauge.level: expected ...`); `undefined` resets the prop to its default.
+- **A Rust component's events** reach JS as the event itself (`JsEvent::Component`, `Event::data_js` converting
+  its data when JS hears it), and whether its lazy children are placed as `JsEvent::Children`.
+- **Platform native components** (Java, Swift, the embedder's GPUI components) keep JSON (`Prop::ComponentProp`,
+  `MountItem::ComponentProps`, `EventPayload::Native`, `Command::Native`): their values cross into another
+  language. The two kinds stay apart.
+- **A class a signature names must be registered** in one of the engine's UI sets: `Registry::merged` panics
+  naming the class and the set otherwise (`Registry::unregistered_classes`), since its objects would have no class
+  in JS.
+
 ## The pieces
 
 - **`nsh-macros`:** `#[class]` on the struct (a marker; the type's name is the JS name) and on its `impl`: `new`
@@ -256,13 +289,15 @@ impl Downloader {
   It implements `ui::Class` (`Class::DEF`, a `ClassDef`: name, doc, members, each a `Member` with its
   `MemberCall`), as `#[module]` implements `Module`; on the struct it implements `Trace` (the callbacks the fields
   keep) and `Ret` (a value of the struct is a new instance).
-- **`nsh-core`:** `ui::Class`, `ClassSpec` (for the declarations), `Instance<T>`, `Callback<A, R>`, the
-  `Instances` table, `Registry::class::<C>()`; the direct conversions (`JsHost`, `JsIn`, `JsOwned`; `JsValue`'s
-  `from_js` / `to_js`); the core runs async members like async module functions (`call_member`, `run_call`).
+- **`nsh-core`:** `ui::Class`, `ClassSpec` (for the declarations), `Instance<T>`, `Callback<A, R>`, `Posts`,
+  `Registry::class::<C>()`; the direct conversions (`JsHost`, `JsIn`, `JsOwned`; `JsValue`'s `from_js` /
+  `to_js`); the typed calls (`call.rs`: `RustOp`, `RustCall`, `JsEvent`, `AnyValue`, `ToJs`); the core runs
+  them in order with the ops (`Core::run_rust`).
 - **`nsh-js`:** `classes.rs` makes each class's constructor and prototype from its `ClassDef` when a bundle imports
   the set or a member first returns one of its values: C closures calling the members through `CallHost` (its
-  `JsHost`); async members push the op and return the promise; the object is the web classes' (`web/mod.rs`), its
-  slot holding the instance, and its mark hook reports the instance's callbacks.
+  `JsHost`); calls that become ops convert their values and push the op (`classes::send`), returning the promise
+  `components.rs` settles when the core's events bring the result (`components::deliver`); the object is the web
+  classes' (`web/mod.rs`), its slot holding the instance, and its mark hook reports the instance's callbacks.
 - **Declarations:** `nsh_core::ui::declarations` writes `export declare class` for each, with the types the members
   use, next to the set's components and modules; the declarations test checks that what exists is declared.
 - **The CLI** needs no change: classes are part of the app's set like its modules.
@@ -271,8 +306,9 @@ impl Downloader {
 
 A synchronous call converts its arguments from QuickJS values to the Rust types directly (no `JsonValue`, no op, no
 commit, no promise), as the web classes' methods do. `bench_calls` (`docs/dev/performance.md`): a class method with
-a number costs what a JS method call does (~34ns), with a `{ x, y }` object ~137ns, a module function without a
-context ~27ns; an awaited op, async function or async member ~1.6–2.1µs.
+a number costs what a JS method call does (~34ns), with a `{ x, y }` object ~139ns, a module function without a
+context ~28ns; an awaited op, async function or async member ~0.56–0.63µs (1.6–2.15µs when they crossed as
+JSON).
 
 ## Decisions
 
@@ -292,14 +328,16 @@ context ~27ns; an awaited op, async function or async member ~1.6–2.1µs.
 
 Where the implementation differs from the proposal above, and why:
 
-- **Posted calls go through the shared table, not a core action.** `Callback::post` / `call_async` queue a `JsCall`
-  in `Instances` (it wakes the engine), and the engine runs the queue at each commit round before dispatching the
-  core's events. A callback may be posted from a synchronous member, where the core is not running, so the queue
-  belongs to the table both sides already share rather than to the core's actions; the order with the core's events
+- **Posted calls go through one queue the engine shares, not a core action.** `Callback::post` / `call_async`
+  queue a `JsCall` in `Posts` (it wakes the engine), and the engine runs the queue at each commit round before
+  dispatching the core's events. A callback may be posted from a synchronous member, where the core is not
+  running, so the queue belongs to the engine rather than to the core's actions; the order with the core's events
   is the same.
-- **The table holds what crosses, not every object.** Each op carries the ids of its `this`, instances and callbacks;
-  the core takes them, and what a failed call did not take is released (`Instances::release_call`). Objects carry no
-  id of their own.
+- **Typed calls instead of a table.** The first version sent ops and async calls as JSON, the instances and
+  callbacks among them held in a table both sides shared under ids the op carried (and replies' instances under
+  an id beside the value). Converting in the JS call and carrying closures removed the table, the ids (so no data
+  can look like one, and no id can leak or be forged), the name-based lookup of the member or function the core
+  calls (`app/native:Tally#save`), and a JSON round trip per call.
 - **Results by value.** `Self` and another class's value are results through the `Ret` impl `#[class]` writes for
   the struct; `Option<Other>` by value cannot be one (Rust's coherence rules), `Option<Instance<Other>>` can.
 - **Subclassing works already**: constructors are QuickJS constructors (called only with `new`) and honor
@@ -307,13 +345,10 @@ Where the implementation differs from the proposal above, and why:
 - **A class without `new`** is declared with `private constructor()`; JS calling it throws a `TypeError`. Members
   named `dispose` or `constructor`, and statics named `prototype`, `name` or `length`, are compile errors (the
   object has those already).
-- **Ids stay out of the app's data.** An op lists its held ids beside the arguments and a reply its instance beside
-  the value (`h`), so data that looks like `{ $instance: 1 }` is data; ops the engine drops when the VM stops
-  release what they hold (`Core::discard_ops`).
 - **Panics in `async` module functions** now reject their promise too (they used to fail the root and leave JS
   waiting), as an `async` member's do.
-- **Module functions take instances and callbacks** in every kind: an op's and a task's cross in the table like an
-  async member's.
+- **Module functions take instances and callbacks** in every kind: an op's and a task's ride in its closure like
+  an async member's.
 - **The standard library's classes** (the table above) have not moved yet; the machinery is shared, so each moves
   when it needs nothing more.
 

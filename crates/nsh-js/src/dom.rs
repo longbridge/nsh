@@ -109,6 +109,8 @@ struct NodeData {
     /// `contentContainerClass`), one of `children` that takes the others
     /// ([`DETACHED`]: none).
     content: NodeId,
+    /// The node's object (not owned: the data goes with it).
+    object: JsValue,
 }
 
 /// The renderer of `ctx`.
@@ -548,12 +550,14 @@ fn new_node(ctx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> Js
         children: Vec::new(),
         handlers: Vec::new(),
         content: DETACHED,
+        object: UNDEFINED,
     }));
     // SAFETY: a registered class; the opaque is the boxed data, freed by
     // the finalizer.
     let obj = unsafe {
         let obj = qjs::JS_NewObjectClass(ctx, d.classes.node as _);
         qjs::JS_SetOpaque(obj, data as *mut c_void);
+        (*data).object = obj;
         obj
     };
     let index = (id >> 1) as usize;
@@ -563,6 +567,17 @@ fn new_node(ctx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> Js
     }
     nodes[index] = data;
     obj
+}
+
+/// Node `id`'s object (owned), or `null` once JS let it go.
+pub(crate) fn node_value(ctx: *mut JsContext, id: NodeId) -> JsValue {
+    let p = dom(ctx).by_id(id);
+    if p.is_null() {
+        return qjs::JS_NULL;
+    }
+    // SAFETY: live node data (it leaves the table when its object is
+    // finalized); the object is live while it is there.
+    unsafe { qjs::JS_DupValue(ctx, (*p).object) }
 }
 
 /// The id of node object `v`, if it is one.

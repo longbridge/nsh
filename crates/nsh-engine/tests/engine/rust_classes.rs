@@ -1,7 +1,6 @@
 //! Rust classes (`#[class]`) through an engine: an app's set registers
 //! them, its bundle imports them; `async` members run as tasks of the core,
-//! their instances crossing in the table the engine shares between the
-//! script and the core.
+//! their instances crossing inside the task (converted in the JS call).
 
 use std::time::Duration;
 
@@ -158,6 +157,12 @@ impl Tools {
         heard.post("sync".to_owned());
     }
 
+    /// Posts "task" to `heard` from a task, after `ms` milliseconds.
+    pub(crate) async fn post_later(heard: Callback<String>, ms: u32) {
+        timer(Duration::from_millis(ms.into())).await;
+        heard.post("task".to_owned());
+    }
+
     /// An op that panics.
     pub(crate) fn explode(cx: &mut ModuleCx) -> i64 {
         let _ = cx;
@@ -172,9 +177,79 @@ impl Tools {
     }
 }
 
+/// Takes a `u32` in every kind of call.
+pub(crate) struct Ints;
+
+#[module]
+impl Ints {
+    /// In the call.
+    pub(crate) fn now(n: u32) -> u32 {
+        n
+    }
+
+    /// As an op.
+    pub(crate) fn op(n: u32, cx: &mut ModuleCx) -> u32 {
+        let _ = cx;
+        n
+    }
+
+    /// As a task.
+    pub(crate) async fn later(n: u32) -> u32 {
+        n
+    }
+}
+
+/// A `u32` kept in Rust.
+#[class]
+pub(crate) struct Dial {
+    at: u32,
+}
+
+#[class]
+impl Dial {
+    pub(crate) fn new() -> Self {
+        Dial { at: 0 }
+    }
+
+    /// Sets it, in the call.
+    pub(crate) fn set(&mut self, at: u32) -> u32 {
+        self.at = at;
+        at
+    }
+
+    /// Sets it, in a task.
+    pub(crate) async fn set_later(this: Instance<Self>, at: u32) -> u32 {
+        this.with_mut(|d| d.at = at);
+        at
+    }
+}
+
+/// Shows a `u32` prop.
+#[derive(Default)]
+pub(crate) struct Gauge;
+
+#[derive(Clone, PartialEq, Props)]
+pub(crate) struct GaugeProps {
+    #[prop(default)]
+    level: nsh_core::ui::Prop<u32>,
+}
+
+impl Component for Gauge {
+    type Props = GaugeProps;
+    type Event = NoEvent;
+
+    fn view(props: GaugeProps, _: Scope<NoEvent>) -> impl IntoElement {
+        text(move || format!("level {}", props.level.get()))
+    }
+}
+
 fn registry() -> Registry {
     let mut r = Registry::ui_set("test/classes");
-    r.class::<Counter>().module::<Tools>();
+    r.class::<Counter>()
+        .class::<Dial>()
+        .module::<Tools>()
+        .module::<Ints>()
+        .register::<Gauge>();
     r
 }
 
@@ -326,6 +401,107 @@ fn functions_run_in_the_call_as_ops_or_as_tasks() {
     );
 }
 
+const ORDER: &str = r#"import { mount, signal, Text } from "nsh";
+import { Tools } from "test/classes";
+
+const shown = signal("waiting");
+const heard = [];
+const hear = (w) => heard.push(w);
+// The task posts at 40 ms, while the timer at 30 ms is still busy after
+// posting in a synchronous call: the call posted first runs first.
+Tools.postLater(hear, 40);
+setTimeout(() => {
+  Tools.postSync(hear);
+  const end = Date.now() + 40;
+  while (Date.now() < end) {}
+}, 30);
+setTimeout(() => shown.set(`done ${heard.join(",")}`), 200);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn a_post_in_a_synchronous_call_keeps_its_place_before_later_ones() {
+    let (_engine, rx) = start(ORDER, vec![registry()]);
+    assert_eq!(shown(&rx, "done"), "done sync,task");
+}
+
+const INTEGERS: &str = r#"import { mount, signal, Text } from "nsh";
+import { Dial, Gauge, Ints } from "test/classes";
+
+const shown = signal("waiting");
+const level = signal(1);
+const msg = async (f) => {
+  try { return String(await f()); } catch (e) { return `${e.name}: ${e.message}`; }
+};
+setTimeout(async () => {
+  const lines = [];
+  const dial = new Dial();
+  for (const v of [4294967295, 1.5, 4294967296, -1, NaN]) {
+    const kinds = [
+      await msg(() => Ints.now(v)),
+      await msg(() => Ints.op(v)),
+      await msg(() => Ints.later(v)),
+      await msg(() => dial.set(v)),
+      await msg(() => dial.setLater(v)),
+      // Thrown by the assignment.
+      await msg(() => { level.set(v); return "set"; }),
+    ];
+    lines.push(kinds.join(" / "));
+  }
+  shown.set(`done ${lines.join("|")}`);
+}, 0);
+
+mount(() => (
+  <>
+    <Gauge level={level()} />
+    <Text>{shown()}</Text>
+  </>
+));
+"#;
+
+#[test]
+fn integers_take_the_same_values_in_every_kind_of_call_and_prop() {
+    let (_engine, rx) = start(INTEGERS, vec![registry()]);
+    // (The gauge's text may come after it in a batch.)
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut done = String::new();
+    while done.is_empty()
+        && let Ok(batch) = rx.recv_deadline(deadline)
+    {
+        for item in &batch.items {
+            if let MountItem::Text { text, .. } = item
+                && text.text.starts_with("done")
+            {
+                done = text.text.clone();
+            }
+        }
+    }
+    let rows: Vec<&str> = done.trim_start_matches("done ").split('|').collect();
+    let max = u32::MAX;
+    assert_eq!(
+        rows[0],
+        format!("{max} / {max} / {max} / {max} / {max} / set")
+    );
+    for (row, v) in rows[1..].iter().zip(["1.5", "4294967296", "-1", "NaN"]) {
+        let refused =
+            |what: &str| format!("TypeError: {what}: expected an integer that fits u32, got {v}");
+        assert_eq!(
+            *row,
+            [
+                refused("Ints.now: `n`"),
+                refused("Ints.op: `n`"),
+                refused("Ints.later: `n`"),
+                refused("Dial.set: `at`"),
+                refused("Dial.setLater: `at`"),
+                refused("Gauge.level"),
+            ]
+            .join(" / ")
+        );
+    }
+    assert_eq!(rows.len(), 5, "{done}");
+}
+
 const DATA: &str = r#"import { mount, signal, Text } from "nsh";
 import { Counter } from "test/classes";
 import { Counter as OtherCounter } from "test/other";
@@ -334,14 +510,15 @@ const shown = signal("waiting");
 const msg = async (p) => { try { return String(await p); } catch (e) { return e.message; } };
 setTimeout(async () => {
   const lines = [];
-  // Data that looks like the runtime's ids is data.
+  // Data is data, whatever it looks like; only an instance is one.
   lines.push(JSON.stringify(await Counter.echo({ $instance: 1, h: 2 })));
   const target = new Counter(1), item = new Counter(5);
   const forged = [];
   for (let i = 1; i < 40; i++) forged.push(msg(target.absorb({ $instance: i })));
   const real = target.absorb(item);
   const results = await Promise.all(forged);
-  lines.push(`${results.every((r) => r.startsWith("`other`: expected a Counter"))} ${await real}`);
+  const refused = "Counter.absorb: `other`: expected a Counter, got an object";
+  lines.push(`${results.every((r) => r === refused)} ${await real}`);
   // Two sets' classes of one name are called apart.
   lines.push(`${await Counter.set()} ${await OtherCounter.set()}`);
   shown.set(`done ${lines.join("|")}`);
@@ -351,7 +528,7 @@ mount(() => <Text>{shown()}</Text>);
 "#;
 
 #[test]
-fn held_ids_are_apart_from_the_data_and_classes_from_their_sets() {
+fn data_is_data_and_classes_are_their_sets() {
     let (_engine, rx) = start(DATA, vec![registry(), other_registry()]);
     assert_eq!(
         shown(&rx, "done"),

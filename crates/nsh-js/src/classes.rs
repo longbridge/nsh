@@ -11,18 +11,20 @@
 //! same instance twice gives the same object). Members that are not
 //! `async` run in the JS call: [`CallHost`] reads the call's arguments and
 //! makes its result for the generated code, converting QuickJS values
-//! directly. An `async` member is an op (`Command::Native` named
-//! `Tally#save`, `{ c, this, a }`) the core runs as a task: its instance
-//! and the instances among its arguments wait in the table the core shares
-//! (`nsh_core::ui::Instances`) under the ids the op carries, and so do the
-//! instances it resolves with.
+//! directly. An `async` member converts `this` and its arguments in the
+//! JS call too, into the start of its task, which an op carries to the
+//! core ([`send`]; a module's functions with a context or `async`, and
+//! components' methods, cross the same way): the instances ride in the
+//! closure. The result comes back boxed in the core's events and is
+//! converted when its promise settles (`components.rs`).
 //!
 //! A JS function Rust takes is a [`JsCallback`]: a key into the context's
 //! table of functions ([`Functions`], freed with the context), called on
-//! the spot inside a synchronous call, or queued in the shared table and
-//! run by [`run_posted`] in the engine's next turn. An instance whose only
-//! handle is its object reports the callbacks it keeps from the object's
-//! mark hook, so the collector sees through them.
+//! the spot inside a synchronous call, or queued in the engine's post
+//! queue ([`nsh_core::ui::Posts`]) and run by [`run_posted`] in its next
+//! turn. An instance whose only handle is its object reports the
+//! callbacks it keeps from the object's mark hook, so the collector sees
+//! through them.
 
 use std::{
     any::{Any, TypeId},
@@ -34,8 +36,8 @@ use std::{
 use nsh_core::{
     JsonValue,
     ui::{
-        CallbackHandle, ClassDef, ClassInstance, Instances, JsCall, JsHost, JsIn, JsKind, JsRaw,
-        Member, MemberCall, MemberKind, PropError, SyncCall, Thrown, Tracer,
+        CallbackHandle, ClassDef, ClassInstance, JsCall, JsHost, JsIn, JsKind, JsRaw, Member,
+        MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall, Thrown, Tracer,
     },
 };
 use rquickjs::qjs;
@@ -57,11 +59,8 @@ pub(crate) struct Classes {
     wrappers: Wrappers,
     /// The classes made, by the index their constructors carry.
     defs: RefCell<Vec<&'static ClassDef>>,
-    /// Where instances cross to the core.
-    instances: Instances,
-    /// The specifier of each class's set (its `async` members are called
-    /// by it).
-    specifiers: RefCell<FxHashMap<TypeId, Option<&'static str>>>,
+    /// The engine's queue of the JS calls Rust posts.
+    posts: Posts,
     /// The JS functions callbacks hold.
     functions: Rc<Functions>,
     /// Synchronous calls from JS running now (a callback is called on the
@@ -74,13 +73,12 @@ pub(crate) struct Classes {
 }
 
 impl Classes {
-    pub(crate) fn new(instances: Instances) -> Self {
+    pub(crate) fn new(posts: Posts) -> Self {
         Self {
             built: RefCell::default(),
             wrappers: Wrappers::default(),
             defs: RefCell::default(),
-            instances,
-            specifiers: RefCell::default(),
+            posts,
             functions: Rc::default(),
             depth: Cell::new(0),
             uncatchable: RefCell::default(),
@@ -93,7 +91,7 @@ impl Classes {
         self.functions.free_all();
         self.uncatchable.borrow_mut().take();
         // Queued calls are dropped (their replies say JS stopped).
-        self.instances.close();
+        self.posts.close();
     }
 }
 
@@ -360,7 +358,7 @@ unsafe extern "C" fn construct(
         return qjs::JS_EXCEPTION;
     };
     let host = CallHost::new(ctx, UNDEFINED, new_target, args(argc, argv));
-    host.run(def, member)
+    host.run(member)
 }
 
 unsafe extern "C" fn call(
@@ -376,7 +374,7 @@ unsafe extern "C" fn call(
     let def = unsafe { &*(opaque as *const ClassDef) };
     let member = &def.members[magic as usize];
     let host = CallHost::new(ctx, this, UNDEFINED, args(argc, argv));
-    host.run(def, member)
+    host.run(member)
 }
 
 /// A function running module function `f` in the JS call (owned, or the
@@ -411,107 +409,33 @@ unsafe extern "C" fn call_sync(
     CallHost::new(ctx, this, UNDEFINED, args(argc, argv)).run_sync(f)
 }
 
-/// An op's arguments and the ids held for them (argument index, id).
-pub(crate) type WiredArgs = (Vec<JsonValue>, Vec<(usize, u64)>);
-
-/// The arguments of an op (a module function's) as JSON: instances and
-/// functions held in the table for the core (released when this fails).
-pub(crate) fn wire_args(ctx: Ctx, args: &[Raw]) -> R<WiredArgs> {
-    let instances = classes(ctx).instances.clone();
-    let mut held = Vec::new();
-    let mut out = Vec::with_capacity(args.len());
-    for (i, &v) in args.iter().enumerate() {
-        match wire_arg(ctx, v, &instances) {
-            Ok((json, id)) => {
-                out.push(json);
-                if let Some(id) = id {
-                    held.push((i, id));
-                }
-            }
-            Err(Throw) => {
-                release(ctx, &held);
-                return Err(Throw);
-            }
-        }
-    }
-    Ok((out, held))
+/// Sends a call into Rust that runs as an op, with the call's `this` and
+/// `args`: `make` converts them in this call into what the op runs (the
+/// instances and callbacks among them ride in it). With `returns`, a
+/// promise of its result, rejected when they do not convert; else
+/// `undefined`, and a conversion error throws.
+pub(crate) fn send(
+    ctx: Ctx,
+    this: Raw,
+    args: js::Args<'_>,
+    returns: bool,
+    make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
+) -> Raw {
+    CallHost::new(ctx, this, UNDEFINED, args).send(returns, make)
 }
 
-/// Lets go of what an op that was not sent holds.
-pub(crate) fn release(ctx: Ctx, held: &[(usize, u64)]) {
-    let instances = &classes(ctx).instances;
-    for (_, id) in held {
-        instances.release(*id);
+/// The pending exception as a rejected promise (an uncatchable one, an
+/// interrupt, stays thrown).
+fn rejected_with_exception(ctx: Ctx) -> Raw {
+    let e = js::take_exception(ctx);
+    // SAFETY: a check of a live value.
+    if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
+        let _ = js::throw(ctx, e);
+        return qjs::JS_EXCEPTION;
     }
-}
-
-/// The name the core calls `async` member `member` of `def` by
-/// (`Tally#save`, `nsh/x:Tally#save` for a runtime class).
-fn member_name(ctx: Ctx, def: &'static ClassDef, member: &Member) -> String {
-    let id = (def.type_id)();
-    let cached = classes(ctx).specifiers.borrow().get(&id).copied();
-    let set = cached.unwrap_or_else(|| {
-        // SAFETY: the state's module table, read briefly.
-        let modules = unsafe { &(*crate::state::state(ctx)).modules };
-        let set = modules.specifier_of_class(def);
-        classes(ctx).specifiers.borrow_mut().insert(id, set);
-        set
-    });
-    match set {
-        Some(set) => format!("{set}:{}#{}", def.name, member.name),
-        None => format!("{}#{}", def.name, member.name),
-    }
-}
-
-/// An argument of an op as JSON: an instance or a function is held in the
-/// table (its id the second value, the JSON `null`), a node is
-/// `{ $node: id }`.
-pub(crate) fn wire_arg(ctx: Ctx, v: Raw, instances: &Instances) -> R<(JsonValue, Option<u64>)> {
-    if let Some(instance) = instance_of(ctx, v) {
-        return Ok((JsonValue::Null, Some(instances.hold_instance(instance))));
-    }
-    if js::is_function(ctx, v) {
-        let id = instances.hold_callback(new_callback(ctx, v));
-        return Ok((JsonValue::Null, Some(id)));
-    }
-    if let Some(id) = crate::dom::node_id(ctx, v) {
-        return Ok((serde_json::json!({ "$node": id }), None));
-    }
-    // SAFETY: a context reference and a dup for the converter.
-    let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(ctx)) };
-    let value = unsafe { rquickjs::Value::from_raw(cx, qjs::JS_DupValue(ctx, v)) };
-    Ok((crate::protocol::to_json(&value).map_err(|_| Throw)?, None))
-}
-
-/// The value of a `$return` (its data, borrowed): `v`, or the object of the
-/// instance the core holds for it (`h`, beside `v`, so no value of the app
-/// reads as one). Owned.
-pub(crate) fn reply_value(ctx: Ctx, data: Raw) -> Raw {
-    let id = js::get(ctx, data, "h")
-        .ok()
-        .filter(|h| !h.is_undefined())
-        .and_then(|h| js::to_number(ctx, h.raw()).ok());
-    let _ = js::take_exception(ctx);
-    let Some(id) = id else {
-        return match js::get(ctx, data, "v") {
-            Ok(v) => v.take(),
-            Err(Throw) => {
-                let _ = js::take_exception(ctx);
-                UNDEFINED
-            }
-        };
-    };
-    let taken = classes(ctx).instances.take_instance(id as u64);
-    let Some(instance) = taken else {
-        return js::NULL;
-    };
-    let host = CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()));
-    match host.wrap(instance) {
-        Ok(obj) => from_raw(obj),
-        Err(_) => {
-            let _ = js::take_exception(ctx);
-            js::NULL
-        }
+    match js::rejected(ctx, e.raw()) {
+        Ok(p) => p.take(),
+        Err(Throw) => qjs::JS_EXCEPTION,
     }
 }
 
@@ -650,12 +574,12 @@ impl<'a> CallHost<'a> {
         r.map(|v| to_raw(v.take())).map_err(|Throw| self.threw())
     }
 
-    /// Runs `member` of `def` (catching a panic): its result, or the
-    /// exception; an `async` one's promise.
-    fn run(&self, def: &'static ClassDef, member: &'static Member) -> Raw {
+    /// Runs `member` (catching a panic): its result, or the exception; an
+    /// `async` one's promise.
+    fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(_) => self.send(def, member),
+            MemberCall::Async(start) => self.send(true, |host| start(host).map(RustCall::Task)),
         }
     }
 
@@ -671,68 +595,66 @@ impl<'a> CallHost<'a> {
         self.finish(result)
     }
 
-    /// Sends a call of `async` member `member` to the core: its promise
-    /// (rejected when `this` or an argument cannot cross).
-    fn send(&self, def: &'static ClassDef, member: &'static Member) -> Raw {
+    /// Sends the call `make` converts this call's values into as an op
+    /// ([`send`]).
+    fn send(
+        &self,
+        returns: bool,
+        make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
+    ) -> Raw {
         let ctx = self.ctx;
-        let instances = classes(ctx).instances.clone();
-        // The ids held for the call: `this` and the arguments'.
-        let mut held = Vec::new();
-        let mut arg_held = Vec::new();
-        let made = (|| -> R<(Option<u64>, Vec<JsonValue>)> {
-            let this = if member.kind == MemberKind::Static {
-                None
-            } else {
-                let instance = instance_of(ctx, self.this)
-                    .filter(|i| (i.def().type_id)() == (def.type_id)())
-                    .ok_or_else(|| {
-                        js::type_error(
-                            ctx,
-                            &format!(
-                                "{}.{}: Illegal invocation: not a {}",
-                                def.name, member.name, def.name
-                            ),
-                        )
-                    })?;
-                let id = instances.hold_instance(instance);
-                held.push(id);
-                Some(id)
-            };
-            let mut list = Vec::with_capacity(member.params.len());
-            for i in 0..member.params.len() {
-                let (json, id) = wire_arg(ctx, self.args.get(i), &instances)?;
-                if let Some(id) = id {
-                    held.push(id);
-                    arg_held.push((i, id));
+        // The app's conversions: a panic in one fails the call.
+        let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| make(self)))
+            .unwrap_or_else(|payload| Err(Thrown::Error(panic_message(payload))));
+        let run = match made {
+            Ok(run) => {
+                if self.pending.get() {
+                    // Thrown by an operation whose error the code handled.
+                    let _ = js::take_exception(ctx);
                 }
-                list.push(json);
+                run
             }
-            Ok((this, list))
-        })();
-        let promise = match made {
-            Ok((this, list)) => crate::components::send_member(
-                ctx,
-                &member_name(ctx, def, member),
-                this,
-                list,
-                &arg_held,
-            ),
-            Err(Throw) => qjs::JS_EXCEPTION,
+            Err(e) => {
+                // Thrown (or rethrown) as a synchronous call's error.
+                let thrown = self.finish(Err(e));
+                return if returns {
+                    rejected_with_exception(ctx)
+                } else {
+                    thrown
+                };
+            }
         };
-        // SAFETY: an inline tag check.
-        if unsafe { qjs::JS_IsException(promise) } {
-            for id in held {
-                instances.release(id);
-            }
-            return match js::rejected_with_exception(ctx) {
-                Ok(p) => p.take(),
-                Err(Throw) => qjs::JS_EXCEPTION,
-            };
+        let call = if returns {
+            crate::components::next_call(ctx)
+        } else {
+            0
+        };
+        // Not queued (over the op limit): the call and what it holds go
+        // here, before any promise is made.
+        if let Err(e) = crate::dom::push_op(ctx, nsh_core::Op::Rust(RustOp { call, run })) {
+            return e;
         }
-        promise
+        if returns {
+            crate::components::promise(ctx, call)
+        } else {
+            UNDEFINED
+        }
     }
 
-    /// The JS result of a call: its value or what it throws.
+    /// Whether an operation threw (its exception is pending).
+    pub(crate) fn has_pending(&self) -> bool {
+        self.pending.get()
+    }
+
+    /// Clears the exception an operation that failed left pending (its
+    /// error was handled).
+    pub(crate) fn clear_pending(&self) {
+        if self.pending.replace(false) {
+            let _ = js::take_exception(self.ctx);
+        }
+    }
+
+    /// The JS result of a call: its value or what it throws.    /// The JS result of a call: its value or what it throws.
     pub(crate) fn finish(&self, result: Result<JsRaw, Thrown>) -> Raw {
         let ctx = self.ctx;
         // A callback was interrupted: JS must not go on, whatever Rust
@@ -910,6 +832,10 @@ impl JsHost for CallHost<'_> {
         crate::dom::node_id(self.ctx, from_raw(v))
     }
 
+    fn node_value(&self, id: nsh_core::NodeId) -> JsRaw {
+        to_raw(crate::dom::node_value(self.ctx, id))
+    }
+
     fn instance(&self, v: JsRaw) -> Option<Rc<dyn ClassInstance>> {
         instance_of(self.ctx, from_raw(v))
     }
@@ -1036,7 +962,7 @@ impl Functions {
 pub(crate) struct JsCallback {
     functions: Rc<Functions>,
     key: u64,
-    instances: Instances,
+    posts: Posts,
 }
 
 impl JsCallback {
@@ -1109,29 +1035,27 @@ impl CallbackHandle for JsCallback {
     }
 
     fn post(&self, call: JsCall) {
-        // Posted inside a synchronous call from JS: queued by an op after
-        // the ones JS sent before, so it runs after what they post.
+        // Posted inside a synchronous call from JS: its place in the queue
+        // waits for an op after the ones JS sent before, so it runs after
+        // what they post.
         if let Some((ctx, _)) = self.value()
             // SAFETY: reading the context's opaque pointer.
             && !crate::state::state(ctx).is_null()
             && classes(ctx).depth.get() > 0
         {
-            let id = self.instances.park(call);
-            let op = nsh_core::Op::Command {
-                id: nsh_core::ROOT_ID,
-                command: nsh_core::Command::Native {
-                    name: nsh_core::ui::POST.into(),
-                    args: serde_json::json!({ "id": id }),
-                },
-            };
+            let id = self.posts.park(call);
+            let op = nsh_core::Op::Rust(RustOp {
+                call: 0,
+                run: RustCall::Post(id),
+            });
             if crate::dom::push_op(ctx, op).is_err() {
                 // Over the op limit (the VM stops): queued as it is.
                 let _ = js::take_exception(ctx);
-                self.instances.unpark(id);
+                self.posts.release(id);
             }
             return;
         }
-        self.instances.post(call);
+        self.posts.post(call);
     }
 }
 
@@ -1148,7 +1072,7 @@ fn new_callback(ctx: Ctx, v: Raw) -> Rc<dyn CallbackHandle> {
     Rc::new(JsCallback {
         functions,
         key,
-        instances: c.instances.clone(),
+        posts: c.posts.clone(),
     })
 }
 
@@ -1166,7 +1090,7 @@ fn message_of(ctx: Ctx, e: Raw) -> String {
 }
 
 /// A host for conversions outside a call.
-fn host_outside_calls<'a>(ctx: Ctx) -> CallHost<'a> {
+pub(crate) fn host_outside_calls<'a>(ctx: Ctx) -> CallHost<'a> {
     CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()))
 }
 
@@ -1263,7 +1187,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
 /// An uncatchable exception (an interrupt) stops them: it is pending when
 /// this fails, and the calls left are dropped.
 pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
-    let calls = classes(ctx).instances.take_calls();
+    let calls = classes(ctx).posts.take_calls();
     for call in calls {
         run_call(ctx, call);
         let interrupted = classes(ctx).uncatchable.borrow_mut().take();
@@ -1274,21 +1198,21 @@ pub(crate) fn run_posted(ctx: Ctx) -> R<()> {
     Ok(())
 }
 
-/// Queues the call parked as `id` (tests without a core).
+/// Lets the call parked as `id` run (tests without a core).
 #[cfg(test)]
-pub(crate) fn unpark(ctx: Ctx, id: u64) {
-    classes(ctx).instances.unpark(id);
+pub(crate) fn release_post(ctx: Ctx, id: u64) {
+    classes(ctx).posts.release(id);
 }
 
 /// Whether JS calls Rust queued are waiting.
 pub(crate) fn has_posted(ctx: Ctx) -> bool {
-    classes(ctx).instances.has_calls()
+    classes(ctx).posts.has_calls()
 }
 
 /// No JS runs any more: the queued calls are dropped, and so are those
 /// posted later (their replies say JS stopped).
 pub(crate) fn close(ctx: Ctx) {
-    classes(ctx).instances.close();
+    classes(ctx).posts.close();
 }
 
 #[cfg(test)]
@@ -1488,12 +1412,8 @@ pub(crate) mod tests {
             "object".into()
         }
 
-        fn from_json(_value: nsh_core::JsonValue) -> Result<Self, PropError> {
+        fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, PropError> {
             Ok(Flaky(true))
-        }
-
-        fn to_json(&self) -> nsh_core::JsonValue {
-            nsh_core::JsonValue::Null
         }
 
         fn to_js<'a>(
@@ -1615,16 +1535,15 @@ pub(crate) mod tests {
             "unknown".into()
         }
 
-        fn from_json(_value: nsh_core::JsonValue) -> Result<Self, PropError> {
-            Ok(Panicky)
-        }
-
-        fn to_json(&self) -> nsh_core::JsonValue {
-            nsh_core::JsonValue::Null
-        }
-
         fn from_js(_value: nsh_core::ui::JsIn<'_>) -> Result<Self, PropError> {
             panic!("panicky");
+        }
+
+        fn to_js<'a>(
+            &self,
+            host: &'a dyn nsh_core::ui::JsHost,
+        ) -> Result<nsh_core::ui::JsOwned<'a>, PropError> {
+            Ok(nsh_core::ui::JsOwned::new(host, host.undefined()))
         }
     }
 
@@ -2139,11 +2058,9 @@ pub(crate) mod tests {
 
     /// An op that cannot be sent lets go of what it holds.
     #[test]
-    fn an_op_that_is_not_sent_releases_its_instances() {
-        let instances = nsh_core::ui::Instances::new();
+    fn an_op_that_is_not_sent_drops_what_it_holds() {
         let host = Host::with_options(HostOptions {
             ui_sets: vec![registry()],
-            class_instances: instances.clone(),
             limits: nsh_core::js::Limits {
                 max_op_values: 40,
                 ..Default::default()
@@ -2153,28 +2070,21 @@ pub(crate) mod tests {
         .unwrap();
         let _ = host.eval_source(
             "import { Tally, Tools } from \"test/classes\";\n\
-             const t = new Tally(1); for (let i = 0; i < 100; i++) { try { Tools.keepOp(t); } catch (e) {} }",
+             let t = new Tally(1); for (let i = 0; i < 100; i++) { try { Tools.keepOp(t); } catch (e) {} }\n\
+             t = null;",
         );
         let mut ops = Vec::new();
         host.take_ops(&mut ops);
         let sent = ops
             .iter()
-            .filter(|op| {
-                matches!(
-                    op,
-                    nsh_core::Op::Command {
-                        command: nsh_core::Command::Native { .. },
-                        ..
-                    }
-                )
-            })
+            .filter(|op| matches!(op, nsh_core::Op::Rust(_)))
             .count();
         assert!(sent < 100, "the op queue filled up");
-        assert_eq!(
-            instances.held(),
-            sent,
-            "only the ops sent hold their instance"
-        );
+        let before = dropped();
+        host.collect_garbage();
+        assert_eq!(dropped(), before, "the ops sent hold the tally");
+        drop(ops);
+        assert_eq!(dropped(), before + 1, "nothing else holds it");
     }
 
     #[test]

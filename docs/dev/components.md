@@ -68,13 +68,16 @@ child components go with it. The design and its reasons: `reactive-components.md
   host serves, also for modules of the same name); components of different sets may share an export. A test
   pins `nsh/ui/mobile`'s exports (`nsh-ui-mobile` `the_exports_are_pinned`). A module's JS name is its type's
   too (`#[module] impl Alert`: `Alert`).
-- **Props** are a struct, **events** an enum; the derives produce the decoding of `$name` values from JS, defaults,
-  and the TypeScript types (doc comments included). Field and variant names become camel case in JS. Value types
+- **Props** are a struct, **events** an enum; the derives produce a decoder per prop (`PropSpec::decode`: the JS
+  value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
+  defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
   `StyleProp<ViewStyle>`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
-  (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. A prop JS sends with
-  the wrong type is refused with a warning; clearing a prop restores its default. A Rust parent passes a value
+  (`props.title.get()` in a binding, `get_untracked()` in a listener). A plain field is read once. A prop JS sets with
+  the wrong type throws a `TypeError` at the assignment (``Gauge.level: expected an integer that fits u32, got
+  1.5``): the JS face decodes it there and sends the typed value (`Prop::RustProp`, an `AnyValue`); clearing a prop
+  (`undefined`) restores its default. A Rust parent passes a value
   (`3.into()`), a signal (`n.into()`) or a closure (`Prop::bind(move || ..)`). Platform-only props are an `android` /
   `ios` prop of a `JsObject` struct (`StatusBar`'s `android={{ backgroundColor }}`), as for host elements.
 - **`Scope<E>`** (`Copy`) is what the component has of its own: `cx.emit(event)` (to the app's `on<Event>`, or to the
@@ -215,10 +218,11 @@ write: `#[methods] impl StepperApi { pub fn set_value(&self, v: f64) {..} pub fn
 implements `Api`, the view registers it with `cx.methods(StepperApi { .. })` for as long as it lives, and
 `#[component(methods = StepperApi)]` (`Component::METHODS = Methods::of::<StepperApi>()`) names it in the spec, so the
 JS face builds the ref (`StepperRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
-written. A call is a `Command::Native { name, args: { c, a } }` op, so it runs in order with the props JS set before
-it. A method returning nothing is called and forgotten (`c` 0); one returning a `JsValue` gives JS a `Promise`,
-answered by a `$return` event (`{ c, v }` or `{ c, e }` for a refused argument) in the same frame's commit rounds. Rust
-calls them directly: `ComponentRef::api::<StepperApi>()`.
+written. A call converts its arguments in the JS call (a wrong one throws, or rejects the promise of a method that
+returns a value) into a closure an op carries (`RustCall::Method`), so it runs in order with the props JS set
+before it, with the API the view registered. A method returning nothing is called and forgotten; one returning a
+value gives JS a `Promise`, settled from the core's events (`JsEvent::Reply`, the boxed value converted then) in
+the same frame's commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
 
 ## Modules
 
@@ -230,30 +234,29 @@ parameters at the end may be left out). The signature decides how a call runs (`
   the arguments and the result directly; TS gets the value, an `Err` throws. It computes; the UI's free functions
   (signals, `dialog`, `theme()`) are not there (the reactive graph is not entered).
 - **A last `cx: &mut ModuleCx`** (`Op`): the platform's services, applied in order right after the call (a dialog,
-  the status bar, focus). A call is a root `Command::Native { name: "Alert.alert", args: { c, a } }` op (in order
-  with the ops before it); one returning a value gives JS a `Promise`, answered like methods by a root `$return`
-  event.
+  the status bar, focus). Its arguments are converted in the JS call into a closure an op carries
+  (`RustCall::Op`, in order with the ops before it); one returning a value gives JS a `Promise`, settled like a
+  method's, and a conversion error rejects it.
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions
   views use (`Alert.alert` awaits `dialog(..)`), sent as the op above; a `Promise` of its value, rejected with an
   `Err`'s message or a panic's.
 
-Parameters are `Arg`s: the `JsValue` types, instances (`Instance<T>`) and `Callback`s; results are `Ret`s. In an op,
-instances and functions are held in the table the script and the core share (`Instances`, below) under ids the op
-lists beside its arguments (`{ c, a, held: [[index, id]] }`, so the app's data never names one; a reply's instance
-goes as `h` beside `v`), released after the call. A panic in an op rejects it (its actions dropped). `Registry::module::<M>()` registers it; `components.rs` builds
+Parameters are `Arg`s: the `JsValue` types, instances (`Instance<T>`) and `Callback`s; results are `Ret`s. In an op
+or a task, instances and functions ride in its closure as they are (`docs/dev/rust-classes.md`, "How calls
+cross"). A panic in an op rejects it (its actions dropped). `Registry::module::<M>()` registers it; `components.rs` builds
 the object. A module with a component's name is merged into it (`StatusBar` is a component with static
 functions). `Registry::reexport` re-exports runtime values (`safeArea`, `keyboard`, `useSafeAreaInsets`: `nsh-js`
 `env.rs`) under the set's module, and `Registry::native_values` names the values `nsh-js` makes for the set (the
 mobile UI's navigation: `navigation.rs`).
 
 The runtime has modules of its own the same way (`crates/nsh-core/src/runtime/`, `runtime::registries()`): one
-`Registry` per JS module (`Registry::runtime("nsh/android")`), whose functions JS calls as `nsh/android:Toast.show` so
-they never clash with a UI set's; the core looks a call up in the set's registry, then the runtime's. Runtime modules
+`Registry` per JS module (`Registry::runtime("nsh/android")`); a call carries what it runs, so a runtime module's
+functions never clash with a UI set's of the same name. Runtime modules
 use the same services as components (`cx.toast`, `cx.announce_for_accessibility`, `image_size`), and the core's
 internal actions for the rest (exiting the app, a ref's accessibility focus).
 `#[module(flat)]` exports functions one by one (`setStatusBarBackgroundColor`); a function returning `Result` rejects
-the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `YNode` in TS (sent as
-`{ $node: id }`).
+the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `YNode` in TS (the node's
+id, and its object again as a result).
 
 ## Classes
 
@@ -277,25 +280,26 @@ statics, and `async fn`s (`this: Instance<Self>` first, for a method) members re
   naming the member and the parameter (``Tally.add: `by`: expected a number, got "x"``). `&Other` / `&mut Other`
   parameters borrow another instance for the call, `Instance<Other>` keeps one; results `Self`, `Other` and
   `Instance<Other>` are objects. Another class's object is refused.
-- **`async` members are ops** (`MemberCall::Async`): `Command::Native { name: "app/native:Tally#save", args: { c,
-  this, a, held } }` on the root (named by the class's set: two sets may have classes of one name), run by the core
-  as a root task like an async function (`call_member`). `this`, the instances among the arguments and those it
-  resolves with wait in `Instances`, a table the engine makes and hands to the script and the core
-  (`Core::set_class_instances`, `HostOptions::class_instances`), under the ids the op carries outside the app's
-  data: a task keeps its instance after the object goes. Ops the engine drops (the VM stopped) release theirs
-  (`Core::discard_ops`).
+- **`async` members are ops** (`MemberCall::Async`): `this` and the arguments are converted in the JS call into
+  the start of a task an op carries (`RustCall::Task`), which the core runs as a root task like an async
+  function's; the instances ride in it, so a task keeps its instance after the object goes, and the instance it
+  resolves with is converted to its object when the promise settles. Ops the engine drops (the VM stopped) reject
+  their promises (`Core::discard_ops`).
 - **Callbacks** (`callback.rs`): a `Callback<A, R>` parameter is a JS function (`A` one value, `()` or a tuple;
   `(a: string, b: number) => boolean`). `call` runs it on the spot, only inside a synchronous call from JS (it
-  panics in a task, and rethrows an uncatchable interrupt when the call returns); `post` and `call_async` queue a
-  `JsCall` in `Instances`, which the engine hands to the script (`Host::run_posted`) at each commit round before
-  the core's events, so a task's posts reach JS before its result. A post made inside a synchronous call from JS
-  waits for a `$post` op after the ops JS sent before it, so posts run in program order. `call_async` settles a
+  panics in a task, and rethrows an uncatchable interrupt when the call returns);
+  `post` and `call_async` queue a `JsCall` in `Posts`, one ordered queue the engine makes and hands to the script
+  and the core (`HostOptions::posts`, `Core::set_posts`), which the engine runs (`Host::run_posted`) at each
+  commit round before the core's events, so a task's posts reach JS before its result. A post made inside a
+  synchronous call from JS is parked in its place until an op after the ops JS sent before it is applied
+  (`RustCall::Post`), and what those ops post goes before it, so posts run in program order. `call_async` settles a
   promise the function returns; once the VM stops, queued and later calls are dropped and their replies say so.
   `nsh-js` keeps the functions in a table of the context (freed with it, so callbacks Rust keeps longer do
   nothing). `#[class]` on the struct implements the `unsafe trait Trace` from every field whose type implements it
   (chosen by type, so aliases count); the object's mark hook reports them when it is the instance's only owner, so
   a listener that captures its own object is collected; callbacks held elsewhere are roots. Before a collected
   object's value drops, its callbacks are released: its `Drop` calling one finds it gone.
+- **A class a signature names is registered** in one of the host's sets, or `Registry::merged` panics naming it.
 
 ## The status bar
 
@@ -475,8 +479,8 @@ what changed.
   so the list's own are left out). Each cell is then the placing component's row wrapper (`Inner::Row`) around a
   node showing the row (`Inner::VirtualRow`), so each part's handlers run with its own component.
 - Lazy children (`#[prop(lazy)] children: Children`, `Sheet`'s): the JS face makes the app's children only while the
-  view places them, under a `cond` on a signal; the core tells it with a `$children` event (`true` / `false`) on the
-  host when the view starts or stops placing them (`ComponentSpec::lazy_children`), so they are made again on each
+  view places them, under a `cond` on a signal; the core tells it in its events (`JsEvent::Children`, `true` /
+  `false`) when the view starts or stops placing them (`ComponentSpec::lazy_children`), so they are made again on each
   opening and released after. Until they are made, `Children::is_empty()` is true. The content a Rust view passes
   such a component (`Sheet::element(..).child(..)`) is lazy the same way: the core keeps it in a region of a signal it
   sets when the nested component starts or stops placing its children (slots and rows stay), instead of telling JS.
@@ -491,8 +495,9 @@ what changed.
   or the view's that passed it.
 - A component's own list reports its viewable rows to it in the core, waiting for `minimum_view_time` when set
   (a task of the list's owner).
-- `cx.emit(event)` is routed after the code that emitted it: to JS as a `NativeEvent` on the host (`{ name, data }`,
-  from the `Event` derive; the JS face calls the app's `on<Name>(data)`), or, for a nested component, to the
+- `cx.emit(event)` is routed after the code that emitted it: to JS as the event itself (`JsEvent::Component`, its
+  data converted by the `Event` derive's `data_js` when JS hears it; the JS face calls the app's
+  `on<Name>(data)`), or, for a nested component, to the
   `on_event` listener of the view that made it, typed, whose own emits are routed in turn until none are left.
 - The back button: `on_back_press` listeners of views run newest first, after modals' and before stacks', then JS's
   (`ui/back.rs`).

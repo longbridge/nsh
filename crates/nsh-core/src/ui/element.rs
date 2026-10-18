@@ -52,22 +52,23 @@ impl<E: ?Sized> Clone for Listener<E> {
     }
 }
 
-/// An event a component emitted, with its type erased.
-pub(crate) trait AnyEvent {
-    fn name(&self) -> &'static str;
-    fn data(&self) -> JsonValue;
+/// An event a component emitted, with its type erased: what JS hears of
+/// it and the event, for Rust listeners.
+pub(crate) trait AnyEvent: super::EventToJs {
     fn as_any(&self) -> &dyn Any;
 }
 
-impl<E: Event> AnyEvent for E {
+impl<E: Event> super::EventToJs for E {
     fn name(&self) -> &'static str {
         Event::name(self)
     }
 
-    fn data(&self) -> JsonValue {
-        Event::data(self)
+    fn data_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        Event::data_js(self, host)
     }
+}
 
+impl<E: Event> AnyEvent for E {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -658,17 +659,34 @@ pub trait Element: IntoElement + Sized {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Style(pub(crate) Option<JsonValue>);
 
+impl Style {
+    /// An inline style of React Native's names (`{ "flex": 1 }`); `null`
+    /// is none.
+    pub fn new(style: JsonValue) -> Self {
+        Self((!style.is_null()).then_some(style))
+    }
+}
+
 impl JsValue for Style {
     fn ts_type(_types: &mut super::TsTypes) -> String {
         "StyleProp<ViewStyle>".into()
     }
 
-    fn from_json(value: JsonValue) -> Result<Self, PropError> {
-        Ok(Self((!value.is_null()).then_some(value)))
+    /// Styles are React Native's objects: read as JSON (as the platform's
+    /// inline styles are).
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        if value.is_nullish() {
+            return Ok(Self(None));
+        }
+        Ok(Self(Some(value.to_json()?)))
     }
 
-    fn to_json(&self) -> JsonValue {
-        self.0.clone().unwrap_or(JsonValue::Null)
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        let raw = match &self.0 {
+            Some(json) => host.json(json)?,
+            None => host.null(),
+        };
+        Ok(super::JsOwned::new(host, raw))
     }
 }
 

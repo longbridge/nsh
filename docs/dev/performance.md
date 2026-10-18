@@ -46,23 +46,30 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
 - Calls into Rust from JS (`class_bench`: `cargo test --release -p nsh-engine --test engine bench_calls -- --ignored
-  --nocapture`, min / median of 20 runs, per call, the JS loop included). A member or function that is not `async`
-  runs in the call and converts its values directly (`docs/dev/rust-classes.md`); one awaited is an op, the core's
-  work and a `$return` event settling its promise (thousands issued in one turn, so this is their throughput, not one
-  call's latency, which also waits for the engine's turn):
+  --nocapture --test-threads=1`, min / median of 20 runs, per call, the JS loop included). A member or function that
+  is not `async` runs in the call and converts its values directly (`docs/dev/rust-classes.md`); one awaited
+  converts its arguments in the call into the closure an op carries, the core runs it, and its boxed result in the
+  core's events settles the promise (thousands issued in one turn, so this is their throughput, not one call's
+  latency, which also waits for the engine's turn). In brackets, when ops and replies were JSON (`Command::Native`,
+  a table of held instances, a `$return` event):
 
   | call | per call |
   |---|---|
   | a JS method (the floor) | 34ns / 38ns |
-  | `#[class]` method taking and returning a number | 34ns / 34ns |
-  | the same taking a `#[derive(JsObject)]` `{ x, y }` | 139ns / 140ns |
-  | `#[module]` function without a context | 27ns / 27ns |
-  | `#[module]` function with `cx` (an op), awaited | 1.60µs / 1.60µs |
-  | `async` `#[module]` function, awaited | 1.69µs / 1.70µs |
-  | `async` `#[class]` member, awaited | 2.08µs / 2.12µs |
+  | `#[class]` method taking and returning a number | 36ns / 37ns [34ns] |
+  | the same taking a `#[derive(JsObject)]` `{ x, y }` | 139ns / 140ns [138ns] |
+  | `#[module]` function without a context | 28ns / 28ns [27ns] |
+  | `#[module]` function with `cx` (an op), awaited | 560ns / 566ns [1.58µs] |
+  | `async` `#[module]` function, awaited | 618ns / 627ns [1.69µs] |
+  | `async` `#[class]` member, awaited | 632ns / 637ns [2.15µs] |
 
-  A synchronous call costs what a JS method call does, ~45× less than an awaited one; reading an object's fields is
-  most of the object case (one property read through QuickJS each).
+  A synchronous call costs what a JS method call does, ~16× less than an awaited one; reading an object's fields is
+  most of the object case (one property read through QuickJS each). Typed calls made the awaited ones 2.8–3.4×
+  cheaper: no JSON either way, no name lookup of the function or member, no table. Rust components' props crossing
+  typed (`Prop::RustProp`) left `component_bench` where it was (GridRust first frame JS 405–415µs, core 1.01–1.03ms,
+  update of 200 titles JS 133–148µs, core 395–436µs, against 410–420µs / 1.01–1.06ms / 138–150µs / 411–443µs; the same
+  1015 / 200 ops and 2217 / 400 mount items), as `nsh trace` did for the gallery (`Bench.tsx --scroll 3000`: the same
+  1205 ops / 1008 items first and 1064 ops / 914 items over 39 scrolling commits) and `examples/bench`.
 - Canvas recording (release `nsh trace`, minimum of the runs): in the former JS runtime, 2500 iterations of
   `beginPath`, `moveTo`, `lineTo`, `lineWidth =`, `strokeStyle =`, `stroke`, `fillRect` (17 500 calls) recorded into a
   JS array in ~1.4ms, the same with methods generated from the specs as with a hand-written class (an A/B of the two

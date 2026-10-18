@@ -178,13 +178,14 @@ mount(() => <Overview />);
 ```
 
 props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 组件自己的内容、事件和状态留在
-Rust 中；TSX 传入 props、接收事件。
+Rust 中；TSX 传入 props、接收事件。类型不对的 prop 在 TSX 设置它的地方抛出 `TypeError`（`u32` 类型的 prop 传 `level={1.5}`）。
 
 函数和成员按 Rust 签名运行。不是 `async` 的在 TSX 调用中直接运行并返回值（`Portfolio.total()` 是数字，`ledger.balance` 是属性）：
 它们计算并保存状态。`async fn` 返回 Promise，作为任务运行，可以使用 NSH 的服务（`fetch`、`timer`、对话框）；带
 `cx: &mut ModuleCx` 参数的模块函数与 UI 按顺序作用于平台（toast、状态栏），返回其值的 Promise。参数和返回值的类型来自签名：数字、
 字符串、`Option`、`Vec`、你的 `#[derive(JsObject)]` 结构体和 `#[derive(PropEnum)]` 枚举、你的类的实例，以及 TSX 函数
-（`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用）。`Err` 以其消息抛出（或 reject）。类的对象拥有它的
+（`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用）。类型不对的参数在调用中抛出 `TypeError`，
+返回 Promise 的调用则以它 reject；`Err` 以其消息抛出（或 reject）。类的对象拥有它的
 Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `using ledger = new Ledger()`）立即释放。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
 Rust 的修改会重新构建并重启应用。
 

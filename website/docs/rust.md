@@ -187,7 +187,7 @@ mount(() => <Overview />);
 
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
-events.
+events. A prop of the wrong type throws a `TypeError` where TSX sets it (`level={1.5}` for a `u32` prop).
 
 A function or a member runs the way its Rust signature says. One that is not `async` runs inside the TSX call and
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
@@ -195,8 +195,9 @@ returns its value (`Portfolio.total()` is a number, `ledger.balance` a property)
 taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and returns a Promise
 of its value. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
-(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`). An `Err` throws
-(or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
+(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`). An argument of
+the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise; an `Err`
+throws (or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
 updates, Rust edits rebuild and restart the app.
 

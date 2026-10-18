@@ -1,6 +1,7 @@
 //! JS values as Rust reads and makes them directly, without JSON: what
-//! the synchronous calls of classes and functions convert their arguments
-//! and results with ([`super::JsValue::from_js`], [`super::JsValue::to_js`]).
+//! every call into Rust converts its arguments and results with, and Rust
+//! components their props and events ([`super::JsValue::from_js`],
+//! [`super::JsValue::to_js`]).
 //!
 //! The values are the JS host's (`nsh-js`: QuickJS's), opaque here
 //! ([`JsRaw`]); a [`JsHost`] reads and makes them. A [`JsIn`] is a value
@@ -75,6 +76,8 @@ pub trait JsHost {
     fn describe(&self, v: JsRaw) -> String;
     /// The node `v` is (a `YNode`, a `ref`).
     fn node(&self, v: JsRaw) -> Option<crate::NodeId>;
+    /// Node `id`'s JS object (`null` when JS let it go), owned.
+    fn node_value(&self, id: crate::NodeId) -> JsRaw;
     /// The instance of a class `v` holds (any class's).
     fn instance(&self, v: JsRaw) -> Option<Rc<dyn ClassInstance>>;
     /// The JS function `v` is, as a callback Rust keeps.

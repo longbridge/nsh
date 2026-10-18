@@ -63,7 +63,7 @@ pub(crate) enum Action {
     /// A dialog; its answer resolves the slot.
     Dialog(Dialog, Rc<RefCell<Output<i32>>>),
     /// The result of a module function JS waits for.
-    Return(u64, Result<super::class::Wire, String>),
+    Return(u32, super::JsResult),
     /// The pixel size of the image at the URI (its bytes stay loaded); the
     /// answer resolves the slot.
     ImageInfo(String, AnswerSlot<Result<ImageSize, String>>),

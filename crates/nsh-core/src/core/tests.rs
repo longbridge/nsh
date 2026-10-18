@@ -51,6 +51,102 @@ impl TextEngine for FakeEngine {
     }
 }
 
+/// What the core hands JS, with Rust components' events, lazy children and
+/// calls' results as the native events JS once heard (`$children`,
+/// `$return` with `{ c, v }` or `{ c, e }`), their data as JSON.
+fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPayload)> {
+    use crate::ui::{JsEvent, json_host};
+    let mut events = Vec::new();
+    c.take_events(&mut events);
+    let native = |id, name: &str, data| {
+        (
+            id,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: name.into(),
+                data,
+            },
+        )
+    };
+    events
+        .into_iter()
+        .map(|e| match e {
+            JsEvent::Event(id, kind, payload) => (id, kind, payload),
+            JsEvent::Component { host, event } => native(
+                host,
+                event.name(),
+                json_host::event_data(&*event).unwrap_or(crate::JsonValue::Null),
+            ),
+            JsEvent::Children { host, wanted } => {
+                native(host, "$children", crate::JsonValue::Bool(wanted))
+            }
+            JsEvent::Reply { call, result } => native(
+                ROOT_ID,
+                "$return",
+                match json_host::result(result) {
+                    Ok(v) => serde_json::json!({ "c": call, "v": v }),
+                    Err(e) => serde_json::json!({ "c": call, "e": e }),
+                },
+            ),
+        })
+        .collect()
+}
+
+/// Prop `name` of a Rust component of props `P`, from JS value `value`
+/// (converted as JS's assignment does).
+fn rust_prop<P: crate::ui::Props>(name: &'static str, value: Option<crate::JsonValue>) -> Prop {
+    let specs = P::spec(&mut crate::ui::TsTypes::default());
+    let decode = specs
+        .iter()
+        .find(|p| p.name == name)
+        .and_then(|p| p.decode)
+        .expect("a value prop");
+    Prop::RustProp(
+        name,
+        value.map(|v| crate::ui::json_host::decode(decode, v).expect("the value converts")),
+    )
+}
+
+#[test]
+fn calls_into_rust_settle_their_promises_whatever_happens() {
+    use crate::ui::{RustCall, RustOp, ToJs};
+    let op = |call, run| Op::Rust(RustOp { call, run });
+    let mut c = core();
+    // Run: its value.
+    c.apply(op(
+        1,
+        RustCall::Op(Box::new(|_| Ok(Box::new(42.0f64) as Box<dyn ToJs>))),
+    ))
+    .unwrap();
+    // A panic: its message.
+    c.apply(op(2, RustCall::Op(Box::new(|_| panic!("op boom")))))
+        .unwrap();
+    // A method of a node that hosts no component.
+    c.apply(op(3, RustCall::Method(40, Box::new(|_| None))))
+        .unwrap();
+    // Not applied (the script stopped): rejected.
+    c.discard_ops(vec![op(
+        4,
+        RustCall::Op(Box::new(|_| Ok(Box::new(1.0f64) as Box<dyn ToJs>))),
+    )]);
+    let replies: Vec<_> = js_events(&mut c)
+        .into_iter()
+        .map(|(_, _, payload)| match payload {
+            EventPayload::Native { data, .. } => data,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        replies,
+        [
+            serde_json::json!({ "c": 1, "v": 42 }),
+            serde_json::json!({ "c": 2, "e": "op boom" }),
+            serde_json::json!({ "c": 3, "e": "node 40 hosts no Rust component" }),
+            serde_json::json!({ "c": 4, "e": "the script stopped before the call ran" }),
+        ]
+    );
+}
+
 fn core() -> Core<FakeEngine> {
     Core::new(FakeEngine::default(), Size::new(320.0, 480.0))
 }
@@ -1889,8 +1985,7 @@ fn layout_events_carry_frames_and_late_listeners_get_one() {
         ],
     );
     c.commit().unwrap();
-    let mut events = Vec::new();
-    c.take_events(&mut events);
+    let events = js_events(&mut c);
     assert_eq!(
         events,
         vec![(
@@ -1922,8 +2017,7 @@ fn layout_events_carry_frames_and_late_listeners_get_one() {
         ],
     );
     c.commit();
-    events.clear();
-    c.take_events(&mut events);
+    let events = js_events(&mut c);
     assert_eq!(events.len(), 1);
 }
 
@@ -3034,9 +3128,7 @@ fn inputs_report_their_content_size() {
         ],
     );
     let sizes = |c: &mut Core<FakeEngine>| {
-        let mut events = Vec::new();
-        c.take_events(&mut events);
-        events
+        js_events(c)
             .into_iter()
             .filter(|(id, kind, _)| *id == 2 && *kind == EventKind::ContentSizeChange)
             .count()
@@ -3375,8 +3467,7 @@ fn refused_urls_fail_and_send_nothing() {
             .iter()
             .any(|i| matches!(i, MountItem::Command { .. }))
     );
-    let mut events = Vec::new();
-    c.take_events(&mut events);
+    let events = js_events(&mut c);
     assert!(matches!(
         &events[..],
         [(3, EventKind::Error, EventPayload::Error { message })] if message.contains("`tracker.io`")
@@ -3433,6 +3524,112 @@ mod components {
             .collect()
     }
 
+    /// Turns by what its ref's method says.
+    #[derive(Default)]
+    struct Knob;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct KnobProps {}
+
+    #[derive(Clone, Copy)]
+    struct KnobApi {
+        at: crate::ui::Signal<i32>,
+    }
+
+    #[crate::ui::methods]
+    impl KnobApi {
+        /// Turns it by `by`; where it is.
+        fn turn(&self, by: i32) -> i32 {
+            self.at.update(|at| *at += by);
+            self.at.get_untracked()
+        }
+
+        /// Fails.
+        fn stuck(&self) -> Result<(), String> {
+            Err(format!("stuck at {}", self.at.get_untracked()))
+        }
+    }
+
+    impl Component for Knob {
+        type Props = KnobProps;
+        type Event = crate::ui::NoEvent;
+        const METHODS: crate::ui::Methods = crate::ui::Methods::of::<KnobApi>();
+
+        fn view(_: KnobProps, cx: Scope<crate::ui::NoEvent>) -> impl IntoElement {
+            let at = signal(0);
+            cx.methods(KnobApi { at });
+            text(move || format!("at {}", at.get()))
+        }
+    }
+
+    #[test]
+    fn methods_take_their_arguments_typed_and_answer_in_the_events() {
+        use crate::ui::{RustCall, RustOp, json_host::JsonHost};
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Knob>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Knob>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["at 0"]);
+        let methods = <KnobApi as crate::ui::Api>::METHODS;
+        // Converted in the JS call: a value of another type fails there.
+        let call = |method: usize, args| {
+            let host = JsonHost::with_args(args);
+            (methods[method].call)(&host)
+        };
+        assert!(call(0, vec![json!("x")]).is_err());
+        for (n, (method, args, host)) in [
+            (0, vec![json!(3)], 2),
+            (1, vec![], 2),
+            (0, vec![json!(1)], 40),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let Ok(run) = call(method, args) else {
+                panic!("converts")
+            };
+            c.apply(Op::Rust(RustOp {
+                call: n as u32 + 1,
+                run: RustCall::Method(host, run),
+            }))
+            .unwrap();
+        }
+        assert_eq!(texts(&c.commit().unwrap()), ["at 3"]);
+        let replies: Vec<_> = js_events(&mut c)
+            .into_iter()
+            .map(|(_, _, payload)| match payload {
+                EventPayload::Native { data, .. } => data,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            replies,
+            [
+                json!({ "c": 1, "v": 3 }),
+                json!({ "c": 2, "e": "stuck at 3" }),
+                json!({ "c": 3, "e": "node 40 hosts no Rust component" }),
+            ]
+        );
+    }
+
     fn core_with_tally() -> Core<FakeEngine> {
         let mut c = core();
         let mut registry = Registry::new();
@@ -3471,9 +3668,9 @@ mod components {
     #[test]
     fn components_render_handle_events_and_place_children() {
         let mut c = core_with_tally();
-        let prop = |name: &str, value| Op::SetProp {
+        let prop = |name: &'static str, value| Op::SetProp {
             id: 2,
-            prop: Prop::ComponentProp(name.into(), Some(value)),
+            prop: rust_prop::<TallyProps>(name, Some(value)),
         };
         apply(
             &mut c,
@@ -3528,8 +3725,7 @@ mod components {
         // A press on the host goes to the component, which emits and
         // updates its text.
         assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
-        let mut events = Vec::new();
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         assert_eq!(
             events,
             [(
@@ -3550,7 +3746,7 @@ mod components {
             &mut c,
             vec![Op::SetProp {
                 id: 2,
-                prop: Prop::ComponentProp("label".into(), None),
+                prop: rust_prop::<TallyProps>("label", None),
             }],
         );
         let batch = c.commit().unwrap();
@@ -3561,8 +3757,24 @@ mod components {
                 .iter()
                 .any(|i| matches!(i, MountItem::Create { .. }))
         );
-        // A value of the wrong type is refused (and logged), nothing changes.
-        apply(&mut c, vec![prop("label", json!(3))]);
+        // A value of the wrong type does not convert (JS's assignment
+        // throws); one decoded for another type is refused (and logged),
+        // nothing changes.
+        let specs = <TallyProps as Props>::spec(&mut crate::ui::TsTypes::default());
+        let decode = specs
+            .iter()
+            .find(|p| p.name == "label")
+            .unwrap()
+            .decode
+            .unwrap();
+        assert!(crate::ui::json_host::decode(decode, json!(3)).is_err());
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: Prop::RustProp("label", Some(crate::ui::AnyValue::new(3.0f64))),
+            }],
+        );
         assert!(c.commit().is_none());
 
         // Unknown events on the host (no handler) are JS's.
@@ -3776,8 +3988,7 @@ mod components {
             })
             .unwrap();
         assert!(c.component_event(inner, EventKind::Press, &EventPayload::None));
-        let mut events = Vec::new();
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         // JS hears the outer component's event, not the inner one.
         assert_eq!(
             events,
@@ -4213,8 +4424,7 @@ mod components {
         // reports it and stops.
         let shown = run_until(&mut c, |s| s.iter().any(|t| t == "3 narrow"));
         assert!(shown.starts_with(&["1 narrow".to_owned()]));
-        let mut events = Vec::new();
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         assert!(
             matches!(&events[..], [(2, EventKind::NativeEvent, EventPayload::Native { name, .. })] if &**name == "done")
         );
@@ -4227,7 +4437,7 @@ mod components {
             &mut c,
             vec![Op::SetProp {
                 id: 2,
-                prop: Prop::ComponentProp("start".into(), Some(json!(10))),
+                prop: rust_prop::<ClockProps>("start", Some(json!(10))),
             }],
         );
         assert_eq!(texts(&c.commit().unwrap()), ["10 narrow"]);
@@ -4910,8 +5120,7 @@ mod components {
             .expect("the button");
         let instances = c.components.instances.len();
         assert_eq!(SETUPS.with(Cell::get), 0, "closed: not made");
-        let mut events = Vec::new();
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         assert!(events.is_empty(), "nothing for JS: {events:?}");
 
         // Opened: made, and placed in the same commit.
@@ -4925,7 +5134,7 @@ mod components {
         // Opened again: made afresh.
         assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
         assert_eq!(texts(&c.commit().unwrap()), ["opened 2"]);
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         assert!(events.is_empty(), "nothing for JS: {events:?}");
     }
 
@@ -5073,7 +5282,7 @@ mod components {
             &mut c,
             vec![Op::SetProp {
                 id: 6,
-                prop: Prop::ComponentProp("explode".into(), Some(serde_json::json!(true))),
+                prop: rust_prop::<FaultyProps>("explode", Some(serde_json::json!(true))),
             }],
         );
         assert_eq!(
@@ -5971,7 +6180,7 @@ mod views {
                 },
                 Op::SetProp {
                     id: 2,
-                    prop: Prop::ComponentProp("label".into(), Some(json!("Hits"))),
+                    prop: rust_prop::<CounterProps>("label", Some(json!("Hits"))),
                 },
                 Op::Insert {
                     parent: ROOT_ID,
@@ -5983,15 +6192,14 @@ mod views {
         assert_eq!(texts(&c.commit().unwrap()), ["Hits 0", "static"]);
         c.apply(Op::SetProp {
             id: 2,
-            prop: Prop::ComponentProp("label".into(), Some(json!("Runs"))),
+            prop: rust_prop::<CounterProps>("label", Some(json!("Runs"))),
         })
         .unwrap();
         assert_eq!(texts(&c.commit().unwrap()), ["Runs 0"]);
         // Its events reach JS.
         assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
-        let mut events = Vec::new();
         c.commit();
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         assert!(events.iter().any(|(id, kind, payload)| *id == 2
             && *kind == EventKind::NativeEvent
             && matches!(payload, EventPayload::Native { name, data } if &**name == "tap" && *data == json!(1))));
@@ -6722,8 +6930,7 @@ mod views {
         let mut shown = texts(&c.commit().unwrap());
         shown.sort();
         assert_eq!(shown, ["fresh 2", "open"]);
-        let mut events = Vec::new();
-        c.take_events(&mut events);
+        let events = js_events(&mut c);
         assert!(events.is_empty(), "nothing for JS: {events:?}");
     }
 

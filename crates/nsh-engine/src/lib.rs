@@ -19,7 +19,7 @@ use std::{io, rc::Rc, sync::Arc, time::Duration};
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
     ApplyError, Core, EdgeInsets, EventKind, EventPayload, ListBind, MountBatch, NodeId, Op,
-    PayloadValue, Size, TextEngine, time::Instant,
+    PayloadValue, Size, TextEngine, time::Instant, ui::JsEvent,
 };
 pub use nsh_core::{
     access::{Access, Capabilities},
@@ -895,10 +895,11 @@ impl<M: TextEngine + 'static> Driver<M> {
         });
         let mut core = Core::new(text_engine.clone(), config.viewport);
         core.set_components(nsh_core::ui::Registry::merged(&config.ui_sets));
-        // Rust classes' instances cross between the script and the core
-        // in one table.
-        let class_instances = nsh_core::ui::Instances::new();
-        core.set_class_instances(class_instances.clone());
+        // The JS calls Rust posts queue in one place, which the core
+        // releases in order with the ops (a post during a synchronous call)
+        // and the script runs.
+        let posts = nsh_core::ui::Posts::new();
+        core.set_posts(posts.clone());
         if let App::Js(_) = &config.app {
             // Only JS is limited (Rust code is as trusted as the platform).
             core.set_max_nodes(config.limits.max_nodes);
@@ -953,7 +954,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             let _ = wake.send(Message::Wake);
         }));
         let wake = tx.clone();
-        class_instances.set_notify(Arc::new(move || {
+        posts.set_notify(Arc::new(move || {
             let _ = wake.send(Message::Wake);
         }));
         let state = State {
@@ -999,7 +1000,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     bundle,
                     config.limits,
                     &config.ui_sets,
-                    class_instances,
+                    posts,
                     &environment,
                     text_engine,
                     stop,
@@ -1163,7 +1164,7 @@ struct State<M: TextEngine> {
     /// List render requests not yet sent to JS.
     binds: Vec<ListBind>,
     /// Events raised by the core (e.g. `onEndReached`, `onLayout`).
-    events: Vec<(NodeId, EventKind, EventPayload)>,
+    events: Vec<JsEvent>,
     trace: bool,
     /// Where commit timings go ([`EngineControl::set_perf_monitor`]).
     perf: Option<Arc<perf::PerfMonitor>>,
@@ -1492,12 +1493,23 @@ impl<M: TextEngine> State<M> {
                 script.run_posted();
             }
             // The core's events (layouts, ends reached, ...) on a Rust
-            // component's nodes are the component's; the rest are JS's.
-            for (id, event, payload) in self.events.drain(..) {
-                if !self.core.component_event(id, event, &payload)
-                    && let Some(script) = script
-                {
-                    script.dispatch_event(id, event, &payload);
+            // component's nodes are the component's; the rest are JS's, in
+            // order with Rust components' events and calls' results.
+            for event in self.events.drain(..) {
+                match event {
+                    JsEvent::Event(id, event, payload) => {
+                        if !self.core.component_event(id, event, &payload)
+                            && let Some(script) = script
+                        {
+                            script.dispatch_event(id, event, &payload);
+                        }
+                    }
+                    // Without JS nothing waits for them.
+                    other => {
+                        if let Some(script) = script {
+                            script.deliver(other);
+                        }
+                    }
                 }
             }
             if let Some(script) = script {

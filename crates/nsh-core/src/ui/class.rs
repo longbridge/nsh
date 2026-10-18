@@ -10,29 +10,25 @@
 //! inside the JS call, outside the core, converting JS values directly
 //! ([`JsValue::from_js`]); a method borrows its instance for the call, so
 //! a re-entrant use of it throws instead of aliasing. `async` members
-//! (`this: Instance<Self>`) are ops like `async` module functions: JS gets
-//! a promise and the core runs them as tasks, finding the instance in the
-//! table both sides share ([`Instances`], made by the engine). JS
-//! functions cross as callbacks (`super::callback`).
+//! (`this: Instance<Self>`) are ops like `async` module functions: their
+//! arguments are converted in the JS call, the op carries the task's start
+//! (with the instance), and JS gets a promise the core's result settles
+//! (`super::call`). JS functions cross as callbacks (`super::callback`).
 
 use std::{
     any::{Any, TypeId},
-    cell::{Cell, Ref, RefCell, RefMut},
-    collections::VecDeque,
+    cell::{Ref, RefCell, RefMut},
     fmt,
     rc::Rc,
-    sync::Arc,
 };
-
-use rustc_hash::FxHashMap;
 
 use super::{
     JsValue, PropError, TsType, TsTypes,
-    callback::{CallbackHandle, JsCall, Trace, Tracer},
+    call::{JsResult, TaskStart},
+    callback::{Trace, Tracer},
     js::{JsHost, JsIn, JsOwned, JsRaw},
-    module::{ModuleFuture, ModuleParam},
+    module::ModuleParam,
 };
-use crate::JsonValue;
 
 // --- The class -----------------------------------------------------------------------
 
@@ -103,10 +99,9 @@ pub struct Member {
     pub call: MemberCall,
 }
 
-/// The future of an `async` member, from its instance (`None` for a
-/// static), its arguments and the table instances cross in.
-pub type AsyncStart =
-    fn(Option<Rc<dyn ClassInstance>>, WireArgs, &Instances) -> Result<ModuleFuture, PropError>;
+/// An `async` member's or function's call, its arguments (and instance)
+/// converted in the JS call: the start of its task.
+pub type AsyncCall = fn(&dyn JsHost) -> Result<TaskStart, Thrown>;
 
 /// How a member (or a synchronous module function) runs.
 #[derive(Clone, Copy)]
@@ -114,9 +109,9 @@ pub enum MemberCall {
     /// In the JS call, converting the call's values directly; the result
     /// is an owned JS value.
     Sync(fn(&dyn JsHost) -> Result<JsRaw, Thrown>),
-    /// As a task of the core (its arguments checked first); JS gets a
-    /// promise.
-    Async(AsyncStart),
+    /// As a task of the core, started in order with the UI's ops; JS gets
+    /// a promise.
+    Async(AsyncCall),
 }
 
 impl MemberCall {
@@ -329,275 +324,16 @@ impl<C: Class> ClassInstance for InstanceCell<C> {
     }
 }
 
-/// Instances and callbacks on their way between JS and the core (an
-/// `async` member's `this` and arguments, its result): each is held under
-/// an id the op carries until the other side takes it; and the calls of JS
-/// functions queued for the next JS turn ([`super::Callback::post`]). One
-/// table per engine, made by it and handed to `nsh-js` and the core. Cheap
-/// to clone.
-#[derive(Clone, Default)]
-pub struct Instances(Rc<InstancesInner>);
-
-#[derive(Default)]
-struct InstancesInner {
-    held: RefCell<FxHashMap<u64, Held>>,
-    next: Cell<u64>,
-    calls: RefCell<VecDeque<JsCall>>,
-    notify: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
-    /// JS stopped for good: calls are dropped (their replies say so).
-    closed: Cell<bool>,
-    /// Calls posted during a synchronous call from JS, waiting for the op
-    /// JS sent after the ones before it (`$post`), so they run in program
-    /// order with what those ops post.
-    parked: RefCell<FxHashMap<u64, JsCall>>,
-    next_parked: Cell<u64>,
-}
-
-enum Held {
-    Instance(Rc<dyn ClassInstance>),
-    Callback(Rc<dyn CallbackHandle>),
-}
-
-impl fmt::Debug for Instances {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Instances")
-            .field("held", &self.0.held.borrow().len())
-            .field("calls", &self.0.calls.borrow().len())
-            .finish()
-    }
-}
-
-impl Instances {
-    /// An empty table.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Calls `notify` when a JS call is queued (it wakes the engine).
-    pub fn set_notify(&self, notify: Arc<dyn Fn() + Send + Sync>) {
-        *self.0.notify.borrow_mut() = Some(notify);
-    }
-
-    fn hold(&self, held: Held) -> u64 {
-        let id = self.0.next.get() + 1;
-        self.0.next.set(id);
-        self.0.held.borrow_mut().insert(id, held);
-        id
-    }
-
-    /// Holds `instance` until taken; its id.
-    #[doc(hidden)]
-    pub fn hold_instance(&self, instance: Rc<dyn ClassInstance>) -> u64 {
-        self.hold(Held::Instance(instance))
-    }
-
-    /// Holds `callback` until taken; its id.
-    #[doc(hidden)]
-    pub fn hold_callback(&self, callback: Rc<dyn CallbackHandle>) -> u64 {
-        self.hold(Held::Callback(callback))
-    }
-
-    /// Takes the instance held as `id`.
-    #[doc(hidden)]
-    pub fn take_instance(&self, id: u64) -> Option<Rc<dyn ClassInstance>> {
-        let mut held = self.0.held.borrow_mut();
-        match held.get(&id)? {
-            Held::Instance(_) => match held.remove(&id) {
-                Some(Held::Instance(i)) => Some(i),
-                _ => None,
-            },
-            Held::Callback(_) => None,
-        }
-    }
-
-    /// Takes the callback held as `id`.
-    #[doc(hidden)]
-    pub fn take_callback(&self, id: u64) -> Option<Rc<dyn CallbackHandle>> {
-        let mut held = self.0.held.borrow_mut();
-        match held.get(&id)? {
-            Held::Callback(_) => match held.remove(&id) {
-                Some(Held::Callback(c)) => Some(c),
-                _ => None,
-            },
-            Held::Instance(_) => None,
-        }
-    }
-
-    /// Lets go of what is held as `id` (nothing when it was taken).
-    #[doc(hidden)]
-    pub fn release(&self, id: u64) {
-        let removed = self.0.held.borrow_mut().remove(&id);
-        // Dropped outside the borrow: an instance's drop may reach JS.
-        drop(removed);
-    }
-
-    /// Lets go of what an op holds and nobody took: its `this` and its
-    /// `held` list (never ids in the arguments, which are the app's data).
-    pub(crate) fn release_call(&self, args: &JsonValue) {
-        if let Some(id) = args.get("this").and_then(JsonValue::as_u64) {
-            self.release(id);
-        }
-        for (_, id) in held_of(args) {
-            self.release(id);
-        }
-    }
-
-    /// The number of instances and callbacks held.
-    pub fn held(&self) -> usize {
-        self.0.held.borrow().len()
-    }
-
-    /// Queues `call` for the next JS turn and wakes the engine.
-    #[doc(hidden)]
-    pub fn post(&self, call: JsCall) {
-        if self.0.closed.get() {
-            // Dropped: a reply waiting for it is told JS stopped.
-            drop(call);
-            return;
-        }
-        self.0.calls.borrow_mut().push_back(call);
-        let notify = self.0.notify.borrow().clone();
-        if let Some(notify) = notify {
-            notify();
-        }
-    }
-
-    /// No JS runs any more (the VM stopped or went): the queued calls are
-    /// dropped, and so are those posted later (their replies say so).
-    pub fn close(&self) {
-        self.0.closed.set(true);
-        let calls = self.take_calls();
-        drop(calls);
-        let parked = std::mem::take(&mut *self.0.parked.borrow_mut());
-        drop(parked);
-    }
-
-    /// Keeps `call` until [`Self::unpark`] (the `$post` op JS sends after
-    /// it): its id.
-    #[doc(hidden)]
-    pub fn park(&self, call: JsCall) -> u64 {
-        let id = self.0.next_parked.get() + 1;
-        self.0.next_parked.set(id);
-        self.0.parked.borrow_mut().insert(id, call);
-        id
-    }
-
-    /// Queues the call parked as `id` (its `$post` op applied).
-    #[doc(hidden)]
-    pub fn unpark(&self, id: u64) {
-        let call = self.0.parked.borrow_mut().remove(&id);
-        if let Some(call) = call {
-            self.post(call);
-        }
-    }
-
-    /// Drops the call parked as `id` (its op was not applied).
-    pub(crate) fn drop_parked(&self, id: u64) {
-        let call = self.0.parked.borrow_mut().remove(&id);
-        drop(call);
-    }
-
-    /// Whether JS calls are queued.
-    pub fn has_calls(&self) -> bool {
-        !self.0.calls.borrow().is_empty()
-    }
-
-    /// The queued JS calls, in order.
-    #[doc(hidden)]
-    pub fn take_calls(&self) -> VecDeque<JsCall> {
-        std::mem::take(&mut *self.0.calls.borrow_mut())
-    }
-}
-
-/// The name of the op that queues a JS call parked during a synchronous
-/// call from JS (`nsh-js` sends it after the ops before the call;
-/// [`Instances::park`]).
-#[doc(hidden)]
-pub const POST: &str = "$post";
-
-/// The `held` list of an op: (argument index, id) pairs nsh-js writes
-/// beside the arguments, so the app's data cannot name a held id.
-fn held_of(args: &JsonValue) -> impl Iterator<Item = (usize, u64)> + '_ {
-    args.get("held")
-        .and_then(JsonValue::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|pair| {
-            let pair = pair.as_array()?;
-            Some((pair.first()?.as_u64()? as usize, pair.get(1)?.as_u64()?))
-        })
-}
-
-/// The arguments of an op (`{ c, this, a, held }`): the JSON values and the
-/// ids of the instances and callbacks held for them.
-#[derive(Debug)]
-pub struct WireArgs {
-    args: std::vec::IntoIter<JsonValue>,
-    held: Vec<(usize, u64)>,
-    index: usize,
-}
-
-impl WireArgs {
-    /// The arguments of op `args`.
-    pub(crate) fn of(args: &JsonValue) -> Self {
-        let list = match args.get("a") {
-            Some(JsonValue::Array(a)) => a.clone(),
-            _ => Vec::new(),
-        };
-        Self {
-            args: list.into_iter(),
-            held: held_of(args).collect(),
-            index: 0,
-        }
-    }
-
-    /// The next argument (`name`, for the error).
-    #[doc(hidden)]
-    pub fn next<T: Arg>(&mut self, instances: &Instances, name: &str) -> Result<T, PropError> {
-        let i = self.index;
-        self.index += 1;
-        let held = self.held.iter().find(|(at, _)| *at == i).map(|(_, id)| *id);
-        T::from_wire(self.args.next().unwrap_or(JsonValue::Null), held, instances)
-            .map_err(|e| PropError(format!("`{name}`: {e}")))
-    }
-}
-
-/// A value of an op's reply: its JSON, or the id of the instance it is
-/// (held for JS, outside the app's data).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Wire {
-    /// The value (`null` for an instance).
-    pub json: JsonValue,
-    /// The instance's id in the table.
-    pub instance: Option<u64>,
-}
-
-impl From<JsonValue> for Wire {
-    fn from(json: JsonValue) -> Self {
-        Self {
-            json,
-            instance: None,
-        }
-    }
-}
-
 // --- What crosses -----------------------------------------------------------------
 
-/// A parameter of a class's member: a [`JsValue`] type, an instance
-/// ([`Instance`]; `&Other` / `&mut Other` borrow one for the call) or a
-/// [`super::Callback`].
+/// A parameter of a class's member or a function: a [`JsValue`] type, an
+/// instance ([`Instance`]; `&Other` / `&mut Other` borrow one for the
+/// call) or a [`super::Callback`], converted from JS in the JS call.
 pub trait Arg: Sized {
     /// Its TypeScript type.
     fn ts_type(types: &mut TsTypes) -> String;
-    /// The value of a JS argument (a synchronous call).
+    /// The value of a JS argument.
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError>;
-    /// The value of an op's argument (an `async` call): `held` is the id of
-    /// the instance JS passed for it, in `instances`.
-    fn from_wire(
-        value: JsonValue,
-        held: Option<u64>,
-        instances: &Instances,
-    ) -> Result<Self, PropError>;
 }
 
 impl<T: JsValue> Arg for T {
@@ -608,21 +344,13 @@ impl<T: JsValue> Arg for T {
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
         T::from_js(value)
     }
-
-    fn from_wire(
-        value: JsonValue,
-        _held: Option<u64>,
-        _instances: &Instances,
-    ) -> Result<Self, PropError> {
-        T::from_json(value)
-    }
 }
 
 /// The instance a JS object of `C` holds (another class's, or another
 /// value, is refused).
 impl<C: Class> Arg for Instance<C> {
-    fn ts_type(_types: &mut TsTypes) -> String {
-        C::DEF.name.to_owned()
+    fn ts_type(types: &mut TsTypes) -> String {
+        types.class(C::DEF)
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
@@ -631,16 +359,6 @@ impl<C: Class> Arg for Instance<C> {
             .instance(value.raw())
             .and_then(Instance::of)
             .ok_or_else(|| value.expected(&format!("a {}", C::DEF.name)))
-    }
-
-    fn from_wire(
-        value: JsonValue,
-        held: Option<u64>,
-        instances: &Instances,
-    ) -> Result<Self, PropError> {
-        held.and_then(|id| instances.take_instance(id))
-            .and_then(Instance::of)
-            .ok_or_else(|| PropError::expected(&format!("a {}", C::DEF.name), &value))
     }
 }
 
@@ -656,17 +374,6 @@ impl<C: Class> Arg for Option<Instance<C>> {
         }
         Instance::from_js(value).map(Some)
     }
-
-    fn from_wire(
-        value: JsonValue,
-        held: Option<u64>,
-        instances: &Instances,
-    ) -> Result<Self, PropError> {
-        if held.is_none() && value.is_null() {
-            return Ok(None);
-        }
-        Instance::from_wire(value, held, instances).map(Some)
-    }
 }
 
 /// A result of a class's member: a [`JsValue`] type, `()`, an instance
@@ -677,11 +384,8 @@ pub trait Ret: Sized {
     const UNIT: bool = false;
     /// Its TypeScript type.
     fn ts_type(types: &mut TsTypes) -> String;
-    /// The value for JS (a synchronous call).
+    /// The value for JS.
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
-    /// The value for an op's reply (an `async` call): an instance is held in
-    /// `instances`.
-    fn into_wire(self, instances: &Instances) -> Wire;
 }
 
 impl<T: JsValue> Ret for T {
@@ -691,10 +395,6 @@ impl<T: JsValue> Ret for T {
 
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         self.to_js(host)
-    }
-
-    fn into_wire(self, _instances: &Instances) -> Wire {
-        self.to_json().into()
     }
 }
 
@@ -708,26 +408,15 @@ impl Ret for () {
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         Ok(JsOwned::new(host, host.undefined()))
     }
-
-    fn into_wire(self, _instances: &Instances) -> Wire {
-        Wire::default()
-    }
 }
 
 impl<C: Class> Ret for Instance<C> {
-    fn ts_type(_types: &mut TsTypes) -> String {
-        C::DEF.name.to_owned()
+    fn ts_type(types: &mut TsTypes) -> String {
+        types.class(C::DEF)
     }
 
     fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         Ok(JsOwned::new(host, host.wrap(self.erased())?))
-    }
-
-    fn into_wire(self, instances: &Instances) -> Wire {
-        Wire {
-            json: JsonValue::Null,
-            instance: Some(instances.hold_instance(self.erased())),
-        }
     }
 }
 
@@ -741,10 +430,6 @@ impl<C: Class> Ret for Option<Instance<C>> {
             Some(i) => i.into_js(host),
             None => Ok(JsOwned::new(host, host.null())),
         }
-    }
-
-    fn into_wire(self, instances: &Instances) -> Wire {
-        self.map_or_else(Wire::default, |i| i.into_wire(instances))
     }
 }
 
@@ -842,14 +527,9 @@ pub(crate) mod __private {
         Instance::new(value).into_js(host)
     }
 
-    /// [`class_into_js`] for an op's reply.
-    pub fn class_into_wire<C: Class>(value: C, instances: &Instances) -> Wire {
-        Instance::new(value).into_wire(instances)
-    }
-
     /// `C`'s TypeScript type.
-    pub fn class_ts<C: Class>(_types: &mut TsTypes) -> String {
-        C::DEF.name.to_owned()
+    pub fn class_ts<C: Class>(types: &mut TsTypes) -> String {
+        types.class(C::DEF)
     }
 
     /// Argument `i` of the call (`what`: `Tally.add`, `name`: `by`, for
@@ -866,14 +546,6 @@ pub(crate) mod __private {
             .ok_or_else(|| {
                 Thrown::Type(format!("{what}: Illegal invocation: not a {}", C::DEF.name))
             })
-    }
-
-    /// The instance of an `async` member.
-    pub fn async_this<C: Class>(
-        this: Option<Rc<dyn ClassInstance>>,
-    ) -> Result<Instance<C>, PropError> {
-        this.and_then(Instance::of)
-            .ok_or_else(|| PropError(format!("not a {}", C::DEF.name)))
     }
 
     /// The value of `instance`, borrowed for a call.
@@ -922,19 +594,17 @@ pub(crate) mod __private {
         }
     }
 
-    /// The reply of an `async` call.
-    pub fn wire_ret<T: Ret>(value: T, instances: &Instances) -> Result<Wire, String> {
-        Ok(value.into_wire(instances))
+    /// The result of a call JS waits for, boxed for its reply.
+    pub fn boxed<T: Ret + 'static>(value: T) -> JsResult {
+        Ok(Box::new(value))
     }
 
-    /// [`wire_ret`] of a `Result`.
-    pub fn wire_ret_result<T: Ret, E: fmt::Display>(
-        value: Result<T, E>,
-        instances: &Instances,
-    ) -> Result<Wire, String> {
-        value
-            .map(|v| v.into_wire(instances))
-            .map_err(|e| e.to_string())
+    /// [`boxed`] of a `Result`: an `Err` rejects with its message.
+    pub fn boxed_result<T: Ret + 'static, E: fmt::Display>(value: Result<T, E>) -> JsResult {
+        match value {
+            Ok(v) => Ok(Box::new(v)),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     /// The documentation of a class (`#[class]` on its struct).
@@ -1229,70 +899,5 @@ export declare const Tools: ToolsModule;
                 .class::<Tally>();
         });
         assert!(component_first.is_err(), "a class after a component");
-    }
-}
-
-#[cfg(test)]
-mod held {
-    use std::rc::Rc;
-
-    use super::{ClassInstance, Instance, Instances};
-    use crate::{Command, Op, ROOT_ID, Size, ui::prelude::*};
-
-    #[class]
-    struct Kept;
-
-    #[class]
-    impl Kept {}
-
-    fn kept() -> Rc<dyn ClassInstance> {
-        Instance::new(Kept).erased()
-    }
-
-    /// An op of member `name` holding `this` and an argument.
-    fn op(instances: &Instances, name: &str) -> Op {
-        let this = instances.hold_instance(kept());
-        let arg = instances.hold_instance(kept());
-        Op::Command {
-            id: ROOT_ID,
-            command: Command::Native {
-                name: name.into(),
-                args: serde_json::json!({ "c": 0, "this": this, "a": [null], "held": [[0, arg]] }),
-            },
-        }
-    }
-
-    #[test]
-    fn a_call_of_no_member_releases_what_it_holds() {
-        let instances = Instances::new();
-        let mut core = crate::Core::new(crate::ApproxTextEngine, Size::new(320.0, 480.0));
-        core.set_class_instances(instances.clone());
-        core.apply(op(&instances, "test/ui:Nope#save")).unwrap();
-        assert_eq!(instances.held(), 0);
-    }
-
-    #[test]
-    fn discarded_ops_release_what_they_hold() {
-        let instances = Instances::new();
-        let mut core = crate::Core::new(crate::ApproxTextEngine, Size::new(320.0, 480.0));
-        core.set_class_instances(instances.clone());
-        core.discard_ops([op(&instances, "test/ui:Kept#later")]);
-        assert_eq!(instances.held(), 0);
-    }
-
-    /// The app's data never names a held id: only the op's `held` list does.
-    #[test]
-    fn ids_in_the_arguments_are_data() {
-        let instances = Instances::new();
-        let id = instances.hold_instance(kept());
-        let mut args = super::WireArgs::of(&serde_json::json!({ "a": [{ "$instance": id }] }));
-        assert!(args.next::<Instance<Kept>>(&instances, "k").is_err());
-        assert_eq!(instances.held(), 1, "the held instance stays");
-        instances.release_call(&serde_json::json!({ "a": [{ "$instance": id }] }));
-        assert_eq!(
-            instances.held(),
-            1,
-            "nor is it released by its id in the data"
-        );
     }
 }

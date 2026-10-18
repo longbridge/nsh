@@ -27,6 +27,7 @@ use crate::{
 pub(crate) fn same_kind(a: &Prop, b: &Prop) -> bool {
     match (a, b) {
         (Prop::ComponentProp(a, _), Prop::ComponentProp(b, _)) => a == b,
+        (Prop::RustProp(a, _), Prop::RustProp(b, _)) => a == b,
         _ => HostProps::same_kind(a, b),
     }
 }
@@ -36,6 +37,7 @@ pub(crate) fn same_kind(a: &Prop, b: &Prop) -> bool {
 pub(crate) fn reset(prop: &Prop) -> Option<Prop> {
     match prop {
         Prop::ComponentProp(name, _) => Some(Prop::ComponentProp(name.clone(), None)),
+        Prop::RustProp(name, _) => Some(Prop::RustProp(name, None)),
         _ => HostProps::reset(prop),
     }
 }

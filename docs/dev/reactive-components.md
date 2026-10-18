@@ -207,7 +207,8 @@ pub struct StepperProps {
   as today.
 - Methods JS calls on a ref: `#[methods]` moves from the component to a handle the body makes. It holds the signals the
   methods read and write: `cx.methods(StepperApi { value })` with `#[methods] impl StepperApi { fn set_value(&self, v:
-  f64) {..} fn value(&self) -> f64 {..} }`. The JS side (`Command::Native`, `$return`) is unchanged.
+  f64) {..} fn value(&self) -> f64 {..} }`. (JS's calls now cross typed: `docs/dev/rust-classes.md`, "How calls
+  cross".)
 - `element_ref()` and `component_ref()` become free functions returning `Copy` handles owned by the current owner;
   `.element_ref(r)` on an element attaches it once.
 
@@ -264,7 +265,7 @@ dynamic(move || if wide.get() { two_columns() } else { one_column() })
 
 - `props.children` and `props.header` (a `Slot`) are placed once where the body puts them. Lazy children (`#[prop(lazy)]`)
   are made while the place that holds them is mounted: `If::new(open, move || props.children)` makes them only while
-  open, as `Sheet` needs. The `$children` event that tells JS stays.
+  open, as `Sheet` needs. The event that tells JS stays (`JsEvent::Children`).
 - `children_each(children, |child, at| ..)` and `list(items, ..)` become `Each`-like: one wrapper per JS child, made
   once, with `at` as a signal.
 

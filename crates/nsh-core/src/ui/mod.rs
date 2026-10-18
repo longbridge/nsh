@@ -33,6 +33,7 @@ pub mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
+pub(crate) mod call;
 mod callback;
 pub(crate) mod class;
 mod component;
@@ -43,6 +44,8 @@ mod events;
 pub(crate) mod flow;
 pub(crate) mod host;
 mod js;
+#[cfg(test)]
+pub(crate) mod json_host;
 pub(crate) mod keys;
 pub(crate) mod module;
 mod once;
@@ -93,14 +96,19 @@ pub use self::{
         NativeValue, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
+    call::{
+        AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, Posts, RustCall, RustOp,
+        TaskStart, ToJs,
+    },
     callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
     class::{
-        Arg, AsyncStart, Class, ClassDef, ClassInstance, ClassSpec, Instance, Instances, Member,
-        MemberCall, MemberKind, MemberSpec, POST, Ret, Thrown, Wire, WireArgs,
+        Arg, AsyncCall, Class, ClassDef, ClassInstance, ClassSpec, Instance, Member, MemberCall,
+        MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
         Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,
-        Methods, NoEvent, Param, PropKind, PropSpec, Props, Registry, Root, declarations,
+        Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
+        declarations,
     },
     element::{
         Accessible, AnyElement, Attrs, BoundListConfig, Child, Children, ComponentElement, ElNode,

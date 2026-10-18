@@ -11,10 +11,10 @@
 use std::{any::Any, marker::PhantomData};
 
 use super::{
-    Component, Event, IntoElement, Owner, PropError, Props,
+    AnyValue, Component, Event, IntoElement, JsResult, MethodCall, Owner, PropError, Props,
     element::{AnyEvent, ElNode},
 };
-use crate::{JsonValue, NodeId};
+use crate::NodeId;
 
 /// What a component that runs once has of its own: it emits its events
 /// (TS: calling an `on…` prop). `Copy`: closures capture it as it is.
@@ -89,7 +89,7 @@ impl<C: Component> OnceInstance<C> {
 }
 
 impl<C: Component> super::component::AnyInstance for OnceInstance<C> {
-    fn set_prop(&mut self, name: &str, value: Option<JsonValue>) -> Result<bool, PropError> {
+    fn set_prop(&mut self, name: &str, value: Option<AnyValue>) -> Result<bool, PropError> {
         match self.initial {
             Some(initial) => initial.run(|| self.props.set(name, value)),
             None => self.props.set(name, value),
@@ -161,8 +161,8 @@ impl<C: Component> super::component::AnyInstance for OnceInstance<C> {
         super::component::name_of::<C>()
     }
 
-    fn call(&mut self, name: &str, args: Vec<JsonValue>) -> Option<Result<JsonValue, PropError>> {
-        super::reactive::call_api(self.host, name, args)
+    fn call(&mut self, call: MethodCall) -> Option<JsResult> {
+        super::reactive::call_api(self.host, call)
     }
 
     fn owner(&self) -> Option<Owner> {

@@ -73,36 +73,17 @@ pub(crate) fn boundary_of(owner: Owner) -> Option<Signal<Option<super::Component
     None
 }
 
-/// A registered [`super::Api`], its type erased: the API and what calls a
-/// method of it by name.
+/// A registered [`super::Api`], its type erased (a method's call, made
+/// in the JS call, downcasts it).
 #[derive(Clone)]
 struct ApiEntry {
     api: Rc<dyn Any>,
-    #[allow(clippy::type_complexity)]
-    call: fn(
-        &dyn Any,
-        &str,
-        Vec<crate::JsonValue>,
-    ) -> Option<Result<crate::JsonValue, super::PropError>>,
-}
-
-fn call_erased<A: super::Api>(
-    api: &dyn Any,
-    name: &str,
-    args: Vec<crate::JsonValue>,
-) -> Option<Result<crate::JsonValue, super::PropError>> {
-    let api = api.downcast_ref::<A>()?;
-    let method = A::METHODS.iter().find(|m| m.name == name)?;
-    Some((method.call)(api, args))
 }
 
 /// Registers `api` as the ref of the component on `host` for as long as the
 /// current owner lives.
 pub(crate) fn register_api<A: super::Api>(host: crate::NodeId, api: A) {
-    let entry = ApiEntry {
-        api: Rc::new(api),
-        call: call_erased::<A>,
-    };
+    let entry = ApiEntry { api: Rc::new(api) };
     with_data(|d| d.apis.insert(host, entry));
     cleanup(move || {
         with_data(|d| d.apis.remove(&host));
@@ -115,16 +96,13 @@ pub(crate) fn api_of<A: super::Api>(host: crate::NodeId) -> Option<Rc<A>> {
     entry.api.downcast::<A>().ok()
 }
 
-/// Calls method `name` of the API of the component on `host`; `None`
-/// without one of that name.
-pub(crate) fn call_api(
-    host: crate::NodeId,
-    name: &str,
-    args: Vec<crate::JsonValue>,
-) -> Option<Result<crate::JsonValue, super::PropError>> {
+/// Calls `call` (a method its arguments were decoded for) with the API of
+/// the component on `host`; `None` without one, or with one of another
+/// type.
+pub(crate) fn call_api(host: crate::NodeId, call: super::MethodCall) -> Option<super::JsResult> {
     // Out of the data first: the method writes signals.
     let entry = with_data(|d| d.apis.get(&host).cloned())?;
-    (entry.call)(&*entry.api, name, args)
+    call(&*entry.api)
 }
 
 /// Runs `f` on the entered runtime's data.

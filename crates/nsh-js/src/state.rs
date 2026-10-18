@@ -59,13 +59,12 @@ pub(crate) fn of_runtime(rt: *mut qjs::JSRuntime) -> Option<*mut State> {
 
 /// Makes the state of `ctx`: the graph, the renderer and their classes,
 /// the environment, and the module loader of the native modules (with the
-/// UI sets `ui_sets`); Rust classes' instances cross to the core in
-/// `class_instances`.
+/// UI sets `ui_sets`); the JS calls Rust posts queue in `posts`.
 pub(crate) fn install(
     ctx: &Ctx<'_>,
     shared: Rc<Shared>,
     ui_sets: &[Registry],
-    class_instances: nsh_core::ui::Instances,
+    posts: nsh_core::ui::Posts,
 ) {
     let raw = ctx.as_raw().as_ptr();
     // SAFETY: registering classes on the context's runtime; the state is
@@ -86,7 +85,7 @@ pub(crate) fn install(
             animations: Default::default(),
             canvases: Default::default(),
             web: Default::default(),
-            classes: crate::classes::Classes::new(class_instances),
+            classes: crate::classes::Classes::new(posts),
             hot: Default::default(),
             keymap: Default::default(),
             chunks: Default::default(),

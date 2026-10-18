@@ -138,6 +138,16 @@ fn string(ctx: *mut JsContext, object: JsValue, key: &CStr) -> Option<String> {
     s
 }
 
+/// The role named `name`, as `MenuRole`'s conversion reads it.
+fn menu_role(ctx: *mut JsContext, name: &str) -> Option<MenuRole> {
+    let host = crate::classes::host_outside_calls(ctx);
+    let value = nsh_core::ui::JsHost::new_string(&host, name).ok()?;
+    let value = nsh_core::ui::JsOwned::new(&host, value);
+    let role = <MenuRole as nsh_core::ui::JsValue>::from_js(value.get()).ok();
+    host.clear_pending();
+    role
+}
+
 /// Boolean property `key`, if it is set.
 fn flag(ctx: *mut JsContext, object: JsValue, key: &CStr) -> Option<bool> {
     let v = get(ctx, object, key);
@@ -211,12 +221,9 @@ impl Decoder {
             }));
         }
         let role = match string(ctx, v, c"role") {
-            Some(name) => Some(
-                <MenuRole as nsh_core::ui::JsValue>::from_json(nsh_core::JsonValue::String(
-                    name.clone(),
-                ))
-                .map_err(|_| format!("unknown menu role `{name}`"))?,
-            ),
+            Some(name) => {
+                Some(menu_role(ctx, &name).ok_or_else(|| format!("unknown menu role `{name}`"))?)
+            }
             None => None,
         };
         if label.is_none() && role.is_none() {
@@ -571,10 +578,14 @@ mod tests {
             .map(|n| n.trim().trim_matches('"').to_owned())
             .filter(|n| !n.is_empty())
             .collect();
-        let mut roles: Vec<String> = MenuRole::ALL
-            .iter()
-            .map(|r| r.to_json().as_str().unwrap().to_owned())
-            .collect();
+        let host = crate::Host::new().unwrap();
+        let mut roles: Vec<String> = host.with_raw(|ctx| {
+            let js = crate::classes::host_outside_calls(ctx);
+            MenuRole::ALL
+                .iter()
+                .map(|r| r.to_js(&js).unwrap().get().as_string().unwrap())
+                .collect()
+        });
         names.sort();
         roles.sort();
         assert_eq!(names, roles);

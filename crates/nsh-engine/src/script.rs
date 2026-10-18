@@ -39,7 +39,7 @@ mod imp {
     impl Script {
         /// Starts a VM for `bundle` and evaluates it (errors go to `sink`);
         /// also the time evaluation took. `None`: the VM did not start.
-        /// Rust classes' instances cross to the core in `class_instances`.
+        /// The JS calls Rust posts queue in `posts` (the core's too).
         #[allow(
             clippy::too_many_arguments,
             reason = "the VM's setup, from the engine's"
@@ -48,7 +48,7 @@ mod imp {
             bundle: &Bundle,
             limits: Limits,
             ui_sets: &[nsh_core::ui::Registry],
-            class_instances: nsh_core::ui::Instances,
+            posts: nsh_core::ui::Posts,
             environment: &Environment,
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
@@ -59,7 +59,7 @@ mod imp {
                 harden: bundle.policy.harden,
                 harden_bytecode: bundle.harden_bytecode.clone(),
                 ui_sets: ui_sets.to_vec(),
-                class_instances,
+                posts,
                 base_url: bundle.base_url.as_deref().map(str::to_owned),
             };
             let mut host = match Host::with_options(options) {
@@ -161,6 +161,10 @@ mod imp {
             self.host.dispatch_event(id, event, payload);
         }
 
+        pub(crate) fn deliver(&self, event: nsh_core::ui::JsEvent) {
+            self.host.deliver(event);
+        }
+
         pub(crate) fn bind_list(&self, list: NodeId, binds: &[(u32, u32)]) {
             self.host.bind_list(list, binds);
         }
@@ -253,7 +257,7 @@ mod stub {
             _: &Bundle,
             _: Limits,
             _: &[nsh_core::ui::Registry],
-            _: nsh_core::ui::Instances,
+            _: nsh_core::ui::Posts,
             _: &Environment,
             _: Rc<M>,
             _: Arc<AtomicBool>,
@@ -282,6 +286,10 @@ mod stub {
         }
 
         pub(crate) fn dispatch_event(&self, _: NodeId, _: EventKind, _: &EventPayload) {
+            match *self {}
+        }
+
+        pub(crate) fn deliver(&self, _: nsh_core::ui::JsEvent) {
             match *self {}
         }
 

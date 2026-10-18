@@ -1,28 +1,29 @@
 //! The JS face of Rust components and modules, made from their specs
 //! (`nsh_core::ui`).
 //!
-//! A component is a host view naming it (`component`), its own props sent
-//! as `$name` when they change (one render effect reads them all), its
-//! events delivered to the `on<Event>` handlers, its children inserted when
-//! it takes some, and one holder per named slot the app fills. A module's
-//! function without a context runs in the JS call (`classes.rs`); one with
-//! a context or `async` sends a call to the core, in order with the ops
-//! before it (instances and functions among its arguments held in the
-//! table the core shares); one with a result returns a promise, settled by
-//! the core's `$return` event.
+//! A component is a host view naming it (`component`), its own props
+//! converted into their Rust types when they change (one render effect
+//! reads them all; a value of the wrong type throws a `TypeError` there)
+//! and set as `Prop::RustProp`, its events delivered to the `on<Event>`
+//! handlers, its children inserted when it takes some, and one holder per
+//! named slot the app fills. A module's function without a context runs in
+//! the JS call (`classes.rs`); one with a context or `async`, and a
+//! component's method, converts its arguments in the JS call and sends
+//! what it runs to the core as an op, in order with the ops before it
+//! (`classes::send`); one with a result returns a promise, settled when
+//! the core's events bring the result ([`deliver`]).
 
 use std::{
     cell::{Cell, RefCell},
     ffi::{CString, c_int},
-    ptr,
     sync::Arc,
 };
 
 use nsh_core::{
-    Command, EventKind, Op,
-    ui::{ComponentSpec, ModuleSpec, PropKind},
+    Command, EventKind, Op, Prop,
+    ui::{ComponentSpec, FunctionCall, JsEvent, JsIn, JsResult, ModuleSpec, PropKind, RustCall},
 };
-use rquickjs::{Ctx, Value, qjs};
+use rquickjs::qjs;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -47,8 +48,6 @@ pub(crate) struct Components {
     /// Calls waiting for a result: call number -> (resolve, reject), owned.
     pending: RefCell<FxHashMap<u32, (JsValue, JsValue)>>,
     calls: Cell<u32>,
-    /// The root listens to `$return` (module calls are answered there).
-    root_listens: Cell<bool>,
 }
 
 impl Components {
@@ -110,107 +109,28 @@ fn handler_name(event: &str) -> String {
 
 // --- Calls and their results -----------------------------------------------------------
 
-/// The JSON a call sends: `{ c, a }`, nodes in `a` as `{ $node: id }`.
-fn call_args(
-    ctx: *mut JsContext,
-    call: u32,
-    args: &[JsValue],
-) -> Result<nsh_core::JsonValue, JsValue> {
-    let mut a = Vec::with_capacity(args.len());
-    for &v in args {
-        a.push(match dom::node_id(ctx, v) {
-            Some(id) => serde_json::json!({ "$node": id }),
-            None => {
-                // SAFETY: a context reference and a dup for the converter.
-                let cx = unsafe { Ctx::from_raw(ptr::NonNull::new_unchecked(ctx)) };
-                let value = unsafe { Value::from_raw(cx, qjs::JS_DupValue(ctx, v)) };
-                match crate::protocol::to_json(&value) {
-                    Ok(json) => json,
-                    Err(_) => return Err(qjs::JS_EXCEPTION),
-                }
-            }
-        });
-    }
-    Ok(serde_json::json!({ "c": call, "a": a }))
-}
-
-/// Sends call `name` to node `id` (1: a module's); with `returns`, returns
-/// a promise of its result.
-fn send(ctx: *mut JsContext, id: u32, name: &str, args: &[JsValue], returns: bool) -> JsValue {
-    let call = if returns { next_call(ctx) } else { 0 };
-    let json = match call_args(ctx, call, args) {
-        Ok(json) => json,
-        Err(e) => return e,
-    };
-    let op = Op::Command {
-        id,
-        command: Command::Native {
-            name: name.into(),
-            args: json,
-        },
-    };
-    if let Err(e) = dom::push_op(ctx, op) {
-        return e;
-    }
-    if !returns {
-        return UNDEFINED;
-    }
-    promise(ctx, call, id == 1)
-}
-
-/// Sends a call of `async` member `name` (`app/native:Tally#save`) to the
-/// core: `this` and the instances among `args` are ids in the table the
-/// core shares (`held`: argument index and id). A promise of its result.
-pub(crate) fn send_member(
-    ctx: *mut JsContext,
-    name: &str,
-    this: Option<u64>,
-    args: Vec<nsh_core::JsonValue>,
-    held: &[(usize, u64)],
-) -> JsValue {
-    let call = next_call(ctx);
-    let mut json = serde_json::json!({ "c": call, "a": args, "held": held });
-    if let Some(this) = this {
-        json["this"] = this.into();
-    }
-    let op = Op::Command {
-        id: 1,
-        command: Command::Native {
-            name: name.into(),
-            args: json,
-        },
-    };
-    if let Err(e) = dom::push_op(ctx, op) {
-        return e;
-    }
-    promise(ctx, call, true)
-}
-
 /// A new call number (never 0: no reply).
-fn next_call(ctx: *mut JsContext) -> u32 {
+pub(crate) fn next_call(ctx: *mut JsContext) -> u32 {
     let c = components(ctx);
     let n = c.calls.get().wrapping_add(1).max(1);
     c.calls.set(n);
     n
 }
 
-/// The promise of call `call`'s result; `on_root`: answered on the root,
-/// which then listens to `$return`.
-fn promise(ctx: *mut JsContext, call: u32, on_root: bool) -> JsValue {
-    let c = components(ctx);
-    if on_root && !c.root_listens.replace(true) {
-        let settle = reactive::new_function(ctx, c"settle", settle_root, 1);
-        let r = dom::set_handler(ctx, 1, EventKind::NativeEvent, settle);
-        // SAFETY: ours.
-        unsafe { qjs::JS_FreeValue(ctx, settle) };
-        if let Err(e) = r {
-            return e;
-        }
-    }
+/// The promise of call `call`'s result, settled when the core's events
+/// bring it ([`deliver`]).
+pub(crate) fn promise(ctx: *mut JsContext, call: u32) -> JsValue {
     let mut funcs = [UNDEFINED; 2];
     // SAFETY: a new promise; the table owns its functions.
     let promise = unsafe { qjs::JS_NewPromiseCapability(ctx, funcs.as_mut_ptr()) };
-    c.pending.borrow_mut().insert(call, (funcs[0], funcs[1]));
+    // SAFETY: an inline tag check.
+    if unsafe { qjs::JS_IsException(promise) } {
+        return promise;
+    }
+    components(ctx)
+        .pending
+        .borrow_mut()
+        .insert(call, (funcs[0], funcs[1]));
     promise
 }
 
@@ -227,152 +147,197 @@ pub(crate) fn measure(ctx: *mut JsContext, id: u32) -> JsValue {
     ) {
         return e;
     }
-    promise(ctx, call, true)
+    promise(ctx, call)
 }
 
-/// Settles the call a `$return` event answers (`{ c, v }` or `{ c, e }`);
-/// false for other events.
-fn settle(ctx: *mut JsContext, event: JsValue) -> Result<bool, JsValue> {
-    let name = get(ctx, event, "name");
-    let is_return = string_arg(ctx, name).as_deref() == Some("$return");
-    // SAFETY: ours.
-    unsafe { qjs::JS_FreeValue(ctx, name) };
-    if !is_return {
-        return Ok(false);
-    }
-    let data = get(ctx, event, "data");
-    let c = get(ctx, data, "c");
-    let mut call = 0f64;
-    // SAFETY: converting live values; every value got is freed.
-    unsafe {
-        qjs::JS_ToFloat64(ctx, &mut call, c);
-        qjs::JS_FreeValue(ctx, c);
-    }
-    let pending = components(ctx).pending.borrow_mut().remove(&(call as u32));
-    let result = match pending {
-        Some((resolve, reject)) => unsafe {
-            let (f, value) = if has(ctx, data, "e") {
-                let message = get(ctx, data, "e");
-                let error = qjs::JS_NewError(ctx);
-                qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), message);
-                (reject, error)
-            } else {
-                (resolve, crate::classes::reply_value(ctx, data))
+/// Delivers what the core hands JS besides nodes' events: a Rust
+/// component's event (to its `on<Event>` handler), whether its lazy
+/// children are placed, a call's result (its promise settles, the value
+/// converted now). `Err`: the exception a handler threw.
+pub(crate) fn deliver(ctx: *mut JsContext, event: JsEvent) -> Result<(), JsValue> {
+    match event {
+        JsEvent::Event(..) => Ok(()),
+        JsEvent::Component { host, event } => {
+            let host_js = crate::classes::host_outside_calls(ctx);
+            let data = match event.data_js(&host_js) {
+                Ok(data) => data.into_raw(),
+                Err(e) => {
+                    host_js.clear_pending();
+                    log::error!(target: "js", "the data of event `{}` did not convert: {e}", event.name());
+                    return Ok(());
+                }
             };
-            let mut args = [value];
-            let r = qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr());
-            qjs::JS_FreeValue(ctx, value);
-            qjs::JS_FreeValue(ctx, resolve);
-            qjs::JS_FreeValue(ctx, reject);
-            if qjs::JS_IsException(r) {
-                Err(r)
-            } else {
-                qjs::JS_FreeValue(ctx, r);
-                Ok(true)
-            }
-        },
-        None => Ok(true),
-    };
-    // SAFETY: ours.
-    unsafe { qjs::JS_FreeValue(ctx, data) };
-    result
+            component_event(ctx, host, event.name(), crate::classes::from_raw(data))
+        }
+        JsEvent::Children { host, wanted } => {
+            let data = if wanted { qjs::JS_TRUE } else { qjs::JS_FALSE };
+            component_event(ctx, host, CHILDREN, data)
+        }
+        JsEvent::Reply { call, result } => settle(ctx, call, result),
+    }
 }
 
-unsafe extern "C" fn settle_root(
+/// The name of the event placing lazy children (no component's event
+/// has a `$`).
+const CHILDREN: &str = "$children";
+
+/// Calls the native-event handler of Rust component host `host` with
+/// `{ name, data }` (`data` taken).
+fn component_event(
     ctx: *mut JsContext,
-    _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
-) -> JsValue {
-    settle(ctx, arg(argc, argv, 0)).err().unwrap_or(UNDEFINED)
+    host: nsh_core::NodeId,
+    name: &str,
+    data: JsValue,
+) -> Result<(), JsValue> {
+    let Some(handler) = dom::handler(ctx, host, EventKind::NativeEvent) else {
+        // SAFETY: ours.
+        unsafe { qjs::JS_FreeValue(ctx, data) };
+        return Ok(());
+    };
+    // SAFETY: a new object taking the name and the data; the handler and
+    // the object are ours, freed after the call.
+    unsafe {
+        let event = qjs::JS_NewObject(ctx);
+        qjs::JS_SetPropertyStr(ctx, event, c"name".as_ptr(), new_string(ctx, name));
+        qjs::JS_SetPropertyStr(ctx, event, c"data".as_ptr(), data);
+        let mut args = [event];
+        let r = qjs::JS_Call(ctx, handler, UNDEFINED, 1, args.as_mut_ptr());
+        qjs::JS_FreeValue(ctx, event);
+        qjs::JS_FreeValue(ctx, handler);
+        if qjs::JS_IsException(r) {
+            return Err(r);
+        }
+        qjs::JS_FreeValue(ctx, r);
+    }
+    Ok(())
+}
+
+/// Settles call `call` with `result`: resolved with the value (converted
+/// now), or rejected with an `Error` of the message (also when the value
+/// does not convert).
+fn settle(ctx: *mut JsContext, call: u32, result: JsResult) -> Result<(), JsValue> {
+    let pending = components(ctx).pending.borrow_mut().remove(&call);
+    // Nobody waits (the promise's VM state was reset): the value drops.
+    let Some((resolve, reject)) = pending else {
+        return Ok(());
+    };
+    let host = crate::classes::host_outside_calls(ctx);
+    let converted = result.and_then(|value| value.to_js_value(&host).map_err(|e| e.0));
+    let (f, value) = match converted {
+        Ok(value) => (resolve, crate::classes::from_raw(value.into_raw())),
+        Err(message) => {
+            host.clear_pending();
+            // SAFETY: a new error taking its message.
+            unsafe {
+                let error = qjs::JS_NewError(ctx);
+                qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), new_string(ctx, &message));
+                (reject, error)
+            }
+        }
+    };
+    // SAFETY: the table's functions (ours now) and the value, freed after
+    // the call.
+    unsafe {
+        let mut args = [value];
+        let r = qjs::JS_Call(ctx, f, UNDEFINED, 1, args.as_mut_ptr());
+        qjs::JS_FreeValue(ctx, value);
+        qjs::JS_FreeValue(ctx, resolve);
+        qjs::JS_FreeValue(ctx, reject);
+        if qjs::JS_IsException(r) {
+            return Err(r);
+        }
+        qjs::JS_FreeValue(ctx, r);
+    }
+    Ok(())
 }
 
 // --- Modules ------------------------------------------------------------------------
 
-/// The name a module's function is called by (`nsh/android:Toast.show`,
-/// `Alert.alert`).
-fn call_name(module: &ModuleSpec, namespace: Option<&str>, function: &str) -> String {
-    match namespace {
-        Some(ns) => format!("{ns}:{}.{function}", module.name),
-        None => format!("{}.{function}", module.name),
-    }
-}
-
 /// A function of a module: one that runs in the JS call, or one sending
-/// its call.
-pub(crate) fn module_function(
-    ctx: *mut JsContext,
-    module: &ModuleSpec,
-    namespace: Option<&str>,
-    function: &str,
-) -> JsValue {
-    let spec = module.functions.iter().find(|f| f.name == function);
-    if let Some((f, spec)) = spec.and_then(|s| s.sync.map(|f| (f, s))) {
-        return crate::classes::sync_function(ctx, function, f, spec.params.len());
-    }
-    let returns = spec.is_some_and(|f| f.returns.is_some());
-    let mut data = [
-        new_string(ctx, &call_name(module, namespace, function)),
-        if returns { qjs::JS_TRUE } else { qjs::JS_FALSE },
-    ];
-    // SAFETY: the function keeps dups of `data`; ours are freed.
+/// what it runs to the core.
+pub(crate) fn module_function(ctx: *mut JsContext, module: &ModuleSpec, function: &str) -> JsValue {
+    let Some(spec) = module.functions.iter().find(|f| f.name == function) else {
+        return UNDEFINED;
+    };
+    let length = spec.params.len();
+    let (f, opaque): (qjs::JSCClosure, *const ()) = match spec.call {
+        FunctionCall::Sync(f) => return crate::classes::sync_function(ctx, function, f, length),
+        FunctionCall::Op(make) => (Some(call_op), make as *const ()),
+        FunctionCall::Async(start) => (Some(call_task), start as *const ()),
+    };
+    let name = CString::new(function).unwrap_or_default();
+    // SAFETY: the opaque is the function's conversion (a function pointer,
+    // as large as a data pointer on every target), which needs no
+    // finalizer; the magic says whether it returns a promise.
     unsafe {
-        let f = qjs::JS_NewCFunctionData(ctx, Some(call_function), 0, 0, 2, data.as_mut_ptr());
-        qjs::JS_FreeValue(ctx, data[0]);
-        f
+        qjs::JS_NewCClosure(
+            ctx,
+            f,
+            name.as_ptr(),
+            None,
+            length as c_int,
+            c_int::from(spec.returns.is_some()),
+            opaque as *mut std::ffi::c_void,
+        )
     }
 }
 
-unsafe extern "C" fn call_function(
+/// The conversion of a module function with a context.
+type MakeOp = fn(&dyn nsh_core::ui::JsHost) -> Result<nsh_core::ui::OpCall, nsh_core::ui::Thrown>;
+
+unsafe extern "C" fn call_op(
     ctx: *mut JsContext,
-    _this: JsValue,
+    this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
-    _magic: c_int,
-    data: *mut JsValue,
+    magic: c_int,
+    opaque: *mut std::ffi::c_void,
 ) -> JsValue {
-    // SAFETY: two data values (`module_function`) and `argc` arguments.
-    let (name, returns) = unsafe { (*data, qjs::JS_ToBool(ctx, *data.add(1)) == 1) };
-    let Some(name) = string_arg(ctx, name) else {
-        return qjs::JS_EXCEPTION;
+    // SAFETY: `module_function` made the opaque from a `MakeOp`, and
+    // QuickJS passes `argc` live arguments.
+    let (make, args) = unsafe {
+        (
+            std::mem::transmute::<*const (), MakeOp>(opaque as *const ()),
+            crate::web::js::Args::new(argc, argv),
+        )
     };
-    let args: Vec<JsValue> = (0..argc.max(0) as usize)
-        .map(|i| arg(argc, argv, i))
-        .collect();
-    // Instances and functions cross in the table the core shares.
-    let Ok((args, held)) = crate::classes::wire_args(ctx, &args) else {
-        return qjs::JS_EXCEPTION;
+    crate::classes::send(ctx, this, args, magic != 0, |host| {
+        make(host).map(RustCall::Op)
+    })
+}
+
+unsafe extern "C" fn call_task(
+    ctx: *mut JsContext,
+    this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+    magic: c_int,
+    opaque: *mut std::ffi::c_void,
+) -> JsValue {
+    // SAFETY: `module_function` made the opaque from an `AsyncCall`, and
+    // QuickJS passes `argc` live arguments.
+    let (start, args) = unsafe {
+        (
+            std::mem::transmute::<*const (), nsh_core::ui::AsyncCall>(opaque as *const ()),
+            crate::web::js::Args::new(argc, argv),
+        )
     };
-    let call = if returns { next_call(ctx) } else { 0 };
-    let op = Op::Command {
-        id: 1,
-        command: Command::Native {
-            name: name.into(),
-            args: serde_json::json!({ "c": call, "a": args, "held": held }),
-        },
-    };
-    if let Err(e) = dom::push_op(ctx, op) {
-        // Not sent: what it holds goes.
-        crate::classes::release(ctx, &held);
-        return e;
-    }
-    if !returns {
-        return UNDEFINED;
-    }
-    promise(ctx, call, true)
+    crate::classes::send(ctx, this, args, magic != 0, |host| {
+        start(host).map(RustCall::Task)
+    })
 }
 
 /// A module's object: its functions.
-pub(crate) fn module(ctx: *mut JsContext, module: &ModuleSpec, namespace: Option<&str>) -> JsValue {
+pub(crate) fn module(ctx: *mut JsContext, module: &ModuleSpec) -> JsValue {
     // SAFETY: a new object taking the functions.
     let obj = unsafe { qjs::JS_NewObject(ctx) };
-    add_functions(ctx, obj, module, namespace);
+    add_functions(ctx, obj, module);
     obj
 }
 
-fn add_functions(ctx: *mut JsContext, obj: JsValue, module: &ModuleSpec, namespace: Option<&str>) {
+fn add_functions(ctx: *mut JsContext, obj: JsValue, module: &ModuleSpec) {
     for f in &module.functions {
-        let func = module_function(ctx, module, namespace, f.name);
+        let func = module_function(ctx, module, f.name);
         let name = CString::new(f.name).unwrap_or_default();
         // SAFETY: the object takes the function.
         unsafe { qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func) };
@@ -393,7 +358,7 @@ pub(crate) fn runtime_module(
         .module_specs()
         .into_iter()
         .find(|m| m.name == module)?;
-    Some(self::module(ctx, &spec, registry.namespace()))
+    Some(self::module(ctx, &spec))
 }
 
 /// Puts the functions of module `module` of the runtime registry
@@ -415,7 +380,7 @@ pub(crate) fn add_runtime_functions(
         .into_iter()
         .find(|m| m.name == module)
     {
-        add_functions(ctx, obj, &spec, registry.namespace());
+        add_functions(ctx, obj, &spec);
     }
 }
 
@@ -426,7 +391,7 @@ pub(crate) fn add_runtime_functions(
 pub(crate) fn component(
     ctx: *mut JsContext,
     spec: Arc<ComponentSpec>,
-    module: Option<(Arc<ModuleSpec>, Option<&'static str>)>,
+    module: Option<Arc<ModuleSpec>>,
 ) -> JsValue {
     let c = components(ctx);
     let index = {
@@ -437,8 +402,8 @@ pub(crate) fn component(
     let mut data = [qjs::JS_NewFloat64(index as f64)];
     // SAFETY: the function keeps a dup of `data`.
     let f = unsafe { qjs::JS_NewCFunctionData(ctx, Some(render), 1, 0, 1, data.as_mut_ptr()) };
-    if let Some((module, namespace)) = module {
-        add_functions(ctx, f, &module, namespace);
+    if let Some(module) = module {
+        add_functions(ctx, f, &module);
     }
     f
 }
@@ -572,21 +537,25 @@ fn render_component(
         unsafe {
             qjs::JS_SetPropertyStr(ctx, api.1, c"node".as_ptr(), qjs::JS_DupValue(ctx, node));
         }
-        for m in &spec.methods {
+        for (i, m) in spec.methods.iter().enumerate() {
+            // The node, the spec's index, the method's.
             let mut mdata = [
                 node,
-                new_string(ctx, m.name),
-                if m.returns.is_some() {
-                    qjs::JS_TRUE
-                } else {
-                    qjs::JS_FALSE
-                },
+                // SAFETY: the spec's index (a number).
+                unsafe { qjs::JS_DupValue(ctx, *spec_data) },
+                qjs::JS_NewFloat64(i as f64),
             ];
             let name = CString::new(m.name).unwrap_or_default();
             // SAFETY: the function keeps dups of `mdata`; the object takes it.
             unsafe {
-                let f =
-                    qjs::JS_NewCFunctionData(ctx, Some(call_method), 0, 0, 3, mdata.as_mut_ptr());
+                let f = qjs::JS_NewCFunctionData(
+                    ctx,
+                    Some(call_method),
+                    m.params.len() as c_int,
+                    0,
+                    3,
+                    mdata.as_mut_ptr(),
+                );
                 qjs::JS_FreeValue(ctx, mdata[1]);
                 qjs::JS_SetPropertyStr(ctx, api.1, name.as_ptr(), f);
             }
@@ -601,7 +570,7 @@ fn render_component(
     // true.
     let lazy = (spec.lazy_children && spec.takes_children() && has(ctx, props, "children"))
         .then(|| Owned(ctx, reactive::new_signal(ctx, qjs::JS_FALSE)));
-    if handles_events || lazy.is_some() || spec.methods.iter().any(|m| m.returns.is_some()) {
+    if handles_events || lazy.is_some() {
         let mut edata = [props, lazy.as_ref().map_or(UNDEFINED, |l| l.1)];
         // SAFETY: the function keeps dups of `edata`.
         let on = Owned(ctx, unsafe {
@@ -703,9 +672,9 @@ unsafe extern "C" fn props_run(
         .props
         .iter()
         .filter(|p| p.kind == PropKind::Value)
-        .map(|p| (p.name, true))
-        .chain(HOST_PROPS.iter().map(|&h| (h, false)));
-    for (i, (key, own)) in keys.enumerate() {
+        .map(|p| (p.name, p.decode))
+        .chain(HOST_PROPS.iter().map(|&h| (h, None)));
+    for (i, (key, decode)) in keys.enumerate() {
         let value = get(ctx, props, key);
         // SAFETY: live values; the array keeps a dup of the new value.
         unsafe {
@@ -716,46 +685,94 @@ unsafe extern "C" fn props_run(
             let same = qjs::JS_IsStrictEqual(ctx, old, value);
             let result = if same {
                 Ok(())
+            } else if let Some(decode) = decode {
+                set_rust_prop(ctx, node, &spec, key, decode, value)
             } else {
-                let wire = if own {
-                    format!("${key}")
-                } else {
-                    key.to_owned()
-                };
-                dom::set_prop_with_prev(ctx, node, &wire, value, old)
+                dom::set_prop_with_prev(ctx, node, key, value, old)
             };
             qjs::JS_FreeValue(ctx, old);
-            qjs::JS_SetPropertyUint32(ctx, prev, i as u32, value);
+            // The previous value is what the view has: one that was not
+            // sent (it did not convert) leaves it, so assigning it again
+            // throws again and `undefined` resets the prop.
             if let Err(e) = result {
+                qjs::JS_FreeValue(ctx, value);
                 return e;
             }
+            qjs::JS_SetPropertyUint32(ctx, prev, i as u32, value);
         }
     }
     UNDEFINED
 }
 
+/// Sets prop `key` of the Rust component on `node` to `value` (borrowed),
+/// converted into the prop's type now: a value of another type throws a
+/// `TypeError`; `undefined` resets the prop to its default.
+fn set_rust_prop(
+    ctx: *mut JsContext,
+    node: JsValue,
+    spec: &ComponentSpec,
+    key: &'static str,
+    decode: nsh_core::ui::PropDecode,
+    value: JsValue,
+) -> Result<(), JsValue> {
+    let Some(id) = dom::node_id(ctx, node) else {
+        return Ok(());
+    };
+    // SAFETY: an inline tag check.
+    let decoded = if unsafe { qjs::JS_IsUndefined(value) } {
+        None
+    } else {
+        let host = crate::classes::host_outside_calls(ctx);
+        match decode(JsIn::new(&host, crate::classes::to_raw(value))) {
+            Ok(v) => {
+                host.clear_pending();
+                Some(v)
+            }
+            // A getter threw: its exception goes on.
+            Err(_) if host.has_pending() => return Err(qjs::JS_EXCEPTION),
+            Err(e) => {
+                let _ = crate::web::js::type_error(ctx, &format!("{}.{key}: {e}", spec.export));
+                return Err(qjs::JS_EXCEPTION);
+            }
+        }
+    };
+    dom::push_op(
+        ctx,
+        Op::SetProp {
+            id,
+            prop: Prop::RustProp(key, decoded),
+        },
+    )
+}
+
 unsafe extern "C" fn call_method(
     ctx: *mut JsContext,
-    _this: JsValue,
+    this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: three data values (`render_component`).
-    let (node, name, returns) =
-        unsafe { (*data, *data.add(1), qjs::JS_ToBool(ctx, *data.add(2)) == 1) };
-    let (Some(id), Some(name)) = (dom::node_id(ctx, node), string_arg(ctx, name)) else {
+    // SAFETY: three data values (`render_component`): the node, the
+    // spec's index and the method's.
+    let (node, spec, index) = unsafe { (*data, data.add(1), *data.add(2)) };
+    let spec = spec_of(ctx, spec);
+    let mut i = 0f64;
+    // SAFETY: a number (`render_component`).
+    unsafe { qjs::JS_ToFloat64(ctx, &mut i, index) };
+    let (Some(id), Some(method)) = (dom::node_id(ctx, node), spec.methods.get(i as usize)) else {
         return qjs::JS_EXCEPTION;
     };
-    let args: Vec<JsValue> = (0..argc.max(0) as usize)
-        .map(|i| arg(argc, argv, i))
-        .collect();
-    send(ctx, id, &name, &args, returns)
+    // SAFETY: QuickJS passes `argc` live arguments.
+    let args = unsafe { crate::web::js::Args::new(argc, argv) };
+    let make = method.call;
+    crate::classes::send(ctx, this, args, method.returns.is_some(), |host| {
+        make(host).map(|call| RustCall::Method(id, call))
+    })
 }
 
-/// A component's native events: `$return` settles a method call, others
-/// go to the `on<Event>` handler of the props.
+/// A component's events ([`deliver`]): `$children` places its lazy
+/// children, others go to the `on<Event>` handler of the props.
 unsafe extern "C" fn on_native_event(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -767,13 +784,8 @@ unsafe extern "C" fn on_native_event(
     // SAFETY: two data values (the props, the lazy children's signal).
     let (props, lazy) = unsafe { (*data, *data.add(1)) };
     let event = arg(argc, argv, 0);
-    match settle(ctx, event) {
-        Ok(true) => return UNDEFINED,
-        Ok(false) => {}
-        Err(e) => return e,
-    }
     let name = get(ctx, event, "name");
-    if string_arg(ctx, name).as_deref() == Some("$children") {
+    if string_arg(ctx, name).as_deref() == Some(CHILDREN) {
         // SAFETY: ours; the signal takes the data.
         unsafe { qjs::JS_FreeValue(ctx, name) };
         if !unsafe { qjs::JS_IsUndefined(lazy) } {

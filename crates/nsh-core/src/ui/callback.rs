@@ -1,7 +1,7 @@
 //! JS functions Rust takes ([`Callback`]): called on the spot inside a
 //! synchronous call from JS, or queued for the next JS turn from anywhere
 //! on the engine thread ([`Callback::post`], [`Callback::call_async`]: the
-//! engine hands the queue, [`super::Instances`], to the script after the
+//! engine hands the queue, [`super::Posts`], to the script after the
 //! core's work). A callback an instance keeps is reported to QuickJS's
 //! collector through the class's [`Trace`], so a cycle through the
 //! instance's JS object is collected.
@@ -16,11 +16,10 @@ use std::{
 
 use super::{
     JsValue, PropError, TsTypes,
-    class::{Arg, Class, Instance, Instances, Ret},
+    class::{Arg, Class, Instance, Ret},
     js::{JsHost, JsIn, JsOwned},
     task::Answer,
 };
-use crate::JsonValue;
 
 /// A JS function as Rust keeps it (`nsh-js` implements it).
 #[doc(hidden)]
@@ -292,16 +291,6 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R>
             .map(Callback::of)
             .ok_or_else(|| value.expected("a function"))
     }
-
-    fn from_wire(
-        value: JsonValue,
-        held: Option<u64>,
-        instances: &Instances,
-    ) -> Result<Self, PropError> {
-        held.and_then(|id| instances.take_callback(id))
-            .map(Callback::of)
-            .ok_or_else(|| PropError::expected("a function", &value))
-    }
 }
 
 /// `null` or `undefined` is `None`.
@@ -315,17 +304,6 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Option<Callbac
             return Ok(None);
         }
         Callback::from_js(value).map(Some)
-    }
-
-    fn from_wire(
-        value: JsonValue,
-        held: Option<u64>,
-        instances: &Instances,
-    ) -> Result<Self, PropError> {
-        if held.is_none() && value.is_null() {
-            return Ok(None);
-        }
-        Callback::from_wire(value, held, instances).map(Some)
     }
 }
 

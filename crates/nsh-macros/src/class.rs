@@ -91,10 +91,6 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
             ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
                 #ui::__private::class_into_js(self, host)
             }
-
-            fn into_wire(self, instances: &#ui::Instances) -> #ui::Wire {
-                #ui::__private::class_into_wire(self, instances)
-            }
         }
     })
 }
@@ -262,9 +258,13 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     // Names the class's object has already, or must keep.
     let reserved = match kind {
         Kind::Constructor => None,
-        Kind::Static if matches!(js.as_str(), "prototype" | "name" | "length") => Some(
-            "a static named `prototype`, `name` or `length` would replace the constructor's own property",
-        ),
+        Kind::Static | Kind::AsyncStatic
+            if matches!(js.as_str(), "prototype" | "name" | "length") =>
+        {
+            Some(
+                "a static named `prototype`, `name` or `length` would replace the constructor's own property",
+            )
+        }
         _ if js == "dispose" => Some("`dispose` is every class's own (it frees the Rust value)"),
         _ if js == "constructor" => Some("`constructor` is the prototype's own (the class)"),
         _ => None,
@@ -379,7 +379,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         }
     }
     let call = if is_async {
-        async_call(f, kind, &params, &names, fallible)
+        async_call(f, kind, &params, &names, &what, fallible)
     } else {
         sync_call(f, kind, &params, &names, &what, fallible)
     };
@@ -499,6 +499,7 @@ fn async_call(
     kind: Kind,
     params: &[Param<'_>],
     names: &[String],
+    what: &str,
     fallible: bool,
 ) -> TokenStream2 {
     let ui = quote!(::nsh_core::ui);
@@ -510,36 +511,33 @@ fn async_call(
         let local = format_ident!("__arg{}", i);
         if let Param::Value(ty) = p {
             decode.push(quote! {
-                let #local: #ty = __args.next::<#ty>(__instances, #name)?;
+                let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
             });
             args.push(quote!(#local));
         }
     }
+    // The instance and the arguments are taken in the JS call; the task
+    // keeps them.
     let this = if kind == Kind::AsyncMethod {
         args.insert(0, quote!(__this));
-        quote!(let __this = #private::async_this::<Self>(__this)?;)
+        quote!(let __this = #private::this::<Self>(host, #what)?;)
     } else {
-        quote!(let _ = __this;)
-    };
-    let args_iter = if decode.is_empty() {
-        quote!(let _ = __args;)
-    } else {
-        quote!(let mut __args = __args;)
+        quote!(let _ = host;)
     };
     let finish = if fallible {
-        quote!(#private::wire_ret_result(__result, &__instances))
+        quote!(#private::boxed_result(__result))
     } else {
-        quote!(#private::wire_ret(__result, &__instances))
+        quote!(#private::boxed(__result))
     };
     quote! {
-        #ui::MemberCall::Async(|__this, __args, __instances| {
+        #ui::MemberCall::Async(|host| {
             #this
-            #args_iter
             #(#decode)*
-            let __instances = ::core::clone::Clone::clone(__instances);
-            ::core::result::Result::Ok(::std::boxed::Box::pin(async move {
-                let __result = Self::#ident(#(#args),*).await;
-                #finish
+            ::core::result::Result::Ok(::std::boxed::Box::new(move || {
+                ::std::boxed::Box::pin(async move {
+                    let __result = Self::#ident(#(#args),*).await;
+                    #finish
+                })
             }))
         })
     }
@@ -569,6 +567,10 @@ mod tests {
             assert!(
                 error(quote!(impl T { fn #ident() -> u32 { 0 } })).contains("a static named"),
                 "{name}"
+            );
+            assert!(
+                error(quote!(impl T { async fn #ident() -> u32 { 0 } })).contains("a static named"),
+                "async {name}"
             );
         }
         // A method may be called `name` (it is on the prototype).

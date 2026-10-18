@@ -21,12 +21,11 @@ use crate::{
     Prop, ROOT_ID, Tag, TextEngine,
     tailwind::ClassList,
     ui::{
-        Action, AnswerSlot, AnyInstance, Attrs, Child, ClipboardRead, ComponentError,
-        ComponentSpec, ElKind, ElNode, Environment, Executor, Function, FunctionCall, ImageSize,
-        Instances, IntoElement, ListConfig, Listener, Member, MemberCall, ModuleCx, ModuleFuture,
-        ParentElement, PlaceFn, Position, PropError, Reactive, Registry, Root, SharedString,
-        StyleRefinement, Task, Theme, WireArgs, caught,
-        class::POST,
+        Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
+        ComponentSpec, ElKind, ElNode, Environment, Executor, ImageSize, IntoElement, JsEvent,
+        JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
+        Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Theme,
+        caught,
         responder::ResponderEl,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
@@ -352,9 +351,10 @@ pub(super) struct Components {
     /// Their views' regions, by id.
     pub(super) regions: FxHashMap<u32, super::views::RegionState>,
     pub(super) next_region: u32,
-    /// The instances of Rust classes on their way from JS (the engine's
-    /// table, shared with the script).
-    class_instances: Instances,
+    /// The JS calls Rust posts (the engine's queue, shared with the
+    /// script): a call posted during a synchronous call from JS waits for
+    /// its op ([`RustCall::Post`]).
+    posts: Posts,
 }
 
 impl Default for Components {
@@ -403,7 +403,7 @@ impl Default for Components {
             patches: super::views::Patches::default(),
             regions: FxHashMap::default(),
             next_region: 1,
-            class_instances: Instances::default(),
+            posts: Posts::default(),
         }
     }
 }
@@ -614,32 +614,27 @@ impl<M: TextEngine> Core<M> {
         self.apply_environment(environment);
     }
 
-    /// Drops `ops` without applying them (the script was stopped): what
-    /// they hold in the class instances' table is released.
+    /// Drops `ops` without applying them (the script was stopped): the
+    /// calls into Rust among them are not made, and the promises waiting
+    /// for them reject (their replies are in the next events); a JS call
+    /// parked behind one is dropped.
     pub fn discard_ops(&mut self, ops: impl IntoIterator<Item = Op>) {
         for op in ops {
-            if let Op::Command {
-                command: Command::Native { name, args },
-                ..
-            } = op
-            {
-                let instances = &self.components.class_instances;
-                if &*name == POST {
-                    if let Some(id) = args.get("id").and_then(JsonValue::as_u64) {
-                        instances.drop_parked(id);
-                    }
-                } else {
-                    instances.release_call(&args);
+            if let Op::Rust(RustOp { call, run }) = op {
+                if let RustCall::Post(id) = run {
+                    self.components.posts.drop_parked(id);
                 }
+                // What the call holds (its arguments: instances, callbacks)
+                // goes now.
+                self.settle(call, Err("the script stopped before the call ran".into()));
             }
         }
     }
 
-    /// The table instances of Rust classes cross in between the script and
-    /// the core (`async` members' `this`, arguments and results): the one
-    /// the engine hands the script too.
-    pub fn set_class_instances(&mut self, instances: Instances) {
-        self.components.class_instances = instances;
+    /// The queue of the JS calls Rust posts: the one the engine hands the
+    /// script too.
+    pub fn set_posts(&mut self, posts: Posts) {
+        self.components.posts = posts;
     }
 
     /// Wakes the engine when a component's task is woken (from any
@@ -944,40 +939,8 @@ impl<M: TextEngine> Core<M> {
                     enabled: enabled || own,
                 }))
             }
-            // A function of a module, on the root.
-            Op::Command {
-                id: crate::ROOT_ID,
-                command: Command::Native { name, args },
-            } if self.function(&name).is_some() => {
-                self.call_function(&name, args);
-                Ok(None)
-            }
-            // A JS call posted in a synchronous call from JS, in order with
-            // the ops before it.
-            Op::Command {
-                id: crate::ROOT_ID,
-                command: Command::Native { name, args },
-            } if &*name == POST => {
-                if let Some(id) = args.get("id").and_then(JsonValue::as_u64) {
-                    self.components.class_instances.unpark(id);
-                }
-                Ok(None)
-            }
-            // An `async` member of a Rust class: `{ c, this, a }`.
-            Op::Command {
-                id: crate::ROOT_ID,
-                command: Command::Native { name, args },
-            } if name.contains('#') => {
-                self.call_member(&name, args);
-                Ok(None)
-            }
-            // A method of the component's ref: `{ c, a }`, the call (0: no
-            // reply) and the arguments.
-            Op::Command {
-                id,
-                command: Command::Native { name, args },
-            } if self.is_host(id) => {
-                self.call_method(id, &name, args);
+            Op::Rust(op) => {
+                self.run_rust(op);
                 Ok(None)
             }
             Op::Release { id } if self.is_host(id) => {
@@ -1038,161 +1001,96 @@ impl<M: TextEngine> Core<M> {
         self.components.mark(cell);
     }
 
-    /// Function `name` of a module: the UI set's (`Alert.alert`), else the
-    /// runtime's (`nsh/android:Toast.show`).
-    fn function(&self, name: &str) -> Option<&'static Function> {
-        self.components
-            .registry
-            .function(name)
-            .or_else(|| crate::runtime::function(name))
+    /// Runs a call JS made into Rust, in order with the ops before it: its
+    /// result settles promise `call` (in the events, in order with them).
+    pub(super) fn run_rust(&mut self, op: RustOp) {
+        let posts = self.components.posts.clone();
+        posts.in_op(|| self.run_rust_op(op));
     }
 
-    /// Calls module function `name` (`Alert.alert`); a call JS waits for
-    /// gets its result as a `$return` event on the root.
-    fn call_function(&mut self, name: &str, args: JsonValue) {
-        let instances = self.components.class_instances.clone();
-        let Some(function) = self.function(name) else {
-            instances.release_call(&args);
-            return;
-        };
-        let call = args.get("c").and_then(JsonValue::as_u64).unwrap_or(0);
-        let root = crate::ROOT_ID;
-        match &function.call {
-            // Run in the JS call, never sent.
-            FunctionCall::Sync(_) => instances.release_call(&args),
-            FunctionCall::Op(run) => {
+    fn run_rust_op(&mut self, op: RustOp) {
+        let RustOp { call, run } = op;
+        match run {
+            RustCall::Op(run) => {
                 let mut cx = ModuleCx::default();
                 // The app's code: a panic rejects the call (its actions are
                 // dropped) instead of unwinding through the engine.
-                let result = match caught(|| run(WireArgs::of(&args), &instances, &mut cx)) {
+                let result = match caught(|| run(&mut cx)) {
                     Ok(result) => {
                         for action in std::mem::take(&mut cx.actions) {
                             self.apply_action(action);
                         }
-                        result.map_err(|e| e.0)
+                        result
                     }
                     Err(message) => Err(message),
                 };
-                instances.release_call(&args);
                 self.apply_actions();
-                if let Err(e) = &result {
-                    log::warn!(target: "js", "{name}(): {e}");
-                }
-                if call != 0 {
-                    self.reply_wire(root, call, result);
-                }
+                self.settle(call, result);
             }
-            FunctionCall::Async(start) => {
-                let started = caught(|| start(WireArgs::of(&args), &instances))
-                    .unwrap_or_else(|message| Err(PropError(message)));
-                instances.release_call(&args);
-                self.run_call(name, call, started);
-            }
-        }
-    }
-
-    /// Runs `started` (an `async` function's or member's future) as a task
-    /// of the root; a call JS waits for gets its result (or its panic's
-    /// message) as a `$return` event.
-    fn run_call(&mut self, name: &str, call: u64, started: Result<ModuleFuture, PropError>) {
-        let root = crate::ROOT_ID;
-        match started {
-            Ok(future) => {
-                let executor = Rc::downgrade(&self.components.executor);
-                let name = name.to_owned();
-                // A task of the root: it never goes away.
-                crate::ui::task::spawn_raw(
-                    &self.components.executor,
-                    root,
-                    Box::pin(async move {
-                        let result = crate::ui::module::catching(future).await;
-                        if call == 0 {
-                            if let Err(e) = &result {
-                                log::warn!(target: "js", "{name}(): {e}");
+            RustCall::Task(start) => match caught(start) {
+                Ok(future) => {
+                    let executor = Rc::downgrade(&self.components.executor);
+                    // A task of the root: it never goes away.
+                    crate::ui::task::spawn_raw(
+                        &self.components.executor,
+                        ROOT_ID,
+                        Box::pin(async move {
+                            let result = crate::ui::module::catching(future).await;
+                            match executor.upgrade() {
+                                Some(executor) if call != 0 => {
+                                    executor.act(Action::Return(call, result));
+                                }
+                                _ => {
+                                    if let Err(e) = &result {
+                                        log::warn!(target: "js", "an async call into Rust failed: {e}");
+                                    }
+                                }
                             }
-                        } else if let Some(executor) = executor.upgrade() {
-                            executor.act(Action::Return(call, result));
-                        }
-                    }),
-                );
-            }
-            Err(e) => {
-                log::warn!(target: "js", "{name}(): {e}");
-                if call != 0 {
-                    self.reply(root, call, Err(e.0));
+                        }),
+                    );
                 }
-            }
-        }
-    }
-
-    /// The `async` member `name` of a Rust class (`app/native:Tally#save`):
-    /// the UI sets', else the runtime's.
-    fn class_member(&self, name: &str) -> Option<&'static Member> {
-        self.components
-            .registry
-            .class_member(name)
-            .or_else(|| crate::runtime::class_member(name))
-    }
-
-    /// Calls `async` member `name` (`app/native:Tally#save`) with `{ c,
-    /// this, a, held }`: the instance and the instances among the arguments
-    /// are ids in the table the script shares.
-    fn call_member(&mut self, name: &str, args: JsonValue) {
-        let instances = self.components.class_instances.clone();
-        let Some(MemberCall::Async(start)) = self.class_member(name).map(|m| m.call) else {
-            log::warn!(target: "js", "{name}(): no such member");
-            instances.release_call(&args);
-            return;
-        };
-        let call = args.get("c").and_then(JsonValue::as_u64).unwrap_or(0);
-        let this = args
-            .get("this")
-            .and_then(JsonValue::as_u64)
-            .and_then(|id| instances.take_instance(id));
-        let started = caught(|| start(this, WireArgs::of(&args), &instances))
-            .unwrap_or_else(|message| Err(PropError(message)));
-        // What the arguments held and the member did not take (it failed
-        // before).
-        instances.release_call(&args);
-        self.run_call(name, call, started);
-    }
-
-    /// Calls method `name` of `host`'s component; a call JS waits for gets
-    /// its result (or error) as a `$return` event.
-    fn call_method(&mut self, host: NodeId, name: &str, args: JsonValue) {
-        let call = args.get("c").and_then(JsonValue::as_u64).unwrap_or(0);
-        let args = match args.get("a") {
-            Some(JsonValue::Array(a)) => a.clone(),
-            _ => Vec::new(),
-        };
-        let mut failed = None;
-        let result = match self
-            .components
-            .instances
-            .get_mut(&host)
-            .map(|i| &mut i.inner)
-        {
-            Some(Inner::Component(inner)) => match caught(|| inner.call(name, args)) {
-                Ok(result) => {
-                    result.unwrap_or_else(|| Err(PropError(format!("no method `{name}`"))))
-                }
-                Err(message) => {
-                    failed = Some(message.clone());
-                    Err(PropError(message))
-                }
+                Err(message) => self.settle(call, Err(message)),
             },
-            _ => Err(PropError(format!("no method `{name}`"))),
-        };
-        self.apply_actions();
-        if let Some(message) = failed {
-            self.component_failed(host, message);
+            RustCall::Method(host, method) => {
+                let mut failed = None;
+                let result = match self
+                    .components
+                    .instances
+                    .get_mut(&host)
+                    .map(|i| &mut i.inner)
+                {
+                    Some(Inner::Component(inner)) => match caught(|| inner.call(method)) {
+                        Ok(Some(result)) => result,
+                        Ok(None) => {
+                            Err(format!("{} has no ref of this method's type", inner.name()))
+                        }
+                        Err(message) => {
+                            failed = Some(message.clone());
+                            Err(message)
+                        }
+                    },
+                    _ => Err(format!("node {host} hosts no Rust component")),
+                };
+                self.apply_actions();
+                if let Some(message) = failed {
+                    self.component_failed(host, message);
+                }
+                self.settle(call, result);
+            }
+            RustCall::Post(id) => self.components.posts.release(id),
         }
-        if let Err(e) = &result {
-            log::warn!(target: "js", "{name}(): {e}");
+    }
+
+    /// Settles promise `call` with `result` (in the events, in order with
+    /// them); 0: JS does not wait, an error is logged.
+    pub(super) fn settle(&mut self, call: u32, result: JsResult) {
+        if call == 0 {
+            if let Err(e) = &result {
+                log::warn!(target: "js", "a call into Rust failed: {e}");
+            }
+            return;
         }
-        if call != 0 {
-            self.reply(host, call, result.map_err(|e| e.0));
-        }
+        self.events.push(JsEvent::Reply { call, result });
     }
 
     /// The app's classes on `host` changed.
@@ -1295,8 +1193,8 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn set_component_prop(
         &mut self,
         host: NodeId,
-        name: Arc<str>,
-        value: Option<JsonValue>,
+        name: &str,
+        value: Option<AnyValue>,
     ) -> bool {
         let Some(inst) = self.components.instances.get_mut(&host) else {
             return false;
@@ -1304,7 +1202,7 @@ impl<M: TextEngine> Core<M> {
         let Inner::Component(inner) = &mut inst.inner else {
             return true;
         };
-        match inner.set_prop(&name, value) {
+        match inner.set_prop(name, value) {
             Ok(true) => self.components.mark(host),
             Ok(false) => {}
             Err(e) => {
@@ -1841,14 +1739,7 @@ impl<M: TextEngine> Core<M> {
                         signal.set(wanted);
                     }
                 }
-                None => self.events.push((
-                    host,
-                    EventKind::NativeEvent,
-                    EventPayload::Native {
-                        name: "$children".into(),
-                        data: JsonValue::Bool(wanted),
-                    },
-                )),
+                None => self.events.push(JsEvent::Children { host, wanted }),
             }
         }
     }
@@ -3342,7 +3233,7 @@ impl<M: TextEngine> Core<M> {
                     command: Command::Dialog(Box::new(dialog)),
                 });
             }
-            Action::Return(call, result) => self.reply_wire(crate::ROOT_ID, call, result),
+            Action::Return(call, result) => self.settle(call, result),
             Action::Animation(op) => {
                 let _ = self.apply_op(Op::Animation(op));
             }
@@ -3493,42 +3384,6 @@ impl<M: TextEngine> Core<M> {
             Some(ClipboardRead::Has(answer)) => answer.borrow_mut().deliver(has),
             None => {}
         }
-    }
-
-    /// The answer to a call JS waits for, as a `$return` event on `host`.
-    /// [`Self::reply`] of an op's value: an instance it is goes as its id
-    /// (`h`), beside the value, so no value of the app reads as one.
-    pub(super) fn reply_wire(
-        &mut self,
-        host: NodeId,
-        call: u64,
-        result: Result<crate::ui::Wire, String>,
-    ) {
-        let instance = result.as_ref().ok().and_then(|w| w.instance);
-        self.reply(host, call, result.map(|w| w.json));
-        if let Some(id) = instance
-            && let Some((_, _, EventPayload::Native { data, .. })) = self.events.last_mut()
-            && let JsonValue::Object(reply) = data
-        {
-            reply.insert("h".into(), id.into());
-        }
-    }
-
-    pub(super) fn reply(&mut self, host: NodeId, call: u64, result: Result<JsonValue, String>) {
-        let mut reply = serde_json::Map::new();
-        reply.insert("c".into(), call.into());
-        match result {
-            Ok(value) => reply.insert("v".into(), value),
-            Err(e) => reply.insert("e".into(), JsonValue::String(e)),
-        };
-        self.events.push((
-            host,
-            EventKind::NativeEvent,
-            EventPayload::Native {
-                name: "$return".into(),
-                data: JsonValue::Object(reply),
-            },
-        ));
     }
 
     /// Events the components handle before anything else: dialog answers
@@ -3766,14 +3621,7 @@ impl<M: TextEngine> Core<M> {
                 }
                 self.apply_actions();
             }
-            None => self.events.push((
-                host,
-                EventKind::NativeEvent,
-                EventPayload::Native {
-                    name: event.name().into(),
-                    data: event.data(),
-                },
-            )),
+            None => self.events.push(JsEvent::Component { host, event }),
         }
     }
 }

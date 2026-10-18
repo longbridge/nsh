@@ -1,10 +1,7 @@
 //! `nsh/image`: image information and loading ahead, the functions of
 //! `Image` (`nsh-js` makes it the image element's component).
 
-use crate::{
-    JsonValue,
-    ui::{ImageSize, JsValue, PropError, TsTypes, module},
-};
+use crate::ui::{ImageSize, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, TsTypes, module};
 
 /// Image information and loading ahead.
 pub(crate) struct Image;
@@ -18,19 +15,20 @@ impl JsValue for ImageUri {
         "string | { uri: string }".into()
     }
 
-    fn from_json(value: JsonValue) -> Result<Self, PropError> {
-        match &value {
-            JsonValue::String(uri) => Ok(Self(uri.clone())),
-            _ => value
-                .get("uri")
-                .and_then(JsonValue::as_str)
-                .map(|uri| Self(uri.to_owned()))
-                .ok_or_else(|| PropError::expected("a URI or { uri }", &value)),
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if let Some(uri) = value.as_string() {
+            return Ok(Self(uri));
         }
+        if value.kind() == JsKind::Object
+            && let Some(uri) = value.field("uri")?.get().as_string()
+        {
+            return Ok(Self(uri));
+        }
+        Err(value.expected("a URI or { uri }"))
     }
 
-    fn to_json(&self) -> JsonValue {
-        JsonValue::String(self.0.clone())
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_string(&self.0)?))
     }
 }
 
