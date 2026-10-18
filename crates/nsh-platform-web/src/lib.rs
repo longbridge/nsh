@@ -38,9 +38,11 @@ use nsh_core::{
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
-    App, Assets, Bundle, BundleCode, Chunk, ColorScheme, EngineConfig, EngineControl, Environment,
-    HotUpdate, Idiom, Limits, LocalEngine, MountSink, Os, Policy,
+    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits, LocalEngine,
+    MountSink, Os,
 };
+#[cfg(feature = "js")]
+use nsh_engine::{Bundle, BundleCode, Chunk, HotUpdate, Policy};
 
 pub use crate::net::{
     nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head,
@@ -58,8 +60,10 @@ thread_local! {
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
     /// How the next [`nsh_start`] runs its bundle ([`nsh_bundle_options`]).
+    #[cfg(feature = "js")]
     static OPTIONS: RefCell<BundleOptions> = RefCell::new(BundleOptions::default());
     /// A hot update could not be applied in place ([`nsh_hot_failed`]).
+    #[cfg(feature = "js")]
     static HOT_FAILED: Cell<bool> = const { Cell::new(false) };
     /// What the page reported last ([`nsh_environment`]), kept for the
     /// next [`nsh_start`].
@@ -70,6 +74,8 @@ thread_local! {
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
     /// The UI sets apps import ([`set_ui_sets`]; by default the mobile UI).
     static UI_SETS: RefCell<Option<Vec<nsh_core::ui::Registry>>> = const { RefCell::new(None) };
+    /// What makes the Rust app's root ([`set_root`]), for [`nsh_start_rust`].
+    static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::ui::Root>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
     #[cfg(feature = "compiler")]
     static COMPILED: RefCell<String> = const { RefCell::new(String::new()) };
@@ -108,7 +114,33 @@ macro_rules! ui_sets {
     };
 }
 
+/// Sets the Rust app [`nsh_start_rust`] runs: `root` makes its root
+/// component (with its theme), each time the page starts it.
+pub fn set_root(root: impl Fn() -> nsh_core::ui::Root + 'static) {
+    ROOT.with(|r| *r.borrow_mut() = Some(Box::new(root)));
+}
+
+/// Makes this module the web runtime of a Rust app (`nsh.json` `"root"`):
+/// it serves `$sets` (the mobile UI and the app's own set) and runs the
+/// root component `$root` makes (an expression giving a
+/// [`nsh_core::ui::Root`]) when the page calls [`nsh_start_rust`]. Built
+/// without the feature `js`, the module has no QuickJS: the app is Rust
+/// and the browser's own JS from start to end. Exports `nsh_app_init`, as
+/// [`ui_sets!`].
+#[macro_export]
+macro_rules! rust_app {
+    ($sets:expr, $root:expr) => {
+        /// Registers the app's UI sets and root (`nsh.js` calls it first).
+        #[unsafe(no_mangle)]
+        pub extern "C" fn nsh_app_init() {
+            $crate::set_ui_sets($sets);
+            $crate::set_root(|| $root);
+        }
+    };
+}
+
 /// What [`nsh_bundle_options`] set for the next [`nsh_start`].
+#[cfg(feature = "js")]
 #[derive(Default)]
 struct BundleOptions {
     /// Run as a release: hardened, as packaged apps run (default:
@@ -150,6 +182,7 @@ impl MountSink for Sink {
         FRAME_REQUESTED.with(|f| f.set(true));
     }
 
+    #[cfg(feature = "js")]
     fn hot_update_failed(&self) {
         HOT_FAILED.with(|f| f.set(true));
     }
@@ -340,6 +373,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
 /// # Safety
 ///
 /// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_start(
     ptr: *const u8,
@@ -362,6 +396,7 @@ pub unsafe extern "C" fn nsh_start(
 ///
 /// `ptr..ptr + len` is memory from [`nsh_alloc`] holding bytecode the CLI
 /// of this runtime's `nsh_js::BYTECODE_VERSION` wrote: QuickJS trusts it.
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_start_bytecode(
     ptr: *const u8,
@@ -376,7 +411,23 @@ pub unsafe extern "C" fn nsh_start_bytecode(
     start(BundleCode::Bytecode(code), width, height, dark, pixel_ratio)
 }
 
-fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32) -> f64 {
+/// Starts the Rust app this module was built for ([`rust_app!`]) in a
+/// `width` × `height` surface: its root component, with no bundle. Returns
+/// the delay (ms) until [`nsh_pump`] is due, or -1 (no app is registered).
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_start_rust(width: f32, height: f32, dark: u32, pixel_ratio: f32) -> f64 {
+    init();
+    let Some(root) = ROOT.with(|r| r.borrow().as_ref().map(|make| make())) else {
+        ffi::report_error("this runtime has no Rust app (`rust_app!`)");
+        return -1.0;
+    };
+    APP.with(|a| a.borrow_mut().take());
+    let environment = environment(width, height, dark != 0, pixel_ratio);
+    run(App::Rust(root), width, height, environment)
+}
+
+/// Sets up logging and panics once.
+fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         let _ = log::set_logger(&LOGGER);
@@ -385,6 +436,11 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
             ffi::report_error(&format!("nsh panicked: {info}"));
         }));
     });
+}
+
+#[cfg(feature = "js")]
+fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32) -> f64 {
+    init();
     APP.with(|a| a.borrow_mut().take());
     let environment = environment(width, height, dark != 0, pixel_ratio);
     let options = OPTIONS.with(|o| std::mem::take(&mut *o.borrow_mut()));
@@ -414,8 +470,13 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
         }
     };
     bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
+    run(App::Js(bundle), width, height, environment)
+}
+
+/// Starts `app` in the page's surface.
+fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
     let config = EngineConfig {
-        app: App::Js(bundle),
+        app,
         viewport: Size::new(width, height),
         trace: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
@@ -472,6 +533,7 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
 /// # Safety
 ///
 /// Both ranges are memory from [`nsh_alloc`].
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_bundle_options(
     release: u32,
@@ -502,6 +564,7 @@ pub unsafe extern "C" fn nsh_bundle_options(
 ///
 /// `ptr..ptr + len` is memory from [`nsh_alloc`] holding what the CLI of
 /// this runtime's `nsh_js::BYTECODE_VERSION` compiled.
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_bundle_harden(ptr: *const u8, len: usize) {
     // SAFETY: guaranteed by the caller.
@@ -517,6 +580,7 @@ pub unsafe extern "C" fn nsh_bundle_harden(ptr: *const u8, len: usize) {
 /// # Safety
 ///
 /// The three ranges are memory from [`nsh_alloc`].
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_hot_update(
     name: *const u8,
@@ -545,6 +609,7 @@ pub unsafe extern "C" fn nsh_hot_update(
 
 /// Whether the last [`nsh_hot_update`] could not be applied in place (1):
 /// the app must be started again with the new bundle.
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_hot_failed() -> u32 {
     HOT_FAILED.with(|f| f.replace(false)) as u32
@@ -559,6 +624,7 @@ pub extern "C" fn nsh_hot_failed() -> u32 {
 ///
 /// Both ranges are memory from [`nsh_alloc`]; bytecode (`ok` 2) is
 /// trusted as in [`nsh_start_bytecode`].
+#[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_chunk(
     id: *const u8,

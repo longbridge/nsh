@@ -12,13 +12,18 @@ repository.workspace = true
 workspace = true
 
 [features]
+default = ["js"]
+# JS apps (`nsh_start`, bundles, hot updates, chunks) on QuickJS. Without
+# it the module runs a Rust app only (`nsh_start_rust`, `rust_app!`) and
+# links no QuickJS.
+js = ["nsh-engine/js", "dep:nsh-js", "dep:rquickjs"]
 # The playground's build (`nsh-playground.wasm`): also compiles TSX in the
 # page (`nsh_compile`; nsh's JSX compiler, no rolldown), about 3 MB more.
-compiler = ["dep:nsh-bundler"]
+compiler = ["js", "dep:nsh-bundler"]
 # The runtime of published apps (`nsh.wasm`): QuickJS without its parser
 # and compiler, 0.18 MB smaller; it runs bytecode only (`nsh_start_bytecode`,
 # bytecode chunks). The player and the dev host without it run source.
-bytecode-only = ["nsh-js/bytecode-only"]
+bytecode-only = ["js", "nsh-js/bytecode-only"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -27,14 +32,14 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 nsh-core.workspace = true
 nsh-animation.workspace = true
-nsh-engine = { workspace = true, features = ["js"] }
-nsh-js.workspace = true
+nsh-engine.workspace = true
+nsh-js = { workspace = true, optional = true }
 nsh-ui-mobile.workspace = true
 nsh-bundler = { workspace = true, optional = true }
 # QuickJS without its internal `assert`s (NDEBUG): 37 KB smaller and a
 # little faster. They check QuickJS' own invariants, not app code; a broken
 # one stays inside the module's sandbox (the native platforms keep them).
-rquickjs = { workspace = true, features = ["disable-assertions"] }
+rquickjs = { workspace = true, features = ["disable-assertions"], optional = true }
 serde_json.workspace = true
 log.workspace = true
 rustc-hash.workspace = true

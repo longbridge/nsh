@@ -660,12 +660,41 @@ class Player {
     chunks = this.options.chunks,
     chunkBase = this.options.chunkBase,
   } = {}) {
+    if (code instanceof ArrayBuffer) code = new Uint8Array(code);
+    const bytecode = typeof code !== "string";
+    const [width, height] = this.reset();
+    this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
+    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
+      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
+    if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
+    this.begin(width, (environment) => {
+      this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
+      const start = bytecode ? this.wasm.nsh_start_bytecode : this.wasm.nsh_start;
+      return this.withStrings([code], (p, l) =>
+        start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
+    });
+  }
+
+  /**
+   * Runs the Rust app the module was built for (an app's runtime with
+   * `nsh.json` `"root"`): its root component, with no bundle and no JS of
+   * the app's, replacing what ran.
+   */
+  runRust() {
+    if (!this.wasm.nsh_start_rust) throw new Error("this runtime has no Rust app");
+    const [width, height] = this.reset();
+    this.chunks = { map: {}, base: document.baseURI, bytecode: false };
+    this.begin(width, (environment) => {
+      this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
+      return this.wasm.nsh_start_rust(width, height, this.dark ? 1 : 0, devicePixelRatio || 1);
+    });
+  }
+
+  /** Stops what ran and empties the root; its size. */
+  reset() {
     this.stop();
     this.resetHistory();
     this.app = (this.app ?? 0) + 1;
-    if (code instanceof ArrayBuffer) code = new Uint8Array(code);
-    const bytecode = typeof code !== "string";
-    this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
     const root = this.root;
     root.textContent = "";
     root.append(this.live);
@@ -678,21 +707,18 @@ class Player {
     const width = root.clientWidth || 390;
     const height = root.clientHeight || 844;
     this.size = [width, height];
-    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
-      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
-    if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
+    return this.size;
+  }
+
+  /** Starts the app with `start(environment)`, which returns the pump delay. */
+  begin(width, start) {
     this.idiom = this.options.idiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Fonts registered while it starts hold its first frame back (`fontLoading`).
     this.starting = true;
     try {
-      this.call(() => {
-        this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
-        const start = bytecode ? this.wasm.nsh_start_bytecode : this.wasm.nsh_start;
-        return this.withStrings([code], (p, l) =>
-          start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
-      });
+      this.call(() => start(environment));
     } finally {
       this.starting = false;
     }
