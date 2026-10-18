@@ -187,6 +187,26 @@ animations end: before the taps the app must be quiet for `--idle-ms` (at most 1
 at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` keeps running after the last tap.
 `--safe-area <top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
 
+## Rust application projects (`nsh init --rust`)
+
+`nsh init <dir> --rust` creates an independent Cargo workspace with published NSH dependencies,
+`src/main.rs` (a native desktop entry using `AppSource::Rust(Root::of::<App>())`) and `src/lib.rs`
+(the root component and its `#[native_module("app/native")]` registry). The platform dependencies
+are target-specific and disable default features, so `cargo run` mounts the Rust root directly.
+`App.tsx` imports that same component; `nsh.json` sets `"rust": "."`, so the existing Rust-component
+build / development / packaging path serves it on the selected platform. The generated app accepts
+`NSH_SCRIPT` for native desktop window checks. `examples/rust-app` exercises both entry points and
+has a headless test of the Rust root's input handling.
+
+The display name becomes a normalized Cargo package name prefixed with `nsh-app-`; the main entry
+uses its Rust crate identifier. Rust creation checks for existing app and Cargo source files before
+writing any of them. The ordinary TSX initializer continues preserving existing files.
+
+Independent apps use crates.io dependencies. Generated host workspaces patch those NSH dependencies
+to the selected source checkout, so the app and its hosts share the same core and registry types.
+The app's Rust watcher excludes `target`, `.nsh` and `.git`, including generated sources under the
+app root. Custom TypeScript declarations are generated when the app's command line is first built.
+
 ## Apps with Rust components of their own (`nsh.json` `"rust"`)
 
 `"rust": "<crate dir>"` names a library crate of the app with a `#[native_module("<specifier>")]` function at its

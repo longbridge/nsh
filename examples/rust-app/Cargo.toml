@@ -1,0 +1,24 @@
+[package]
+name = "nsh-rust-app"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+nsh-core = { version = "0.1.1", path = "../../crates/nsh-core" }
+nsh-ui-mobile = { version = "0.1.1", path = "../../crates/nsh-ui-mobile" }
+env_logger = "0.11"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-platform-linux = { version = "0.1.1", path = "../../crates/nsh-platform-linux", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { version = "0.1.1", path = "../../crates/nsh-platform-macos", default-features = false }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows = { version = "0.1.1", path = "../../crates/nsh-platform-windows", default-features = false }
+
+[dev-dependencies]
+nsh-engine = { version = "0.1.1", path = "../../crates/nsh-engine", default-features = false }

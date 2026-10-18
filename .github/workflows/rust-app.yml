@@ -1,0 +1,83 @@
+name: Rust application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "examples/rust-app/**"
+      - "crates/nsh-core/**"
+      - "crates/nsh-engine/**"
+      - "crates/nsh-macros/**"
+      - "crates/nsh-ui-mobile/**"
+      - "crates/nsh-platform-linux/**"
+      - "crates/nsh-platform-macos/**"
+      - "crates/nsh-platform-windows/**"
+      - "Cargo.toml"
+      - ".github/workflows/rust-app.yml"
+  pull_request:
+    paths:
+      - "examples/rust-app/**"
+      - "crates/nsh-cli/**"
+      - "crates/nsh-core/**"
+      - "crates/nsh-engine/**"
+      - "crates/nsh-macros/**"
+      - "crates/nsh-ui-mobile/**"
+      - "crates/nsh-platform-linux/**"
+      - "crates/nsh-platform-macos/**"
+      - "crates/nsh-platform-windows/**"
+      - "Cargo.toml"
+      - ".github/workflows/rust-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up temporary files
+        run: |
+          mkdir -p "$RUNNER_TEMP/nsh-test-tmp"
+          echo "TMPDIR=$RUNNER_TEMP/nsh-test-tmp" >> "$GITHUB_ENV"
+      - name: Set up Windows compiler stack
+        if: runner.os == 'Windows'
+        run: echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
+      - name: Install GTK 4
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rust-app-${{ hashFiles('examples/rust-app/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-app-
+      - name: Clippy
+        run: cargo clippy --manifest-path examples/rust-app/Cargo.toml --target-dir target --all-targets --locked -- -D warnings
+      - name: Test the Rust root
+        run: cargo test --manifest-path examples/rust-app/Cargo.toml --target-dir target --locked
+      - name: Check the native dependency graph
+        run: |
+          cargo tree --manifest-path examples/rust-app/Cargo.toml --locked -e normal > "$RUNNER_TEMP/rust-app-dependencies.txt"
+          if grep -E 'nsh-js |rquickjs' "$RUNNER_TEMP/rust-app-dependencies.txt"; then
+            echo "The Rust executable unexpectedly links a JS runtime"
+            exit 1
+          fi

@@ -55,14 +55,17 @@ source, cargo's output and the hosts' own.
 ## nsh init
 
 ```sh
-nsh init [DIR] [--name <NAME>]
+nsh init [DIR] [--name <NAME>] [--rust]
 ```
 
-Creates an app in `DIR` (default: the current directory, created if missing): `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already.
+By default, creates a TSX app in `DIR` (default: the current directory, created if missing): `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already.
 
 | Flag | Description |
 |---|---|
 | `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case). |
+| `--rust` | Creates a Cargo project with a native Rust entry (`cargo run`) and a TSX entry sharing its Rust components. Requires Rust and the native desktop backend's development libraries. |
+
+With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."`. Run the Rust entry on macOS, Windows or Linux with `cargo run`, or the TSX entry with `nsh run` on the native development hosts, including iOS and Android. The TSX Rust-component toolchain uses an NSH source checkout (the CLI's checkout or `NSH_SOURCE`). Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
 
 ## nsh run
 

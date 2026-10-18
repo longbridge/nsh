@@ -1,0 +1,7 @@
+{
+  "name": "Rust App",
+  "id": "com.example.rustapp",
+  "version": "1.0.0",
+  "build": 1,
+  "rust": "."
+}

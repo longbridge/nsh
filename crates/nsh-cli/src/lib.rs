@@ -54,9 +54,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create an app: `App.tsx`, `nsh.json`, `tsconfig.json` and the type
-    /// declarations editors use (`.nsh/types`, kept up to date by the other
-    /// commands).
+    /// Create a TSX app, or a Cargo project with shared Rust UI (`--rust`).
+    /// Generates the app's entry points, configuration and editor declarations.
     Init {
         /// Directory of the app (created if missing).
         #[arg(default_value = ".")]
@@ -64,6 +63,10 @@ enum Command {
         /// Display name (default: the directory's name).
         #[arg(long)]
         name: Option<String>,
+        /// Create a Cargo project with a native Rust entry and a TSX entry
+        /// sharing the same Rust components. Requires a Rust toolchain.
+        #[arg(long)]
+        rust: bool,
     },
     /// Bundle an app and compile it to QuickJS bytecode.
     Build {
@@ -393,7 +396,7 @@ fn run(mut command: Command) -> anyhow::Result<()> {
 
 fn dispatch(command: Command) -> anyhow::Result<()> {
     match command {
-        Command::Init { dir, name } => init::init(&dir, name),
+        Command::Init { dir, name, rust } => init::init(&dir, name, rust),
         Command::Build {
             entry,
             out,

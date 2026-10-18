@@ -1,0 +1,3 @@
+# Share the checkout's build directory with the NSH toolchain.
+[build]
+target-dir = "../../target"

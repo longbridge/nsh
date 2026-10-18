@@ -31,6 +31,20 @@ A module is what a host app loads: one or more `.tsx` files with an entry. `nsh 
 
 The display name defaults to the directory's name; pass `--name "My App"` to choose another. The id becomes `com.example.<name>`: change it in `nsh.json` before you ship. Files that already exist are kept, so you can run `nsh init` in a directory that has some of them.
 
+### Start with Rust
+
+Use `nsh init my-app --rust` to create a Cargo project with native Rust UI:
+
+```sh
+nsh init my-app --rust
+cd my-app
+cargo run
+```
+
+`src/lib.rs` contains the UI, state and event handlers. `src/main.rs` mounts the Rust root directly on macOS, Windows or Linux. `App.tsx` imports the same root from `app/native`, providing the TSX development and delivery entry, including the iOS and Android development hosts. Rust development requires a Rust toolchain and the desktop backend's development libraries. The TSX Rust-component commands use an NSH source checkout, found through the CLI's checkout or `NSH_SOURCE`; their first build also generates declarations for `app/native`.
+
+See [the CLI reference](./cli.md#nsh-init) and `examples/rust-app` in the repository for both entry points and a Rust engine test.
+
 ### The entry module
 
 ```tsx
