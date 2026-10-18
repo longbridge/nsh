@@ -318,6 +318,9 @@ define_class!(
                     .map(|running| running.window.clone())
             });
             if let Some(window) = window {
+                if window.isMiniaturized() {
+                    window.deminiaturize(None);
+                }
                 window.makeKeyAndOrderFront(None);
             }
             false
