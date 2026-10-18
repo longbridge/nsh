@@ -8,8 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nsh_core::ui::prelude::*;
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, Meter, PressProps, RoundButton,
-    Segment, SegmentedEvent, Tone, appear, caption, colors, icon, press_with, radius, segmented,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, Meter, PressProps,
+    RoundButton, Segment, SegmentedEvent, Tone, caption, colors, icon, press_with, radius,
+    segmented,
 };
 
 /// The web site of the second web view.
@@ -373,19 +374,8 @@ fn messaging() -> impl IntoElement {
 /// tell the app.
 #[component]
 pub(crate) fn Media() -> impl IntoElement {
-    let cards = [
-        messaging().into_element(),
-        Site::element(()).into_element(),
-        Player::element(()).into_element(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                cards
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .card(messaging)
+        .card(|| Site::element(()))
+        .card(|| Player::element(()))
 }

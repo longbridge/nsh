@@ -9,8 +9,8 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, MONO, PressProps, Segment,
-    SegmentedEvent, ToggleEvent, appear, caption, colors, hint, inset_shadow, press_with, radius,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressProps,
+    Segment, SegmentedEvent, ToggleEvent, caption, colors, hint, inset_shadow, press_with, radius,
     rgb_a, segmented, tints, toggle,
 };
 
@@ -905,23 +905,13 @@ fn right_to_left() -> Card {
 /// The demo's page.
 #[component]
 pub(crate) fn Styles() -> impl IntoElement {
-    let sections = [
-        corners(),
-        borders(),
-        shadows(),
-        layers(),
-        transforms(),
-        numerals(),
-        right_to_left(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                sections
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new().cards([
+        corners,
+        borders,
+        shadows,
+        layers,
+        transforms,
+        numerals,
+        right_to_left,
+    ])
 }

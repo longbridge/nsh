@@ -14,13 +14,15 @@
 //! - The device's input: [`hint`] (touch or pointer wording), [`bind_refresh`]
 //!   (a desktop's refresh key).
 //! - The desktop layout of wide windows: [`SIDEBAR`], [`desktop`],
-//!   [`pane_width`], [`columns_for`].
+//!   [`pane_width`], [`columns_for`]; [`DemoPage`], a demo's cards in
+//!   columns.
 
 mod animated;
 mod controls;
 mod device;
 mod icons;
 mod layout;
+mod page;
 mod parts;
 mod theme;
 
@@ -33,6 +35,7 @@ pub(crate) use self::{
     device::{bind_refresh, hint},
     icons::{IconName, Tint, icon},
     layout::{SIDEBAR, columns_for, desktop, pane_width},
+    page::DemoPage,
     parts::{
         Badge, Button, ButtonVariant, Card, Figure, IconTile, Inset, Meter, RoundButton, Row,
         Section, Stat, caption, code, header, legend,

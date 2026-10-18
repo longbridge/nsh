@@ -21,9 +21,9 @@ use nsh_ui_mobile::{
 use crate::{
     nav,
     ui::{
-        Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, IconTile, Inset, MONO,
-        Meter, PressProps, RoundButton, Section, Segment, SegmentedEvent, Tone, appear, caption,
-        colors, header, hint, icon, press_with, radius, segmented, tints,
+        Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, Inset,
+        MONO, Meter, PressProps, RoundButton, Section, Segment, SegmentedEvent, Tone, appear,
+        caption, colors, header, hint, icon, press_with, radius, segmented, tints,
     },
 };
 
@@ -471,7 +471,7 @@ pub(crate) fn Form() -> impl IntoElement {
     let touched = signal(Touched::default());
     // The inputs in return-key order.
     let refs: Rc<[ElementRef]> = (0..CHAIN).map(|_| element_ref()).collect();
-    let fx: Vec<FieldFx> = (0..f::COUNT).map(|_| FieldFx::new()).collect();
+    let fx: Rc<[FieldFx]> = (0..f::COUNT).map(|_| FieldFx::new()).collect();
     let name_err = computed(move || name.with(|n| name_error(touched.get(), n)));
     let email_err = computed(move || email.with(|e| email_error(touched.get(), e)));
     let password_err = computed(move || password.with(|p| password_error(touched.get(), p)));
@@ -497,261 +497,283 @@ pub(crate) fn Form() -> impl IntoElement {
     };
     let set = |text: Signal<String>| move |v: &str| text.set(v.to_owned());
 
-    let keyboard = Card::new()
-        .icon(IconName::Form)
-        .title("Keyboard")
-        .subtitle("keyboardDismissMode while dragging")
-        .right(
-            Badge::new(move || format!("{} pt", keyboard_height().round())).tone(move || {
-                if keyboard_height() > 0.0 {
-                    Tone::Accent
-                } else {
-                    Tone::Neutral
-                }
-            }),
-        )
-        .child(
-            segmented(
-                MODES.map(|m| Segment::new(m.1)),
-                Prop::bind(move || mode.get() as u32),
+    let keyboard = move || {
+        Card::new()
+            .icon(IconName::Form)
+            .title("Keyboard")
+            .subtitle("keyboardDismissMode while dragging")
+            .right(
+                Badge::new(move || format!("{} pt", keyboard_height().round())).tone(move || {
+                    if keyboard_height() > 0.0 {
+                        Tone::Accent
+                    } else {
+                        Tone::Neutral
+                    }
+                }),
             )
-            .on_event(move |e: &SegmentedEvent| {
-                let SegmentedEvent::Change(i) = *e;
-                mode.set(i as usize);
-            }),
-        )
-        .child(caption(
-            hint(
-                "Drag the form with the keyboard up",
-                "Desktops have no on-screen keyboard to dismiss",
-            ),
-            Some(move || MODES[mode.get()].2),
-        ));
+            .child(
+                segmented(
+                    MODES.map(|m| Segment::new(m.1)),
+                    Prop::bind(move || mode.get() as u32),
+                )
+                .on_event(move |e: &SegmentedEvent| {
+                    let SegmentedEvent::Change(i) = *e;
+                    mode.set(i as usize);
+                }),
+            )
+            .child(caption(
+                hint(
+                    "Drag the form with the keyboard up",
+                    "Desktops have no on-screen keyboard to dismiss",
+                ),
+                Some(move || MODES[mode.get()].2),
+            ))
+    };
 
     let score = computed(move || password.with(|p| strength(p)));
-    let account = Section::new("Account")
-        .note("autoComplete")
-        .child(
-            field(&fx[f::NAME], "Name")
-                .error(name_err)
-                .on_blur(touch(|t| t.name = true))
-                .render(|i| {
-                    chained(0, i)
-                        .value(move || name.get())
-                        .on_change_text(set(name))
-                        .auto_capitalize(AutoCapitalize::Words)
-                        .auto_fill(AutoFill::Name)
-                        .placeholder("Ada Lovelace")
-                }),
-        )
-        .child(
-            field(&fx[f::EMAIL], "E-mail")
-                .api("email-address")
-                .error(email_err)
-                .on_blur(touch(|t| t.email = true))
-                .render(|i| {
-                    chained(1, i)
-                        .value(move || email.get())
-                        .on_change_text(set(email))
-                        .keyboard_type(KeyboardType::Email)
-                        .auto_capitalize(AutoCapitalize::None)
-                        .auto_correct(false)
-                        .auto_fill(AutoFill::Email)
-                        .placeholder("ada@example.com")
-                }),
-        )
-        .child(
-            view()
-                .gap_2()
+    let account = {
+        let (fx, chained) = (fx.clone(), chained.clone());
+        move || {
+            Section::new("Account")
+                .note("autoComplete")
                 .child(
-                    field(&fx[f::PASSWORD], "Password")
-                        .api("secureTextEntry")
-                        .error(password_err)
-                        .on_blur(touch(|t| t.password = true))
+                    field(&fx[f::NAME], "Name")
+                        .error(name_err)
+                        .on_blur(touch(|t| t.name = true))
                         .render(|i| {
-                            chained(2, i)
-                                .value(move || password.get())
-                                .on_change_text(move |v: &str| {
-                                    if strength(v) != score.get_untracked() {
-                                        animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-                                    }
-                                    password.set(v.to_owned());
-                                })
-                                .secure(true)
-                                .auto_fill(AutoFill::NewPassword)
-                                .placeholder("At least 8 characters")
+                            chained(0, i)
+                                .value(move || name.get())
+                                .on_change_text(set(name))
+                                .auto_capitalize(AutoCapitalize::Words)
+                                .auto_fill(AutoFill::Name)
+                                .placeholder("Ada Lovelace")
+                        }),
+                )
+                .child(
+                    field(&fx[f::EMAIL], "E-mail")
+                        .api("email-address")
+                        .error(email_err)
+                        .on_blur(touch(|t| t.email = true))
+                        .render(|i| {
+                            chained(1, i)
+                                .value(move || email.get())
+                                .on_change_text(set(email))
+                                .keyboard_type(KeyboardType::Email)
+                                .auto_capitalize(AutoCapitalize::None)
+                                .auto_correct(false)
+                                .auto_fill(AutoFill::Email)
+                                .placeholder("ada@example.com")
                         }),
                 )
                 .child(
                     view()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(10.0))
+                        .gap_2()
                         .child(
-                            view().flex_1().child(
-                                Meter::new(move || score.get() as f32 / 4.0)
-                                    .tone(move || STRENGTH_TONE[score.get()]),
-                            ),
+                            field(&fx[f::PASSWORD], "Password")
+                                .api("secureTextEntry")
+                                .error(password_err)
+                                .on_blur(touch(|t| t.password = true))
+                                .render(|i| {
+                                    chained(2, i)
+                                        .value(move || password.get())
+                                        .on_change_text(move |v: &str| {
+                                            if strength(v) != score.get_untracked() {
+                                                animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+                                            }
+                                            password.set(v.to_owned());
+                                        })
+                                        .secure(true)
+                                        .auto_fill(AutoFill::NewPassword)
+                                        .placeholder("At least 8 characters")
+                                }),
                         )
                         .child(
-                            text(move || STRENGTH_LABEL[score.get()])
-                                .w(px(52.0))
-                                .text_right()
-                                .text_size(px(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(move || {
-                                    let score = score.get();
-                                    if score > 0 {
-                                        STRENGTH_TONE[score].color()
-                                    } else {
-                                        colors::FAINT
-                                    }
-                                }),
+                            view()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(10.0))
+                                .child(
+                                    view().flex_1().child(
+                                        Meter::new(move || score.get() as f32 / 4.0)
+                                            .tone(move || STRENGTH_TONE[score.get()]),
+                                    ),
+                                )
+                                .child(
+                                    text(move || STRENGTH_LABEL[score.get()])
+                                        .w(px(52.0))
+                                        .text_right()
+                                        .text_size(px(13.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(move || {
+                                            let score = score.get();
+                                            if score > 0 {
+                                                STRENGTH_TONE[score].color()
+                                            } else {
+                                                colors::FAINT
+                                            }
+                                        }),
+                                ),
                         ),
-                ),
-        )
-        .child(field(&fx[f::PHONE], "Phone").api("phone-pad").render(|i| {
-            chained(3, i)
-                .keyboard_type(KeyboardType::Phone)
-                .auto_fill(AutoFill::Tel)
-                .placeholder("+1 555 0100")
-        }))
-        .child(field(&fx[f::WEBSITE], "Website").api("url").render(|i| {
-            chained(4, i)
-                .keyboard_type(KeyboardType::Url)
-                .auto_capitalize(AutoCapitalize::None)
-                .auto_correct(false)
-                .placeholder("https://")
-        }));
+                )
+                .child(field(&fx[f::PHONE], "Phone").api("phone-pad").render(|i| {
+                    chained(3, i)
+                        .keyboard_type(KeyboardType::Phone)
+                        .auto_fill(AutoFill::Tel)
+                        .placeholder("+1 555 0100")
+                }))
+                .child(field(&fx[f::WEBSITE], "Website").api("url").render(|i| {
+                    chained(4, i)
+                        .keyboard_type(KeyboardType::Url)
+                        .auto_capitalize(AutoCapitalize::None)
+                        .auto_correct(false)
+                        .placeholder("https://")
+                }))
+        }
+    };
 
-    let numbers = Section::new("Numbers")
-        .note("keyboardType")
-        .child(pair(
-            field(&fx[f::AGE], "Age").hint("3 digits").render(|i| {
-                chained(5, i)
-                    .keyboard_type(KeyboardType::Number)
-                    .max_length(3)
-                    .placeholder("36")
-            }),
-            field(&fx[f::AMOUNT], "Amount")
-                .api("decimal-pad")
-                .prefix("$")
-                .render(|i| {
-                    chained(6, i)
-                        .keyboard_type(KeyboardType::Decimal)
-                        .placeholder("0.00")
-                }),
-        ))
-        .child(
-            field(&fx[f::OFFSET], "Offset")
-                .api("numbers-and-punctuation")
-                .hint("dark keyboard (iOS)")
-                .render(|i| {
-                    i.keyboard_type(KeyboardType::NumbersAndPunctuation)
-                        .keyboard_appearance(KeyboardAppearance::Dark)
-                        .placeholder("-12.5")
-                }),
-        )
-        .child(
-            field(&fx[f::CODE], "Verification code")
-                .hint(move || format!("{}/6", code.with(|c| c.encode_utf16().count())))
-                .render(|i| {
-                    chained(7, i)
-                        .value(move || code.get())
-                        .on_change_text(set(code))
-                        .keyboard_type(KeyboardType::Number)
-                        .max_length(6)
-                        .placeholder("······")
-                        .letter_spacing(10.0)
-                        .text_size(px(22.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .tabular_nums()
-                        .text_center()
-                }),
-        );
-
-    let address = Section::new("Shipping address")
-        .note("scrolls into view")
-        .child(field(&fx[f::STREET], "Street").render(|i| {
-            chained(8, i)
-                .auto_fill(AutoFill::StreetAddress)
-                .placeholder("12 Analytical Way")
-        }))
-        .child(pair(
-            field(&fx[f::CITY], "City").render(|i| chained(9, i).placeholder("London")),
-            field(&fx[f::POSTAL], "Postal code").render(|i| {
-                chained(10, i)
-                    .auto_capitalize(AutoCapitalize::Characters)
-                    .auto_fill(AutoFill::PostalCode)
-                    .placeholder("SW1A 1AA")
-            }),
-        ))
-        .child(
-            field(&fx[f::COUNTRY], "Country")
-                .render(|i| chained(11, i).placeholder("United Kingdom")),
-        );
-
-    let note_count = computed(move || notes.with(|n| n.encode_utf16().count()));
-    let texts = Section::new("Text")
-        .note("Input props")
-        .child(
-            field(&fx[f::SHOUT], "Controlled")
-                .hint("Uppercased as you type")
-                .render(|i| {
-                    chained(12, i)
-                        .value(move || shout.get())
-                        .on_change_text(move |t: &str| shout.set(t.to_uppercase()))
-                        .placeholder("TYPE IN LOWER CASE")
-                }),
-        )
-        .child(
-            field(&fx[f::READ_ONLY], "Read only")
-                .api("editable={false}")
-                .read_only()
-                .render(|i| i.value("Not editable")),
-        )
-        .child(
-            field(&fx[f::COLORS], "Custom colors")
-                .api("selectionColor")
-                .render(|i| {
-                    chained(13, i)
-                        .placeholder("A blue placeholder, an amber selection")
-                        .placeholder_color(|| color(colors::INFO))
-                        .selection_color(|| color(colors::WARN))
-                }),
-        )
-        .child(
-            view()
-                .gap_2()
-                .child(
-                    field(&fx[f::NOTES], "Notes")
-                        .hint(move || format!("{}/280", note_count.get()))
-                        .multiline()
+    let numbers = {
+        let (fx, chained) = (fx.clone(), chained.clone());
+        move || {
+            Section::new("Numbers")
+                .note("keyboardType")
+                .child(pair(
+                    field(&fx[f::AGE], "Age").hint("3 digits").render(|i| {
+                        chained(5, i)
+                            .keyboard_type(KeyboardType::Number)
+                            .max_length(3)
+                            .placeholder("36")
+                    }),
+                    field(&fx[f::AMOUNT], "Amount")
+                        .api("decimal-pad")
+                        .prefix("$")
                         .render(|i| {
-                            chained(14, i)
-                                .max_length(280)
-                                .value(move || notes.get())
-                                .on_change_text(set(notes))
-                                .placeholder("Return adds a line")
-                                .min_h(px(100.0))
+                            chained(6, i)
+                                .keyboard_type(KeyboardType::Decimal)
+                                .placeholder("0.00")
+                        }),
+                ))
+                .child(
+                    field(&fx[f::OFFSET], "Offset")
+                        .api("numbers-and-punctuation")
+                        .hint("dark keyboard (iOS)")
+                        .render(|i| {
+                            i.keyboard_type(KeyboardType::NumbersAndPunctuation)
+                                .keyboard_appearance(KeyboardAppearance::Dark)
+                                .placeholder("-12.5")
                         }),
                 )
                 .child(
-                    Meter::new(move || note_count.get() as f32 / 280.0).tone(move || {
-                        if note_count.get() > 250 {
-                            Tone::Warn
-                        } else {
-                            Tone::Accent
-                        }
+                    field(&fx[f::CODE], "Verification code")
+                        .hint(move || format!("{}/6", code.with(|c| c.encode_utf16().count())))
+                        .render(|i| {
+                            chained(7, i)
+                                .value(move || code.get())
+                                .on_change_text(set(code))
+                                .keyboard_type(KeyboardType::Number)
+                                .max_length(6)
+                                .placeholder("······")
+                                .letter_spacing(10.0)
+                                .text_size(px(22.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .tabular_nums()
+                                .text_center()
+                        }),
+                )
+        }
+    };
+
+    let address = {
+        let (fx, chained) = (fx.clone(), chained.clone());
+        move || {
+            Section::new("Shipping address")
+                .note("scrolls into view")
+                .child(field(&fx[f::STREET], "Street").render(|i| {
+                    chained(8, i)
+                        .auto_fill(AutoFill::StreetAddress)
+                        .placeholder("12 Analytical Way")
+                }))
+                .child(pair(
+                    field(&fx[f::CITY], "City").render(|i| chained(9, i).placeholder("London")),
+                    field(&fx[f::POSTAL], "Postal code").render(|i| {
+                        chained(10, i)
+                            .auto_capitalize(AutoCapitalize::Characters)
+                            .auto_fill(AutoFill::PostalCode)
+                            .placeholder("SW1A 1AA")
                     }),
-                ),
-        )
-        .child(AutoGrow::element(()))
-        .child(
-            field(&fx[f::CARET], "No caret")
-                .api("caretHidden")
-                .render(|i| i.caret_hidden(true).default_value("No caret here")),
-        );
+                ))
+                .child(
+                    field(&fx[f::COUNTRY], "Country")
+                        .render(|i| chained(11, i).placeholder("United Kingdom")),
+                )
+        }
+    };
+
+    let note_count = computed(move || notes.with(|n| n.encode_utf16().count()));
+    let texts = {
+        let (fx, chained) = (fx.clone(), chained.clone());
+        move || {
+            Section::new("Text")
+                .note("Input props")
+                .child(
+                    field(&fx[f::SHOUT], "Controlled")
+                        .hint("Uppercased as you type")
+                        .render(|i| {
+                            chained(12, i)
+                                .value(move || shout.get())
+                                .on_change_text(move |t: &str| shout.set(t.to_uppercase()))
+                                .placeholder("TYPE IN LOWER CASE")
+                        }),
+                )
+                .child(
+                    field(&fx[f::READ_ONLY], "Read only")
+                        .api("editable={false}")
+                        .read_only()
+                        .render(|i| i.value("Not editable")),
+                )
+                .child(
+                    field(&fx[f::COLORS], "Custom colors")
+                        .api("selectionColor")
+                        .render(|i| {
+                            chained(13, i)
+                                .placeholder("A blue placeholder, an amber selection")
+                                .placeholder_color(|| color(colors::INFO))
+                                .selection_color(|| color(colors::WARN))
+                        }),
+                )
+                .child(
+                    view()
+                        .gap_2()
+                        .child(
+                            field(&fx[f::NOTES], "Notes")
+                                .hint(move || format!("{}/280", note_count.get()))
+                                .multiline()
+                                .render(|i| {
+                                    chained(14, i)
+                                        .max_length(280)
+                                        .value(move || notes.get())
+                                        .on_change_text(set(notes))
+                                        .placeholder("Return adds a line")
+                                        .min_h(px(100.0))
+                                }),
+                        )
+                        .child(Meter::new(move || note_count.get() as f32 / 280.0).tone(
+                            move || {
+                                if note_count.get() > 250 {
+                                    Tone::Warn
+                                } else {
+                                    Tone::Accent
+                                }
+                            },
+                        )),
+                )
+                .child(AutoGrow::element(()))
+                .child(
+                    field(&fx[f::CARET], "No caret")
+                        .api("caretHidden")
+                        .render(|i| i.caret_hidden(true).default_value("No caret here")),
+                )
+        }
+    };
 
     let submit = move |_: &()| {
         touched.set(Touched {
@@ -786,110 +808,98 @@ pub(crate) fn Form() -> impl IntoElement {
             (Tone::Up, format!("Account created for {name} <{email}>"))
         }));
     };
-    let submit_card = Card::new()
-        .icon(IconName::Check)
-        .title("Create the account")
-        .subtitle("Submitting checks every field")
-        .right(dynamic(move || {
-            status.with(|s| {
-                s.as_ref().map(|&(tone, _)| {
-                    Badge::new(if tone == Tone::Up { "Sent" } else { "Check" }).tone(tone)
+    let submit_card = move || {
+        Card::new()
+            .icon(IconName::Check)
+            .title("Create the account")
+            .subtitle("Submitting checks every field")
+            .right(dynamic(move || {
+                status.with(|s| {
+                    s.as_ref().map(|&(tone, _)| {
+                        Badge::new(if tone == Tone::Up { "Sent" } else { "Check" }).tone(tone)
+                    })
                 })
-            })
-        }))
-        .child(dynamic(move || {
-            status.with(|s| {
-                s.as_ref().map(|(tone, message)| {
-                    let up = *tone == Tone::Up;
-                    let fg = if up { colors::UP } else { colors::DANGER };
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .p_3()
-                        .rounded(px(radius::CONTROL))
-                        .bg(if up { tints::UP } else { tints::DANGER })
-                        .child(icon(
-                            if up { IconName::Check } else { IconName::Bell },
-                            16.0,
-                            fg,
-                        ))
-                        .child(
-                            text(message.clone())
-                                .flex_1()
-                                .text_size(px(14.0))
-                                .line_height(px(19.0))
-                                .text_color(fg),
-                        )
+            }))
+            .child(dynamic(move || {
+                status.with(|s| {
+                    s.as_ref().map(|(tone, message)| {
+                        let up = *tone == Tone::Up;
+                        let fg = if up { colors::UP } else { colors::DANGER };
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .p_3()
+                            .rounded(px(radius::CONTROL))
+                            .bg(if up { tints::UP } else { tints::DANGER })
+                            .child(icon(
+                                if up { IconName::Check } else { IconName::Bell },
+                                16.0,
+                                fg,
+                            ))
+                            .child(
+                                text(message.clone())
+                                    .flex_1()
+                                    .text_size(px(14.0))
+                                    .line_height(px(19.0))
+                                    .text_color(fg),
+                            )
+                    })
                 })
-            })
-        }))
-        .child(pair(
-            Button::new("Submit", submit),
-            Button::new("Hide keyboard", |_: &()| dismiss_keyboard())
-                .variant(ButtonVariant::Secondary),
-        ));
+            }))
+            .child(pair(
+                Button::new("Submit", submit),
+                Button::new("Hide keyboard", |_: &()| dismiss_keyboard())
+                    .variant(ButtonVariant::Secondary),
+            ))
+    };
 
-    let more = Card::new()
-        .title("More keyboards")
-        .subtitle("Sheets and bars that ride on the keyboard")
-        .flush()
-        .child(
-            Inset::new()
-                .padding(0.0)
-                .gap(0.0)
-                .child(link_row(
-                    IconName::Components,
-                    "Inputs in a sheet",
-                    "presentationStyle=\"pageSheet\"",
-                    true,
-                    move |_: &()| sheet.set(true),
-                ))
-                .child(link_row(
-                    IconName::Text,
-                    "A message bar at the bottom",
-                    "KeyboardAvoidingView",
-                    false,
-                    |_: &()| {
-                        nav::push("message-bar", || {
-                            header(screen().title("Message bar")).child(MessageBar::element(()))
-                        });
-                    },
-                )),
-        );
-
-    let cards = [
-        keyboard.into_element(),
-        account.into_element(),
-        numbers.into_element(),
-        address.into_element(),
-        Section::new("Selection and keys")
-            .note("onSelectionChange")
-            .child(SelectionDemo::element(()))
-            .into_element(),
-        texts.into_element(),
-        submit_card.into_element(),
-        more.into_element(),
-    ];
-    let sheet_fx: Vec<FieldFx> = fx[f::SHEET..].to_vec();
-    view().flex_1().child(
-        scroll()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .keyboard_dismiss_mode(move || MODES[mode.get()].0)
+    let more = move || {
+        Card::new()
+            .title("More keyboards")
+            .subtitle("Sheets and bars that ride on the keyboard")
+            .flush()
             .child(
-                view()
-                    .child(
-                        view().p_4().pb(px(40.0)).gap_4().children(
-                            cards
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, card)| appear(i as u32).child(card)),
-                        ),
-                    )
-                    .child(If::new(sheet, move || sheet_view(sheet, &sheet_fx))),
-            ),
-    )
+                Inset::new()
+                    .padding(0.0)
+                    .gap(0.0)
+                    .child(link_row(
+                        IconName::Components,
+                        "Inputs in a sheet",
+                        "presentationStyle=\"pageSheet\"",
+                        true,
+                        move |_: &()| sheet.set(true),
+                    ))
+                    .child(link_row(
+                        IconName::Text,
+                        "A message bar at the bottom",
+                        "KeyboardAvoidingView",
+                        false,
+                        |_: &()| {
+                            nav::push("message-bar", || {
+                                header(screen().title("Message bar")).child(MessageBar::element(()))
+                            });
+                        },
+                    )),
+            )
+    };
+
+    let sheet_fx: Vec<FieldFx> = fx[f::SHEET..].to_vec();
+    DemoPage::new()
+        .keyboard_dismiss_mode(move || MODES[mode.get()].0)
+        .card(keyboard)
+        .card(account)
+        .card(numbers)
+        .card(address)
+        .card(|| {
+            Section::new("Selection and keys")
+                .note("onSelectionChange")
+                .child(SelectionDemo::element(()))
+        })
+        .card(texts)
+        .card(submit_card)
+        .card(more)
+        .child(If::new(sheet, move || sheet_view(sheet, &sheet_fx)))
 }
 
 /// The sheet of inputs (`open` while it shows), its fields animated by

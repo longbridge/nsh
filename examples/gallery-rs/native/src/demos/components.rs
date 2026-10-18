@@ -20,10 +20,10 @@ use nsh_ui_mobile::{
 use crate::{
     nav,
     ui::{
-        self, Badge, ButtonVariant as UiVariant, Finish, Finished, IconName, IconTile, Inset, MONO,
-        PressProps, Row, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize,
-        ToggleEvent, Tone, appear, caption, colors, header, hint, icon, inset_shadow, press_with,
-        radius, rgb_a, segmented, tints, toggle,
+        self, Badge, ButtonVariant as UiVariant, DemoPage, Finish, Finished, IconName, IconTile,
+        Inset, MONO, PressProps, Row, Segment, Segmented, SegmentedEvent, SegmentedProps,
+        SegmentedSize, ToggleEvent, Tone, appear, caption, colors, header, hint, icon,
+        inset_shadow, press_with, radius, rgb_a, segmented, tints, toggle,
     },
 };
 
@@ -858,42 +858,31 @@ fn link_row(
 /// The demo's page.
 #[component]
 pub(crate) fn Components() -> impl IntoElement {
-    let avoiding = ui::Card::new()
-        .title("Keyboard avoidance")
-        .subtitle("Content outside scroll views")
-        .flush()
-        .child(Inset::new().padding(0.0).gap(0.0).child(link_row(
-            IconName::Form,
-            "KeyboardAvoidingView",
-            "padding / height / position",
-            |_: &()| {
-                nav::push("keyboard-avoiding", || {
-                    header(screen().title("KeyboardAvoidingView")).child(AvoidingPage::element(()))
-                });
-            },
-        )));
-    let cards = [
-        MobileComponents::element(()).into_element(),
-        PressFeedback::element(()).into_element(),
-        PressableSheet::element(()).into_element(),
-        LayoutAnimations::element(()).into_element(),
-        Accessory::element(()).into_element(),
-        avoiding.into_element(),
-        ModalOptions::element(()).into_element(),
-        PlatformInfo::element(()).into_element(),
-    ];
-    view().flex_1().child(
-        scroll()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-            .child(
-                view().p_4().pb(px(40.0)).gap_4().children(
-                    cards
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, card)| appear(i as u32).child(card)),
-                ),
-            ),
-    )
+    let avoiding = || {
+        ui::Card::new()
+            .title("Keyboard avoidance")
+            .subtitle("Content outside scroll views")
+            .flush()
+            .child(Inset::new().padding(0.0).gap(0.0).child(link_row(
+                IconName::Form,
+                "KeyboardAvoidingView",
+                "padding / height / position",
+                |_: &()| {
+                    nav::push("keyboard-avoiding", || {
+                        header(screen().title("KeyboardAvoidingView"))
+                            .child(AvoidingPage::element(()))
+                    });
+                },
+            )))
+    };
+    DemoPage::new()
+        .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
+        .card(|| MobileComponents::element(()))
+        .card(|| PressFeedback::element(()))
+        .card(|| PressableSheet::element(()))
+        .card(|| LayoutAnimations::element(()))
+        .card(|| Accessory::element(()))
+        .card(avoiding)
+        .card(|| ModalOptions::element(()))
+        .card(|| PlatformInfo::element(()))
 }

@@ -12,9 +12,9 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, IconTile, MONO, PressProps,
-    Row, Stat, Tone, appear, caption, colors, hint, icon, inset_shadow, press_with, radius, rgb_a,
-    tints,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, MONO,
+    PressProps, Row, Stat, Tone, caption, colors, hint, icon, inset_shadow, press_with, radius,
+    rgb_a, tints,
 };
 
 /// A dot matrix behind a stage, drawn for its size (again when it or the
@@ -834,23 +834,12 @@ fn accessibility() -> impl IntoElement {
 /// The demo's page.
 #[component]
 pub(crate) fn Gestures() -> impl IntoElement {
-    let cards: [AnyElement; 7] = [
-        Transformable::element(()).into_element(),
-        Ball::element(()).into_element(),
-        TouchPad::element(()).into_element(),
-        PressEvents::element(()).into_element(),
-        HitSlop::element(()).into_element(),
-        pointer_events().into_element(),
-        accessibility().into_element(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                cards
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .card(|| Transformable::element(()))
+        .card(|| Ball::element(()))
+        .card(|| TouchPad::element(()))
+        .card(|| PressEvents::element(()))
+        .card(|| HitSlop::element(()))
+        .card(pointer_events)
+        .card(accessibility)
 }

@@ -8,7 +8,7 @@ use nsh_core::ui::{EllipsizeMode, WritingDirection, prelude::*};
 use crate::{
     assets::{LOGO, PACIFICO},
     ui::{
-        Card, Finish, Finished, IconName, MONO, PressProps, appear, caption, colors, press_with,
+        Card, DemoPage, Finish, Finished, IconName, MONO, PressProps, caption, colors, press_with,
         radius, rgb_a, tints,
     },
 };
@@ -471,24 +471,13 @@ pub(crate) fn TextDemo() -> impl IntoElement {
     // a sentence.
     let tapped = signal("nothing yet");
     let likes = signal(3_u32);
-    let cards = [
-        links(tapped),
-        inline(likes),
-        fonts(),
-        scaling(),
-        truncation(),
-        cjk(),
-        right_to_left(),
-        alignment(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                cards
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .card(move || links(tapped))
+        .card(move || inline(likes))
+        .card(fonts)
+        .card(scaling)
+        .card(truncation)
+        .card(cjk)
+        .card(right_to_left)
+        .card(alignment)
 }

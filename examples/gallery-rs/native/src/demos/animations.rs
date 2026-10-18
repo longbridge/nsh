@@ -20,8 +20,8 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, Finish, Finished, IconName, MONO, PressProps, PressRole,
-    Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, Tone, appear, caption,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressProps,
+    PressRole, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, Tone, caption,
     colors, icon, legend, press_with, radius, segmented, tints,
 };
 
@@ -1250,24 +1250,13 @@ fn Layout() -> impl IntoElement {
 /// The demo's page.
 #[component]
 pub(crate) fn Animations() -> impl IntoElement {
-    let cards: [AnyElement; 8] = [
-        Hero::element(()).into_element(),
-        EasingPlot::element(()).into_element(),
-        EasingRace::element(()).into_element(),
-        Composition::element(()).into_element(),
-        Springs::element(()).into_element(),
-        Interpolations::element(()).into_element(),
-        HidingHeader::element(()).into_element(),
-        Layout::element(()).into_element(),
-    ];
-    view().flex_1().child(
-        scroll().flex_1().bg(colors::BACKGROUND).child(
-            view().p_4().pb(px(40.0)).gap_4().children(
-                cards
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, card)| appear(i as u32).child(card)),
-            ),
-        ),
-    )
+    DemoPage::new()
+        .card(|| Hero::element(()))
+        .card(|| EasingPlot::element(()))
+        .card(|| EasingRace::element(()))
+        .card(|| Composition::element(()))
+        .card(|| Springs::element(()))
+        .card(|| Interpolations::element(()))
+        .card(|| HidingHeader::element(()))
+        .card(|| Layout::element(()))
 }

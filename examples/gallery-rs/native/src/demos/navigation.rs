@@ -12,9 +12,9 @@ use nsh_ui_mobile::{SafeAreaView, SafeAreaViewProps};
 use crate::{
     nav,
     ui::{
-        Badge, Button, ButtonVariant, Card, Figure, Finish, Finished, IconName, IconTile, Inset,
-        MONO, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors, header, hint, icon,
-        motion, press_with, radius, tints, toggle,
+        Badge, Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, IconTile,
+        Inset, MONO, PressProps, Section, Stat, ToggleEvent, Tone, appear, colors, header, hint,
+        icon, motion, press_with, radius, tints, toggle,
     },
 };
 
@@ -691,69 +691,77 @@ pub(crate) fn Navigation() -> impl IntoElement {
             unsaved,
         ),
     ];
-    let mut links: Vec<AnyElement> = screens
-        .into_iter()
-        .enumerate()
-        .map(|(i, (key, icon_name, title, note, make))| {
-            link_row(icon_name, title, note, i == 0, move |_: &()| {
-                nav::push(key, make)
+    let links = move || {
+        let mut links: Vec<AnyElement> = screens
+            .into_iter()
+            .enumerate()
+            .map(|(i, (key, icon_name, title, note, make))| {
+                link_row(icon_name, title, note, i == 0, move |_: &()| {
+                    nav::push(key, make)
+                })
+                .into_element()
             })
-            .into_element()
-        })
-        .collect();
-    links.push(
-        link_row(
-            IconName::Lists,
-            "A deep stack",
-            "push / popToTop",
-            false,
-            |_: &()| nav::push(format!("deep-{}", nav::depth()), deep(1)),
-        )
-        .into_element(),
-    );
-    let tiles = modals().map(|(presented, _, title, note, icon_name)| {
+            .collect();
+        links.push(
+            link_row(
+                IconName::Lists,
+                "A deep stack",
+                "push / popToTop",
+                false,
+                |_: &()| nav::push(format!("deep-{}", nav::depth()), deep(1)),
+            )
+            .into_element(),
+        );
+        links
+    };
+    let tiles = {
         let pop = pop.clone();
-        press_with(
-            PressProps {
-                label: Some(title.into()).into(),
-                ..PressProps::default()
-            },
-            move |_: &()| {
-                if presented == Presented::Dialog {
-                    // The dialog springs up from a little smaller each
-                    // time it opens.
-                    pop.set(0.0);
-                    pop.spring(1.0, motion::SETTLE);
-                }
-                sheet.set(Some(presented));
-            },
-        )
-        .w(relative(0.485))
-        .child(
-            view()
-                .min_h(px(100.0))
-                .p_3()
-                .gap_3()
-                .rounded(px(radius::INSET))
-                .border_curve(BorderCurve::Continuous)
-                .bg(colors::INSET)
-                .border_1()
-                .border_color(colors::LINE)
-                .finish(Finish::Inset)
-                .child(IconTile::new(icon_name).size(32.0))
+        move || {
+            modals().map(|(presented, _, title, note, icon_name)| {
+                let pop = pop.clone();
+                press_with(
+                    PressProps {
+                        label: Some(title.into()).into(),
+                        ..PressProps::default()
+                    },
+                    move |_: &()| {
+                        if presented == Presented::Dialog {
+                            // The dialog springs up from a little smaller each
+                            // time it opens.
+                            pop.set(0.0);
+                            pop.spring(1.0, motion::SETTLE);
+                        }
+                        sheet.set(Some(presented));
+                    },
+                )
+                .w(relative(0.485))
                 .child(
                     view()
-                        .gap(px(2.0))
+                        .min_h(px(100.0))
+                        .p_3()
+                        .gap_3()
+                        .rounded(px(radius::INSET))
+                        .border_curve(BorderCurve::Continuous)
+                        .bg(colors::INSET)
+                        .border_1()
+                        .border_color(colors::LINE)
+                        .finish(Finish::Inset)
+                        .child(IconTile::new(icon_name).size(32.0))
                         .child(
-                            text(title)
-                                .text_size(px(15.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(colors::TEXT),
-                        )
-                        .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
-                ),
-        )
-    });
+                            view()
+                                .gap(px(2.0))
+                                .child(
+                                    text(title)
+                                        .text_size(px(15.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(colors::TEXT),
+                                )
+                                .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
+                        ),
+                )
+            })
+        }
+    };
     let close = move |_: &()| sheet.set(None);
     let modal_view = dynamic(move || {
         sheet.get().map(|presented| match presented {
@@ -852,116 +860,98 @@ pub(crate) fn Navigation() -> impl IntoElement {
                 .into_element(),
         })
     });
-    view().flex_1().child(
-        scroll()
-            .flex_1()
-            .bg(colors::BACKGROUND)
-            .child(
-                view()
-                    .p_4()
-                    .pb(px(40.0))
-                    .gap_4()
-                    .child(
-                        appear(0).child(
-                            Card::new()
-                                .icon(IconName::Nav)
-                                .title("Native stack")
-                                .subtitle("Headers, transitions, the safe area")
-                                .right(Badge::new(hint(
-                                    "UIKit / View",
-                                    if os() == Os::Linux {
-                                        "GTK 4"
-                                    } else {
-                                        "Native views"
-                                    },
-                                )))
-                                .child(insets()),
-                        ),
-                    )
-                    .child(
-                        appear(1).child(
-                            Card::new()
-                                .title("Screens")
-                                .subtitle("Screen options, pushed with nav.push")
-                                .flush()
-                                .child(Inset::new().padding(0.0).gap(0.0).children(links)),
-                        ),
-                    )
-                    .child(
-                        appear(2).child(
-                            Card::new()
-                                .title("Modals")
-                                .subtitle("Presentation styles and transitions")
-                                .flush()
-                                .child(
-                                    view()
-                                        .flex_row()
-                                        .flex_wrap()
-                                        .justify_between()
-                                        .gap_y_2()
-                                        .children(tiles),
-                                ),
-                        ),
-                    )
-                    .child(
-                        appear(3).child(
-                            Card::new()
-                                .icon(IconName::System)
-                                .title("Back button")
-                                .subtitle(hint(
-                                    "Android: BackHandler",
-                                    "BackHandler: Escape, Alt+Left",
-                                ))
-                                .right(toggle(intercepting, "Intercept the back button").on_event(
-                                    move |e: &ToggleEvent| {
-                                        let ToggleEvent::Change(on) = *e;
-                                        intercepting.set(on);
-                                    },
-                                ))
-                                .child(
-                                    Figure::new(move || presses.get().to_string())
-                                        .unit(move || {
-                                            if presses.get() == 1 {
-                                                "press"
-                                            } else {
-                                                "presses"
-                                            }
-                                        })
-                                        .note(move || {
-                                            if intercepting.get() {
-                                                "caught"
-                                            } else {
-                                                "popped"
-                                            }
-                                        })
-                                        .tone(move || {
-                                            if intercepting.get() {
-                                                Tone::Warn
-                                            } else {
-                                                Tone::Accent
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    text(move || {
-                                        if intercepting.get() {
-                                            "The handler returns true: back presses stay on \
-                                             this screen."
-                                        } else {
-                                            hint(
-                                                "Off: the back button pops this screen.",
-                                                "Off: Escape pops this screen, or the app's \
-                                                 last screen does nothing.",
-                                            )
-                                        }
-                                    })
-                                    .text_size(px(13.0))
-                                    .line_height(px(18.0))
-                                    .text_color(colors::MUTED),
-                                ),
-                        ),
-                    ),
-            )
-            .child(modal_view),
-    )
+    DemoPage::new()
+        .card(|| {
+            Card::new()
+                .icon(IconName::Nav)
+                .title("Native stack")
+                .subtitle("Headers, transitions, the safe area")
+                .right(Badge::new(hint(
+                    "UIKit / View",
+                    if os() == Os::Linux {
+                        "GTK 4"
+                    } else {
+                        "Native views"
+                    },
+                )))
+                .child(insets())
+        })
+        .card(move || {
+            Card::new()
+                .title("Screens")
+                .subtitle("Screen options, pushed with nav.push")
+                .flush()
+                .child(Inset::new().padding(0.0).gap(0.0).children(links()))
+        })
+        .card(move || {
+            Card::new()
+                .title("Modals")
+                .subtitle("Presentation styles and transitions")
+                .flush()
+                .child(
+                    view()
+                        .flex_row()
+                        .flex_wrap()
+                        .justify_between()
+                        .gap_y_2()
+                        .children(tiles()),
+                )
+        })
+        .card(move || {
+            Card::new()
+                .icon(IconName::System)
+                .title("Back button")
+                .subtitle(hint(
+                    "Android: BackHandler",
+                    "BackHandler: Escape, Alt+Left",
+                ))
+                .right(toggle(intercepting, "Intercept the back button").on_event(
+                    move |e: &ToggleEvent| {
+                        let ToggleEvent::Change(on) = *e;
+                        intercepting.set(on);
+                    },
+                ))
+                .child(
+                    Figure::new(move || presses.get().to_string())
+                        .unit(move || {
+                            if presses.get() == 1 {
+                                "press"
+                            } else {
+                                "presses"
+                            }
+                        })
+                        .note(move || {
+                            if intercepting.get() {
+                                "caught"
+                            } else {
+                                "popped"
+                            }
+                        })
+                        .tone(move || {
+                            if intercepting.get() {
+                                Tone::Warn
+                            } else {
+                                Tone::Accent
+                            }
+                        }),
+                )
+                .child(
+                    text(move || {
+                        if intercepting.get() {
+                            "The handler returns true: back presses stay on \
+                             this screen."
+                        } else {
+                            hint(
+                                "Off: the back button pops this screen.",
+                                "Off: Escape pops this screen, or the app's \
+                                 last screen does nothing.",
+                            )
+                        }
+                    })
+                    .text_size(px(13.0))
+                    .line_height(px(18.0))
+                    .text_color(colors::MUTED),
+                )
+        })
+        .child(modal_view)
 }
