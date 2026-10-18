@@ -118,6 +118,14 @@ pub enum Idiom {
     Desktop,
 }
 
+impl Idiom {
+    /// Whether desktop behavior applies on `os` in this idiom: a desktop
+    /// OS, or a browser in the desktop idiom (TS: `Platform.isDesktop`).
+    pub fn desktop_on(self, os: Os) -> bool {
+        os.is_desktop() || (os == Os::Web && self == Idiom::Desktop)
+    }
+}
+
 /// What the platform knows about the surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Environment {
@@ -169,7 +177,7 @@ impl Environment {
     /// idiom (`desktop={{…}}` props, `Platform.select({ desktop })`,
     /// `Platform.isDesktop`).
     pub fn desktop(&self) -> bool {
-        self.os.is_desktop() || (self.os == Os::Web && self.idiom == Idiom::Desktop)
+        self.idiom.desktop_on(self.os)
     }
 }
 

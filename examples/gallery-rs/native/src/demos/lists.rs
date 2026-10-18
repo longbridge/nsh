@@ -795,7 +795,7 @@ fn cards() -> Section {
     .estimated_item_size(130.0)
     .shows_indicator(false)
     .content_padding_x(14.0)
-    .row_gap(10.0)
+    .column_gap(10.0)
     .h(px(124.0));
     Section::new("Horizontal list")
         .note("1,000 recycled cards")

@@ -1068,6 +1068,19 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                     input()
                         .value(move || draft.get())
                         .multiline(true)
+                        // Return sends on desktops, as in chat apps there
+                        // (Shift+Return adds a line); phones keep return for
+                        // line breaks.
+                        .submit_behavior(if is_desktop() {
+                            SubmitBehavior::Submit
+                        } else {
+                            SubmitBehavior::Newline
+                        })
+                        .on_submit_editing(move |_: &str| {
+                            if !streaming.get_untracked() {
+                                chat.send();
+                            }
+                        })
                         .placeholder(move || format!("Message {}", model.get().name()))
                         .placeholder_color(|| color(colors::FAINT))
                         .selection_color(|| color(colors::ACCENT))

@@ -363,7 +363,7 @@ fn Cards() -> impl IntoElement {
     .disable_interval_momentum(one_step)
     .shows_indicator(false)
     .h(px(128.0))
-    .row_gap(GAP)
+    .column_gap(GAP)
     .content_padding_x(14.0);
     view()
         .gap_3()
