@@ -120,8 +120,10 @@ fn large_title() -> Screen {
                     .tabular_nums(),
             )
     });
+    // A large title on iOS only (TS: `ios={{ headerLargeTitle: true }}`):
+    // elsewhere the header is the usual one.
     header(screen().title("Large title"))
-        .header_large_title(true)
+        .header_large_title(os() == Os::Ios)
         .child(page(
             "iOS: the title shrinks into the bar as the content scrolls.",
             [Card::new()
