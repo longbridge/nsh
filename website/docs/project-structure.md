@@ -87,8 +87,6 @@ error building App.tsx failed
 nsh.json: tailwind: unknown theme key `colours`
 ```
 
-> [!WARNING]
-> `nsh package` and `nsh publish` read `nsh.json` strictly and currently reject keys they do not know, including `theme`. If you set a component theme, package from a copy of the app without it until this is fixed.
 
 ### capabilities
 
