@@ -10,7 +10,7 @@ An NSH app imports everything it uses from a small set of modules. They are all 
 
 ```tsx
 import { mount, signal } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { windowSize } from "nsh/device";
 import { Button, SafeAreaView } from "nsh/ui/mobile";
 ```
@@ -29,7 +29,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | Module | Exports | Page |
 |---|---|---|
 | `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; `View`, `Text`, `Scroll`, `Input`; the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
-| `nsh/animated` | `createNativeValue`, `NativeValue`, `NativeNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
+| `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/list` | `List` (virtualized, recycling list) | [nsh/list](./nsh-list.md) |
 | `nsh/canvas` | `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient` | [nsh/canvas](./nsh-canvas.md) |
 | `nsh/device` | `windowSize`, `colorScheme`, `fontScale`, `Platform`, `PixelRatio`, `I18nManager` | [nsh/device](./nsh-device.md) |

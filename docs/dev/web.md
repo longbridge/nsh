@@ -247,13 +247,13 @@ of the Android animator); bound properties go out as `["a", id, prop, value]` af
 What moves on the web follows the Linux backend (`nsh-platform-linux` `transition.rs`, `navigation.rs`), which was
 measured against it frame by frame (`requestAnimationFrame` samplers of computed styles in headless Chromium):
 
-- **Native values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
+- **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
   border overlay gets its own for border colors, widths and radii, since it draws the border.
 - **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
-  transforms follow the view's own (and the native values bound to it), as the native backends apply them after
+  transforms follow the view's own (and the animated values bound to it), as the native backends apply them after
   the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *
   var(--nsh-ko))`, and the keyframes add to the registered `--nsh-ko` (initial 1).
 - **Layout animations** (`op_la`, for the rest of the batch) run with Web Animations, which play over the views' own

@@ -104,7 +104,7 @@ function nativeComponent<P extends object = {}, E extends object = {}>(
 | 某个 prop 的值变化 | 该 prop 及其新值 |
 | 某个 prop 变为 `undefined` | 该 prop，但没有值（Swift 中为 `nil`，Java 中为 `null`） |
 
-非 JSON 值（函数、类实例、`NativeValue`）无法跨越边界；接口只传数据。
+非 JSON 值（函数、类实例、`AnimatedValue`）无法跨越边界；接口只传数据。
 
 ## 事件
 

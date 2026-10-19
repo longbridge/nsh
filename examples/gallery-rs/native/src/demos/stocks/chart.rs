@@ -8,7 +8,7 @@ use std::{f32::consts::TAU, rc::Rc};
 use nsh_core::{
     PanActivation, Rect,
     canvas::{CanvasGradient, CanvasTextAlign, CanvasTextBaseline, LineJoin},
-    ui::{NativeNode, prelude::*},
+    ui::{AnimatedNode, prelude::*},
 };
 
 use super::{
@@ -156,8 +156,8 @@ struct Plot {
 /// The live point's pulse as the intraday line draws it: the ring's alpha
 /// and radius (native: they move without a drawing).
 struct LivePoint {
-    alpha: NativeNode,
-    radius: NativeNode,
+    alpha: AnimatedNode,
+    radius: AnimatedNode,
 }
 
 impl Plot {
@@ -554,7 +554,11 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
     let running = live.running;
     effect(move || run_pulse(&pulse, running.get()));
     // The crosshair: where it is, and whether it shows.
-    let [cross_x, cross_y, shown] = [native_value(0.0), native_value(0.0), native_value(0.0)];
+    let [cross_x, cross_y, shown] = [
+        animated_value(0.0),
+        animated_value(0.0),
+        animated_value(0.0),
+    ];
     // The data and its frame, after a tick that moved the stock (its
     // minutes moved with its quote), the period or the width changed.
     let plot = {
@@ -755,7 +759,7 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                         .on_responder_release(move |_: &ResponderEvent| released(None))
                         .on_responder_terminate(move |_: &ResponderEvent| ended(None)),
                 )
-                // The crosshair over the canvas, moved by native values.
+                // The crosshair over the canvas, moved by animated values.
                 .child(
                     view()
                         .pointer_events(PointerEvents::None)

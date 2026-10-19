@@ -372,29 +372,29 @@ pub(crate) fn selection<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop>
     ))
 }
 
-/// `pan`: `{ x, y }` native values.
+/// `pan`: `{ x, y }` animated values.
 pub(crate) fn pan<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
-    let axis = |key| input.field(key).and_then(|v| v.native_node());
+    let axis = |key| input.field(key).and_then(|v| v.animated_node());
     Some(Prop::PanValues(axis("x"), axis("y")))
 }
 
 /// `pinch`: `{ scale }`.
 pub(crate) fn pinch<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::PinchValue(
-        input.field("scale").and_then(|v| v.native_node()),
+        input.field("scale").and_then(|v| v.animated_node()),
     ))
 }
 
 /// `rotation`: `{ angle }`.
 pub(crate) fn rotation<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
     Some(Prop::RotationValue(
-        input.field("angle").and_then(|v| v.native_node()),
+        input.field("angle").and_then(|v| v.animated_node()),
     ))
 }
 
-/// `scrollValue`: a native value.
+/// `scrollValue`: an animated value.
 pub(crate) fn scroll_value<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
-    Some(Prop::ScrollValue(input.native_node()))
+    Some(Prop::ScrollValue(input.animated_node()))
 }
 
 /// `hitSlop`: one number for every edge, or the edges.

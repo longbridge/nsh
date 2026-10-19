@@ -188,11 +188,11 @@ fn Pager() -> impl IntoElement {
     // narrower than the window).
     let width = signal(untracked(window).width - 72.0);
     let page = signal(0_usize);
-    // The scroll offset, fed natively, and the pages' width as a native
+    // The scroll offset, fed natively, and the pages' width as an animated
     // value: the offset in pages (`at`) moves the parallax and the
     // indicator without making them again when the width changes.
-    let x = native_value(0.0);
-    let pages_wide = native_value(width.get_untracked().max(1.0));
+    let x = animated_value(0.0);
+    let pages_wide = animated_value(width.get_untracked().max(1.0));
     {
         let pages_wide = pages_wide.clone();
         effect(move || pages_wide.set(width.get().max(1.0)));

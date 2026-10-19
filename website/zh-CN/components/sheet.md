@@ -101,5 +101,5 @@ mount(App);
 ## 相关
 
 - [Modal](./navigation.md#modal)：全屏和页面表单样式的模态层。
-- [动画](../docs/animation.md)：原生值与弹簧动画。
+- [动画](../docs/animation.md)：动画值与弹簧动画。
 - [ActionSheet](./action-sheet.md)：系统的操作表。

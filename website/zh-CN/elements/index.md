@@ -110,18 +110,18 @@ const hovered = signal<string | null>(null);
 | `nativeID` | `string` | 为视图命名，供其他元素引用，例如输入框引用的 `InputAccessoryView`。 |
 | `testID` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
 
-### 驱动原生值的手势
+### 驱动动画值的手势
 
 这些属性把手势绑定到[原生动画值](../modules/nsh-animated.md)，值在 UI 线程上变化，每帧都不经过 JS。参见[触摸与手势](../docs/touch-and-gestures.md)。
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `pan` | `{ x?: NativeValue; y?: NativeValue }` | 拖动驱动这些值（单位为点）。 |
+| `pan` | `{ x?: AnimatedValue; y?: AnimatedValue }` | 拖动驱动这些值（单位为点）。 |
 | `onPanStart` | `(e: PanEvent) => void` | 拖动开始。 |
 | `onPanEnd` | `(e: PanEvent) => void` | 拖动结束，带有松手时的速度（例如用来启动 `decay`）。 |
-| `pinch` | `{ scale?: NativeValue }` | 双指捏合驱动 `scale`。 |
+| `pinch` | `{ scale?: AnimatedValue }` | 双指捏合驱动 `scale`。 |
 | `onPinchStart` / `onPinchEnd` | `(e: { scale: number; velocity: number }) => void` | 捏合开始 / 结束。 |
-| `rotation` | `{ angle?: NativeValue }` | 双指旋转驱动 `angle`（角度）。 |
+| `rotation` | `{ angle?: AnimatedValue }` | 双指旋转驱动 `angle`（角度）。 |
 | `onRotationStart` / `onRotationEnd` | `(e: { rotation: number; velocity: number }) => void` | 旋转开始 / 结束。 |
 
 `PanEvent` 为 `{ translationX, translationY, velocityX, velocityY, valueX?, valueY? }`：自开始以来的位移、以点每秒计的速度，以及此刻所绑定值的数值（拖动可能在动画中途抓住一个值）。

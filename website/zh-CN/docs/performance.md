@@ -97,10 +97,10 @@ core 只发送变化的部分：新视图不带默认样式，也不带空的事
 
 ```tsx
 import { View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { List } from "nsh/list";
 
-const scrollY = createNativeValue(0);
+const scrollY = createAnimatedValue(0);
 
 <View
   style={{
@@ -114,7 +114,7 @@ const scrollY = createNativeValue(0);
 ```
 
 - `timing`、`spring` 和 `decay` 在平台的 UI 线程上逐帧运行，每帧不涉及 JS。
-- `scrollValue` 在同一帧内把滚动偏移写入原生值；`pan={{ x, y }}` 让拖动直接移动视图。JS 只在结束时得到通知（promise
+- `scrollValue` 在同一帧内把滚动偏移写入动画值；`pan={{ x, y }}` 让拖动直接移动视图。JS 只在结束时得到通知（promise
   resolve，`onPanEnd` 拿到速度）。
 - `Animated.sequence` / `parallel` / `stagger` / `loop` 作为一棵原生树运行：每一步在上一步结束的瞬间开始，中间没有
   等待 JS 的间隙。
@@ -200,7 +200,7 @@ nsh run App.tsx --target macos --fps --release
 
 - 交互：一次点击只改变少量 mount item，而不是几十个。
 - 列表：长列表一律用 `List`，并设置 `estimatedItemSize`；每个条目的状态放在数据里。
-- 动画：使用原生值，而不是每帧写入的 signal。
+- 动画：使用动画值，而不是每帧写入的 signal。
 - 滚动效果：使用 `scrollValue`，而不是 `onScroll`。
 - 处理函数：不在每次按键或每个滚动事件中做繁重工作；用 `computed` 缓存。
 - 组件：合适时优先使用 `nsh/ui/mobile` 的 Rust 组件；它们比用 TSX 写的等价组件花费更少的 JS。

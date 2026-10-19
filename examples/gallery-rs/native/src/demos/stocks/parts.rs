@@ -38,7 +38,7 @@ pub(crate) struct SpringBarProps {
 /// native spring: the bar is the track's width and slides in, clipped.
 #[component]
 pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
-    let x = native_value(0.0);
+    let x = animated_value(0.0);
     // The track's width as laid out (0 before), and whether the bar was
     // placed (the first place jumps, later ones spring).
     let width = stored(0.0_f32);
@@ -123,8 +123,8 @@ pub(crate) struct LiveDotProps {
 
 /// A value that pulses 0 → 1 over 1.4 s, looped (started by
 /// [`run_pulse`]).
-pub(crate) fn pulse() -> (NativeValue, Animation) {
-    let v = native_value(0.0);
+pub(crate) fn pulse() -> (AnimatedValue, Animation) {
+    let v = animated_value(0.0);
     let looped = Animation::timing(
         &v,
         1.0,
@@ -135,7 +135,7 @@ pub(crate) fn pulse() -> (NativeValue, Animation) {
 }
 
 /// Runs a [`pulse`] while `running`; stopped, it fades back to 0.
-pub(crate) fn run_pulse((v, looped): &(NativeValue, Animation), running: bool) {
+pub(crate) fn run_pulse((v, looped): &(AnimatedValue, Animation), running: bool) {
     if running {
         let _ = looped.start();
     } else {

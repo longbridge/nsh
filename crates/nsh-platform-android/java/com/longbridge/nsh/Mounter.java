@@ -1302,7 +1302,7 @@ final class Mounter {
         }
     }
 
-    /** Canvas native value slot `n` arrives as property `CANVAS_ARG + n` (`animation.rs`). */
+    /** Canvas animated value slot `n` arrives as property `CANVAS_ARG + n` (`animation.rs`). */
     private static final int CANVAS_ARG = 1000;
 
     void outputs(float[] out) {

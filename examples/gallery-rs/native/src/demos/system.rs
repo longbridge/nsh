@@ -293,7 +293,7 @@ fn Dialogs() -> impl IntoElement {
     // What the last dialog answered.
     let answer = signal(None::<Toned>);
     // Pops the answer in each time it changes.
-    let pop = native_value(1.0);
+    let pop = animated_value(1.0);
     let owner = Owner::current();
     // Shows `dialog`, then what `answered` makes of the index chosen (-1:
     // dismissed), popping it in.
@@ -518,7 +518,7 @@ fn FramesAndTimers() -> impl IntoElement {
     // Seconds since the page opened, counted by an interval.
     let ticks = signal(0_u32);
     // Flashes the beat dot once per tick (the fade runs natively).
-    let beat = native_value(0.0);
+    let beat = animated_value(0.0);
     {
         let beat = beat.clone();
         set_interval(Duration::from_secs(1), move || {

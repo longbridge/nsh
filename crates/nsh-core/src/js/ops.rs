@@ -90,7 +90,7 @@ impl<'a, L: HostList<Item: HostInput>> OpReader<'a, L> {
 }
 
 /// An argument of a recorded operation: how it is read (with the list's
-/// context `Cx`, e.g. the drawing that numbers' native values become slots
+/// context `Cx`, e.g. the drawing that numbers' animated values become slots
 /// of) and its TypeScript type.
 pub trait OpArg<Cx>: Sized {
     /// How many items it takes (an `[f32; 4]` four, one parameter each).

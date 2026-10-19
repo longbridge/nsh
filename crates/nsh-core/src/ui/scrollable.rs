@@ -3,7 +3,7 @@
 //! (`ScrollingHostProps`).
 
 use super::{
-    Element, IntoReactive, Listener, NativeValue, ScrollEvent, ScrollOffset,
+    AnimatedValue, Element, IntoReactive, Listener, ScrollEvent, ScrollOffset,
     events::{self, Decode},
     host,
 };
@@ -146,10 +146,10 @@ pub trait Scrollable: Element {
         self
     }
 
-    /// Follows the scroll offset (along its axis) with a native value:
+    /// Follows the scroll offset (along its axis) with an animated value:
     /// headers that shrink or fade, parallax, with no engine work per frame
     /// (TS: `scrollValue`).
-    fn scroll_value(mut self, value: &NativeValue) -> Self {
+    fn scroll_value(mut self, value: &AnimatedValue) -> Self {
         host::set(self.node(), Prop::ScrollValue(Some(value.node().id())));
         self.node().attrs.bound.push(value.node().clone());
         self

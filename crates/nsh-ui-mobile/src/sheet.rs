@@ -43,7 +43,7 @@ fn settle(velocity: Option<f32>) -> Spring {
 #[component]
 pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
     // How far down the panel is from where it rests.
-    let offset = native_value(0.0);
+    let offset = animated_value(0.0);
     // Closing: the panel slides away, then the app is told.
     let closing = stored(None::<Spawned<()>>);
     // Slides in from below the screen.

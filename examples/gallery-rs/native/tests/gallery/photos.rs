@@ -1,5 +1,5 @@
 //! The Photos demo on a headless engine: its rows render, the list feeds
-//! the hero's and the bar's native values, more load at the end, a pull
+//! the hero's and the bar's animated values, more load at the end, a pull
 //! refreshes and is counted.
 
 use std::time::Duration;

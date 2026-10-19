@@ -68,9 +68,9 @@ pub struct PanEvent {
     pub velocity_x: f32,
     /// Vertical velocity.
     pub velocity_y: f32,
-    /// The bound horizontal native value now (`Interactive::pan`).
+    /// The bound horizontal animated value now (`Interactive::pan`).
     pub value_x: Option<f32>,
-    /// The bound vertical native value now.
+    /// The bound vertical animated value now.
     pub value_y: Option<f32>,
 }
 

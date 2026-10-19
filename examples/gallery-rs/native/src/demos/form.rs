@@ -31,9 +31,9 @@ use crate::{
 #[derive(Clone)]
 struct FieldFx {
     /// 0 blurred, 1 focused: the ring's opacity.
-    focus: NativeValue,
+    focus: AnimatedValue,
     /// The field's horizontal offset while it shakes.
-    shake: NativeValue,
+    shake: AnimatedValue,
     /// It shows an error now.
     shown: Stored<bool>,
 }
@@ -41,8 +41,8 @@ struct FieldFx {
 impl FieldFx {
     fn new() -> Self {
         Self {
-            focus: native_value(0.0),
-            shake: native_value(0.0),
+            focus: animated_value(0.0),
+            shake: animated_value(0.0),
             shown: stored(false),
         }
     }

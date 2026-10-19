@@ -1,5 +1,5 @@
 //! Canvas: 2D drawing on cards: a dial whose needle and sweep follow one
-//! native value, an area chart and a ridgeline that sweep in natively, a
+//! animated value, an area chart and a ridgeline that sweep in natively, a
 //! dot matrix with a pulsing dot, a dumbbell plot whose dots travel, a
 //! clock, SVG paths, compositing and touch drawing (as the TSX gallery's
 //! `demos/CanvasDemo.tsx`).
@@ -136,8 +136,8 @@ fn dashed(p: Painter, (x0, y0): (f32, f32), (x1, y1): (f32, f32), color: Color) 
         .restore()
 }
 
-/// A rectangle whose width is a native value (the reveals' clips).
-fn rect_of(mut p: Painter, x: f32, y: f32, w: &NativeNode, h: f32) -> Painter {
+/// A rectangle whose width is an animated value (the reveals' clips).
+fn rect_of(mut p: Painter, x: f32, y: f32, w: &AnimatedNode, h: f32) -> Painter {
     let w = p.num(w);
     p.op(CanvasOp::Path(PathOp::Rect([
         Num::Const(x),
@@ -165,13 +165,13 @@ fn measured(height: f32, draw: impl Fn(Palette, f32) -> Painter + 'static) -> Ca
 
 /// A value that sweeps 0 → 1 once mounted and again on [`replay`]:
 /// canvases clip to it.
-fn reveal(duration: f32) -> NativeValue {
-    let t = native_value(0.0);
+fn reveal(duration: f32) -> AnimatedValue {
+    let t = animated_value(0.0);
     replay(&t, duration);
     t
 }
 
-fn replay(t: &NativeValue, duration: f32) {
+fn replay(t: &AnimatedValue, duration: f32) {
     t.set(0.0);
     t.timing(1.0, duration, Easing::Curve(Curve::Cubic, EaseMode::Out));
 }
@@ -192,7 +192,7 @@ fn legends(items: impl IntoIterator<Item = (AdaptiveColor, &'static str)>) -> Vi
 
 // ---------------------------------------------------------------------------
 // A dial: a tick ring, a hatched red zone, a gradient sweep and a needle, all
-// bound to one native value. Springing it moves the needle on the UI thread.
+// bound to one animated value. Springing it moves the needle on the UI thread.
 
 /// The dial's presets: label and load.
 const PRESETS: [(&str, u32); 3] = [("Idle", 18), ("Cruise", 57), ("Peak", 91)];
@@ -203,7 +203,7 @@ fn load_of(preset: u32) -> u32 {
 }
 
 /// The dial at `load`, its needle and sweep bound to `needle`.
-fn draw_dial(c: Palette, width: f32, height: f32, needle: &NativeValue, load: u32) -> Painter {
+fn draw_dial(c: Palette, width: f32, height: f32, needle: &AnimatedValue, load: u32) -> Painter {
     let (a0, a1) = (0.75 * PI, 2.25 * PI);
     let angle = needle.interpolate(&[0.0, 100.0], &[a0, a1]);
     let (cx, cy) = (width / 2.0, height * 0.54);
@@ -314,7 +314,7 @@ fn draw_dial(c: Palette, width: f32, height: f32, needle: &NativeValue, load: u3
 #[component]
 fn Dial() -> impl IntoElement {
     let preset = signal(1_u32);
-    let needle = native_value(0.0);
+    let needle = animated_value(0.0);
     needle.spring(load_of(1) as f32, spring(90.0, 9.0));
     let height = 230.0;
     let load = computed(move || load_of(preset.get()));
@@ -332,7 +332,7 @@ fn Dial() -> impl IntoElement {
     Card::new()
         .icon(IconName::Spark)
         .title("Turbine 3 load")
-        .subtitle("Needle and sweep on one native value")
+        .subtitle("Needle and sweep on one animated value")
         .child(measured(height, move |c, width| {
             draw_dial(c, width, height, &drawn, load.get())
         }))
@@ -407,7 +407,7 @@ fn last(data: &[f64]) -> f64 {
 }
 
 /// The area chart of `data`, its data clipped to `sweep`.
-fn draw_area(c: Palette, width: f32, height: f32, data: &[f64], sweep: &NativeValue) -> Painter {
+fn draw_area(c: Palette, width: f32, height: f32, data: &[f64], sweep: &AnimatedValue) -> Painter {
     let values: Vec<f32> = data.iter().map(|v| *v as f32).collect();
     let font = sans(11.0, 400);
     let measure = |s: &str| measure_text(&font, s);
@@ -582,7 +582,7 @@ fn ridges() -> Vec<Vec<f32>> {
 }
 
 /// The ridgeline, its curves clipped to `sweep`.
-fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &NativeValue) -> Painter {
+fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Painter {
     let font = sans(11.0, 400);
     let measure = |s: &str| measure_text(&font, s);
     let left = measure("Mon") + 10.0;
@@ -685,7 +685,7 @@ fn levels() -> [AdaptiveColor; 5] {
 }
 
 /// The dot matrix, its newest dot pulsing with `pulse`.
-fn draw_dots(c: Palette, width: f32, height: f32, pulse: &NativeValue) -> Painter {
+fn draw_dots(c: Palette, width: f32, height: f32, pulse: &AnimatedValue) -> Painter {
     let levels = levels().map(color);
     let (rows, gap) = (7, 12.5);
     let cols = (width / gap).floor() as i32;
@@ -729,7 +729,7 @@ fn draw_dots(c: Palette, width: f32, height: f32, pulse: &NativeValue) -> Painte
 /// The dot matrix's card.
 #[component]
 fn DotMatrix() -> impl IntoElement {
-    let pulse = native_value(0.0);
+    let pulse = animated_value(0.0);
     let looped = Animation::timing(
         &pulse,
         1.0,
@@ -781,7 +781,7 @@ const ROUTES: [(&str, f32, f32); 6] = [
 ];
 
 /// The dumbbell plot, its after dots travelling with `t`.
-fn draw_dumbbell(c: Palette, width: f32, height: f32, t: &NativeValue) -> Painter {
+fn draw_dumbbell(c: Palette, width: f32, height: f32, t: &AnimatedValue) -> Painter {
     let (name_font, small) = (sans(13.0, 400), sans(11.0, 400));
     let left = ROUTES
         .iter()
@@ -846,7 +846,7 @@ fn draw_dumbbell(c: Palette, width: f32, height: f32, t: &NativeValue) -> Painte
 }
 
 /// Moves the after dots from the before ones again.
-fn play(t: &NativeValue) {
+fn play(t: &AnimatedValue) {
     t.set(0.0);
     t.timing(1.0, 1500.0, Easing::Curve(Curve::Cubic, EaseMode::Out));
 }
@@ -854,7 +854,7 @@ fn play(t: &NativeValue) {
 /// The dumbbell plot's card: "Replay" moves its dots again.
 #[component]
 fn Dumbbell() -> impl IntoElement {
-    let t = native_value(0.0);
+    let t = animated_value(0.0);
     play(&t);
     let height = 30.0 * ROUTES.len() as f32 + 24.0;
     let drawn = t.clone();
@@ -877,7 +877,7 @@ fn Dumbbell() -> impl IntoElement {
 // A clock: transforms, save / restore, a second hand rotating natively.
 
 /// The clock's face, its second hand turned by `seconds`.
-fn draw_clock(c: Palette, size: f32, seconds: &NativeValue) -> Painter {
+fn draw_clock(c: Palette, size: f32, seconds: &AnimatedValue) -> Painter {
     let r = size / 2.0;
     let mut p = Painter::new()
         .translate(r, r)
@@ -934,7 +934,7 @@ fn draw_clock(c: Palette, size: f32, seconds: &NativeValue) -> Painter {
 /// The clock's card.
 #[component]
 fn Clock() -> impl IntoElement {
-    let seconds = native_value(0.0);
+    let seconds = animated_value(0.0);
     let spin =
         Animation::timing(&seconds, 60.0, Timing::new(60_000.0, Easing::Linear)).looped(None);
     spin.start();

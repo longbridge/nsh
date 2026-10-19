@@ -116,7 +116,7 @@ fn fingers(touch: &TouchEvent) -> (Vec<&TouchPoint>, Option<&TouchPoint>) {
 /// Drag, pinch and rotate one photo at the same time, all on the UI thread.
 #[component]
 fn Transformable() -> impl IntoElement {
-    let values = [0.0, 0.0, 1.0, 0.0].map(native_value);
+    let values = [0.0, 0.0, 1.0, 0.0].map(animated_value);
     let [x, y, scale, angle] = values.clone();
     // The last drag's distance, scale and angle.
     let drag = signal(0.0_f32);
@@ -228,7 +228,7 @@ fn Ball() -> impl IntoElement {
     let start = stored((0.0_f32, 0.0_f32));
     let state = signal((SharedString::from("Idle"), Tone::Neutral));
     // 1 while held.
-    let grab = native_value(0.0);
+    let grab = animated_value(0.0);
     // The ball's colors follow the appearance natively.
     let ball = {
         let (grant, release, terminate) = (grab.clone(), grab.clone(), grab.clone());
@@ -447,7 +447,7 @@ const PRESS_EVENTS: [&str; 4] = ["pressIn", "press", "longPress", "pressOut"];
 /// Each press event lights up its chip as it arrives.
 #[component]
 fn PressEvents() -> impl IntoElement {
-    let flashes: Rc<[NativeValue]> = PRESS_EVENTS.iter().map(|_| native_value(0.0)).collect();
+    let flashes: Rc<[AnimatedValue]> = PRESS_EVENTS.iter().map(|_| animated_value(0.0)).collect();
     let count = signal(0_u32);
     // The latest first.
     let log = signal(Vec::<&'static str>::new());
@@ -601,7 +601,7 @@ fn PressEvents() -> impl IntoElement {
 #[component]
 fn HitSlop() -> impl IntoElement {
     let taps = signal(0_u32);
-    let ring = native_value(0.0);
+    let ring = animated_value(0.0);
     let sin = Easing::Curve(Curve::Sin, EaseMode::InOut);
     let breathe = Animation::sequence([
         Animation::timing(&ring, 1.0, Timing::new(1400.0, sin)),

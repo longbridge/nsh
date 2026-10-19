@@ -1,6 +1,6 @@
 ---
 title: Animation
-description: Style transitions and keyframe animations, native values with timing, spring and decay, interpolation, composite animations, Easing, LayoutAnimation, and what runs on the UI thread.
+description: Style transitions and keyframe animations, animated values with timing, spring and decay, interpolation, composite animations, Easing, LayoutAnimation, and what runs on the UI thread.
 order: 43
 group: ui
 demo: guide-animation
@@ -16,7 +16,7 @@ There are four tools, from the simplest to the most flexible:
 |---|---|
 | [Transitions](#transitions) | A style change that should animate instead of jump: a color, an opacity, a transform. |
 | [Keyframe animations](#keyframe-animations) | A spinner, a pulsing placeholder, a bouncing hint. |
-| [Native values](#native-values) | Anything driven by a value over time: springs, gestures, scroll position, sequences. |
+| [Animated values](#animated-values) | Anything driven by a value over time: springs, gestures, scroll position, sequences. |
 | [LayoutAnimation](#layoutanimation) | Size and position changes after a re-render: items inserted, removed, reordered, a panel expanding. |
 
 ## Transitions
@@ -88,17 +88,17 @@ Four built-in keyframe animations run natively, forever by default: `spin` (one 
 
 Tailwind: `animate-spin`, `animate-ping`, `animate-pulse`, `animate-bounce`, `animate-none`.
 
-## Native values
+## Animated values
 
-A native value is a number that lives on the UI thread. Create one with `createNativeValue` from `nsh/animated`, bind it to styles, and animate it; the bound views follow it every frame without re-rendering.
+An animated value is a number that lives on the UI thread. Create one with `createAnimatedValue` from `nsh/animated`, bind it to styles, and animate it; the bound views follow it every frame without re-rendering.
 
 ```tsx
 import { mount, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 
 function App() {
-  const x = createNativeValue(0);
-  const opacity = createNativeValue(1);
+  const x = createAnimatedValue(0);
+  const opacity = createAnimatedValue(1);
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 24 }}>
       <View style={{ width: 60, height: 60, borderRadius: 12, backgroundColor: "#0969da", opacity, transform: [{ translateX: x }] }} />
@@ -122,16 +122,16 @@ mount(App);
 **What can be bound:** `opacity`; `backgroundColor`, `borderColor` (every side) and a `Text`'s `color` (the whole text), through an interpolation to colors; `shadowColor`, `shadowOpacity` and `shadowRadius`; and the `translateX`, `translateY`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY` and `rotateZ` steps of `transform`. A focus ring or a price that flashes green is a color interpolation bound to `borderColor` or `color`:
 
 ```tsx
-const flash = createNativeValue(0);
+const flash = createAnimatedValue(0);
 const color = flash.interpolate({ inputRange: [0, 1], outputRange: ["#1f2328", "#1a7f37"] });
 
 <Text style={{ color }}>{price()}</Text>
 // On a new price: flash.set(1); flash.timing(0, { duration: 600 });
-``` Native values also drive [canvas drawings](./canvas.md#animating-with-native-values), receive scroll offsets ([`scrollValue`](./scrolling.md#scroll-linked-effects-scrollvalue)) and gestures ([`pan`, `pinch`, `rotation`](./touch-and-gestures.md#native-gestures-pan-pinch-and-rotation)).
+``` Animated values also drive [canvas drawings](./canvas.md#driving-drawings-with-animated-values), receive scroll offsets ([`scrollValue`](./scrolling.md#scroll-linked-effects-scrollvalue)) and gestures ([`pan`, `pinch`, `rotation`](./touch-and-gestures.md#native-gestures-pan-pinch-and-rotation)).
 
-The value is kept alive by the views bound to it, so a binding never breaks because a JS variable went out of scope. Create native values in the component that owns them (not at module level when every instance needs its own).
+The value is kept alive by the views bound to it, so a binding never breaks because a JS variable went out of scope. Create animated values in the component that owns them (not at module level when every instance needs its own).
 
-### NativeValue methods
+### AnimatedValue methods
 
 | Method | Description |
 |---|---|
@@ -167,7 +167,7 @@ const where = await x.getValue();
 `value.interpolate({ inputRange, outputRange })` maps a value through piecewise linear segments to numbers, colors or angles, and returns a new node you can bind. One value can drive many properties.
 
 ```tsx
-const t = createNativeValue(0);
+const t = createAnimatedValue(0);
 
 <View
   style={{
@@ -199,7 +199,7 @@ Nodes combine with arithmetic, also natively: `a.add(b)`, `a.sub(b)`, `a.mul(b)`
 `node.diffClamp(min, max)` follows the node's *changes* while staying within `min..max`. Applied to a scroll offset, it makes a header that hides as the content scrolls up and comes back as soon as it scrolls down:
 
 ```tsx
-const scroll = createNativeValue(0);
+const scroll = createAnimatedValue(0);
 const header = scroll.diffClamp(0, 56);
 
 <Scroll style={{ flex: 1 }} scrollValue={scroll}>…</Scroll>
@@ -211,10 +211,10 @@ const header = scroll.diffClamp(0, 56);
 `Animated` builds animations out of steps and runs the whole tree natively: each step starts on the UI thread the moment the previous one ends, with no gap and no JS in between.
 
 ```tsx
-import { Animated, createNativeValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh/animated";
 
-const ys = [0, 1, 2, 3, 4].map(() => createNativeValue(0));
-const fade = createNativeValue(1);
+const ys = [0, 1, 2, 3, 4].map(() => createAnimatedValue(0));
+const fade = createAnimatedValue(1);
 
 const hop = Animated.stagger(
   80,
@@ -332,7 +332,7 @@ LayoutAnimation.configureNext({
 | LayoutAnimation | UI thread | none |
 | `requestAnimationFrame` loops, `onScroll` handlers, `PanResponder` | JS, then a re-render | every frame |
 
-Reach for `requestAnimationFrame` (a global, following the display) only for what cannot be described ahead of time, such as a physics simulation in JS. Anything that can be a native value should be one.
+Reach for `requestAnimationFrame` (a global, following the display) only for what cannot be described ahead of time, such as a physics simulation in JS. Anything that can be an animated value should be one.
 
 ## Reduced motion
 
@@ -352,7 +352,7 @@ See [Accessibility](./accessibility.md#reduced-motion).
 ## Related
 
 - [`nsh/animated`](../modules/nsh-animated.md): the reference.
-- [Touch and gestures](./touch-and-gestures.md): driving native values with the finger.
+- [Touch and gestures](./touch-and-gestures.md): driving animated values with the finger.
 - [Scrolling](./scrolling.md#scroll-linked-effects-scrollvalue): `scrollValue`.
-- [Canvas](./canvas.md#animating-with-native-values): native values in drawings.
+- [Canvas](./canvas.md#driving-drawings-with-animated-values): animated values in drawings.
 - [Style reference](../modules/style-reference.md): the `transition*` and `animation*` keys.

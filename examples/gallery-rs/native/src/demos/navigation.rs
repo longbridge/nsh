@@ -618,7 +618,7 @@ fn modal_body(
 pub(crate) fn Navigation() -> impl IntoElement {
     let sheet = signal(None::<Presented>);
     // The dialog's spring in, 0 to 1.
-    let pop = native_value(0.0);
+    let pop = animated_value(0.0);
     // The back button is intercepted, and the presses it caught.
     let intercepting = signal(false);
     let presses = signal(0_u32);

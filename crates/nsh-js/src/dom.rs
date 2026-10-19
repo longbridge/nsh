@@ -598,7 +598,7 @@ pub(crate) fn node_id(ctx: *mut JsContext, v: JsValue) -> Option<NodeId> {
 }
 
 /// Keeps `value` (borrowed; objects only) alive with node `node` under
-/// `key`, replacing what it kept there: the native values a view reads.
+/// `key`, replacing what it kept there: the animated values a view reads.
 pub(crate) fn retain(ctx: *mut JsContext, node: JsValue, key: &'static str, value: JsValue) {
     let p = node_ptr(ctx, node);
     if !p.is_null() {

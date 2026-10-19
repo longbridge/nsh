@@ -1,5 +1,5 @@
 import { cleanup, effect, Input, type JSX, Scroll, signal, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { BackHandler } from "nsh/android";
 import { Platform } from "nsh/device";
 import { Alert, Modal, SafeAreaView, Screen, useSafeAreaInsets } from "nsh/ui/mobile";
@@ -362,7 +362,7 @@ export function Navigation() {
   });
   const push = (page: () => JSX.Element) => () => nav.push({ name: "page", page });
   // The dialog springs up from a little smaller each time it opens.
-  const pop = createNativeValue(0);
+  const pop = createAnimatedValue(0);
   effect(() => {
     if (sheet() !== "dialog") return;
     pop.set(0);

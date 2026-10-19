@@ -20,7 +20,7 @@ use crate::ChannelSink;
 /// looping until stopped.
 #[component]
 fn Jumper() -> impl IntoElement {
-    let x = native_value(0.0);
+    let x = animated_value(0.0);
     let linear = |ms| Timing::new(ms, Easing::Linear);
     let jump = Animation::sequence([
         Animation::timing(

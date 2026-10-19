@@ -126,7 +126,7 @@ draw a panel.
   ~150 per wheel event in Lists, ~3.5 ms each event in a debug build), and canvases out of sight are not redrawn by
   their animations.
 
-  Partial canvas redraws (`nsh_core::canvas::DamageScan`, `docs/dev/canvas.md`): an animation of a canvas's native
+  Partial canvas redraws (`nsh_core::canvas::DamageScan`, `docs/dev/canvas.md`): an animation of a canvas's animated
   values redraws only what the operations reading them cover (Stocks: the chart's ring ~31×31 pt of its 524×340, the
   sparklines' ~23×25 of 124×58; whole only on the ticks). With `drawRect:` this halved the main-thread frame (Stocks
   idle `main` p50 ~3.0 → ~2.0 ms, CPU ~62% → ~44%). On top of content layers drawn asynchronously the gain is within

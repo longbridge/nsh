@@ -74,7 +74,7 @@ pub(crate) enum PressEvent {
 /// [`press_with`].
 #[component]
 pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElement {
-    let scale = native_value(1.0);
+    let scale = animated_value(1.0);
     let (down, up) = (scale.clone(), scale.clone());
     view()
         .bind_scale(&scale)
@@ -138,7 +138,7 @@ pub(crate) struct AppearProps {
 /// (40 ms apart). `flex` lets it wrap a page that fills its parent.
 #[component]
 pub(crate) fn Appear(props: AppearProps) -> impl IntoElement {
-    let shown = native_value(0.0);
+    let shown = animated_value(0.0);
     shown.timing_with(
         1.0,
         Timing {

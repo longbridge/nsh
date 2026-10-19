@@ -10,7 +10,7 @@ NSH 应用用到的一切都从一小组模块导入。这些模块全部是原�
 
 ```tsx
 import { mount, signal } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { windowSize } from "nsh/device";
 import { Button, SafeAreaView } from "nsh/ui/mobile";
 ```
@@ -29,7 +29,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | 模块 | 导出 | 页面 |
 |---|---|---|
 | `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`；`View`、`Text`、`Scroll`、`Input`；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
-| `nsh/animated` | `createNativeValue`、`NativeValue`、`NativeNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
+| `nsh/animated` | `createAnimatedValue`、`AnimatedValue`、`AnimatedNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/list` | `List`（虚拟化、可复用单元格的列表） | [nsh/list](./nsh-list.md) |
 | `nsh/canvas` | `Canvas`、`Path2D`、`CanvasRenderingContext2D`、`CanvasGradient` | [nsh/canvas](./nsh-canvas.md) |
 | `nsh/device` | `windowSize`、`colorScheme`、`fontScale`、`Platform`、`PixelRatio`、`I18nManager` | [nsh/device](./nsh-device.md) |

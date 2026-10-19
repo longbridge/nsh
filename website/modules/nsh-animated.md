@@ -1,21 +1,21 @@
 ---
 title: nsh/animated
-description: Native values, animation drivers, composed animations, easings and layout animation.
+description: Animated values, animation drivers, composed animations, easings and layout animation.
 order: 3
 demo: mod-animated
 ---
 
 # nsh/animated
 
-`nsh/animated` animates on the UI thread. You create a **native value**, bind it (or values derived from it) to a style property, and start an animation; from then on every frame is computed natively, without running JavaScript. A busy JS thread cannot make the animation stutter, and an animation costs no JS work per frame.
+`nsh/animated` animates on the UI thread. You create a **animated value**, bind it (or values derived from it) to a style property, and start an animation; from then on every frame is computed natively, without running JavaScript. A busy JS thread cannot make the animation stutter, and an animation costs no JS work per frame.
 
 ```ts
-import { Animated, createNativeValue, Easing, LayoutAnimation, NativeNode, NativeValue } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing, LayoutAnimation, AnimatedNode, AnimatedValue } from "nsh/animated";
 ```
 
 See [Animation](../docs/animation.md) for the guide.
 
-## What a native value can drive
+## What an animated value can drive
 
 | Where | How |
 |---|---|
@@ -30,20 +30,20 @@ See [Animation](../docs/animation.md) for the guide.
 
 Other style properties take plain values; to animate the layout itself (sizes, positions in the flow), use [`LayoutAnimation`](#layoutanimation).
 
-## createNativeValue
+## createAnimatedValue
 
 ```ts
-function createNativeValue(value?: number): NativeValue;
+function createAnimatedValue(value?: number): AnimatedValue;
 ```
 
-Creates a native value starting at `value` (default `0`).
+Creates an animated value starting at `value` (default `0`).
 
 ```tsx
 import { mount, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
 function App() {
-  const x = createNativeValue(0);
+  const x = createAnimatedValue(0);
   let right = false;
   const toggle = () => {
     right = !right;
@@ -61,12 +61,12 @@ mount(App);
 ```
 
 > [!NOTE]
-> A native value lives on the UI thread and changes there every frame, so JS reads it asynchronously: `await value.getValue()` (or the promise `stop()` returns) gives the value at that moment. Keep the target in a variable or a signal when your code needs it right away, as above. Gesture events report the values at their end (`PanEvent.valueX` / `valueY`).
+> An animated value lives on the UI thread and changes there every frame, so JS reads it asynchronously: `await value.getValue()` (or the promise `stop()` returns) gives the value at that moment. Keep the target in a variable or a signal when your code needs it right away, as above. Gesture events report the values at their end (`PanEvent.valueX` / `valueY`).
 
-## NativeValue
+## AnimatedValue
 
 ```ts
-class NativeValue extends NativeNode {
+class AnimatedValue extends AnimatedNode {
   constructor(value: number);
   set(value: number): void;
   stop(): Promise<number>;
@@ -95,15 +95,15 @@ class NativeValue extends NativeNode {
 Each animation method returns a promise that resolves with `true` when the animation finished and `false` when it was stopped (by `stop`, `set` or another animation of the same value).
 
 ```ts
-const opacity = createNativeValue(1);
+const opacity = createAnimatedValue(1);
 const finished = await opacity.timing(0, { duration: 200 });
 if (finished) visible.set(false);
 ```
 
-## NativeNode
+## AnimatedNode
 
 ```ts
-class NativeNode {
+class AnimatedNode {
   interpolate(config: {
     inputRange: number[];
     outputRange: number[] | string[];
@@ -111,19 +111,19 @@ class NativeNode {
     extrapolateLeft?: Extrapolation;
     extrapolateRight?: Extrapolation;
     easing?: Easing;
-  }): NativeNode;
-  diffClamp(min: number, max: number): NativeNode;
-  add(b: NativeNode | number): NativeNode;
-  sub(b: NativeNode | number): NativeNode;
-  mul(b: NativeNode | number): NativeNode;
-  div(b: NativeNode | number): NativeNode;
-  mod(b: NativeNode | number): NativeNode;
+  }): AnimatedNode;
+  diffClamp(min: number, max: number): AnimatedNode;
+  add(b: AnimatedNode | number): AnimatedNode;
+  sub(b: AnimatedNode | number): AnimatedNode;
+  mul(b: AnimatedNode | number): AnimatedNode;
+  div(b: AnimatedNode | number): AnimatedNode;
+  mod(b: AnimatedNode | number): AnimatedNode;
 }
 
 type Extrapolation = "extend" | "clamp" | "identity";
 ```
 
-A node of the native animation graph: a `NativeValue`, or a value derived from others. Derived nodes are evaluated on the UI thread whenever their inputs change.
+A node of the native animation graph: a `AnimatedValue`, or a value derived from others. Derived nodes are evaluated on the UI thread whenever their inputs change.
 
 | Method | Description |
 |---|---|
@@ -133,7 +133,7 @@ A node of the native animation graph: a `NativeValue`, or a value derived from o
 | `mod(b)` | Modulo, never negative for a positive `b` (keeping angles in 0..360). |
 
 ```tsx
-const scroll = createNativeValue(0);
+const scroll = createAnimatedValue(0);
 const header = scroll.diffClamp(0, 44);
 
 <Scroll scrollValue={scroll} style={{ flex: 1 }}>{/* rows */}</Scroll>
@@ -141,7 +141,7 @@ const header = scroll.diffClamp(0, 44);
 ```
 
 ```ts
-const progress = createNativeValue(0);
+const progress = createAnimatedValue(0);
 const rotate = progress.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
 const color = progress.interpolate({ inputRange: [0, 0.5, 1], outputRange: ["#22c55e", "#eab308", "#ef4444"] });
 ```
@@ -150,20 +150,20 @@ const color = progress.interpolate({ inputRange: [0, 0.5, 1], outputRange: ["#22
 
 ```ts
 const Animated: {
-  timing(value: NativeValue, config: { toValue: number; duration?: number; easing?: Easing; delay?: number }): CompositeAnimation;
-  spring(value: NativeValue, config: { toValue: number; stiffness?: number; damping?: number; mass?: number; velocity?: number }): CompositeAnimation;
-  decay(value: NativeValue, config?: { velocity?: number; deceleration?: number; clamp?: [number, number]; bounce?: number }): CompositeAnimation;
+  timing(value: AnimatedValue, config: { toValue: number; duration?: number; easing?: Easing; delay?: number }): CompositeAnimation;
+  spring(value: AnimatedValue, config: { toValue: number; stiffness?: number; damping?: number; mass?: number; velocity?: number }): CompositeAnimation;
+  decay(value: AnimatedValue, config?: { velocity?: number; deceleration?: number; clamp?: [number, number]; bounce?: number }): CompositeAnimation;
   sequence(list: CompositeAnimation[]): CompositeAnimation;
   parallel(list: CompositeAnimation[], config?: { stopTogether?: boolean }): CompositeAnimation;
   stagger(ms: number, list: CompositeAnimation[]): CompositeAnimation;
   delay(ms: number): CompositeAnimation;
   loop(animation: CompositeAnimation, config?: { iterations?: number; resetBeforeIteration?: boolean }): CompositeAnimation;
-  add(a: NativeNode, b: NativeNode | number): NativeNode;
-  subtract(a: NativeNode, b: NativeNode | number): NativeNode;
-  multiply(a: NativeNode, b: NativeNode | number): NativeNode;
-  divide(a: NativeNode, b: NativeNode | number): NativeNode;
-  modulo(a: NativeNode, b: NativeNode | number): NativeNode;
-  diffClamp(a: NativeNode, min: number, max: number): NativeNode;
+  add(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  subtract(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  multiply(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  divide(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  modulo(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  diffClamp(a: AnimatedNode, min: number, max: number): AnimatedNode;
   sampleSpring(config: SpringConfig & { from?: number }, fps?: number): number[];
   sampleDecay(config: DecayConfig & { from?: number }, fps?: number): number[];
 };
@@ -179,13 +179,13 @@ interface CompositeAnimation {
 
 | Function | Description |
 |---|---|
-| `timing`, `spring`, `decay` | One animation of one value; same options and defaults as the [`NativeValue`](#nativevalue) methods, with the target as `toValue`. |
+| `timing`, `spring`, `decay` | One animation of one value; same options and defaults as the [`AnimatedValue`](#animatedvalue) methods, with the target as `toValue`. |
 | `sequence(list)` | Runs the animations one after another. |
 | `parallel(list, { stopTogether })` | Runs them at the same time. With `stopTogether` (default `true`), stopping one stops all. |
 | `stagger(ms, list)` | Runs them in parallel, each starting `ms` after the previous one. |
 | `delay(ms)` | Waits; useful inside `sequence`. |
 | `loop(animation, { iterations, resetBeforeIteration })` | Repeats `animation` `iterations` times (forever by default), putting its values back before each run unless `resetBeforeIteration` is `false`. |
-| `add`, `subtract`, `multiply`, `divide`, `modulo`, `diffClamp` | The same as the [`NativeNode`](#nativenode) methods, as functions. |
+| `add`, `subtract`, `multiply`, `divide`, `modulo`, `diffClamp` | The same as the [`AnimatedNode`](#animatednode) methods, as functions. |
 
 `CompositeAnimation`:
 
@@ -196,7 +196,7 @@ interface CompositeAnimation {
 | `reset()` | Stops it and puts its values back where they were when it started. |
 
 ```ts
-const ys = [0, 1, 2, 3].map(() => createNativeValue(0));
+const ys = [0, 1, 2, 3].map(() => createAnimatedValue(0));
 const hop = Animated.stagger(
   80,
   ys.map((y) =>

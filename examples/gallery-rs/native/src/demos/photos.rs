@@ -232,7 +232,7 @@ fn hero(
     refreshing: Signal<bool>,
     refresh: impl Into<Listener<()>>,
     refresh_key: Option<String>,
-    scroll_y: NativeValue,
+    scroll_y: AnimatedValue,
     wide: bool,
 ) -> impl IntoElement {
     view()
@@ -371,7 +371,7 @@ pub(crate) fn Photos() -> impl IntoElement {
     let refresh = stored(None::<Spawned<()>>);
     // The list's scroll offset, fed natively: the hero's parallax and fade
     // and the compact bar run without a binding per frame.
-    let scroll_y = native_value(0.0);
+    let scroll_y = animated_value(0.0);
     let on_refresh = move |_: &()| {
         refreshing.set(true);
         let task = set_timeout(Duration::from_millis(800), move || {

@@ -30,7 +30,7 @@ use nsh_core::{
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
     nsh_animation::{Curve, EaseMode},
     time::Instant,
-    ui::{AccessibilityState, NativeNode, View, prelude::*},
+    ui::{AccessibilityState, AnimatedNode, View, prelude::*},
 };
 
 use self::{
@@ -360,7 +360,7 @@ pub(crate) fn Stocks() -> impl IntoElement {
 fn MarketStrip() -> impl IntoElement {
     let live = live();
     let opened = signal(false);
-    let turn = native_value(0.0);
+    let turn = animated_value(0.0);
     let toggle = {
         let turn = turn.clone();
         move |_: &()| {
@@ -575,9 +575,9 @@ const PULSE_GAP: Duration = Duration::from_millis(600);
 /// The newest point's pulse as a sparkline draws it: the ring's radius,
 /// the halo's and the ring's alpha (native: they move without a drawing).
 struct Ring {
-    radius: NativeNode,
-    halo: NativeNode,
-    stroke: NativeNode,
+    radius: AnimatedNode,
+    halo: AnimatedNode,
+    stroke: AnimatedNode,
 }
 
 /// Today in 104 × 38 pt: a smooth line through a moving average of the
@@ -729,7 +729,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
     };
     // The newest point's pulse: 0 → 1 on a change, at most every 600 ms so
     // each one plays out.
-    let ring = native_value(1.0);
+    let ring = animated_value(1.0);
     {
         let ring = ring.clone();
         let seen = stored(quote.get_untracked().changed_at);

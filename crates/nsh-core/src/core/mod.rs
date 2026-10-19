@@ -394,7 +394,7 @@ struct Node {
     component: Option<Box<ComponentState>>,
     /// Recycling slot (or role) of a list cell.
     slot: Option<CellSlot>,
-    /// Native values driven by gestures on the view.
+    /// Animated values driven by gestures on the view.
     gestures: GestureValues,
     /// The native view exists.
     created: bool,

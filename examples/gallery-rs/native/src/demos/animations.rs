@@ -174,7 +174,7 @@ fn chip(
 const S: f32 = 188.0;
 
 /// An orbit of `size` turning by `angle`, with a dot of `dot` on it.
-fn orbit(size: f32, angle: &NativeNode, color: AdaptiveColor, dot: f32) -> View {
+fn orbit(size: f32, angle: &AnimatedNode, color: AdaptiveColor, dot: f32) -> View {
     view()
         .pointer_events(PointerEvents::None)
         .absolute()
@@ -201,9 +201,9 @@ fn orbit(size: f32, angle: &NativeNode, color: AdaptiveColor, dot: f32) -> View 
 /// once.
 #[component]
 fn Hero() -> impl IntoElement {
-    let spin = native_value(0.0);
-    let rings: Vec<NativeValue> = (0..3).map(|_| native_value(0.0)).collect();
-    let breathe = native_value(0.0);
+    let spin = animated_value(0.0);
+    let rings: Vec<AnimatedValue> = (0..3).map(|_| animated_value(0.0)).collect();
+    let breathe = animated_value(0.0);
     let all = Animation::parallel([
         Animation::timing(&spin, 360.0, Timing::new(3200.0, Easing::Linear)).looped(None),
         Animation::stagger(
@@ -303,7 +303,7 @@ const PLOT: f32 = 196.0;
 
 /// The plot of curve `selected`, `width` wide, its playhead and dot at
 /// `px`, `py`.
-fn draw_plot(width: f32, selected: usize, px: &NativeValue, py: &NativeValue) -> Painter {
+fn draw_plot(width: f32, selected: usize, px: &AnimatedValue, py: &AnimatedValue) -> Painter {
     let (lo, hi) = (-0.18, 1.24);
     let height = PLOT;
     let (l, r, t, b) = (30.0, width - 12.0, 8.0, height - 8.0);
@@ -353,7 +353,7 @@ fn draw_plot(width: f32, selected: usize, px: &NativeValue, py: &NativeValue) ->
         .line_width(2.0)
         .line_join(LineJoin::Round)
         .stroke();
-    // The playhead and the dot, from native values.
+    // The playhead and the dot, from animated values.
     let hx = px.mul(r - l).add(l);
     let hy = py
         .mul(-(b - t) / (hi - lo))
@@ -389,7 +389,7 @@ fn draw_plot(width: f32, selected: usize, px: &NativeValue, py: &NativeValue) ->
 #[component]
 fn EasingPlot() -> impl IntoElement {
     let selected = signal(CURVES.len() - 3);
-    let (dot_x, dot_y) = (native_value(0.0), native_value(0.0));
+    let (dot_x, dot_y) = (animated_value(0.0), animated_value(0.0));
     // The run going on (a new play stops it).
     let running = stored(None::<Animation>);
     // The plot's width, from its layout.
@@ -449,10 +449,10 @@ fn EasingPlot() -> impl IntoElement {
 /// Every curve at once: ten timings in one `Animation::parallel`.
 #[component]
 fn EasingRace() -> impl IntoElement {
-    let dots: Rc<[NativeValue]> = CURVES.iter().map(|_| native_value(0.0)).collect();
+    let dots: Rc<[AnimatedValue]> = CURVES.iter().map(|_| animated_value(0.0)).collect();
     // How far the dots travel: the tracks' width (from the first one's
     // layout) less a dot's.
-    let travel = native_value(0.0);
+    let travel = animated_value(0.0);
     // At the end of the tracks (the next play goes back).
     let there = signal(false);
     let rows = CURVES
@@ -547,8 +547,8 @@ impl Run {
 fn Composition() -> impl IntoElement {
     // The tiles' vertical offsets, their turn (0..1, each tile turning its
     // own angle) and their opacity.
-    let ys: Vec<NativeValue> = TONES.iter().map(|_| native_value(0.0)).collect();
-    let (spin, fade) = (native_value(0.0), native_value(1.0));
+    let ys: Vec<AnimatedValue> = TONES.iter().map(|_| animated_value(0.0)).collect();
+    let (spin, fade) = (animated_value(0.0), animated_value(1.0));
     let stagger = Animation::stagger(
         70.0,
         ys.iter().map(|y| {
@@ -712,8 +712,8 @@ fn draw_springs(
     plot: f32,
     width: f32,
     there: bool,
-    clock: &NativeValue,
-    xs: &[NativeValue],
+    clock: &AnimatedValue,
+    xs: &[AnimatedValue],
 ) -> Painter {
     let (cw, height) = (plot, 150.0);
     let (l, r, t, b) = (4.0, cw - 4.0, 10.0, height - 10.0);
@@ -773,8 +773,8 @@ fn draw_springs(
 /// are the springs themselves.
 #[component]
 fn Springs() -> impl IntoElement {
-    let xs: Rc<[NativeValue]> = SPRINGS.iter().map(|_| native_value(0.0)).collect();
-    let clock = native_value(0.0);
+    let xs: Rc<[AnimatedValue]> = SPRINGS.iter().map(|_| animated_value(0.0)).collect();
+    let clock = animated_value(0.0);
     // The tracks' width, from the first one's layout; the plot's, from its
     // layout.
     let width = signal(0.0_f32);
@@ -886,7 +886,7 @@ fn dial_face() -> Painter {
 #[component]
 fn Interpolations() -> impl IntoElement {
     // The value: 0, 1 or 2 at rest; where it goes.
-    let t = native_value(0.0);
+    let t = animated_value(0.0);
     let at = signal(0_u32);
     let angle = t.interpolate_with(
         &[0.0, 1.0],
@@ -1006,7 +1006,7 @@ const H: f32 = 52.0;
 #[component]
 fn HidingHeader() -> impl IntoElement {
     // The scroll offset.
-    let scroll_value = native_value(0.0);
+    let scroll_value = animated_value(0.0);
     let header = scroll_value.diff_clamp(0.0, H);
     let rows = (1..=30u32).map(|n| {
         view()

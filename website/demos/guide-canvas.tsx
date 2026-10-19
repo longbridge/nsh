@@ -1,5 +1,5 @@
 import { type GestureResponderEvent, mount, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas, Path2D } from "nsh/canvas";
 import { tint, ui } from "./palette";
 
@@ -19,8 +19,8 @@ function Button(props: { label: string; onPress: () => void }) {
 }
 
 function App() {
-  // The ring's sweep is a native value: animating it redraws without running `draw`.
-  const progress = createNativeValue(0.35);
+  // The ring's sweep is an animated value: animating it redraws without running `draw`.
+  const progress = createAnimatedValue(0.35);
   const target = signal(0.35);
   const go = () => {
     const to = Math.round(Math.random() * 100) / 100;

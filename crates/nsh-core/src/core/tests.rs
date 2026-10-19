@@ -4915,7 +4915,7 @@ mod components {
     /// A sheet that follows drags natively and springs back when let go.
     #[component]
     fn Sheet(_props: FormProps) -> impl IntoElement {
-        let offset = native_value(0.0);
+        let offset = animated_value(0.0);
         let state = signal("resting");
         let springing = offset.clone();
         view()
@@ -4935,7 +4935,7 @@ mod components {
     }
 
     #[test]
-    fn native_values_bind_animate_and_end() {
+    fn animated_values_bind_animate_and_end() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -5783,7 +5783,7 @@ mod touch {
     /// A card scaled and turned by two-finger gestures.
     #[component]
     fn Card() -> impl IntoElement {
-        let (scale, angle) = (native_value(1.0), native_value(0.0));
+        let (scale, angle) = (animated_value(1.0), animated_value(0.0));
         view()
             .pinch_value(&scale)
             .rotation_value(&angle)
@@ -5792,7 +5792,7 @@ mod touch {
     }
 
     #[test]
-    fn pinches_and_rotations_drive_native_values() {
+    fn pinches_and_rotations_drive_animated_values() {
         let mut c = core();
         c.mount_root(&crate::ui::Root::new::<Card>(|| ()));
         let batch = c.commit().unwrap();
@@ -5858,10 +5858,10 @@ mod painter {
     }
 
     /// A label placed by its measured width, gradients, a stroked SVG path
-    /// and an operation built by hand reading a native value.
+    /// and an operation built by hand reading an animated value.
     #[component]
     fn Label() -> impl IntoElement {
-        let offset = native_value(3.0);
+        let offset = animated_value(3.0);
         let width = crate::ui::prelude::measure_text("600 20px system-ui", "100%");
         let mut p = Painter::new()
             .stroke_style(
@@ -5918,7 +5918,7 @@ mod painter {
                 ..
             }
         ));
-        // The native value is a slot of the drawing.
+        // The animated value is a slot of the drawing.
         assert_eq!(ops[5], CanvasOp::LineDashOffset(Num::Slot(0)));
         assert_eq!(drawing.slots.len(), 1);
     }
@@ -6621,7 +6621,7 @@ mod views {
     /// A track whose color moves between two theme colors natively.
     #[component]
     fn Track() -> impl IntoElement {
-        let on = native_value(0.0);
+        let on = animated_value(0.0);
         let off_color = AdaptiveColor {
             light: rgb(0xeeeeee),
             dark: rgb(0x222222),

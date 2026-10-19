@@ -617,11 +617,11 @@ where
 
 // --- Handles -----------------------------------------------------------------
 
-/// A native animation value starting at `value` (TS: `createNativeValue`):
+/// A native animation value starting at `value` (TS: `createAnimatedValue`):
 /// bind it to styles, drags, scroll offsets or drawings, animate it from
 /// handlers and tasks.
-pub fn native_value(value: f32) -> super::NativeValue {
-    super::NativeValue::new(&executor(), value)
+pub fn animated_value(value: f32) -> super::AnimatedValue {
+    super::AnimatedValue::new(&executor(), value)
 }
 
 /// A handle for an element (TS: `ref`): put it on the element with

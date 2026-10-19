@@ -1112,7 +1112,7 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
 }
 
 /// A pinch (`rotation` 0; `amount`: the scale since it began) or rotation
-/// (1; degrees) on a view with native values (`phase`: 0 start, 1 move, 2
+/// (1; degrees) on a view with animated values (`phase`: 0 start, 1 move, 2
 /// end).
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_transform_gesture(id: u32, rotation: u32, phase: u32, amount: f32) -> f64 {

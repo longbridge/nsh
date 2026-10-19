@@ -118,5 +118,5 @@ button closes the sheet.
 ## Related
 
 - [Modal](./navigation.md#modal): full-screen and page-sheet modals.
-- [Animation](../docs/animation.md): native values and springs.
+- [Animation](../docs/animation.md): animated values and springs.
 - [ActionSheet](./action-sheet.md): the system's action sheet.

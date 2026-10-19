@@ -72,7 +72,7 @@ pub struct Screen {
     pub events: std::collections::HashMap<u32, EventMask>,
     /// Each canvas's drawing.
     pub drawings: std::collections::HashMap<u32, Arc<Drawing>>,
-    /// The native values gestures drive, by view.
+    /// The animated values gestures drive, by view.
     pub gestures: std::collections::HashMap<u32, GestureValues>,
     /// The commands sent, in order.
     pub commands: Vec<(u32, Command)>,

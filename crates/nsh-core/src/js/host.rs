@@ -41,9 +41,9 @@ pub trait HostInput: Sized {
     fn entries(&self) -> Vec<(String, Self)>;
     /// Truthy, as JS sees it.
     fn truthy(&self) -> bool;
-    /// The native animation node this value is (`NativeNode.__nv`).
-    fn native_node(&self) -> Option<nsh_animation::NodeId> {
-        self.field("__nv")
+    /// The native animation node this value is (`AnimatedNode.__av`).
+    fn animated_node(&self) -> Option<nsh_animation::NodeId> {
+        self.field("__av")
             .and_then(|v| v.as_number())
             .map(|n| n as nsh_animation::NodeId)
     }

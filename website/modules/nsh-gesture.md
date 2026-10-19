@@ -13,7 +13,7 @@ import { PanResponder, type PanResponderGestureState } from "nsh/gesture";
 ```
 
 > [!TIP]
-> `PanResponder` delivers every move to JS, so it suits gestures that change app state (reordering, swipe-to-delete decisions). To move a view with the finger, the `pan={{ x, y }}`, `pinch` and `rotation` props are faster: the drag writes [native values](./nsh-animated.md) on the UI thread and JS only hears `onPanStart` / `onPanEnd`. See [Touch and gestures](../docs/touch-and-gestures.md).
+> `PanResponder` delivers every move to JS, so it suits gestures that change app state (reordering, swipe-to-delete decisions). To move a view with the finger, the `pan={{ x, y }}`, `pinch` and `rotation` props are faster: the drag writes [animated values](./nsh-animated.md) on the UI thread and JS only hears `onPanStart` / `onPanEnd`. See [Touch and gestures](../docs/touch-and-gestures.md).
 
 ## PanResponder.create
 

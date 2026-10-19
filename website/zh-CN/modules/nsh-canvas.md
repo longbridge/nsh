@@ -7,7 +7,7 @@ demo: mod-canvas
 
 # nsh/canvas
 
-`nsh/canvas` 提供与 HTML Canvas 2D 风格一致的绘图上下文。你的 `draw` 函数**记录**绘图操作，平台随后以屏幕分辨率在原生侧回放（iOS 上是 Core Graphics，Android 上是 `android.graphics.Canvas`）。绘图中的数字和颜色可以是[原生值](./nsh-animated.md)：它们做动画时，平台会自行重绘，无需再次运行 `draw`。
+`nsh/canvas` 提供与 HTML Canvas 2D 风格一致的绘图上下文。你的 `draw` 函数**记录**绘图操作，平台随后以屏幕分辨率在原生侧回放（iOS 上是 Core Graphics，Android 上是 `android.graphics.Canvas`）。绘图中的数字和颜色可以是[动画值](./nsh-animated.md)：它们做动画时，平台会自行重绘，无需再次运行 `draw`。
 
 ```ts
 import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
@@ -34,7 +34,7 @@ interface CanvasSize {
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `draw` | `(ctx, { width, height }) => void` | 绘制画布。尺寸确定后运行一次，之后在它读取的 signal 变化时、以及画布尺寸改变时再次运行。作为数字或颜色传入的原生值做动画时不会触发它。 |
+| `draw` | `(ctx, { width, height }) => void` | 绘制画布。尺寸确定后运行一次，之后在它读取的 signal 变化时、以及画布尺寸改变时再次运行。作为数字或颜色传入的动画值做动画时不会触发它。 |
 
 通过样式给画布设置尺寸（`width` / `height`、`flex: 1`、`aspectRatio` 等）。坐标单位为点，原点在左上角。
 
@@ -69,13 +69,13 @@ mount(App);
 
 ## 不重绘的动画
 
-所有类型为 `CanvasNumber` 的参数和所有填充/描边样式（`fillStyle`、`strokeStyle`）都接受 `NativeNode`。画布在绘制时读取该节点，并在其动画的每一帧在原生侧重绘：
+所有类型为 `CanvasNumber` 的参数和所有填充/描边样式（`fillStyle`、`strokeStyle`）都接受 `AnimatedNode`。画布在绘制时读取该节点，并在其动画的每一帧在原生侧重绘：
 
 ```tsx
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
-const progress = createNativeValue(0);
+const progress = createAnimatedValue(0);
 
 <Canvas
   style={{ width: 120, height: 120 }}
@@ -85,7 +85,7 @@ const progress = createNativeValue(0);
     ctx.lineCap = "round";
     ctx.strokeStyle = "#6366f1";
     ctx.beginPath();
-    // 终止角是原生节点：`progress` 做动画时在原生侧重绘。
+    // 终止角是动画节点：`progress` 做动画时在原生侧重绘。
     ctx.arc(c, c, c - 10, -Math.PI / 2, progress.mul(Math.PI * 2).sub(Math.PI / 2));
     ctx.stroke();
   }}
@@ -95,8 +95,8 @@ progress.timing(0.75, { duration: 900, easing: Easing.inOut(Easing.cubic) });
 ```
 
 ```ts
-type CanvasNumber = number | NativeNode;
-type CanvasPaint = string | CanvasGradient | NativeNode;
+type CanvasNumber = number | AnimatedNode;
+type CanvasPaint = string | CanvasGradient | AnimatedNode;
 ```
 
 ## CanvasRenderingContext2D

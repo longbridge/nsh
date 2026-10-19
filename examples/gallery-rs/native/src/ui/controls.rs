@@ -34,7 +34,7 @@ fn knob(on: bool) -> f32 {
 /// natively.
 #[component]
 pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoElement {
-    let on = native_value(knob(props.value.get_untracked()));
+    let on = animated_value(knob(props.value.get_untracked()));
     // A new value from the owner springs the knob there.
     let spring = on.clone();
     let shown = stored(props.value.get_untracked());
@@ -192,7 +192,7 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
     let count = computed(move || props.options.with(Vec::len).max(1));
     let segment = computed(move || (width.get() - 6.0) / count.get() as f32);
     // The indicator's offset: the first place jumps, later moves spring.
-    let x = native_value(0.0);
+    let x = animated_value(0.0);
     let placed = stored(false);
     let mover = x.clone();
     effect(move || {

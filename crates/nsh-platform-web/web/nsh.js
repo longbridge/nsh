@@ -3801,7 +3801,7 @@ class Player {
     return true;
   }
 
-  /** Ctrl + wheel pinches the view under the pointer (native values),
+  /** Ctrl + wheel pinches the view under the pointer (animated values),
    * ending when the wheel stops for 150 ms. */
   wheelPinch(e) {
     let t = this.wheelPinchState;

@@ -204,7 +204,7 @@ fn face(
 /// Two faces back to back: each hides while turned away.
 #[component]
 fn FlipCard() -> impl IntoElement {
-    let angle = native_value(0.0);
+    let angle = animated_value(0.0);
     // Turned to its back (nothing displays it: the angle shows it).
     let flipped = stored(false);
     let spring = angle.clone();
@@ -528,7 +528,7 @@ fn layers() -> Card {
     let clip = signal(true);
     let front = signal(0_usize);
     let level = signal(1_u32);
-    let opacity = native_value(0.45);
+    let opacity = animated_value(0.45);
     let switch = move |_: &()| clip.update(|c| *c = !*c);
     let next = move |_: &()| front.update(|f| *f = (*f + 1) % 3);
     let squares = [colors::DANGER, colors::INFO, colors::UP]
@@ -654,7 +654,7 @@ fn layers() -> Card {
 fn transforms() -> Card {
     // A slow native sway, so the perspective reads as depth (kept with
     // the page: dropping the last handle releases it).
-    let sway = native_value(-30.0);
+    let sway = animated_value(-30.0);
     let sin = Easing::Curve(Curve::Sin, EaseMode::InOut);
     let sway_loop = Animation::sequence([
         Animation::timing(&sway, 30.0, Timing::new(2200.0, sin)),

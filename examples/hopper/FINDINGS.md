@@ -22,7 +22,7 @@ workaround here in the same change.
 - `locationX` is relative to the touched view, and there was no `measure()`: `ref.measure()` gives a view's `pageX` /
   `pageY`, and `track` (`ui.tsx`) follows the finger in page coordinates, so the slider's children take touches.
 - No keyboard for signed numbers: `keyboardType="numbers-and-punctuation"` has a minus key (the ± button is gone).
-- `borderColor` could not be animated natively: `borderColor`, `color` and shadows bind to native values; the
+- `borderColor` could not be animated natively: `borderColor`, `color` and shadows bind to animated values; the
   switch's knob ring animates.
 - QuickJS had no `Intl`: `Intl.NumberFormat` / `DateTimeFormat` and `toLocaleString` are formatted in Rust.
 - No `isPointInPath`: `ctx.isPointInPath` / `isPointInStroke` are answered in Rust; the RCS quads and the tank in

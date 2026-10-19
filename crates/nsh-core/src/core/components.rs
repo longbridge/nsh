@@ -137,7 +137,7 @@ pub(super) struct Instance {
     /// The view's parts in the touch responder, by node.
     pub(super) responders: Vec<(NodeId, Rc<ResponderEl>)>,
     /// The app's `style` on the host, applied after the root's own inline
-    /// style and native values.
+    /// style and animated values.
     pub(super) app_style: Option<crate::StylePatch>,
     dirty: bool,
     /// The nodes of its view with bindings: what was applied last.
@@ -254,7 +254,7 @@ impl Expanded {
 enum Awaited {
     /// An animation's end: whether it finished.
     End(AnswerSlot<bool>),
-    /// A value read ([`crate::ui::NativeValue::value`]).
+    /// A value read ([`crate::ui::AnimatedValue::value`]).
     Value(AnswerSlot<f32>),
 }
 
@@ -455,11 +455,11 @@ impl Components {
 }
 
 /// The inline style of `id`: the declarations of its `Style` prop, then
-/// the native values bound to it, then (on a host) the app's style.
+/// the animated values bound to it, then (on a host) the app's style.
 fn inline_style(
     id: NodeId,
     inline: Option<&crate::StylePatch>,
-    animated: &[(crate::StyleDecl, crate::ui::NativeNode)],
+    animated: &[(crate::StyleDecl, crate::ui::AnimatedNode)],
     app: Option<&crate::StylePatch>,
 ) -> Op {
     let mut style = Box::<crate::Style>::default();
@@ -1239,7 +1239,7 @@ impl<M: TextEngine> Core<M> {
     /// takes its slots, children and styles; a list cell builds its row
     /// again); whether there were any.
     fn render_dirty(&mut self) -> bool {
-        // What handles asked for since (native values released, ...).
+        // What handles asked for since (animated values released, ...).
         for action in self.components.executor.take_actions() {
             self.apply_action(action);
         }
@@ -3565,7 +3565,7 @@ impl<M: TextEngine> Core<M> {
         safe
     }
 
-    /// Applies what handlers, handles (element refs, native values) and
+    /// Applies what handlers, handles (element refs, animated values) and
     /// services asked for, in order.
     pub(super) fn apply_actions(&mut self) {
         for action in self.components.executor.take_actions() {

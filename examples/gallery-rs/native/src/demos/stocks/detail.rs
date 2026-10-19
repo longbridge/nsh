@@ -79,7 +79,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     let ticket = signal(false);
     // The confirmation: what it says, and its motion (0 hidden, 1 shown).
     let message = signal((SharedString::default(), SharedString::default(), Side::Buy));
-    let banner = native_value(0.0);
+    let banner = animated_value(0.0);
     let banner_run = stored(None::<Animation>);
     // The confirmation drops in from the top and leaves by itself.
     let show_banner = {
@@ -366,7 +366,7 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
     let tone = computed(move || tone_of(change.get()));
     // The day is down: the arrow turns over.
     let down = computed(move || change.get() < 0.0);
-    let turn = native_value(if down.get_untracked() { 1.0 } else { 0.0 });
+    let turn = animated_value(if down.get_untracked() { 1.0 } else { 0.0 });
     {
         let turn = turn.clone();
         let shown = stored(down.get_untracked());
@@ -509,7 +509,7 @@ fn DayRange(props: StockProps) -> impl IntoElement {
         let q = quote.get();
         day_at(&q, tick, v(&q))
     };
-    let x = native_value(0.0);
+    let x = animated_value(0.0);
     // The track's width as laid out (0 before), and whether the knob was
     // placed (the first place jumps, later ones spring).
     let width = stored(0.0_f32);

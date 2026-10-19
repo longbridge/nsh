@@ -276,7 +276,7 @@ pub fn input_accessory_view(native_id: &str) -> InputAccessoryView {
     InputAccessoryView(node)
 }
 
-/// A canvas showing what `painter` recorded (native values in it move
+/// A canvas showing what `painter` recorded (animated values in it move
 /// natively). A closure draws in a binding: `canvas(move || draw(theme()))`
 /// draws again when what it read changes (a size kept from `on_layout`,
 /// the appearance).
@@ -905,7 +905,7 @@ impl NativeView {
     }
 }
 
-/// A number in a drawing: a constant, or a native value the canvas reads
+/// A number in a drawing: a constant, or an animated value the canvas reads
 /// while it draws (it draws again natively as the value moves).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanvasArg(pub(crate) CanvasArgKind);
@@ -913,7 +913,7 @@ pub struct CanvasArg(pub(crate) CanvasArgKind);
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum CanvasArgKind {
     Const(f32),
-    Node(super::NativeNode),
+    Node(super::AnimatedNode),
 }
 
 impl From<f32> for CanvasArg {
@@ -924,14 +924,14 @@ impl From<f32> for CanvasArg {
 
 impl<A: super::Animated> From<&A> for CanvasArg {
     fn from(a: &A) -> Self {
-        Self(CanvasArgKind::Node(a.native_node()))
+        Self(CanvasArgKind::Node(a.animated_node()))
     }
 }
 
 /// What a drawing fills or strokes with (`fillStyle` / `strokeStyle`): a
 /// color, a gradient ([`CanvasGradient::linear`], `radial`, `conic`), or a
-/// native value interpolating colors
-/// ([`super::NativeNode::interpolate_colors`]), read as it moves.
+/// animated value interpolating colors
+/// ([`super::AnimatedNode::interpolate_colors`]), read as it moves.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanvasPaint(CanvasPaintKind);
 
@@ -939,7 +939,7 @@ pub struct CanvasPaint(CanvasPaintKind);
 enum CanvasPaintKind {
     Color(Color),
     Gradient(Arc<CanvasGradient>),
-    Node(super::NativeNode),
+    Node(super::AnimatedNode),
 }
 
 impl From<Color> for CanvasPaint {
@@ -962,22 +962,22 @@ impl From<Arc<CanvasGradient>> for CanvasPaint {
 
 impl<A: super::Animated> From<&A> for CanvasPaint {
     fn from(a: &A) -> Self {
-        Self(CanvasPaintKind::Node(a.native_node()))
+        Self(CanvasPaintKind::Node(a.animated_node()))
     }
 }
 
 /// Records a [`Drawing`] with the HTML Canvas 2D operations (Rust names):
 /// `Painter::new().fill_color(red).fill_rect(0.0, 0.0, w, h).finish()`.
 /// Coordinates are points from the canvas's top left. Numbers and paints
-/// may be native values (the canvas draws again natively as they move);
+/// may be animated values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
 /// [`Painter::num`], [`Painter::paint`] and [`Painter::op`]. Text is
 /// measured with [`super::ambient::measure_text`].
 #[derive(Debug, Clone, Default)]
 pub struct Painter {
     drawing: Drawing,
-    /// The native values the drawing reads, kept alive with it.
-    nodes: Vec<super::NativeNode>,
+    /// The animated values the drawing reads, kept alive with it.
+    nodes: Vec<super::AnimatedNode>,
 }
 
 impl Painter {
@@ -992,7 +992,7 @@ impl Painter {
     }
 
     /// `value` as a number of this drawing, for an operation built by hand
-    /// ([`Self::op`]): a native value becomes a slot the canvas reads while
+    /// ([`Self::op`]): an animated value becomes a slot the canvas reads while
     /// it draws, kept alive with the drawing.
     pub fn num(&mut self, value: impl Into<CanvasArg>) -> Num {
         match value.into().0 {
@@ -1011,7 +1011,7 @@ impl Painter {
         }
     }
 
-    fn slot(&mut self, node: super::NativeNode) -> u16 {
+    fn slot(&mut self, node: super::AnimatedNode) -> u16 {
         let slot = self.drawing.slot(node.id());
         self.nodes.push(node);
         slot
@@ -1032,7 +1032,7 @@ impl Painter {
     /// `location_y`) is inside the current path by `rule`, with the
     /// transform, as recorded so far (TS: `ctx.isPointInPath(x, y, rule)`).
     /// Answered from the geometry here, with no platform round trip; a
-    /// number given as a native value counts as 0, as in TS. To find what
+    /// number given as an animated value counts as 0, as in TS. To find what
     /// is under a tap, build the canvas's painter in a function the press
     /// handler calls too.
     pub fn is_point_in_path(&self, x: f32, y: f32, rule: FillRule) -> bool {
@@ -1339,7 +1339,7 @@ impl Painter {
         self.stroke_style(color)
     }
 
-    /// Fills with `paint`: a color, a gradient or a native value of colors
+    /// Fills with `paint`: a color, a gradient or an animated value of colors
     /// (`fillStyle`).
     pub fn fill_style(mut self, paint: impl Into<CanvasPaint>) -> Self {
         let paint = self.paint(paint);
@@ -1379,7 +1379,7 @@ impl Painter {
         self.op(CanvasOp::LineDash(segments.into()))
     }
 
-    /// Where the dashes start along the line (`lineDashOffset`; a native
+    /// Where the dashes start along the line (`lineDashOffset`; an animated
     /// value marches them).
     pub fn line_dash_offset(mut self, offset: impl Into<CanvasArg>) -> Self {
         let o = self.num(offset);

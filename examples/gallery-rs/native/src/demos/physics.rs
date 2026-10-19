@@ -1,6 +1,6 @@
 //! Physics: a card dragged on the UI thread and released into a spring, a
 //! decay or the nearest corner, with the drag's velocity; a canvas draws a
-//! tether to it from the same native values, without a render per frame
+//! tether to it from the same animated values, without a render per frame
 //! (as the TSX gallery's `demos/Physics.tsx`).
 
 use std::f32::consts::TAU;
@@ -72,8 +72,8 @@ fn corners(stage: (f32, f32)) -> (f32, f32) {
 
 /// The stage's backdrop for a stage of `stage`: a dot grid, the axes, the
 /// snap corners in `mode` snap, and the tether to the card, which follows
-/// the native values `x` and `y`.
-fn backdrop(stage: (f32, f32), mode: Mode, x: &NativeValue, y: &NativeValue) -> Painter {
+/// the animated values `x` and `y`.
+fn backdrop(stage: (f32, f32), mode: Mode, x: &AnimatedValue, y: &AnimatedValue) -> Painter {
     // The canvas fills the stage inside its 1 pt rim.
     let (width, height) = (stage.0 - 2.0, stage.1 - 2.0);
     let (mx, my) = (width / 2.0, height / 2.0);
@@ -116,7 +116,7 @@ fn backdrop(stage: (f32, f32), mode: Mode, x: &NativeValue, y: &NativeValue) -> 
         }
     }
     p.line_dash(&[])
-        // The tether, from native values: it follows drags and springs
+        // The tether, from animated values: it follows drags and springs
         // without a drawing of its own.
         .stroke_color(color(colors::ACCENT))
         .global_alpha(0.45)
@@ -136,9 +136,9 @@ fn backdrop(stage: (f32, f32), mode: Mode, x: &NativeValue, y: &NativeValue) -> 
 #[component]
 pub(crate) fn Physics() -> impl IntoElement {
     // The drag's translation (the drag moves it natively).
-    let (x, y) = (native_value(0.0), native_value(0.0));
+    let (x, y) = (animated_value(0.0), animated_value(0.0));
     // The pulse: 0 at rest, 1 at its peak; and 1 while the card is held.
-    let (pressed, lift) = (native_value(0.0), native_value(0.0));
+    let (pressed, lift) = (animated_value(0.0), animated_value(0.0));
     let mode = signal(Mode::default());
     let feel = signal(Feel::default());
     // The stage's size, from its layout.
@@ -152,7 +152,7 @@ pub(crate) fn Physics() -> impl IntoElement {
     let pulse = stored(None::<Spawned<()>>);
 
     // Springs `v` to `to` with the feel chosen, starting at `velocity`.
-    let settle = move |v: &NativeValue, to: f32, velocity: f32| {
+    let settle = move |v: &AnimatedValue, to: f32, velocity: f32| {
         let (k, c) = feel.get_untracked().spring();
         let _ = v.spring(
             to,

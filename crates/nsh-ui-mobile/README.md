@@ -55,7 +55,7 @@ state) stays native. JS only gets the events the component emits.
   |t: &str| ..)`, `on_layout`, `on_pan_end`, `on_scroll`); their setters take bindings too.
 - **Element refs** send commands to what the view made: `element_ref()`, `.element_ref(&r)` on the element,
   `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after clearing it).
-- **Native values** move styles with no binding per frame: `native_value(0.0)`, `.bind_translate_y(&v)`,
+- **Animated values** move styles with no binding per frame: `animated_value(0.0)`, `.bind_translate_y(&v)`,
   `.pan_values(..)` (drags move it natively), `v.spring(..)` (await its `AnimationEnd` in a task). `Sheet` is the
   example.
 - **The component's own rows**: `virtual_list(count, move |at| row)` with `.keys(move || ids)` (and `.header(..)`,

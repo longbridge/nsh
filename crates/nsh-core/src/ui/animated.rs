@@ -1,4 +1,4 @@
-//! Native animation values for Rust components (TS: `createNativeValue`,
+//! Native animation values for Rust components (TS: `createAnimatedValue`,
 //! `Animated.spring`, `interpolate`): nodes of the platform's animation
 //! graph that styles, drags, scroll offsets and drawings are bound to, so
 //! they move on the UI thread with no engine work per frame. Composed
@@ -87,19 +87,19 @@ impl Derived {
     }
 }
 
-/// A value of the graph: [`NativeValue`] or [`NativeNode`], to bind
+/// A value of the graph: [`AnimatedValue`] or [`AnimatedNode`], to bind
 /// (`Styled::bind_opacity`) or derive from.
 pub trait Animated {
     /// The node.
-    fn native_node(&self) -> NativeNode;
+    fn animated_node(&self) -> AnimatedNode;
 }
 
 /// A node derived from values (an interpolation, arithmetic): bound like a
 /// value, moving when they move.
 #[derive(Clone)]
-pub struct NativeNode(Rc<Node>);
+pub struct AnimatedNode(Rc<Node>);
 
-impl NativeNode {
+impl AnimatedNode {
     pub(crate) fn id(&self) -> nsh_animation::NodeId {
         self.0.id
     }
@@ -114,26 +114,26 @@ impl NativeNode {
     fn derive(
         &self,
         op: impl FnOnce(nsh_animation::NodeId) -> AnimationOp,
-        other: Option<&NativeNode>,
-    ) -> NativeNode {
+        other: Option<&AnimatedNode>,
+    ) -> AnimatedNode {
         let Some(executor) = self.executor() else {
             // The surface is gone: a node nothing reads.
             return self.clone();
         };
         let key = op(0);
         if let Some(node) = executor.derived(&key) {
-            return NativeNode(node);
+            return AnimatedNode(node);
         }
         let mut inputs = vec![self.0.clone()];
         inputs.extend(other.map(|o| o.0.clone()));
         let node = Node::new(&executor, |id| with_node(key.clone(), id), inputs);
         executor.remember_derived(key, &node);
-        NativeNode(node)
+        AnimatedNode(node)
     }
 
     /// Maps the value through `input` breakpoints (ascending) to numbers,
     /// clamped at both ends: `x.interpolate(&[0.0, 300.0], &[1.0, 0.0])`.
-    pub fn interpolate(&self, input: &[f32], output: &[f32]) -> NativeNode {
+    pub fn interpolate(&self, input: &[f32], output: &[f32]) -> AnimatedNode {
         self.interpolate_with(
             input,
             Output::Numbers(output.to_vec()),
@@ -149,7 +149,7 @@ impl NativeNode {
         &self,
         input: &[f32],
         colors: &[C],
-    ) -> NativeNode {
+    ) -> AnimatedNode {
         let colors: Rc<[AdaptiveColor]> = colors.iter().map(|&c| c.into()).collect();
         let pick = {
             let colors = colors.clone();
@@ -194,7 +194,7 @@ impl NativeNode {
         input: &[f32],
         output: Output,
         interpolation: Interpolation,
-    ) -> NativeNode {
+    ) -> AnimatedNode {
         let source = self.id();
         let input_range = input.to_vec();
         self.derive(
@@ -211,7 +211,7 @@ impl NativeNode {
         )
     }
 
-    fn math(&self, op: MathOp, other: AnimationOperand) -> NativeNode {
+    fn math(&self, op: MathOp, other: AnimationOperand) -> AnimatedNode {
         let a = Operand::Node(self.id());
         let b = other.operand;
         self.derive(
@@ -221,33 +221,33 @@ impl NativeNode {
     }
 
     /// The sum with `other`.
-    pub fn add(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    pub fn add(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.math(MathOp::Add, other.into())
     }
 
     /// The difference with `other`.
-    pub fn sub(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    pub fn sub(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.math(MathOp::Sub, other.into())
     }
 
     /// The product with `other`.
-    pub fn mul(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    pub fn mul(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.math(MathOp::Mul, other.into())
     }
 
     /// The quotient by `other`.
-    pub fn div(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    pub fn div(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.math(MathOp::Div, other.into())
     }
 
     /// The remainder by `other`.
-    pub fn modulo(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    pub fn modulo(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.math(MathOp::Mod, other.into())
     }
 
     /// Follows the value's changes but stays within `min..=max` (a header
     /// hiding as content scrolls up).
-    pub fn diff_clamp(&self, min: f32, max: f32) -> NativeNode {
+    pub fn diff_clamp(&self, min: f32, max: f32) -> AnimatedNode {
         let input = self.id();
         self.derive(
             move |node| AnimationOp::CreateDiffClamp {
@@ -261,21 +261,21 @@ impl NativeNode {
     }
 }
 
-impl Animated for NativeNode {
-    fn native_node(&self) -> NativeNode {
+impl Animated for AnimatedNode {
+    fn animated_node(&self) -> AnimatedNode {
         self.clone()
     }
 }
 
-impl PartialEq for NativeNode {
+impl PartialEq for AnimatedNode {
     fn eq(&self, other: &Self) -> bool {
         self.id() == other.id()
     }
 }
 
-impl fmt::Debug for NativeNode {
+impl fmt::Debug for AnimatedNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("NativeNode").field(&self.id()).finish()
+        f.debug_tuple("AnimatedNode").field(&self.id()).finish()
     }
 }
 
@@ -284,7 +284,7 @@ impl fmt::Debug for NativeNode {
 pub struct AnimationOperand {
     operand: Operand,
     /// The node, kept alive by what derives from it.
-    node: Option<NativeNode>,
+    node: Option<AnimatedNode>,
 }
 
 impl From<f32> for AnimationOperand {
@@ -298,7 +298,7 @@ impl From<f32> for AnimationOperand {
 
 impl<A: Animated> From<&A> for AnimationOperand {
     fn from(a: &A) -> Self {
-        let node = a.native_node();
+        let node = a.animated_node();
         Self {
             operand: Operand::Node(node.id()),
             node: Some(node),
@@ -306,7 +306,7 @@ impl<A: Animated> From<&A> for AnimationOperand {
     }
 }
 
-/// How [`NativeNode::interpolate_with`] maps: what it does outside the
+/// How [`AnimatedNode::interpolate_with`] maps: what it does outside the
 /// input range on each side, and the curve within each segment (TS:
 /// `extrapolateLeft`, `extrapolateRight`, `easing`). By default it clamps
 /// on both sides, linearly.
@@ -338,10 +338,10 @@ impl Default for Interpolation {
 }
 
 /// A settable, animatable value (made with
-/// [`super::ambient::native_value`]): set it, animate it, bind it, derive
+/// [`super::ambient::animated_value`]): set it, animate it, bind it, derive
 /// from it. Clones are the same value.
 #[derive(Clone, PartialEq, Debug)]
-pub struct NativeValue(NativeNode);
+pub struct AnimatedValue(AnimatedNode);
 
 /// How a spring moves (TS's defaults: stiffness 170, damping 26, mass 1).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -433,7 +433,7 @@ pub fn sample_spring(from: f32, to: f32, spring: Spring, fps: f32) -> Vec<f32> {
     sample(spring.driver(to), from, fps)
 }
 
-/// The values a decay ([`NativeValue::decay`]) moves a value through from
+/// The values a decay ([`AnimatedValue::decay`]) moves a value through from
 /// `from` at `velocity` (per second), one per frame at `fps` until it
 /// stops (TS: `Animated.sampleDecay`). At most
 /// [`nsh_animation::MAX_SAMPLES`].
@@ -450,7 +450,7 @@ pub fn sample_decay(from: f32, velocity: f32, deceleration: f32, fps: f32) -> Ve
     )
 }
 
-/// Like [`sample_decay`], within `min..=max` ([`NativeValue::decay_within`]:
+/// Like [`sample_decay`], within `min..=max` ([`AnimatedValue::decay_within`]:
 /// it stops at a bound, or bounces back keeping `bounce` of its speed).
 pub fn sample_decay_within(
     from: f32,
@@ -487,9 +487,9 @@ impl std::future::IntoFuture for AnimationEnd {
     }
 }
 
-impl NativeValue {
+impl AnimatedValue {
     pub(crate) fn new(executor: &Rc<Executor>, value: f32) -> Self {
-        Self(NativeNode(Node::new(
+        Self(AnimatedNode(Node::new(
             executor,
             |node| AnimationOp::CreateValue { node, value },
             Vec::new(),
@@ -497,7 +497,7 @@ impl NativeValue {
     }
 
     /// The node, to derive from.
-    pub fn node(&self) -> &NativeNode {
+    pub fn node(&self) -> &AnimatedNode {
         &self.0
     }
 
@@ -618,70 +618,70 @@ impl NativeValue {
             .act(AnimationOp::ExtractOffset { node: self.0.id() });
     }
 
-    /// See [`NativeNode::interpolate`].
-    pub fn interpolate(&self, input: &[f32], output: &[f32]) -> NativeNode {
+    /// See [`AnimatedNode::interpolate`].
+    pub fn interpolate(&self, input: &[f32], output: &[f32]) -> AnimatedNode {
         self.0.interpolate(input, output)
     }
 
-    /// See [`NativeNode::interpolate_colors`].
+    /// See [`AnimatedNode::interpolate_colors`].
     pub fn interpolate_colors<C: Into<AdaptiveColor> + Copy>(
         &self,
         input: &[f32],
         colors: &[C],
-    ) -> NativeNode {
+    ) -> AnimatedNode {
         self.0.interpolate_colors(input, colors)
     }
 
-    /// See [`NativeNode::interpolate_with`].
+    /// See [`AnimatedNode::interpolate_with`].
     pub fn interpolate_with(
         &self,
         input: &[f32],
         output: Output,
         interpolation: Interpolation,
-    ) -> NativeNode {
+    ) -> AnimatedNode {
         self.0.interpolate_with(input, output, interpolation)
     }
 
-    /// See [`NativeNode::diff_clamp`].
-    pub fn diff_clamp(&self, min: f32, max: f32) -> NativeNode {
+    /// See [`AnimatedNode::diff_clamp`].
+    pub fn diff_clamp(&self, min: f32, max: f32) -> AnimatedNode {
         self.0.diff_clamp(min, max)
     }
 
-    /// See [`NativeNode::add`].
-    pub fn add(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    /// See [`AnimatedNode::add`].
+    pub fn add(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.0.add(other)
     }
 
-    /// See [`NativeNode::sub`].
-    pub fn sub(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    /// See [`AnimatedNode::sub`].
+    pub fn sub(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.0.sub(other)
     }
 
-    /// See [`NativeNode::mul`].
-    pub fn mul(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    /// See [`AnimatedNode::mul`].
+    pub fn mul(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.0.mul(other)
     }
 
-    /// See [`NativeNode::div`].
-    pub fn div(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    /// See [`AnimatedNode::div`].
+    pub fn div(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.0.div(other)
     }
 
-    /// See [`NativeNode::modulo`].
-    pub fn modulo(&self, other: impl Into<AnimationOperand>) -> NativeNode {
+    /// See [`AnimatedNode::modulo`].
+    pub fn modulo(&self, other: impl Into<AnimationOperand>) -> AnimatedNode {
         self.0.modulo(other)
     }
 }
 
-impl Animated for NativeValue {
-    fn native_node(&self) -> NativeNode {
+impl Animated for AnimatedValue {
+    fn animated_node(&self) -> AnimatedNode {
         self.0.clone()
     }
 }
 
 /// A composed animation (TS: `Animated.timing` / `spring` / `decay` /
 /// `sequence` / `parallel` / `stagger` / `delay` / `loop`): a tree of
-/// steps over native values, run on the UI thread, each step starting at
+/// steps over animated values, run on the UI thread, each step starting at
 /// the exact end of the one before (no round trip to the engine between
 /// steps).
 ///
@@ -707,7 +707,7 @@ pub struct Animation(Rc<Composed>);
 struct Composed {
     spec: Composite,
     /// The values it animates, kept while it is.
-    values: Vec<NativeValue>,
+    values: Vec<AnimatedValue>,
     run: Run,
 }
 
@@ -733,10 +733,10 @@ impl Drop for Run {
 }
 
 impl Animation {
-    fn new(spec: Composite, values: Vec<NativeValue>) -> Self {
+    fn new(spec: Composite, values: Vec<AnimatedValue>) -> Self {
         let executor = values
             .first()
-            .map(NativeValue::executor)
+            .map(AnimatedValue::executor)
             .unwrap_or_default();
         Self(Rc::new(Composed {
             spec,
@@ -749,25 +749,25 @@ impl Animation {
         }))
     }
 
-    fn run(value: &NativeValue, driver: Driver) -> Self {
+    fn run(value: &AnimatedValue, driver: Driver) -> Self {
         let node = value.0.id();
         Self::new(Composite::Run { node, driver }, vec![value.clone()])
     }
 
     /// `value` moving to `to` as `timing` says.
-    pub fn timing(value: &NativeValue, to: f32, timing: Timing) -> Self {
+    pub fn timing(value: &AnimatedValue, to: f32, timing: Timing) -> Self {
         Self::run(value, timing.driver(to))
     }
 
     /// `value` springing to `to`.
-    pub fn spring(value: &NativeValue, to: f32, spring: Spring) -> Self {
+    pub fn spring(value: &AnimatedValue, to: f32, spring: Spring) -> Self {
         Self::run(value, spring.driver(to))
     }
 
     /// `value` gliding from `velocity` (per second; `None`: the current
     /// one), slowing down by `deceleration` per millisecond (0.998: a
     /// fling).
-    pub fn decay(value: &NativeValue, velocity: Option<f32>, deceleration: f32) -> Self {
+    pub fn decay(value: &AnimatedValue, velocity: Option<f32>, deceleration: f32) -> Self {
         Self::run(
             value,
             Driver::Decay {
@@ -782,7 +782,7 @@ impl Animation {
     /// Like [`Self::decay`], within `min..=max`: it stops at a bound, or
     /// bounces back from it keeping `bounce` (0..1) of its speed.
     pub fn decay_within(
-        value: &NativeValue,
+        value: &AnimatedValue,
         velocity: Option<f32>,
         deceleration: f32,
         (min, max): (f32, f32),
@@ -805,7 +805,7 @@ impl Animation {
     }
 
     /// The spec and values of this animation.
-    fn into_parts(self) -> (Composite, Vec<NativeValue>) {
+    fn into_parts(self) -> (Composite, Vec<AnimatedValue>) {
         match Rc::try_unwrap(self.0) {
             Ok(Composed { spec, values, .. }) => (spec, values),
             Err(shared) => (shared.spec.clone(), shared.values.clone()),
@@ -817,7 +817,7 @@ impl Animation {
         make: impl FnOnce(Vec<Composite>) -> Composite,
     ) -> Self {
         let mut specs = Vec::new();
-        let mut values: Vec<NativeValue> = Vec::new();
+        let mut values: Vec<AnimatedValue> = Vec::new();
         for animation in animations {
             let (spec, of) = animation.into_parts();
             specs.push(spec);
@@ -972,7 +972,7 @@ mod tests {
     #[test]
     fn a_derived_chain_keeps_its_middle_nodes() {
         let executor = Rc::new(Executor::default());
-        let v = NativeValue::new(&executor, 0.5);
+        let v = AnimatedValue::new(&executor, 0.5);
         // The product has no handle of its own once the difference exists.
         let end = v.node().mul(2.0).sub(1.0);
         assert_eq!(released(&executor), 0, "the product lives with the end");
@@ -1003,8 +1003,8 @@ mod tests {
     fn composites_describe_their_steps() {
         let executor = Rc::new(Executor::default());
         let (a, b) = (
-            NativeValue::new(&executor, 0.0),
-            NativeValue::new(&executor, 1.0),
+            AnimatedValue::new(&executor, 0.0),
+            AnimatedValue::new(&executor, 1.0),
         );
         let (na, nb) = (a.node().id(), b.node().id());
         let run = |node, to| Composite::Run {
@@ -1012,7 +1012,7 @@ mod tests {
             driver: timing(to, 100.0),
         };
         let step =
-            |v: &NativeValue, to| Animation::timing(v, to, Timing::new(100.0, Easing::Linear));
+            |v: &AnimatedValue, to| Animation::timing(v, to, Timing::new(100.0, Easing::Linear));
         let staggered = Animation::stagger(50.0, [step(&a, 1.0), step(&b, 2.0)]);
         let delayed = |ms, c| Composite::Sequence(vec![Composite::Delay(ms), c]);
         assert_eq!(
@@ -1075,7 +1075,7 @@ mod tests {
     #[test]
     fn composites_start_stop_reset_and_release_by_key() {
         let executor = Rc::new(Executor::default());
-        let x = NativeValue::new(&executor, 0.0);
+        let x = AnimatedValue::new(&executor, 0.0);
         let _ = ops(&executor);
         let jump = Animation::sequence([
             Animation::timing(&x, 10.0, Timing::default()),
@@ -1137,7 +1137,7 @@ mod tests {
     #[test]
     fn values_derive_like_their_nodes() {
         let executor = Rc::new(Executor::default());
-        let t = NativeValue::new(&executor, 0.0);
+        let t = AnimatedValue::new(&executor, 0.0);
         let right = Interpolation {
             extrapolate_right: Extrapolate::Extend,
             ..Interpolation::default()
