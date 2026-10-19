@@ -71,9 +71,10 @@ Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `cr
 
 Standard networking: global `fetch` keeps engine checks and redirect handling. Scoped `network.http` rules use
 `scheme` (HTTPS by default), `host`, optional `port`, required GET/POST `methods`, and `paths` / `path_prefixes`.
-Paths match exactly; prefixes match slash-delimited boundaries. `{host, methods}` grants no paths. Legacy rules
-are explicitly selected by `schemes` or `pathPrefix`; mixing rule forms is rejected and serialization preserves
-the form. Native `websocket` checks GET permission before DNS and rejects handshake redirects. Raw TCP
+Paths match exactly; prefixes match slash-delimited boundaries. `{host, methods}` grants no paths. A scoped rule
+names one exact host: a wildcard there is a parse error (it would compare exactly and match nothing), so host
+patterns go in `hosts` or legacy rules. Legacy rules are explicitly selected by `schemes` or `pathPrefix`; mixing
+rule forms is rejected and serialization preserves the form. Native `websocket` checks GET permission before DNS and rejects handshake redirects. Raw TCP
 `net.connect` requires `network.hosts` (all valid ports on a granted host); HTTP path/method grants cannot
 authorize raw sockets. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
 standard catalog is eleven canonical bare modules; its connection and file APIs follow their generated

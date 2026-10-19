@@ -26,7 +26,8 @@
 
 //! Scoped HTTP rules use `scheme`, `port`, `methods`, `paths` and
 //! `path_prefixes`. They default to HTTPS and require GET/POST methods and
-//! at least one matching exact path or slash-delimited prefix. Breaking change:
+//! at least one matching exact path or slash-delimited prefix, on an exact
+//! host (a wildcard host is rejected: use `hosts` for those). Breaking change:
 //! `{host, methods}` now follows this scoped form and grants no paths. Legacy
 //! NSH rules remain explicit through `schemes` or `pathPrefix`; mixing the two
 //! forms is rejected. Serialization preserves the chosen rule form.
@@ -363,6 +364,13 @@ impl Capabilities {
                         );
                     }
                     let reference = !legacy;
+                    // Scoped rules compare the host exactly; a pattern there
+                    // would silently match nothing.
+                    if reference && host.contains('*') {
+                        return Err(format!(
+                            "scoped network.http rules need an exact host, not `{host}`; list wildcard hosts in capabilities.network.hosts"
+                        ));
+                    }
                     let scope = if reference {
                         let scheme = g
                             .get("scheme")
@@ -1127,6 +1135,25 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    #[test]
+    fn scoped_http_rules_reject_wildcard_hosts() {
+        for host in ["*.example.com", "*"] {
+            let error = Capabilities::from_json(&serde_json::json!({"network":{"http":[
+                {"host": host, "methods": ["GET"], "paths": ["/"]}
+            ]}}))
+            .unwrap_err();
+            assert!(error.contains("exact host"), "{error}");
+        }
+        // Legacy rules match host patterns, so they keep accepting them.
+        let legacy = Access {
+            declared: caps(
+                r#"{"network":{"http":[{"host":"*.example.com","schemes":["https"]}]}}"#,
+            ),
+            granted: None,
+        };
+        assert!(legacy.allows_http("GET", "https://api.example.com/"));
     }
 
     #[cfg(unix)]
