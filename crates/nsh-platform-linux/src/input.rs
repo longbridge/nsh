@@ -642,6 +642,12 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
             down(surface, Key::Mouse, x, y, time)
         }
+        T::ButtonPress
+            if button() == Some(gdk::BUTTON_SECONDARY)
+                && context_menu(surface, x, y, event.modifier_state()) =>
+        {
+            return glib::Propagation::Stop;
+        }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
             up(surface, Key::Mouse, x, y, time, false)
         }
@@ -679,6 +685,47 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         _ => {}
     }
     glib::Propagation::Proceed
+}
+
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it (true:
+/// the click is taken). Text fields are GTK's widgets, which show their
+/// own menu.
+fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> bool {
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return false;
+    };
+    for v in chain(&hit.view) {
+        let (id, listens, input) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+            )
+        };
+        if listens {
+            let (location_x, location_y) = local(surface, &v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location_x,
+                location_y,
+                page_x: x,
+                page_y: y,
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+                    alt: state.contains(gdk::ModifierType::ALT_MASK),
+                    shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+                    cmd: state.contains(gdk::ModifierType::SUPER_MASK),
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if input {
+            return false;
+        }
+    }
+    false
 }
 
 /// The event's position in the root's coordinates (`None` for events of

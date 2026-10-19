@@ -832,6 +832,16 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
             obj.set("metaKey", e.modifiers.cmd)?;
             obj.set("shiftKey", e.modifiers.shift)?;
         }
+        EventPayload::ContextMenu(e) => {
+            obj.set("locationX", e.location_x)?;
+            obj.set("locationY", e.location_y)?;
+            obj.set("pageX", e.page_x)?;
+            obj.set("pageY", e.page_y)?;
+            obj.set("altKey", e.modifiers.alt)?;
+            obj.set("ctrlKey", e.modifiers.ctrl)?;
+            obj.set("metaKey", e.modifiers.cmd)?;
+            obj.set("shiftKey", e.modifiers.shift)?;
+        }
         EventPayload::FileDrop(uris) => {
             let list = rquickjs::Array::new(ctx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
@@ -1163,6 +1173,37 @@ const report = (v) => text(String(v));
             );
             assert!(flag("shiftKey") && flag("metaKey"));
             assert!(!flag("altKey") && !flag("ctrlKey"));
+        });
+    }
+
+    #[test]
+    fn context_menu_payload_has_both_positions() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::ContextMenuEvent {
+            location_x: 1.0,
+            location_y: 2.0,
+            page_x: 11.0,
+            page_y: 22.0,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        };
+        host.ctx.with(|ctx| {
+            let value = payload_object(&ctx, &EventPayload::ContextMenu(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |k: &str| obj.get::<_, f64>(k).unwrap();
+            assert_eq!(
+                (
+                    num("locationX"),
+                    num("locationY"),
+                    num("pageX"),
+                    num("pageY")
+                ),
+                (1.0, 2.0, 11.0, 22.0)
+            );
+            assert!(obj.get::<_, bool>("ctrlKey").unwrap());
+            assert!(!obj.get::<_, bool>("metaKey").unwrap());
         });
     }
 

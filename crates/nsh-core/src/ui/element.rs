@@ -10,9 +10,9 @@ use super::{
     style::{StyleRefinement, Styled, Variant},
 };
 use crate::{
-    AccessibilityProp, AccessibilityRole, AccessibilityState, EdgeInsets, EventKind, EventPayload,
-    HoverEvent, ImageSource, ListContentStyle, NativeProp, NodeId, PointerEvents, Prop, Rect, Size,
-    Tag, TouchEvent, style::Color,
+    AccessibilityProp, AccessibilityRole, AccessibilityState, ContextMenuEvent, EdgeInsets,
+    EventKind, EventPayload, HoverEvent, ImageSource, ListContentStyle, NativeProp, NodeId,
+    PointerEvents, Prop, Rect, Size, Tag, TouchEvent, style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
@@ -989,6 +989,17 @@ pub trait Interactive: Element {
         self.on(
             EventKind::HoverMove,
             events::typed(listener.into_listener(), events::hover),
+        )
+    }
+
+    /// The secondary button was pressed over it (a right click,
+    /// Control-click on Apple platforms): where, to open a menu at
+    /// (`page_x`, `page_y`). The nearest element that listens hears it;
+    /// a text input or selectable text nearer shows its own menu instead.
+    fn on_context_menu<M>(self, listener: impl IntoListener<ContextMenuEvent, M>) -> Self {
+        self.on(
+            EventKind::ContextMenu,
+            events::typed(listener.into_listener(), events::context_menu),
         )
     }
 

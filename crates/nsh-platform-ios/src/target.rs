@@ -68,6 +68,20 @@ define_class!(
             self.with_mounter(move |m| m.hover(id, state, in_window, modifiers));
         }
 
+        #[unsafe(method(handleContextMenu:))]
+        fn handle_context_menu(&self, recognizer: &UITapGestureRecognizer) {
+            if recognizer.state() != UIGestureRecognizerState::Ended {
+                return;
+            }
+            let Some(view) = recognizer.view() else { return };
+            let id = view.tag() as NodeId;
+            let in_window = recognizer.locationInView(None);
+            // SAFETY: UIGestureRecognizer's `modifierFlags` (iOS 13.4), a
+            // UIKeyModifierFlags (NSInteger).
+            let modifiers: isize = unsafe { msg_send![recognizer, modifierFlags] };
+            self.with_mounter(move |m| m.context_menu(id, in_window, modifiers));
+        }
+
         #[unsafe(method(handlePinch:))]
         fn handle_pinch(&self, recognizer: &UIPinchGestureRecognizer) {
             let Some(view) = recognizer.view() else { return };

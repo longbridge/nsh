@@ -901,6 +901,21 @@ pub unsafe extern "C" fn nsh_event(
                 },
             })
         }
+        EventKind::ContextMenu => {
+            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+                location_x: num("locationX"),
+                location_y: num("locationY"),
+                page_x: num("pageX"),
+                page_y: num("pageY"),
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: flag("ctrlKey"),
+                    alt: flag("altKey"),
+                    shift: flag("shiftKey"),
+                    cmd: flag("metaKey"),
+                },
+            })
+        }
         EventKind::ChangeText | EventKind::SubmitEditing => EventPayload::Text {
             text: text("text"),
             count: num("count") as u32,

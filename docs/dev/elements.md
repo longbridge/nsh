@@ -103,6 +103,15 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   the system, not along a chain. The engine merges moves (`State::hover_moves`): the latest per view, delivered at most
   once per `HOVER_MOVE_INTERVAL` (8 ms) and always before the next other event, so a view hears where the mouse went
   before it hears it leave; mice report up to 1000 moves a second, and a crosshair needs one per frame.
+- **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
+  macOS, in GPUI on macOS too; the browser's `contextmenu`, which its keyboard menu key raises too). The platform
+  decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
+  view that listens hears it (`EventPayload::ContextMenu`: `locationX` / `locationY` in it, `pageX` / `pageY` in its
+  root view, which is where `Menu.popup` takes its point, and the modifier keys); a text field nearer, or selectable
+  text with an edit menu of its own (Windows, GPUI, the web), shows that menu instead and the app hears nothing.
+  JS cannot cancel the system's menu after the fact (the main thread never waits for JS), so the rule is what is
+  mounted. iOS: a `UITapGestureRecognizer` for the secondary button per listening view (iPad pointers, Mac
+  Catalyst's mouse). On touchscreens a menu belongs on `onLongPress`; Android raises `onContextMenu` for no input yet.
 - **Keyboard focus**: on macOS and the web, views that take presses are stops of Tab (the keyboard focus) and Return /
   Space press the focused one; a click presses without focusing, so a pressable's `FOCUSED` state (`focus:` classes,
   `.focus(..)`) is keyboard focus, and `focus-visible:` is the same variant. `focusable={false}` (`Prop::Focusable`,

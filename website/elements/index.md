@@ -129,6 +129,29 @@ const at = signal<number | null>(null);
 </View>
 ```
 
+### Context menus
+
+`onContextMenu` tells a view that the secondary button was pressed over it: a right click, Control-click on macOS, a
+two-finger click on a touchpad, the secondary click of an iPad's pointer; in browsers also the keyboard's menu key.
+Open the app's own menu there with [`Menu.popup`](../modules/nsh-desktop.md):
+
+```tsx
+import { Menu } from "nsh/desktop";
+
+<View onContextMenu={(e) => Menu.popup(rowMenu(row), { x: e.pageX, y: e.pageY })}>…</View>
+```
+
+| Prop | Type | Description |
+|---|---|---|
+| `onContextMenu` | `(e: ContextMenuEvent) => void` | The secondary button was pressed over the view or a view inside it. |
+
+`ContextMenuEvent` has `locationX` / `locationY` in the view, `pageX` / `pageY` in its root view (where `Menu.popup`
+places a menu) and the modifier keys (`altKey`, `ctrlKey`, `metaKey`, `shiftKey`). The nearest view that listens, from
+the one under the pointer outwards, hears it. A text input, or selectable text with an edit menu (Windows, the GPUI
+backend, browsers), nearer than that view shows its own menu instead; with no listener around, nothing happens. The platform decides this as the button goes down, from what is mounted, so the handler is told after
+the fact and nothing has to be cancelled. On touchscreens, a long press opens menus: handle `onLongPress` with the same
+function.
+
 ### Keyboard focus
 
 On macOS and the web, Tab moves the keyboard focus between the views that take presses (and the inputs), Return or

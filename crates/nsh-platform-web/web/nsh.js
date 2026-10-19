@@ -3604,7 +3604,7 @@ class Player {
     });
     // No page menu over the app (nor iOS's callout on a long press); fields
     // and selectable text keep theirs.
-    root.addEventListener("contextmenu", (e) => this.editable(e.target) || e.preventDefault());
+    root.addEventListener("contextmenu", (e) => this.contextMenu(e) || this.editable(e.target) || e.preventDefault());
     root.addEventListener("copy", (e) => this.copyText(e));
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
@@ -3633,6 +3633,37 @@ class Player {
     this.live.className = "nsh-live";
     this.live.setAttribute("aria-live", "polite");
     if (this.history) this.installHistory();
+  }
+
+  /**
+   * `onContextMenu` of the nearest view around `e`'s target that listens,
+   * unless a field or selectable text is nearer (it keeps the browser's
+   * menu); true when a view took it. The browser raises `contextmenu` for
+   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   */
+  contextMenu(e) {
+    const view = this.viewOf(e.target);
+    if (!view) return false;
+    for (const el of this.ancestors(view)) {
+      if (el._events?.has("onContextMenu")) {
+        e.preventDefault();
+        const [pageX, pageY] = this.point(e);
+        const r = el.getBoundingClientRect();
+        this.event(el._id, "onContextMenu", {
+          locationX: e.clientX - r.left,
+          locationY: e.clientY - r.top,
+          pageX,
+          pageY,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+        });
+        return true;
+      }
+      if (el.matches(".nsh-field, .nsh-selectable")) return false;
+    }
+    return false;
   }
 
   /** Whether the browser handles presses at `target` itself: fields,

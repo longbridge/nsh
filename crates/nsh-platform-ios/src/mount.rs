@@ -131,6 +131,9 @@ struct Gestures {
     press: Option<Retained<PressRecognizer>>,
     /// Reports `hover:` and the hover events (pointers).
     hover: Option<Retained<objc2_ui_kit::UIHoverGestureRecognizer>>,
+    /// `onContextMenu`: secondary clicks (iPad pointers, Mac Catalyst's
+    /// mouse).
+    context: Option<Retained<objc2_ui_kit::UITapGestureRecognizer>>,
     /// `cursor`: the pointer's look.
     pointer: Option<Retained<objc2_ui_kit::UIPointerInteraction>>,
     pan: Option<Retained<UIPanGestureRecognizer>>,
@@ -1710,6 +1713,34 @@ impl Mounter {
             .dispatch_event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
 
+    /// A secondary click on view `id`, at `in_window` (the window's
+    /// coordinates).
+    pub(crate) fn context_menu(&mut self, id: NodeId, in_window: CGPoint, modifiers: isize) {
+        let Some(view) = self.slot(id).map(|s| s.native.view().retain()) else {
+            return;
+        };
+        let local = view.convertPoint_fromView(in_window, None);
+        let page = self.root_view_of(&view).map_or(in_window, |root| {
+            root.convertPoint_fromView(in_window, None)
+        });
+        // UIKeyModifierShift, Control, Alternate, Command.
+        let has = |bit: u32| modifiers & (1 << bit) != 0;
+        let event = nsh_core::ContextMenuEvent {
+            location_x: local.x as f32,
+            location_y: local.y as f32,
+            page_x: page.x as f32,
+            page_y: page.y as f32,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: has(18),
+                alt: has(19),
+                shift: has(17),
+                cmd: has(20),
+            },
+        };
+        self.control
+            .dispatch_event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+    }
+
     /// The root view `view` is in: the surface's, or its modal's (touches'
     /// page coordinates are in it).
     fn root_view_of(&self, view: &UIView) -> Option<Retained<UIView>> {
@@ -2111,8 +2142,30 @@ impl Mounter {
                 )
             }
         });
+        let wants_context = events.contains(EventKind::ContextMenu);
+        toggle(&mut slot.gestures.context, wants_context, view, || {
+            // SAFETY: `handleContextMenu:` is implemented by the target,
+            // which outlives the recognizer; `buttonMaskRequired` is
+            // UIGestureRecognizer's (iOS 13.4), UIEventButtonMaskSecondary.
+            unsafe {
+                let r = objc2_ui_kit::UITapGestureRecognizer::initWithTarget_action(
+                    objc2_ui_kit::UITapGestureRecognizer::alloc(mtm),
+                    Some(&target),
+                    Some(sel!(handleContextMenu:)),
+                );
+                let _: () = objc2::msg_send![&r, setButtonMaskRequired: 1isize << 1];
+                r
+            }
+        });
         let wants_touch = events.contains(EventKind::Touch);
-        if wants_press || wants_pan || wants_pinch || wants_rotation || wants_touch || wants_hover {
+        if wants_press
+            || wants_pan
+            || wants_pinch
+            || wants_rotation
+            || wants_touch
+            || wants_hover
+            || wants_context
+        {
             view.setUserInteractionEnabled(true);
         }
         if let Some(nsh) = slot.native.nsh() {
