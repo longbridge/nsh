@@ -444,3 +444,20 @@ fn a_late_exit_listener_hears_the_exit_and_children_free_their_place() {
     );
     assert_eq!(app.shown("done"), "done ok");
 }
+
+#[test]
+fn past_the_children_limit_spawn_throws_and_run_rejects_a_range_error() {
+    let app = App::start(
+        r#"(async () => {
+  const children = [];
+  for (let i = 0; i < 32; i++) children.push(process.spawn("/bin/sh", ["-c", "sleep 5"]));
+  let thrown = "";
+  try { process.spawn("/bin/sh", ["-c", "exit 0"]); } catch (e) { thrown = e.constructor.name; }
+  const rejected = await process.run("/bin/sh", ["-c", "exit 0"]).then(() => "ran", (e) => e.constructor.name);
+  for (const child of children) child.kill();
+  report(`${thrown} ${rejected}`);
+})().catch((e) => report(String(e)));"#,
+        shell(),
+    );
+    assert_eq!(app.shown("done"), "done RangeError RangeError");
+}

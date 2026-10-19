@@ -653,7 +653,7 @@ mod native {
     fn launch_child(sys: &System, launch: Launch, stdin: bool) -> Result<Started, JsError> {
         let children = sys.locals.get::<super::Children>();
         let place = sys.quotas.take(CHILDREN, MAX_CHILDREN).ok_or_else(|| {
-            JsError::Type(format!("a VM may run at most {MAX_CHILDREN} children"))
+            JsError::Range(format!("a VM may run at most {MAX_CHILDREN} children"))
         })?;
         let mut cmd = Command::new(resolve_executable(&launch.command)?);
         cmd.env_clear()
