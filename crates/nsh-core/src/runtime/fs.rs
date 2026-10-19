@@ -994,7 +994,21 @@ mod confined {
             path::Component,
         };
         let mut current = std::fs::File::open("/")?;
-        for part in path.components() {
+        let parts: Vec<_> = path.components().collect();
+        for (i, part) in parts.iter().enumerate() {
+            // An ancestor is only passed through: on Linux `O_PATH` needs no
+            // read permission of it (a home directory may be 0711).
+            #[cfg(target_os = "linux")]
+            let access = if i + 1 < parts.len() {
+                libc::O_PATH
+            } else {
+                libc::O_RDONLY
+            };
+            #[cfg(not(target_os = "linux"))]
+            let access = {
+                let _ = i;
+                libc::O_RDONLY
+            };
             match part {
                 Component::RootDir => (),
                 Component::Normal(name) => {
@@ -1006,7 +1020,7 @@ mod confined {
                         libc::openat(
                             current.as_raw_fd(),
                             name.as_ptr(),
-                            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                            access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
                         )
                     };
                     if fd < 0 {

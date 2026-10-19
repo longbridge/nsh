@@ -735,3 +735,32 @@ import fs from "fs/promises";
     );
     assert_eq!(shown(&rx, "done"), "done 0 true true");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_root_under_a_directory_it_may_only_pass_through_opens() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("pass-through").canonicalize().unwrap();
+    let inner = dir.join("locked/inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(inner.join("note.txt"), "through").unwrap();
+    // Search permission only, as a home directory of 0711 gives others.
+    std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o311)).unwrap();
+    let file = serde_json::to_string(&inner.join("note.txt")).unwrap();
+    let grant = serde_json::json!({ "fs": { "read": [inner] } }).to_string();
+    let (_engine, rx) = start(
+        &format!(
+            r#"
+import fs from "fs/promises";
+fs.readFile({file}, "utf8").then(report, (e) => report(String(e)));
+"#
+        ),
+        &grant,
+        None,
+        Default::default(),
+    );
+    let shown = shown(&rx, "done");
+    std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(shown, "done through");
+}
