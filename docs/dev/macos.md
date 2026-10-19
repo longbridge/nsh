@@ -286,10 +286,18 @@ view loop alongside native text inputs. Disabled accessibility state, removed
 press listeners, hidden views and views leaving the tree exclude a control.
 Tab/Shift+Tab stay within the newest modal and advance from the currently
 focused control. The root and passive layout views stay outside that loop. A
-modal remembers the view that had the focus when it was presented
-(`ModalNav::focus_before`) and gives it back when it closes, if the focus fell
-to the root or the window meanwhile and the view is still shown: Escape on a
-popover returns to its trigger.
+modal remembers the input or pressable view that had the focus when it was
+presented (`ModalNav::focus_before`, held weakly) and gives it back when it
+closes, if the focus fell to the root or the window meanwhile: Escape on a
+popover returns to its trigger. A field edits in the window's shared field
+editor, which leaves the tree when editing ends, so the input that owns the
+editor is what is remembered; it comes back through `focus()`, with the caret
+at the end and its text not selected. A view that can no longer take the focus
+(disabled, without press listeners, `pointerEvents` none, hidden, detached)
+is skipped, and so is one a newer modal still covers: nothing under the
+newest modal is focused. When a lower modal closes under a newer one, the
+newer one that remembered a view of it remembers the lower one's instead, so
+closing it later returns to the view that opened the stack.
 
 Focused controls update the existing `focus:` interaction state. Unmodified
 Return, keypad Enter and Space emit PressIn/PressOut/Press once on key-down;
@@ -306,6 +314,10 @@ the public event protocol.
 Checked with `--script` (`key Tab`, `key Return`, `key space`, `key Escape`,
 `tap`): Tab between pressables, Return and Space pressing the focused one, Tab
 staying in a transparent modal, and the focus returning to the trigger after
-Escape or a click outside. Still to check natively: Shift+Tab, mixed inputs and
+Escape or a click outside; a single-line and a secure field getting it back
+with the caret at the end (a character typed after Escape is appended); a
+trigger disabled meanwhile staying unfocused; a lower modal closing under a
+newer one leaving the focus alone, and the newer one's Escape returning it to
+the stack's trigger. Still to check natively: Shift+Tab, mixed inputs and
 buttons, disabling or deleting a focused control, repeat suppression, modifier
 shortcuts, screen-reader focus and window deactivation.
