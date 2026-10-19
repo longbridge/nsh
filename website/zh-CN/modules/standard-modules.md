@@ -57,11 +57,11 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 }
 ```
 
-根目录可以是绝对路径、`${dataDir}`（宿主为此应用选定的数据目录）、`${pluginDir}`（应用目录）、`${homeDir}`，或相对于应用目录的路径。调用中的相对路径依次在每个授权根目录中解析。嵌入应用可以进一步缩小授权。每个操作都限定在其授权根目录之内，符号链接也是如此。`lstat`、`readlink`、`exists`、`unlink`、`rename` 和 `rmdir` 作用于符号链接本身：目标不存在的符号链接 `exists` 为 `true`，`unlink` 删除链接并保留其目标。
+根目录可以是绝对路径、`${dataDir}`（宿主为此应用选定的数据目录）、`${pluginDir}`（应用目录）、`${homeDir}`，或相对于应用目录的路径。调用中的相对路径依次在每个授权根目录中解析。嵌入应用可以进一步缩小授权。每个操作都限定在其授权根目录之内，符号链接也是如此；绝对路径按书写形式检查，因此须通过根目录自身的路径（或其解析后的路径）访问，而不能经由根目录之外的符号链接。`lstat`、`readlink`、`exists`、`unlink`、`rename` 和 `rmdir` 作用于符号链接本身：目标不存在的符号链接 `exists` 为 `true`，`unlink` 删除链接并保留其目标。
 
 失败时的错误带有 Node 的错误属性：`code`（`ENOENT`、`EEXIST`、`ENOTDIR`、`EISDIR`、`ENOTEMPTY`、`ELOOP`、`EACCES`、`EPERM` 等；文本不是 UTF-8 时为 `EILSEQ`，超出读取上限时为 `ERR_FS_FILE_TOO_LARGE`）、`syscall` 和 `path`，因此可以用 `error.code === "ENOENT"` 判断文件不存在。授权范围之外的路径抛出 `code` 为 `EACCES` 的 `TypeError`，宿主没有原生文件系统时 `code` 为 `ENOSYS`。
 
-`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名，传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
+`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名（名称合计最多 1 MiB；更大的目录以 `code` 为 `ERR_OUT_OF_RANGE` 的 `RangeError` 拒绝），传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
 
 ## 进程
 
@@ -101,7 +101,11 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 ## 网络授权与边界
 
-全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，单条消息最多 8 MiB，发送队列最多 8 条且缓冲总量最多 8 MiB。握手和写入超时为 30 秒，关闭最多等待 5 秒。`WebSocketConnection` 最多保留八条未读消息：对端关闭后，`read()` 仍按顺序返回这些消息，然后以连接结束的原因拒绝。
+全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，两者的单条消息都最多 8 MiB。
+
+全局 `WebSocket` 的发送队列最多 8 条消息、缓冲总量最多 8 MiB（`bufferedAmount`），超出任一项时 `send()` 抛出错误。握手和每次写入超时为 30 秒，关闭时最多等待 5 秒对端的关闭帧。消息到达时即以 `message` 事件交付。
+
+`websocket` 模块的 `WebSocketConnection` 最多同时有 8 个待完成操作（读、写、关闭），尚未发出的写入合计最多 8 MiB；超过字节上限的 `write()` 在调用时抛出 `RangeError`，超过操作上限的则被拒绝。同一时间只能有一个 `read()` 等待。尚未读取的到达消息最多保留八条且合计 8 MiB；再多一条就关闭连接，因为应用读取得比对端发送得慢。解析、连接与握手合计、每次写入和关闭的超时均为 30 秒。连接结束后（对端关闭、读写失败或未读数据过多），`read()` 仍按顺序返回保留的消息，然后以连接结束的原因拒绝。
 
 `net.connect(host, port)` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 `Socket` 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。未授权时在调用处抛出 `TypeError`，超出限制时抛出 `RangeError`；连接与 I/O 失败以带有 Node 的 `code`（`ECONNREFUSED`、`ENOTFOUND`、`ETIMEDOUT`、`ECONNRESET` 等）和 `syscall` 的错误拒绝 Promise，连接失败还带有 `address` 和 `port`，对已关闭 socket 的操作为 `ERR_SOCKET_CLOSED`。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
 

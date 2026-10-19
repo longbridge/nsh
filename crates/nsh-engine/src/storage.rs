@@ -31,14 +31,17 @@ impl FileStorage {
     /// The storage in `dir/storage.json`: the one already open in this
     /// process, or a new one (the directory is made on the first write).
     pub fn open(dir: impl Into<PathBuf>) -> Arc<Self> {
-        static OPEN: Mutex<Vec<Weak<FileStorage>>> = Mutex::new(Vec::new());
+        // By path, so that finding one upgrades no other: a reference taken
+        // even briefly would move the other's last drop, which waits for
+        // its writes, to this thread, after its owner thought it done.
+        static OPEN: Mutex<Vec<(PathBuf, Weak<FileStorage>)>> = Mutex::new(Vec::new());
         let path = dir.into().join("storage.json");
         let mut open = OPEN.lock().unwrap_or_else(|e| e.into_inner());
-        open.retain(|s| s.strong_count() > 0);
+        open.retain(|(_, s)| s.strong_count() > 0);
         if let Some(storage) = open
             .iter()
-            .filter_map(Weak::upgrade)
-            .find(|s| s.path == path)
+            .find(|(p, _)| *p == path)
+            .and_then(|(_, s)| s.upgrade())
         {
             return storage;
         }
@@ -48,7 +51,7 @@ impl FileStorage {
             in_memory: std::sync::atomic::AtomicBool::new(false),
             writer: Mutex::new(None),
         });
-        open.push(Arc::downgrade(&storage));
+        open.push((storage.path.clone(), Arc::downgrade(&storage)));
         storage
     }
 

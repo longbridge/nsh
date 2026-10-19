@@ -34,6 +34,12 @@ const LIMIT: usize = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// Messages received while no read waits; one more closes the connection.
 const UNREAD: usize = 8;
+/// Bytes of messages received while no read waits; more closes the
+/// connection. Native memory the heap limit does not cover.
+const UNREAD_BYTES: usize = LIMIT;
+/// Bytes of writes not sent yet, per connection (the global `WebSocket`'s
+/// `bufferedAmount` limit); a write past it throws.
+const PENDING_WRITES: usize = LIMIT;
 
 /// WebSocket client connections to the hosts the HTTP grants allow.
 #[module]
@@ -211,35 +217,53 @@ enum Command {
     Close(Reply<()>),
 }
 
-/// An open WebSocket connection: one read and up to eight commands may
-/// wait at once.
+/// An open WebSocket connection: one read, up to eight commands and 8 MiB
+/// of writes may wait at once.
 #[class]
 pub(crate) struct WebSocketConnection {
     commands: mpsc::Sender<Command>,
     reading: Rc<Cell<bool>>,
+    /// Bytes of writes not sent yet.
+    pending: Rc<Cell<usize>>,
     /// The task driving the socket; dropping it closes the connection.
     _driver: Spawned<()>,
 }
 
 #[class]
 impl WebSocketConnection {
-    /// Sends a text (string) or binary (Uint8Array) message of at most 8 MiB.
+    /// Sends a text (string) or binary (Uint8Array) message of at most
+    /// 8 MiB; at most 8 MiB of writes may wait to be sent.
     pub(crate) fn write(&self, data: Data) -> Result<Later<()>, JsError> {
         let message = match data {
             Data::Text(text) => Message::Text(text.into()),
             Data::Bytes(bytes) => Message::Binary(bytes.into()),
         };
-        if message.len() > LIMIT {
+        let length = message.len();
+        if length > LIMIT {
             return Err(JsError::Range(format!(
                 "WebSocket write exceeded the {LIMIT} byte limit"
             )));
         }
+        let queued = self.pending.get() + length;
+        if queued > PENDING_WRITES {
+            return Err(JsError::Range(format!(
+                "WebSocket writes waiting to be sent exceeded the {PENDING_WRITES} byte limit"
+            )));
+        }
+        self.pending.set(queued);
+        struct Pending(Rc<Cell<usize>>, usize);
+        impl Drop for Pending {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() - self.1);
+            }
+        }
+        let pending = Pending(self.pending.clone(), length);
         let (send, receive) = oneshot::channel();
-        Ok(Later::new(enqueue(
-            &self.commands,
-            Command::Write(message, send),
-            receive,
-        )))
+        let sent = enqueue(&self.commands, Command::Write(message, send), receive);
+        Ok(Later::new(async move {
+            let _pending = pending;
+            sent.await
+        }))
     }
 
     /// The next message: a string for text, a Uint8Array for bytes.
@@ -362,6 +386,7 @@ async fn open(
     Ok(WebSocketConnection {
         commands,
         reading: Rc::default(),
+        pending: Rc::default(),
         _driver: driver,
     })
 }
@@ -371,7 +396,8 @@ async fn open(
 /// still read, in order, before the reason it ended; the VM's place for
 /// the connection is given back then.
 async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: Held) {
-    let mut messages = VecDeque::new();
+    let mut messages: VecDeque<Message> = VecDeque::new();
+    let mut unread = 0;
     let mut read: Option<Reply<Message>> = None;
     let error = loop {
         tokio::select! {
@@ -383,6 +409,7 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
                 }
                 Some(Command::Read(reply)) => match messages.pop_front() {
                     Some(message) => {
+                        unread -= message.len();
                         let _ = reply.send(Ok(message));
                     }
                     None => read = Some(reply),
@@ -413,11 +440,16 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
                 Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
                     if let Some(reply) = read.take() {
                         let _ = reply.send(Ok(message));
-                    } else if messages.len() < UNREAD {
+                    } else if messages.len() < UNREAD && unread + message.len() <= UNREAD_BYTES {
+                        unread += message.len();
                         messages.push_back(message);
                     } else {
+                        // The app reads slower than the peer sends: closing
+                        // bounds the memory instead of buffering without end.
                         let _ = tokio::time::timeout(TIMEOUT, socket.close(None)).await;
-                        break "WebSocket connection is closed".to_owned();
+                        break format!(
+                            "WebSocket closed: more than {UNREAD} messages or {UNREAD_BYTES} bytes arrived unread"
+                        );
                     }
                 }
                 Some(Ok(Message::Ping(_))) => {

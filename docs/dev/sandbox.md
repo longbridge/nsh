@@ -51,11 +51,13 @@ trusted: every limit and check is enforced in Rust, never in JS.
   without reaping it (`waitid(WNOWAIT)` on Linux, a kqueue `NOTE_EXIT` on Apple platforms), so the group is only
   signalled while the leader's pid is still taken. VM teardown sends every child SIGKILL before joining any
   supervisor. Windows ends trees with one `taskkill /T /F` per child, started without waiting. Filesystem checks
-  reject traversal and canonicalize the nearest existing ancestor before checking containment in each granted root,
-  including symlinks and paths whose final components will be created. The operation then runs in the granted
-  root, opened once (on Unix component by component with `O_NOFOLLOW` from `/`) as a cap-std `Dir`, so no symlink
-  leads it outside; operations on links (`lstat`, `readlink`, `exists`, `unlink`, `rename`, `rmdir`) resolve only
-  the parent. Files are opened non-blocking and must be regular files. One VM has at most 1024 operations and
+  work on the path's text (`.` and `..` resolved as written) against each granted root in both its written and its
+  canonical form (the nearest existing ancestor canonicalized once per VM, `Roots` in `sys.locals`), so the call
+  does no disk work on the engine thread; a path reaching a root through an outside symlink is refused. The
+  operation then runs off the engine thread in the granted root, opened (on Unix component by component with
+  `O_NOFOLLOW` from `/`, ancestors for search only) as a cap-std `Dir`, so no symlink leads it outside; a write
+  creates a root that does not exist yet, a read finds nothing in it. Operations on links (`lstat`, `readlink`,
+  `exists`, `unlink`, `rename`, `rmdir`) act on the last component itself. Files are opened non-blocking and must be regular files. One VM has at most 1024 operations and
   64 MiB of file data in flight (`nsh_core::runtime::fs`, counted in the VM's `Quotas`). `${dataDir}`, `${pluginDir}` and
   `${homeDir}` are resolved from trusted host configuration. Relative roots are anchored at the host plugin
   directory; an unconfigured anchor grants nothing. Read and write grants are separate. Environment visibility

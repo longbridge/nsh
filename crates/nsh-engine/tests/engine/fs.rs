@@ -382,6 +382,8 @@ import fs from "fs/promises";
   try { await fs.readFile("over-read-limit"); } catch (e) { read = e.constructor === Error && e.message.includes("67108864"); }
   let write = false;
   try { fs.writeFile("not-created", "x".repeat(8 * 1024 * 1024 + 1)); } catch (e) { write = e instanceof RangeError && e.message.includes("8388608-byte"); }
+  // A buffer past the limit is refused by its length, before it is copied.
+  try { fs.writeFile("not-created", new Uint8Array(64 * 1024 * 1024)); write = false; } catch (e) { write = write && e instanceof RangeError && e.message.includes("67108864 bytes"); }
   const bytes = await fs.readFile("above-native-text-limit");
   report(read && write && Object.getPrototypeOf(bytes) === Uint8Array.prototype && bytes.length === 16 * 1024 * 1024 + 1 ? "ok" : "bad");
 })().catch((e) => report(String(e)));
@@ -763,4 +765,65 @@ fs.readFile({file}, "utf8").then(report, (e) => report(String(e)));
     std::fs::set_permissions(dir.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(shown, "done through");
+}
+
+#[test]
+fn a_root_named_through_a_link_is_reached_by_either_name() {
+    // As `/var` and `/private/var` on macOS: the grant names the link.
+    let dir = scratch("linked-root").canonicalize().unwrap();
+    std::fs::create_dir(dir.join("real")).unwrap();
+    std::fs::write(dir.join("real/note.txt"), "either").unwrap();
+    symlink(dir.join("real"), dir.join("alias")).unwrap();
+    let grant = serde_json::json!({ "fs": { "read": [dir.join("alias")] } }).to_string();
+    let (by_link, by_target) = (
+        serde_json::to_string(&dir.join("alias/note.txt")).unwrap(),
+        serde_json::to_string(&dir.join("real/note.txt")).unwrap(),
+    );
+    let (_engine, rx) = start(
+        &format!(
+            r#"
+import fs from "fs/promises";
+(async () => {{
+  report([await fs.readFile({by_link}, "utf8"), await fs.readFile({by_target}, "utf8")].join("|"));
+}})().catch((e) => report(String(e)));
+"#
+        ),
+        &grant,
+        None,
+        Default::default(),
+    );
+    assert_eq!(shown(&rx, "done"), "done either|either");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_directory_past_the_readdir_limit_is_refused_with_a_code() {
+    let (root, app) = data_dir("many");
+    std::fs::create_dir(app.join("many")).unwrap();
+    for i in 0..10_001 {
+        std::fs::write(app.join(format!("many/{i:05}")), "").unwrap();
+    }
+    std::fs::create_dir(app.join("some")).unwrap();
+    for i in 0..3_000 {
+        std::fs::write(app.join(format!("some/{i:05}-{}", "n".repeat(40))), "").unwrap();
+    }
+    let (_engine, rx) = start(
+        r#"
+import fs from "fs/promises";
+(async () => {
+  const many = await fs.readdir("many").then(() => "listed", (e) => `${e.constructor.name}:${e.code}`);
+  // About 140 KB of names: listed in batches held ahead.
+  const some = await fs.readdir("some");
+  report(`${many} ${some.length} ${some[0].startsWith("00000-")}`);
+})().catch((e) => report(String(e)));
+"#,
+        DATA_GRANT,
+        Some(root.clone()),
+        Default::default(),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done RangeError:ERR_OUT_OF_RANGE 3000 true"
+    );
+    let _ = std::fs::remove_dir_all(root);
 }

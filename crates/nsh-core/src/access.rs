@@ -1399,6 +1399,7 @@ mod tests {
         assert!(!Access::all().allows_exit());
         assert!(!Access::all().allows_env("NSH_SECRET"));
         assert!(Access::all().allows_env("LANG"));
+        assert_eq!(Access::all().allows_env("lang"), cfg!(windows));
         assert!(Access::all().allows_env("TZ"));
         // Identity, paths and proxy credentials need an explicit grant.
         for name in [

@@ -1,8 +1,9 @@
 //! `fs/promises`: capability-checked files. A call checks its path against
-//! `capabilities.fs` (a `TypeError` there) and its limits (a `RangeError`);
-//! the disk work then runs off the engine thread, confined to the granted
-//! root by a cap-std `Dir`, so a symlink inside a root cannot lead a later
-//! operation outside it. Results settle as core tasks.
+//! `capabilities.fs` (a `TypeError` there) and its limits (a `RangeError`)
+//! by the path's text and the VM's resolved roots, without disk work; the
+//! work then runs off the engine thread, confined to the granted root by a
+//! cap-std `Dir`, so a symlink inside a root cannot lead a later operation
+//! outside it. Results settle as core tasks.
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
@@ -36,6 +37,9 @@ const GROWTH: usize = 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_NAME_BYTES: usize = 1024 * 1024;
+/// The name bytes a `readdir` holds of the budget ahead of listing them.
+#[cfg(not(target_arch = "wasm32"))]
+const NAME_BATCH: usize = 64 * 1024;
 
 /// Promise-based files under the roots `capabilities.fs` grants. Failures
 /// carry Node's `code` (`ENOENT`, `EEXIST`, ...), `syscall` and `path`; a
@@ -56,7 +60,7 @@ impl Fs {
         encoding: Option<Encoding>,
         sys: System,
     ) -> Result<Later<Holding<FileData>>, JsError> {
-        let grant = grant(&sys, &path, false, false)?;
+        let grant = grant(&sys, &path, false)?;
         let pending = pending(&sys)?;
         let text = encoding.is_some();
         Ok(Later::new(async move {
@@ -72,17 +76,20 @@ impl Fs {
         data: FileData,
         sys: System,
     ) -> Result<Later<()>, JsError> {
-        let grant = grant(&sys, &path, true, false)?;
+        let grant = grant(&sys, &path, true)?;
+        let too_long = |len: usize| {
+            JsError::Range(format!(
+                "`{}` write is {len} bytes, over the {MAX_WRITE}-byte fs.writeFile limit",
+                grant.name()
+            ))
+        };
         let bytes = match data {
             FileData::Text(text) => text.into_bytes(),
             FileData::Bytes(bytes) => bytes,
+            FileData::TooLong(len) => return Err(too_long(len)),
         };
         if bytes.len() > MAX_WRITE {
-            return Err(JsError::Range(format!(
-                "`{}` write is {} bytes, over the {MAX_WRITE}-byte fs.writeFile limit",
-                grant.name(),
-                bytes.len()
-            )));
+            return Err(too_long(bytes.len()));
         }
         let pending = pending(&sys)?;
         let held = sys
@@ -109,7 +116,7 @@ impl Fs {
         sys: System,
     ) -> Result<Later<Holding<Entries>>, JsError> {
         let types = options.and_then(|o| o.with_file_types).unwrap_or(false);
-        let grant = grant(&sys, &path, false, false)?;
+        let grant = grant(&sys, &path, false)?;
         let pending = pending(&sys)?;
         Ok(Later::new(async move {
             let _pending = pending;
@@ -120,19 +127,19 @@ impl Fs {
     /// Whether the entry exists; a symlink exists even when its target is
     /// missing.
     pub(crate) fn exists(path: String, sys: System) -> Result<Later<bool>, JsError> {
-        let grant = grant(&sys, &path, false, true)?;
+        let grant = grant(&sys, &path, false)?;
         start(&sys, grant.exists())
     }
 
     /// Removes a file or a symlink itself, never its target.
     pub(crate) fn unlink(path: String, sys: System) -> Result<Later<()>, JsError> {
-        let grant = grant(&sys, &path, true, true)?;
+        let grant = grant(&sys, &path, true)?;
         start(&sys, grant.unlink())
     }
 
     /// Removes one empty directory.
     pub(crate) fn rmdir(path: String, sys: System) -> Result<Later<()>, JsError> {
-        let grant = grant(&sys, &path, true, true)?;
+        let grant = grant(&sys, &path, true)?;
         start(&sys, grant.rmdir())
     }
 
@@ -144,32 +151,32 @@ impl Fs {
         sys: System,
     ) -> Result<Later<()>, JsError> {
         let recursive = options.and_then(|o| o.recursive).unwrap_or(false);
-        let grant = grant(&sys, &path, true, false)?;
+        let grant = grant(&sys, &path, true)?;
         start(&sys, grant.mkdir(recursive))
     }
 
     /// The entry's metadata, following a symlink.
     pub(crate) fn stat(path: String, sys: System) -> Result<Later<Stats>, JsError> {
-        let grant = grant(&sys, &path, false, false)?;
+        let grant = grant(&sys, &path, false)?;
         start(&sys, grant.stat(false))
     }
 
     /// The entry's metadata; a symlink's own.
     pub(crate) fn lstat(path: String, sys: System) -> Result<Later<Stats>, JsError> {
-        let grant = grant(&sys, &path, false, true)?;
+        let grant = grant(&sys, &path, false)?;
         start(&sys, grant.stat(true))
     }
 
     /// Moves an entry (a symlink itself, not its target).
     pub(crate) fn rename(from: String, to: String, sys: System) -> Result<Later<()>, JsError> {
-        let source = grant(&sys, &from, true, true)?;
-        let target = grant(&sys, &to, true, true)?;
+        let source = grant(&sys, &from, true)?;
+        let target = grant(&sys, &to, true)?;
         start(&sys, source.rename(target))
     }
 
     /// A symlink's target, as it is written.
     pub(crate) fn readlink(path: String, sys: System) -> Result<Later<String>, JsError> {
-        let grant = grant(&sys, &path, false, true)?;
+        let grant = grant(&sys, &path, false)?;
         start(&sys, grant.readlink())
     }
 }
@@ -233,6 +240,8 @@ impl JsValue for Encoding {
 pub(crate) enum FileData {
     Text(String),
     Bytes(Vec<u8>),
+    /// Bytes past what one `writeFile` writes, left uncopied: their length.
+    TooLong(usize),
 }
 
 impl JsValue for FileData {
@@ -244,6 +253,14 @@ impl JsValue for FileData {
         if let Some(text) = value.as_string() {
             return Ok(FileData::Text(text));
         }
+        // Measured before the copy: a buffer far past the limit is refused
+        // without one.
+        if value.kind() == JsKind::Object
+            && let Some(len) = value.field("byteLength")?.get().as_number()
+            && len > MAX_WRITE as f64
+        {
+            return Ok(FileData::TooLong(len as usize));
+        }
         value
             .as_bytes()
             .map(FileData::Bytes)
@@ -254,6 +271,7 @@ impl JsValue for FileData {
         match self {
             FileData::Text(text) => text.to_js(host),
             FileData::Bytes(bytes) => bytes.to_js(host),
+            FileData::TooLong(_) => Err(PropError("file data past the write limit".into())),
         }
     }
 }
@@ -494,27 +512,85 @@ fn resolved(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// A checked path: the granted root, opened, and the path within it.
+/// A checked path: the granted roots it is in (canonical, in the order
+/// of the grants) and the path within each. The work opens the first that
+/// exists, off the engine thread.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct Grant {
-    /// The root, opened; `None`: a read root that does not exist (yet), in
-    /// which every entry is missing.
-    dir: Option<cap_std::fs::Dir>,
-    relative: PathBuf,
+    within: Vec<(PathBuf, PathBuf)>,
+    /// A write creates its root when it does not exist yet.
+    write: bool,
     name: String,
     /// The path as the call gave it (an error's `path`).
     path: String,
+}
+
+/// One VM's granted roots, resolved: the canonical form of each root path
+/// (the anchors and the manifest's root expanded), made the first time a
+/// call names it. A root's place does not move while the VM runs; what is
+/// in it is never cached.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct Roots(std::cell::RefCell<rustc_hash::FxHashMap<PathBuf, Option<PathBuf>>>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::ui::Local for Roots {}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Roots {
+    /// Root `raw` of the manifest or the host grant: its expanded form and
+    /// its canonical one (`None`: it names no root).
+    fn get(&self, sys: &System, raw: &str) -> Option<(PathBuf, PathBuf)> {
+        let data = sys.data_dir.clone().unwrap_or_default();
+        let expanded = sys.paths.resolve_root(raw, &data).ok()?;
+        let expanded = lexical(&expanded);
+        let canonical = self
+            .0
+            .borrow_mut()
+            .entry(expanded.clone())
+            .or_insert_with(|| resolved(&expanded).ok())
+            .clone()?;
+        Some((expanded, canonical))
+    }
+}
+
+/// The rest of `path` past `root`, when `path` is in it (component by
+/// component; ignoring ASCII case on Windows, as its file systems do).
+#[cfg(not(target_arch = "wasm32"))]
+fn inside(path: &Path, root: &Path) -> Option<PathBuf> {
+    let mut rest = path.components();
+    for part in root.components() {
+        let next = rest.next()?;
+        let same = if cfg!(windows) {
+            next.as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&part.as_os_str().to_string_lossy())
+        } else {
+            next == part
+        };
+        if !same {
+            return None;
+        }
+    }
+    Some(rest.collect())
+}
+
+/// The rest of `path` in root `(expanded, canonical)`: under either form
+/// (`/var/…` and `/private/var/…` on macOS).
+#[cfg(not(target_arch = "wasm32"))]
+fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -> Option<PathBuf> {
+    inside(path, canonical).or_else(|| inside(path, expanded))
 }
 
 /// WebAssembly has no files: no path is ever granted.
 #[cfg(target_arch = "wasm32")]
 pub(crate) enum Grant {}
 
-/// Checks `path` against the `capabilities.fs` roots of a read or a write.
-/// `link` operations act on the last component itself (a symlink there is
-/// not followed: `lstat`, `readlink`, `exists`, `unlink`, `rename`,
-/// `rmdir`), so only its parent is resolved.
-fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsError> {
+/// Checks `path` against the `capabilities.fs` roots of a read or a write,
+/// by its text (`.` and `..` resolved as written) and the roots' resolved
+/// forms. Operations on links (`lstat`, `readlink`, `exists`, `unlink`,
+/// `rename`, `rmdir`) then act on the last component itself.
+fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
     let access = &sys.access;
     let roots = if write {
         &access.declared.fs.write
@@ -532,103 +608,77 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
                 .with_code("ENOSYS"),
         );
     }
+    // By the path's text and the VM's resolved roots: no disk work on the
+    // engine thread. A symlink inside a root cannot lead outside it: the
+    // work runs in the opened root (cap-std).
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let given = path;
+        let roots_of = sys.locals.get::<Roots>();
         let data = sys.data_dir.clone().unwrap_or_default();
-        let paths = &sys.paths;
-        let path = PathBuf::from(path);
-        let requested = if path.to_string_lossy().starts_with("${") {
-            paths
-                .resolve_root(&path.to_string_lossy(), &data)
-                .map_err(JsError::Type)?
+        let requested = if path.starts_with("${") {
+            sys.paths.resolve_root(path, &data).map_err(JsError::Type)?
         } else {
-            path
+            PathBuf::from(path)
         };
-        // A read root that does not exist yet (`${dataDir}` before the app
-        // writes): its entries are missing, unless another root has them.
-        let mut missing = None;
+        let host: Option<Vec<(PathBuf, PathBuf)>> = access.granted.as_ref().map(|host| {
+            let grants = if write { &host.fs.write } else { &host.fs.read };
+            grants.iter().filter_map(|r| roots_of.get(sys, r)).collect()
+        });
+        let mut within = Vec::new();
         for raw in roots {
-            let Ok(root) = paths.resolve_root(raw, &data).and_then(|p| resolved(&p)) else {
+            let Some(root) = roots_of.get(sys, raw) else {
                 continue;
             };
             let candidate = if requested.is_absolute() {
-                if link {
-                    match (requested.parent(), requested.file_name()) {
-                        (Some(parent), Some(name)) => resolved(parent).map(|p| p.join(name)),
-                        _ => resolved(&requested),
-                    }
-                } else {
-                    resolved(&requested)
-                }
+                lexical(&requested)
             } else {
-                Ok(lexical(&root.join(&requested)))
+                lexical(&root.1.join(&requested))
             };
-            let mut candidate = candidate.unwrap_or_else(|_| lexical(&requested));
-            if !candidate.starts_with(&root) {
-                if link && requested.is_absolute() && resolved(&requested).is_ok_and(|p| p == root)
-                {
-                    candidate = root.clone();
-                } else {
-                    continue;
-                }
-            }
-            let effective = if let Some(host) = &access.granted {
-                let grants = if write { &host.fs.write } else { &host.fs.read };
-                grants
-                    .iter()
-                    .filter_map(|r| paths.resolve_root(r, &data).and_then(|p| resolved(&p)).ok())
-                    .filter(|r| candidate.starts_with(r))
-                    .map(|r| {
-                        if r.starts_with(&root) {
-                            r
-                        } else {
-                            root.clone()
-                        }
-                    })
-                    .next()
-            } else {
-                Some(root.clone())
-            };
-            let Some(root) = effective else { continue };
-            let Ok(relative) = candidate.strip_prefix(&root) else {
+            let Some(mut relative) = in_root(&candidate, &root) else {
                 continue;
             };
-            // A granted root belongs to the app: a write may create it.
-            if write && !root.exists() && std::fs::create_dir_all(&root).is_err() {
-                continue;
-            }
-            let (relative, name) = if relative.as_os_str().is_empty() {
-                (PathBuf::from("."), ".".to_owned())
-            } else {
-                (relative.to_owned(), relative.display().to_string())
-            };
-            let dir = match confined::open_root(&root) {
-                Ok(dir) => dir,
-                Err(e) if !write && e.kind() == std::io::ErrorKind::NotFound => {
-                    missing.get_or_insert(Grant {
-                        dir: None,
-                        relative,
-                        name,
-                        path: given.to_owned(),
-                    });
+            let mut base = root.1.clone();
+            if let Some(host) = &host {
+                // The host's grant narrows the root: the path must be in
+                // one of its roots too; work from the narrower.
+                let Some(granted) = host.iter().find_map(|h| {
+                    let rest = in_root(&candidate, h)?;
+                    Some((h, rest))
+                }) else {
                     continue;
+                };
+                if inside(&granted.0.1, &root.1).is_some() {
+                    base = granted.0.1.clone();
+                    relative = granted.1;
                 }
-                Err(_) => continue,
+            }
+            within.push((base, relative));
+        }
+        if let Some((_, first)) = within.first() {
+            let name = if first.as_os_str().is_empty() {
+                ".".to_owned()
+            } else {
+                first.display().to_string()
             };
+            let within = within
+                .into_iter()
+                .map(|(root, rest)| {
+                    let rest = if rest.as_os_str().is_empty() {
+                        PathBuf::from(".")
+                    } else {
+                        rest
+                    };
+                    (root, rest)
+                })
+                .collect();
             return Ok(Grant {
-                dir: Some(dir),
-                relative,
+                within,
+                write,
                 name,
-                path: given.to_owned(),
+                path: path.to_owned(),
             });
         }
-        if let Some(grant) = missing {
-            return Ok(grant);
-        }
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = link;
     let what = if write { "write" } else { "read" };
     Err(JsError::Type(format!(
         "filesystem {what} is not granted by capabilities.fs.{what}"
@@ -673,11 +723,29 @@ impl Grant {
         &self.name
     }
 
-    /// The opened root: `NotFound` for a root that does not exist.
-    fn dir(&self) -> std::io::Result<&cap_std::fs::Dir> {
-        self.dir
-            .as_ref()
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    /// The first of its roots that exists, opened, and the path in it. A
+    /// write creates its first root when none exists (the app's own
+    /// directory, `${dataDir}`); for a read, every entry of a root that
+    /// does not exist is missing.
+    fn open(&self) -> std::io::Result<(cap_std::fs::Dir, &Path)> {
+        let mut failed = None;
+        for (root, relative) in &self.within {
+            match confined::open_root(root) {
+                Ok(dir) => return Ok((dir, relative)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    failed.get_or_insert(e);
+                }
+            }
+        }
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        let Some((root, relative)) = self.within.first().filter(|_| self.write) else {
+            return Err(std::io::ErrorKind::NotFound.into());
+        };
+        std::fs::create_dir_all(root)?;
+        Ok((confined::open_root(root)?, relative))
     }
 
     /// I/O error `error` of `syscall` as Node's: the message names the
@@ -703,8 +771,8 @@ impl Grant {
         };
         let (grant, file, size) = blocking(move || {
             let file = self
-                .dir()
-                .and_then(|dir| confined::open_file(dir, &self.relative, false))
+                .open()
+                .and_then(|(dir, relative)| confined::open_file(&dir, relative, false))
                 .map_err(|e| self.error("read", "open", e))?;
             let size = file
                 .metadata()
@@ -780,6 +848,7 @@ impl Grant {
         let len = match &value {
             FileData::Text(text) => text.len(),
             FileData::Bytes(bytes) => bytes.len(),
+            FileData::TooLong(len) => *len,
         };
         drop(held);
         // At most what was held a moment ago: it fits.
@@ -794,8 +863,8 @@ impl Grant {
         blocking(move || {
             use std::io::Write;
             let mut file = self
-                .dir()
-                .and_then(|dir| confined::open_file(dir, &self.relative, true))
+                .open()
+                .and_then(|(dir, relative)| confined::open_file(&dir, relative, true))
                 .map_err(|e| self.error("write", "open", e))?;
             file.set_len(0)
                 .map_err(|e| self.error("write", "ftruncate", e))?;
@@ -807,13 +876,15 @@ impl Grant {
 
     async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
         blocking(move || {
-            let dir = self.dir();
-            if recursive {
-                dir.and_then(|dir| dir.create_dir_all(&self.relative))
-            } else {
-                dir.and_then(|dir| dir.create_dir(&self.relative))
-            }
-            .map_err(|e| self.error("create", "mkdir", e))
+            self.open()
+                .and_then(|(dir, relative)| {
+                    if recursive {
+                        dir.create_dir_all(relative)
+                    } else {
+                        dir.create_dir(relative)
+                    }
+                })
+                .map_err(|e| self.error("create", "mkdir", e))
         })
         .await
     }
@@ -823,30 +894,32 @@ impl Grant {
     async fn exists(self) -> Result<bool, JsError> {
         blocking(move || {
             Ok(self
-                .dir()
-                .is_ok_and(|dir| dir.symlink_metadata(&self.relative).is_ok()))
+                .open()
+                .is_ok_and(|(dir, relative)| dir.symlink_metadata(relative).is_ok()))
         })
         .await
     }
 
     async fn stat(self, link: bool) -> Result<Stats, JsError> {
         blocking(move || {
-            let dir = self.dir();
-            if link {
-                dir.and_then(|dir| dir.symlink_metadata(&self.relative))
-            } else {
-                dir.and_then(|dir| dir.metadata(&self.relative))
-            }
-            .map(confined::stats)
-            .map_err(|e| self.error("stat", if link { "lstat" } else { "stat" }, e))
+            self.open()
+                .and_then(|(dir, relative)| {
+                    if link {
+                        dir.symlink_metadata(relative)
+                    } else {
+                        dir.metadata(relative)
+                    }
+                })
+                .map(confined::stats)
+                .map_err(|e| self.error("stat", if link { "lstat" } else { "stat" }, e))
         })
         .await
     }
 
     async fn readlink(self) -> Result<String, JsError> {
         blocking(move || {
-            self.dir()
-                .and_then(|dir| dir.read_link_contents(&self.relative))
+            self.open()
+                .and_then(|(dir, relative)| dir.read_link_contents(relative))
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|e| self.error("read link", "readlink", e))
         })
@@ -855,8 +928,8 @@ impl Grant {
 
     async fn unlink(self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir()
-                .and_then(|dir| dir.remove_file(&self.relative))
+            self.open()
+                .and_then(|(dir, relative)| dir.remove_file(relative))
                 .map_err(|e| self.error("remove", "unlink", e))
         })
         .await
@@ -864,8 +937,8 @@ impl Grant {
 
     async fn rmdir(self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir()
-                .and_then(|dir| dir.remove_dir(&self.relative))
+            self.open()
+                .and_then(|(dir, relative)| dir.remove_dir(relative))
                 .map_err(|e| self.error("remove", "rmdir", e))
         })
         .await
@@ -873,8 +946,11 @@ impl Grant {
 
     async fn rename(self, to: Self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir()
-                .and_then(|dir| dir.rename(&self.relative, to.dir()?, &to.relative))
+            self.open()
+                .and_then(|(dir, relative)| {
+                    let (target, to_relative) = to.open()?;
+                    dir.rename(relative, &target, to_relative)
+                })
                 .map_err(|e| self.error("rename", "rename", e))
         })
         .await
@@ -882,33 +958,61 @@ impl Grant {
 
     async fn entries(self, quotas: &Quotas, types: bool) -> Result<Holding<Entries>, JsError> {
         let name = self.name.clone();
-        let (entries, name_bytes) = blocking(move || {
-            let mut entries = Vec::new();
-            let mut name_bytes = 0;
-            for entry in self
-                .dir()
-                .and_then(|dir| dir.read_dir(&self.relative))
-                .map_err(|e| self.error("list", "scandir", e))?
-            {
-                let entry = entry.map_err(|e| self.error("list", "scandir", e))?;
-                let name = entry.file_name().to_string_lossy().into_owned();
-                name_bytes += name.len();
-                if entries.len() == MAX_ENTRIES || name_bytes > MAX_NAME_BYTES {
-                    return Err(JsError::Error(format!(
-                        "cannot list `{}`: directory exceeded the {MAX_ENTRIES}-entry or {MAX_NAME_BYTES}-name-byte fs.readdir limit",
-                        self.name
-                    )));
-                }
-                let directory = entry.file_type().is_ok_and(|t| t.is_dir());
-                entries.push((name, directory));
-            }
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            Ok((entries, name_bytes))
+        let (grant, mut listing) = blocking(move || {
+            let listing = self
+                .open()
+                .and_then(|(dir, relative)| dir.read_dir(relative))
+                .map_err(|e| self.error("list", "scandir", e))?;
+            Ok((self, listing))
         })
         .await?;
-        let held = quotas
-            .reserve(IN_FLIGHT, name_bytes, MAX_IN_FLIGHT)
-            .ok_or_else(|| exceeded(&name))?;
+        let grant = std::sync::Arc::new(grant);
+        let mut entries = Vec::new();
+        let mut name_bytes = 0;
+        // The names are held a batch ahead of reading them.
+        let mut held = Vec::new();
+        let mut holding = 0;
+        loop {
+            held.push(
+                quotas
+                    .reserve(IN_FLIGHT, NAME_BATCH, MAX_IN_FLIGHT)
+                    .ok_or_else(|| exceeded(&name))?,
+            );
+            holding += NAME_BATCH;
+            let lister = grant.clone();
+            let done;
+            (listing, entries, name_bytes, done) = blocking(move || {
+                let mut entries = entries;
+                let mut name_bytes = name_bytes;
+                while name_bytes < holding {
+                    let Some(entry) = listing.next() else {
+                        entries.sort_by(|a: &(String, bool), b| a.0.cmp(&b.0));
+                        return Ok((listing, entries, name_bytes, true));
+                    };
+                    let entry = entry.map_err(|e| lister.error("list", "scandir", e))?;
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    name_bytes += name.len();
+                    if entries.len() == MAX_ENTRIES || name_bytes > MAX_NAME_BYTES {
+                        return Err(JsError::Range(format!(
+                            "cannot list `{}`: directory exceeded the {MAX_ENTRIES}-entry or {MAX_NAME_BYTES}-name-byte fs.readdir limit",
+                            lister.name
+                        ))
+                        .with_code("ERR_OUT_OF_RANGE")
+                        .with("path", lister.path.as_str()));
+                    }
+                    let directory = entry.file_type().is_ok_and(|t| t.is_dir());
+                    entries.push((name, directory));
+                }
+                Ok((listing, entries, name_bytes, false))
+            })
+            .await?;
+            if done {
+                break;
+            }
+        }
+        drop(held);
+        // At most what was held a moment ago: it fits.
+        let held = quotas.reserve(IN_FLIGHT, name_bytes, MAX_IN_FLIGHT);
         let value = if types {
             Entries::Typed(
                 entries
@@ -921,7 +1025,7 @@ impl Grant {
         };
         Ok(Holding {
             value,
-            _held: vec![held],
+            _held: held.into_iter().collect(),
         })
     }
 }
@@ -980,6 +1084,19 @@ mod confined {
 
     use cap_std::fs::{Dir, File, Metadata, OpenOptions};
 
+    /// How a root's ancestors are opened: for search only where the OS has
+    /// such a mode (`O_PATH` on Linux and Android, `O_SEARCH` on Apple's),
+    /// else for reading.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const SEARCH: libc::c_int = libc::O_PATH;
+    #[cfg(target_vendor = "apple")]
+    const SEARCH: libc::c_int = libc::O_SEARCH;
+    #[cfg(all(
+        unix,
+        not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))
+    ))]
+    const SEARCH: libc::c_int = libc::O_RDONLY;
+
     /// Opens a canonical root. On Unix every component is opened with
     /// `O_NOFOLLOW` from `/`, so a symlink swapped in after the grant check
     /// cannot redirect the root.
@@ -996,33 +1113,36 @@ mod confined {
         let mut current = std::fs::File::open("/")?;
         let parts: Vec<_> = path.components().collect();
         for (i, part) in parts.iter().enumerate() {
-            // An ancestor is only passed through: on Linux `O_PATH` needs no
-            // read permission of it (a home directory may be 0711).
-            #[cfg(target_os = "linux")]
-            let access = if i + 1 < parts.len() {
-                libc::O_PATH
-            } else {
-                libc::O_RDONLY
-            };
-            #[cfg(not(target_os = "linux"))]
-            let access = {
-                let _ = i;
-                libc::O_RDONLY
-            };
+            // An ancestor is only passed through: opened for search, it
+            // needs no read permission (a home directory may be 0711).
+            let through = i + 1 < parts.len();
             match part {
                 Component::RootDir => (),
                 Component::Normal(name) => {
                     let name = CString::new(name.as_bytes())
                         .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-                    // SAFETY: current is a live directory and name is
-                    // NUL-terminated; the returned descriptor is owned below.
-                    let fd = unsafe {
-                        libc::openat(
-                            current.as_raw_fd(),
-                            name.as_ptr(),
-                            access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                        )
+                    let open = |access: libc::c_int| {
+                        // SAFETY: current is a live directory and name is
+                        // NUL-terminated; the descriptor returned is owned
+                        // below.
+                        unsafe {
+                            libc::openat(
+                                current.as_raw_fd(),
+                                name.as_ptr(),
+                                access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                            )
+                        }
                     };
+                    let mut fd = if through {
+                        open(SEARCH)
+                    } else {
+                        open(libc::O_RDONLY)
+                    };
+                    // A kernel without the search mode (macOS before 13)
+                    // refuses it: read the directory then.
+                    if fd < 0 && through && SEARCH != libc::O_RDONLY {
+                        fd = open(libc::O_RDONLY);
+                    }
                     if fd < 0 {
                         return Err(io::Error::last_os_error());
                     }
@@ -1084,15 +1204,20 @@ mod confined {
             use cap_std::fs::MetadataExt;
             meta.mode()
         };
-        // Node's modes on Windows: the type bits, and write bits unless
-        // read-only.
+        // Node's modes on Windows: the type bits (a link's own, from
+        // `lstat`), and write bits unless read-only.
         #[cfg(not(unix))]
-        let mode = if meta.is_dir() { 0o040000 } else { 0o100000 }
-            | if meta.permissions().readonly() {
-                0o444
-            } else {
-                0o666
-            };
+        let mode = if meta.is_symlink() {
+            0o120000
+        } else if meta.is_dir() {
+            0o040000
+        } else {
+            0o100000
+        } | if meta.permissions().readonly() {
+            0o444
+        } else {
+            0o666
+        };
         super::Stats {
             size: meta.len() as f64,
             mode,
@@ -1108,6 +1233,27 @@ mod confined {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_path_is_inside_a_root_by_its_components() {
+        use std::path::{Path, PathBuf};
+        let root = Path::new(if cfg!(windows) {
+            "C:\\data\\app"
+        } else {
+            "/data/app"
+        });
+        let file = root.join("notes").join("a.txt");
+        assert_eq!(
+            super::inside(&file, root),
+            Some(PathBuf::from("notes").join("a.txt"))
+        );
+        assert_eq!(super::inside(root, root), Some(PathBuf::new()));
+        let sibling = root.with_file_name("application");
+        assert_eq!(super::inside(&sibling, root), None);
+        #[cfg(windows)]
+        assert!(super::inside(Path::new("c:\\DATA\\App\\x"), root).is_some());
+    }
+
     use crate::ui::{Registry, declarations};
 
     #[test]

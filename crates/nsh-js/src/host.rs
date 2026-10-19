@@ -53,7 +53,7 @@ pub(crate) struct Shared {
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::ui::Quotas,
     /// The VM's scheduler, for the APIs that start its I/O runtime (the
-    /// native WebSocket's; the browser has its own).
+    /// global WebSocket, which WebAssembly builds have none of).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) scheduler: std::rc::Weak<Scheduler>,
     /// The VM's state of the runtime's Rust modules (`process`'s
