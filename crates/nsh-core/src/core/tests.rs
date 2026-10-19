@@ -3943,6 +3943,114 @@ mod components {
         )
     }
 
+    /// Children above a footer slot.
+    #[derive(Clone, Copy, PartialEq, Props)]
+    struct PanelProps {
+        footer: crate::ui::Prop<Option<Slot>>,
+        children: Children,
+    }
+
+    #[component]
+    fn Panel(props: PanelProps) -> impl IntoElement {
+        view()
+            .child(props.children)
+            .child(props.footer.place(|f| f))
+    }
+
+    /// JS children come after the view is made (lazy ones, later ones) and
+    /// go before what follows their place: a region (the footer's slot)
+    /// that is empty then, and its node once it fills.
+    #[test]
+    fn children_go_before_a_region_that_fills_later() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Panel>();
+        c.set_components(registry);
+        let child = |id| {
+            vec![
+                Op::Create { id, tag: Tag::View },
+                Op::Insert {
+                    parent: 2,
+                    child: id,
+                    before: None,
+                },
+            ]
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Panel>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        // The footer's region is empty: the child goes at the end.
+        apply(&mut c, child(8));
+        let batch = c.commit().expect("a child before an empty region");
+        assert!(batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::Insert {
+                parent: 2,
+                child: 8,
+                before: None
+            }
+        )));
+        // The footer fills; a later child goes before its node.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::ComponentSlot("footer".into()),
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().expect("the footer filled");
+        apply(&mut c, child(10));
+        let batch = c.commit().unwrap();
+        assert!(
+            batch.items.iter().any(|i| matches!(
+                i,
+                MountItem::Insert {
+                    parent: 2,
+                    child: 10,
+                    before: Some(4)
+                }
+            )),
+            "{:?}",
+            batch.items
+        );
+    }
+
     #[test]
     fn slots_are_the_glues_nodes_placed_by_the_render() {
         let mut c = core();

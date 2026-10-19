@@ -97,14 +97,22 @@ pub(super) struct RegionState {
     fill: Option<&'static str>,
 }
 
-/// What a region's nodes go before in their parent.
-#[derive(Debug, Clone, Copy)]
+/// What a region's nodes (or a host's JS children) go before in their
+/// parent.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Anchor {
     /// The end.
     End,
     Node(NodeId),
     /// The next region's first node, or what it goes before.
     Region(u32),
+}
+
+/// A node (`None`: the end).
+impl From<Option<NodeId>> for Anchor {
+    fn from(node: Option<NodeId>) -> Self {
+        node.map_or(Anchor::End, Anchor::Node)
+    }
 }
 
 /// The bound parts of an element, taken off it before its static parts are
@@ -380,8 +388,20 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// What follows the elements before `out`'s end: its first node, the
+    /// region it is (empty now, it may fill), or `fallback` past them.
+    pub(super) fn anchor_after(out: &[Expanded], fallback: Anchor) -> Anchor {
+        out.iter()
+            .find_map(|e| match e.part {
+                Part::Region(region) => Some(Anchor::Region(region)),
+                _ if e.id != 0 => Some(Anchor::Node(e.id)),
+                _ => None,
+            })
+            .unwrap_or(fallback)
+    }
+
     /// The node a region's nodes go before (`None`: the end).
-    fn anchor_node(&self, anchor: Anchor) -> Option<NodeId> {
+    pub(super) fn anchor_node(&self, anchor: Anchor) -> Option<NodeId> {
         let mut anchor = anchor;
         loop {
             match anchor {
@@ -568,22 +588,22 @@ impl<M: TextEngine> Core<M> {
         // A nested component's content joins it as JS children do.
         let nested = parent != host && self.is_host(parent);
         if let Some(at) = placeholder {
-            let after = out[at + 1..]
-                .iter()
-                .find(|e| e.id != 0)
-                .map(|e| e.id)
-                .or(anchor);
             inst.children_at = if nested {
+                let after = out[at + 1..]
+                    .iter()
+                    .find(|e| e.id != 0)
+                    .map(|e| e.id)
+                    .or(anchor);
                 Placement::Nested(parent, after)
             } else {
-                Placement::At(parent, after)
+                Placement::At(parent, Self::anchor_after(&out[at + 1..], state.anchor))
             };
         }
         self.place_filled(&out, &mut inst, anchor, |after| {
             if nested {
                 Placement::Nested(parent, after)
             } else {
-                Placement::At(parent, after)
+                Placement::At(parent, after.into())
             }
         });
         // In place: from the last, each before the next, from the anchor.
