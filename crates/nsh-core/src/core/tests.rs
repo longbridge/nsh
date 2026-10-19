@@ -494,6 +494,208 @@ fn nested_spans_merge_with_styles() {
     );
 }
 
+/// The attributed text of the first `Text` item in `batch`.
+fn text_item(batch: &MountBatch) -> Option<Arc<AttributedText>> {
+    batch.items.iter().find_map(|i| match i {
+        MountItem::Text { text, .. } => Some(text.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn span_backgrounds_style_their_characters() {
+    // <Text>a <Text bg r=4>b<Text bold>c</Text></Text> d</Text>
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Text,
+            },
+            style_op(2, &[("backgroundColor", StyleValue::Str("#00ff00"))]),
+            Op::CreateText {
+                id: 3,
+                text: "a ".into(),
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::Text,
+            },
+            style_op(
+                4,
+                &[
+                    ("backgroundColor", StyleValue::Str("#ff0000")),
+                    ("borderRadius", StyleValue::Number(4.0)),
+                ],
+            ),
+            Op::CreateText {
+                id: 5,
+                text: "b".into(),
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::Text,
+            },
+            style_op(6, &[("fontWeight", StyleValue::Str("bold"))]),
+            Op::CreateText {
+                id: 7,
+                text: "c".into(),
+            },
+            Op::CreateText {
+                id: 8,
+                text: " d".into(),
+            },
+            Op::Insert {
+                parent: 6,
+                child: 7,
+                before: None,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 5,
+                before: None,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 8,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    assert_eq!(text.text, "a bc d");
+    let backgrounds: Vec<_> = text.spans.iter().map(|s| s.style.background).collect();
+    let red = Some(crate::text::TextBackground {
+        color: Color(0xff00_00ff),
+        radius: 4.0,
+        node: 4,
+    });
+    // The block's own background is its view's; the bold span inside the
+    // red one keeps the red one's.
+    assert_eq!(backgrounds, [None, red, red, None]);
+    assert!(text.has_backgrounds());
+    // The view draws the block's background.
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0x00ff_00ff)
+    );
+
+    // A new color draws again without measuring again.
+    apply(
+        &mut c,
+        vec![style_op(
+            4,
+            &[("backgroundColor", StyleValue::Str("#0000ff"))],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    let text = text_item(&batch).unwrap();
+    assert_eq!(
+        text.spans[1].style.background.map(|b| (b.color, b.radius)),
+        Some((Color(0x0000_ffff), 0.0))
+    );
+    assert!(frame_of(&batch, 2).is_none());
+
+    // Transparent is none.
+    apply(
+        &mut c,
+        vec![style_op(
+            4,
+            &[("backgroundColor", StyleValue::Str("transparent"))],
+        )],
+    );
+    let text = text_item(&c.commit().unwrap()).unwrap();
+    assert!(!text.has_backgrounds());
+}
+
+#[test]
+fn background_boxes_join_pieces_of_one_span() {
+    let mut t = AttributedText::default();
+    let plain = ResolvedTextStyle::default();
+    let bg = |node| crate::text::TextBackground {
+        color: Color(0xff00_00ff),
+        radius: 3.0,
+        node,
+    };
+    let code = ResolvedTextStyle {
+        background: Some(bg(4)),
+        ..plain
+    };
+    let bold = ResolvedTextStyle {
+        font_weight: 700,
+        ..code
+    };
+    // "a " "bc" (one background, two runs) "d" " e" (a span of its own,
+    // looking the same) " "
+    t.push("a ", plain);
+    t.push("b", code);
+    t.push("c", bold);
+    t.push(
+        "d",
+        ResolvedTextStyle {
+            background: Some(bg(6)),
+            ..plain
+        },
+    );
+    t.push(" e ", plain);
+    let piece = |i: u32, ascent: f32| crate::text::LinePiece {
+        x: i as f32 * 10.0,
+        width: 10.0,
+        background: t.background_at(i),
+        ascent,
+        descent: 2.0,
+    };
+    let pieces = (0..7).map(|i| piece(i, if i == 3 { 12.0 } else { 10.0 }));
+    let mut boxes = Vec::new();
+    crate::text::BackgroundBox::join(pieces, (0.0, 70.0), |b| boxes.push(b));
+    assert_eq!(boxes.len(), 2);
+    assert_eq!((boxes[0].x, boxes[0].width), (20.0, 20.0));
+    assert_eq!((boxes[0].ascent, boxes[0].descent), (12.0, 2.0));
+    assert_eq!(boxes[0].background.node, 4);
+    assert_eq!((boxes[1].x, boxes[1].width), (40.0, 10.0));
+    assert_eq!(boxes[1].background.node, 6);
+    // At most half its height.
+    assert_eq!(boxes[0].radius(), 3.0);
+    assert_eq!(
+        crate::text::BackgroundBox {
+            ascent: 2.0,
+            descent: 1.0,
+            ..boxes[0]
+        }
+        .radius(),
+        1.5
+    );
+    // Cut to the line.
+    let mut boxes = Vec::new();
+    crate::text::BackgroundBox::join((0..7).map(|i| piece(i, 10.0)), (0.0, 25.0), |b| {
+        boxes.push(b)
+    });
+    assert_eq!(boxes.len(), 1);
+    assert_eq!((boxes[0].x, boxes[0].width), (20.0, 5.0));
+}
+
 #[test]
 fn placeholder_text_outside_text_is_ignored() {
     let mut c = core();

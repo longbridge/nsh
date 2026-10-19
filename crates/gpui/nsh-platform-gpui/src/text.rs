@@ -1705,6 +1705,8 @@ impl GpuiTextEngine {
                         kind,
                         size: s.size,
                         x_height: s.x,
+                        ascent: s.ascent,
+                        descent: s.descent,
                     });
                     for g in &p.glyphs[c.glyphs.0 as usize..c.glyphs.1 as usize] {
                         out.glyphs.push(Glyph {
@@ -1730,6 +1732,8 @@ impl GpuiTextEngine {
                         kind: BoxKind::Ellipsis,
                         size: s.size,
                         x_height: s.x,
+                        ascent: s.ascent,
+                        descent: s.descent,
                     });
                     for g in &e.glyphs {
                         out.glyphs.push(Glyph {
@@ -1850,6 +1854,9 @@ struct CBox {
     /// Font size and x height of its span (decorations).
     size: f32,
     x_height: f32,
+    /// Its font's ascent and descent (span backgrounds).
+    ascent: f32,
+    descent: f32,
 }
 
 /// One glyph to paint.
@@ -1935,6 +1942,45 @@ impl GpuiLayout {
                 .filter(|&i| i > at)
                 .min()
                 .unwrap_or(line.info.end),
+        }
+    }
+
+    /// Calls `f(x, y, width, height, radius, color)` with the boxes
+    /// (content coordinates) of the span backgrounds of `text`.
+    fn background_rects(
+        &self,
+        text: &AttributedText,
+        mut f: impl FnMut(f32, f32, f32, f32, f32, Color),
+    ) {
+        for line in &self.lines {
+            let pieces = self.boxes[line.boxes.clone()].iter().map(|b| match b.kind {
+                BoxKind::Attachment => nsh_core::LinePiece {
+                    x: b.x,
+                    width: b.w,
+                    background: text.background_at(b.style),
+                    ascent: 0.0,
+                    descent: 0.0,
+                },
+                _ => nsh_core::LinePiece {
+                    x: b.x,
+                    width: b.w,
+                    background: text.background_at(b.style),
+                    ascent: b.ascent,
+                    descent: b.descent,
+                },
+            });
+            let clip = (line.info.x, line.info.x + line.info.width);
+            nsh_core::BackgroundBox::join(pieces, clip, |b| {
+                let top = line.baseline - b.ascent;
+                f(
+                    b.x,
+                    top,
+                    b.width,
+                    b.ascent + b.descent,
+                    b.radius(),
+                    b.background.color,
+                );
+            });
         }
     }
 
@@ -2122,6 +2168,11 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     }
     let text = &drawn.text;
     let (ox, oy) = (drawn.content.x, drawn.content.y);
+    if text.has_backgrounds() {
+        layout.background_rects(text, |x, y, w, h, r, color| {
+            cx.fill_rect(crate::geom::rect(ox + x, oy + y, w, h), [r; 4], color);
+        });
+    }
     if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
         let tint = selection_tint(text);
         layout.selection_rects(range, |x, y, w, h| {
@@ -3481,6 +3532,41 @@ mod tests {
         let p = engine.prepare(&text(&[("♥\u{FE0F}", plain(13.0))]));
         let from_emoji_font = p.glyphs.iter().any(|g| is_emoji_font(g.font));
         assert!(!from_emoji_font || p.glyphs.iter().any(|g| g.emoji) || p.glyphs.is_empty());
+    }
+
+    #[test]
+    fn span_backgrounds_box_each_line() {
+        let Some(engine) = engine() else {
+            return;
+        };
+        let style = plain(15.0);
+        let code = ResolvedTextStyle {
+            font_size: 13.0,
+            background: Some(nsh_core::TextBackground {
+                color: Color(0xeeee_eeff),
+                radius: 4.0,
+                node: 4,
+            }),
+            ..style
+        };
+        let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
+        let (size, layout) = layout_of(&engine, &t, None);
+        let l = layout.downcast::<GpuiLayout>().unwrap();
+        let mut rects = Vec::new();
+        l.background_rects(&t, |x, y, w, h, r, c| rects.push((x, y, w, h, r, c)));
+        assert_eq!(rects.len(), 1, "{rects:?}");
+        let (x, y, w, h, r, c) = rects[0];
+        // The code's own font: lower than the line, around its baseline.
+        assert!(x > 0.0 && x + w < size.width, "{rects:?}");
+        assert!(y >= 0.0 && h < l.lines[0].info.height + 0.01, "{rects:?}");
+        assert_eq!((r, c), (4.0, Color(0xeeee_eeff)));
+        // Wrapped: a box on each line the span reaches.
+        let (_, layout) = layout_of(&engine, &t, Some(w * 0.7));
+        let l = layout.downcast::<GpuiLayout>().unwrap();
+        let mut rects = Vec::new();
+        l.background_rects(&t, |x, y, w, h, r, c| rects.push((x, y, w, h, r, c)));
+        assert!(rects.len() >= 2, "{rects:?}");
+        assert!(rects[1].1 > rects[0].1);
     }
 
     #[test]

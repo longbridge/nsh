@@ -15,15 +15,18 @@ use nsh_core::{AttributedText, EllipsizeMode, Size, TextAlign, TextEngine, TextL
 use crate::java::{java, with_env};
 
 /// Ints per span: start, end, weight, flags, color, decoration color,
-/// family index, font variant bits, decoration style.
-const SPAN_INTS: usize = 9;
+/// family index, font variant bits, decoration style, background color,
+/// background node.
+const SPAN_INTS: usize = 11;
 /// Floats per span: size, line height, letter spacing, decoration
-/// thickness (0: the font's), underline offset (NaN: the font's).
-const SPAN_FLOATS: usize = 5;
+/// thickness (0: the font's), underline offset (NaN: the font's),
+/// background radius.
+const SPAN_FLOATS: usize = 6;
 const ITALIC: i32 = 1;
 const UNDERLINE: i32 = 2;
 const STRIKE: i32 = 4;
 const DECORATION_COLOR: i32 = 8;
+const BACKGROUND: i32 = 16;
 
 /// `0xRRGGBBAA` -> Android's `0xAARRGGBB`.
 #[inline]
@@ -75,6 +78,9 @@ impl TextEngine for AndroidTextEngine {
             if s.decoration_color.is_some() {
                 flags |= DECORATION_COLOR;
             }
+            if s.background.is_some() {
+                flags |= BACKGROUND;
+            }
             ints.extend_from_slice(&[
                 span.start as i32,
                 span.end as i32,
@@ -91,6 +97,8 @@ impl TextEngine for AndroidTextEngine {
                     nsh_core::DecorationStyle::Dashed => 3,
                     nsh_core::DecorationStyle::Wavy => 4,
                 },
+                s.background.map_or(0, |b| argb(b.color)),
+                s.background.map_or(0, |b| b.node as i32),
             ]);
             floats.extend_from_slice(&[
                 s.font_size,
@@ -98,6 +106,7 @@ impl TextEngine for AndroidTextEngine {
                 s.letter_spacing,
                 s.decoration_thickness.unwrap_or(0.0),
                 s.underline_offset.unwrap_or(f32::NAN),
+                s.background.map_or(0.0, |b| b.radius),
             ]);
         }
         // Alignment, writing direction (0 from the content, 1 left to

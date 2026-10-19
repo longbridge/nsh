@@ -34,6 +34,15 @@
   Linux the UI font is the first of a list that GPUI can set in bold (GNOME's Adwaita Sans is variable: Noto Sans or
   DejaVu Sans take its place, with Adwaita Sans's ascent and descent, so lines are as tall as GTK's). Symbols that are
   text by default (♥, ✓) take a text font when the fallback would draw them as color emoji, so the text's color applies.
+- **Span backgrounds**: `backgroundColor` / `borderRadius` on a nested `<Text>` (its view style, which spans otherwise
+  ignore) become `ResolvedTextStyle::background` (`TextBackground`: color, radius and the span's node, so neighboring
+  spans that look the same stay apart), inherited by the spans inside it; the block's own background stays its view's.
+  Drawing only (not in `layout_eq`). Each backend lists a line's pieces in visual order (clusters, glyphs or runs, with
+  their font's ascent and descent) and `BackgroundBox::join` joins the neighbors of one background into a box per
+  line, cut to the line's ink (hanging whitespace is not painted); the box is the font's ascent to descent (CSS's
+  inline box), rounded on every line (`box-decoration-break: clone`), drawn behind the selection and the glyphs. CoreText
+  splits runs where the background's `NshBackground` attribute changes; the web emits the boxes as elements behind
+  the runs.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own
   layout root at its content size (`update_attachments`), it becomes an object replacement character (U+FFFC,
   `AttributedText::attachments`) that the engine sizes to it on the baseline (CTRunDelegate; Android a `ReplacementSpan`), so
