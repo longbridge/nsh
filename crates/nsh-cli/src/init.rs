@@ -318,7 +318,7 @@ fn rust_package_name(name: &str) -> String {
 /// longer generates (a module that moved) are removed.
 pub(crate) fn write_types(dir: &Path) {
     let types = dir.join(".nsh/types");
-    let mut definitions = nsh_js::type_definitions(crate::described_sets());
+    let mut definitions = nsh_js::type_definitions(&crate::ui_sets());
     definitions.extend(nsh_bundler::type_definitions());
     remove_stale(&types, &types, &definitions);
     for (path, contents) in definitions {

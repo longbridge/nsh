@@ -36,6 +36,15 @@ pub(crate) struct Device<'a> {
     pub(crate) several: bool,
 }
 
+/// Shows a log line of a process run for this command (an app's headless
+/// runner), as this process's own would be.
+pub(crate) fn forward(level: Level, target: &str, message: &str) {
+    let metadata = Metadata::builder().level(level).target(target).build();
+    if level <= log::max_level() && Logger.enabled(&metadata) {
+        show(level, target, message, None);
+    }
+}
+
 /// Shows a log line of a device.
 pub(crate) fn device(device: &Device<'_>, level: LogLevel, target: &str, message: &str) {
     let level = match level {

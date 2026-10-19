@@ -1,7 +1,7 @@
-//! The `nsh` command line tool, as a library: [`main_with`] runs it with
-//! the UI sets the hosts serve. `nsh` itself is `main_with` of the mobile
-//! UI; an app with Rust components of its own (`nsh.json` `"rust"`) gets a
-//! build of it with the app's sets too, one per crate.
+//! The `nsh` command line tool, as a library: [`main`] runs it. It links
+//! the mobile UI; an app with Rust components of its own (`nsh.json`
+//! `"rust"`) is known to it by the description its describe program prints
+//! (`rust_app.rs`), and runs in the hosts and runners built for it.
 
 mod android;
 mod build;
@@ -20,39 +20,45 @@ mod ui;
 mod web;
 mod windows;
 
-use std::{path::PathBuf, process::ExitCode, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    process::ExitCode,
+    sync::{Arc, OnceLock, RwLock},
+};
 
 use clap::{Args, Parser, Subcommand};
-use nsh_core::ui::{Registry, Root};
+use nsh_core::ui::{Registry, description::SetDescription};
 
-/// The UI sets of this build ([`main_with`]).
-static UI_SETS: OnceLock<Vec<Registry>> = OnceLock::new();
-
-/// The root of the Rust app this build runs for ([`main_with_root`]).
-static ROOT: OnceLock<fn() -> Root> = OnceLock::new();
-
-/// The root of the Rust app this command line was built for (`nsh.json`
-/// `"root"`), which `nsh trace` mounts.
-pub(crate) fn root() -> Option<Root> {
-    ROOT.get().map(|make| make())
+/// The UI sets this command line links: the mobile UI.
+pub(crate) fn own_sets() -> &'static [Registry] {
+    static OWN: OnceLock<Vec<Registry>> = OnceLock::new();
+    OWN.get_or_init(|| vec![nsh_ui_mobile::registry()])
 }
 
-/// The UI sets the hosts serve: what bundles import natively, what bytecode
-/// links against, what `.nsh/types` declares.
-pub(crate) fn ui_sets() -> &'static [Registry] {
-    UI_SETS.get_or_init(|| vec![nsh_ui_mobile::registry()])
+/// The UI sets of the command's app, as data ([`set_app_sets`]).
+static UI_SETS: RwLock<Option<Arc<[SetDescription]>>> = RwLock::new(None);
+
+/// The UI sets the hosts serve, as data: what bundles import natively,
+/// what bytecode links against, what `.nsh/types` declares. The mobile UI,
+/// then an app's own sets ([`set_app_sets`]).
+pub(crate) fn ui_sets() -> Arc<[SetDescription]> {
+    if let Some(sets) = &*UI_SETS.read().unwrap_or_else(|e| e.into_inner()) {
+        return sets.clone();
+    }
+    let sets: Arc<[SetDescription]> = own_sets().iter().map(SetDescription::from).collect();
+    *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets.clone());
+    sets
 }
 
-/// [`ui_sets`] as data, as the bundler, the bytecode compiler and
-/// `.nsh/types` take them.
-pub(crate) fn described_sets() -> &'static [nsh_core::ui::description::SetDescription] {
-    static DESCRIBED: OnceLock<Vec<nsh_core::ui::description::SetDescription>> = OnceLock::new();
-    DESCRIBED.get_or_init(|| {
-        ui_sets()
-            .iter()
-            .filter_map(nsh_core::ui::description::SetDescription::of)
-            .collect()
-    })
+/// Makes [`ui_sets`] the mobile UI and `app`, the sets of the app's crates
+/// (described again after a change to its Rust code).
+pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
+    let sets: Arc<[SetDescription]> = own_sets()
+        .iter()
+        .map(SetDescription::from)
+        .chain(app)
+        .collect();
+    *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
 }
 
 #[derive(Parser)]
@@ -72,7 +78,7 @@ struct Cli {
     command: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Command {
     /// Create an app: in TSX, in Rust, or in TSX with a Rust crate of its
     /// own (`--template`). Generates the app's entry points, configuration
@@ -340,7 +346,7 @@ enum Command {
 }
 
 /// Arguments of `nsh package`.
-#[derive(Args)]
+#[derive(Args, Clone)]
 struct PackageArgs {
     /// The entry module, or the app's directory (default: the current one),
     /// whose `App.tsx` is the entry.
@@ -410,40 +416,18 @@ impl Command {
     }
 }
 
-/// [`main_with`] for a Rust app (`nsh.json` `"root"`): `root` makes the
-/// app's root (its component, theme, appearance and id), which `nsh trace`
-/// mounts headless.
-pub fn main_with_root(ui_sets: Vec<Registry>, root: fn() -> Root) -> ExitCode {
-    let _ = ROOT.set(root);
-    main_with(ui_sets)
-}
-
-/// Runs the command line with `ui_sets` (`nsh_ui_mobile::registry()` and
-/// the registries of an app's own crates); errors are printed.
-pub fn main_with(ui_sets: Vec<Registry>) -> ExitCode {
-    let duplicate = duplicate_specifier(&ui_sets);
-    let _ = UI_SETS.set(ui_sets);
+/// Runs the command line; errors are printed.
+pub fn main() -> ExitCode {
     let cli = Cli::parse();
     ui::init(cli.verbose);
     logger::init();
-    let result = match duplicate {
-        // A second set of one specifier would never be imported: refused,
-        // whatever the crates' sources looked like when the workspace was
-        // written.
-        Some(specifier) => Err(anyhow::anyhow!(
-            "two UI sets are imported as {specifier:?}: give each crate of the app a `#[native_module(\"…\")]` specifier of its own"
-        )),
-        None => run(cli.command),
-    };
+    let result = run(cli.command);
     // A signal stopped the command (`ui::Stoppable`): it ends as the signal
     // would have, and what failed as it stopped (a tool it interrupted) is
     // no news.
     ui::exit_if_stopped();
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) if e.downcast_ref::<rust_app::Restart>().is_some() => {
-            ExitCode::from(rust_app::RESTART)
-        }
         Err(e) => {
             ui::report(&e);
             ExitCode::FAILURE
@@ -458,18 +442,6 @@ fn run(mut command: Command) -> anyhow::Result<()> {
         // A Rust app has no TypeScript to declare things for.
         types &= !rust_app::is_root(entry);
     }
-    // An app with Rust components of its own runs in its own build of this.
-    if let Some(status) = rust_app::reexec(command.entry_mut().map(|e| e.as_path()))? {
-        // As it ended: with its exit code, or by the signal that ended it.
-        #[cfg(unix)]
-        if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
-            ui::exit_by_signal(signal);
-        }
-        std::process::exit(status.code().unwrap_or(1));
-    }
-    if types && let Some(entry) = command.entry_mut() {
-        init::write_types_for(entry);
-    }
     // A Rust app (`nsh.json` "root") has no bundle: it is built, traced,
     // run and packaged.
     let rust_command = matches!(
@@ -478,19 +450,58 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     );
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
+        && !rust_command
     {
-        if !rust_command {
-            anyhow::bail!(
-                "{} declares a Rust app (\"root\"): it is built with `nsh build`, traced with `nsh trace`, \
-                 run with `nsh run` and packaged with `nsh package`; the other commands take a TSX entry",
-                ui::path(entry)
-            );
+        anyhow::bail!(
+            "{} declares a Rust app (\"root\"): it is built with `nsh build`, traced with `nsh trace`, \
+             run with `nsh run` and packaged with `nsh package`; the other commands take a TSX entry",
+            ui::path(entry)
+        );
+    }
+    let app = match command.entry_mut() {
+        Some(entry) => rust_app::of(entry)?,
+        None => None,
+    };
+    let Some(app) = app else {
+        if let Some(entry) = command.entry_mut() {
+            if rust_app::is_root(entry) {
+                anyhow::bail!("nsh.json: \"root\" needs \"rust\", the path of the app's crate");
+            }
+            if types {
+                init::write_types_for(entry);
+            }
         }
-        if rust_app::current().is_none() {
-            anyhow::bail!("nsh.json: \"root\" needs \"rust\", the path of the app's crate");
+        return dispatch(command);
+    };
+    // An app with Rust crates of its own: described by the program built
+    // from them, its hosts built with them. A development session ends
+    // when its Rust code changes, and starts again with it built anew.
+    rust_app::set_current(app.clone());
+    let mut restarted = false;
+    loop {
+        match app.describe() {
+            Ok(sets) => set_app_sets(sets),
+            // Its build failed and waited for the next change already.
+            Err(e) if e.downcast_ref::<rust_app::Restart>().is_some() => continue,
+            // The code just saved does not describe: wait for the fix.
+            Err(e) if restarted => {
+                app.wait_after(&e)?;
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+        if types && let Some(entry) = command.entry_mut() {
+            init::write_types_for(entry);
+        }
+        match dispatch(command.clone()) {
+            Err(e) if e.downcast_ref::<rust_app::Restart>().is_some() && !ui::stop_requested() => {
+                restarted = true;
+                rust_app::set_restarted();
+                ui::note("the app's Rust code changed: building it again");
+            }
+            result => return result,
         }
     }
-    dispatch(command)
 }
 
 fn dispatch(command: Command) -> anyhow::Result<()> {
@@ -659,29 +670,5 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             packages,
             out,
         } => sign::revoke_list(&root, extend.as_deref(), sequence, &keys, &packages, &out),
-    }
-}
-
-/// The first import specifier two of `sets` share.
-fn duplicate_specifier(sets: &[Registry]) -> Option<&'static str> {
-    let mut seen = std::collections::HashSet::new();
-    sets.iter()
-        .filter_map(Registry::specifier)
-        .find(|specifier| !seen.insert(*specifier))
-}
-
-#[cfg(test)]
-mod duplicate_tests {
-    use super::*;
-
-    #[test]
-    fn two_sets_of_one_specifier_are_refused() {
-        let a = Registry::ui_set("app/a");
-        let b = Registry::ui_set("app/b");
-        assert_eq!(duplicate_specifier(&[a.clone(), b.clone()]), None);
-        assert_eq!(
-            duplicate_specifier(&[a, b, Registry::ui_set("app/a")]),
-            Some("app/a")
-        );
     }
 }

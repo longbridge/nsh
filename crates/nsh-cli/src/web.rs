@@ -53,10 +53,10 @@ const DEV_PAGE: &str = include_str!("web/dev.html");
 /// The UI sets the web runtime serves: the mobile UI, and for an app with
 /// Rust components of its own the app's set too (its runtime is built with
 /// the sets this command line has, `rust_app::RustApp::web`).
-fn ui_sets() -> Vec<&'static str> {
-    crate::described_sets()
+fn ui_sets() -> Vec<String> {
+    crate::ui_sets()
         .iter()
-        .map(|set| set.specifier.as_str())
+        .map(|set| set.specifier.clone())
         .collect()
 }
 
@@ -84,7 +84,7 @@ pub(crate) fn package(
         .ui_sets
         .iter()
         .map(String::as_str)
-        .filter(|set| !served.contains(set))
+        .filter(|set| !served.iter().any(|s| s == set))
         .collect();
     if !missing.is_empty() {
         bail!(

@@ -539,6 +539,9 @@ pub struct TraceRequest {
     /// The app's bytecode, compiled by `nsh` (`None`: the runner's Rust
     /// root).
     pub bytecode: Option<PathBuf>,
+    /// The QuickJS build `nsh` compiled it for (`nsh_js::BYTECODE_VERSION`),
+    /// which must be the runner's.
+    pub bytecode_version: Option<String>,
     /// The bundle's source map, for errors at source positions.
     pub source_map: Option<PathBuf>,
     /// The app's source directory (its `asset:/` files).
@@ -556,6 +559,7 @@ impl TraceRequest {
         json!({
             "protocol": PROTOCOL,
             "bytecode": path(&self.bytecode),
+            "bytecode_version": self.bytecode_version,
             "source_map": path(&self.source_map),
             "dir": self.dir.to_string_lossy(),
             "verbose": self.verbose,
@@ -578,6 +582,10 @@ impl TraceRequest {
         let path = |key: &str| value.get(key).and_then(Value::as_str).map(PathBuf::from);
         Ok(TraceRequest {
             bytecode: path("bytecode"),
+            bytecode_version: value
+                .get("bytecode_version")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             source_map: path("source_map"),
             dir: path("dir").ok_or("the request has no dir")?,
             verbose: value.get("verbose").and_then(Value::as_bool) == Some(true),
@@ -704,26 +712,10 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
         log::LevelFilter::Info
     });
     let app = match (&request.bytecode, root) {
-        (Some(bytecode), _) => {
-            if !cfg!(feature = "js") {
-                return fail("this runner has no JS runtime: it runs the app's Rust root".into());
-            }
-            let bytes = match std::fs::read(bytecode) {
-                Ok(bytes) => bytes,
-                Err(e) => return fail(format!("read {}: {e}", bytecode.display())),
-            };
-            // SAFETY: `nsh` compiled it for this runner just now, against
-            // the QuickJS this runner links (the same nsh version).
-            let bundle = unsafe { crate::Bundle::bytecode(bytes) };
-            let map = request
-                .source_map
-                .as_ref()
-                .and_then(|map| std::fs::read_to_string(map).ok());
-            App::Js(match map {
-                Some(map) => bundle.with_source_map(map),
-                None => bundle,
-            })
-        }
+        (Some(bytecode), _) => match js_app(&request, bytecode) {
+            Ok(app) => app,
+            Err(e) => return fail(e),
+        },
         (None, Some(root)) => App::Rust(root()),
         (None, None) => return fail("no bytecode, and this runner has no Rust root".into()),
     };
@@ -749,6 +741,36 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
             fail(e)
         }
     }
+}
+
+/// The JS app of `request`: the bytecode `nsh` compiled, at `bytecode`.
+#[cfg(feature = "js")]
+fn js_app(request: &TraceRequest, bytecode: &std::path::Path) -> Result<App, String> {
+    if request.bytecode_version.as_deref() != Some(crate::BYTECODE_VERSION) {
+        return Err(format!(
+            "the bytecode is for {}, and this runner's QuickJS is {}",
+            request.bytecode_version.as_deref().unwrap_or("no QuickJS"),
+            crate::BYTECODE_VERSION
+        ));
+    }
+    let bytes = std::fs::read(bytecode).map_err(|e| format!("read {}: {e}", bytecode.display()))?;
+    // SAFETY: `nsh` compiled it for this runner just now, for the QuickJS
+    // build it links (checked above).
+    let bundle = unsafe { crate::Bundle::bytecode(bytes) };
+    let map = request
+        .source_map
+        .as_ref()
+        .and_then(|map| std::fs::read_to_string(map).ok());
+    Ok(App::Js(match map {
+        Some(map) => bundle.with_source_map(map),
+        None => bundle,
+    }))
+}
+
+/// A runner without feature `js` runs a Rust root only.
+#[cfg(not(feature = "js"))]
+fn js_app(_: &TraceRequest, _: &std::path::Path) -> Result<App, String> {
+    Err("this runner has no JS runtime: it runs the app's Rust root".into())
 }
 
 #[cfg(test)]
@@ -847,6 +869,7 @@ mod tests {
     fn requests_and_messages_survive_their_lines() {
         let request = TraceRequest {
             bytecode: Some(PathBuf::from("C:\\app\\.nsh\\rust\\trace\\bundle.nshc")),
+            bytecode_version: Some("rquickjs-0.14.0/quickjs-ng-0.16.2/le64".into()),
             source_map: None,
             dir: PathBuf::from("/apps/charts"),
             verbose: true,

@@ -98,7 +98,7 @@ static STOP_SIGNAL: AtomicI32 = AtomicI32::new(0);
 /// Until dropped, Ctrl-C (SIGINT) and SIGTERM ask the command to stop
 /// ([`stop_requested`]) instead of ending the process, so that it undoes
 /// what it set up outside it on its way out (`nsh run`'s `adb reverse`);
-/// a second one ends the process. [`crate::main_with`] then ends it as the
+/// a second one ends the process. [`crate::main`] then ends it as the
 /// signal would have.
 pub(crate) struct Stoppable(());
 
@@ -120,26 +120,6 @@ pub(crate) fn stop_requested() -> bool {
     STOP_SIGNAL.load(Ordering::SeqCst) != 0
 }
 
-/// Passes a requested stop on to `child` (a command line this one runs,
-/// which is [`Stoppable`] itself): it may not have had the signal, if it
-/// was sent to this process alone. Once it did, the one passed on is not
-/// taken as a second.
-#[cfg(unix)]
-pub(crate) fn pass_stop_on(child: &std::process::Child) {
-    let signal = STOP_SIGNAL.load(Ordering::SeqCst);
-    if signal != 0
-        && let Ok(pid) = libc::pid_t::try_from(child.id())
-    {
-        // SAFETY: a plain syscall on a child that has not been waited for.
-        unsafe { libc::kill(pid, signal) };
-    }
-}
-
-/// Windows delivers Ctrl-C to every process of the console, the child
-/// included: nothing to pass on.
-#[cfg(windows)]
-pub(crate) fn pass_stop_on(_child: &std::process::Child) {}
-
 /// After a requested stop: ends the process as the signal would have
 /// (the shell sees an interrupted command).
 pub(crate) fn exit_if_stopped() {
@@ -150,7 +130,7 @@ pub(crate) fn exit_if_stopped() {
 }
 
 /// Ends the process with `signal`'s default action.
-pub(crate) fn exit_by_signal(signal: libc::c_int) {
+fn exit_by_signal(signal: libc::c_int) {
     // SAFETY: back to the default action, then raise it.
     unsafe {
         libc::signal(signal, libc::SIG_DFL);
