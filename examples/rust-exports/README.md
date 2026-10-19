@@ -24,7 +24,7 @@ cargo build -p nsh-cli
 cargo test -p rust-exports-native                         # the headless tests
 ```
 
-`nsh` builds the app its own command line and hosts with the crate linked in (`docs/dev/tooling.md`, "Apps with Rust
+`nsh` describes the crate with a small program of it and builds the app's hosts with it linked in (`docs/dev/tooling.md`, "Apps with Rust
 components of their own"): TSX edits are hot updates, Rust edits rebuild and restart the app. The tests
 (`native/tests/rust_exports/`) bundle `App.tsx` against the crate's set, run it on a headless engine, press through
 its UI and check what each export shows.

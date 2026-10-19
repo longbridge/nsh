@@ -100,6 +100,10 @@ pub fn App() -> impl IntoElement {
 | Android | 带有你的 crate 的应用 `libnsh.so`，由运行时的 Activity 启动 |
 | Web | 包含引擎和你的 crate 的 `nsh.wasm`（整个 Rust gallery 为 3.3 MB，brotli 压缩后 0.75 MB）；页面直接挂载根组件 |
 
+`nsh` 只构建你的 crate 需要的东西：一个由你的 crate 和 NSH 核心组成的小程序，它向 CLI 描述 crate 的组件和模块，其余工作由
+CLI 自己完成；再加上你运行或打包的每个目标的运行器。新 Rust 应用的第一次构建只编译你的 crate 和 NSH 的核心，大约 60 个
+crate。`nsh trace` 在同样构建的、包含你的 crate 的运行器中以无界面方式挂载根组件。
+
 `nsh run` 期间，修改 crate 的 Rust 代码会重新构建运行器并重启应用；在浏览器中，已打开的页面会自动加载新的运行时。
 `cargo run` 在桌面后端上直接启动同一个根组件（`src/main.rs`）；嵌入 NSH 的原生应用在 macOS、Windows、Linux、GPUI 和
 iOS 的 `AppView` 上用 `AppSource::Rust` 挂载 Rust 根组件。
@@ -223,7 +227,8 @@ Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型
 （`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用）。类型不对的参数在调用中抛出 `TypeError`，
 返回 Promise 的调用则以它 reject；`Err` 以其消息抛出（或 reject）。类的对象拥有它的
 Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `using ledger = new Ledger()`）立即释放。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
-Rust 的修改会重新构建并重启应用。
+Rust 的修改会重新构建并重启应用。CLI 根据 crate 的描述知道它导出了什么，自己打包和编译 TSX；开发宿主和 `nsh trace` 的
+无界面运行器则与你的 crate 和 QuickJS 一起构建。
 
 仓库中的 `examples/rust-exports` 是导出的参考示例：一个小型 TSX 应用，它的 crate 导出一个组件（必填、有默认值和可选的
 props，一个事件，子元素）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、

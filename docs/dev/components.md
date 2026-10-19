@@ -395,7 +395,7 @@ in points: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.tt
 font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
 crate again (`include_bytes!`). The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
-built, kind), which the app's command line (`rust_app.rs`, the registry is in-process) serves in development and
+built, kind), which `nsh` (`rust_app.rs`, from the description of the set: each file's path and source) serves in development and
 copies into packages next to the imported assets, and whose fonts the engine registers before the first view
 (`EngineConfig::ui_sets`, read through `EngineConfig::assets`).
 

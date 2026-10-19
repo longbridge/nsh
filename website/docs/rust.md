@@ -106,6 +106,11 @@ and no QuickJS linked in:
 | Android | The app's `libnsh.so` with your crate, started by the runtime's activity |
 | Web | `nsh.wasm` with the engine and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli); the page mounts the root |
 
+`nsh` builds what your crate needs and nothing more: a small program of your crate and NSH's core that describes its
+components and modules to the CLI, which then does the rest itself, and the runner of each target you run or
+package. The first build of a new Rust app compiles your crate and NSH's core, about 60 crates. `nsh trace` mounts
+the root headless in a runner of your crate built the same way.
+
 During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app; in the browser,
 the open page loads the new runtime by itself. `cargo run` starts the same root directly on the desktop backend
 (`src/main.rs`), and native apps that embed NSH mount a Rust root with `AppSource::Rust` on the `AppView` of macOS,
@@ -238,7 +243,9 @@ of its value. Arguments and results are typed from the signature: numbers, strin
 the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise; an `Err`
 throws (or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
-updates, Rust edits rebuild and restart the app.
+updates, Rust edits rebuild and restart the app. The CLI bundles and compiles the TSX itself, knowing your crate's
+exports from its description; the development hosts and `nsh trace`'s headless runner are built with your crate and
+QuickJS.
 
 `examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
 component (props required, defaulted and optional, an event, children), one module (a function of each kind) and

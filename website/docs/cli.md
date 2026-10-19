@@ -71,7 +71,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 | `--template <TEMPLATE>` | `ts`, `rust` or `mixed` (above). `rust` and `mixed` need Rust; `cargo run` also needs the native desktop backend's development libraries. |
 | `--nsh-source <DIR>` | With `rust` or `mixed`: the crates depend on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
 
-The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
+The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Before each command on such an app, `nsh` builds a small program of the app's crates and NSH's core that describes their components, modules and classes, and runs it when the crates changed; with that description the CLI itself bundles, compiles, type-checks, serves and packages the app. A Rust app's builds compile its crates and NSH's core alone. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
 
 ## nsh run
 
@@ -122,7 +122,7 @@ nsh trace [ENTRY] [--tap <SELECTOR>]... [--taps <N>] [--idle-ms <MS>] [--wait <M
           [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>]
 ```
 
-Runs the app headless, in the CLI's own process with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)). A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) is traced the same way, with its root mounted and no bundle.
+Runs the app headless, with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)). A TSX app runs in the CLI's own process. An app with Rust crates runs in a headless runner built with them, which the CLI hands the bytecode it compiled; a Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs in one with its root mounted, no bundle and no QuickJS. The output is the same either way.
 
 ```text
 ✓ bundled App.tsx (3255 B in 12.6 ms)
@@ -167,7 +167,7 @@ Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> -
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves. For a Rust app (`nsh.json` `"root"`), it builds the app's crates and writes `app.json` and the files they ship (`assets/`): its runners mount the root, so there is no bundle.
+Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves. For a Rust app (`nsh.json` `"root"`), it builds and describes the app's crates and writes `app.json` and the files they ship (`assets/`): its runners mount the root, so there is no bundle.
 
 | Flag | Default | Description |
 |---|---|---|

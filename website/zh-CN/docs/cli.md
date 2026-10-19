@@ -69,7 +69,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 | `--template <TEMPLATE>` | `ts`、`rust` 或 `mixed`（见上表）。`rust` 和 `mixed` 需要 Rust 工具链；`cargo run` 还需要原生桌面后端的开发库。 |
 | `--nsh-source <DIR>` | 与 `rust` 或 `mixed` 一起使用：crate 按路径依赖 `DIR` 中 NSH 源码仓库的 crate，基于 NSH 源码构建应用。 |
 
-`rust` 和 `mixed` 的 crate 依赖 crates.io 上与 CLI 同版本的 NSH crate（使用 `--nsh-source` 时依赖该源码仓库中的 crate），`nsh` 命令用同样的 crate 构建应用的运行器和宿主。请在新的应用目录中创建它们：只要其中任何一个文件已存在，就会在写入之前报告为冲突。
+`rust` 和 `mixed` 的 crate 依赖 crates.io 上与 CLI 同版本的 NSH crate（使用 `--nsh-source` 时依赖该源码仓库中的 crate），`nsh` 命令用同样的 crate 构建应用的运行器和宿主。对这样的应用，`nsh` 在每条命令之前构建一个由应用 crate 和 NSH 核心组成的小程序，用它描述这些 crate 的组件、模块和类（crate 有改动时才重新运行）；有了这份描述，CLI 自己完成打包、编译、类型检查、开发服务和打包发布。Rust 应用的构建只编译它的 crate 和 NSH 的核心。请在新的应用目录中创建它们：只要其中任何一个文件已存在，就会在写入之前报告为冲突。
 
 ## nsh run
 
@@ -119,7 +119,7 @@ nsh dev [ENTRY] [--port <PORT>] [--release]
 nsh trace [ENTRY] [--taps <N>] [--idle-ms <MS>] [--scroll <POINTS>] [--width <W>] [--height <H>]
 ```
 
-以无界面方式运行应用：在 CLI 自己的进程里，使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。Rust 应用（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）也以同样方式 trace：挂载它的根组件，没有 bundle。
+以无界面方式运行应用：使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。TSX 应用在 CLI 自己的进程里运行。带 Rust crate 的应用在用这些 crate 构建的无界面运行器中运行，CLI 把自己编译好的字节码交给它；Rust 应用（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）在挂载根组件的运行器中运行，没有 bundle，也没有 QuickJS。两种方式的输出相同。
 
 ```text
 ✓ bundled App.tsx (3255 B in 12.6 ms)
@@ -147,7 +147,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。对 Rust 应用（`nsh.json` 的 `"root"`），它构建应用的 crate，并写出 `app.json` 和这些 crate 附带的文件（`assets/`）：它的运行器挂载根组件，因此没有 bundle。
+打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。对 Rust 应用（`nsh.json` 的 `"root"`），它构建并描述应用的 crate，并写出 `app.json` 和这些 crate 附带的文件（`assets/`）：它的运行器挂载根组件，因此没有 bundle。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
