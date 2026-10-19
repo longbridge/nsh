@@ -189,7 +189,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/accessibility` | Screen reader and reduce motion state, announcements |
 | `nsh/image` | `Image` (the element), `Image.getSize`, `Image.prefetch` |
 | `nsh/webview`, `nsh/video` | `WebView`, `Video` |
-| `nsh/native` | Components the embedding app registers |
+| `nsh/native` | Components and functions the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |
 
 The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error.

@@ -20,6 +20,7 @@ mod counter;
 mod errors;
 mod fetch;
 mod handle_bench;
+mod host_modules;
 mod hot;
 mod hover;
 mod js_touch;

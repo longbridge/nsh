@@ -188,7 +188,7 @@ const open = async () => {
 | `nsh/accessibility` | 读屏与减少动态效果的状态、朗读通知 |
 | `nsh/image` | `Image`（元素）、`Image.getSize`、`Image.prefetch` |
 | `nsh/webview`, `nsh/video` | `WebView`、`Video` |
-| `nsh/native` | 嵌入应用注册的组件 |
+| `nsh/native` | 嵌入应用注册的组件和函数 |
 | `nsh/ios`, `nsh/android` | 平台专属 API |
 
 [模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。

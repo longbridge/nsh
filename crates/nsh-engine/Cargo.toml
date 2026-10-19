@@ -38,6 +38,8 @@ libc.workspace = true
 
 [dev-dependencies]
 nsh-ui-mobile.workspace = true
+# The host's shared data in `nativeModule`'s tests.
+tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-js.workspace = true
 crossbeam-channel.workspace = true

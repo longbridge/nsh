@@ -363,6 +363,9 @@ enum Made {
 /// bundle.
 pub(crate) struct ModuleTable {
     registries: Vec<Registry>,
+    /// Where the host's UI sets start in `registries` (after the
+    /// runtime's).
+    host: usize,
     pub(crate) chunks: RefCell<ChunkCodes>,
 }
 
@@ -393,9 +396,11 @@ impl ChunkCodes {
 impl ModuleTable {
     pub(crate) fn new(ui_sets: &[Registry]) -> ModuleTable {
         let mut registries: Vec<Registry> = nsh_core::runtime::registries().to_vec();
+        let host = registries.len();
         registries.extend(ui_sets.iter().filter(|r| r.specifier().is_some()).cloned());
         ModuleTable {
             registries,
+            host,
             chunks: RefCell::default(),
         }
     }
@@ -422,41 +427,68 @@ impl ModuleTable {
             .filter(|r| r.specifier() == Some(name))
         {
             found = true;
-            let modules = registry.module_specs();
-            let specs = registry.specs();
-            for spec in &specs {
-                let module = modules.iter().find(|m| m.name == spec.export).cloned();
-                out.push((spec.export.clone(), Made::Component(spec.clone(), module)));
-            }
-            for m in &modules {
-                if specs.iter().any(|s| s.export == m.name) {
-                    continue;
-                }
-                if m.flat {
-                    for f in &m.functions {
-                        out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
-                    }
-                } else {
-                    out.push((m.name.to_owned(), Made::Module(m.clone())));
-                }
-            }
-            for class in registry.class_specs() {
-                out.push((class.name.to_owned(), Made::Class(class.def)));
-            }
-            for &value in registry
-                .reexports()
-                .0
-                .iter()
-                .chain(registry.native_value_names())
-            {
-                out.push((value.to_owned(), Made::Reexport(value)));
-            }
+            registry_exports(registry, &mut out);
         }
         // nsh's own export wins over a registry's of the same name (it
         // builds on it: `AccessibilityInfo`).
         let mut seen = std::collections::HashSet::new();
         out.retain(|(name, _)| seen.insert(name.clone()));
         found.then_some(out)
+    }
+
+    /// The exports of the UI set the host registered under `specifier`
+    /// (`nativeModule`): only the host's sets, never nsh's own modules or
+    /// the runtime's.
+    fn host_exports(&self, specifier: &str) -> Option<Vec<(String, Made)>> {
+        if MODULES.iter().any(|m| m.name == specifier) {
+            return None;
+        }
+        let mut out = Vec::new();
+        let mut found = false;
+        for registry in self.registries[self.host..]
+            .iter()
+            .filter(|r| r.specifier() == Some(specifier))
+        {
+            found = true;
+            registry_exports(registry, &mut out);
+        }
+        let mut seen = std::collections::HashSet::new();
+        out.retain(|(name, _)| seen.insert(name.clone()));
+        found.then_some(out)
+    }
+}
+
+/// The exports of `registry`: its components, modules, classes and
+/// re-exports.
+fn registry_exports(registry: &Registry, out: &mut Vec<(String, Made)>) {
+    let modules = registry.module_specs();
+    let specs = registry.specs();
+    for spec in &specs {
+        let module = modules.iter().find(|m| m.name == spec.export).cloned();
+        out.push((spec.export.clone(), Made::Component(spec.clone(), module)));
+    }
+    for m in &modules {
+        if specs.iter().any(|s| s.export == m.name) {
+            continue;
+        }
+        if m.flat {
+            for f in &m.functions {
+                out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
+            }
+        } else {
+            out.push((m.name.to_owned(), Made::Module(m.clone())));
+        }
+    }
+    for class in registry.class_specs() {
+        out.push((class.name.to_owned(), Made::Class(class.def)));
+    }
+    for &value in registry
+        .reexports()
+        .0
+        .iter()
+        .chain(registry.native_value_names())
+    {
+        out.push((value.to_owned(), Made::Reexport(value)));
     }
 }
 
@@ -589,21 +621,7 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
             return -1;
         };
         for (export, made) in exports {
-            let value = match made {
-                Made::Own(Export::Function(f, length)) => {
-                    let cname = CString::new(export.as_str()).unwrap_or_default();
-                    reactive::new_function(ctx, &cname, f, length)
-                }
-                Made::Own(Export::Value(make)) => make(ctx),
-                Made::Component(spec, module) => components::component(ctx, spec, module),
-                Made::Module(spec) => components::module(ctx, &spec),
-                Made::Function(spec, f) => components::module_function(ctx, &spec, f),
-                Made::Class(def) => match crate::classes::constructor(ctx, def) {
-                    Ok(ctor) => ctor.take(),
-                    Err(_) => qjs::JS_EXCEPTION,
-                },
-                Made::Reexport(value) => env::reexport(ctx, value),
-            };
+            let value = make(ctx, &export, made);
             if qjs::JS_IsException(value) {
                 return -1;
             }
@@ -614,6 +632,48 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
         }
     }
     0
+}
+
+/// The value of export `export` (owned; an exception when making it threw).
+fn make(ctx: *mut JsContext, export: &str, made: Made) -> JsValue {
+    match made {
+        Made::Own(Export::Function(f, length)) => {
+            let cname = CString::new(export).unwrap_or_default();
+            reactive::new_function(ctx, &cname, f, length)
+        }
+        Made::Own(Export::Value(make)) => make(ctx),
+        Made::Component(spec, module) => components::component(ctx, spec, module),
+        Made::Module(spec) => components::module(ctx, &spec),
+        Made::Function(spec, f) => components::module_function(ctx, &spec, f),
+        Made::Class(def) => match crate::classes::constructor(ctx, def) {
+            Ok(ctor) => ctor.take(),
+            Err(_) => qjs::JS_EXCEPTION,
+        },
+        Made::Reexport(value) => env::reexport(ctx, value),
+    }
+}
+
+/// The exports of the UI set the host registered under `specifier`, as one
+/// object (`nativeModule`; owned): `None` when the host registered none,
+/// an exception when making an export threw.
+pub(crate) fn host_module(ctx: *mut JsContext, specifier: &str) -> Option<JsValue> {
+    // SAFETY: the state's table, by shared reference; it lives as long as
+    // the context.
+    let exports = unsafe { &(*crate::state::state(ctx)).modules }.host_exports(specifier)?;
+    // SAFETY: a new object taking each new value; freed when one throws.
+    unsafe {
+        let object = qjs::JS_NewObject(ctx);
+        for (export, made) in exports {
+            let value = make(ctx, &export, made);
+            if qjs::JS_IsException(value) {
+                qjs::JS_FreeValue(ctx, object);
+                return Some(value);
+            }
+            let cname = CString::new(export.as_str()).unwrap_or_default();
+            qjs::JS_SetPropertyStr(ctx, object, cname.as_ptr(), value);
+        }
+        Some(object)
+    }
 }
 
 #[cfg(test)]

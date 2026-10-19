@@ -60,6 +60,23 @@
   the box is empty, so a component can size itself. Content masks are
   rectangles: rounded corners do not cut a component (videos follow them).
   `crates/gpui/nsh-platform-gpui/examples/embed.rs` runs `examples/embedded` with its badge as a GPUI element.
+- **Native modules** (`nsh/native`'s `nativeModule`; `platform_modules.rs`, `modules::host_module`): an embedding app
+  written in Rust gives its engines a UI set of its own (`Registry::ui_set("host/trading")` with its `#[module]`s,
+  `#[class]`es and Rust components) next to NSH's (`set_ui_sets` of the platform crate, `EngineConfig::ui_sets`), and
+  the app reaches it by name at run time: `nativeModule<{ Trading: TradingApi }>("host/trading")` is an object of
+  the set's exports, made as an import of the set makes them, once per specifier and engine. The app declares `T`
+  itself, so it is built with the stock `nsh build` and the CLI never needs the host's registry (an `import` of the
+  set needs a CLI built with it, `rust_app.rs`). Calls keep the typed machinery (`rust-classes.md`): plain functions
+  answer in the call, `cx` functions are ops, `async` ones tasks. Where the host gave no set under the specifier, it
+  throws a `ReferenceError` naming it.
+- **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
+  `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
+  change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
+  engine thread; tokio's channels need no runtime there, their wakers wake the engine) posts the current state, then
+  awaits each change and posts it (`Callback::post`, which runs the callback in the engine's next JS turn). The
+  host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
+  them; the task ends with the engine (its callbacks are dropped with the VM). The engine's `host_modules` tests run it with two
+  engines.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

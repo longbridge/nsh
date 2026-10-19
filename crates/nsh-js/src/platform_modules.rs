@@ -3,7 +3,9 @@
 //! `nsh/ios` (`isAvailable`, `InputAccessoryView`), `nsh/webview` and
 //! `nsh/video` (their host elements as components, which the compiler
 //! makes in place for their tags), and `nsh/native` (`nativeComponent`: the
-//! JS face of components the embedding app registers natively).
+//! JS face of components the embedding app registers natively;
+//! `nativeModule`: the exports of a UI set it registers, reached by name at
+//! run time).
 
 use std::{
     cell::RefCell,
@@ -32,6 +34,8 @@ pub(crate) struct PlatformModules {
     /// function).
     back: RefCell<Vec<(u32, JsValue)>>,
     next: std::cell::Cell<u32>,
+    /// `nativeModule`'s objects, made once per specifier (owned).
+    host_modules: RefCell<Vec<(String, JsValue)>>,
 }
 
 impl PlatformModules {
@@ -40,6 +44,10 @@ impl PlatformModules {
         for (_, f) in self.back.borrow_mut().drain(..) {
             // SAFETY: owned values; no JS runs from here on.
             unsafe { qjs::JS_FreeValue(raw, f) };
+        }
+        for (_, m) in self.host_modules.borrow_mut().drain(..) {
+            // SAFETY: as above.
+            unsafe { qjs::JS_FreeValue(raw, m) };
         }
     }
 }
@@ -462,17 +470,74 @@ unsafe extern "C" fn native_event(
     }
 }
 
+/// `nativeModule(specifier)`: the exports of the UI set the embedding app
+/// registered under `specifier`, as one object, the same each call.
+unsafe extern "C" fn native_module(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let Some(specifier) = dom::string_arg(ctx, arg(argc, argv, 0)) else {
+        // SAFETY: throws on a live context.
+        return unsafe {
+            qjs::JS_ThrowTypeError(ctx, c"nativeModule: a specifier string".as_ptr())
+        };
+    };
+    let cached = modules(ctx)
+        .host_modules
+        .borrow()
+        .iter()
+        .find(|(s, _)| *s == specifier)
+        // SAFETY: a dup for the caller.
+        .map(|&(_, m)| unsafe { qjs::JS_DupValue(ctx, m) });
+    if let Some(m) = cached {
+        return m;
+    }
+    let Some(m) = crate::modules::host_module(ctx, &specifier) else {
+        let message = CString::new(format!(
+            "nativeModule: nothing is registered under \"{specifier}\"; the embedding app \
+             registers its functions as a UI set of that name (`Registry::ui_set(\"{specifier}\")` \
+             in its engines' UI sets)"
+        ))
+        .unwrap_or_default();
+        // SAFETY: throws on a live context; `%s` keeps the message literal.
+        return unsafe { qjs::JS_ThrowReferenceError(ctx, c"%s".as_ptr(), message.as_ptr()) };
+    };
+    // SAFETY: inspecting the value just made; a dup the cache owns.
+    unsafe {
+        if !qjs::JS_IsException(m) {
+            let kept = qjs::JS_DupValue(ctx, m);
+            modules(ctx)
+                .host_modules
+                .borrow_mut()
+                .push((specifier, kept));
+        }
+    }
+    m
+}
+
 /// `nsh/native`.
-pub(crate) const NATIVE_EXPORTS: &[Item] = &[(
-    "nativeComponent",
-    Export::Function(native_component, 2),
-    Ts::function(
-        "A component for the native component the embedding app registered as\n`name` (Swift `NshAppView.register(component:)`, Java\n`NshView.registerComponent`). It is laid out like a view, at the size its\nstyle gives it, else at the size the component reports. Its `ref` calls\ncommands: `ref.command(\"zoomTo\", { level: 3 })`. Where nothing is\nregistered under `name`, it renders an empty view.",
-        &[
-            "<P extends object = {}, E extends object = {}>(name: string, spec: NativeComponentSpec<P, E>): (props: NativeComponentProps<P, E>) => YNode",
-        ],
+pub(crate) const NATIVE_EXPORTS: &[Item] = &[
+    (
+        "nativeComponent",
+        Export::Function(native_component, 2),
+        Ts::function(
+            "A component for the native component the embedding app registered as\n`name` (Swift `NshAppView.register(component:)`, Java\n`NshView.registerComponent`). It is laid out like a view, at the size its\nstyle gives it, else at the size the component reports. Its `ref` calls\ncommands: `ref.command(\"zoomTo\", { level: 3 })`. Where nothing is\nregistered under `name`, it renders an empty view.",
+            &[
+                "<P extends object = {}, E extends object = {}>(name: string, spec: NativeComponentSpec<P, E>): (props: NativeComponentProps<P, E>) => YNode",
+            ],
+        ),
     ),
-)];
+    (
+        "nativeModule",
+        Export::Function(native_module, 1),
+        Ts::function(
+            "The exports of the UI set the embedding app registered as `specifier`\n(`Registry::ui_set(\"host/trading\")` among its engines' UI sets: Rust\n`set_ui_sets`, `EngineConfig::ui_sets`): its modules, classes, functions\nand components, as one object, the same on every call. The app declares\nthe type `T` itself, so it builds with the stock `nsh build`:\n`nativeModule<{ Trading: TradingApi }>(\"host/trading\").Trading.quote(\"AAPL\")`.\nCalls work as through an import: plain functions return their value,\n`async` ones a promise, and callbacks can be called later by Rust. Where\nnothing is registered under `specifier`, it throws a `ReferenceError`\nnaming it.",
+            &["<T extends object>(specifier: string): T"],
+        ),
+    ),
+];
 
 /// `nsh/native`'s types.
 pub(crate) const NATIVE_TYPES: &str = r#"/** Handlers of a native component's events: `regionChange` -> `onRegionChange`. */
