@@ -14,7 +14,7 @@ Native Shell provides a pinned subset of LLRT standard modules inside its existi
 | `process` | `spawn` (a `ChildProcess`), `run`, `exit`, `platform`, `arch`, `nextTick`; `env` and `dataDir` on the default object, which is also the global `process` |
 | `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
 | `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
-| `websocket` | `WebSocket` constructor, also installed globally on native hosts |
+| `websocket` | `WebSocket.connect(url, options?)` resolving a `WebSocketConnection` (`read`, `write`, `close`); the global `WebSocket` constructor on native hosts |
 
 ## Imports and generated types
 

@@ -77,7 +77,7 @@ patterns go in `hosts` or legacy rules. Legacy rules are explicitly selected by 
 rule forms is rejected and serialization preserves the form. WebSockets (the global and the `websocket` module)
 go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
 `https` (or under their own scheme, for legacy rules listing it), on the parsed URL the handshake then connects
-to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (`Shared::websockets`). Raw TCP
+to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). Raw TCP
 `net.connect` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
 bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
 declaration) has none. Sockets are capped at 32 per VM (`Shared::sockets`) and 4 MiB of pending writes each;

@@ -3073,6 +3073,7 @@ name = "nsh-core"
 version = "0.1.1"
 dependencies = [
  "cap-std",
+ "futures-util",
  "libc",
  "log",
  "nsh-animation",
@@ -3082,6 +3083,8 @@ dependencies = [
  "slab",
  "taffy",
  "tokio",
+ "tokio-tungstenite 0.28.0",
+ "url",
 ]
 
 [[package]]
@@ -3115,6 +3118,7 @@ dependencies = [
  "rustc-hash",
  "serde_json",
  "tokio",
+ "tokio-tungstenite 0.28.0",
 ]
 
 [[package]]

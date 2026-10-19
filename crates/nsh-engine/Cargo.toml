@@ -41,6 +41,8 @@ nsh-ui-mobile.workspace = true
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-js.workspace = true
 crossbeam-channel.workspace = true
+# A WebSocket server for `tests/engine/websocket.rs`.
+tokio-tungstenite.workspace = true
 
 # Most of the engine's tests run JS apps.
 [[test]]

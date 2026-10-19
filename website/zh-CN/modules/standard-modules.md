@@ -14,7 +14,7 @@ Native Shell 在同一个 QuickJS VM 中提供一组固定版本的 LLRT 标准�
 | `process` | `spawn` (a `ChildProcess`), `run`, `exit`, `platform`, `arch`, `nextTick`; `env` and `dataDir` on the default object, which is also the global `process` |
 | `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
 | `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
-| `websocket` | `WebSocket` constructor, also installed globally on native hosts |
+| `websocket` | `WebSocket.connect(url, options?)` 解析为 `WebSocketConnection`（`read`、`write`、`close`）；原生宿主上另有全局 `WebSocket` 构造器 |
 
 ## 导入与类型
 

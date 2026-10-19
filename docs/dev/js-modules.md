@@ -100,10 +100,15 @@ limits throw in the call, and the disk work runs on the tokio runtime's blocking
 (`nsh_core::runtime::process`): `run`, `spawn` (a `ChildProcess` whose `on(..)` keeps `Callback`s that a core
 task posts the child's output to), `exit`, `platform`, `arch` and the `env` / `dataDir` getters; `nsh-js` makes
 its default object the global `process` and adds `nextTick`, a JS job (`standard/process.rs`). The VM's children
-are a `Local`, closed (killed at once, joined together) when the VM goes.
+are a `Local`, closed (killed at once, joined together) when the VM goes. And `websocket`
+(`nsh_core::runtime::websocket`: the `WebSocket` module's `connect` and its `WebSocketConnection` class): its URL,
+options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake is a core task, and a
+task spawned per connection drives the socket (answering pings, keeping up to eight unread messages); its
+connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`, which the global `WebSocket` (`nsh-js`
+`standard/websocket.rs`, made on first use) shares.
 
 LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs` projects
-actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `websocket` adapters
-share the owning VM and NSH capability checks. Their declared interfaces, rather
+actual exports from checksummed upstream assets in `third_party/llrt-types`. The privileged modules share the
+owning VM and NSH capability checks. Their declared interfaces, rather
 than complete Node.js or browser compatibility, define the app API. Existing WHATWG constructor identities stay
 intact. Standard `websocket` is an explicit connection API, distinct from the browser WebSocket interface.
