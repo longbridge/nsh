@@ -1745,8 +1745,11 @@ dependencies = [
  "gpui-fast-platform",
  "gpui-kit",
  "log",
+ "nsh-core",
  "nsh-platform-gpui",
+ "nsh-ui-mobile",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

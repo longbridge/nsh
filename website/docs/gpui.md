@@ -120,7 +120,11 @@ so only load it from your own app's files.
   256 MB heap); the development host and the release runner run apps with `Limits::standalone_desktop()`.
 - `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
   with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
-- `set_ui_sets(sets)` replaces the default `nsh/ui/mobile` set, for apps with Rust components of their own.
+- `set_ui_sets(sets)` replaces the default `nsh/ui/mobile` set, for apps with Rust components of their own, and gives
+  your app's own sets: an app reaches the functions and classes of one by name with
+  [`nativeModule`](../modules/nsh-native.md#nativemodule) and is built with the stock `nsh build`. The repository's
+  `examples/embed-gpui` keeps a trading desk in the host this way, which two embedded order tickets and the host's
+  own widgets share.
 
 ## Differences
 

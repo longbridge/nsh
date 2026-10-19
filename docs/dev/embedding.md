@@ -75,8 +75,8 @@
   engine thread; tokio's channels need no runtime there, their wakers wake the engine) posts the current state, then
   awaits each change and posts it (`Callback::post`, which runs the callback in the engine's next JS turn). The
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
-  them; the task ends with the engine (its callbacks are dropped with the VM). The engine's `host_modules` tests run it with two
-  engines.
+  them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
+  selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -89,8 +89,10 @@
 ## GPUI and GPUI Kit apps
 
 Desktop apps built with GPUI or GPUI Kit (Longbridge Pro, Allsum Desktop) embed NSH with `nsh-platform-gpui`'s
-`AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two surfaces
-in a resizable split.
+`AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two order
+tickets in a resizable split, sharing the host's trading desk (`src/trading.rs`, `nativeModule("host/trading")`) with
+each other and with the host's sidebar and toolbar, and a "Show layers" toggle outlining what GPUI Kit draws and what
+NSH draws (`src/layers.rs`).
 
 - **One GPUI.** NSH draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
@@ -132,7 +134,10 @@ in a resizable split.
   colors and Tailwind palette names only: NSH also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
   reads gradients and `blue-500/50` that NSH rejects.
 - **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
-  (`AppView::register_component`): their events and commands, as on the other platforms. A component can render GPUI
+  (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
+  of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and
+  subscribe to the desk, whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
+  `changed()`), so the host and every ticket show the same symbol and orders. A component can render GPUI
   Kit widgets in its box (`NativeComponent::render`), which take their own input: the example's "Extended hours" is a
   GPUI Kit `Switch` (`src/switch.rs`, `host.switch`) that reports its natural size (`ComponentContext::set_size`: its
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on

@@ -8,11 +8,17 @@ publish = false
 
 # Its own workspace: GPUI Kit (and the GPUI it builds on) stays out of nsh's
 # workspace builds. Build it with nsh's target directory to share what is
-# built: `CARGO_TARGET_DIR=../../target cargo run`.
+# built: `cargo run --manifest-path examples/embed-gpui/Cargo.toml
+# --target-dir target` from the repository's root.
 [workspace]
 
 [dependencies]
 nsh-platform-gpui = { path = "../../crates/gpui/nsh-platform-gpui" }
+# The host's own set (`host/trading`): `#[module]`, and NSH's UI set next to it.
+nsh-core = { path = "../../crates/nsh-core" }
+nsh-ui-mobile = { path = "../../crates/nsh-ui-mobile" }
+# The desk the host and the apps share (`watch`).
+tokio = { version = "1", default-features = false, features = ["sync"] }
 # `gpui-fast`: GPUI Kit drawn by the same `gpui_fast` crate as nsh.
 gpui-kit = { version = "0.7.3", features = ["gpui-fast"] }
 gpui_platform = { package = "gpui-fast-platform", version = "0.1.9", default-features = false, features = ["font-kit", "wayland", "x11"] }

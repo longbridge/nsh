@@ -8,35 +8,48 @@
 //! change ([`theme::nsh_theme`], `observe_global::<Theme>`), Tab moves
 //! through the host's widgets and the surfaces' fields alike, GPUI Kit's
 //! dialogs and notifications draw above the surfaces, closing a pane
-//! drops its view, which stops its engine, and the apps' "Extended hours"
-//! switch is a GPUI Kit widget this app registers as a native component
-//! ([`switch`]).
+//! drops its view, which stops its engine, and the apps' watchlist and
+//! "Extended hours" switch are GPUI Kit widgets this app registers as
+//! native components ([`watchlist`], [`switch`]).
+//!
+//! The host's desk ([`trading`]: the selected symbol, the orders, the
+//! positions) is shared both ways: the apps reach it by name
+//! (`nativeModule("host/trading")`, served from the set this app gives
+//! `set_ui_sets`) and subscribe to it, and the sidebar and toolbar follow
+//! and change it, so a symbol or an order chosen anywhere shows
+//! everywhere. "Show layers" outlines what is GPUI Kit's and what is
+//! NSH's ([`layers`]).
 //!
 //! ```sh
 //! nsh build examples/embed-gpui/app -o examples/embed-gpui/build/app
-//! cd examples/embed-gpui && CARGO_TARGET_DIR=../../target cargo run
+//! cargo run --manifest-path examples/embed-gpui/Cargo.toml --target-dir target
 //! ```
 //!
 //! `cargo run -- <bundle.nshc or its directory>` runs another bundle;
 //! `--alone` runs one surface in a window of its own (no host widgets).
 
+mod layers;
 mod switch;
 mod theme;
+mod trading;
+mod watchlist;
 
 use std::path::{Path, PathBuf};
 
 use gpui_kit::{
     assets::Assets,
+    base::Selectable,
     component::{
         ActiveTheme, IconName, Sizable, Theme, ThemeMode, WindowExt,
         button::{Button, ButtonVariants},
         h_flex,
-        input::{Input, InputState},
+        input::{Input, InputEvent, InputState},
         notification::Notification,
         resizable::{h_resizable, resizable_panel},
         sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
         v_flex,
     },
+    prelude::FluentBuilder,
     *,
 };
 use nsh_platform_gpui::{App as NshApp, AppOptions, AppView, AssetBase, Bundle};
@@ -62,20 +75,54 @@ struct Shell {
     panes: Vec<Pane>,
     layout: Layout,
     search: Entity<InputState>,
+    /// The host's desk as last seen ([`trading::watch`]).
+    desk: trading::Desk,
     _theme: Subscription,
+    _search: Subscription,
+    _desk: Task<()>,
 }
 
 impl Shell {
     fn new(bundle: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Symbol (Tab moves on)"));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Symbol, Enter selects"));
+        // Enter selects the symbol on the desk, for every ticket.
+        let search_events = cx.subscribe_in(
+            &search,
+            window,
+            |this: &mut Shell, search, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = event {
+                    let symbol = search.read(cx).value().to_string();
+                    this.select(&symbol, window, cx);
+                }
+            },
+        );
         // Every theme change (mode, theme) goes to the embedded apps.
         let theme = cx.observe_global::<Theme>(|this: &mut Shell, cx| this.apply_theme(cx));
+        // The desk's changes, from the tickets or from here.
+        let mut desk = trading::watch();
+        let follow = cx.spawn(async move |this, cx| {
+            while desk.changed().await.is_ok() {
+                let now = desk.borrow_and_update().clone();
+                if this
+                    .update(cx, |this, cx| {
+                        this.desk = now;
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         let mut shell = Shell {
             bundle,
             panes: Vec::new(),
             layout: Layout::Split,
             search,
+            desk: trading::desk(),
             _theme: theme,
+            _search: search_events,
+            _desk: follow,
         };
         for title in ["Ticket A", "Ticket B"] {
             let view = shell.open_app(window, cx);
@@ -111,6 +158,21 @@ impl Shell {
             ThemeMode::Dark
         };
         Theme::change(mode, Some(window), cx);
+    }
+
+    /// Selects `symbol` on the desk (every ticket follows), or says why not.
+    fn select(&mut self, symbol: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(err) = trading::select(symbol) {
+            window.push_notification(Notification::new().message(err), cx);
+        }
+    }
+
+    /// Shows or hides the layers' outlines, here and in the surfaces'
+    /// GPUI widgets (which read the global when they draw).
+    fn toggle_layers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = layers::shown(cx);
+        cx.set_global(layers::Layers(!shown));
+        window.refresh();
     }
 
     /// Switches to the themes registered from `themes/violet.json` (an nsh
@@ -174,14 +236,19 @@ impl Shell {
                     ),
             )
             .child(match &pane.view {
-                Some(view) => div().flex_1().min_h_0().child(view.clone()),
+                Some(view) => div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(view.clone())
+                    .when(layers::shown(cx), |d| d.child(layers::nsh_overlay(cx))),
                 None => div()
                     .flex_1()
                     .flex()
                     .items_center()
                     .justify_center()
                     .text_color(theme.muted_foreground)
-                    .child("Closed: its engine stopped"),
+                    .child("Closed: its engine stopped. Open starts a new one."),
             })
     }
 }
@@ -205,10 +272,64 @@ impl Render for Shell {
             item("Ticket A", Layout::Single(0), cx).icon(IconName::SquareTerminal),
             item("Ticket B", Layout::Single(1), cx).icon(IconName::SquareTerminal),
         ]);
-        let dark = cx.theme().mode.is_dark();
+        // The host's watchlist: the desk's symbol, picked here or in a
+        // ticket.
+        let watchlist = SidebarMenu::new().children(trading::SYMBOLS.map(|(symbol, price)| {
+            let shell = cx.entity().downgrade();
+            SidebarMenuItem::new(symbol)
+                .active(self.desk.symbol == symbol)
+                .suffix(move |_, cx| {
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("${price:.2}"))
+                })
+                .on_click(move |_, window, cx| {
+                    let _ = shell.update(cx, |this, cx| this.select(symbol, window, cx));
+                })
+        }));
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        // The desk's orders, from every ticket.
+        let orders = v_flex()
+            .gap_1()
+            .px_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("Orders, all tickets"),
+            )
+            .children(self.desk.orders.iter().map(|o| {
+                let (side, color) = match o.side {
+                    trading::Side::Buy => ("Buy", theme.chart_bullish),
+                    trading::Side::Sell => ("Sell", theme.chart_bearish),
+                };
+                h_flex()
+                    .gap_1()
+                    .text_xs()
+                    .child(div().text_color(muted).child(format!("#{}", o.id)))
+                    .child(div().text_color(color).child(side))
+                    .child(format!("{} {}", o.quantity, o.symbol))
+            }))
+            .when(self.desk.orders.is_empty(), |d| {
+                d.child(div().text_xs().text_color(muted).child("None yet"))
+            });
+        let positions = if self.desk.positions.is_empty() {
+            "No positions".to_owned()
+        } else {
+            self.desk
+                .positions
+                .iter()
+                .map(|p| format!("{} {:+}", p.symbol, p.shares))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        };
+        let dark = theme.mode.is_dark();
+        let shown = layers::shown(cx);
         let toolbar = h_flex()
             .gap_2()
-            .child(div().w(px(220.)).child(Input::new(&self.search).small()))
+            .child(div().w(px(200.)).child(Input::new(&self.search).small()))
             .child(
                 Button::new("mode")
                     .small()
@@ -233,6 +354,14 @@ impl Render for Shell {
                     ),
             )
             .child(
+                Button::new("layers")
+                    .small()
+                    .outline()
+                    .selected(shown)
+                    .label("Show layers")
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_layers(window, cx))),
+            )
+            .child(
                 Button::new("dialog")
                     .small()
                     .primary()
@@ -248,23 +377,46 @@ impl Render for Shell {
                             cx,
                         );
                     }),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(format!("Positions: {positions}")),
             );
+        // A gap on each side of the divider: the panes never touch it.
         let content = match layout {
             Layout::Split => h_resizable("panes")
-                .child(resizable_panel().child(self.pane(0, cx)))
-                .child(resizable_panel().child(self.pane(1, cx)))
+                .child(resizable_panel().child(div().size_full().pr_2().child(self.pane(0, cx))))
+                .child(resizable_panel().child(div().size_full().pl_2().child(self.pane(1, cx))))
                 .into_any_element(),
             Layout::Single(i) => self.pane(i, cx).into_any_element(),
         };
+        let legend = h_flex()
+            .gap_4()
+            .child(layers::legend_item("GPUI Kit host", cx.theme().border, cx))
+            .child(layers::legend_item(
+                "NSH app (TSX)",
+                layers::nsh_colors(cx).0,
+                cx,
+            ))
+            .child(layers::legend_item(
+                "GPUI widget inside the NSH app",
+                layers::widget_colors(cx).0,
+                cx,
+            ));
         h_flex()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(
                 Sidebar::new("sidebar")
-                    .w(px(200.))
+                    .w(px(220.))
                     .header(SidebarHeader::new().child("nsh in GPUI Kit"))
-                    .child(SidebarGroup::new("Embedded apps").child(menu)),
+                    .child(SidebarGroup::new("Embedded apps").child(menu))
+                    .child(SidebarGroup::new("Watchlist").child(watchlist))
+                    .footer(orders),
             )
             .child(
                 v_flex()
@@ -274,7 +426,8 @@ impl Render for Shell {
                     .p_3()
                     .gap_3()
                     .child(toolbar)
-                    .child(div().flex_1().min_h_0().child(content)),
+                    .child(div().flex_1().min_h_0().child(content))
+                    .when(shown, |d| d.child(legend)),
             )
     }
 }
@@ -301,6 +454,10 @@ fn open_app(path: &Path, window: &mut Window, cx: &mut App) -> Option<Entity<App
     // The app's switch is GPUI Kit's, drawn by this app.
     view.read(cx)
         .register_component(switch::NAME, std::rc::Rc::new(switch::HostSwitch::make));
+    view.read(cx).register_component(
+        watchlist::NAME,
+        std::rc::Rc::new(watchlist::Watchlist::make),
+    );
     let theme = cx.theme();
     let (nsh_theme, appearance) = (theme::nsh_theme(theme), theme::appearance(theme.mode));
     view.update(cx, |view, cx| {
@@ -330,9 +487,13 @@ fn bundle_path() -> PathBuf {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // What the apps reach by name: NSH's UI set and the host's desk
+    // (`nativeModule("host/trading")`), served by every surface.
+    nsh_platform_gpui::set_ui_sets(vec![nsh_ui_mobile::registry(), trading::registry()]);
     let bundle = bundle_path();
     gpui_kit::application().with_assets(Assets).run(move |cx| {
         gpui_kit::init(cx);
+        cx.set_global(layers::Layers(true));
         // nsh's theme format is gpui-kit's: a theme file with a name per
         // entry loads into GPUI Kit's registry as it is.
         if let Err(err) = gpui_kit::component::ThemeRegistry::global_mut(cx)
@@ -347,7 +508,7 @@ fn main() {
         })
         .detach();
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(1080.), px(620.)), cx)),
+            window_bounds: Some(WindowBounds::centered(size(px(1280.), px(820.)), cx)),
             titlebar: Some(TitlebarOptions {
                 title: Some("nsh in GPUI Kit".into()),
                 ..Default::default()
