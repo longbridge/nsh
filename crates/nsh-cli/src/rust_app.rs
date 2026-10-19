@@ -114,11 +114,11 @@ impl AppCrate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Nsh {
     /// crates.io, at this `nsh`'s version ([`VERSION`]): the app's crates
-    /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --rust` writes).
+    /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --template rust` writes).
     Registry,
-    /// The checkout the app's crates depend on by path (`nsh init --rust
-    /// --nsh-source <dir>`): nsh's own examples, or an app trying changes to
-    /// nsh.
+    /// The checkout the app's crates depend on by path (`nsh init
+    /// --template rust --nsh-source <dir>`): nsh's own examples, or an app
+    /// trying changes to nsh.
     Source(PathBuf),
 }
 

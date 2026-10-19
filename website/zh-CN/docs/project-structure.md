@@ -114,7 +114,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "ESNext.Disposable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "preserve",
@@ -145,7 +145,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 
 `lib` 是不含 `DOM` 的 `ES2023`：没有 `document` 或 `window`。这些文件会被重新生成（只在内容变化时），所以不要编辑，也不要提交；`.gitignore` 已经排除了 `.nsh/`。如果克隆项目后编辑器提示找不到 `nsh`，运行任意一个构建命令即可，例如 `nsh trace App.tsx`。
 
-`jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，NSH 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）；`nsh` 只剥离类型，不做检查。
+`"ESNext.Disposable"` 声明了运行时提供的 `using` 声明和 `Symbol.dispose`：`using account = new Account()` 在块结束时释放一个 [Rust 类](./rust.md)的值。`jsxImportSource: "nsh"` 和 `jsx: "preserve"` 只对编辑器有意义：无论 `tsconfig.json` 怎么写，NSH 都用自己的编译器编译 JSX。TypeScript 类型由编辑器检查（如果装了 `tsc` 也可以用它）；`nsh` 只剥离类型，不做检查。
 
 ## 模块
 

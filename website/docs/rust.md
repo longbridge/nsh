@@ -17,7 +17,7 @@ own UI. What differs is the language of your own code, and with it whether the a
 | The app runs | QuickJS and the engine | the engine and your crate only, on every platform and in the browser | QuickJS and the engine, with your crate |
 | Suits | Apps and modules delivered at run time, quick iteration | Medium and large apps with demanding business logic | A Rust core with parts that change often |
 | Edits | Hot updates | Rebuild and restart | Hot updates for TSX, rebuild and restart for Rust |
-| Start | `nsh init my-app` | `nsh init my-app --rust` | `nsh init my-app --rust`, then `nsh run App.tsx` |
+| Start | `nsh init my-app --template ts` | `nsh init my-app --template rust` | `nsh init my-app --template mixed` |
 
 ## Choosing
 
@@ -36,7 +36,7 @@ runs on QuickJS, which the app then carries.
 ## An app written in Rust
 
 ```sh
-nsh init my-app --rust
+nsh init my-app --template rust
 cd my-app
 nsh run                        # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
 nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows, gpui
@@ -279,4 +279,4 @@ crate they depend on by path, rebuilds the app and restarts it.
 - [Project structure](./project-structure.md): every key of `nsh.json`.
 - [Web](./web.md#apps-with-rust-components): Rust apps in the browser.
 - [Networking](./networking.md#from-rust-components): `fetch` from Rust.
-- [CLI](./cli.md#nsh-init): `nsh init --rust`.
+- [CLI](./cli.md#nsh-init): `nsh init --template rust` and `--template mixed`.

@@ -157,7 +157,7 @@ Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing document
 cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
 cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
-./target/debug/nsh init my-app                                                     # new app: App.tsx, nsh.json, tsconfig.json, .nsh/types
+./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX with a crate in native/; asks on a terminal without --template
 cargo build -p nsh-ios-host --target aarch64-apple-ios-macabi                          # the Catalyst development host (nsh run builds it in a checkout)
 cargo build -p nsh-ios-host --target aarch64-apple-ios-sim                             # the iOS simulator host (`nsh run --target ios`)
 cargo build -p nsh-ios-app --target aarch64-apple-ios-sim                              # the release runner (`nsh package --target ios-simulator`)

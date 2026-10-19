@@ -187,24 +187,31 @@ animations end: before the taps the app must be quiet for `--idle-ms` (at most 1
 at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` keeps running after the last tap.
 `--safe-area <top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
 
-## Rust application projects (`nsh init --rust`)
+## New apps (`nsh init --template`)
 
-`nsh init <dir> --rust` creates an independent Cargo workspace with published NSH dependencies,
-`src/main.rs` (a native desktop entry using `AppSource::Rust(Root::of::<App>())`) and `src/lib.rs`
-(the root component and its `#[native_module("app/native")]` registry). The platform dependencies
-are target-specific and disable default features, so `cargo run` mounts the Rust root directly.
-`App.tsx` imports that same component; `nsh.json` sets `"rust": "."`, so the existing Rust-component
-build / development / packaging path serves it on the selected platform. The generated app accepts
-`NSH_SCRIPT` for native desktop window checks. `examples/gallery-rs` is a Rust app with a native entry
-(`cargo run`) and headless tests of its Rust root.
+`nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a
+menu (`ui::choose`) when stdin and stdout are a terminal (`ui::interactive`; Enter picks `ts`) and takes `ts`
+otherwise, so scripts and CI never wait for an answer.
 
-The display name becomes a normalized Cargo package name prefixed with `nsh-app-`; the main entry
-uses its Rust crate identifier. Rust creation checks for existing app and Cargo source files before
-writing any of them. The ordinary TSX initializer continues preserving existing files.
+- **`ts`**: `App.tsx`, `nsh.json`, `tsconfig.json` (`nsh_bundler::TSCONFIG`), `.gitignore` and `.nsh/types`. Files
+  that exist are kept; only a directory that has them all is refused.
+- **`rust`**: an independent Cargo workspace: `Cargo.toml`, `src/main.rs` (a native desktop entry using
+  `AppSource::Rust(Root::of::<App>())`; the platform dependencies are target-specific and disable default features,
+  so `cargo run` mounts the Rust root directly and accepts `NSH_SCRIPT` for window checks), `src/lib.rs` (the root
+  component and its `#[native_module("<slug>/native")]` registry, which exports `App` for a TSX entry added later),
+  `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README (`templates/rust/`) saying how to add
+  that entry. No TSX, so no `tsconfig.json` and no `.nsh/types`. `examples/gallery-rs` is a Rust app with a native
+  entry (`cargo run`) and headless tests of its Rust root.
+- **`mixed`**: the `ts` files with an `App.tsx` that imports from `<slug>/native`, `nsh.json` with `"rust": "native"`,
+  a README and the crate `native/` (`Cargo.toml`, `src/lib.rs`: a component, a module function and a class;
+  `templates/mixed/`), a small form of `examples/rust-exports`.
 
-`nsh init --rust` writes crates.io dependencies at the CLI's version, or with `--nsh-source <dir>` path
-dependencies on that checkout's crates; the generated host workspaces take nsh's crates from the same place, so the
-app and its hosts share the same core and registry types.
+The slug is the display name in lower case, words joined by `-` (`My App`: `my-app`); the crates' packages are
+`nsh-app-<slug>` (`rust`) and `nsh-app-<slug>-native` (`mixed`), and `src/main.rs` uses the first one's crate
+identifier. A `rust` or `mixed` app's files are checked before any is written: one existing is a conflict.
+`--nsh-source <dir>` (with `rust` or `mixed`; with `ts` it is an error) writes path dependencies on that checkout's
+crates instead of crates.io's at the CLI's version; the generated host workspaces take nsh's crates from the same
+place, so the app and its hosts share the same core and registry types.
 The app's Rust watcher excludes `target`, `.nsh` and `.git`, including generated sources under the
 app root, and the build directory itself (`CARGO_TARGET_DIR` inside a crate's directory under another name). Custom TypeScript declarations are generated when the app's command line is first built.
 

@@ -48,4 +48,4 @@ cargo test -p gallery-native
 
 The headless tests exercise the gallery's Rust root, demo navigation, state changes and desktop layouts. The
 native entry is checked on Linux, macOS and Windows, including a dependency check for the Rust-only engine path.
-Create an independent Rust app with `nsh init my-app --rust`, then `cd my-app` and `cargo run`.
+Create an independent Rust app with `nsh init my-app --template rust`, then `cd my-app` and `cargo run`.

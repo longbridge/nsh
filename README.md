@@ -72,12 +72,12 @@ Choose how to write your app:
 
 | | Rust | TSX |
 |---|---|---|
-| Create | `nsh init my-app --rust` | `nsh init my-app` |
+| Create | `nsh init my-app --template rust` | `nsh init my-app --template ts` |
 | Write | Rust components, typed styles and signals | TSX components, Tailwind classes and signals |
 | Iterate | Rebuild and restart on Rust changes | Hot updates that preserve state |
 | Toolchain | `nsh` and [Rust](https://rustup.rs) | `nsh` |
 
-You can also combine them: TSX screens import your Rust components and modules. See
+You can also combine them (`nsh init my-app --template mixed`): TSX screens import your Rust components and modules. See
 [Building with Rust](https://nsh.dev/docs/rust) for Rust apps and mixed projects.
 
 Run either app on your chosen platform:

@@ -63,8 +63,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create a TSX app, or a Cargo project with shared Rust UI (`--rust`).
-    /// Generates the app's entry points, configuration and editor declarations.
+    /// Create an app: in TSX, in Rust, or in TSX with a Rust crate of its
+    /// own (`--template`). Generates the app's entry points, configuration
+    /// and editor declarations.
     Init {
         /// Directory of the app (created if missing).
         #[arg(default_value = ".")]
@@ -72,14 +73,13 @@ enum Command {
         /// Display name (default: the directory's name).
         #[arg(long)]
         name: Option<String>,
-        /// Create a Cargo project with a native Rust entry and a TSX entry
-        /// sharing the same Rust components. Requires a Rust toolchain.
-        #[arg(long)]
-        rust: bool,
-        /// With `--rust`: depend on the nsh crates of this checkout by path,
-        /// instead of crates.io's at this CLI's version (the app's hosts
-        /// build from the same place).
-        #[arg(long, value_name = "DIR", requires = "rust")]
+        /// What the app is written in (asked on a terminal; else `ts`).
+        #[arg(long, value_enum)]
+        template: Option<init::Template>,
+        /// With `--template rust` or `mixed`: depend on the nsh crates of
+        /// this checkout by path, instead of crates.io's at this CLI's
+        /// version (the app's hosts build from the same place).
+        #[arg(long, value_name = "DIR")]
         nsh_source: Option<PathBuf>,
     },
     /// Bundle an app and compile it to QuickJS bytecode; a Rust app
@@ -487,9 +487,15 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Init {
             dir,
             name,
-            rust,
+            template,
             nsh_source,
-        } => init::init(&dir, name, rust, nsh_source.as_deref()),
+        } => {
+            let template = match template {
+                Some(template) => template,
+                None => init::Template::ask()?,
+            };
+            init::init(&dir, name, template, nsh_source.as_deref())
+        }
         Command::Build {
             entry,
             out,

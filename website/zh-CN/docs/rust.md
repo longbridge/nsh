@@ -17,7 +17,7 @@ JavaScript 虚拟机。
 | 应用运行的内容 | QuickJS 和引擎 | 只有引擎和你的 crate，所有平台和浏览器都一样 | QuickJS 和引擎，加上你的 crate |
 | 适合 | 运行时下发的应用和模块、快速迭代 | 业务复杂度高的中大型应用 | Rust 核心加上经常变化的部分 |
 | 修改代码 | 热更新 | 重新构建并重启 | TSX 热更新，Rust 重新构建并重启 |
-| 创建 | `nsh init my-app` | `nsh init my-app --rust` | `nsh init my-app --rust`，然后 `nsh run App.tsx` |
+| 创建 | `nsh init my-app --template ts` | `nsh init my-app --template rust` | `nsh init my-app --template mixed` |
 
 ## 如何选择
 
@@ -33,7 +33,7 @@ Rust 和原生代码：在 iOS、Android、macOS、Windows、Linux、GPUI 和 We
 ## 完全用 Rust 编写的应用
 
 ```sh
-nsh init my-app --rust
+nsh init my-app --template rust
 cd my-app
 nsh run                        # 本机的后端；--target ios、android、web、macos、linux、windows 或 gpui
 nsh package --target web       # 或 ios、ios-simulator、android、macos、linux、windows、gpui
@@ -261,4 +261,4 @@ crate，都会重新构建并重启应用。
 - [项目结构](./project-structure.md)：`nsh.json` 的每个键。
 - [Web](./web.md#带-rust-组件的应用)：浏览器中的 Rust 应用。
 - [网络](./networking.md#在-rust-组件中)：在 Rust 中使用 `fetch`。
-- [CLI](./cli.md#nsh-init)：`nsh init --rust`。
+- [CLI](./cli.md#nsh-init)：`nsh init --template rust` 和 `--template mixed`。

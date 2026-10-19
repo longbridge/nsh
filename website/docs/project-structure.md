@@ -115,7 +115,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "ESNext.Disposable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "preserve",
@@ -146,7 +146,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 
 `lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh trace App.tsx`.
 
-`jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
+`"ESNext.Disposable"` declares `using` declarations and `Symbol.dispose`, which the runtime has: `using account = new Account()` frees a [Rust class](./rust.md)'s value at the end of the block. `jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
 
 ## Modules
 

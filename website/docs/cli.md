@@ -54,18 +54,24 @@ source, cargo's output and the hosts' own.
 ## nsh init
 
 ```sh
-nsh init [DIR] [--name <NAME>] [--rust [--nsh-source <DIR>]]
+nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 ```
 
-By default, creates a TSX app in `DIR` (default: the current directory, created if missing): `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already.
+Creates an app in `DIR` (default: the current directory, created if missing) from a template. Without `--template`, `nsh init` asks which one on a terminal (Enter picks `ts`) and takes `ts` elsewhere (a script, CI).
+
+| Template | What it creates |
+|---|---|
+| `ts` | A TSX app: `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
+| `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run`, `nsh trace` and `nsh package` mount the root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
+| `mixed` | A TSX app with a Rust crate of its own: `App.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "native"`, `.gitignore`, `.nsh/types`, a README, and the crate in `native/`, whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. |
 
 | Flag | Description |
 |---|---|
-| `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case). |
-| `--rust` | Creates a Cargo project with a native Rust entry (`cargo run`) and a TSX entry sharing its Rust components. Requires Rust and the native desktop backend's development libraries. |
-| `--nsh-source <DIR>` | With `--rust`: the project depends on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
+| `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case), and the crates' import specifier `<name>/native` (lower case, words joined by `-`). |
+| `--template <TEMPLATE>` | `ts`, `rust` or `mixed` (above). `rust` and `mixed` need Rust; `cargo run` also needs the native desktop backend's development libraries. |
+| `--nsh-source <DIR>` | With `rust` or `mixed`: the crates depend on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
 
-With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."` and `"root": "App"`. `nsh run` and `nsh package` then mount the Rust root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly; `nsh run App.tsx` runs the TSX entry. The project depends on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners from the same crates. Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
+The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
 
 ## nsh run
 
