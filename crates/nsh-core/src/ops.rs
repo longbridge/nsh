@@ -172,11 +172,12 @@ events! {
     Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds text, `text`: the text, unless only `has` was asked).",
     KeyCommand = "onKeyCommand": "A key matched a binding of `nsh/keymap` (root only; payload: the binding's id, [`crate::keymap::KeyBinding::id`]).",
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
-    HoverIn = "onHoverIn": "The mouse came over the view or a view inside it (desktop backends that track the pointer; never on touches).",
-    HoverOut = "onHoverOut": "The mouse left the view and the views inside it, or the window (desktop backends that track the pointer).",
+    HoverIn = "onHoverIn": "The mouse came over the view or a view inside it (never on touches).",
+    HoverOut = "onHoverOut": "The mouse left the view and the views inside it, or the window.",
     FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination.",
     FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
+    HoverMove = "onHoverMove": "The mouse moved over a hovered view, with no button down (payload: [`EventPayload::Hover`]; at most one per frame).",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -317,6 +318,23 @@ pub struct TouchPoint {
     pub changed: bool,
 }
 
+/// Where the mouse is over a hovered view ([`EventKind::HoverMove`]), in
+/// points.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct HoverEvent {
+    /// Position in the view, its transforms undone.
+    pub location_x: f32,
+    /// Position in the view.
+    pub location_y: f32,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal), as touches' `page_x`.
+    pub page_x: f32,
+    /// Position in the root view.
+    pub page_y: f32,
+    /// The modifier keys held.
+    pub modifiers: crate::keymap::Modifiers,
+}
+
 /// Touches for the JS responder system.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TouchEvent {
@@ -452,6 +470,8 @@ pub enum EventPayload {
     },
     /// Touches (`onTouch`).
     Touch(Box<TouchEvent>),
+    /// The mouse over a hovered view (`onHoverMove`).
+    Hover(HoverEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
     /// The lines of a text block.

@@ -92,24 +92,40 @@ start first.
 
 ### Hover
 
-On macOS, Linux and the GPUI backend, JS can hear the mouse come over a view and leave it (other platforms do not raise these events
-yet; `hover:` classes style hovered views everywhere the platform tracks hover).
+JS can hear the mouse come over a view, move over it and leave it: on macOS, Windows, Linux, the GPUI backend and in
+desktop browsers, with an iPad's pointer or a Mac's mouse on iOS, and with a mouse or a stylus on Android. `hover:`
+classes style hovered views in the same places.
 
 | Prop | Type | Description |
 |---|---|---|
 | `onHoverIn` | `() => void` | The mouse came over the view or a view inside it. |
+| `onHoverMove` | `(e: HoverEvent) => void` | The mouse moved over the view (or a view inside it) with no button down. |
 | `onHoverOut` | `() => void` | The mouse left the view and the views inside it, or the window. |
 
 Like CSS `:hover`, a view counts as hovered while the mouse is over it or over anything inside it, so the views around
 the one under the mouse hear `onHoverIn` too (from the outside in; `onHoverOut` from the inside out). The events come
-after the fact and never on touches. A view removed from under the mouse hears `onHoverOut`, on Linux at the next mouse
-move.
+after the fact and never on touches; a move with a button down is a touch (`onTouchMove`, the responder). A view removed
+from under the mouse hears `onHoverOut`, on Linux and Windows at the next mouse move.
+
+`HoverEvent` says where the mouse is: `locationX` / `locationY` in the view (points, its transforms undone), `pageX` /
+`pageY` in the root view it is in, as touches give them, and the modifier keys held (`altKey`, `ctrlKey`, `metaKey`:
+Command on Apple platforms, the Windows key elsewhere, `shiftKey`). Moves come at most once a frame, the latest one,
+and always before the `onHoverOut` that follows them, so a handler can redraw on each move:
 
 ```tsx
 const hovered = signal<string | null>(null);
 
 <View onHoverIn={() => hovered.set(file.path)} onHoverOut={() => hovered.set(null)} class="hover:bg-zinc-100">
   <Text>{file.name}</Text>
+</View>
+
+// A crosshair over a chart.
+const at = signal<number | null>(null);
+
+<View onHoverMove={(e) => at.set(e.locationX)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+  <If when={at() !== null}>
+    <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
+  </If>
 </View>
 ```
 

@@ -11,8 +11,8 @@ use super::{
 };
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, EdgeInsets, EventKind, EventPayload,
-    ImageSource, ListContentStyle, NativeProp, NodeId, PointerEvents, Prop, Rect, Size, Tag,
-    TouchEvent, style::Color,
+    HoverEvent, ImageSource, ListContentStyle, NativeProp, NodeId, PointerEvents, Prop, Rect, Size,
+    Tag, TouchEvent, style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
@@ -964,6 +964,31 @@ pub trait Interactive: Element {
         self.on(
             EventKind::FileDrop,
             events::typed(listener.into_listener(), events::file_drop),
+        )
+    }
+
+    /// The mouse came over it or an element inside it (never on touches).
+    fn on_hover_in<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.on(
+            EventKind::HoverIn,
+            events::typed(listener.into_listener(), events::unit),
+        )
+    }
+
+    /// The mouse left it and the elements inside it, or the window.
+    fn on_hover_out<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.on(
+            EventKind::HoverOut,
+            events::typed(listener.into_listener(), events::unit),
+        )
+    }
+
+    /// The mouse moved over it (or an element inside it) with no button
+    /// down: where, in it and in its root view, at most once per frame.
+    fn on_hover_move<M>(self, listener: impl IntoListener<HoverEvent, M>) -> Self {
+        self.on(
+            EventKind::HoverMove,
+            events::typed(listener.into_listener(), events::hover),
         )
     }
 

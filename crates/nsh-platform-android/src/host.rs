@@ -716,6 +716,43 @@ extern "system" fn Java_com_longbridge_nsh_Native_event(
     }
 }
 
+/// `onHoverMove` of view `id` (see `Native.hover`).
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+extern "system" fn Java_com_longbridge_nsh_Native_hover(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    x: jfloat,
+    y: jfloat,
+    page_x: jfloat,
+    page_y: jfloat,
+    modifiers: jint,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let event = nsh_core::HoverEvent {
+        location_x: x,
+        location_y: y,
+        page_x,
+        page_y,
+        modifiers: nsh_core::keymap::Modifiers {
+            ctrl: modifiers & 1 != 0,
+            alt: modifiers & 2 != 0,
+            shift: modifiers & 4 != 0,
+            cmd: modifiers & 8 != 0,
+        },
+    };
+    if let Some(control) = host.control() {
+        control.dispatch_event(
+            id as NodeId,
+            EventKind::HoverMove,
+            EventPayload::Hover(event),
+        );
+    }
+}
+
 /// Touches for the JS responder system (see `Native.touch`).
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]

@@ -242,6 +242,7 @@ final class Mounter {
                     if ((events.get(id) & touch) != (mask & touch)) touchListeners += (mask & touch) != 0 ? 1 : -1;
                     events.put(id, mask);
                     View v = views.get(id);
+                    if (v != null) updateHover(id, v);
                     if (v instanceof Box) {
                         ((Box) v).events = mask;
                         v.setClickable((mask & (1L << Native.PRESS)) != 0);
@@ -1013,20 +1014,55 @@ final class Mounter {
         trackedStates.put(id, states);
         View v = views.get(id);
         if (v == null) return;
-        if ((states & STATE_HOVERED) != 0) {
-            v.setOnHoverListener((view, e) -> {
-                int action = e.getActionMasked();
-                if (action == android.view.MotionEvent.ACTION_HOVER_ENTER) reportState(id, STATE_HOVERED, true);
-                else if (action == android.view.MotionEvent.ACTION_HOVER_EXIT) reportState(id, STATE_HOVERED, false);
-                return false;
-            });
-        } else {
-            v.setOnHoverListener(null);
-        }
+        updateHover(id, v);
         if ((states & STATE_PRESSED) != 0 && !v.isClickable()) {
             // Presses reach views that report them.
             v.setClickable(true);
         }
+    }
+
+    private static final long HOVER_EVENTS =
+            (1L << Native.HOVER_IN) | (1L << Native.HOVER_OUT) | (1L << Native.HOVER_MOVE);
+
+    /**
+     * Mice and styluses hovering `v`: its `hover:` state and its hover events
+     * (moves come with no button down).
+     */
+    private void updateHover(int id, View v) {
+        if ((trackedStates.get(id) & STATE_HOVERED) == 0 && (events.get(id) & HOVER_EVENTS) == 0) {
+            v.setOnHoverListener(null);
+            return;
+        }
+        v.setOnHoverListener((view, e) -> {
+            int action = e.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_HOVER_ENTER) {
+                reportState(id, STATE_HOVERED, true);
+                if (wants(id, Native.HOVER_IN)) event(id, Native.HOVER_IN);
+            } else if (action == android.view.MotionEvent.ACTION_HOVER_EXIT) {
+                reportState(id, STATE_HOVERED, false);
+                if (wants(id, Native.HOVER_OUT)) event(id, Native.HOVER_OUT);
+                return false;
+            }
+            if (wants(id, Native.HOVER_MOVE)) hoverMove(id, view, e);
+            return false;
+        });
+    }
+
+    /** `onHoverMove`: where the pointer is in `v` and in its root view (dp). */
+    private void hoverMove(int id, View v, android.view.MotionEvent e) {
+        // The surface, or the window of the modal the view is in.
+        View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
+        int[] at = new int[2], rootAt = new int[2];
+        v.getLocationOnScreen(at);
+        root.getLocationOnScreen(rootAt);
+        int meta = e.getMetaState(), modifiers = 0;
+        if ((meta & android.view.KeyEvent.META_CTRL_ON) != 0) modifiers |= 1;
+        if ((meta & android.view.KeyEvent.META_ALT_ON) != 0) modifiers |= 2;
+        if ((meta & android.view.KeyEvent.META_SHIFT_ON) != 0) modifiers |= 4;
+        if ((meta & android.view.KeyEvent.META_META_ON) != 0) modifiers |= 8;
+        float d = density;
+        Native.hover(handle(), id, e.getX() / d, e.getY() / d,
+                (e.getX() + at[0] - rootAt[0]) / d, (e.getY() + at[1] - rootAt[1]) / d, modifiers);
     }
 
     /** An interaction state of `id` changed: tells the core if it reads it. */

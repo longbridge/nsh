@@ -30,6 +30,7 @@ const PRESSED = 1;
 const HOVERED = 2;
 const FOCUSED = 4;
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
+const HOVER_EVENTS = ["onHoverIn", "onHoverOut", "onHoverMove"];
 /** `accessibilityRole`s whose ARIA role has another name; others are the same. */
 const ARIA_ROLES = {
   none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
@@ -1336,6 +1337,42 @@ class Player {
     this.updateFocusable(el);
     this.updateTouchAction(el);
     if (el._kind === "scroll" && el._events.has("onRefresh")) this.installPull(el);
+    if (!el._hoverEvents && HOVER_EVENTS.some((e) => el._events.has(e))) this.installHover(el);
+  }
+
+  /**
+   * `onHoverIn` / `onHoverOut` / `onHoverMove` of `el`, from the mouse's
+   * pointer events (pointerenter and pointerleave reach the views around
+   * the one under the mouse too, as with `:hover`). Moves with a button
+   * down are not hovers.
+   */
+  installHover(el) {
+    el._hoverEvents = true;
+    el.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse") return;
+      el._hoverIn = true;
+      if (el._events.has("onHoverIn")) this.event(el._id, "onHoverIn");
+    });
+    el.addEventListener("pointerleave", () => {
+      if (!el._hoverIn) return;
+      el._hoverIn = false;
+      if (el._events.has("onHoverOut")) this.event(el._id, "onHoverOut");
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (e.pointerType !== "mouse" || e.buttons || !el._events.has("onHoverMove")) return;
+      const [pageX, pageY] = this.point(e);
+      const r = el.getBoundingClientRect();
+      this.event(el._id, "onHoverMove", {
+        locationX: e.clientX - r.left,
+        locationY: e.clientY - r.top,
+        pageX,
+        pageY,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+      });
+    });
   }
 
   op_ts([, id, states]) {

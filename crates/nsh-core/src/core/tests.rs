@@ -9541,6 +9541,54 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
     }
 }
 
+#[test]
+fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
+    use crate::ui::prelude::*;
+    #[component]
+    fn Crosshair() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_hover_move(move |e: &HoverEvent| {
+                at.set(format!(
+                    "{} {} {} {} {}",
+                    e.location_x, e.location_y, e.page_x, e.page_y, e.modifiers.shift
+                ))
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::ui::Root::of::<Crosshair>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::HoverMove) => Some(*id),
+            _ => None,
+        })
+        .expect("the listening view mounts HoverMove in its event mask");
+    let event = crate::HoverEvent {
+        location_x: 4.0,
+        location_y: 5.0,
+        page_x: 14.0,
+        page_y: 25.0,
+        modifiers: crate::keymap::Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    };
+    assert!(c.component_event(host, EventKind::HoverMove, &EventPayload::Hover(event)));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "4 5 14 25 true")));
+    // Another payload is not a hover move.
+    assert!(c.component_event(host, EventKind::HoverMove, &EventPayload::None));
+    assert!(
+        c.commit()
+            .is_none_or(|b| !b.items.iter().any(|i| matches!(i, MountItem::Text { .. })))
+    );
+}
+
 /// What builders take: listeners without arguments, children in an
 /// `Option`, a `Vec`, an array or an iterator.
 mod builders {
