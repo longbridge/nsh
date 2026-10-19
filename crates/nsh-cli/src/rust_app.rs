@@ -643,6 +643,16 @@ const NSH_CRATES: &[&str] = &[
     "nsh-platform-gpui",
 ];
 
+/// Git dependencies of nsh's crates that a checkout's root `Cargo.toml`
+/// patches to a copy in the checkout, `(source, crate, directory)`: the
+/// generated workspace patches them alike, or its builds take the
+/// unpatched crate (the web runtime then fails to compile).
+const PATCHED: &[(&str, &str, &str)] = &[(
+    "https://github.com/awslabs/llrt",
+    "llrt_utils",
+    "third_party/llrt-utils",
+)];
+
 /// The dependencies of the app's crate `c` on nsh's crates, as `cargo
 /// metadata --no-deps` gives them (`name`, `req`, `path` for one by path).
 fn nsh_dependencies(c: &AppCrate) -> anyhow::Result<Vec<serde_json::Value>> {
@@ -1298,6 +1308,12 @@ opt-level = 3
                 manifest.push_str(&format!(
                     "{name} = {{ path = {:?} }}\n",
                     nsh_crate(source, name).to_string_lossy()
+                ));
+            }
+            for (git, name, dir) in PATCHED {
+                manifest.push_str(&format!(
+                    "\n[patch.{git:?}]\n{name} = {{ path = {:?} }}\n",
+                    source.join(dir).to_string_lossy()
                 ));
             }
         }
@@ -2290,6 +2306,10 @@ mod tests {
         assert!(!manifest.contains("gpui-"), "{manifest}");
         assert!(manifest.contains("[patch.crates-io]"), "{manifest}");
         assert!(manifest.contains("nsh-core = { path ="), "{manifest}");
+        assert!(
+            manifest.contains("[patch.\"https://github.com/awslabs/llrt\"]\nllrt_utils = { path ="),
+            "{manifest}"
+        );
         assert!(manifest.contains("exclude = [\"gpui\"]"), "{manifest}");
         // The web runtime is built as nsh builds its own.
         assert!(manifest.contains("\"web\"]"), "{manifest}");
