@@ -169,6 +169,15 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 
 `limits`, `grantCapabilities` and `storageDirectory` apply from the next load: set them before `loadBundle` / `run`.
 
+Each signed package keeps its storage under its own app id, which its release key's certificate vouches for. Bundles carry no verified id, so every bundle a host loads keeps its storage in `nsh/default`; a host that loads several bundles gives each view a directory of its own:
+
+```swift
+app.storageDirectory = FileManager.default
+    .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("nsh/com.example.orders")
+try app.loadBundle(at: url)
+```
+
 ## Limits
 
 ```swift

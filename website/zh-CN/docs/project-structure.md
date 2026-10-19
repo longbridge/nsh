@@ -67,7 +67,7 @@ mount(App);
 | 键 | 类型 | 使用者 | 说明 |
 |---|---|---|---|
 | `name` | string | `package` | 应用图标下显示的名称。默认：入口所在目录的名称。 |
-| `id` | string | `package`, `publish` | Bundle identifier / application id，例如 `com.example.app`。默认：`com.example.<name>`。 |
+| `id` | string | `package`, `publish`, `nsh/storage` | Bundle identifier / application id，反向 DNS 形式，例如 `com.yourcompany.app`；`package` 和 `publish` 必须提供。没有时 `nsh run` 使用 `com.example.<name>`。 |
 | `version` | string | `package`, `publish` | 用户可见的版本号，例如 `1.2.0`（`CFBundleShortVersionString`，Android 的 `versionName`）。 |
 | `build` | number | `package`, `publish` | 构建号（`CFBundleVersion`，Android 的 `versionCode`）。签名包要求它在每次发布时递增。 |
 | `icon` | string | `package` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |

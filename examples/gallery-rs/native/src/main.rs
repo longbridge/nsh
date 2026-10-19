@@ -22,8 +22,7 @@ fn main() -> impl std::process::Termination {
         platform::AppOptions {
             title: "Rust Gallery".to_owned(),
             asset_base: Some(platform::AssetBase::Directory(assets)),
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
-            app_id: "com.example.rustgallery".to_owned(),
+            app_id: "com.longbridge.nsh.galleryrs".to_owned(),
             size: (1200, 800),
             script: std::env::var("NSH_SCRIPT").ok(),
             ..Default::default()

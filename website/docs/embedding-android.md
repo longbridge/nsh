@@ -171,6 +171,13 @@ again replaces the running app. The complete sample is
 
 `setLimits`, `setGrantedCapabilities` and `setStorageDirectory` apply from the next load: call them before `loadAssetBundle` and friends.
 
+Each signed package keeps its storage under its own app id, which its release key's certificate vouches for. Bundles carry no verified id, so every bundle a host loads keeps its storage in `files/nsh/default`; a host that loads several bundles gives each view a directory of its own:
+
+```java
+nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
+nsh.loadAssetBundle("orders");
+```
+
 ## Limits
 
 ```java

@@ -148,10 +148,30 @@ pub(crate) fn name_and_id(entry: &Path, config: &AppConfig) -> (String, String) 
     (name, id)
 }
 
+/// [`name_and_id`] for a release (`nsh package`, `nsh publish`): the id
+/// must be the app's own, written in `nsh.json`, since it also names where
+/// the app keeps its data (`nsh/storage`) and two apps with one id share it.
+pub(crate) fn release_name_and_id(
+    entry: &Path,
+    config: &AppConfig,
+) -> anyhow::Result<(String, String)> {
+    let Some(id) = &config.id else {
+        bail!(
+            "nsh.json needs an `id` for a release, in reverse-DNS form (`com.yourcompany.app`): it names the app and where it keeps its data, so no other app may use it"
+        );
+    };
+    if id.starts_with("com.example.") {
+        ui::warn(format!(
+            "app id `{id}` is a placeholder: give the app an id under a domain you own before releasing it, as apps with one id share their data"
+        ));
+    }
+    Ok(name_and_id(entry, config))
+}
+
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
-    let (name, id) = name_and_id(&entry, config);
+    let (name, id) = release_name_and_id(&entry, config)?;
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let executable = if executable.is_empty() {
         "App".to_owned()

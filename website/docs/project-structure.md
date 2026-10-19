@@ -67,7 +67,7 @@ mount(App);
 | Key | Type | Used by | Description |
 |---|---|---|---|
 | `name` | string | `package` | The display name under the app icon. Default: the entry directory's name. |
-| `id` | string | `package`, `publish` | Bundle identifier / application id, e.g. `com.example.app`. Default: `com.example.<name>`. |
+| `id` | string | `package`, `publish`, `nsh/storage` | Bundle identifier / application id in reverse-DNS form, e.g. `com.yourcompany.app`; required by `package` and `publish`. `nsh run` uses `com.example.<name>` without one. |
 | `version` | string | `package`, `publish` | The user-visible version, e.g. `1.2.0` (`CFBundleShortVersionString`, Android `versionName`). |
 | `build` | number | `package`, `publish` | The build number (`CFBundleVersion`, Android `versionCode`). Signed packages require it to grow with every release. |
 | `icon` | string | `package` | A square PNG, ideally 1024×1024, relative to `nsh.json`. |

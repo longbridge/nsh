@@ -112,7 +112,7 @@ pub(crate) struct PublishOptions<'a> {
 pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
-    let (name, id) = crate::package::name_and_id(&entry, config);
+    let (name, id) = crate::package::release_name_and_id(&entry, config)?;
     let Some(build_number) = config.build else {
         bail!(
             "a package needs a build number (nsh.json `build` or --build): older builds are refused once a newer one was installed"

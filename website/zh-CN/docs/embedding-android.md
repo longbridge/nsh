@@ -165,6 +165,13 @@ setContentView(column);
 
 `setLimits`、`setGrantedCapabilities` 和 `setStorageDirectory` 从下一次加载开始生效：请在 `loadAssetBundle` 等方法之前调用。
 
+每个签名包按自己的 app id 保存存储，这个 id 由其发布密钥的证书担保。bundle 不带经过验证的 id，所以宿主加载的所有 bundle 都把存储放在 `files/nsh/default`；加载多个 bundle 的宿主应给每个视图指定专属目录：
+
+```java
+nsh.setStorageDirectory(new File(getFilesDir(), "nsh/com.example.orders"));
+nsh.loadAssetBundle("orders");
+```
+
 ## 限制
 
 ```java
