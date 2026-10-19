@@ -33,6 +33,8 @@ pub mod runtime;
 pub mod shape;
 pub mod storage;
 mod style;
+#[cfg(feature = "svg")]
+pub mod svg;
 pub mod tailwind;
 mod text;
 pub mod time;
