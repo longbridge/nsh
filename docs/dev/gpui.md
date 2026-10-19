@@ -38,6 +38,7 @@ GPUI Kit example `examples/embed-gpui` is a workspace of its own too, built into
 cd crates/gpui
 cargo clippy --all-targets --features nsh-platform-gpui/dev -- -D warnings
 cargo test                                        # needs no display: tests open no window
+cargo test -p nsh-platform-gpui --features shot   # also windows of GPUI's test platform (no display either)
 cargo +nightly fmt --all                          # the main workspace's fmt does not reach it
 cargo build -p nsh-gpui-host                      # ../../target/debug/nsh-gpui-host
 ```
@@ -57,10 +58,13 @@ Features:
 | `webview` (default) | web views with wry (`native/web.rs`; GTK 3 and WebKitGTK on Linux) | yes | yes |
 | `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux | Linux |
 | `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes | no |
-| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`) | macOS, Windows | no |
+| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows | no |
 
-`shot` turns on GPUI's test support: never in the release runner. Cargo unifies features per build, so the
-distribution builds the host and the runner in separate `cargo build` runs (`cargo xtask dist`), never together.
+`shot` turns on GPUI's test support: never in the release runner. With it, the crate's tests include `tests.rs`:
+surfaces in windows of GPUI's test platform (`TestAppContext`), drawn and given GPUI's input with the engine on its
+own thread (`allow_parking`), such as keys reaching a field beside a native component; CI runs them on Linux. Cargo
+unifies features per build, so the distribution builds the host and the runner in separate `cargo build` runs (`cargo
+xtask dist`), never together.
 
 ### Looking at a change on Linux
 

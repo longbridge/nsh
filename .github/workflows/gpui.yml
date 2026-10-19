@@ -102,6 +102,13 @@ jobs:
         working-directory: crates/gpui
         run: cargo test
 
+      # With the tests in windows of GPUI's test platform (feature `shot`, GPUI's
+      # test support): still no display.
+      - name: Test (GPUI's test platform)
+        if: runner.os == 'Linux'
+        working-directory: crates/gpui
+        run: cargo test -p nsh-platform-gpui --features shot
+
       # The GPUI Kit example: its `build.rs` bundles its app.
       - name: Clippy (examples/embed-gpui)
         if: runner.os == 'Linux'

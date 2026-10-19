@@ -32,6 +32,8 @@ nsh-core = { version = "0.1.1", path = "../nsh-core" }
 nsh-dev = { version = "0.1.1", path = "../nsh-dev" }
 nsh-engine = { version = "0.1.1", path = "../nsh-engine", default-features = false }
 nsh-ui-mobile = { version = "0.1.1", path = "../nsh-ui-mobile" }
+# The JSX compiler alone (tests compile their apps).
+nsh-bundler = { version = "0.1.1", path = "../nsh-bundler", default-features = false }
 nsh-platform-gpui = { version = "0.1.1", path = "nsh-platform-gpui", default-features = false }
 
 # The same versions as the main workspace's.

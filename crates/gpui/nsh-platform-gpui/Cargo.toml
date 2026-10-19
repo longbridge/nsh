@@ -67,6 +67,11 @@ x11rb.workspace = true
 gtk = { workspace = true, optional = true }
 webkit2gtk = { workspace = true, optional = true }
 
+# Tests in windows of GPUI's test platform (feature `shot`) compile
+# their apps.
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dev-dependencies]
+nsh-bundler.workspace = true
+
 # A whole app: tests do not build it.
 [[example]]
 name = "embed"
