@@ -117,5 +117,5 @@ projects their actual exports from checksummed upstream assets in `third_party/l
 decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
-they differ (a symlink `exists`, listeners get the payload only, `Stats` reads through getters, the child
+they differ (a symlink `exists`, listeners get the payload only, `Stats`' methods are on its prototype, the child
 environment and `cwd` rules), `website/modules/standard-modules.md` says so.

@@ -168,6 +168,10 @@ const kindOf = (stat) => stat.isSymbolicLink() ? "link" : stat.isDirectory() ? "
   const stat = await fs.stat("reports/day.md");
   out.stat = { size: stat.size, file: stat.isFile(), dir: stat.isDirectory(), kind: kindOf(stat),
     mtime: typeof stat.mtimeMs === "number" && stat.mtime instanceof Date, mode: stat.mode & 0o170000 };
+  // Data fields are own properties, as gpui-shell's and Node's are.
+  out.statJson = Object.keys(JSON.parse(JSON.stringify(stat))).sort();
+  out.spread = typeof { ...stat }.mtimeMs;
+  out.direntJson = JSON.stringify(entries[2]);
   // skills-manager statPaths on a link
   const link = await fs.lstat("current");
   out.link = [kindOf(link), await fs.readlink("current")];
@@ -230,6 +234,21 @@ const kindOf = (stat) => stat.isSymbolicLink() ? "link" : stat.isDirectory() ? "
         out["stat"],
         serde_json::json!({ "size": 9, "file": true, "dir": false, "kind": "file", "mtime": true, "mode": 0o100000 })
     );
+    assert_eq!(
+        out["statJson"],
+        serde_json::json!([
+            "atime",
+            "atimeMs",
+            "birthtime",
+            "birthtimeMs",
+            "mode",
+            "mtime",
+            "mtimeMs",
+            "size"
+        ])
+    );
+    assert_eq!(out["spread"], "number");
+    assert_eq!(out["direntJson"], r#"{"name":"reports"}"#);
     assert_eq!(out["link"], serde_json::json!(["link", "target.txt"]));
     assert_eq!(out["followed"], "file");
     assert_eq!(out["exists"], serde_json::json!([true, false, true, false]));

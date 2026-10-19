@@ -29,7 +29,7 @@ Each module is imported by exactly the name in the table: `import { join } from 
 The modules follow Node's names and shapes for the subset they export, and gpui-shell's behavior where it defines one. NSH's own choices:
 
 - `fs/promises`' `exists` is `true` for a symlink whose target is missing, and `unlink`, `rename`, `rmdir`, `lstat` and `readlink` act on a symlink itself.
-- `Stats` and `Dirent` are objects whose fields (`size`, `mtimeMs`, `name`, ...) are getters, with `isFile()`, `isDirectory()` and `isSymbolicLink()` methods.
+- `Stats` and `Dirent` have their fields (`size`, `mtimeMs`, `name`, ...) as own properties, as Node's do, and `isFile()`, `isDirectory()` and `isSymbolicLink()` on their prototype.
 - A `ChildProcess` listener receives the event's payload: the output text, or the exit's `{ code, signal, error }`. `on` returns the child.
 - A child's environment is a small set from the host plus the names the app is granted, and it runs in the app's data directory or a `cwd` within an `fs.write` root ([Processes](#processes)).
 - `process.dataDir` is `null` when the host has no data directory; `process.exit` asks the host to exit.
@@ -61,7 +61,7 @@ Roots are absolute paths, `${dataDir}` (this app's data directory, chosen by the
 
 Failures carry Node's error properties: `code` (`ENOENT`, `EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, `ELOOP`, `EACCES`, `EPERM`, ...; `EILSEQ` for text that is not UTF-8, `ERR_FS_FILE_TOO_LARGE` past the read limit), `syscall` and `path`, so `error.code === "ENOENT"` tells a missing file apart. A path outside the grants throws a `TypeError` with `code` `EACCES`, and `ENOSYS` where the host has no native filesystem.
 
-`readFile` returns a `Uint8Array`, or a string with `"utf8"`, and reads files up to 64 MiB. `writeFile` writes a string or `Uint8Array` of up to 8 MiB, creating or replacing a regular file. `readdir` lists up to 10 000 names, sorted, or `Dirent`s (`name`, `isDirectory()`) with `{ withFileTypes: true }`. `stat` and `lstat` resolve a `Stats` (its fields are getters) with `size`, `mode`, `mtimeMs` / `atimeMs` / `birthtimeMs`, `mtime` / `atime` / `birthtime` as `Date`s, and `isFile()`, `isDirectory()` and `isSymbolicLink()`. `rmdir` removes one empty directory. One VM runs up to 1024 operations at a time and holds up to 64 MiB of file data in flight (data handed to `writeFile` until it is written, data read until its promise settles); a call past these limits throws a `RangeError`, a read past them rejects.
+`readFile` returns a `Uint8Array`, or a string with `"utf8"`, and reads files up to 64 MiB. `writeFile` writes a string or `Uint8Array` of up to 8 MiB, creating or replacing a regular file. `readdir` lists up to 10 000 names, sorted, or `Dirent`s (`name`, `isDirectory()`) with `{ withFileTypes: true }`. `stat` and `lstat` resolve a `Stats` with `size`, `mode`, `mtimeMs` / `atimeMs` / `birthtimeMs`, `mtime` / `atime` / `birthtime` as `Date`s, and `isFile()`, `isDirectory()` and `isSymbolicLink()`. `rmdir` removes one empty directory. One VM runs up to 1024 operations at a time and holds up to 64 MiB of file data in flight (data handed to `writeFile` until it is written, data read until its promise settles); a call past these limits throws a `RangeError`, a read past them rejects.
 
 ## Processes
 

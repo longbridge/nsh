@@ -187,7 +187,9 @@ For that, two choices of the first version change:
   rather than `null` (`process`' exit `error`).
 - **Interfaces**: `#[class(interface)]` on the struct makes a class whose objects come from members only: its
   module exports no value of it and TypeScript declares an `interface` (`fs/promises`' `Stats`); it has no
-  constructor or statics. A result `Vec<Instance<T>>` is an array of objects.
+  constructor or statics. Its getters are read once when its object is made, as own enumerable data properties
+  (so `Object.keys`, spread and `JSON.stringify` see them, as Node's `Stats`' fields), its methods stay on the
+  prototype (`nsh-js` `classes.rs`). A result `Vec<Instance<T>>` is an array of objects.
 - **The VM's `System`**: a parameter `sys: System` of a function or member (any kind) is not one JS passes: the
   call fills it in (an `async` one when it is made) with the app's `Access`, its data directory, the host's
   `TrustedPaths`, the VM's `Quotas` (counts of limited resources, `quotas.take(kind, max)` or
