@@ -144,6 +144,19 @@ the files, then the release key's Ed25519 signature over everything before it. T
 
 The package's identity, used for revocation, is the SHA-256 of the whole file.
 
+### Packages from newer versions of NSH
+
+A host app runs packages that a newer `nsh publish` signed, as long as its runtime is at least the package's minimum
+runtime. What a newer version adds and the host's runtime does not know is left out, and never widens what the
+package may do:
+
+- header fields and files it does not know are ignored (they are still covered by the signature and their hashes),
+  unless the package marks a field as one its runtime must understand: then older runtimes refuse it;
+- [capabilities](./sandbox-and-capabilities.md) it does not know are not granted, and a capability or `http` grant
+  with a key it does not know is dropped as a whole, since that key may restrict it.
+
+What was left out is logged when the package loads.
+
 ## Verify a package
 
 `nsh verify` checks a package exactly as a host app trusting the given roots would:

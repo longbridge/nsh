@@ -109,7 +109,9 @@ An app declares what it may reach outside its VM in `nsh.json`:
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
 restricted. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
-build errors, so a typo is caught when you build instead of becoming a missing permission at runtime.
+build errors, so a typo is caught when you build instead of becoming a missing permission at runtime. A [signed
+package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
+runtime does not know: they are not granted there.
 
 ### `network`
 

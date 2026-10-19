@@ -4,6 +4,9 @@
 //! nsh may grant less ([`Access`]): a request must be allowed by both.
 //! Everything is denied unless listed, and unknown keys are errors, so a
 //! typo is caught at build time rather than becoming a missing grant.
+//! Signed packages are read leniently ([`Capabilities::from_json_lenient`]):
+//! a newer signer may declare what this runtime does not know, which is
+//! then not granted.
 //!
 //! ```json
 //! "capabilities": {
@@ -160,77 +163,96 @@ impl Capabilities {
     }
 
     /// Parses `capabilities` from `nsh.json` (or a grant in the same form).
+    /// Unknown keys are errors: a typo is caught when the app is built.
     pub fn from_json(value: &Value) -> Result<Self, String> {
+        Self::parse(value, None)
+    }
+
+    /// Parses the capabilities a signed package declares, which a newer
+    /// signer may have written: unknown keys never grant anything. An
+    /// unknown capability is not granted; an unknown key inside one (a
+    /// restriction this runtime cannot apply) drops what it is in, the
+    /// whole capability or the `http` grant. Returns what was dropped
+    /// (`capabilities.bluetooth`, ...) with the capabilities.
+    pub fn from_json_lenient(value: &Value) -> Result<(Self, Vec<String>), String> {
+        let mut dropped = Vec::new();
+        let caps = Self::parse(value, Some(&mut dropped))?;
+        Ok((caps, dropped))
+    }
+
+    /// `dropped`: lenient, recording what unknown keys dropped; `None`:
+    /// strict.
+    fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
+        const KNOWN: [&str; 4] = ["network", "webview", "statusBar", "clipboard"];
         let obj = object(value, "capabilities")?;
-        known(
-            obj,
-            "capabilities",
-            &["network", "webview", "statusBar", "clipboard"],
-        )?;
+        for key in obj.keys().filter(|k| !KNOWN.contains(&k.as_str())) {
+            match dropped.as_deref_mut() {
+                // A capability of a newer runtime: not granted.
+                Some(dropped) => dropped.push(format!("capabilities.{key}")),
+                None => return Err(unknown_key("capabilities", key, &KNOWN)),
+            }
+        }
+        // Whether `obj` (`what`) has only `keys`; lenient, an unknown key
+        // drops `name` (what it is in): recorded, and `false` returned.
+        let mut check = |obj: &Map<String, Value>,
+                         what: &str,
+                         keys: &[&str],
+                         name: &str|
+         -> Result<bool, String> {
+            let Some(key) = obj.keys().find(|k| !keys.contains(&k.as_str())) else {
+                return Ok(true);
+            };
+            match dropped.as_deref_mut() {
+                Some(dropped) => {
+                    dropped.push(format!("{name} (unknown key `{key}`)"));
+                    Ok(false)
+                }
+                None => Err(unknown_key(what, key, keys)),
+            }
+        };
         let mut caps = Capabilities::default();
         if let Some(network) = obj.get("network") {
             let network = object(network, "capabilities.network")?;
-            known(network, "capabilities.network", &["hosts", "http"])?;
-            if let Some(hosts) = network.get("hosts") {
-                caps.network.hosts = patterns(hosts, "capabilities.network.hosts")?;
-            }
-            if let Some(http) = network.get("http") {
-                let list = http
-                    .as_array()
-                    .ok_or("capabilities.network.http must be an array")?;
-                for grant in list {
-                    let g = object(grant, "capabilities.network.http[]")?;
-                    known(
-                        g,
-                        "capabilities.network.http[]",
-                        &["host", "methods", "schemes", "pathPrefix"],
-                    )?;
-                    let host = g
-                        .get("host")
-                        .and_then(Value::as_str)
-                        .ok_or("capabilities.network.http[] needs a `host`")?;
-                    let strings = |key: &str, upper: bool| -> Result<Vec<String>, String> {
-                        match g.get(key) {
-                            None => Ok(Vec::new()),
-                            Some(v) => strings(v, &format!("capabilities.network.http[].{key}"))
-                                .map(|l| {
-                                    l.into_iter()
-                                        .map(|s| {
-                                            if upper {
-                                                s.to_ascii_uppercase()
-                                            } else {
-                                                s.to_ascii_lowercase()
-                                            }
-                                        })
-                                        .collect()
-                                }),
+            if check(
+                network,
+                "capabilities.network",
+                &["hosts", "http"],
+                "capabilities.network",
+            )? {
+                if let Some(hosts) = network.get("hosts") {
+                    caps.network.hosts = patterns(hosts, "capabilities.network.hosts")?;
+                }
+                if let Some(http) = network.get("http") {
+                    let list = http
+                        .as_array()
+                        .ok_or("capabilities.network.http must be an array")?;
+                    for (i, grant) in list.iter().enumerate() {
+                        let g = object(grant, "capabilities.network.http[]")?;
+                        if check(
+                            g,
+                            "capabilities.network.http[]",
+                            &["host", "methods", "schemes", "pathPrefix"],
+                            &format!("capabilities.network.http[{i}]"),
+                        )? {
+                            caps.network.http.push(http_grant(g)?);
                         }
-                    };
-                    caps.network.http.push(HttpGrant {
-                        host: HostPattern::new(host)?,
-                        methods: strings("methods", true)?,
-                        schemes: strings("schemes", false)?,
-                        path_prefix: match g.get("pathPrefix") {
-                            None => None,
-                            Some(v) => Some(
-                                v.as_str()
-                                    .ok_or(
-                                        "capabilities.network.http[].pathPrefix must be a string",
-                                    )?
-                                    .to_owned(),
-                            ),
-                        },
-                    });
+                    }
                 }
             }
         }
         if let Some(webview) = obj.get("webview") {
             let webview = object(webview, "capabilities.webview")?;
-            known(webview, "capabilities.webview", &["hosts"])?;
-            caps.webview = Some(match webview.get("hosts") {
-                Some(hosts) => patterns(hosts, "capabilities.webview.hosts")?,
-                None => Vec::new(),
-            });
+            if check(
+                webview,
+                "capabilities.webview",
+                &["hosts"],
+                "capabilities.webview",
+            )? {
+                caps.webview = Some(match webview.get("hosts") {
+                    Some(hosts) => patterns(hosts, "capabilities.webview.hosts")?,
+                    None => Vec::new(),
+                });
+            }
         }
         if let Some(status_bar) = obj.get("statusBar") {
             caps.status_bar = status_bar
@@ -314,14 +336,45 @@ fn object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>, St
         .ok_or_else(|| format!("{what} must be an object"))
 }
 
-fn known(obj: &Map<String, Value>, what: &str, keys: &[&str]) -> Result<(), String> {
-    match obj.keys().find(|k| !keys.contains(&k.as_str())) {
-        Some(k) => Err(format!(
-            "{what}: unknown key `{k}` (known: {})",
-            keys.join(", ")
-        )),
-        None => Ok(()),
-    }
+fn unknown_key(what: &str, key: &str, known: &[&str]) -> String {
+    format!("{what}: unknown key `{key}` (known: {})", known.join(", "))
+}
+
+/// One `capabilities.network.http[]` grant, its keys checked.
+fn http_grant(g: &Map<String, Value>) -> Result<HttpGrant, String> {
+    let host = g
+        .get("host")
+        .and_then(Value::as_str)
+        .ok_or("capabilities.network.http[] needs a `host`")?;
+    let strings = |key: &str, upper: bool| -> Result<Vec<String>, String> {
+        match g.get(key) {
+            None => Ok(Vec::new()),
+            Some(v) => strings(v, &format!("capabilities.network.http[].{key}")).map(|l| {
+                l.into_iter()
+                    .map(|s| {
+                        if upper {
+                            s.to_ascii_uppercase()
+                        } else {
+                            s.to_ascii_lowercase()
+                        }
+                    })
+                    .collect()
+            }),
+        }
+    };
+    Ok(HttpGrant {
+        host: HostPattern::new(host)?,
+        methods: strings("methods", true)?,
+        schemes: strings("schemes", false)?,
+        path_prefix: match g.get("pathPrefix") {
+            None => None,
+            Some(v) => Some(
+                v.as_str()
+                    .ok_or("capabilities.network.http[].pathPrefix must be a string")?
+                    .to_owned(),
+            ),
+        },
+    })
 }
 
 fn strings(value: &Value, what: &str) -> Result<Vec<String>, String> {
@@ -540,6 +593,46 @@ mod tests {
             r#"{ "network": { "hosts": ["a.com"], "http": [{ "host": "b.com", "methods": ["GET"] }] }, "webview": { "hosts": ["*"] } }"#,
         );
         assert_eq!(Capabilities::from_json(&c.to_json()).unwrap(), c);
+    }
+
+    /// Packages from newer signers: what this runtime does not know is never
+    /// granted, and an unknown restriction drops what it restricts.
+    #[test]
+    fn unknown_keys_in_packages_grant_nothing() {
+        let lenient =
+            |json: &str| Capabilities::from_json_lenient(&serde_json::from_str(json).unwrap());
+        let (c, dropped) = lenient(
+            r#"{ "bluetooth": true, "clipboard": true,
+                 "network": { "hosts": ["a.com"], "http": [
+                     { "host": "b.com", "ports": [443] },
+                     { "host": "c.com", "methods": ["GET"] }
+                 ] } }"#,
+        )
+        .unwrap();
+        assert!(c.clipboard);
+        assert_eq!(c.network.hosts, [HostPattern::new("a.com").unwrap()]);
+        assert_eq!(c.network.http.len(), 1);
+        assert_eq!(c.network.http[0].host.as_str(), "c.com");
+        assert_eq!(
+            dropped,
+            [
+                "capabilities.bluetooth",
+                "capabilities.network.http[0] (unknown key `ports`)"
+            ]
+        );
+        let (c, dropped) =
+            lenient(r#"{ "network": { "hosts": ["a.com"], "ipv6": false }, "webview": { "hosts": ["*"], "x": 1 } }"#)
+                .unwrap();
+        assert_eq!(c, Capabilities::default());
+        assert_eq!(dropped.len(), 2);
+        // What it knows is still checked.
+        assert!(lenient(r#"{ "statusBar": "yes" }"#).is_err());
+        assert!(lenient(r#"{ "network": { "hosts": ["exa mple.com"] } }"#).is_err());
+        // Nothing unknown: the same as the strict parse.
+        let json = serde_json::json!({ "network": { "hosts": ["a.com"] }, "statusBar": true });
+        let (c, dropped) = Capabilities::from_json_lenient(&json).unwrap();
+        assert_eq!(c, Capabilities::from_json(&json).unwrap());
+        assert!(dropped.is_empty());
     }
 
     #[test]

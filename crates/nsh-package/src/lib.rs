@@ -38,7 +38,29 @@
 //!
 //! The signature covers every byte before it, so nothing in a package can
 //! change without invalidating it; its identity (for revocation) is the
-//! SHA-256 of the whole file. A package always carries the bundle's source;
+//! SHA-256 of the whole file.
+//!
+//! # Format evolution
+//!
+//! Packages outlive the runtime that reads them: a host app in the field
+//! runs packages signed by newer tools. So an addition is optional unless
+//! said otherwise, and what a runtime does not know never widens what a
+//! package may do:
+//!
+//! - header and `app` fields it does not know are ignored;
+//! - a file of a kind it does not know, or with a field it does not know
+//!   (which may change what its bytes are), is not used; it still tiles
+//!   the data and is hashed;
+//! - a header field it must not ignore (a new restriction, a new meaning
+//!   of the bytes) is named in the header's `critical` list, and a runtime
+//!   that does not know a field listed there refuses the package;
+//! - capabilities it does not know are not granted, and an unknown key
+//!   inside one drops that capability (`Capabilities::from_json_lenient`).
+//!
+//! Signers write `critical` only when it is not empty, and nothing else
+//! older runtimes do not read. What was ignored is in
+//! [`VerifiedPackage::ignored`]. An incompatible change bumps the format
+//! version, which runtimes require to match. A package always carries the bundle's source;
 //! bytecode is an extra that only loads when the runtime's
 //! `BYTECODE_VERSION` matches (QuickJS bytecode is trusted input: loading
 //! crafted bytecode is memory corruption, so it is only ever loaded from a

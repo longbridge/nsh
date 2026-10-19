@@ -122,6 +122,41 @@ fn a_verified_package_runs_and_older_builds_are_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A package declaring capabilities of a newer runtime still runs: what
+/// this runtime does not know is not granted, the rest is.
+#[test]
+fn capabilities_of_newer_runtimes_are_not_granted() {
+    let dir = std::env::temp_dir().join(format!("nsh-package-newer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let root = SecretKey::generate().unwrap();
+    let release = SecretKey::generate().unwrap();
+    let cert = certify(&root, &release.public(), &["*".into()], 0, u64::MAX);
+    let mut trust = TrustStore::new();
+    trust.add_root(root.public());
+    let newer = Contents {
+        capabilities: Some(serde_json::json!({
+            "bluetooth": { "devices": ["*"] },
+            "clipboard": true,
+            "network": {
+                "hosts": ["api.example.com"],
+                "http": [{ "host": "quotes.example.com", "ports": [8443] }]
+            }
+        })),
+        ..counter(1, nsh_js::BYTECODE_VERSION)
+    };
+    let bytes = build(&newer, &release, &cert).unwrap();
+    let bundle = nsh_engine::load_package(&mut trust, &bytes, &dir)
+        .unwrap()
+        .bundle;
+    let access = bundle.policy.access();
+    assert!(access.allows_clipboard());
+    assert!(access.allows_http("GET", "https://api.example.com/x"));
+    // The grant restricted by a key this runtime cannot apply is dropped.
+    assert!(!access.allows_http("GET", "https://quotes.example.com/x"));
+    assert!(first_texts(bundle).contains(&"0".to_owned()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn bytecode_files_are_refused_by_read() {
     let dir = std::env::temp_dir().join(format!("nsh-read-test-{}", std::process::id()));
