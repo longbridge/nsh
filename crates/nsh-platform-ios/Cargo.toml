@@ -24,7 +24,7 @@ dev = ["js", "dep:nsh-dev"]
 embed = ["js"]
 
 [dependencies]
-nsh-core.workspace = true
+nsh-core = { workspace = true, features = ["svg"] }
 nsh-engine.workspace = true
 nsh-base.workspace = true
 serde_json.workspace = true
