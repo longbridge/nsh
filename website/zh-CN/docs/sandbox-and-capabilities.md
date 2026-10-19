@@ -53,7 +53,7 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
 
 宿主应用可以按视图修改限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
-[Android](./embedding-android.md) 上用 `NshView.setLimits`。修改从下一次加载开始生效。
+[Android](./embedding-android.md) 上用 `NshView.setLimits`，[GPUI 应用](./gpui.md) 里用 `AppOptions::limits` / `AppView::set_limits`。修改从下一次加载开始生效。
 
 ## 加固
 

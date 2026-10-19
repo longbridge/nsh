@@ -67,7 +67,7 @@ pub fn main() -> std::process::ExitCode {
 /// window's options.
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn setup() -> (PathBuf, nsh_platform_gpui::AppOptions) {
-    use nsh_platform_gpui::{AppOptions, Appearance, AssetBase};
+    use nsh_platform_gpui::{AppOptions, Appearance, AssetBase, Limits};
 
     /// Run by `nsh run`: the app's own logs go to its terminal too.
     static DEVELOPMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -100,6 +100,8 @@ fn setup() -> (PathBuf, nsh_platform_gpui::AppOptions) {
     };
     let mut options = AppOptions {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
+        // An app on its own, not a module embedded in another app.
+        limits: Limits::standalone_desktop(),
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))

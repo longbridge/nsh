@@ -115,6 +115,11 @@ so only load it from your own app's files.
 - `run_app(source, options)` starts GPUI and runs one app in a window until it closes (what the release runner does).
 - `AppView::register_component(name, factory)` registers a native component of yours before loading
   ([Native components](./native-components.md)).
+- `AppOptions::limits` (or `AppView::set_limits`, for the apps loaded next) sets the VM limits: the JS heap, the
+  stack, the time budgets and the node quota ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Embedded apps get `Limits::default()` (a
+  256 MB heap); the development host and the release runner run apps with `Limits::standalone_desktop()`.
+- `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
+  with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
 - `set_ui_sets(sets)` replaces the default `nsh/ui/mobile` set, for apps with Rust components of their own.
 
 ## Differences

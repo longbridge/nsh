@@ -40,7 +40,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
-  budgets, node quota; unset / 0 keeps a default), from the next load.
+  budgets, node quota; unset / 0 keeps a default), from the next load; on GPUI `AppOptions::limits` /
+  `AppView::set_limits` (a whole `Limits`), likewise from the next load.
 
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).

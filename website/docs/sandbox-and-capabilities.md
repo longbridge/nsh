@@ -59,7 +59,8 @@ not cover: without them, an app could exhaust the device's memory through the UI
 > handler.
 
 Host apps can change the limits per view: `NshAppView.limits` on [iOS](./embedding-ios.md#limits),
-`NshView.setLimits` on [Android](./embedding-android.md#limits). They apply from the next load.
+`NshView.setLimits` on [Android](./embedding-android.md#limits), `AppOptions::limits` / `AppView::set_limits` in a
+[GPUI app](./gpui.md#embedding-in-a-gpui-app). They apply from the next load.
 
 ## Hardening
 

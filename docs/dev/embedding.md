@@ -123,3 +123,11 @@ in a resizable split.
   (`NativeComponent::focus_handle`; a wrapper's, since the `Switch` keeps its handle internal), so it is a Tab stop
   among the app's text fields, and a click focuses that handle too. `AppView::on_error` hears
   the app's fatal errors (also logged).
+- **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
+  view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
+  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+- **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
+  from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
+  assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
+  key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
+  the session. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.

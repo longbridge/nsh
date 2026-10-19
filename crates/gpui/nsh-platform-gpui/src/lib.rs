@@ -59,7 +59,7 @@ pub use nsh_core::{
     platform::Appearance,
     ui::{AdaptiveColor, Color, Theme, ThemeColors, ThemeError},
 };
-pub use nsh_engine::{App, Bundle, Root};
+pub use nsh_engine::{App, Bundle, Limits, Root};
 
 pub use crate::{
     app::{AppOptions, AppSource, AppView, open_app_window, run_app, set_ui_sets},

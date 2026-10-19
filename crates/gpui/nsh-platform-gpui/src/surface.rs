@@ -157,6 +157,9 @@ pub(crate) struct Surface {
     pub(crate) stats: RefCell<Option<crate::stats::FrameStats>>,
     epoch: std::time::Instant,
     on_error: Handler<dyn Fn(&str)>,
+    /// A dev session's error overlay: hears the errors besides `on_error`.
+    #[cfg(feature = "dev")]
+    on_dev_error: Handler<dyn Fn(&str)>,
     on_hot_update_failed: Handler<dyn Fn()>,
     /// Counts the apps stopped ([`Surface::stop`]): what an engine sent
     /// before is not applied to the next one.
@@ -220,6 +223,8 @@ impl Surface {
             stats: RefCell::new(None),
             epoch: std::time::Instant::now(),
             on_error: RefCell::new(None),
+            #[cfg(feature = "dev")]
+            on_dev_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             generation: Cell::new(0),
             asset_base: RefCell::new(None),
@@ -350,6 +355,13 @@ impl Surface {
         *self.on_error.borrow_mut() = Some(Rc::from(f));
     }
 
+    /// Shows fatal app errors with `f` too, besides the handler of
+    /// [`Surface::set_error_handler`] (a dev session's overlay).
+    #[cfg(feature = "dev")]
+    pub(crate) fn set_dev_error_handler(&self, f: ErrorHandler) {
+        *self.on_dev_error.borrow_mut() = Some(Rc::from(f));
+    }
+
     /// Runs `f` when a hot update could not be applied in place.
     #[cfg(feature = "dev")]
     pub(crate) fn set_hot_update_failed(&self, f: impl Fn() + 'static) {
@@ -454,6 +466,13 @@ impl Surface {
                 Message::Error(message) => {
                     log::error!("{message}");
                     crate::script::app_error();
+                    #[cfg(feature = "dev")]
+                    {
+                        let handler = self.on_dev_error.borrow().clone();
+                        if let Some(f) = handler {
+                            f(&message);
+                        }
+                    }
                     let handler = self.on_error.borrow().clone();
                     if let Some(f) = handler {
                         f(&message);
@@ -624,5 +643,21 @@ mod tests {
         );
         surface.drain();
         assert_eq!((errors.get(), surface.batches.get()), (2, 1));
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn a_dev_session_hears_errors_besides_the_embedding_apps_handler() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let heard = Rc::new(RefCell::new(Vec::new()));
+        let host = heard.clone();
+        surface.set_error_handler(Box::new(move |m| {
+            host.borrow_mut().push(format!("host {m}"))
+        }));
+        let dev = heard.clone();
+        surface.set_dev_error_handler(Box::new(move |m| dev.borrow_mut().push(format!("dev {m}"))));
+        sent(&surface, vec![Message::Error("boom".into())]);
+        surface.drain();
+        assert_eq!(*heard.borrow(), ["dev boom", "host boom"]);
     }
 }

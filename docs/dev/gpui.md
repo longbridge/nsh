@@ -155,7 +155,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Window chrome (`nsh/desktop`) | `chrome.rs` | Windows open with a transparent title bar (macOS, Windows) so both styles can be drawn later: a title row drawn above the app, or the hidden style with the traffic lights / caption buttons over the app (`WindowControlArea` on Windows); Linux uses the window manager's decorations, or client-side ones when asked and granted. The application menu is GPUI's native menu bar on macOS, a menu bar drawn above the app elsewhere; context menus are popups drawn over the window with keyboard access |
 | Clipboard | `system.rs` | GPUI's (`write_to_clipboard` / `read_from_clipboard`) |
 | Networking | `net.rs` | ureq, as on Windows and Linux |
-| Dev | `dev.rs` | The dev client on its own thread (reconnecting with a backoff); its events, runtime errors and the reload key drained by a foreground task of the view; the status line and the error overlay are GPUI elements over the surface |
+| Dev | `dev.rs` | `AppView::connect_dev_server` (also what `AppSource::DevServer` runs): the dev client on its own thread (reconnecting with a backoff); its events, runtime errors and the reload key drained by a foreground task of the view, which ends when the view connects again; the status line and the error overlay are GPUI elements over the surface; the surface reports errors to the overlay and to the embedding app's `on_error` alike |
 
 ## Frame statistics: `--fps`
 

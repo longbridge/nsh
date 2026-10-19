@@ -14,17 +14,19 @@
 
 use std::{
     borrow::Cow,
+    cell::RefCell,
     io::Write,
+    rc::Rc,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
 use futures_channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{
-    AnyElement, App as GpuiApp, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, px, rgba,
+    AnyElement, App as GpuiApp, Context, FontWeight, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, div, px, rgba,
 };
 use nsh_dev::{
     DevClient, DevEvent, HostInfo,
@@ -102,13 +104,21 @@ enum Msg {
     HideStatus(u64),
 }
 
+/// Numbers the sessions: a replaced session's task stops.
+static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+
 /// A connection to a dev server, loading its bundles into one view, and
-/// what it shows over the app. Dropping it (with its [`AppView`]) stops
-/// the client.
+/// what it shows over the app. Dropping it (with its [`AppView`], or when
+/// the view connects again) stops the client.
 pub(crate) struct DevSession {
+    /// Which session it is ([`NEXT_SESSION`]).
+    id: u64,
     /// Keeps the client (and its thread) alive.
     _client: Option<Arc<DevClient>>,
     tx: UnboundedSender<Msg>,
+    /// Where the reload key sends (the current session's channel): the
+    /// key is the view's shortcut once, whatever session it reaches.
+    reloads: Rc<RefCell<UnboundedSender<Msg>>>,
     /// Build the app runs (loaded, or reached by hot updates): the server
     /// run it came from and its number.
     running: Option<(u64, u64)>,
@@ -186,16 +196,41 @@ impl DevSession {
     }
 }
 
-/// Connects `view` to the dev server at `url` (`ws://host:port/ws`).
-pub(crate) fn start(view: &Entity<AppView>, url: String, cx: &mut GpuiApp) {
+/// Connects `this` to the dev server at `url` (`ws://host:port/ws`),
+/// replacing its session if it had one.
+pub(crate) fn start(this: &AppView, url: String, cx: &mut Context<AppView>) {
     let (tx, mut rx) = unbounded::<Msg>();
-    let this = view.read(cx);
     if let Some(base) = asset_base(&url) {
         this.set_asset_base(Some(AssetBase::Http(base)));
     }
+    let surface = this.surface();
+    let previous = this.dev.borrow_mut().take();
+    let reloads = match previous {
+        Some(previous) => {
+            *previous.reloads.borrow_mut() = tx.clone();
+            previous.reloads.clone()
+        }
+        None => {
+            let reloads = Rc::new(RefCell::new(tx.clone()));
+            let sender = reloads.clone();
+            surface.shortcuts.borrow_mut().push(Box::new(move |event| {
+                if !is_reload_key(event) {
+                    return false;
+                }
+                if !event.repeat {
+                    let _ = sender.borrow().unbounded_send(Msg::Reload);
+                }
+                true
+            }));
+            reloads
+        }
+    };
+    let id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
     let mut session = DevSession {
+        id,
         _client: None,
         tx: tx.clone(),
+        reloads,
         running: None,
         latest: None,
         status: None,
@@ -204,25 +239,16 @@ pub(crate) fn start(view: &Entity<AppView>, url: String, cx: &mut GpuiApp) {
     };
     session.show_status(Status::Connecting(&url));
 
-    let surface = this.surface();
+    // Next to the embedding app's handler (`AppView::on_error`), which
+    // hears the errors too.
     let errors = tx.clone();
-    surface.set_error_handler(Box::new(move |message| {
+    surface.set_dev_error_handler(Box::new(move |message| {
         let _ = errors.unbounded_send(Msg::RuntimeError(message.to_owned()));
     }));
     let failed = tx.clone();
     surface.set_hot_update_failed(move || {
         let _ = failed.unbounded_send(Msg::HotUpdateFailed);
     });
-    let reloads = tx.clone();
-    surface.shortcuts.borrow_mut().push(Box::new(move |event| {
-        if !is_reload_key(event) {
-            return false;
-        }
-        if !event.repeat {
-            let _ = reloads.unbounded_send(Msg::Reload);
-        }
-        true
-    }));
 
     let host = HostInfo {
         device: device_name(host_name().as_deref()),
@@ -256,8 +282,7 @@ pub(crate) fn start(view: &Entity<AppView>, url: String, cx: &mut GpuiApp) {
     }
     *this.dev.borrow_mut() = Some(session);
 
-    let weak = view.downgrade();
-    cx.spawn(async move |cx| {
+    cx.spawn(async move |weak, cx| {
         use futures_util::StreamExt;
         while let Some(msg) = rx.next().await {
             // A burst (a bundle right after "building") is handled in one
@@ -266,14 +291,19 @@ pub(crate) fn start(view: &Entity<AppView>, url: String, cx: &mut GpuiApp) {
             while let Ok(msg) = rx.try_recv() {
                 msgs.push(msg);
             }
-            let alive = weak.update(cx, |view, cx| {
+            let current = weak.update(cx, |view, cx| {
+                // Replaced by another session: what this one sent is stale.
+                if view.dev.borrow().as_ref().map(|s| s.id) != Some(id) {
+                    return false;
+                }
                 for msg in msgs {
                     handle(view, msg);
                 }
                 cx.notify();
                 crate::rt::flush(cx);
+                true
             });
-            if alive.is_err() {
+            if !matches!(current, Ok(true)) {
                 break;
             }
         }
