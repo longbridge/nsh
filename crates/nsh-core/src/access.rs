@@ -270,23 +270,40 @@ impl TrustedPaths {
                     .ok_or_else(|| format!("host anchor {placeholder} unavailable"))?;
                 // Component by component: `/` separates nothing in a
                 // verbatim Windows anchor.
-                let mut path = anchor.to_path_buf();
-                path.extend(tail.split('/').filter(|part| !part.is_empty()));
-                return Ok(path);
+                let tail: PathBuf = tail.split('/').filter(|part| !part.is_empty()).collect();
+                return within(anchor, &tail, root);
             }
         }
         let path = PathBuf::from(root);
         if path.is_absolute() {
             Ok(path)
         } else {
-            self.plugin_dir
-                .as_ref()
+            let anchor = self
+                .plugin_dir
+                .as_deref()
                 .filter(|p| p.is_absolute())
-                .map(|root| root.join(path))
                 .ok_or_else(|| {
-                    "host application directory unavailable for relative filesystem root".into()
-                })
+                    "host application directory unavailable for relative filesystem root".to_owned()
+                })?;
+            within(anchor, &path, root)
         }
+    }
+}
+
+/// `tail` joined to `anchor`, when it stays there: names only. On Windows
+/// a drive (`C:/Windows`), a share (`\\srv\share`) or a rooted path
+/// (`\Users`) would replace or leave the anchor in `join`.
+fn within(anchor: &Path, tail: &Path, root: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let names = tail
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    let mut path = anchor.to_path_buf();
+    path.extend(tail.components().filter(|c| *c != Component::CurDir));
+    if names && path.starts_with(anchor) {
+        Ok(path)
+    } else {
+        Err(format!("filesystem root `{root}` leaves its anchor"))
     }
 }
 
@@ -589,7 +606,9 @@ fn valid_command(command: &str) -> bool {
     !command.is_empty()
         && !command.contains(['\0', '*'])
         && (Path::new(command).is_absolute()
-            || (!command.contains(['/', '\\']) && command != "." && command != ".."))
+            // A bare name has no drive (`C:git` is relative to the host's
+            // directory on drive C).
+            || (!command.contains(['/', '\\', ':']) && command != "." && command != ".."))
 }
 
 fn validate_path_pattern(path: &str) -> Result<(), String> {
@@ -1129,6 +1148,22 @@ mod tests {
 
     fn caps(json: &str) -> Capabilities {
         Capabilities::from_json(&serde_json::from_str(json).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn roots_stay_within_their_anchor_and_bare_commands_have_no_drive() {
+        let anchor = Path::new(if cfg!(windows) { "C:\\app" } else { "/app" });
+        assert!(super::within(anchor, Path::new("data/x"), "r").is_ok());
+        assert!(super::within(anchor, Path::new("/etc"), "r").is_err());
+        #[cfg(windows)]
+        for tail in ["C:/Windows", "\\\\srv\\share", "\\Users", "D:x"] {
+            assert!(
+                super::within(anchor, Path::new(tail), "r").is_err(),
+                "{tail}"
+            );
+        }
+        assert!(!super::valid_command("C:git"));
+        assert!(super::valid_command("git"));
     }
 
     #[test]
