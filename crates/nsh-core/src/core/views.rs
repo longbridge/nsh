@@ -83,7 +83,7 @@ pub(super) struct BoundNode {
 
 /// A region of a parent's children.
 pub(super) struct RegionState {
-    host: NodeId,
+    pub(super) host: NodeId,
     parent: NodeId,
     /// What its nodes go before.
     anchor: Anchor,
@@ -569,8 +569,13 @@ impl<M: TextEngine> Core<M> {
             },
         );
         // Part of what fills a nested component's slot: it goes where the
-        // nested view places the slot, whose prop follows.
+        // nested view places the slot, whose prop follows; what fills this
+        // view's own slots and it passes on goes there too.
         if let Some(name) = state.fill {
+            if let Some(mut inst) = self.components.instances.remove(&host) {
+                self.note_passed(parent, name, host, &mut inst);
+                self.components.instances.insert(host, inst);
+            }
             self.refill(parent, name);
             return;
         }

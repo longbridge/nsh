@@ -175,10 +175,16 @@ pub(super) struct Instance {
 /// (`Instance::slots`).
 pub(super) struct Fill {
     pub(super) name: &'static str,
-    /// Its parts in order: nodes, and regions whose nodes come and go.
+    /// Its parts in order: nodes, regions whose nodes come and go, and
+    /// what fills the placing view's own slots.
     parts: Vec<FillPart>,
+    /// The host of the view that fills it.
+    from: NodeId,
     /// Where the nested view places them.
     pub(super) at: Placement,
+    /// The slot of a component in the nested view whose fill places this
+    /// one (`.fill(name, props.slot.place(|s| s))`): its nodes go there.
+    forwarded: Option<(NodeId, &'static str)>,
 }
 
 /// A part of a [`Fill`].
@@ -186,6 +192,8 @@ pub(super) struct Fill {
 pub(super) enum FillPart {
     Node(NodeId),
     Region(u32),
+    /// What fills the placing view's own slot of this name, passed on.
+    Filled(&'static str),
 }
 
 impl Instance {
@@ -2109,7 +2117,7 @@ impl<M: TextEngine> Core<M> {
                 inst.children_at = Placement::Nested(parent, anchor);
             }
             self.place_filled(&out, inst, None, |anchor| Placement::Nested(parent, anchor));
-            self.fill_nested(parent, &out);
+            self.fill_nested(parent, &out, host, inst);
             self.join_nested(parent, &out, inst);
             return out;
         }
@@ -2595,14 +2603,115 @@ impl<M: TextEngine> Core<M> {
 
     /// The nodes of `fill` now, in order.
     pub(super) fn fill_nodes(&self, fill: &Fill) -> Vec<NodeId> {
+        self.fill_nodes_with(fill, None)
+    }
+
+    /// [`Self::fill_nodes`], with `out`'s instance for its host (one taken
+    /// out of the instances while its view is reconciled).
+    fn fill_nodes_with(&self, fill: &Fill, out: Option<(NodeId, &Instance)>) -> Vec<NodeId> {
         let mut nodes = Vec::with_capacity(fill.parts.len());
         for part in &fill.parts {
             match *part {
                 FillPart::Node(id) => nodes.push(id),
-                FillPart::Region(region) => nodes.extend(self.region_nodes(region)),
+                FillPart::Region(region) => self.fill_region_nodes(region, out, &mut nodes),
+                FillPart::Filled(name) => self.passed_nodes(fill.from, name, out, &mut nodes),
             }
         }
         nodes
+    }
+
+    /// Adds the nodes of region `region` of a fill to `nodes`, what fills
+    /// a slot of the region's view passed on among them.
+    fn fill_region_nodes(
+        &self,
+        region: u32,
+        out: Option<(NodeId, &Instance)>,
+        nodes: &mut Vec<NodeId>,
+    ) {
+        let Some(state) = self.components.regions.get(&region) else {
+            return;
+        };
+        for e in &state.children {
+            match e.part {
+                Part::Filled(name) => self.passed_nodes(state.host, name, out, nodes),
+                Part::Region(inner) => self.fill_region_nodes(inner, out, nodes),
+                _ => nodes.extend(self.placed(e)),
+            }
+        }
+    }
+
+    /// Adds the nodes of what fills slot `name` of the component on `host`
+    /// to `nodes` (`out`: an instance taken out of the instances).
+    fn passed_nodes(
+        &self,
+        host: NodeId,
+        name: &'static str,
+        out: Option<(NodeId, &Instance)>,
+        nodes: &mut Vec<NodeId>,
+    ) {
+        let inst = match out {
+            Some((h, inst)) if h == host => Some(inst),
+            _ => self.components.instances.get(&host).map(|i| &**i),
+        };
+        if let Some(fill) = inst.and_then(|i| self.fill_of(i, name)) {
+            nodes.extend(self.fill_nodes_with(fill, out));
+        }
+    }
+
+    /// The slots of the view on `host` whose fills `parts` pass on (as they
+    /// are, or in a region of them).
+    fn passed_slots(&self, parts: &[FillPart], host: NodeId, names: &mut Vec<&'static str>) {
+        fn of_region<M: TextEngine>(
+            core: &Core<M>,
+            region: u32,
+            host: NodeId,
+            names: &mut Vec<&'static str>,
+        ) {
+            let Some(state) = core.components.regions.get(&region) else {
+                return;
+            };
+            for e in &state.children {
+                match e.part {
+                    Part::Filled(name) if state.host == host => names.push(name),
+                    Part::Region(inner) => of_region(core, inner, host, names),
+                    _ => {}
+                }
+            }
+        }
+        for part in parts {
+            match *part {
+                FillPart::Filled(name) => names.push(name),
+                FillPart::Region(region) => of_region(self, region, host, names),
+                FillPart::Node(_) => {}
+            }
+        }
+    }
+
+    /// Notes on the view on `host` (`inst`) which of its slots' fills go
+    /// on into the fill of slot `name` of the nested component `nested`.
+    pub(super) fn note_passed(
+        &self,
+        nested: NodeId,
+        name: &'static str,
+        host: NodeId,
+        inst: &mut Instance,
+    ) {
+        let mut passed = Vec::new();
+        if let Some(fill) = self
+            .components
+            .instances
+            .get(&nested)
+            .and_then(|t| self.fill_of(t, name))
+        {
+            self.passed_slots(&fill.parts, host, &mut passed);
+        }
+        for fill in &mut inst.fills {
+            if passed.contains(&fill.name) {
+                fill.forwarded = Some((nested, name));
+            } else if fill.forwarded == Some((nested, name)) {
+                fill.forwarded = None;
+            }
+        }
     }
 
     /// The first node among `elements` (in their order), else `end`.
@@ -2691,11 +2800,12 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The slots this view fills of the nested component hosted by
-    /// `nested`, from its content `out`: they replace the ones before (a
-    /// fill gone was released with its nodes), and go where the nested view
-    /// places them.
-    fn fill_nested(&mut self, nested: NodeId, out: &[Expanded]) {
+    /// The slots the view on `host` (its instance `inst`) fills of the
+    /// nested component hosted by `nested`, from its content `out`: they
+    /// replace the ones before (a fill gone was released with its nodes,
+    /// what was passed on and no longer is leaves its place), and go where
+    /// the nested view places them.
+    fn fill_nested(&mut self, nested: NodeId, out: &[Expanded], host: NodeId, inst: &mut Instance) {
         let fills: Vec<(&'static str, Vec<FillPart>)> = out
             .iter()
             .filter_map(|e| match e.part {
@@ -2705,6 +2815,7 @@ impl<M: TextEngine> Core<M> {
                         .iter()
                         .filter_map(|c| match c.part {
                             Part::Region(region) => Some(FillPart::Region(region)),
+                            Part::Filled(name) => Some(FillPart::Filled(name)),
                             _ if c.id != 0 => Some(FillPart::Node(c.id)),
                             _ => None,
                         })
@@ -2713,40 +2824,111 @@ impl<M: TextEngine> Core<M> {
                 _ => None,
             })
             .collect();
-        let Some(inst) = self.components.instances.get_mut(&nested) else {
+        // What fills this view's own slots goes where they are passed on.
+        for fill in &mut inst.fills {
+            if fill.forwarded.is_some_and(|(n, _)| n == nested) {
+                fill.forwarded = None;
+            }
+        }
+        for (name, parts) in &fills {
+            let mut passed = Vec::new();
+            self.passed_slots(parts, host, &mut passed);
+            for fill in inst.fills.iter_mut().filter(|f| passed.contains(&f.name)) {
+                fill.forwarded = Some((nested, name));
+            }
+        }
+        let Some(target) = self.components.instances.get_mut(&nested) else {
             return;
         };
-        if fills.is_empty() && inst.fills.is_empty() {
+        if fills.is_empty() && target.fills.is_empty() {
             return;
         }
-        let mut changed = inst.fills.len() != fills.len();
-        let old = std::mem::take(&mut inst.fills);
+        let mut changed = target.fills.len() != fills.len();
+        let old = std::mem::take(&mut target.fills);
         for (name, parts) in fills {
-            let (at, same) = match old.iter().find(|f| f.name == name) {
-                Some(f) => (f.at, f.parts == parts),
-                None => (Placement::None, false),
+            let (at, forwarded, same) = match old.iter().find(|f| f.name == name) {
+                Some(f) => (f.at, f.forwarded, f.parts == parts),
+                None => (Placement::None, None, false),
             };
             changed |= !same;
-            inst.fills.push(Fill { name, parts, at });
+            target.fills.push(Fill {
+                name,
+                parts,
+                from: host,
+                at,
+                forwarded,
+            });
         }
-        if changed {
-            // Its slot props follow (`Some` while a fill has nodes).
-            self.components.mark(nested);
-            let names: Vec<&'static str> = self.components.instances[&nested]
-                .fills
-                .iter()
-                .map(|f| f.name)
-                .collect();
-            for name in names {
-                self.place_fill(nested, name);
+        if !changed {
+            return;
+        }
+        // What was passed on and is no longer leaves its place (it stays:
+        // the view above's); what was released went with its Delete.
+        let out = Some((host, &*inst));
+        let mut leaving = Vec::new();
+        for fill in &old {
+            let at = self.fill_place(nested, fill.name);
+            let now = self
+                .components
+                .instances
+                .get(&nested)
+                .and_then(|t| self.fill_of(t, fill.name))
+                .map(|f| self.fill_nodes_with(f, out))
+                .unwrap_or_default();
+            for node in self.fill_nodes_with(fill, out) {
+                if !now.contains(&node) && self.key(node).is_ok() {
+                    leaving.push((at, node));
+                }
             }
+        }
+        for (at, node) in leaving {
+            self.unplace(at, node);
+        }
+        // Its slot props follow (`Some` while a fill has nodes).
+        self.components.mark(nested);
+        let names: Vec<&'static str> = self.components.instances[&nested]
+            .fills
+            .iter()
+            .map(|f| f.name)
+            .collect();
+        for name in names {
+            self.place_fill_with(nested, name, Some((host, &*inst)));
+        }
+    }
+
+    /// Where the nodes of the fill of slot `name` of the nested component
+    /// hosted by `nested` are placed: where its view places them, or where
+    /// the slot it is passed on to is.
+    fn fill_place(&self, nested: NodeId, name: &'static str) -> Placement {
+        let Some(fill) = self
+            .components
+            .instances
+            .get(&nested)
+            .and_then(|inst| self.fill_of(inst, name))
+        else {
+            return Placement::None;
+        };
+        match (fill.at, fill.forwarded) {
+            (Placement::None, Some((deeper, slot))) => self.fill_place(deeper, slot),
+            (at, _) => at,
         }
     }
 
     /// Puts the nodes of the fill of slot `name` of the nested component
     /// hosted by `nested` where its view places them (a region of the fill
-    /// changed, or the fill).
+    /// changed, or the fill), and where it passes them on to.
     pub(super) fn place_fill(&mut self, nested: NodeId, name: &'static str) {
+        self.place_fill_with(nested, name, None);
+    }
+
+    /// [`Self::place_fill`], with `out`'s instance for its host (one taken
+    /// out of the instances while its view is reconciled).
+    fn place_fill_with(
+        &mut self,
+        nested: NodeId,
+        name: &'static str,
+        out: Option<(NodeId, &Instance)>,
+    ) {
         let Some(fill) = self
             .components
             .instances
@@ -2755,7 +2937,13 @@ impl<M: TextEngine> Core<M> {
         else {
             return;
         };
-        let (nodes, at) = (self.fill_nodes(fill), fill.at);
+        let (nodes, at, forwarded) = (self.fill_nodes_with(fill, out), fill.at, fill.forwarded);
+        if let Some((deeper, slot)) = forwarded {
+            // Passed on: the deeper slot's fill holds them, and its prop
+            // follows.
+            self.components.mark(deeper);
+            self.place_fill_with(deeper, slot, out);
+        }
         match at {
             Placement::At(parent, anchor) => {
                 let parent_key = self.key(parent).ok();

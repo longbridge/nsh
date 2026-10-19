@@ -518,7 +518,10 @@ what changed.
   (`place(|h| h.px_4())`) makes a node of the nested view's own with those styles around them. The slot's prop is
   `Some` while the fill has nodes. The fill is the placing view's content: reconciled whenever that view reconciles
   the nested element (a new element replaces the old in its place), released with it, and taken out of a place that
-  goes before that place's node is deleted.
+  goes before that place's node is deleted. A view passes a slot it is given on to a nested component's slot by
+  filling that one with the place (`.fill("corner", props.corner.place(|c| c))`): the deeper fill's part is what
+  fills the passing view's slot (`FillPart::Filled`, also inside the place's region), resolved through it as deep as
+  it goes, and a change to the outer fill reaches the deeper slot (`Fill::forwarded`).
 - Rows: the JS face makes a `List` of the app's data and row renderer and hands it to the host as the slot of the
   `Items` prop. The view places it like a slot and sends its layout (`ListConfig`: estimated size, columns,
   direction, padding, gaps; its bound parts as `Patch::Layout`). Each item cell of that list gets the component's row

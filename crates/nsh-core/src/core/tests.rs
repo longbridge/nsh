@@ -8184,6 +8184,60 @@ mod views {
         assert_eq!(native_children(&c, corners[1]).len(), 2);
     }
 
+    #[derive(Clone, PartialEq, Props)]
+    struct MidProps {
+        corner: crate::ui::Prop<Option<Slot>>,
+    }
+
+    /// Passes its corner slot on to a corner's.
+    #[component]
+    fn Mid(props: MidProps) -> impl IntoElement {
+        view().child(
+            Corner::element(CornerProps::default()).fill("corner", props.corner.place(|c| c)),
+        )
+    }
+
+    /// Fills a mid's corner with a text, and another's with what a press
+    /// switches (a text, nothing, a view of a text).
+    #[component]
+    fn Top() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .on_press(move || n.update(|n| *n += 1))
+            .child(Mid::element(MidProps::default()).fill("corner", text("deep")))
+            .child(Mid::element(MidProps::default()).fill(
+                "corner",
+                dynamic(move || match n.get() % 3 {
+                    0 => Some(text("switched").into_element()),
+                    1 => None,
+                    _ => Some(view().child(text("boxed")).into_element()),
+                }),
+            ))
+    }
+
+    #[test]
+    fn a_filled_slot_passed_on_to_another_slot_is_placed_there() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Top>(|| ()));
+        let batch = c.commit().unwrap();
+        let top = root_host(&batch);
+        // Each mid's view is its corner.
+        let mids = native_children(&c, top);
+        let [first, second] = [0, 1].map(|i| native_children(&c, mids[i])[0]);
+        let deep = text_node(&batch, "deep");
+        assert_eq!(native_parent(&c, deep), Some(first), "{:?}", batch.items);
+        let switched = text_node(&batch, "switched");
+        assert_eq!(native_parent(&c, switched), Some(second));
+        // Gone, then a view of a text: the deeper corner follows.
+        assert!(c.component_event(top, EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        assert_eq!(native_children(&c, second).len(), 1, "the title alone");
+        assert!(c.component_event(top, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let boxed = native_parent(&c, text_node(&batch, "boxed")).expect("placed");
+        assert_eq!(native_parent(&c, boxed), Some(second), "{:?}", batch.items);
+    }
+
     /// A corner as its view's root, its fill switched by a press on it
     /// (a text, a view of a text).
     #[component]
@@ -8266,7 +8320,7 @@ mod views {
             })
             .expect("a list");
         let mut shown: std::collections::HashMap<String, NodeId> = Default::default();
-        let mut record = |b: &MountBatch, shown: &mut std::collections::HashMap<String, NodeId>| {
+        let record = |b: &MountBatch, shown: &mut std::collections::HashMap<String, NodeId>| {
             for i in &b.items {
                 if let MountItem::Text { id, text, .. } = i {
                     shown.retain(|_, v| v != id);
