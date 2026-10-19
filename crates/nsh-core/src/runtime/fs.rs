@@ -27,6 +27,10 @@ const MAX_IN_FLIGHT: usize = 64 * 1024 * 1024;
 const PENDING: &str = "fs.pending";
 /// The [`Quotas`] kind of bytes in flight.
 const IN_FLIGHT: &str = "fs.bytes";
+/// What a read holds of the budget at a time past the size the file had
+/// when it was opened.
+#[cfg(not(target_arch = "wasm32"))]
+const GROWTH: usize = 1024 * 1024;
 /// The most entries and name bytes one `readdir` lists.
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_ENTRIES: usize = 10_000;
@@ -713,51 +717,76 @@ impl Grant {
         if size > MAX_READ {
             return Err(too_big(size));
         }
-        let held = quotas
-            .reserve(IN_FLIGHT, size, MAX_IN_FLIGHT)
-            .ok_or_else(|| exceeded(&grant.name))?;
-        let name = grant.name.clone();
-        let too_big_read = too_big.clone();
-        // The file may change while it is read: its size is held, then
-        // what was read.
-        let value = blocking(move || {
-            use std::io::Read;
-            let mut bytes = Vec::with_capacity(size);
-            let mut file = file;
-            file.by_ref()
-                .take((MAX_READ + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|e| grant.error("read", "read", e))?;
+        let mut held = vec![
+            quotas
+                .reserve(IN_FLIGHT, size, MAX_IN_FLIGHT)
+                .ok_or_else(|| exceeded(&grant.name))?,
+        ];
+        let mut reserved = size;
+        // The file may grow while it is read (or say 0, as `/proc` does):
+        // what is read never goes past what is held by more than the byte
+        // that tells growth from the end, and more is held a chunk at a time.
+        let grant = std::sync::Arc::new(grant);
+        let mut bytes = Vec::with_capacity(size);
+        let mut file = file;
+        loop {
+            let want = reserved - bytes.len() + 1;
+            let reader = grant.clone();
+            let (back, read, more) = blocking(move || {
+                use std::io::Read;
+                let mut bytes = bytes;
+                let before = bytes.len();
+                file.by_ref()
+                    .take(want as u64)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| reader.error("read", "read", e))?;
+                let more = bytes.len() - before == want;
+                Ok((file, bytes, more))
+            })
+            .await?;
+            (file, bytes) = (back, read);
+            if !more {
+                break;
+            }
             if bytes.len() > MAX_READ {
-                return Err(too_big_read(bytes.len()));
+                return Err(too_big(bytes.len()));
             }
-            if !text {
-                return Ok(FileData::Bytes(bytes));
-            }
+            let chunk = GROWTH.min(MAX_READ + 1 - reserved);
+            held.push(
+                quotas
+                    .reserve(IN_FLIGHT, chunk, MAX_IN_FLIGHT)
+                    .ok_or_else(|| exceeded(&grant.name))?,
+            );
+            reserved += chunk;
+        }
+        if bytes.len() > MAX_READ {
+            return Err(too_big(bytes.len()));
+        }
+        let value = if text {
+            let decoder = grant.clone();
             // Valid UTF-8 keeps its length, and so what it holds of the
             // budget.
-            String::from_utf8(bytes).map(FileData::Text).map_err(|e| {
-                JsError::Error(format!("cannot decode `{}` as UTF-8: {e}", grant.name))
-                    .with_code("EILSEQ")
-                    .with("path", grant.path.as_str())
+            blocking(move || {
+                String::from_utf8(bytes).map(FileData::Text).map_err(|e| {
+                    JsError::Error(format!("cannot decode `{}` as UTF-8: {e}", decoder.name))
+                        .with_code("EILSEQ")
+                        .with("path", decoder.path.as_str())
+                })
             })
-        })
-        .await?;
+            .await?
+        } else {
+            FileData::Bytes(bytes)
+        };
         let len = match &value {
             FileData::Text(text) => text.len(),
             FileData::Bytes(bytes) => bytes.len(),
         };
-        let held = if len > size {
-            let more = quotas
-                .reserve(IN_FLIGHT, len - size, MAX_IN_FLIGHT)
-                .ok_or_else(|| exceeded(&name))?;
-            vec![held, more]
-        } else {
-            drop(held);
-            // Less than was held a moment ago: it fits.
-            let exact = quotas.reserve(IN_FLIGHT, len, MAX_IN_FLIGHT);
-            exact.into_iter().collect()
-        };
+        drop(held);
+        // At most what was held a moment ago: it fits.
+        let held: Vec<Held> = quotas
+            .reserve(IN_FLIGHT, len, MAX_IN_FLIGHT)
+            .into_iter()
+            .collect();
         Ok(Holding { value, _held: held })
     }
 

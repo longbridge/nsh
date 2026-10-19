@@ -715,3 +715,23 @@ const code = (p) => p.then(() => "none", (e) => `${e.constructor.name}:${e.code}
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_longer_than_its_size_says_is_read_whole() {
+    // `/proc` files say they are empty; the read holds more as it goes.
+    let (_engine, rx) = start(
+        r#"
+import fs from "fs/promises";
+(async () => {
+  const size = (await fs.stat("status")).size;
+  const text = await fs.readFile("status", "utf8");
+  report(`${size} ${text.startsWith("Name:")} ${text.length > 100}`);
+})().catch((e) => report(String(e)));
+"#,
+        r#"{"fs":{"read":["/proc/self"]}}"#,
+        None,
+        Default::default(),
+    );
+    assert_eq!(shown(&rx, "done"), "done 0 true true");
+}
