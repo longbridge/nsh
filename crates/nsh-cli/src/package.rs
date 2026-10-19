@@ -88,6 +88,9 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde::de::IgnoredAny>,
+    /// Read and checked by the bundler.
+    #[serde(default, rename = "resolve")]
+    _resolve: Option<serde::de::IgnoredAny>,
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde::de::IgnoredAny>,
