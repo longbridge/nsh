@@ -240,6 +240,12 @@ throws (or rejects) with its message. A class's object owns its Rust value: it i
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
 updates, Rust edits rebuild and restart the app.
 
+`examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
+component (props required, defaulted and optional, an event, children), one module (a function of each kind) and
+one class (a constructor, methods, a getter and a setter, a static, an `async` member, another instance as an
+argument, a callback Rust posts to, `dispose()` and `using`), each with a short doc comment, and headless tests that
+press through the app and check what each one shows.
+
 `examples/gallery-rs` in the repository is a complete Rust app with both entries: every demo is Rust,
 `nsh run examples/gallery-rs --target web` (or `ios`, `android`, …) runs its root, `cargo run -p gallery-native`
 starts it on the desktop backend, and `nsh run examples/gallery-rs/App.tsx` runs it under its TSX entry.
