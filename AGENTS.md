@@ -57,6 +57,8 @@ crates/
                        all of that, without it only `compile_module` (`compile.rs`: one module, no rolldown) is left, which
                        also builds for WebAssembly (the website's playground)
   nsh-dev/             Dev tooling: dev server protocol, server (CLI, feature `server`), client (host, feature `client`)
+  nsh-testing/         Headless tests of an app's TSX entry (`cargo test`): built against UI sets as `nsh run` builds it, run on
+                       `nsh_engine::headless::Headless` (an engine without a window, display frames, a model of the views, presses)
   nsh-platform-ios/    UIKit backend (iOS / simulator / Mac Catalyst): native view mounting, CoreText text engine, input, AppView, standalone app;
                        feature `dev`: dev server client, log forwarding, error overlay; feature `embed`: the C ABI (`embed.rs`,
                        `include/nsh.h`) under the `NativeShell` Swift module (`swift/NativeShell.swift`) iOS apps embed nsh with

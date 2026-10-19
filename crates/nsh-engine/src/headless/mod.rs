@@ -11,6 +11,12 @@
 //! its standard output as `nsh trace` does; its log lines, warnings and
 //! errors go to standard error as [`RunnerMessage`]s, which `nsh` shows as
 //! its own. A Rust app's runner is built without feature `js`: no QuickJS.
+//!
+//! Tests run an app the same way ([`Headless`]): on an engine with display
+//! frames at 60 Hz ([`start`]), its batches applied to a model of the
+//! native views ([`Screen`]), pressed by what they show with `nsh trace`'s
+//! selectors (`--tap`'s: `id:save`, `label:Close`, `text:+1`, or a bare
+//! string). `nsh-testing` builds a TSX entry for them.
 
 mod net;
 
@@ -25,7 +31,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use nsh_core::{
-    ApproxTextEngine, EventKind, MountBatch, MountItem, NodeId, Size,
+    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId, Size,
     ui::{Registry, Root},
 };
 use serde_json::{Value, json};
@@ -168,6 +174,22 @@ impl MountSink for ChannelSink {
     }
 }
 
+/// Starts `config`'s app on an engine with no platform that gets display
+/// frames at 60 Hz while it asks for them, as on screen (timers,
+/// animations and what waits for a frame run), laying text out with
+/// [`ApproxTextEngine`]: the engine, and the batches it sends.
+pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let control = Arc::new(OnceLock::new());
+    let sink = ChannelSink {
+        batches: tx,
+        control: control.clone(),
+    };
+    let engine = Engine::start(config, || ApproxTextEngine, sink)?;
+    let _ = control.set(engine.control());
+    Ok((engine, rx))
+}
+
 /// Runs `app` (with the UI sets `ui_sets` and its files from `assets`)
 /// headless as `options` say: prints every mount batch to `out`, taps
 /// views, runs timers. `warn` gets what the run notices without failing
@@ -185,9 +207,7 @@ pub fn trace(
         .iter()
         .map(|s| Selector::parse(s))
         .collect::<Result<Vec<_>, _>>()?;
-    let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
-        app,
         viewport: Size::new(options.width, options.height),
         trace: true,
         network: Some(Arc::new(UreqNetwork::new())),
@@ -196,20 +216,10 @@ pub fn trace(
             safe_area: options.safe_area,
             ..Default::default()
         },
-        header_heights: (44.0, 96.0),
-        limits: crate::Limits::default(),
         ui_sets,
-        runtime: None,
-        data_dir: None,
-        storage: None,
+        ..EngineConfig::new(app)
     };
-    let control = Arc::new(OnceLock::new());
-    let sink = ChannelSink {
-        batches: tx,
-        control: control.clone(),
-    };
-    let engine = Engine::start(config, || ApproxTextEngine, sink).map_err(|e| e.to_string())?;
-    let _ = control.set(engine.control());
+    let (engine, rx) = start(config).map_err(|e| e.to_string())?;
 
     let mut views = Views::new(out);
     let first = next(&rx).ok_or("the app rendered nothing")?;
@@ -266,11 +276,11 @@ pub fn trace(
     for (i, selector) in steps.iter().enumerate() {
         let n = i + 1;
         let (id, title) = match selector {
-            Some(selector) => match views.find(selector) {
+            Some(selector) => match views.screen.find(selector) {
                 Some(id) => (id, format!("tap #{n} ({selector}) on view {id}")),
                 None => return Err(format!("tap #{n}: no pressable view matches `{selector}`")),
             },
-            None => match views.first_pressable() {
+            None => match views.screen.first_pressable() {
                 Some(id) => (id, format!("tap #{n} on view {id}")),
                 None => {
                     warn("no pressable view found");
@@ -280,7 +290,7 @@ pub fn trace(
         };
         engine
             .control()
-            .dispatch_event(id, EventKind::Press, nsh_core::EventPayload::None);
+            .dispatch_event(id, EventKind::Press, EventPayload::None);
         match next(&rx) {
             Some(batch) => views.show(&title, &batch),
             None => return Err(format!("tap #{n} produced no update")),
@@ -343,39 +353,24 @@ impl std::fmt::Display for Selector {
     }
 }
 
-/// The native view tree as the mount items built it, for finding what to
-/// tap, and where the batches are printed.
+/// Where the batches of a trace are printed, and the views they built.
 struct Views<'o> {
     out: &'o mut dyn Write,
-    nodes: HashMap<NodeId, View>,
-    /// Children of each view, bottom to top.
-    children: HashMap<NodeId, Vec<NodeId>>,
-}
-
-#[derive(Default)]
-struct View {
-    parent: Option<NodeId>,
-    pressable: bool,
-    test_id: Option<Arc<str>>,
-    label: Option<Arc<str>>,
-    text: Option<String>,
+    screen: Screen,
 }
 
 impl<'o> Views<'o> {
     fn new(out: &'o mut dyn Write) -> Self {
         Self {
             out,
-            nodes: HashMap::new(),
-            children: HashMap::new(),
+            screen: Screen::default(),
         }
     }
 
     /// Prints a batch and applies it.
     fn show(&mut self, title: &str, batch: &MountBatch) {
         print_batch(self.out, title, batch);
-        for item in &batch.items {
-            self.apply(item);
-        }
+        self.screen.apply(batch);
     }
 
     /// Prints the batches that arrive for `limit`, or until none came for
@@ -401,8 +396,37 @@ impl<'o> Views<'o> {
             }
         }
     }
+}
 
-    fn apply(&mut self, item: &MountItem) {
+/// The native views as the mount items built them: their tree, what they
+/// show (text, test id, accessibility label), which hear presses, and the
+/// commands sent (the clipboard, focus, scrolling, ...).
+#[derive(Debug, Default)]
+pub struct Screen {
+    nodes: HashMap<NodeId, View>,
+    /// Children of each view, bottom to top.
+    children: HashMap<NodeId, Vec<NodeId>>,
+    commands: Vec<(NodeId, Command)>,
+}
+
+#[derive(Debug, Default)]
+struct View {
+    parent: Option<NodeId>,
+    pressable: bool,
+    test_id: Option<Arc<str>>,
+    label: Option<Arc<str>>,
+    text: Option<String>,
+}
+
+impl Screen {
+    /// Applies `batch`.
+    pub fn apply(&mut self, batch: &MountBatch) {
+        for item in &batch.items {
+            self.apply_item(item);
+        }
+    }
+
+    fn apply_item(&mut self, item: &MountItem) {
         match item {
             MountItem::Create { id, .. } => {
                 self.nodes.insert(*id, View::default());
@@ -437,6 +461,7 @@ impl<'o> Views<'o> {
             MountItem::Text { id, text, .. } => {
                 self.nodes.entry(*id).or_default().text = Some(text.text.clone());
             }
+            MountItem::Command { id, command } => self.commands.push((*id, command.clone())),
             _ => {}
         }
     }
@@ -462,6 +487,40 @@ impl<'o> Views<'o> {
             }
         }
         out
+    }
+
+    /// The texts on screen, in tree order.
+    pub fn texts(&self) -> Vec<&str> {
+        self.attached()
+            .into_iter()
+            .filter_map(|id| self.nodes.get(&id)?.text.as_deref())
+            .collect()
+    }
+
+    /// Whether a view on screen shows the text `text` (spaces around it
+    /// aside).
+    pub fn shows(&self, text: &str) -> bool {
+        self.texts().iter().any(|t| t.trim() == text)
+    }
+
+    /// The commands sent so far, in order, with the view each went to.
+    pub fn commands(&self) -> &[(NodeId, Command)] {
+        &self.commands
+    }
+
+    /// Whether the command `command` was sent.
+    pub fn sent(&self, command: &Command) -> bool {
+        self.commands.iter().any(|(_, c)| c == command)
+    }
+
+    /// The view a press on `selector` goes to (`nsh trace --tap`'s:
+    /// `id:<testID>`, `label:<label>`, `text:<text>`, `view:<id>`, or a
+    /// bare string matched as each of the first three in turn): the first
+    /// matching view on screen, or its nearest ancestor that hears presses
+    /// (a text inside a button). `None` when none matches; an error for a
+    /// selector that does not parse.
+    pub fn press_target(&self, selector: &str) -> Result<Option<NodeId>, String> {
+        Selector::parse(selector).map(|s| self.find(&s))
     }
 
     fn first_pressable(&self) -> Option<NodeId> {
@@ -503,6 +562,121 @@ impl<'o> Views<'o> {
             }
             id = view.parent?;
         }
+    }
+}
+
+/// How long [`Headless::wait_for`] and [`Headless::wait_until`] wait.
+pub const WAIT: Duration = Duration::from_secs(5);
+
+/// An app on a headless engine ([`start`]) and what it shows ([`Screen`]),
+/// for tests: wait for what it shows, press views as a tap does.
+///
+/// ```ignore
+/// let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+/// app.wait_for("Count: 0");
+/// app.press("Tap");
+/// app.wait_for("Count: 1");
+/// ```
+pub struct Headless {
+    engine: Engine,
+    batches: Receiver<MountBatch>,
+    screen: Screen,
+}
+
+impl Headless {
+    /// Starts `config`'s app ([`start`]).
+    pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
+        let (engine, batches) = start(config)?;
+        Ok(Headless {
+            engine,
+            batches,
+            screen: Screen::default(),
+        })
+    }
+
+    /// The engine: [`Engine::control`] sends it input.
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// What is on screen, from the batches applied so far.
+    pub fn screen(&self) -> &Screen {
+        &self.screen
+    }
+
+    /// The engine and the batches not applied yet, for a model of the
+    /// test's own.
+    pub fn into_parts(self) -> (Engine, Receiver<MountBatch>) {
+        (self.engine, self.batches)
+    }
+
+    /// Applies the next batch, waiting `timeout` at most: the batch, or
+    /// `None` when none came.
+    pub fn next_batch(&mut self, timeout: Duration) -> Option<MountBatch> {
+        let batch = self.batches.recv_timeout(timeout).ok()?;
+        self.screen.apply(&batch);
+        Some(batch)
+    }
+
+    /// Applies batches until none comes for 300 ms, or for 2 s at most (an
+    /// app updating all the time never goes quiet).
+    pub fn settle(&mut self) {
+        let end = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < end && self.next_batch(Duration::from_millis(300)).is_some() {}
+    }
+
+    /// Applies batches until `done` holds for the screen.
+    ///
+    /// # Panics
+    ///
+    /// When it does not within [`WAIT`]; the message names `what` and the
+    /// texts on screen.
+    pub fn wait_until(&mut self, what: &str, done: impl Fn(&Screen) -> bool) {
+        let deadline = Instant::now() + WAIT;
+        while !done(&self.screen) {
+            match self.batches.recv_deadline(deadline) {
+                Ok(batch) => self.screen.apply(&batch),
+                Err(_) => panic!("{what} never happens; on screen: {:?}", self.screen.texts()),
+            }
+        }
+    }
+
+    /// Applies batches until a view shows the text `text`.
+    ///
+    /// # Panics
+    ///
+    /// When none does within [`WAIT`].
+    pub fn wait_for(&mut self, text: &str) {
+        self.wait_until(&format!("{text:?} showing"), |s| s.shows(text));
+    }
+
+    /// Whether a view on screen shows the text `text`.
+    pub fn shows(&self, text: &str) -> bool {
+        self.screen.shows(text)
+    }
+
+    /// Presses what `selector` names, as a tap does: `nsh trace --tap`'s
+    /// selectors ([`Screen::press_target`]), so `"Save"` presses the
+    /// button whose text, label or test id it is. Does not wait for what
+    /// the press changes ([`Headless::wait_for`]).
+    ///
+    /// # Panics
+    ///
+    /// When nothing on screen that hears presses matches.
+    pub fn press(&mut self, selector: &str) {
+        let target = self
+            .screen
+            .press_target(selector)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no pressable view matches `{selector}`; on screen: {:?}",
+                    self.screen.texts()
+                )
+            });
+        self.engine
+            .control()
+            .dispatch_event(target, EventKind::Press, EventPayload::None);
     }
 }
 
@@ -775,7 +949,37 @@ fn js_app(_: &TraceRequest, _: &std::path::Path) -> Result<App, String> {
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::ui::prelude::*;
+
     use super::*;
+
+    /// A count and a button that adds one.
+    #[component]
+    fn Tally() -> impl IntoElement {
+        let count = signal(0_u32);
+        view()
+            .child(text(move || format!("Count: {}", count.get())))
+            .child(
+                view()
+                    .on_press(move || count.update(|c| *c += 1))
+                    .child(text("Add")),
+            )
+    }
+
+    #[test]
+    fn a_test_presses_what_a_text_is_in_and_waits_for_what_it_shows() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Tally>())).unwrap();
+        app.wait_for("Count: 0");
+        // The text is in the pressable view: the press goes to the view.
+        app.press("Add");
+        app.wait_for("Count: 1");
+        app.press("text:Add");
+        app.wait_for("Count: 2");
+        assert!(!app.shows("Count: 1"));
+        assert_eq!(app.screen().texts(), ["Count: 2", "Add"]);
+        assert_eq!(app.screen().press_target("Nothing"), Ok(None));
+        assert!(app.screen().press_target("view:x").is_err());
+    }
 
     #[test]
     fn selectors_parse() {

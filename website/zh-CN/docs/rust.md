@@ -266,6 +266,51 @@ Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简�
 （或 `ios`、`android` 等）运行它的根组件，`nsh trace examples/gallery-rs` 以无界面方式运行它，`cargo run -p gallery-native`
 在桌面后端上启动它。
 
+## 测试
+
+测试在 `cargo test` 中无界面地运行应用：运行在真实的引擎上，没有窗口，以 60 Hz 提供显示帧，所以定时器、任务和动画都像在屏幕上一样运行。
+`nsh_engine::headless::Headless`（nsh-engine 的特性 `headless`）启动应用，维护一份它所显示视图的模型（`app.screen()`：它们的文本、
+应用发送的命令），并像点击一样按下视图，视图的写法与 `nsh trace --tap` 相同（文本、无障碍标签或 test id；`text:`、`label:`、`id:`）。
+Rust 应用运行它的根组件；`EngineConfig::new` 是一个手机尺寸、其余都未设置的引擎：
+
+```toml
+[dev-dependencies]
+nsh-engine = { version = "0.1", features = ["headless"] }
+```
+
+```rust
+use nsh_engine::{EngineConfig, headless::Headless};
+
+#[test]
+fn a_tap_counts() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+    app.wait_for("Count: 0");
+    app.press("Tap");
+    app.wait_for("Count: 1");
+}
+```
+
+TSX 入口用 `nsh-testing` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由 `#[native_module]` 生成的
+`registry()`：
+
+```toml
+[dev-dependencies]
+nsh-testing = "0.1"
+nsh-ui-mobile = "0.1"
+```
+
+```rust
+#[test]
+fn the_module_formats_money() {
+    let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+    let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
+    app.wait_for("Formatted at once: $1,234.50");
+}
+```
+
+`nsh_testing::compile_tsx` 只构建一次入口供多个测试使用，`nsh_engine::headless::start` 把批次交给自己维护屏幕模型的测试。
+`examples/rust-exports` 用这种方式测试它的 TSX 入口，`examples/gallery-rs` 测试它的 Rust 根组件。
+
 ## 多个 crate
 
 应用的 Rust 代码可以拆分成多个 crate，每个 crate 用自己的名称导入：`"rust"` 可以是 crate 路径的列表，列表中的每个 crate

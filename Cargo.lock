@@ -2506,6 +2506,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nsh-testing"
+version = "0.1.1"
+dependencies = [
+ "nsh-bundler",
+ "nsh-core",
+ "nsh-engine",
+ "nsh-js",
+]
+
+[[package]]
 name = "nsh-ui-mobile"
 version = "0.1.1"
 dependencies = [
@@ -4221,12 +4231,9 @@ dependencies = [
 name = "rust-exports-native"
 version = "0.1.1"
 dependencies = [
- "crossbeam-channel",
- "log",
- "nsh-bundler",
  "nsh-core",
  "nsh-engine",
- "nsh-js",
+ "nsh-testing",
  "nsh-ui-mobile",
 ]
 

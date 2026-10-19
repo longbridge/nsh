@@ -26,8 +26,9 @@ cargo test -p rust-exports-native                         # the headless tests
 
 `nsh` describes the crate with a small program of it and builds the app's hosts with it linked in (`docs/dev/tooling.md`, "Apps with Rust
 components of their own"): TSX edits are hot updates, Rust edits rebuild and restart the app. The tests
-(`native/tests/rust_exports/`) bundle `App.tsx` against the crate's set, run it on a headless engine, press through
-its UI and check what each export shows.
+(`native/tests/rust_exports/`) build `App.tsx` against the crate's set (`rust_exports_native::registry()`) and run it
+headless with `nsh-testing`, press through its UI, check what each export shows, and check the declarations TSX
+reads.
 
 How each kind of export runs, crosses and is typed: [Building with Rust](../../website/docs/rust.md) and, for
 NSH's developers, `docs/dev/rust-classes.md` (classes, module functions, callbacks) and `docs/dev/components.md`

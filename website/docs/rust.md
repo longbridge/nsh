@@ -290,6 +290,53 @@ press through the app and check what each one shows.
 --target web` (or `ios`, `android`, …) runs its root, `nsh trace examples/gallery-rs` runs it headless, and
 `cargo run -p gallery-native` starts it on the desktop backend.
 
+## Testing
+
+Tests run the app headless in `cargo test`: on the real engine, without a window, with display frames at 60 Hz, so
+timers, tasks and animations run as on screen. `nsh_engine::headless::Headless` (nsh-engine's feature `headless`)
+starts the app, keeps a model of the views it shows (`app.screen()`: their texts, the commands it sent) and presses
+views as a tap does, named as `nsh trace --tap` names them (a text, an accessibility label or a test id; `text:`,
+`label:`, `id:`). A Rust app runs its root; `EngineConfig::new` is a phone-sized engine with nothing else set:
+
+```toml
+[dev-dependencies]
+nsh-engine = { version = "0.1", features = ["headless"] }
+```
+
+```rust
+use nsh_engine::{EngineConfig, headless::Headless};
+
+#[test]
+fn a_tap_counts() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+    app.wait_for("Count: 0");
+    app.press("Tap");
+    app.wait_for("Count: 1");
+}
+```
+
+A TSX entry is built with `nsh-testing` as `nsh run` builds it, against the UI sets its hosts serve: NSH's, and each
+crate's `registry()`, which `#[native_module]` makes:
+
+```toml
+[dev-dependencies]
+nsh-testing = "0.1"
+nsh-ui-mobile = "0.1"
+```
+
+```rust
+#[test]
+fn the_module_formats_money() {
+    let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+    let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
+    app.wait_for("Formatted at once: $1,234.50");
+}
+```
+
+`nsh_testing::compile_tsx` builds the entry once for several tests, and `nsh_engine::headless::start` hands the
+batches to a test that keeps its own model of the screen. `examples/rust-exports` tests its TSX entry this way,
+`examples/gallery-rs` its Rust root.
+
 ## Several crates
 
 An app's Rust code can be split into crates, each imported by its own specifier: `"rust"` takes a list of crate

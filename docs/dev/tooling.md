@@ -191,6 +191,13 @@ animations end: before the taps the app must be quiet for `--idle-ms` (at most 1
 at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` keeps running after the last tap.
 `--safe-area <top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
 
+Tests use the same pieces: `headless::start` (the engine with its frames, the batches to the caller),
+`headless::Screen` (that model of the native tree, public: texts in tree order, the commands sent, `press_target`
+with the `--tap` selectors) and `headless::Headless` (an app, its screen, `wait_for` / `wait_until` / `settle`,
+`press`). `EngineConfig::new(app)` is the phone-sized config the trace and the tests start from. `nsh-testing` adds
+what a TSX entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so
+that a Rust app's tests link neither the bundler nor QuickJS.
+
 ## New apps (`nsh init --template`)
 
 `nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a

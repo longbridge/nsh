@@ -37,7 +37,8 @@ env:
   # whole pipeline), so its tests all run.
   PACKAGES: >-
     -p nsh-core -p nsh-animation -p nsh-macros -p nsh-js -p nsh-engine
-    -p nsh-bundler -p nsh-package -p nsh-ui-mobile --features nsh-bundler/bundle
+    -p nsh-bundler -p nsh-package -p nsh-ui-mobile -p nsh-testing
+    --features nsh-bundler/bundle,nsh-engine/headless
 
 jobs:
   check:
