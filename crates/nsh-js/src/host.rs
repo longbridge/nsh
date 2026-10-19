@@ -52,7 +52,9 @@ pub(crate) struct Shared {
     /// The VM's counts of limited resources for Rust modules (`net`'s
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::ui::Quotas,
-    /// The VM's scheduler, for the APIs that start its I/O runtime.
+    /// The VM's scheduler, for the APIs that start its I/O runtime (the
+    /// native WebSocket's; the browser has its own).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) scheduler: std::rc::Weak<Scheduler>,
     /// The VM's state of the runtime's Rust modules (`process`'s
     /// children), closed when the VM goes.
