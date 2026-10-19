@@ -335,12 +335,34 @@ How users get it (`website/docs/installation.md`):
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
-- Homebrew: publishing the release runs `.github/workflows/packages.yml`, which fills in
+- Homebrew: publishing a stable release runs `.github/workflows/packages.yml`, which fills in
   `.github/packages/nsh.rb` with the archives' checksums and pushes it to `longbridge/homebrew-tap` as
-  `Formula/nsh.rb` (secret `HOMEBREW_TAP_TOKEN`). The formula keeps the distribution in `libexec`.
+  `Formula/nsh.rb`. It validates the tag and checksum sidecars, downloads and verifies both archives, then installs
+  and tests the formula on Apple silicon before updating the tap. The formula supports Apple-silicon macOS and
+  x86_64 Linux, keeps the whole distribution in `libexec`, and tests web packaging through the installed symlink.
+  Pull requests and pushes to `main` that change the package files run these checks without writing to the tap.
 - Scoop: the release job fills in `.github/packages/nsh.json` and attaches it as `nsh.json`; Scoop installs from
   `releases/latest/download/nsh.json` and updates from the same URL, so nothing is committed anywhere.
 - mise: its `github:` backend picks the archive by OS and architecture, strips `nsh/` and finds `bin/`.
+
+### Homebrew publishing setup and recovery
+
+A maintainer must configure the existing `HOMEBREW_TAP_TOKEN` Actions secret in `longbridge/nsh` (or an organization
+secret made available to this repository). It needs **Contents: read and write** on `longbridge/homebrew-tap` only,
+and permission to push the tap's default branch under its branch rules. The NSH workflow's own `GITHUB_TOKEN` stays
+read-only: it cannot write another repository. Do not grant broader repository access or bypass branch protection.
+The job reports a specific error when the tap secret is missing; invalid or expired credentials still fail at checkout
+or push. Setting credentials is a maintainer step, separate from merging the workflow change.
+
+After configuring the secret, run **Packages** from the Actions page on `main`, with the published stable tag to sync
+(or leave it empty for the latest release). This only updates the tap; it does not build or publish a release. Drafts
+and prereleases are refused. Repeating a successful run makes no commit when the formula is unchanged, and an older
+version cannot replace a newer formula. Writers queue serially; if another tap contributor advances the branch during
+the update, a rejected push can be retried with a fresh run. Use a new dispatch on `main` to apply workflow fixes to an
+old release: rerunning an old failed run keeps that run's original workflow revision.
+
+For local generator regression checks, run `python3 -m unittest discover -s .github/packages -v`. The `Packages` PR
+check additionally runs Homebrew style, strict audit, installation and the formula's CLI/web-runtime smoke test.
 
 ## Entries and `cargo run`
 
