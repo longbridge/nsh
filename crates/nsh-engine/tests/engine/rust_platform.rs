@@ -48,6 +48,7 @@ fn config(app: App) -> EngineConfig {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        storage: None,
     }
 }
 

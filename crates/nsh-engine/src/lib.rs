@@ -11,6 +11,8 @@
 mod access;
 pub mod perf;
 mod script;
+#[cfg(not(target_arch = "wasm32"))]
+mod storage;
 #[cfg(feature = "js")]
 mod symbolicate;
 
@@ -28,6 +30,7 @@ pub use nsh_core::{
         ColorScheme, Environment, FetchEvent, FetchOp, HttpBody, HttpHead, HttpRequest, Idiom,
         Insets, Locale, Os,
     },
+    storage::{StorageBackend, StorageChange},
     ui::{Root, Theme},
 };
 #[cfg(feature = "js")]
@@ -36,6 +39,8 @@ pub use nsh_js::BYTECODE_VERSION;
 #[cfg(feature = "js")]
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
+#[cfg(not(target_arch = "wasm32"))]
+pub use storage::{FileStorage, app_data_dir};
 
 use crate::script::{NetworkQueue, RequestId, Script};
 
@@ -486,6 +491,10 @@ pub struct EngineConfig {
     /// The tokio runtime the components' async tasks use (timers, IO,
     /// background work); `None`: one shared by the engines of the process.
     pub runtime: Option<tokio::runtime::Handle>,
+    /// Where the app's storage (`nsh/storage`) is kept: the platform's
+    /// ([`FileStorage`] in the app's data directory, the browser's
+    /// `localStorage`); `None`: in memory, for the engine's life.
+    pub storage: Option<Arc<dyn nsh_core::storage::StorageBackend>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -905,6 +914,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
+        core.set_storage(config.storage.clone());
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);

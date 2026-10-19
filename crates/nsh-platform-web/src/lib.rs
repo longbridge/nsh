@@ -26,6 +26,7 @@ mod canvas;
 mod encode;
 mod ffi;
 mod net;
+mod storage;
 mod text;
 
 use std::{
@@ -44,10 +45,11 @@ use nsh_engine::{
 #[cfg(feature = "js")]
 use nsh_engine::{Bundle, BundleCode, Chunk, HotUpdate, Policy};
 
-pub use crate::net::{
-    nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head,
-};
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
+pub use crate::{
+    net::{nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head},
+    storage::nsh_storage_reply,
+};
 
 thread_local! {
     static APP: RefCell<Option<Running>> = const { RefCell::new(None) };
@@ -492,6 +494,9 @@ fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
         limits: Limits::default(),
         ui_sets: ui_sets(),
         runtime: None,
+        storage: Some(std::sync::Arc::new(
+            BASE_URL.with(|b| storage::LocalStorage::new(b.borrow().as_deref())),
+        )),
     };
     let text = Rc::new(WebTextEngine::default());
     let Some(engine) = LocalEngine::start(config, text.clone(), Sink) else {

@@ -75,6 +75,9 @@ final class Native {
     /** VM limits of the apps loaded next (0 keeps a default). */
     static native void setLimits(long handle, int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes);
 
+    /** The directory the storage of the apps loaded next is kept in (null: in memory). */
+    static native void setStorage(long handle, String dir);
+
     /** Whether the running app's web views may navigate to {@code url}. */
     static native boolean allowsWebview(long handle, String url);
 

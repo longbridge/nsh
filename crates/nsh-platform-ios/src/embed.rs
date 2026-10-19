@@ -11,6 +11,7 @@
 //! functions must be called on the main thread; trust and package functions
 //! on any thread.
 use std::{
+    cell::RefCell,
     ffi::{CStr, CString, c_char, c_void},
     path::{Path, PathBuf},
     sync::Mutex,
@@ -29,6 +30,22 @@ use crate::{AppView, AssetBase, SurfaceOptions};
 /// An embedded nsh app (opaque to C).
 pub struct NshApp {
     view: AppView,
+    /// The storage directory the embedding app chose
+    /// ([`nsh_app_set_storage_directory`]); `None`: one per app id.
+    storage: RefCell<Option<PathBuf>>,
+}
+
+impl NshApp {
+    /// Points the next load's storage at the chosen directory, or else at
+    /// `nsh/<app id>` (`nsh/default` for apps without one: bundles, dev
+    /// servers) in the embedding app's Application Support.
+    fn use_storage(&self, app_id: Option<&str>) {
+        let dir = self.storage.borrow().clone().or_else(|| {
+            let id = app_id.filter(|id| crate::view::is_dir_name(id));
+            nsh_engine::app_data_dir("nsh").map(|dir| dir.join(id.unwrap_or("default")))
+        });
+        self.view.set_storage_directory(dir);
+    }
 }
 
 fn main_thread() -> MainThreadMarker {
@@ -108,7 +125,10 @@ pub extern "C" fn nsh_app_create(frame: CGRect, trace: bool) -> *mut NshApp {
         ..SurfaceOptions::default()
     };
     let view = AppView::new(main_thread(), frame, options);
-    Box::into_raw(Box::new(NshApp { view }))
+    Box::into_raw(Box::new(NshApp {
+        view,
+        storage: RefCell::new(None),
+    }))
 }
 
 /// The view to add to a hierarchy. Owned by `app`.
@@ -164,6 +184,7 @@ pub unsafe extern "C" fn nsh_app_load_bundle(app: *mut NshApp, path: *const c_ch
             path.parent()
                 .map(|dir| AssetBase::Directory(dir.join("assets"))),
         );
+        app.use_storage(None);
         app.view.load(bundle);
         Ok(())
     }))
@@ -235,6 +256,32 @@ pub unsafe extern "C" fn nsh_app_set_limits(
     app.view.set_limits(limits);
 }
 
+/// The directory the storage (`nsh/storage`) of the apps `app` loads is
+/// kept in (`storage.json` in it); `NULL`: `nsh/<app id>` in the embedding
+/// app's Application Support, by the package's id (`nsh/default` for
+/// bundles and dev servers). Applies from the next load. Returns an error
+/// for a path that is not UTF-8, or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `path` must be `NULL` or a
+/// NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_storage_directory(
+    app: *mut NshApp,
+    path: *const c_char,
+) -> *mut c_char {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    let dir = if path.is_null() {
+        Ok(None)
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe { utf8(path, "the storage directory") }.map(|path| Some(PathBuf::from(path)))
+    };
+    status(dir.map(|dir| *app.storage.borrow_mut() = dir))
+}
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change, showing errors over the app. Returns an error
 /// when the library was built without development support, or `NULL`.
@@ -252,7 +299,10 @@ pub unsafe extern "C" fn nsh_app_connect_dev_server(
     let (app, url) = unsafe { (&*app, utf8(url, "the dev server URL")) };
     #[cfg(feature = "dev")]
     {
-        status(url.map(|url| app.view.connect_dev_server(url.to_owned())))
+        status(url.map(|url| {
+            app.use_storage(None);
+            app.view.connect_dev_server(url.to_owned());
+        }))
     }
     #[cfg(not(feature = "dev"))]
     {
@@ -556,6 +606,7 @@ pub unsafe extern "C" fn nsh_app_run_package(app: *mut NshApp, package: *mut Nsh
     let (app, package) = unsafe { (&*app, Box::from_raw(package)) };
     app.view
         .set_asset_base(Some(AssetBase::Directory(package.assets)));
+    app.use_storage(package.id.to_str().ok());
     app.view.load(package.bundle);
 }
 

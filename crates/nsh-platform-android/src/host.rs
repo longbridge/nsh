@@ -51,6 +51,10 @@ pub(crate) struct Host {
     granted: Mutex<Option<nsh_engine::Capabilities>>,
     /// The VM limits of loaded apps (`NshView.setLimits`).
     limits: Mutex<nsh_engine::Limits>,
+    /// The directory loaded apps keep their storage in
+    /// (`NshView.setStorageDirectory`, or the app's own under the files
+    /// directory); `None`: in memory.
+    storage: Mutex<Option<std::path::PathBuf>>,
     /// What the running app may reach (web view navigations check it).
     access: Mutex<Arc<nsh_engine::Access>>,
     #[cfg(feature = "dev")]
@@ -97,6 +101,9 @@ impl Host {
             limits: *self.limits.lock().expect("limits"),
             ui_sets: crate::ui_sets(),
             runtime: None,
+            storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
+                nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
+            }),
         };
         let density = self.density;
         let sink = Sink(self.clone());
@@ -330,6 +337,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         epoch: Instant::now(),
         granted: Mutex::new(None),
         limits: Mutex::new(nsh_engine::Limits::default()),
+        storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         #[cfg(feature = "dev")]
         dev: Mutex::new(None),
@@ -401,6 +409,28 @@ extern "system" fn Java_com_longbridge_nsh_Native_setLimits(
         limits.max_nodes = n;
     }
     *host.limits.lock().expect("limits") = limits;
+}
+
+/// The directory the storage of the apps loaded next is kept in (null: in
+/// memory); Java picks the app's own under the files directory.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setStorage(
+    mut env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    dir: JString<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let dir = if dir.is_null() {
+        None
+    } else {
+        match env.get_string(&dir) {
+            Ok(dir) => Some(std::path::PathBuf::from(String::from(dir))),
+            Err(err) => return log::error!("invalid storage directory: {err}"),
+        }
+    };
+    *host.storage.lock().expect("storage") = dir;
 }
 
 /// Whether the running app's web views may navigate to `url`.

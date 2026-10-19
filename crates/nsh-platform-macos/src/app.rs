@@ -66,6 +66,9 @@ pub struct AppOptions {
     /// Where bundled assets are (for [`AppSource::Bundle`]); dev servers
     /// serve them themselves.
     pub asset_base: Option<AssetBase>,
+    /// The application id (`com.example.app`); the app's data is kept
+    /// under it, in `~/Library/Application Support/<app id>`.
+    pub app_id: String,
     /// The window title.
     pub title: String,
     /// The initial window size in points.
@@ -94,6 +97,10 @@ pub struct AppOptions {
     /// release runner run apps on their own, with
     /// [`Limits::standalone_desktop`].
     pub limits: Limits,
+    /// Where the apps' storage (`nsh/storage`) is kept: `None` keeps it in
+    /// `storage.json` of the app's data directory
+    /// ([`nsh_engine::app_data_dir`] of [`app_id`](Self::app_id)).
+    pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
 }
 
 impl Default for AppOptions {
@@ -101,6 +108,7 @@ impl Default for AppOptions {
         AppOptions {
             trace: false,
             asset_base: None,
+            app_id: "com.longbridge.nsh.host".to_owned(),
             title: "nsh".to_owned(),
             size: (1200, 800),
             keep_alive_on_close: false,
@@ -109,6 +117,7 @@ impl Default for AppOptions {
             appearance: Appearance::System,
             fps: false,
             limits: Limits::default(),
+            storage: None,
         }
     }
 }
@@ -206,6 +215,10 @@ impl AppView {
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
+            storage: options.storage.clone().or_else(|| {
+                let dir = nsh_engine::app_data_dir(&options.app_id)?;
+                Some(nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>)
+            }),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface

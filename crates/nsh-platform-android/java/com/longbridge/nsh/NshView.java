@@ -68,6 +68,8 @@ public class NshView extends FrameLayout {
     private volatile String assetHttp;
     private volatile File assetDir;
     private volatile String assetApk;
+    /** The storage directory the embedding app chose; null: one per app id. */
+    private File storageDirectory;
     private TextView status;
     private View errorView;
 
@@ -147,6 +149,30 @@ public class NshView extends FrameLayout {
     }
 
     /**
+     * The directory the storage ({@code nsh/storage}) of the apps this view
+     * loads from now on is kept in ({@code storage.json} in it). {@code null}
+     * (the default): {@code nsh/<app id>} in the Context's files directory,
+     * by the package's id ({@code nsh/default} for bundles, Rust apps and dev
+     * servers), so each signed app keeps its own.
+     *
+     * @param dir the directory, or null
+     */
+    public void setStorageDirectory(File dir) {
+        storageDirectory = dir;
+    }
+
+    /** Points the next load's storage at the chosen directory or the app's own. */
+    private void useStorage(String appId) {
+        File dir = storageDirectory;
+        if (dir == null) {
+            boolean named = appId != null && !appId.isEmpty() && appId.indexOf('/') < 0
+                    && !appId.equals(".") && !appId.equals("..");
+            dir = new File(getContext().getFilesDir(), "nsh/" + (named ? appId : "default"));
+        }
+        Native.setStorage(handle, dir.getPath());
+    }
+
+    /**
      * Runs a JS bundle written by `nsh build` (`bundle.js`); assets come from
      * `assets/` next to it. Bytecode only loads from the APK's own assets
      * ({@link #loadAssetBundle}) or a signed package ({@link #runPackage}):
@@ -171,6 +197,7 @@ public class NshView extends FrameLayout {
             assetHttp = null;
             assetApk = null;
             assetDir = new File(file.getParentFile(), "assets");
+            useStorage(null);
             Native.load(handle, code, false, map, capabilities);
             return true;
         } catch (Exception e) {
@@ -199,6 +226,7 @@ public class NshView extends FrameLayout {
             assetHttp = null;
             assetDir = null;
             assetApk = dir + "/assets/";
+            useStorage(null);
             Native.load(handle, code, true, null, capabilities);
             return true;
         } catch (Exception e) {
@@ -218,6 +246,7 @@ public class NshView extends FrameLayout {
         assetHttp = null;
         assetDir = null;
         assetApk = dir + "/assets/";
+        useStorage(null);
         Native.runRust(handle);
     }
 
@@ -228,7 +257,9 @@ public class NshView extends FrameLayout {
      * @param pkg the package
      */
     public void runPackage(NshPackage pkg) {
-        Native.runPackage(handle, pkg.take());
+        long taken = pkg.take();
+        useStorage(pkg.appId);
+        Native.runPackage(handle, taken);
     }
 
     /** Called by {@code Native.runPackage} before the package starts. */
@@ -264,6 +295,7 @@ public class NshView extends FrameLayout {
         }
         assetDir = null;
         assetApk = null;
+        useStorage(null);
         return Native.connectDevServer(handle, url);
     }
 

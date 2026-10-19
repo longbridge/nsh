@@ -110,6 +110,7 @@ fn scrolls_with_recycled_cells(app: &str) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        storage: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();

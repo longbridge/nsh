@@ -36,6 +36,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/image` | `Image`（元素）、`Image.getSize`、`Image.prefetch` | [nsh/image](./nsh-image.md) |
 | `nsh/clipboard` | `Clipboard.setString`、`Clipboard.getString`、`Clipboard.hasString` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.getAllKeys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
 | `nsh/keymap` | `keymap.bind`（键盘快捷键：`mod+k`、`ctrl+shift+p` 等） | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`（宿主应用注册的原生组件） | [nsh/native](./nsh-native.md) |
 | `nsh/accessibility` | `AccessibilityInfo`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |

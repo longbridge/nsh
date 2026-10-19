@@ -173,7 +173,8 @@ xdotool mousemove --window $W 100 30 click 1; xdotool type --window $W "hi"; xdo
 ```
 
 Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);
-`--trace` logs per-commit timings. GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tree, with each view's
+`--trace` logs per-commit timings; `--app-id <id>` (which `nsh run` passes from `nsh.json`, as on the macOS,
+Windows and GPUI hosts) names the GTK application and the directory of the app's storage and web view data. GTK Inspector (`GTK_DEBUG=interactive`) shows the widget tree, with each view's
 `testID` as its name.
 
 ## Not implemented, or different

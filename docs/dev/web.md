@@ -462,6 +462,10 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
 
 ## Platform services
 
+- **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<page directory>:<key>` (the
+  directory of `document.baseURI`), so sites at different paths of one origin keep theirs apart, while apps run one after
+  another on one page (the demo player, the dev host) share theirs. `nsh.js` wraps every call in try / catch (blocked
+  storage, private mode, quota) and hands failures back as messages.
 - **Dialogs** (`Alert`, `ActionSheet`) are drawn in the root: with the `desktop` idiom as the Linux and macOS
   backends' cards (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert and
   action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's

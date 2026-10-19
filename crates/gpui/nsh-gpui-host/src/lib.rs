@@ -10,6 +10,9 @@
 //!   X11, which shots need).
 //! - `--size 1200x800` sets the window size.
 //! - `--fps` logs frame statistics once a second (`nsh::perf fps …`).
+//! - `--app-id <id>` sets the application id (`com.example.app`), which
+//!   the app's data (`nsh/storage`) is kept under; `nsh run` passes the
+//!   app's (`nsh.json` `"id"`), so each app keeps its own.
 //!
 //! Without arguments it connects to the dev server on this machine.
 //!
@@ -53,6 +56,11 @@ pub fn main() -> std::process::ExitCode {
                 source = Some(AppSource::Bundle(bundle));
             }
             "--trace" => options.trace = true,
+            "--app-id" => {
+                if let Some(id) = args.next().filter(|id| !id.is_empty()) {
+                    options.app_id = id;
+                }
+            }
             "--fps" => options.fps = true,
             "--script" => options.script = args.next(),
             "--size" => {

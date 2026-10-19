@@ -150,6 +150,7 @@ setContentView(column);
 | `setErrorListener(ErrorListener listener)` | 在 UI 线程上接收应用的致命错误（加载失败、未捕获的 JS 异常、VM 因触及限制而停止）。错误总会写入日志。 |
 | `setLimits(int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes)` | 接下来加载的应用的 VM 限制；传 0 表示使用默认值。 |
 | `setGrantedCapabilities(String json)` | 接下来加载的应用最多能做什么，JSON 格式与 `nsh.json` 的 `capabilities` 相同；`null` 表示授予每个应用所声明的能力。授权无效时返回 `false`（并被忽略）。 |
+| `setStorageDirectory(File dir)` | 接下来加载的应用保存其[存储](../modules/nsh-storage.md)的目录；`null`：应用私有目录内的 `files/nsh/<app id>`，按签名包的 id（bundle 和开发服务器使用 `default`）。 |
 | `loadAssetBundle(String dir)` | 运行 APK assets 中的 `dir/bundle.nshc`；应用资源取自 `dir/assets/`。无法读取时返回 `false`（也会报告给错误监听器）。 |
 | `loadBundleFile(File file)` | 运行一个 `bundle.js` 文件；资源取自同目录下的 `assets/`。拒绝 `.nshc` 文件。 |
 | `runPackage(NshPackage pkg)` | 运行一个已验证的签名包，替换正在运行的应用。一个包只能运行一次。 |
@@ -162,7 +163,7 @@ setContentView(column);
 > 编译字节码（`.nshc`）只能从 APK 自身的 assets 或签名包中加载。存储上的文件可能被替换，而 QuickJS 不校验字节码，所以
 > `loadBundleFile` 只接受 JS 源码。应用下载的代码应以[签名包](./signed-packages.md)的形式提供。
 
-`setLimits` 和 `setGrantedCapabilities` 从下一次加载开始生效：请在 `loadAssetBundle` 等方法之前调用。
+`setLimits`、`setGrantedCapabilities` 和 `setStorageDirectory` 从下一次加载开始生效：请在 `loadAssetBundle` 等方法之前调用。
 
 ## 限制
 

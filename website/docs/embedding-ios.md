@@ -154,6 +154,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `onError: ((String) -> Void)?` | Receives fatal app errors (a bundle that fails to load, uncaught JS exceptions, a VM stopped by a limit) on the main thread. Errors are always logged; development builds also show them over the app. |
 | `limits: NshLimits` | The VM limits of the apps loaded from now on. |
 | `grantCapabilities(_ json: String?) throws` | The most the apps loaded from now on may do, as JSON in the form of `nsh.json`'s `capabilities`; `nil` grants what each app declares. Throws `NshError` for invalid JSON. |
+| `storageDirectory: URL?` | Where the apps loaded from now on keep their [storage](../modules/nsh-storage.md); `nil`: `Library/Application Support/nsh/<app id>`, by the id of the signed package (`default` for bundles and dev servers). |
 | `loadBundle(at url: URL) throws` | Runs a bundle written by `nsh build`. Assets come from `assets/` next to it; `bundle.js.map` and `capabilities.json` next to it are read too. |
 | `run(_ package: NshPackage)` | Runs a verified signed package (see below). A package runs once. |
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | Verifies the package at a URL off the main thread, then runs it. Throws why it was refused; the running app stays. |
@@ -166,7 +167,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 > anywhere else could corrupt memory: for a file outside the app bundle, load `bundle.js` (JS source), or better, a
 > [signed package](./signed-packages.md).
 
-`limits` and `grantCapabilities` apply from the next load: set them before `loadBundle` / `run`.
+`limits`, `grantCapabilities` and `storageDirectory` apply from the next load: set them before `loadBundle` / `run`.
 
 ## Limits
 

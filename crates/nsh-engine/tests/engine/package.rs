@@ -50,6 +50,7 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx

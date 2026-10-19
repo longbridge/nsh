@@ -101,6 +101,8 @@ pub struct Capabilities {
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
     pub clipboard: bool,
+    /// The app may keep data on the device (`nsh/storage`).
+    pub storage: bool,
 }
 
 /// The parts of a URL the checks look at.
@@ -156,6 +158,7 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            storage: true,
         }
     }
 
@@ -165,7 +168,7 @@ impl Capabilities {
         known(
             obj,
             "capabilities",
-            &["network", "webview", "statusBar", "clipboard"],
+            &["network", "webview", "statusBar", "clipboard", "storage"],
         )?;
         let mut caps = Capabilities::default();
         if let Some(network) = obj.get("network") {
@@ -242,6 +245,11 @@ impl Capabilities {
                 .as_bool()
                 .ok_or("capabilities.clipboard must be a boolean")?;
         }
+        if let Some(storage) = obj.get("storage") {
+            caps.storage = storage
+                .as_bool()
+                .ok_or("capabilities.storage must be a boolean")?;
+        }
         Ok(caps)
     }
 
@@ -280,6 +288,7 @@ impl Capabilities {
         }
         obj.insert("statusBar".into(), self.status_bar.into());
         obj.insert("clipboard".into(), self.clipboard.into());
+        obj.insert("storage".into(), self.storage.into());
         Value::Object(obj)
     }
 
@@ -439,6 +448,11 @@ impl Access {
     pub fn allows_clipboard(&self) -> bool {
         self.each(|c| c.clipboard)
     }
+
+    /// Whether the app may keep data on the device.
+    pub fn allows_storage(&self) -> bool {
+        self.each(|c| c.storage)
+    }
 }
 
 /// `location` against `base` (absolute, scheme-relative, absolute-path or
@@ -485,6 +499,7 @@ mod tests {
         assert!(!access.allows_webview("https://example.com/"));
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
+        assert!(!access.allows_storage());
         assert!(Access::all().is_unrestricted());
     }
 

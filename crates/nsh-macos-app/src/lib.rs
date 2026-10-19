@@ -93,6 +93,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
         info.as_ref()
             .and_then(|info| info.get(key)?.as_str().map(str::to_owned))
     };
+    if let Some(id) = field("id") {
+        options.app_id = id;
+    }
     if let Some(name) = field("name") {
         options.title = name;
     }

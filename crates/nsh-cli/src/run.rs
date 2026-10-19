@@ -144,7 +144,7 @@ pub(crate) fn run(
         // bundle around it.
         Target::Linux => {
             let mut command = Command::new(&host);
-            command.args(&args);
+            command.args(&args).args(["--app-id", &app_id(entry)?]);
             run_local(&session, &mut command, "the Linux host")
         }
         // In place too: the AppKit host makes itself a regular app (menu
@@ -153,24 +153,24 @@ pub(crate) fn run(
             // The menu bar and the window show the app's name.
             let entry = entry.canonicalize()?;
             let config = crate::package::read_config(&entry).unwrap_or_default();
-            let (name, _) = crate::package::name_and_id(&entry, &config);
+            let (name, id) = crate::package::name_and_id(&entry, &config);
             let mut command = Command::new(&host);
             command
                 .args(&args)
-                .args(["--name", &name])
+                .args(["--name", &name, "--app-id", &id])
                 .args(["-ApplePersistenceIgnoreState", "YES"]);
             run_local(&session, &mut command, "the macOS host")
         }
         Target::Windows => {
             let mut command = Command::new(&host);
-            command.args(&args);
+            command.args(&args).args(["--app-id", &app_id(entry)?]);
             run_local(&session, &mut command, "the Windows host")
         }
         // In place on every OS: GPUI makes the process a regular app (on
         // macOS too) without an app bundle around it.
         Target::Gpui => {
             let mut command = Command::new(&host);
-            command.args(&args);
+            command.args(&args).args(["--app-id", &app_id(entry)?]);
             run_local(&session, &mut command, "the GPUI host")
         }
         Target::Ios => {
@@ -195,6 +195,14 @@ pub(crate) fn run(
         }
         Target::Android | Target::Web => unreachable!("handled above"),
     }
+}
+
+/// The app's id (`nsh.json` `"id"`) for the desktop hosts, which keep the
+/// app's data under it: each app its own.
+fn app_id(entry: &Path) -> anyhow::Result<String> {
+    let entry = entry.canonicalize()?;
+    let config = crate::package::read_config(&entry).unwrap_or_default();
+    Ok(crate::package::name_and_id(&entry, &config).1)
 }
 
 /// Starts a dev session that serves the web host and prints its address;

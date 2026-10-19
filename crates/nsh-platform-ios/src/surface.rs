@@ -396,6 +396,9 @@ impl RootView {
             limits: self.ivars().options.limits,
             ui_sets: crate::ui_sets(),
             runtime: None,
+            storage: self.ivars().options.storage.as_ref().map(|dir| {
+                nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
+            }),
         };
         let sink = MainThreadSink {
             mounter: mounter.clone(),
@@ -460,6 +463,9 @@ pub struct SurfaceOptions {
     /// What the embedding app grants the apps it runs at most (`None`: what
     /// each app declares).
     pub granted: Option<nsh_engine::Capabilities>,
+    /// The directory the apps' storage (`nsh/storage`) is kept in
+    /// (`storage.json` in it); `None`: in memory, for the app's run.
+    pub storage: Option<std::path::PathBuf>,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
 }

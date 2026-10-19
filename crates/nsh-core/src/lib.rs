@@ -27,6 +27,7 @@ mod props;
 pub mod reactive;
 pub mod runtime;
 pub mod shape;
+pub mod storage;
 mod style;
 pub mod tailwind;
 mod text;

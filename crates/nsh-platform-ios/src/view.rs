@@ -120,6 +120,15 @@ impl AppView {
         self.reconfigure(|options| options.limits = limits);
     }
 
+    /// The directory the storage (`nsh/storage`) of the apps this view loads
+    /// is kept in (`None`: in memory). A change applies from the next
+    /// [`AppView::load`].
+    pub fn set_storage_directory(&self, dir: Option<std::path::PathBuf>) {
+        if self.inner.state.borrow().options.storage != dir {
+            self.reconfigure(|options| options.storage = dir);
+        }
+    }
+
     fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
         let mut state = self.inner.state.borrow_mut();
         change(&mut state.options);
@@ -212,4 +221,10 @@ impl Inner {
             dev.show_error(&self.container, "Uncaught error", message);
         }
     }
+}
+
+/// Whether `name` (an app id) names one directory: not empty, no separator,
+/// not `.` or `..`.
+pub(crate) fn is_dir_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != ".."
 }

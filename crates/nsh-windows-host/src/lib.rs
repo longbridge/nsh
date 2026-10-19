@@ -11,6 +11,9 @@
 //!   the screen.
 //! - `--size 390x844` sets the window size in points (default 1200x800,
 //!   wide enough for desktop layouts such as the gallery's sidebar).
+//! - `--app-id <id>` sets the application id (`com.example.app`), which
+//!   the app's data (`nsh/storage`) is kept under; `nsh run` passes the
+//!   app's (`nsh.json` `"id"`), so each app keeps its own.
 //!
 //! Without arguments it connects to the dev server on this machine.
 //!
@@ -54,6 +57,11 @@ pub fn main() -> std::process::ExitCode {
                 source = Some(AppSource::Bundle(bundle));
             }
             "--trace" => options.trace = true,
+            "--app-id" => {
+                if let Some(id) = args.next().filter(|id| !id.is_empty()) {
+                    options.app_id = id;
+                }
+            }
             // Steps run once the window shows (`nsh_platform_windows`'s
             // `script` module): offscreen screenshots and simulated input.
             "--script" => options.script = args.next(),

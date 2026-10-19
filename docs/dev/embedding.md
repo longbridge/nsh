@@ -126,6 +126,11 @@ in a resizable split.
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
   in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+- **Storage.** Where apps keep `nsh/storage` (`storage.json`, `nsh_engine::FileStorage::open`): on the desktops
+  `AppOptions::storage` (a `StorageBackend`), else `app_data_dir(AppOptions::app_id)`; on iOS `NshAppView.storageDirectory`
+  (`nsh_app_set_storage_directory`), else `Application Support/nsh/<package app id | default>` (the standalone runner and
+  host: `app_data_dir(bundle id)`); on Android `NshView.setStorageDirectory`, else `filesDir/nsh/<package app id | default>`;
+  all from the next load.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload

@@ -155,6 +155,7 @@ again replaces the running app. The complete sample is
 | `setErrorListener(ErrorListener listener)` | Receives fatal app errors (load failures, uncaught JS exceptions, a VM stopped by a limit) on the UI thread. They are always logged. |
 | `setLimits(int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes)` | VM limits of the apps loaded next; 0 keeps a default. |
 | `setGrantedCapabilities(String json)` | The most the apps loaded next may do, as JSON in the form of `nsh.json`'s `capabilities`; `null` grants what each app declares. Returns `false` (and is ignored) for an invalid grant. |
+| `setStorageDirectory(File dir)` | Where the apps loaded next keep their [storage](../modules/nsh-storage.md); `null`: `files/nsh/<app id>` in the app's private directory, by the id of the signed package (`default` for bundles and dev servers). |
 | `loadAssetBundle(String dir)` | Runs `dir/bundle.nshc` from the APK's assets; app assets come from `dir/assets/`. Returns `false` if it cannot be read (also reported to the error listener). |
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |
 | `runPackage(NshPackage pkg)` | Runs a verified signed package, replacing the running app. A package runs once. |
@@ -168,7 +169,7 @@ again replaces the running app. The complete sample is
 > and QuickJS does not validate bytecode, so `loadBundleFile` takes JS source only. Code the app downloads should come
 > as a [signed package](./signed-packages.md).
 
-`setLimits` and `setGrantedCapabilities` apply from the next load: call them before `loadAssetBundle` and friends.
+`setLimits`, `setGrantedCapabilities` and `setStorageDirectory` apply from the next load: call them before `loadAssetBundle` and friends.
 
 ## Limits
 

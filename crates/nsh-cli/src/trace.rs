@@ -139,6 +139,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         limits: nsh_engine::Limits::default(),
         ui_sets: crate::ui_sets().to_vec(),
         runtime: None,
+        storage: None,
     };
     let control = Arc::new(OnceLock::new());
     let sink = ChannelSink {

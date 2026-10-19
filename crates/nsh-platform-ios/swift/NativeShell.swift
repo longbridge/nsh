@@ -141,6 +141,17 @@ public final class NshAppView: UIView {
         }
     }
 
+    /// The directory the storage (`nsh/storage`) of the apps loaded from now
+    /// on is kept in. `nil`: `nsh/<app id>` in the app's Application Support,
+    /// by the package's id (`nsh/default` for bundles and dev servers), so
+    /// each signed app keeps its own.
+    public var storageDirectory: URL? {
+        didSet {
+            // A file path is always UTF-8, so this cannot fail.
+            try? check(nsh_app_set_storage_directory(app, storageDirectory?.path))
+        }
+    }
+
     /// Grants the apps loaded from now on at most these capabilities: JSON in
     /// the form of `nsh.json`'s `capabilities` (`nil`: what each app
     /// declares). A request must be allowed by both.

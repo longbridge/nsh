@@ -14,6 +14,9 @@
 //!   shows an app's phone layout).
 //! - `--name <name>` names the app (the menu bar, the window title; `nsh
 //!   run` passes the app's name), "nsh" by default.
+//! - `--app-id <id>` sets the application id (`com.example.app`), which
+//!   the app's data (`nsh/storage`) is kept under; `nsh run` passes the
+//!   app's (`nsh.json` `"id"`), so each app keeps its own.
 //!
 //! Without arguments it connects to the dev server on this machine.
 //!
@@ -58,6 +61,11 @@ pub fn main() -> std::process::ExitCode {
                 source = Some(AppSource::Bundle(bundle));
             }
             "--trace" => options.trace = true,
+            "--app-id" => {
+                if let Some(id) = args.next().filter(|id| !id.is_empty()) {
+                    options.app_id = id;
+                }
+            }
             "--name" => {
                 if let Some(name) = args.next().filter(|n| !n.is_empty()) {
                     options.title = name;
