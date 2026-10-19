@@ -60,7 +60,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   `${homeDir}` are resolved from trusted host configuration. Relative roots are anchored at the host plugin
   directory; an unconfigured anchor grants nothing. Read and write grants are separate. Environment visibility
   uses the default metadata-name list in `default-env` (language, time zone, terminal and desktop kind only: no
-  identity, paths or proxies, which can carry credentials), plus explicit case-insensitive `process.env` names
+  identity, paths or proxies, which can carry credentials), plus explicit `process.env` names (matched exactly, ignoring case only on Windows)
   allowed by both policies. `process.exit` requests a host handler and never exits the embedding process itself.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
   budgets, node quota; unset / 0 keeps a default), from the next load; on GPUI `AppOptions::limits` /
