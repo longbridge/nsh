@@ -360,10 +360,10 @@ fn resolve_executable(command: &str) -> Result<PathBuf, String> {
             return Ok(path);
         }
         #[cfg(target_os = "windows")]
-        if candidate.extension().is_none() {
-            if let Ok(path) = executable(&candidate.with_extension("exe")) {
-                return Ok(path);
-            }
+        if candidate.extension().is_none()
+            && let Ok(path) = executable(&candidate.with_extension("exe"))
+        {
+            return Ok(path);
         }
     }
     Err(format!(
