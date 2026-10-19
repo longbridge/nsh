@@ -98,33 +98,41 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         .iter()
         .map(|s| Selector::parse(s))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let bundle = nsh_bundler::bundle(&BundleOptions {
-        entry: entry.to_path_buf(),
-        minify: false,
-        split: false,
-        ui_sets: crate::ui_sets().to_vec(),
-    })
-    .map_err(|e| BuildError::from(e).into_error(entry))?;
-    // Exact numbers: traces are compared.
-    ui::done(format!(
-        "bundled {} {}",
-        ui::path(entry),
-        ui::dim(format!(
-            "({} B in {:.1} ms)",
-            bundle.code.len(),
-            bundle.elapsed_ms
-        ))
-    ));
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, crate::ui_sets())?;
-    // SAFETY: compiled just now by this runtime.
-    let bytecode = unsafe { Bundle::bytecode(bytecode) };
+    let app = if crate::rust_app::is_root(entry) {
+        // A Rust app: its command line was built with the root.
+        let root = crate::root().context("this nsh was not built for a Rust app's root")?;
+        ui::done(format!("mounting the Rust app {}", ui::path(entry)));
+        nsh_engine::App::Rust(root)
+    } else {
+        let bundle = nsh_bundler::bundle(&BundleOptions {
+            entry: entry.to_path_buf(),
+            minify: false,
+            split: false,
+            ui_sets: crate::ui_sets().to_vec(),
+        })
+        .map_err(|e| BuildError::from(e).into_error(entry))?;
+        // Exact numbers: traces are compared.
+        ui::done(format!(
+            "bundled {} {}",
+            ui::path(entry),
+            ui::dim(format!(
+                "({} B in {:.1} ms)",
+                bundle.code.len(),
+                bundle.elapsed_ms
+            ))
+        ));
+        let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, crate::ui_sets())?;
+        // SAFETY: compiled just now by this runtime.
+        let bytecode = unsafe { Bundle::bytecode(bytecode) };
+        nsh_engine::App::Js(match bundle.source_map {
+            Some(map) => bytecode.with_source_map(map),
+            None => bytecode,
+        })
+    };
 
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
-        app: nsh_engine::App::Js(match bundle.source_map {
-            Some(map) => bytecode.with_source_map(map),
-            None => bytecode,
-        }),
+        app,
         viewport: Size::new(options.width, options.height),
         trace: true,
         network: Some(std::sync::Arc::new(crate::net::UreqNetwork::new())),

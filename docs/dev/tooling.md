@@ -294,7 +294,10 @@ toolchain cannot know the sets, so `nsh` builds the app its own (`crates/nsh-cli
   crates' assets only); `nsh run` runs the desktops' runner in debug in place (`NSH_APP_DIR`: its `nsh` directory, and
   the app's logs on stderr), Catalyst's in an app bundle (`NSH_DEVELOPMENT`), and installs a package on the simulator
   and Android; on the web a dev session without builds serves the page. A crate change ends the command with `Restart`
-  (`RustApp::watch`). The other commands refuse a Rust app's entry. `examples/gallery-rs` is one (`"root": "Gallery"`).
+  (`RustApp::watch`). The app's command line has the root too (`cli/main.rs`: `nsh_cli::main_with_root(sets,
+  app_root)`), so `nsh trace` mounts it headless (`nsh_engine::App::Rust`, no bundle), and `nsh build` writes what it
+  ships besides its runners (`app.json` and the crates' assets); neither writes `.nsh/types` for it, which has no
+  TypeScript. The other commands refuse a Rust app's entry. `examples/gallery-rs` is one (`"root": "Gallery"`).
 - The files the sets' crates ship (`Registry::assets(assets!())`: a crate's `assets/` directory, published as
   `asset:/@<package>/<path>`, so each crate's are apart) go with the app's imported assets: the dev server serves them
   (`DevServer::serve_files`), `nsh build` / `package` / `publish` copy them (`build::Built::assets`: each file's path

@@ -113,7 +113,7 @@ nsh dev [ENTRY] [--port <PORT>] [--release]
 nsh trace [ENTRY] [--taps <N>] [--idle-ms <MS>] [--scroll <POINTS>] [--width <W>] [--height <H>]
 ```
 
-以无界面方式运行应用：在 CLI 自己的进程里，使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。
+以无界面方式运行应用：在 CLI 自己的进程里，使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。Rust 应用（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）也以同样方式 trace：挂载它的根组件，没有 bundle。
 
 ```text
 ✓ bundled App.tsx (3255 B in 12.6 ms)
@@ -141,7 +141,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。
+打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。对 Rust 应用（`nsh.json` 的 `"root"`），它构建应用的 crate，并写出 `app.json` 和这些 crate 附带的文件（`assets/`）：它的运行器挂载根组件，因此没有 bundle。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|

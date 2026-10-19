@@ -116,7 +116,7 @@ nsh trace [ENTRY] [--tap <SELECTOR>]... [--taps <N>] [--idle-ms <MS>] [--wait <M
           [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>]
 ```
 
-Runs the app headless, in the CLI's own process with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)).
+Runs the app headless, in the CLI's own process with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)). A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) is traced the same way, with its root mounted and no bundle.
 
 ```text
 ✓ bundled App.tsx (3255 B in 12.6 ms)
@@ -161,7 +161,7 @@ Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> -
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves.
+Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves. For a Rust app (`nsh.json` `"root"`), it builds the app's crates and writes `app.json` and the files they ship (`assets/`): its runners mount the root, so there is no bundle.
 
 | Flag | Default | Description |
 |---|---|---|
