@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -44,6 +44,31 @@ impl MountSink for ChannelSink {
     }
 }
 
+/// The simulated operating system of a headless trace.
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub(crate) enum TraceOs {
+    Ios,
+    Android,
+    Macos,
+    Windows,
+    Linux,
+    Web,
+}
+
+impl TraceOs {
+    fn platform(self) -> nsh_core::platform::Os {
+        use nsh_core::platform::Os;
+        match self {
+            Self::Ios => Os::Ios,
+            Self::Android => Os::Android,
+            Self::Macos => Os::MacOs,
+            Self::Windows => Os::Windows,
+            Self::Linux => Os::Linux,
+            Self::Web => Os::Web,
+        }
+    }
+}
+
 /// What `nsh trace` does after the first render.
 pub(crate) struct TraceOptions {
     /// Taps on the first pressable view (when `tap` is empty).
@@ -65,6 +90,10 @@ pub(crate) struct TraceOptions {
     pub(crate) height: f32,
     /// The simulated safe area insets.
     pub(crate) safe_area: Insets,
+    /// Explicit app data root for integration tests, never the user's default directory.
+    pub(crate) data_dir: Option<PathBuf>,
+    /// Simulated OS; existing traces retain their platform default.
+    pub(crate) os: Option<TraceOs>,
 }
 
 /// Parses `--safe-area <top,right,bottom,left>` (one value: all four).
@@ -117,7 +146,18 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
     ));
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, crate::ui_sets())?;
     // SAFETY: compiled just now by this runtime.
-    let bytecode = unsafe { Bundle::bytecode(bytecode) };
+    let mut bytecode = unsafe { Bundle::bytecode(bytecode) };
+    bytecode.policy = nsh_engine::Policy::development();
+    bytecode.policy.declared = bundle.capabilities.clone();
+    bytecode.app_id = crate::package::app_id(entry).ok();
+    let data_dir = options
+        .data_dir
+        .as_ref()
+        .map(|path| {
+            std::fs::create_dir_all(path)?;
+            std::fs::canonicalize(path)
+        })
+        .transpose()?;
 
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
@@ -133,13 +173,14 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         ))),
         environment: Environment {
             safe_area: options.safe_area,
+            os: options.os.map(TraceOs::platform).unwrap_or_default(),
             ..Default::default()
         },
         header_heights: (44.0, 96.0),
         limits: nsh_engine::Limits::default(),
         ui_sets: crate::ui_sets().to_vec(),
         runtime: None,
-        data_dir: None,
+        data_dir,
         storage: None,
     };
     let control = Arc::new(OnceLock::new());

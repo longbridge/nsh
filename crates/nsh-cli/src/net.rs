@@ -259,3 +259,7 @@ fn run(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "net_fetch_tests.rs"]
+mod fetch_tests;

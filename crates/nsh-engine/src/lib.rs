@@ -59,6 +59,10 @@ const IDLE_GC_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The app an engine runs.
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one app per surface; keep the public constructor API without allocation"
+)]
 pub enum App {
     /// A Rust app: its root component, mounted as the surface's content.
     Rust(Root),
@@ -949,6 +953,14 @@ impl<M: TextEngine + 'static> Driver<M> {
         rx: &Receiver<Message>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
+        let system_data_dir = config
+            .data_dir
+            .as_ref()
+            .map(|root| root.join(app_dir_name(config.app.app_id())));
+        let system_tx = tx.clone();
+        let system_wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let _ = system_tx.send(Message::Wake);
+        });
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(match &config.app {
             App::Js(bundle) => bundle.policy.access(),
@@ -1068,6 +1080,11 @@ impl<M: TextEngine + 'static> Driver<M> {
                     text_engine,
                     stop,
                     sink,
+                    script::SystemConfig {
+                        access: (*access).clone(),
+                        data_dir: system_data_dir,
+                        wake: system_wake,
+                    },
                 )?;
                 driver.script = Some(script);
                 eval_us
@@ -1091,6 +1108,11 @@ impl<M: TextEngine + 'static> Driver<M> {
             if !handle(script, state, message) {
                 return None;
             }
+        }
+        // Workers may finish while the first bundle evaluates. Deliver their
+        // completions even when the startup drain already consumed their wakeup.
+        if let Some(script) = script {
+            script.run_system();
         }
         state.load_fonts(script, assets.as_deref(), &**sink);
         if let Some(batch) = state.commit(script) {
@@ -1153,6 +1175,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                 script.hot_update(update, &**sink);
             }
             script.run_timers(Instant::now());
+            script.run_system();
         }
         state.core.run_component_tasks();
         // What JS timers and Rust component tasks took; a Rust component

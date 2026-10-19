@@ -133,6 +133,13 @@ enum Command {
         /// Viewport height in points.
         #[arg(long, default_value_t = 844.0)]
         height: f32,
+        /// Isolated root for this trace's app data, storage and native file APIs.
+        /// Without this flag, trace uses memory-only storage and no filesystem data root.
+        #[arg(long, value_name = "DIR")]
+        data_dir: Option<PathBuf>,
+        /// Simulated operating system; desktop system APIs also require a compatible host.
+        #[arg(long, value_enum)]
+        os: Option<trace::TraceOs>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -449,6 +456,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             scroll,
             width,
             height,
+            data_dir,
+            os,
         } => trace::trace(
             &entry,
             trace::TraceOptions {
@@ -460,6 +469,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 scroll,
                 width,
                 height,
+                data_dir,
+                os,
                 safe_area: safe_area.unwrap_or_default(),
             },
         ),

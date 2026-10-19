@@ -34,6 +34,10 @@ impl NativeModules {
                 .collect(),
             ..Self::default()
         };
+        for name in nsh_core::js::STANDARD_MODULES {
+            out.specifiers.insert((*name).to_owned());
+            out.specifiers.insert(format!("node:{name}"));
+        }
         for r in nsh_core::runtime::registries().iter().chain(ui_sets) {
             let Some(spec) = r.specifier() else {
                 continue;

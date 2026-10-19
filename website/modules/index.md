@@ -37,6 +37,8 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/image` | `Image` (the element), `Image.getSize`, `Image.prefetch` | [nsh/image](./nsh-image.md) |
 | `nsh/clipboard` | `Clipboard.setString`, `Clipboard.getString`, `Clipboard.hasString` | [nsh/clipboard](./nsh-clipboard.md) |
 | `nsh/storage` | `Storage.getItem`, `Storage.setItem`, `Storage.removeItem`, `Storage.getAllKeys`, `Storage.clear` | [nsh/storage](./nsh-storage.md) |
+| `nsh/process` | `isAvailable`, `Process.spawn`, `Process.run` | [nsh/process](./nsh-process.md) |
+| `nsh/fs` | `isAvailable`, `FileSystem.appDataDir`, `readText`, `writeText`, `mkdir`, `exists`, `rename`, `remove` | [nsh/fs](./nsh-fs.md) |
 | `nsh/keymap` | `keymap.bind` (keyboard shortcuts: `mod+k`, `ctrl+shift+p`, ...) | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent` (components the embedding app registers) | [nsh/native](./nsh-native.md) |
 | `nsh/accessibility` | `AccessibilityInfo`, `screenReaderEnabled`, `reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
@@ -46,6 +48,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/webview` | `WebView` | [nsh/webview](./nsh-webview.md) |
 | `nsh/video` | `Video` | [nsh/video](./nsh-video.md) |
 | `nsh/ui/mobile` | Navigation (`createNavigator`, `Stack`, `Screen`, `Modal`), `SafeAreaView`, `StatusBar`, `Alert`, `ActionSheet`, `Keyboard`, `Button`, `TextField`, ... | [Components](../components/index.md) |
+| Standard modules | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder`, `process`, `fs`, `fs/promises`, `net`, `websocket` | [Standard modules](./standard-modules.md) |
 | Globals | `fetch`, `URL`, `TextEncoder`, `Blob`, `FormData`, `AbortController`, `Intl`, timers, `console`, `requestAnimationFrame`, ... (no import) | [Global APIs](./globals.md) |
 
 Reference pages that are not modules:

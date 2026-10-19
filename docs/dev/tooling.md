@@ -186,6 +186,12 @@ then text), the first match in tree order below the root, or its nearest pressab
 animations end: before the taps the app must be quiet for `--idle-ms` (at most 10 s), after each tap for 100 ms (also
 at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` keeps running after the last tap.
 `--safe-area <top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
+`--os ios|android|macos|windows|linux|web` selects the environment's OS (default unchanged: iOS). It does not
+change the actual native target: process APIs also require a desktop native host. `--data-dir` does not change OS.
+Trace passes the built app id and capability declaration into the engine. `--data-dir <dir>` supplies an explicit
+filesystem data root, with per-app isolation below it; otherwise data stays in memory and native filesystem APIs
+have no data directory. Process execution and filesystem operations require explicit manifest grants; trace keeps
+the same checks as desktop hosts. Use a dedicated root for repeatable tests instead of everyday app data.
 
 ## Rust application projects (`nsh init --rust`)
 

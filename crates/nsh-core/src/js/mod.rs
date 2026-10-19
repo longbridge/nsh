@@ -34,7 +34,33 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/list",
     "nsh/image",
     "nsh/keymap",
+    "nsh/process",
+    "nsh/fs",
 ];
+
+/// Standard modules available in the same VM, with optional `node:` import aliases.
+/// Privileged entries route through NSH capability adapters.
+pub const STANDARD_MODULES: &[&str] = &[
+    "buffer",
+    "crypto",
+    "path",
+    "url",
+    "zlib",
+    "events",
+    "assert",
+    "util",
+    "string_decoder",
+    "process",
+    "fs",
+    "fs/promises",
+    "net",
+    "websocket",
+];
+
+/// Whether a module is a standard builtin with an accepted canonical spelling.
+pub fn is_standard_module(name: &str) -> bool {
+    STANDARD_MODULES.contains(&name.strip_prefix("node:").unwrap_or(name))
+}
 
 /// The module name of an app's bundle (its entry chunk): stack traces show
 /// `bundle.js:LINE:COL`, and the chunks of a split bundle import it as

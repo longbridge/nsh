@@ -38,6 +38,21 @@ nsh trace App.tsx
 | `--scroll <points>` | 无 | 将第一个滚动视图或列表滚动这么多点，每帧 10 pt，并打印每一帧的批次。 |
 | `--width <points>` | 390 | 视口宽度。 |
 | `--height <points>` | 844 | 视口高度。 |
+| `--data-dir <DIR>` | | 为此次运行设置显式磁盘数据根目录；默认使用内存数据。 |
+| `--os <OS>` | `ios` | 模拟 `ios`、`android`、`macos`、`windows`、`linux` 或 `web`；影响平台 API 和属性的选择。 |
+
+
+## 隔离磁盘数据
+
+使用显式数据根目录验证原生文件读写：
+
+```sh
+nsh trace App.tsx --os linux --data-dir "$HOME/.cache/my-app-trace" --taps 0
+```
+
+运行时在该根目录下按应用 id 隔离数据，`${dataDir}` 授权仍由应用声明与宿主配置决定。选择专用于测试的目录，避免改写日常应用数据。默认情况下 trace 使用内存数据，原生文件操作需要显式的 `--data-dir` 根目录。
+
+`--os linux` 选择 Linux 平台环境；`--data-dir` 本身不会改变平台。进程等平台 API 还要求实际原生宿主支持该能力；模拟平台不能让移动端或浏览器宿主获得桌面进程能力。
 
 ## 读懂输出
 
@@ -183,8 +198,8 @@ jobs:
 这些计数是确定的；共享 CI 机器上的耗时则不是。
 
 > [!NOTE]
-> `nsh trace` 以全部能力运行：它不应用 `nsh.json` 中的 `capabilities`，其中的 `fetch` 也会真的访问网络。能力规则请在
-> 设备上或打包后的构建中测试。
+> `nsh trace` 会应用构建产物中的应用 id 和 `nsh.json` 能力声明。`fetch` 会按网络授权实际访问网络；
+> 进程和文件操作需要显式授权，与桌面宿主中的规则相同。
 
 ## 用于 UI 测试的 `testID`
 

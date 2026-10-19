@@ -25,10 +25,12 @@ trusted: every limit and check is enforced in Rust, never in JS.
   libraries such as axios. Hot updates are evaluated from Rust and need none of it.
 - **Capabilities** (`nsh_core::access`): an app declares what it may reach in `nsh.json` `"capabilities"` — `network`
   (`hosts`: `*`, `*.example.com` or a host, any method; `http`: a host with `methods` / `schemes` / `pathPrefix`),
-  `webview` (`hosts` a web view may show and navigate to), `statusBar`, `clipboard` (`nsh/clipboard`: reading and
+  `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths), `fs` (`read` / `write`: absolute roots or
+  `${dataDir}` roots, expanded from the host-provided app data directory), `clipboard` (`nsh/clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
-  are build errors; an app without the key may do everything (a standalone app is its developer's own). The embedding app
+  are build errors; an app without the key retains unrestricted network, webview, status bar and clipboard access.
+  Process execution and filesystem access always require explicit declarations, including standalone apps. The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
   `nsh build` / `nsh package`; the dev protocol's `Bundle` message, so development enforces the same capabilities; a change
@@ -40,9 +42,21 @@ trusted: every limit and check is enforced in Rust, never in JS.
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
+- **Desktop system APIs**: `nsh/process` and `nsh/fs` check the intersection of the declaration and the optional host
+  grant in Rust. Process commands match exactly: a grant for `codex` grants that command, while `/usr/bin/codex`
+  requires its own entry. The runtime launches the executable directly with an argument array. Filesystem checks
+  reject traversal and canonicalize the nearest existing ancestor before checking containment in each granted root,
+  including symlinks and paths whose final components will be created. `${dataDir}` is resolved from trusted
+  host configuration, never from a directory supplied by JS. Read and write grants are separate.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
   budgets, node quota; unset / 0 keeps a default), from the next load; on GPUI `AppOptions::limits` /
   `AppView::set_limits` (a whole `Limits`), likewise from the next load.
 
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).
+
+Standard networking: global `fetch` keeps engine checks and redirect handling. Native `WebSocket` checks GET
+permission before DNS, mapping ws/wss to http/https for existing scheme grants; its handshake rejects redirects.
+Raw TCP `net.connect` requires `network.hosts` (all valid ports on a granted host); HTTP path/method grants
+cannot authorize raw sockets. Standard `fs` and `process` route through the same checked native dispatchers
+as `nsh/fs` and `nsh/process`. See `website/modules/standard-modules.md` for the bounded public surface.

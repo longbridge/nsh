@@ -38,6 +38,8 @@ mod rust_touch;
 mod shutdown;
 mod split;
 mod storage;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod system;
 mod theme;
 
 /// Hands the engine's batches to the test.

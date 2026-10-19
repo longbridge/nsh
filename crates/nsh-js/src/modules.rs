@@ -25,10 +25,10 @@ use nsh_core::{
     decl,
     ui::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry},
 };
-use rquickjs::qjs;
+use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
 use crate::{
-    animated, canvas, components, desktop, dom, env, keymap, list, platform_modules,
+    animated, canvas, components, desktop, dom, env, fs, keymap, list, platform_modules, process,
     reactive::{self, Native},
     touch,
 };
@@ -326,6 +326,16 @@ pub(crate) const MODULES: &[NativeModule] = &[
         exports: keymap::EXPORTS,
         types: decl!(keymap::TYPES),
     },
+    NativeModule {
+        name: "nsh/process",
+        exports: process::EXPORTS,
+        types: decl!(process::TYPES),
+    },
+    NativeModule {
+        name: "nsh/fs",
+        exports: fs::EXPORTS,
+        types: decl!(fs::TYPES),
+    },
 ];
 
 /// `nsh/image`: `Image`, the image element as a component carrying the
@@ -460,12 +470,94 @@ impl ModuleTable {
     }
 }
 
-/// Makes runtime `rt` load the modules of `table` (which outlives it).
-pub(crate) fn set_loader(rt: *mut qjs::JSRuntime, table: *const ModuleTable) {
-    // SAFETY: a plain C loader; the default name normalization keeps bare
-    // specifiers as they are.
-    unsafe {
-        qjs::JS_SetModuleLoaderFunc(rt, None, Some(load), table as *mut c_void);
+/// The table is owned by State (or the bytecode compiler), and outlives
+/// every module load. No JS values are kept in this context-local handle.
+#[derive(Clone, Copy, JsLifetime)]
+struct ModuleTablePtr(*const ModuleTable);
+
+pub(crate) fn install(ctx: &Ctx<'_>, table: *const ModuleTable) {
+    assert!(ctx.store_userdata(ModuleTablePtr(table)).is_ok());
+}
+
+pub(crate) struct Resolver;
+impl rquickjs::loader::Resolver for Resolver {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<rquickjs::loader::ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
+        if let Some(name) = crate::standard::normalize(name) {
+            return Ok(name.to_owned());
+        }
+        Ok(normalize_chunk(base, name))
+    }
+}
+
+// Match QuickJS's default normalization: preserve bare names and only
+// consume leading ./ and ../ relative to the importing module's directory.
+fn normalize_chunk(base: &str, name: &str) -> String {
+    if !name.starts_with('.') {
+        return name.to_owned();
+    }
+    let mut directory = base.rsplit_once('/').map_or("", |(dir, _)| dir);
+    let mut rest = name;
+    loop {
+        if let Some(next) = rest.strip_prefix("./") {
+            rest = next;
+        } else if let Some(next) = rest.strip_prefix("../") {
+            let last = directory.rsplit('/').next().unwrap_or("");
+            if directory.is_empty() || matches!(last, "." | "..") {
+                break;
+            }
+            directory = directory.rsplit_once('/').map_or("", |(dir, _)| dir);
+            rest = next;
+        } else {
+            break;
+        }
+    }
+    if directory.is_empty() {
+        rest.to_owned()
+    } else {
+        format!("{directory}/{rest}")
+    }
+}
+
+pub(crate) struct Loader;
+impl rquickjs::loader::Loader for Loader {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<rquickjs::loader::ImportAttributes<'js>>,
+    ) -> rquickjs::Result<Module<'js>> {
+        if let Some(name) = crate::standard::normalize(name) {
+            return crate::standard::load(ctx, name);
+        }
+        // SAFETY: the thunk uses this live context's registered table and
+        // returns exactly the module created by the existing native loader.
+        unsafe { Module::from_load_fn(ctx.clone(), name, load_native) }
+    }
+}
+
+unsafe extern "C" fn load_native(
+    raw: *mut JsContext,
+    name: *const c_char,
+) -> *mut qjs::JSModuleDef {
+    // SAFETY: called by Module::from_load_fn while its runtime is locked;
+    // the temporary Ctx never escapes this callback.
+    let ctx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+    let table = ctx.userdata::<ModuleTablePtr>().map(|table| table.0);
+    match table {
+        // SAFETY: install's owner keeps the table alive through this load.
+        Some(table) => unsafe { load(raw, name, table as *mut c_void) },
+        None => {
+            unsafe {
+                qjs::JS_ThrowInternalError(raw, c"native module table is not installed".as_ptr());
+            }
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -475,7 +567,7 @@ unsafe extern "C" fn load(
     opaque: *mut c_void,
 ) -> *mut qjs::JSModuleDef {
     // SAFETY: QuickJS passes a NUL-terminated module name; the table is the
-    // one `set_loader` was given.
+    // one `install` registered for this context.
     let (cname, table) = unsafe { (CStr::from_ptr(name), &*(opaque as *const ModuleTable)) };
     let exports = cname.to_str().ok().and_then(|n| table.exports(n));
     // Taken first: compiling it loads its imports, here again.
@@ -497,7 +589,7 @@ unsafe extern "C" fn load(
         unsafe {
             qjs::JS_ThrowReferenceError(
                 ctx,
-                c"could not load module '%s' (only nsh's own modules can be imported at run time)"
+                c"could not load module '%s' (only registered native modules and bundle chunks can be imported at run time)"
                     .as_ptr(),
                 name,
             )
@@ -622,5 +714,25 @@ mod tests {
     fn nshs_own_modules_are_the_ones_the_bundler_knows() {
         let names: Vec<&str> = super::MODULES.iter().map(|m| m.name).collect();
         assert_eq!(names, nsh_core::js::NATIVE_MODULES);
+    }
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::normalize_chunk;
+
+    #[test]
+    fn relative_chunks_keep_quickjs_default_resolution() {
+        assert_eq!(normalize_chunk("bundle.js", "./chunk.js"), "chunk.js");
+        assert_eq!(normalize_chunk("a/b/main.js", "../chunk.js"), "a/chunk.js");
+        assert_eq!(
+            normalize_chunk("a/main.js", "../../chunk.js"),
+            "../chunk.js"
+        );
+        assert_eq!(normalize_chunk("a/main.js", "nsh/device"), "nsh/device");
+        assert_eq!(
+            normalize_chunk("a/main.js", "./x/../chunk.js"),
+            "a/x/../chunk.js"
+        );
     }
 }

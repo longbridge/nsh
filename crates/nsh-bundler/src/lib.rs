@@ -75,3 +75,6 @@ mod tests {
         assert!(!err.contains('\u{1b}'), "{err}");
     }
 }
+
+#[cfg(all(test, feature = "bundle"))]
+mod standard_tests;

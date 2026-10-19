@@ -109,7 +109,7 @@ Use it with hosts you start yourself, for example an app that embeds the develop
 
 ```sh
 nsh trace [ENTRY] [--tap <SELECTOR>]... [--taps <N>] [--idle-ms <MS>] [--wait <MS>] [--duration <MS>]
-          [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>]
+          [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>] [--data-dir <DIR>] [--os <OS>]
 ```
 
 Runs the app headless, in the CLI's own process with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)).
@@ -135,8 +135,10 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 | `--scroll <POINTS>` | | Scrolls the first scroll view or list by this many points, 10 points per frame, and prints each frame's batch. |
 | `--width <W>` | `390` | Viewport width in points. |
 | `--height <H>` | `844` | Viewport height in points. |
+| `--data-dir <DIR>` | | Use an explicit on-disk data root for this run; defaults to in-memory data. |
+| `--os <OS>` | `ios` | Simulate `ios`, `android`, `macos`, `windows`, `linux` or `web`; selects platform APIs and props. |
 
-`nsh trace` behaves as iOS: `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
+`nsh trace` defaults to iOS: `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply. Select another platform with `--os`. `--data-dir` selects only the data root; platform APIs also require support from the actual native host.
 
 ## nsh check
 

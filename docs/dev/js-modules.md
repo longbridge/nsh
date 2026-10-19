@@ -39,6 +39,8 @@ globals.
 | `nsh/gesture` | `PanResponder` | `touch.rs` |
 | `nsh/clipboard` | `Clipboard.setString(text)`, `Clipboard.getString()` / `hasString()` (promises the core resolves from the root's `Clipboard` event; `hasString` does not read the text, so iOS shows no paste notice); UIPasteboard, ClipboardManager, `navigator.clipboard`; the `clipboard` capability | its registry (`nsh_core::runtime`) |
 | `nsh/storage` | `Storage.getItem` / `setItem` / `removeItem` / `getAllKeys` / `clear` (async functions of the core; the entries live in memory in `nsh_core::storage`, loaded once from the platform's `StorageBackend` (`EngineConfig::storage`: `nsh_engine::FileStorage::open` in `<EngineConfig::data_dir>/<app id>` (the id travels with the app: `app.json`, the dev server, packages, `Root::app_id`), one per file in the process so a reload reads unflushed writes; a damaged file is set aside as `storage.json.corrupt`, an unreadable one leaves the changes in memory, never replacing it; `localStorage` under `nsh:<app id>:` on the web) and every change handed to it; 5 MB quota; no capability: the app's own data, kept where the host says) | its registry (`nsh_core::runtime`) |
+| `nsh/process` | `isAvailable`, `Process.spawn` / `run`: desktop child processes with native stdio events, stdin and termination; explicit `process.execute` capability | `process.rs` |
+| `nsh/fs` | `isAvailable`, `FileSystem.appDataDir` / `readText` / `writeText` / `mkdir` / `exists` / `rename` / `remove`: desktop text files within explicit `fs.read` / `fs.write` roots | `fs.rs` |
 | `nsh/keymap` | `keymap.bind(keystroke, handler, { when, repeat })` / `keymap.bind({ keystroke: handler })`: keyboard shortcuts. Keystrokes are parsed and checked in Rust (`nsh_core::keymap`: syntax, `mod`, reserved keystrokes, which ones text inputs keep); the whole table goes to the platform as the root's `Prop::Keymap` → `MountItem::Keymap`, which matches keys on the spot and reports the root's `KeyCommand` event (the binding's id). Bindings made under an owner go with it; a module's top-level ones are undone when hot module replacement runs it again (`hot::undo_on_rerun`) | `keymap.rs` |
 | `nsh/webview`, `nsh/video` | `WebView`, `Video` | `platform_modules.rs` |
 | `nsh/native` | `nativeComponent(name, { props, events })`: a component for a native component the embedding app registered | `platform_modules.rs` |
@@ -79,3 +81,11 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
 - Something only one platform has: `nsh/ios` / `nsh/android`, or a prop in `ios={{…}}` / `android={{…}}` /
   `desktop={{…}}`.
 - Never a compatibility re-export when something moves, never a React Native compatibility wrapper.
+
+## Pinned standard modules
+
+`standard/mod.rs` loads the explicit `nsh_core::js::STANDARD_MODULES` list, with one optional `node:` alias.
+LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs` projects
+actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `process`, `fs`, `net`
+and `websocket` adapters share the owning VM and NSH capability checks. Existing WHATWG constructors retain
+their identities. This is a bounded standard-module subset, not a complete Node.js runtime.

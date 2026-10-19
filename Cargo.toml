@@ -68,6 +68,7 @@ flate2 = "1"
 tar = { version = "0.4", default-features = false }
 base64 = "0.22"
 getrandom = "0.3"
+getrandom04 = { package = "getrandom", version = "0.4" }
 slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
@@ -136,7 +137,21 @@ taffy = { version = "0.15", default-features = false, features = ["std", "taffy_
 tokio = { version = "1", default-features = false }
 
 # `full` is avoided on purpose: it enables `dyn-load` (dlopen2), which does not build for iOS / Catalyst.
-rquickjs = { version = "=0.14.0", default-features = false, features = ["std"] }
+rquickjs = { version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "array-buffer", "macro"] }
+
+# Standard library modules share NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
+llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_crypto = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_path = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_url = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_events = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_assert = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_util = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_string_decoder = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
+llrt_zlib = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d", default-features = false, features = ["compression-rust"] }
+cap-std = "4.0.3"
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
 rolldown = "=1.2.13"
 rolldown_common = "=1.2.13"
@@ -417,3 +432,7 @@ strip = true
 panic = "abort"
 [profile.web.package.rquickjs-sys]
 opt-level = 3
+
+# Pinned LLRT utilities need a non-native signal fallback for WebAssembly.
+[patch."https://github.com/awslabs/llrt"]
+llrt_utils = { path = "third_party/llrt-utils" }

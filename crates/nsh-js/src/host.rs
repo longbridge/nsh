@@ -13,7 +13,8 @@ use nsh_core::{
     platform::Environment, time::Instant,
 };
 use rquickjs::{
-    CatchResultExt, Context, Ctx, Function, Module, Persistent, Runtime, Value, function::Opt, qjs,
+    AsyncRuntime, CatchResultExt, Ctx, Function, Module, Persistent, Promise, Value, function::Opt,
+    qjs,
 };
 
 use crate::{
@@ -22,6 +23,7 @@ use crate::{
     net::{FetchEvent, NetworkQueue, RequestId},
     protocol::Warnings,
     sandbox::{self, Budget, Phase},
+    standard::scheduler::{Context, Scheduler},
     timers::Timers,
     web,
 };
@@ -40,6 +42,11 @@ pub(crate) struct Shared {
     /// Native animation nodes and composites collected meanwhile.
     pub(crate) animation_releases: RefCell<Vec<nsh_animation::AnimationOp>>,
     timers: RefCell<Timers>,
+    /// Permissions and host-selected app directory for native system operations.
+    pub(crate) system_access: RefCell<nsh_core::access::Access>,
+    pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
+    /// Worker completion wakes the owning engine without polling.
+    pub(crate) system_wake: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub(crate) warnings: RefCell<Warnings>,
     pub(crate) net: RefCell<NetworkQueue>,
     /// Requests whose response bodies were collected unread (finalizers
@@ -74,12 +81,14 @@ pub type TextMeasurer = Box<dyn Fn(&nsh_core::canvas::CanvasFont, &str) -> f32>;
 pub struct Host {
     // Field order matters: the context must drop before the runtime.
     ctx: Context,
-    rt: Runtime,
+    rt: AsyncRuntime,
+    scheduler: Rc<Scheduler>,
     /// Set by the heap's allocator when it refuses an allocation.
     exhausted: Arc<AtomicBool>,
     shared: Rc<Shared>,
     on_error: Option<ErrorHandler>,
     budget: Budget,
+    evaluations: RefCell<Vec<Persistent<Promise<'static>>>>,
 }
 
 /// A context with `JS_NewContext`'s intrinsics. With feature
@@ -87,10 +96,10 @@ pub struct Host {
 /// function constructors, `Module::declare`): nothing then reaches QuickJS'
 /// parser and compiler, which the linker leaves out, and the VM runs
 /// bytecode only (the web runtime of published apps).
-fn new_context(rt: &Runtime) -> rquickjs::Result<Context> {
+fn new_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Context> {
     #[cfg(not(feature = "bytecode-only"))]
     {
-        Context::full(rt)
+        Context::full(rt, scheduler)
     }
     #[cfg(feature = "bytecode-only")]
     {
@@ -107,7 +116,7 @@ fn new_context(rt: &Runtime) -> rquickjs::Result<Context> {
             Promise,
             WeakRef,
             Performance,
-        )>(rt)?;
+        )>(rt, scheduler)?;
         // SAFETY: a new, live context; rquickjs has no intrinsic for it.
         ctx.with(|ctx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(ctx.as_raw().as_ptr()) });
         Ok(ctx)
@@ -155,12 +164,15 @@ impl Host {
         // The allocator enforces the heap limit (`set_memory_limit` does
         // nothing with one) and tells when it was reached.
         let (allocator, exhausted) = sandbox::HeapAllocator::new(limits.memory_bytes);
-        let rt = Runtime::new_with_alloc(allocator)?;
+        let scheduler = Scheduler::new()
+            .map_err(|e| JsError::new(format!("cannot start JS I/O scheduler: {e}")))?;
+        let rt = AsyncRuntime::new_with_alloc(allocator)?;
+        scheduler.ready(rt.set_loader(crate::modules::Resolver, crate::modules::Loader));
         // The engine thread is spawned with a larger stack; keep a margin.
-        rt.set_max_stack_size(limits.stack_bytes);
+        scheduler.ready(rt.set_max_stack_size(limits.stack_bytes));
         let budget = Budget::new(limits);
-        rt.set_interrupt_handler(Some(budget.interrupt_handler(None)));
-        let ctx = new_context(&rt)?;
+        scheduler.ready(rt.set_interrupt_handler(Some(budget.interrupt_handler(None))));
+        let ctx = new_context(&rt, scheduler.clone())?;
         let shared = Rc::new(Shared {
             limits,
             ..Shared::default()
@@ -177,6 +189,7 @@ impl Host {
                 .as_deref()
                 .and_then(|u| url::Url::parse(u).ok());
             install(&ctx, &shared)?;
+            crate::standard::install(&ctx)?;
             if options.harden {
                 match &options.harden_bytecode {
                     // SAFETY: trusted, per the option's contract.
@@ -190,18 +203,22 @@ impl Host {
         Ok(Host {
             ctx,
             rt,
+            scheduler,
             exhausted,
             shared,
             on_error: None,
             budget,
+            evaluations: RefCell::new(Vec::new()),
         })
     }
 
     /// Aborts running JS (with an uncatchable exception) once `stop` is
     /// set: an engine shutting down never waits for a long-running script.
     pub fn set_stop_flag(&self, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) {
-        self.rt
-            .set_interrupt_handler(Some(self.budget.interrupt_handler(Some(stop))));
+        self.scheduler.ready(
+            self.rt
+                .set_interrupt_handler(Some(self.budget.interrupt_handler(Some(stop)))),
+        );
     }
 
     /// Why the VM was stopped, if it was: it ran out of memory, or the app
@@ -213,6 +230,7 @@ impl Host {
     /// Stops the VM (e.g. the core refused an op over a quota).
     pub fn stop(&self, reason: String) {
         self.shared.stop(reason);
+        self.scheduler.disable();
     }
 
     /// The VM's limits.
@@ -271,22 +289,103 @@ impl Host {
         self.on_error = Some(handler);
     }
 
+    /// Actual native module exports for declaration generation. This evaluates
+    /// trusted module initializers only, without running user bundles or jobs.
+    #[cfg(not(feature = "bytecode-only"))]
+    pub(crate) fn standard_exports(&self) -> Result<Vec<(String, Vec<String>)>, JsError> {
+        self.guarded(Phase::Load, || {
+            self.ctx
+                .with(|ctx| {
+                    crate::standard::NAMES
+                        .iter()
+                        .map(|name| {
+                            let module = crate::standard::load(&ctx, name)
+                                .catch(&ctx)
+                                .map_err(JsError::caught)?;
+                            let (module, promise) =
+                                module.eval().catch(&ctx).map_err(JsError::caught)?;
+                            if let Some(result) = promise.result::<()>() {
+                                result.catch(&ctx).map_err(JsError::caught)?;
+                            }
+                            let namespace =
+                                module.namespace().catch(&ctx).map_err(JsError::caught)?;
+                            let mut exports = namespace
+                                .keys::<String>()
+                                .collect::<rquickjs::Result<Vec<_>>>()
+                                .catch(&ctx)
+                                .map_err(JsError::caught)?;
+                            exports.sort();
+                            Ok(((*name).to_owned(), exports))
+                        })
+                        .collect::<Result<Vec<(String, Vec<String>)>, JsError>>()
+                })
+                .map_err(|error| self.classify(error))
+        })
+        .unwrap_or_else(|| Err(self.stopped()))
+    }
+
+    #[cfg(feature = "bytecode-only")]
+    pub(crate) fn standard_exports(&self) -> Result<Vec<(String, Vec<String>)>, JsError> {
+        Ok(Vec::new())
+    }
+
     /// Evaluates a bundle given as source.
     pub fn eval_source(&self, source: &str) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
-            self.ctx
-                .with(|ctx| -> Result<(), JsError> {
+            let promise = self
+                .ctx
+                .with(|ctx| -> Result<_, JsError> {
                     let module = Module::declare(ctx.clone(), crate::BUNDLE_NAME, source)
                         .catch(&ctx)
                         .map_err(JsError::caught)?;
                     let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
-                    promise.finish::<()>().catch(&ctx).map_err(JsError::caught)
+                    Ok(Persistent::save(&ctx, promise))
                 })
                 .map_err(|e| self.classify(e))?;
-            self.run_jobs();
-            Ok(())
+            self.finish_evaluation(promise)
         })
         .unwrap_or_else(|| Err(self.stopped()))
+    }
+
+    /// Poll native work outside the context lock. A module awaiting I/O remains
+    /// owned by the VM and resumes on its engine wake, without blocking input.
+    fn finish_evaluation(&self, promise: Persistent<Promise<'static>>) -> Result<(), JsError> {
+        self.run_jobs();
+        let result = self.ctx.with(|ctx| {
+            let restored = promise
+                .clone()
+                .restore(&ctx)
+                .map_err(|e| JsError::from_engine(&ctx, e))?;
+            Ok::<_, JsError>(
+                restored
+                    .result::<()>()
+                    .map(|r| r.catch(&ctx).map_err(JsError::caught)),
+            )
+        })?;
+        match result {
+            Some(result) => result.map_err(|e| self.classify(e)),
+            None => {
+                self.evaluations.borrow_mut().push(promise);
+                Ok(())
+            }
+        }
+    }
+
+    fn settle_evaluations(&self) {
+        let pending = self.evaluations.take();
+        for promise in pending {
+            let result = self.ctx.with(|ctx| match promise.clone().restore(&ctx) {
+                Ok(promise) => promise
+                    .result::<()>()
+                    .map(|r| r.catch(&ctx).map_err(JsError::caught)),
+                Err(error) => Some(Err(JsError::from_engine(&ctx, error))),
+            });
+            match result {
+                Some(Err(error)) => self.uncaught(&error),
+                Some(Ok(())) => {}
+                None => self.evaluations.borrow_mut().push(promise),
+            }
+        }
     }
 
     /// Evaluates a classic script named `name` (for stack traces) and
@@ -317,19 +416,19 @@ impl Host {
     /// Evaluates a bundle compiled with [`crate::compile_bytecode`].
     pub fn eval_bytecode(&self, bytecode: &[u8]) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
-            self.ctx
-                .with(|ctx| -> Result<(), JsError> {
+            let promise = self
+                .ctx
+                .with(|ctx| -> Result<_, JsError> {
                     // SAFETY: bytecode comes from `compile_bytecode` with the same
                     // QuickJS build; QuickJS does not validate arbitrary input.
                     let module = unsafe { Module::load(ctx.clone(), bytecode) }
                         .catch(&ctx)
                         .map_err(JsError::caught)?;
                     let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
-                    promise.finish::<()>().catch(&ctx).map_err(JsError::caught)
+                    Ok(Persistent::save(&ctx, promise))
                 })
                 .map_err(|e| self.classify(e))?;
-            self.run_jobs();
-            Ok(())
+            self.finish_evaluation(promise)
         })
         .unwrap_or_else(|| Err(self.stopped()))
     }
@@ -498,6 +597,49 @@ impl Host {
         );
     }
 
+    /// Sets native system permissions and the app-specific trusted data directory.
+    /// Process and file access require explicit grants, including in standalone apps.
+    pub fn set_system_access(
+        &self,
+        access: nsh_core::access::Access,
+        data_dir: Option<std::path::PathBuf>,
+    ) {
+        *self.shared.system_access.borrow_mut() = access;
+        *self.shared.system_data_dir.borrow_mut() = data_dir;
+    }
+
+    /// Wakes this host's engine when a process or filesystem worker produces an event.
+    pub fn set_system_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.scheduler.set_wake(wake.clone());
+        *self.shared.system_wake.borrow_mut() = Some(wake);
+    }
+
+    /// Delivers queued native process and file events, then drains resulting promise jobs.
+    pub fn run_system(&self) {
+        self.guarded(Phase::Call, || {
+            self.ctx.with(|ctx| {
+                let raw = ctx.as_raw().as_ptr();
+                crate::process::pump(raw);
+                crate::fs::pump(raw);
+            });
+            self.run_jobs();
+        });
+    }
+
+    /// Whether native process or filesystem work is still owned by this VM.
+    /// Workers wake the engine; this predicate does not schedule polling.
+    pub fn has_system_tasks(&self) -> bool {
+        if self.fatal().is_some() {
+            return false;
+        }
+        !self.evaluations.borrow().is_empty()
+            || self.scheduler.ready(self.rt.is_job_pending())
+            || self.ctx.with(|ctx| {
+                let raw = ctx.as_raw().as_ptr();
+                crate::process::has_pending(raw) || crate::fs::has_pending(raw)
+            })
+    }
+
     /// Earliest timer deadline, if any timer is pending.
     pub fn next_timer(&self) -> Option<Instant> {
         self.shared.timers.borrow_mut().next_deadline()
@@ -527,16 +669,26 @@ impl Host {
     /// Runs pending promise jobs and microtasks until the queue is empty.
     pub fn run_jobs(&self) {
         self.guarded(Phase::Call, || {
-            while self.rt.is_job_pending() {
-                if let Err(err) = self.rt.execute_pending_job() {
-                    let err = err.0.with(|ctx| {
-                        let caught = ctx.catch();
-                        let mut err = JsError::new(describe(caught.clone()));
-                        err.null = caught.is_null();
-                        err
-                    });
-                    self.uncaught(&err);
+            loop {
+                match self.scheduler.poll_job(&self.rt) {
+                    std::task::Poll::Ready(Ok(true)) => {}
+                    std::task::Poll::Ready(Ok(false)) | std::task::Poll::Pending => break,
+                    std::task::Poll::Ready(Err(err)) => {
+                        let err = self.scheduler.ready(err.with(|ctx| {
+                            let caught = ctx.catch();
+                            let mut err = JsError::new(describe(caught.clone()));
+                            err.null = caught.is_null();
+                            err
+                        }));
+                        self.uncaught(&err);
+                        if self.fatal().is_some() {
+                            break;
+                        }
+                    }
                 }
+            }
+            if self.fatal().is_none() {
+                self.settle_evaluations();
             }
         });
     }
@@ -692,14 +844,14 @@ impl Host {
 
     /// The number of live JS objects (diagnostics: leak checks).
     pub fn object_count(&self) -> i64 {
-        self.rt.memory_usage().obj_count
+        self.scheduler.ready(self.rt.memory_usage()).obj_count
     }
 
     /// Runs the cycle collector. Call when idle so released nodes are
     /// reported promptly.
     pub fn collect_garbage(&self) {
         self.guarded(Phase::Call, || {
-            self.rt.run_gc();
+            self.scheduler.ready(self.rt.run_gc());
             self.run_jobs();
         });
     }
@@ -723,6 +875,8 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
+        self.scheduler.disable();
+        self.evaluations.borrow_mut().clear();
         // Persistent JS values must be freed before the runtime.
         self.shared.timers.borrow_mut().clear();
         self.shared.frames.borrow_mut().clear();
@@ -1040,6 +1194,112 @@ const report = (v) => text(String(v));
                 _ => None,
             })
             .collect()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_future_wakes_engine_and_resumes_without_idle_polling() {
+        let host = Host::new().unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        host.set_system_wake(Arc::new(move || {
+            let _ = send.send(());
+        }));
+        host.ctx.with(|ctx| {
+            ctx.globals().set("nativeFutureDone", false).unwrap();
+            let owned = ctx.clone();
+            ctx.spawn(async move {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                owned.globals().set("nativeFutureDone", true).unwrap();
+            });
+        });
+        host.run_jobs();
+        assert!(host.has_system_tasks());
+        assert!(
+            !host
+                .ctx
+                .with(|ctx| ctx.globals().get::<_, bool>("nativeFutureDone").unwrap())
+        );
+        receive
+            .recv_timeout(Duration::from_secs(2))
+            .expect("native timer wakes owning engine");
+        host.run_system();
+        assert!(
+            host.ctx
+                .with(|ctx| ctx.globals().get::<_, bool>("nativeFutureDone").unwrap())
+        );
+        assert!(!host.has_system_tasks());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dropping_host_cancels_pending_native_future_and_wake_callback() {
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let callback_dropped = Arc::new(AtomicBool::new(false));
+        let host = Host::new().unwrap();
+        let callback_guard = Dropped(callback_dropped.clone());
+        host.set_system_wake(Arc::new(move || {
+            let _ = &callback_guard;
+        }));
+        let guard = Dropped(dropped.clone());
+        host.ctx.with(|ctx| {
+            let owned = ctx.clone();
+            ctx.spawn(async move {
+                let (_guard, _owned) = (guard, owned);
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            });
+        });
+        host.run_jobs();
+        assert!(host.has_system_tasks());
+        drop(host);
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "pending future must be destroyed with VM"
+        );
+        assert!(
+            callback_dropped.load(Ordering::SeqCst),
+            "engine callback must not retain old generation"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn top_level_await_resumes_and_reports_rejection_on_native_wake() {
+        let mut host = Host::new().unwrap();
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let captured = errors.clone();
+        host.set_error_handler(Box::new(move |error| {
+            captured.borrow_mut().push(error.message.clone())
+        }));
+        let (send, receive) = std::sync::mpsc::channel();
+        host.set_system_wake(Arc::new(move || {
+            let _ = send.send(());
+        }));
+        host.ctx.with(|ctx| {
+            let promise = Promise::wrap_future(&ctx, async {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                7
+            })
+            .unwrap();
+            ctx.globals().set("nativePending", promise).unwrap();
+        });
+        host.eval_source("await nativePending; throw new Error('native TLA rejected');")
+            .unwrap();
+        assert_eq!(host.evaluations.borrow().len(), 1);
+        receive.recv_timeout(Duration::from_secs(2)).unwrap();
+        host.run_system();
+        assert!(host.evaluations.borrow().is_empty());
+        assert!(
+            errors
+                .borrow()
+                .iter()
+                .any(|error| error.contains("native TLA rejected"))
+        );
     }
 
     #[test]

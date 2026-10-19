@@ -106,7 +106,7 @@ nsh dev [ENTRY] [--port <PORT>] [--release]
 ## nsh trace
 
 ```sh
-nsh trace [ENTRY] [--taps <N>] [--idle-ms <MS>] [--scroll <POINTS>] [--width <W>] [--height <H>]
+nsh trace [ENTRY] [--taps <N>] [--idle-ms <MS>] [--scroll <POINTS>] [--width <W>] [--height <H>] [--data-dir <DIR>] [--os <OS>]
 ```
 
 以无界面方式运行应用：在 CLI 自己的进程里，使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。
@@ -128,8 +128,10 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 | `--scroll <POINTS>` | | 让第一个滚动视图或列表滚动这么多点，每帧 10 点，并打印每一帧的批次。 |
 | `--width <W>` | `390` | 视口宽度，单位为点。 |
 | `--height <H>` | `844` | 视口高度，单位为点。 |
+| `--data-dir <DIR>` | | 为此次运行设置显式磁盘数据根目录；默认使用内存数据。 |
+| `--os <OS>` | `ios` | 模拟 `ios`、`android`、`macos`、`windows`、`linux` 或 `web`；影响平台 API 和属性的选择。 |
 
-`nsh trace` 按 iOS 运行：`Platform.OS` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性都会生效。
+`nsh trace` 默认按 iOS 运行：`Platform.OS` 为 `"ios"`，`ios:` 类和 `ios={{…}}` 属性生效。用 `--os` 选择其他平台。`--data-dir` 只设置数据根目录；平台 API 还要求当前原生宿主支持该能力。
 
 ## nsh build
 

@@ -1,0 +1,88 @@
+//! Native worker completions must wake the engine, including during initial evaluation.
+use std::time::{Duration, Instant};
+
+use nsh_core::{ApproxTextEngine, MountItem, Size, platform::Os};
+use nsh_engine::{Bundle, Engine, EngineConfig, Environment};
+
+use crate::ChannelSink;
+
+#[test]
+fn filesystem_completion_during_initial_evaluation_is_delivered_without_timers() {
+    let dir = std::env::temp_dir().join(format!("nsh-system-startup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("data/com.example.system")).unwrap();
+    std::fs::write(
+        dir.join("data/com.example.system/input.txt"),
+        "native file ready",
+    )
+    .unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(
+        &entry,
+        r#"import { mount, signal, Text } from "nsh";
+import { FileSystem } from "nsh/fs";
+const status = signal("waiting");
+const request = FileSystem.readText("${dataDir}/input.txt");
+// Finish the native operation before the engine finishes evaluating this module.
+const until = Date.now() + 100;
+while (Date.now() < until) {}
+request.then(value => status.set(value), error => status.set(String(error)));
+mount(() => <Text>{status()}</Text>);
+"#,
+    )
+    .unwrap();
+    let bundled = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
+        entry,
+        minify: false,
+        split: false,
+        ui_sets: Vec::new(),
+    })
+    .unwrap();
+    let bundle = Bundle::source(bundled.code)
+        .with_app_id(Some("com.example.system"))
+        .with_capabilities_json(Some(r#"{"fs":{"read":["${dataDir}"]}}"#))
+        .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        app: nsh_engine::App::Js(bundle),
+        viewport: Size::new(400.0, 300.0),
+        trace: false,
+        network: None,
+        assets: None,
+        environment: Environment {
+            os: if cfg!(target_os = "macos") {
+                Os::MacOs
+            } else {
+                Os::Linux
+            },
+            ..Default::default()
+        },
+        header_heights: (44.0, 96.0),
+        limits: nsh_engine::Limits::default(),
+        ui_sets: Vec::new(),
+        runtime: None,
+        data_dir: Some(dir.join("data")),
+        storage: None,
+    };
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut shown = Vec::new();
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(batch) = rx.recv_timeout(remaining) else {
+            break;
+        };
+        shown.extend(batch.items.iter().filter_map(|item| match item {
+            MountItem::Text { text, .. } => Some(text.text.clone()),
+            _ => None,
+        }));
+        if shown.iter().any(|text| text == "native file ready") {
+            break;
+        }
+    }
+    drop(engine);
+    let _ = std::fs::remove_dir_all(dir);
+    assert!(
+        shown.iter().any(|text| text == "native file ready"),
+        "native completion never reached the UI: {shown:?}"
+    );
+}

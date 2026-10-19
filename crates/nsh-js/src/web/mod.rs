@@ -15,7 +15,7 @@
 
 pub(crate) mod js;
 
-mod blob;
+pub(crate) mod blob;
 mod encoding;
 mod event;
 mod fetch;

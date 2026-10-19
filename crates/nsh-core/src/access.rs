@@ -21,7 +21,10 @@
 //! sources; `asset:` URIs are always allowed. `webview` lists the hosts a
 //! web view may show and navigate to (its pages' own subresources are the
 //! web content's business). An app without `"capabilities"` (a standalone
-//! app, its developer's own) may do everything.
+//! app, its developer's own) retains unrestricted existing APIs. Process and
+//! filesystem access always require an explicit declaration.
+
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -90,9 +93,30 @@ pub struct NetworkGrants {
     pub http: Vec<HttpGrant>,
 }
 
+/// Commands an app may execute. Names are exact, without shell expansion.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProcessGrants {
+    /// Exact executable names or absolute executable paths.
+    pub execute: Vec<String>,
+}
+
+/// Filesystem roots an app may read or write. `${dataDir}` is resolved by
+/// the host to this app's own data directory, never to a JS supplied root.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FileGrants {
+    /// Roots available for read operations.
+    pub read: Vec<String>,
+    /// Roots available for mutation operations.
+    pub write: Vec<String>,
+}
+
 /// What an app may do (one declaration, or one grant).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Capabilities {
+    /// Explicit native subprocess grants.
+    pub process: ProcessGrants,
+    /// Explicit native filesystem grants.
+    pub fs: FileGrants,
     /// `fetch`, remote images and video.
     pub network: NetworkGrants,
     /// The hosts web views may show; `None`: no web views.
@@ -145,10 +169,13 @@ pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
 }
 
 impl Capabilities {
-    /// Everything: apps without a declaration, development tools.
+    /// Legacy unrestricted APIs for apps without a declaration. Process and
+    /// filesystem grants stay empty and always require explicit opt-in.
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
+            process: ProcessGrants::default(),
+            fs: FileGrants::default(),
             network: NetworkGrants {
                 hosts: any.clone(),
                 http: Vec::new(),
@@ -165,7 +192,14 @@ impl Capabilities {
         known(
             obj,
             "capabilities",
-            &["network", "webview", "statusBar", "clipboard"],
+            &[
+                "network",
+                "webview",
+                "statusBar",
+                "clipboard",
+                "process",
+                "fs",
+            ],
         )?;
         let mut caps = Capabilities::default();
         if let Some(network) = obj.get("network") {
@@ -242,6 +276,28 @@ impl Capabilities {
                 .as_bool()
                 .ok_or("capabilities.clipboard must be a boolean")?;
         }
+        if let Some(process) = obj.get("process") {
+            let process = object(process, "capabilities.process")?;
+            known(process, "capabilities.process", &["execute"])?;
+            if let Some(execute) = process.get("execute") {
+                caps.process.execute = strings(execute, "capabilities.process.execute")?;
+                if caps.process.execute.iter().any(|s| !valid_command(s)) {
+                    return Err("capabilities.process.execute needs exact executable names or absolute paths".into());
+                }
+            }
+        }
+        if let Some(fs) = obj.get("fs") {
+            let fs = object(fs, "capabilities.fs")?;
+            known(fs, "capabilities.fs", &["read", "write"])?;
+            for (key, target) in [("read", &mut caps.fs.read), ("write", &mut caps.fs.write)] {
+                if let Some(value) = fs.get(key) {
+                    *target = strings(value, &format!("capabilities.fs.{key}"))?;
+                    for root in target.iter() {
+                        validate_path_pattern(root)?;
+                    }
+                }
+            }
+        }
         Ok(caps)
     }
 
@@ -273,6 +329,14 @@ impl Capabilities {
         network.insert("http".into(), http.into());
         let mut obj = Map::new();
         obj.insert("network".into(), Value::Object(network));
+        obj.insert(
+            "process".into(),
+            serde_json::json!({"execute": self.process.execute}),
+        );
+        obj.insert(
+            "fs".into(),
+            serde_json::json!({"read": self.fs.read, "write": self.fs.write}),
+        );
         if let Some(hosts) = &self.webview {
             let mut w = Map::new();
             w.insert("hosts".into(), list(hosts));
@@ -306,6 +370,69 @@ impl Capabilities {
                 .as_ref()
                 .is_some_and(|hosts| hosts.iter().any(|h| h.matches(&url.host)))
     }
+}
+
+fn valid_command(command: &str) -> bool {
+    !command.is_empty()
+        && !command.contains(['\0', '*'])
+        && (Path::new(command).is_absolute()
+            || (!command.contains(['/', '\\']) && command != "." && command != ".."))
+}
+
+fn validate_path_pattern(path: &str) -> Result<(), String> {
+    let suffix = path.strip_prefix("${dataDir}");
+    if suffix.is_some_and(|s| !s.is_empty() && !s.starts_with('/'))
+        || path.contains('\0')
+        || path.contains('*')
+        || (suffix.is_none() && (!Path::new(path).is_absolute() || path.contains("${")))
+        || Path::new(path)
+            .components()
+            .any(|p| matches!(p, Component::ParentDir))
+    {
+        return Err(
+            "filesystem roots must be absolute paths or ${dataDir} paths without traversal".into(),
+        );
+    }
+    Ok(())
+}
+
+// Resolve every existing ancestor, including symlinks. Missing tails are
+// permitted so creation receives the same boundary checks as reads.
+fn resolved_path(path: &Path) -> Result<PathBuf, String> {
+    if !path.is_absolute() || path.components().any(|p| matches!(p, Component::ParentDir)) {
+        return Err("filesystem paths must be absolute and contain no parent traversal".into());
+    }
+    let mut cursor = path;
+    let mut tail = Vec::new();
+    loop {
+        match std::fs::symlink_metadata(cursor) {
+            Ok(_) => {
+                let mut resolved = std::fs::canonicalize(cursor).map_err(|e| e.to_string())?;
+                for part in tail.into_iter().rev() {
+                    resolved.push(part);
+                }
+                return Ok(resolved);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tail.push(
+                    cursor
+                        .file_name()
+                        .ok_or("invalid filesystem path")?
+                        .to_owned(),
+                );
+                cursor = cursor.parent().ok_or("invalid filesystem path")?;
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+fn expand_data_dir(path: &str, data_dir: &Path) -> Result<PathBuf, String> {
+    validate_path_pattern(path)?;
+    Ok(match path.strip_prefix("${dataDir}") {
+        Some(tail) => data_dir.join(tail.trim_start_matches('/')),
+        None => PathBuf::from(path),
+    })
 }
 
 fn object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>, String> {
@@ -372,6 +499,54 @@ impl Access {
     pub fn is_unrestricted(&self) -> bool {
         let all = Capabilities::all();
         self.declared == all && self.granted.as_ref().is_none_or(|g| *g == all)
+    }
+
+    /// Whether an exact command is declared and granted. These capabilities
+    /// always require explicit opt-in, including for legacy standalone apps.
+    pub fn allows_process(&self, command: &str) -> bool {
+        valid_command(command) && self.each(|c| c.process.execute.iter().any(|p| p == command))
+    }
+
+    /// Resolve a filesystem path within both the declaration and host grant.
+    /// `data_dir` is an app-specific directory supplied only by the host.
+    pub fn authorize_file(
+        &self,
+        path: &Path,
+        data_dir: &Path,
+        write: bool,
+    ) -> Result<PathBuf, String> {
+        let requested = if let Some(text) = path.to_str().filter(|s| s.starts_with("${dataDir}")) {
+            expand_data_dir(text, data_dir)?
+        } else {
+            path.to_owned()
+        };
+        let resolved = resolved_path(&requested)?;
+        let allowed = self.each(|c| {
+            let roots = if write { &c.fs.write } else { &c.fs.read };
+            roots.iter().any(|root| {
+                expand_data_dir(root, data_dir)
+                    .and_then(|r| resolved_path(&r))
+                    .is_ok_and(|root| resolved.starts_with(root))
+            })
+        });
+        if allowed {
+            Ok(resolved)
+        } else {
+            Err(format!(
+                "filesystem {} is not granted by capabilities.fs",
+                if write { "write" } else { "read" }
+            ))
+        }
+    }
+
+    /// Raw TCP authority comes only from host grants, never HTTP path or method
+    /// grants. The port is checked for validity; host grants cover every port.
+    pub fn allows_socket(&self, host: &str, port: u16) -> bool {
+        if port == 0 || host.is_empty() || host.contains(['/', '@', '?', '#', '\0']) {
+            return false;
+        }
+        let host = host.to_ascii_lowercase();
+        self.each(|c| c.network.hosts.iter().any(|pattern| pattern.matches(&host)))
     }
 
     /// Whether `fetch(url, { method })` may go out. `asset:` URIs are always
@@ -470,6 +645,94 @@ mod tests {
 
     fn caps(json: &str) -> Capabilities {
         Capabilities::from_json(&serde_json::from_str(json).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn system_capabilities_are_explicit_and_intersected() {
+        let declared = caps(
+            r#"{"process":{"execute":["claude","codex"]},"fs":{"read":["${dataDir}"],"write":["${dataDir}"]}}"#,
+        );
+        assert_eq!(
+            Capabilities::from_json(&declared.to_json()).unwrap(),
+            declared
+        );
+        let access = Access {
+            declared,
+            granted: Some(caps(
+                r#"{"process":{"execute":["codex"]},"fs":{"read":["${dataDir}/conversations"]}}"#,
+            )),
+        };
+        assert!(access.allows_process("codex"));
+        assert!(!access.allows_process("claude"));
+        assert!(!access.allows_process("/usr/bin/codex"));
+        assert!(!Access::all().allows_process("codex"));
+        let root = std::env::current_dir().unwrap();
+        assert!(
+            access
+                .authorize_file(&root.join("conversations/new.json"), &root, false)
+                .is_ok()
+        );
+        assert!(
+            access
+                .authorize_file(&root.join("other.json"), &root, false)
+                .is_err()
+        );
+        assert!(
+            access
+                .authorize_file(&root.join("conversations/new.json"), &root, true)
+                .is_err()
+        );
+        assert!(Access::all().authorize_file(&root, &root, false).is_err());
+        assert!(
+            access
+                .authorize_file(&root.join("../secret"), &root, false)
+                .is_err()
+        );
+        for bad in [
+            r#"{"process":{"execut":[]}}"#,
+            r#"{"fs":{"reads":[]}}"#,
+            r#"{"fs":{"read":["${dataDir}/../outside"]}}"#,
+            r#"{"fs":{"read":["relative"]}}"#,
+            r#"{"process":{"execute":["*"]}}"#,
+        ] {
+            assert!(Capabilities::from_json(&serde_json::from_str(bad).unwrap()).is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn filesystem_symlinks_cannot_escape_granted_roots() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/nsh-benchs-test-tmp")
+            });
+        let root = base.join(format!("access-policy-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("allowed")).unwrap();
+        std::fs::create_dir_all(root.join("outside")).unwrap();
+        symlink(root.join("outside"), root.join("allowed/link")).unwrap();
+        let access = Access {
+            declared: caps(r#"{"fs":{"read":["${dataDir}"],"write":["${dataDir}"]}}"#),
+            granted: None,
+        };
+        for write in [false, true] {
+            assert!(
+                access
+                    .authorize_file(
+                        &root.join("allowed/link/missing/file"),
+                        &root.join("allowed"),
+                        write
+                    )
+                    .is_err()
+            );
+            assert!(
+                access
+                    .authorize_file(&root.join("allowed/new/file"), &root.join("allowed"), write)
+                    .is_ok()
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

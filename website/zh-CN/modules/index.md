@@ -37,6 +37,8 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/image` | `Image`（元素）、`Image.getSize`、`Image.prefetch` | [nsh/image](./nsh-image.md) |
 | `nsh/clipboard` | `Clipboard.setString`、`Clipboard.getString`、`Clipboard.hasString` | [nsh/clipboard](./nsh-clipboard.md) |
 | `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.getAllKeys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
+| `nsh/process` | `isAvailable`, `Process.spawn`, `Process.run` | [nsh/process](./nsh-process.md) |
+| `nsh/fs` | `isAvailable`, `FileSystem.appDataDir`, `readText`, `writeText`, `mkdir`, `exists`, `rename`, `remove` | [nsh/fs](./nsh-fs.md) |
 | `nsh/keymap` | `keymap.bind`（键盘快捷键：`mod+k`、`ctrl+shift+p` 等） | [nsh/keymap](./nsh-keymap.md) |
 | `nsh/native` | `nativeComponent`（宿主应用注册的原生组件） | [nsh/native](./nsh-native.md) |
 | `nsh/accessibility` | `AccessibilityInfo`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
@@ -46,6 +48,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/webview` | `WebView` | [nsh/webview](./nsh-webview.md) |
 | `nsh/video` | `Video` | [nsh/video](./nsh-video.md) |
 | `nsh/ui/mobile` | 导航（`createNavigator`、`Stack`、`Screen`、`Modal`）、`SafeAreaView`、`StatusBar`、`Alert`、`ActionSheet`、`Keyboard`、`Button`、`TextField` 等 | [组件](../components/index.md) |
+| Standard modules | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder`, `process`, `fs`, `fs/promises`, `net`, `websocket` | [标准模块](./standard-modules.md) |
 | 全局对象 | `fetch`、`URL`、`TextEncoder`、`Blob`、`FormData`、`AbortController`、`Intl`、定时器、`console`、`requestAnimationFrame` 等（无需导入） | [全局 API](./globals.md) |
 
 以下参考页面不对应模块：

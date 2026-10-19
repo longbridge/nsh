@@ -511,7 +511,30 @@ pub fn type_definitions(ui_sets: &[Registry]) -> Vec<(String, String)> {
         format!("{BANNER}export type {{ JSX }} from \"./types\";\n"),
     ));
     out.push(("nsh/globals.d.ts".to_owned(), globals()));
+    out.extend(standard_types().iter().cloned());
     out
+}
+
+/// Standard export discovery evaluates trusted builtins once, without running
+/// application code, privileged operations, or asynchronous jobs.
+fn standard_types() -> &'static Vec<(String, String)> {
+    static FILES: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    FILES.get_or_init(|| {
+        let host = crate::Host::new().expect("create standard declaration discovery VM");
+        let exports = host
+            .standard_exports()
+            .expect("discover actual standard module exports");
+        let names: Vec<Vec<&str>> = exports
+            .iter()
+            .map(|(_, values)| values.iter().map(String::as_str).collect())
+            .collect();
+        let borrowed: Vec<(&str, &[&str])> = exports
+            .iter()
+            .zip(&names)
+            .map(|((name, _), values)| (name.as_str(), values.as_slice()))
+            .collect();
+        crate::standard::declarations::type_definitions(&borrowed)
+    })
 }
 
 /// A constant's value as TypeScript (`2`, not `2.0`).
@@ -528,7 +551,9 @@ fn number(v: f64) -> String {
 fn globals() -> String {
     let mut out = String::from(BANNER);
     out.push_str("// The globals of nsh's JS environment besides the ECMAScript library\n// (there is no DOM).\n\n");
+    out.push_str("/// <reference path=\"../standard/index.d.ts\" />\n");
     out.push_str(crate::host::GLOBALS);
+    out.push_str(&crate::standard::declarations::globals());
     for types in crate::web::TYPES {
         out.push('\n');
         out.push_str(types);

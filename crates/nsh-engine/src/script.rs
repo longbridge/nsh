@@ -3,6 +3,13 @@
 //! none; without feature `js` the engine cannot make one (the type is
 //! uninhabited, so the loop needs no `cfg`).
 
+/// Host-owned permissions, data root and event wakeup for native system modules.
+pub(crate) struct SystemConfig {
+    pub(crate) access: nsh_core::access::Access,
+    pub(crate) data_dir: Option<std::path::PathBuf>,
+    pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+
 #[cfg(feature = "js")]
 pub(crate) use imp::Script;
 #[cfg(not(feature = "js"))]
@@ -53,6 +60,7 @@ mod imp {
             text_engine: Rc<M>,
             stop: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
+            system: super::SystemConfig,
         ) -> Option<(Script, u128)> {
             let options = HostOptions {
                 limits,
@@ -70,6 +78,8 @@ mod imp {
                     return None;
                 }
             };
+            host.set_system_access(system.access, system.data_dir);
+            host.set_system_wake(system.wake);
             host.set_stop_flag(stop.clone());
             let symbolicator = Rc::new(RefCell::new(Symbolicator::new(bundle.source_map.clone())));
             let (map, errors, stopping) = (symbolicator.clone(), sink.clone(), stop.clone());
@@ -193,6 +203,10 @@ mod imp {
             self.host.run_timers(now);
         }
 
+        pub(crate) fn run_system(&self) {
+            self.host.run_system();
+        }
+
         pub(crate) fn wants_frame(&self) -> bool {
             self.host.wants_frame()
         }
@@ -262,6 +276,7 @@ mod stub {
             _: Rc<M>,
             _: Arc<AtomicBool>,
             sink: Rc<dyn MountSink>,
+            _: super::SystemConfig,
         ) -> Option<(Script, u128)> {
             let message = "this build of nsh runs Rust apps only (feature `js` is off)";
             log::error!("{message}");
@@ -318,6 +333,10 @@ mod stub {
         }
 
         pub(crate) fn run_timers(&self, _: Instant) {
+            match *self {}
+        }
+
+        pub(crate) fn run_system(&self) {
             match *self {}
         }
 

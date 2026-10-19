@@ -45,6 +45,21 @@ Use it to:
 | `--scroll <points>` | none | Scroll the first scroll view or list by this many points, in 10 pt frames, printing each frame's batch. |
 | `--width <points>` | 390 | Viewport width. |
 | `--height <points>` | 844 | Viewport height. |
+| `--data-dir <DIR>` | | Use an explicit on-disk data root for this run; defaults to in-memory data. |
+| `--os <OS>` | `ios` | Simulate `ios`, `android`, `macos`, `windows`, `linux` or `web`; selects platform APIs and props. |
+
+
+## Isolate disk data
+
+Use an explicit data root to check native file operations:
+
+```sh
+nsh trace App.tsx --os linux --data-dir "$HOME/.cache/my-app-trace" --taps 0
+```
+
+The runtime isolates data by app id beneath this root. `${dataDir}` grants still come from the app declaration and host configuration. Choose a dedicated test directory to keep everyday app data separate. Trace uses in-memory data by default; native file operations require an explicit `--data-dir` root.
+
+`--os linux` selects the Linux platform environment; `--data-dir` itself does not change platforms. Platform APIs such as processes also require a compatible actual native host; simulating a platform keeps mobile and browser hosts within their native capabilities.
 
 ## Reading the output
 
@@ -200,8 +215,8 @@ To guard performance, record the item counts of a few interactions (the `── 
 `mount items` numbers) and fail when they grow. Counts are deterministic; timings on shared CI machines are not.
 
 > [!NOTE]
-> `nsh trace` runs with every capability: it does not apply the `capabilities` of `nsh.json`, and its `fetch` really
-> goes to the network. Test capability rules on a device or in a packaged build.
+> `nsh trace` applies the built app id and the capability declaration from `nsh.json`. Its `fetch` performs real
+> network requests under those grants; process and file operations require explicit grants, as in desktop hosts.
 
 ## `testID` for UI tests
 

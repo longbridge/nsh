@@ -76,16 +76,14 @@ fn compile(
     strip: bool,
 ) -> Result<Vec<u8>, JsError> {
     let rt = Runtime::new()?;
+    rt.set_loader(crate::modules::Resolver, crate::modules::Loader);
     let ctx = Context::full(&rt)?;
     ctx.with(|ctx| {
         // Imports resolve while compiling: the native modules declare
         // their exports.
-        // SAFETY: the context's own runtime; the table outlives it (the
-        // runtime is dropped at the end of this function, before it).
-        crate::modules::set_loader(
-            unsafe { rquickjs::qjs::JS_GetRuntime(ctx.as_raw().as_ptr()) },
-            &modules,
-        );
+        // The table outlives this context and runtime; compilation only
+        // declares imports, without initializing host or LLRT globals.
+        crate::modules::install(&ctx, &modules);
         let module = Module::declare(ctx.clone(), name, source)
             .catch(&ctx)
             .map_err(JsError::caught)?;
@@ -106,6 +104,35 @@ mod tests {
     use std::ffi::CStr;
 
     use super::*;
+
+    #[test]
+    fn native_and_standard_imports_compile_together_without_host_initialization() {
+        let bytes = compile_bytecode(
+            r#"import { Text } from 'nsh';
+               import { Buffer } from 'node:buffer';
+               import path from 'path';
+               globalThis.result = [Text, Buffer, path];"#,
+            false,
+        )
+        .unwrap();
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn standard_aliases_and_native_modules_share_runtime_loader() {
+        let host = crate::Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import * as bare from 'buffer';
+            import * as alias from 'node:buffer';
+            import { Text } from 'nsh';
+            if (bare !== alias || typeof Text !== 'function') throw Error('module identity');
+        "#,
+        )
+        .unwrap();
+        assert!(host.eval_source("import 'node:vm';").is_err());
+        assert!(host.eval_source("import 'node:node:buffer';").is_err());
+    }
 
     /// Fails when the engine is upgraded without bumping `BYTECODE_VERSION`.
     #[test]
