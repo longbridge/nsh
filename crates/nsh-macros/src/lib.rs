@@ -283,8 +283,9 @@ enum Kind {
 /// - `Items`: virtualized rows (in JS `each`, a row renderer and `List`'s
 ///   data props), at most one, and not with `Children`.
 ///
-/// `#[prop(rename = "…")]` sets the JS name. The struct's doc comment
-/// documents the component in TypeScript, the fields' its props. The props
+/// `#[prop(rename = "…")]` sets the JS name. The fields' doc comments
+/// document the props in TypeScript (the component's own is its
+/// `#[component] fn`'s; the struct's stays Rust's). The props
 /// also get `Default` (every field at its default), for Rust views:
 /// `ButtonProps { title: "+1".into(), ..Default::default() }`.
 #[proc_macro_derive(Props, attributes(prop))]
@@ -306,7 +307,6 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     let Fields::Named(fields) = &data.fields else {
         return Err(syn::Error::new(input.span(), "`Props` needs named fields"));
     };
-    let doc = decl(&docs(&input.attrs));
     let ui = quote!(::nsh_core::ui);
     let mut specs = Vec::new();
     let mut initial = Vec::new();
@@ -516,10 +516,6 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
         impl #impl_generics #ui::Props for #name #ty_generics #where_clause {
             const ITEMS: ::core::option::Option<&'static str> = #items_const;
             const LAZY_CHILDREN: bool = #lazy_children;
-
-            fn doc() -> &'static str {
-                #doc
-            }
 
             fn spec(types: &mut #ui::TsTypes) -> ::std::vec::Vec<#ui::PropSpec> {
                 let _ = &types;
@@ -951,7 +947,10 @@ pub fn assets(input: TokenStream) -> TokenStream {
 ///
 /// makes `pub struct Stepper;` and its `Component` impl; the body is its
 /// view, run once. Without a `Scope` parameter it emits no
-/// events (`NoEvent`); without props it has none (`()`).
+/// events (`NoEvent`); without props it has none (`()`). The function's
+/// doc comment documents the component in TypeScript (`Component::DOC`),
+/// and a `#[module] impl` of the same name (its functions on the
+/// component: `StatusBar.setHidden(..)`).
 /// `#[component(methods = StepperApi)]` gives its ref in JS the methods of
 /// that [`methods`] API, which the view registers with `cx.methods(..)`.
 #[proc_macro_attribute]
@@ -1033,14 +1032,21 @@ fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenSt
     };
     let methods =
         methods.map(|api| quote!(const METHODS: #ui::Methods = #ui::Methods::of::<#api>();));
+    let doc = decl(&docs(attrs));
     Ok(quote! {
         #(#attrs)*
         #[derive(::core::fmt::Debug, ::core::default::Default, ::core::clone::Clone, ::core::marker::Copy)]
         #vis struct #name;
 
+        // A `#[module] impl` of the component's name is documented by it.
+        impl #ui::__private::ModuleDoc for #name {
+            const DOC: &'static str = #doc;
+        }
+
         impl #ui::Component for #name {
             type Props = #props_ty;
             type Event = #event;
+            const DOC: &'static str = #doc;
             #methods
 
             #[allow(unused_variables)]
@@ -1383,8 +1389,11 @@ fn module_cx(ty: &Type) -> bool {
 /// `#[module]` on an `impl` block of a unit struct: its functions with a
 /// visibility (`pub fn`, `pub(crate) fn`; no receiver) become functions of
 /// a JS object named after the struct
-/// (`Alert.alert(...)`), documented by their doc comments (the block's doc
-/// comment documents the object). The signature decides how a call runs:
+/// (`Alert.alert(...)`), documented by their doc comments. The struct
+/// takes `#[module]` too, and its doc comment documents the object (a doc
+/// comment on the block is an error: TS shows the struct's); a
+/// component's struct (`#[component]`) needs none. The signature decides
+/// how a call runs:
 /// a function without a context runs in the JS call and returns its value
 /// (`checksum(bytes)`), as a class's method does; one whose last parameter
 /// is `cx: &mut ModuleCx` is an op, run in order with what JS set before it
@@ -1413,10 +1422,56 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .into();
         }
     };
-    let item = parse_macro_input!(item as ItemImpl);
-    module_impl(item, flat)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
+    let item = parse_macro_input!(item as syn::Item);
+    match item {
+        syn::Item::Struct(s) if !flat => module_struct(s),
+        syn::Item::Impl(i) => module_impl(i, flat),
+        syn::Item::Struct(s) => Err(syn::Error::new(
+            s.ident.span(),
+            "`flat` goes on the `#[module(flat)] impl` block; the struct takes `#[module]`",
+        )),
+        other => Err(syn::Error::new(
+            other.span(),
+            "`#[module]` goes on a unit struct and on its `impl` block",
+        )),
+    }
+    .unwrap_or_else(syn::Error::into_compile_error)
+    .into()
+}
+
+/// `#[module]` on the struct: its doc comment documents the module in TS.
+fn module_struct(item: syn::ItemStruct) -> syn::Result<TokenStream2> {
+    if !item.generics.params.is_empty() {
+        return Err(syn::Error::new(
+            item.generics.span(),
+            "a module has no generic parameters",
+        ));
+    }
+    let ui = quote!(::nsh_core::ui);
+    let name = &item.ident;
+    let doc = decl(&docs(&item.attrs));
+    Ok(quote! {
+        #item
+
+        impl #ui::__private::ModuleDoc for #name {
+            const DOC: &'static str = #doc;
+        }
+    })
+}
+
+/// Refuses a doc comment on an export's `impl` block (`what`: `#[module]`):
+/// TS shows the struct's, so one here would be lost.
+fn no_block_doc(item: &ItemImpl, what: &str) -> syn::Result<()> {
+    match item.attrs.iter().find(|a| a.path().is_ident("doc")) {
+        Some(doc) => Err(syn::Error::new(
+            doc.span(),
+            format!(
+                "document the export on its struct, not on the `{what} impl` block: the struct's \
+                 doc comment is the one TS shows (a `//` comment here stays in Rust)"
+            ),
+        )),
+        None => Ok(()),
+    }
 }
 
 /// `#[class]` on a struct and on its `impl` block: a JS class (the
@@ -1471,7 +1526,7 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
         ));
     };
     let module_name = type_name.to_string();
-    let module_doc = decl(&docs(&item.attrs));
+    no_block_doc(&item, "#[module]")?;
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
@@ -1656,7 +1711,7 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
 
         impl #ui::Module for #self_ty {
             const NAME: &'static str = #module_name;
-            const DOC: &'static str = #module_doc;
+            const DOC: &'static str = <Self as #ui::__private::ModuleDoc>::DOC;
             const FUNCTIONS: &'static [#ui::Function] = &[#(#entries),*];
             const FLAT: bool = #flat;
         }

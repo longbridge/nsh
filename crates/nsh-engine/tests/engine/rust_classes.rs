@@ -125,6 +125,7 @@ thread_local! {
 }
 
 /// Functions of the three kinds.
+#[module]
 pub(crate) struct Tools;
 
 #[module]
@@ -194,6 +195,7 @@ impl Tools {
 }
 
 /// Takes a `u32` in every kind of call.
+#[module]
 pub(crate) struct Ints;
 
 #[module]
@@ -325,6 +327,7 @@ impl Twin {
 }
 
 /// Makes `Lonely`s.
+#[module]
 pub(crate) struct Maker;
 
 #[module]

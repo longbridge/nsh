@@ -158,7 +158,7 @@ fn TitleBar() -> impl IntoElement {
 ## Extending a Rust app with TSX
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components
-(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, a `#[module]` `impl`),
+(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, `#[module]` on a unit struct and its `impl`),
 classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. In a `#[module]` or
 `#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too); functions without a visibility are helpers that
 stay in Rust. Their TypeScript
@@ -198,6 +198,8 @@ impl Ledger {
     }
 }
 
+/// The app's holdings.
+#[module]
 pub struct Portfolio;
 
 #[module]
@@ -229,6 +231,13 @@ function Overview() {
 
 mount(() => <Overview />);
 ```
+
+Each export is documented in TypeScript by the doc comment of the Rust item that names it: a component by its
+`#[component] fn` (`Chart`), a module and a class by their struct (`Portfolio`, `Ledger`), and props, events,
+functions and members by their own (a setter needs none beside its getter). The `Props` struct's and the event
+enum's own doc comments, and those of `impl` blocks, stay in Rust; a doc comment on a `#[module]` or `#[class]`
+`impl` block is a compile error, since TypeScript would not show it. Each command that writes `.nsh/types` warns
+about an export TSX sees without a doc comment, naming it (`Ledger.add`, `Chart.range`).
 
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears

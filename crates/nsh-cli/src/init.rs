@@ -356,6 +356,28 @@ pub(crate) fn write_types(dir: &Path) {
         }
     }
     migrate_tsconfig(dir);
+    warn_undocumented(&crate::ui_sets());
+}
+
+/// Warns of the exports of `sets` (an app's crates') without a doc comment:
+/// TSX sees them undocumented in the declarations and the editor.
+fn warn_undocumented(sets: &[nsh_core::ui::description::SetDescription]) {
+    for set in sets {
+        let missing = &set.undocumented;
+        if missing.is_empty() {
+            continue;
+        }
+        ui::warn(format!(
+            "{} exports {} without a doc comment, which TSX sees in its declarations: {}",
+            set.specifier,
+            if missing.len() == 1 {
+                "one item"
+            } else {
+                "items"
+            },
+            missing.join(", ")
+        ));
+    }
 }
 
 /// Replaces the app's `tsconfig.json` with [`nsh_bundler::TSCONFIG`] when

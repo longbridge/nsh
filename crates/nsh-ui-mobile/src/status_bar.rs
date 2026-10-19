@@ -5,10 +5,7 @@ use nsh_core::{
     ui::{StatusBarSetting, StatusBarStyle, prelude::*},
 };
 
-/// What the status bar shows while this renders: the most recently
-/// mounted `StatusBar` wins, prop by prop, over what the functions set. In
-/// an app embedded in a native one, the host app's view controller
-/// decides on iOS.
+/// The props of [`StatusBar`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct StatusBarProps {
     /// The content's color.
@@ -89,8 +86,10 @@ fn setting(props: &StatusBarProps) -> StatusBarSetting {
     }
 }
 
-/// A rendered status bar setting ([`StatusBarProps`]): over the others while
-/// it is mounted.
+/// What the status bar shows while this renders: the most recently
+/// mounted `StatusBar` wins, prop by prop, over what the functions set. In
+/// an app embedded in a native one, the host app's view controller
+/// decides on iOS.
 #[component]
 pub fn StatusBar(props: StatusBarProps) -> impl IntoElement {
     let entry = add_status_bar(untracked(|| setting(&props)));
@@ -99,7 +98,6 @@ pub fn StatusBar(props: StatusBarProps) -> impl IntoElement {
     view().hidden()
 }
 
-/// The status bar, set imperatively (under the rendered `StatusBar`s).
 #[module]
 impl StatusBar {
     /// Sets the color of the status bar's content.

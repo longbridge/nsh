@@ -313,7 +313,11 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
   error: it can only be TS's). `new`
   is the constructor (a class without one cannot be made from JS, only returned); `&self` / `&mut self` methods,
   `#[getter]` / `#[setter]` (one name: `count` and `set_count` are the property `count`), functions without `self`
-  are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations'.
+  are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations':
+  the struct's documents the class, as a module's struct (`#[module]` on it and on its `impl`, `ModuleDoc`) does
+  the module and a component's `#[component] fn` the component; one on a `#[class]` or `#[module]` `impl` block is a
+  compile error (TS would not show it). `Registry::undocumented` lists the exports TS sees without a doc comment;
+  the command line warns of an app's when it writes `.nsh/types`, and nsh's own sets are tested to have none.
   It implements `ui::Class` (`Class::DEF`, a `ClassDef`: name, doc, members, each a `Member` with its
   `MemberCall`), as `#[module]` implements `Module`; on the struct it implements `Trace` (the callbacks the fields
   keep) and `Ret` (a value of the struct is a new instance).

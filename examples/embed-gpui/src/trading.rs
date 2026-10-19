@@ -173,6 +173,7 @@ pub fn place(symbol: &str, quantity: u32, side: Side, extended: bool) -> Result<
 }
 
 /// The desk's functions, as the tickets see them.
+#[module]
 pub struct Trading;
 
 #[module]

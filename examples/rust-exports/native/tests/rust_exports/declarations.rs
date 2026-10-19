@@ -18,3 +18,25 @@ fn callbacks_and_events_name_their_arguments() {
         assert!(ts.contains(line), "missing {line:?} in\n{ts}");
     }
 }
+
+#[test]
+fn each_export_is_documented_by_the_item_that_names_it() {
+    let ts = declarations();
+    for line in [
+        // The `#[component] fn`'s doc comment, not the props struct's.
+        "/** How much of a budget is spent;",
+        // The `#[module]` struct's, the `#[class]` struct's.
+        "/** Money helpers. */\nexport interface LedgerModule {",
+        "/** An account kept in Rust: TS holds the object, the balance lives here. */\nexport declare class Account {",
+    ] {
+        assert!(ts.contains(line), "missing {line:?} in\n{ts}");
+    }
+    assert!(
+        !ts.contains("The props of"),
+        "the props struct's doc is Rust's:\n{ts}"
+    );
+    assert_eq!(
+        rust_exports_native::__nsh_native_module().undocumented(),
+        Vec::<String>::new()
+    );
+}

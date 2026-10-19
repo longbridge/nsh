@@ -2,9 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A view padded by the insets of system UI or headers where it renders
-/// (the surface's safe area, a modal's, or a screen's, below its header),
-/// on top of its own padding.
+/// The props of [`SafeAreaView`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct SafeAreaViewProps {
     /// The edges to pad (all by default).
@@ -26,7 +24,9 @@ pub enum Edge {
     Left,
 }
 
-/// A view padded by the insets where it renders ([`SafeAreaViewProps`]).
+/// A view padded by the insets of system UI or headers where it renders
+/// (the surface's safe area, a modal's, or a screen's, below its header),
+/// on top of its own padding.
 #[component]
 pub fn SafeAreaView(props: SafeAreaViewProps, cx: Scope<NoEvent>) -> impl IntoElement {
     view()

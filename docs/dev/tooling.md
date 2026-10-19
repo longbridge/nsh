@@ -263,7 +263,8 @@ program that describes them, builds the hosts and runners with them, and does ev
   - `describe` (nsh-core and the app's crates, nothing else): calls each crate's entry and prints one JSON document,
     `nsh_core::ui::description::Description` (format `FORMAT`, the nsh-core version that wrote it, then per crate in
     `"rust"`'s order its specifier, exports with their kinds, TypeScript declarations, re-exported runtime values and
-    types, the values nsh-js makes for it and the files it ships);
+    types, the values nsh-js makes for it, the files it ships and the exports TS sees without a doc comment, which
+    `nsh` warns of as it writes `.nsh/types`);
   - `trace` (nsh-engine with `js` and `headless`, the mobile UI and the app's sets): the headless runner of `nsh trace`
     (`nsh_engine::headless::runner`);
   - the hosts and runners, passing the sets after the mobile UI's (`vec![nsh_ui_mobile::registry(), set_app_charts(),

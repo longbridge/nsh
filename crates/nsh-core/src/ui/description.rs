@@ -20,7 +20,7 @@ use super::Registry;
 
 /// The version of the JSON format of a [`Description`]: bumped whenever
 /// what it holds or means changes.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 
 /// The version of nsh-core that writes descriptions: the version of nsh
 /// the app's crates were built with.
@@ -107,6 +107,9 @@ pub struct SetDescription {
     pub native_values: Vec<String>,
     /// The files it ships.
     pub assets: Vec<AssetDescription>,
+    /// The exports TS sees without a doc comment ([`Registry::undocumented`]),
+    /// which the toolchain warns of.
+    pub undocumented: Vec<String>,
 }
 
 impl SetDescription {
@@ -162,6 +165,7 @@ impl SetDescription {
                     source: file.source.to_owned(),
                 })
                 .collect(),
+            undocumented: registry.undocumented(),
         })
     }
 
@@ -190,6 +194,7 @@ impl SetDescription {
                 "path": a.path,
                 "source": a.source,
             })).collect::<Vec<_>>(),
+            "undocumented": self.undocumented,
         })
     }
 
@@ -239,6 +244,7 @@ impl SetDescription {
             reexported_types: strings(reexports, "types", &format!("{at}.reexports"))?,
             native_values: strings(set, "native_values", &at)?,
             assets,
+            undocumented: strings(set, "undocumented", &at)?,
         })
     }
 }
@@ -368,6 +374,11 @@ mod tests {
         view()
     }
 
+    #[component]
+    fn Plain() -> impl IntoElement {
+        view()
+    }
+
     fn set() -> Registry {
         let mut r = Registry::ui_set("test/description");
         r.register::<Badge>();
@@ -401,6 +412,11 @@ mod tests {
         assert_eq!(set.reexported_values, ["safeArea"]);
         assert_eq!(set.reexported_types, ["Insets"]);
         assert_eq!(set.native_values, ["Stack"]);
+        assert!(set.undocumented.is_empty());
+        // What TS sees without a doc comment, which `nsh` warns of.
+        let mut plain = Registry::ui_set("test/plain");
+        plain.register::<Plain>();
+        assert_eq!(SetDescription::of(&plain).unwrap().undocumented, ["Plain"]);
         // A registry of no set has no description.
         assert!(SetDescription::of(&Registry::new()).is_none());
     }

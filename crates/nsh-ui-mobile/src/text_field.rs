@@ -2,9 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A labeled text input with a clear button. With `value` the app controls
-/// the text (it updates `value` from `onChange`); without, the field keeps
-/// its own, starting at `defaultValue`.
+/// The props of [`TextField`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct TextFieldProps {
     /// Above the input.
@@ -38,7 +36,9 @@ pub enum TextFieldEvent {
     Submit(String),
 }
 
-/// A labeled text input ([`TextFieldProps`]).
+/// A labeled text input with a clear button. With `value` the app controls
+/// the text (it updates `value` from `onChange`); without, the field keeps
+/// its own, starting at `defaultValue`.
 #[component]
 pub fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> impl IntoElement {
     // Our own text, when the app does not control it.

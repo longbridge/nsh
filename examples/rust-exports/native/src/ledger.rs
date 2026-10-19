@@ -6,10 +6,11 @@ use std::time::Duration;
 use nsh_core::ui::prelude::*;
 
 /// Money helpers.
+#[module]
 pub struct Ledger;
 
-// The block's doc comment is the module's in TS.
-/// Money helpers.
+// `#[module]` on the struct and on this block: the struct's doc comment
+// is the module's in TS.
 #[module]
 impl Ledger {
     /// `amount` as money: `$1,234.50`, `-$3.00`.

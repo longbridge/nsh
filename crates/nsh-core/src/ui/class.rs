@@ -688,6 +688,17 @@ pub(crate) mod __private {
         const DOC: &'static str;
     }
 
+    /// The documentation of a module (`#[module]` on its struct, or the
+    /// `#[component]` of its name).
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` needs `#[module]` on its struct too",
+        label = "a module's struct and its `impl` block both have `#[module]` (the struct's doc comment documents it)"
+    )]
+    pub trait ModuleDoc {
+        /// The struct's (or component function's) doc comment.
+        const DOC: &'static str;
+    }
+
     /// A field of a class's struct, traced when its type implements
     /// [`Trace`] (`#[class]` calls `(&&Field(&self.x)).trace_field(t)`: the
     /// method of `TraceField` applies to types that implement it, the one
@@ -912,6 +923,7 @@ export declare class Token {
     }
 
     /// Functions of the three kinds.
+    #[module]
     struct Tools;
 
     #[module]
@@ -970,7 +982,8 @@ export declare class Token {
         );
         assert_eq!(
             declarations(&registry, &[]),
-            r#"export interface ToolsModule {
+            r#"/** Functions of the three kinds. */
+export interface ToolsModule {
   /** The sum, at once. */
   sum(values: (number)[]): number;
   shout(text: string): void;
@@ -985,6 +998,7 @@ export declare class Token {
   later(listener: (value: number) => string): Promise<string>;
 }
 
+/** Functions of the three kinds. */
 export declare const Tools: ToolsModule;
 
 "#

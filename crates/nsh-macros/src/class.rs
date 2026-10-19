@@ -221,6 +221,7 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
         ));
     };
     let class_name = type_name.to_string();
+    crate::no_block_doc(&item, "#[class]")?;
     let mut members = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
@@ -624,6 +625,15 @@ mod tests {
         assert_eq!(
             error(quote!(impl T { pub fn name(&self) -> u32 { 0 } })),
             "no error"
+        );
+    }
+
+    #[test]
+    fn a_doc_comment_on_the_block_is_refused() {
+        // TS shows the struct's: one here would be lost.
+        assert!(
+            error(quote!(#[doc = " A tally."] impl T { pub fn new() -> Self { T } }))
+                .contains("document the export on its struct")
         );
     }
 

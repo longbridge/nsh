@@ -13,9 +13,9 @@ fn native(registry: &mut Registry) {
         .class::<Counter>();
 }
 
-// A component: `<Badge label="…" onPress={…} />`. The props' doc comment is
-// the component's in TS.
-/// A pill with a label; pressing it reports `onPress`.
+// A component: `<Badge label="…" onPress={…} />`. The function's doc comment
+// is the component's in TS, the fields' its props'.
+/// The props of [`Badge`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct BadgeProps {
     /// The text.
@@ -29,7 +29,7 @@ pub enum BadgeEvent {
     Press,
 }
 
-/// A pill with a label ([`BadgeProps`]).
+/// A pill with a label; pressing it reports `onPress`.
 #[component]
 pub fn Badge(props: BadgeProps, cx: Scope<BadgeEvent>) -> impl IntoElement {
     view()
@@ -43,10 +43,11 @@ pub fn Badge(props: BadgeProps, cx: Scope<BadgeEvent>) -> impl IntoElement {
 }
 
 /// Text helpers.
+#[module]
 pub struct Format;
 
-// A module: `Format.times(3)`. The block's doc comment is the module's in TS.
-/// Text helpers.
+// A module: `Format.times(3)`. The struct's doc comment is the module's in
+// TS (`#[module]` on it and on this block).
 #[module]
 impl Format {
     /// "once", "twice", "3 times".

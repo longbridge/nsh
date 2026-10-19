@@ -1501,6 +1501,7 @@ pub(crate) mod tests {
     }
 
     /// Functions JS calls.
+    #[module]
     pub(crate) struct Tools;
 
     #[module]

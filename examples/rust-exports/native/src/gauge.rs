@@ -2,9 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// How much of a budget is spent; a press adds `step` (back to 0 past
-/// `max`) and reports the new value. The app controls `value`: it sets it
-/// from `onChange`.
+/// The props of [`Gauge`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct GaugeProps {
     /// The amount spent (required).
@@ -28,7 +26,9 @@ pub enum GaugeEvent {
     Change(f64),
 }
 
-/// A budget bar ([`GaugeProps`]).
+/// How much of a budget is spent; a press adds `step` (back to 0 past
+/// `max`) and reports the new value. The app controls `value`: it sets it
+/// from `onChange`.
 #[component]
 pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
     let fraction = move || {

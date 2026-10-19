@@ -77,7 +77,8 @@ reasons: `reactive-components.md`.
   too (`#[module] impl Alert`: `Alert`).
 - **Props** are a struct, **events** an enum; the derives produce a decoder per prop (`PropSpec::decode`: the JS
   value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
-  defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. An
+  defaults, and the TypeScript types (doc comments included: the fields' and variants', while the component's is
+  its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's). Field and variant names become camel case in JS. An
   event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
   variant names it (`onSelect?: (index: number) => void`). Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
@@ -275,7 +276,8 @@ commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
 ## Modules
 
 Functions a UI set exports without a component (`Alert.alert`, `Keyboard.dismiss`, `StatusBar.setHidden`) are a
-`#[module]` `impl` block of a unit struct: `pub fn`s are the functions, typed from their signatures (`Option`
+unit struct and its `impl` block, both `#[module]` (the struct's doc comment documents the module; a component of the
+same name stands for the struct, `StatusBar`): `pub fn`s are the functions, typed from their signatures (`Option`
 parameters at the end may be left out). The signature decides how a call runs (`FunctionCall`):
 
 - **No context, not `async`** (`Sync`): it runs inside the JS call, as a class's method does (below), converting
