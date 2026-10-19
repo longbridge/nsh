@@ -3,7 +3,7 @@
 
 /// The declarations of the crate's set.
 fn declarations() -> String {
-    nsh_core::ui::declarations(&rust_exports_native::__nsh_native_module(), &[])
+    nsh_core::ui::declarations(&rust_exports_native::registry(), &[])
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn each_export_is_documented_by_the_item_that_names_it() {
         "the props struct's doc is Rust's:\n{ts}"
     );
     assert_eq!(
-        rust_exports_native::__nsh_native_module().undocumented(),
+        rust_exports_native::registry().undocumented(),
         Vec::<String>::new()
     );
 }

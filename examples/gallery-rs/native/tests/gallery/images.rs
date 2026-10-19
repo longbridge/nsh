@@ -267,7 +267,7 @@ fn show_and_reload_change_what_loads() {
 fn the_gallery_ships_its_assets() {
     use nsh_core::ui::AssetKind;
     // The set `#[native_module]` makes, as nsh's generated workspace gets it.
-    let registry = gallery_native::__nsh_native_module();
+    let registry = gallery_native::registry();
     let files: Vec<_> = registry
         .asset_files()
         .map(|f| {

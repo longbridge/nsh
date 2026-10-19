@@ -159,7 +159,9 @@ fn TitleBar() -> impl IntoElement {
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components
 (`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, `#[module]` on a unit struct and its `impl`),
-classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. In a `#[module]` or
+classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets; the attribute also makes
+`pub fn registry()` at the crate's root, the same set for your tests and other Rust code (`my_app_native::registry()`,
+next to `nsh_ui_mobile::registry()`). In a `#[module]` or
 `#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too); functions without a visibility are helpers that
 stay in Rust. Their TypeScript
 declarations, doc comments included, are generated from the Rust types into `.nsh/types`, so TSX is checked against

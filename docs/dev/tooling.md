@@ -241,7 +241,9 @@ fn native(registry: &mut Registry) {
 
 The attribute (`nsh-macros` `native_module.rs`) checks the specifier at compile time (a bare import specifier, not
 `nsh` or `nsh/...`) and makes a hidden entry of a fixed name, `__nsh_native_module() -> Registry`
-(`Registry::ui_set(specifier)`, then the function), which the generated code below calls. A second one in the crate
+(`Registry::ui_set(specifier)`, then the function), which the generated code below calls, and a public, documented
+`pub fn registry() -> Registry` making the same set, for the crate's tests and other Rust code
+(`rust_exports_native::registry()` next to `nsh_ui_mobile::registry()`; the hidden entry calls it). A second one in the crate
 fails as that name defined twice; one outside the crate's root fails at the attribute (a glob of `crate::*` in a
 block finds the entry or a stand-in whose bound reports where it goes: `#[diagnostic::on_unimplemented]`). The
 generated code links each listed crate under a name of its own (`app_<package>`, `-` as `_`: `app_gallery_native`)

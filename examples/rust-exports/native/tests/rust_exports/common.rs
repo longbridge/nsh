@@ -16,10 +16,7 @@ use nsh_engine::{App, Bundle, Engine, EngineConfig, EngineControl, Environment, 
 /// The sets the app's hosts serve: the mobile UI, then the crate's
 /// (`nsh.json` `"rust"`), as `nsh` passes them.
 fn ui_sets() -> Vec<Registry> {
-    vec![
-        nsh_ui_mobile::registry(),
-        rust_exports_native::__nsh_native_module(),
-    ]
+    vec![nsh_ui_mobile::registry(), rust_exports_native::registry()]
 }
 
 /// `App.tsx` as bytecode, compiled once for every test.

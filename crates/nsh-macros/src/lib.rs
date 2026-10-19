@@ -1098,6 +1098,11 @@ fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenSt
 /// }
 /// ```
 ///
+/// It also makes `pub fn registry() -> Registry` at the crate's root: the
+/// set, for tests and other Rust code (`my_app_native::registry()`, next to
+/// `nsh_ui_mobile::registry()`), so the crate's root has no other item
+/// named `registry`.
+///
 /// The specifier is checked at compile time: a bare import specifier
 /// (`my-app/native`, `@acme/ui`), not a path, and not nsh's own (`nsh`,
 /// `nsh/...`). A crate has one, at its root: it generates a hidden entry

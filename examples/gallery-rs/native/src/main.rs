@@ -12,7 +12,7 @@ use nsh_platform_windows as platform;
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn main() -> impl std::process::Termination {
     env_logger::init();
-    let gallery = gallery_native::__nsh_native_module();
+    let gallery = gallery_native::registry();
     let assets = asset_directory(&gallery).expect("copy the gallery's registered assets");
     platform::set_ui_sets(vec![nsh_ui_mobile::registry(), gallery]);
     let theme = nsh_core::ui::Theme::from_json(include_str!("../../theme.json"))
