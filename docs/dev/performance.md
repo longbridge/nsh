@@ -17,7 +17,12 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
 - On Catalyst (release), rebinding one row while scrolling slowly takes ~0.4ms (clocked down) and rebinding a whole screen of ~32 rows on a
   fast fling 0.9–1.6ms.
 - Host startup (`Host::new`, release): ~75–155µs (clock state). The web APIs add nothing until first used, then ~90µs to
-  make their classes (`bench_first_web_global`; as JS they cost ~0.8ms as source, ~0.33ms as bytecode).
+  make their classes (`bench_first_web_global`; as JS they cost ~0.8ms as source, ~0.33ms as bytecode). The standard
+  modules add `Buffer` (~30µs, made at startup: it must exist before hardening freezes `%TypedArray%.prototype`) and
+  the per-VM I/O scheduler (~12µs, plus ~12µs for the async runtime over the plain one); the `process`, `crypto`
+  and `WebSocket` globals are made on first use (`standard::LAZY`; `process` and `WebSocket` evaluate JS facades of
+  ~190µs each). On a Linux x86 desktop `bench_host_startup` (`cargo test --release -p nsh-js --test web
+  bench_host_startup -- --ignored --nocapture`) measures ~150µs before the standard modules and ~270µs with them.
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 

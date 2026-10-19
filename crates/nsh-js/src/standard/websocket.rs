@@ -60,11 +60,15 @@ enum Command {
     Close(Option<CloseFrame>),
 }
 
-/// Installs the global constructor after the existing web globals.
-pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
-    ctx.globals()
-        .set("__nshWebSocketConnect", Func::from(connect))?;
-    ctx.eval::<(), _>(FACADE)?;
+/// Makes the global constructor, on the first use of `WebSocket`
+/// (`standard::LAZY`). The facade receives the native transport as an
+/// argument, so no other global is defined.
+pub(crate) fn init(ctx: &Ctx<'_>) -> Result<()> {
+    if super::take_lazy(ctx, "WebSocket")? {
+        let make: Function = ctx.eval(FACADE)?;
+        let constructor: Value = make.call((Func::from(connect),))?;
+        ctx.globals().set("WebSocket", constructor)?;
+    }
     Ok(())
 }
 
@@ -300,9 +304,7 @@ fn closed<'js>(
     emit(callback, "close", data.into_value())
 }
 
-const FACADE: &str = r#"(() => {
-const connect = globalThis.__nshWebSocketConnect;
-delete globalThis.__nshWebSocketConnect;
+const FACADE: &str = r#"((connect) => {
 class WebSocket extends EventTarget {
   #handle; #state = 0; #protocol = ''; #url; #binaryType = 'blob'; #handlers = {};
   constructor(url, protocols = []) {
@@ -370,8 +372,8 @@ for (const [key, value] of Object.entries({ CONNECTING: 0, OPEN: 1, CLOSING: 2, 
   Object.defineProperty(WebSocket, key, { value });
   Object.defineProperty(WebSocket.prototype, key, { value });
 }
-globalThis.WebSocket = WebSocket;
-})();"#;
+return WebSocket;
+})"#;
 
 #[cfg(test)]
 #[path = "websocket_fixture.rs"]
