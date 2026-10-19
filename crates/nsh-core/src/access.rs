@@ -9,7 +9,8 @@
 //! "capabilities": {
 //!   "network": {
 //!     "hosts": ["api.example.com", "*.cdn.example.com"],
-//!     "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }]
+//!     "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }],
+//!     "sockets": ["mqtt.example.com:8883"]
 //!   },
 //!   "webview": { "hosts": ["*.example.com"] },
 //!   "statusBar": true
@@ -18,11 +19,17 @@
 //!
 //! `network` covers `fetch` (every redirect is checked again), remote
 //! images (also canvas images and `Image.getSize` / `prefetch`) and video
-//! sources; `asset:` URIs are always allowed. `webview` lists the hosts a
-//! web view may show and navigate to (its pages' own subresources are the
-//! web content's business). An app without `"capabilities"` (a standalone
-//! app, its developer's own) retains unrestricted existing APIs. Process and
-//! filesystem access always require an explicit declaration.
+//! sources; `asset:` URIs are always allowed. WebSockets are HTTP upgrades:
+//! a `ws:` / `wss:` URL is checked as a GET of the same URL over `http:` /
+//! `https:` (or under its own scheme, for legacy rules that list it).
+//! `network.sockets` grants raw TCP (`net.connect`) to exact `host:port`
+//! pairs only: no wildcards, and neither `hosts` nor `http` grants imply
+//! one. `webview` lists the hosts a web view may show and navigate to (its
+//! pages' own subresources are the web content's business). An app without
+//! `"capabilities"` (a standalone app, its developer's own) retains
+//! unrestricted HTTP, web views, the status bar and the clipboard; raw
+//! sockets, processes and the filesystem always require an explicit
+//! declaration.
 
 //! Scoped HTTP rules use `scheme`, `port`, `methods`, `paths` and
 //! `path_prefixes`. They default to HTTPS and require GET/POST methods and
@@ -123,11 +130,80 @@ pub struct HttpScope {
 
 /// `capabilities.network`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct NetworkGrants {
     /// Reachable with any method.
     pub hosts: Vec<HostPattern>,
     /// Finer grants.
     pub http: Vec<HttpGrant>,
+    /// Raw TCP destinations (`net.connect`).
+    pub sockets: Vec<SocketGrant>,
+}
+
+/// One raw TCP destination: an exact host and port, written `host:port`
+/// (`[::1]:port` for IPv6). A socket bypasses every HTTP rule (methods,
+/// paths, schemes), so it is granted per port and never by a pattern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocketGrant {
+    host: String,
+    port: u16,
+}
+
+impl SocketGrant {
+    /// Parses `host:port` (host lower-cased; port 1 to 65535).
+    pub fn new(grant: &str) -> Result<Self, String> {
+        let invalid = || {
+            format!(
+                "invalid socket grant `{grant}`: expected an exact `host:port` (`[::1]:port` for IPv6), without wildcards"
+            )
+        };
+        let (host, port) = grant.trim().rsplit_once(':').ok_or_else(invalid)?;
+        let port = port
+            .parse::<u16>()
+            .ok()
+            .filter(|p| *p != 0)
+            .ok_or_else(invalid)?;
+        let host = host.to_ascii_lowercase();
+        let host = match host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+            Some(v6)
+                if !v6.is_empty()
+                    && v6
+                        .chars()
+                        .all(|c| c.is_ascii_hexdigit() || matches!(c, ':' | '.')) =>
+            {
+                v6.to_owned()
+            }
+            Some(_) => return Err(invalid()),
+            None if !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-')) =>
+            {
+                host.trim_end_matches('.').to_owned()
+            }
+            None => return Err(invalid()),
+        };
+        Ok(Self { host, port })
+    }
+
+    /// The host (lower case, IPv6 without brackets).
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    /// The port.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// The `host:port` form [`Self::new`] reads.
+    pub fn to_string_form(&self) -> String {
+        if self.host.contains(':') {
+            format!("[{}]:{}", self.host, self.port)
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
+    }
 }
 
 /// Commands an app may execute. Names are exact, without shell expansion.
@@ -273,14 +349,16 @@ pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
 }
 
 impl Capabilities {
-    /// Legacy unrestricted APIs for apps without a declaration. Process and
-    /// filesystem grants stay empty and always require explicit opt-in.
+    /// Legacy unrestricted APIs for apps without a declaration. Socket,
+    /// process and filesystem grants stay empty and always require explicit
+    /// opt-in.
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
             network: NetworkGrants {
                 hosts: any.clone(),
                 http: Vec::new(),
+                sockets: Vec::new(),
             },
             webview: Some(any),
             status_bar: true,
@@ -307,9 +385,19 @@ impl Capabilities {
         let mut caps = Capabilities::default();
         if let Some(network) = obj.get("network") {
             let network = object(network, "capabilities.network")?;
-            known(network, "capabilities.network", &["hosts", "http"])?;
+            known(
+                network,
+                "capabilities.network",
+                &["hosts", "http", "sockets"],
+            )?;
             if let Some(hosts) = network.get("hosts") {
                 caps.network.hosts = patterns(hosts, "capabilities.network.hosts")?;
+            }
+            if let Some(sockets) = network.get("sockets") {
+                caps.network.sockets = strings(sockets, "capabilities.network.sockets")?
+                    .iter()
+                    .map(|s| SocketGrant::new(s))
+                    .collect::<Result<_, _>>()?;
             }
             if let Some(http) = network.get("http") {
                 let list = http
@@ -545,6 +633,15 @@ impl Capabilities {
             })
             .collect();
         network.insert("http".into(), http.into());
+        if !self.network.sockets.is_empty() {
+            let sockets: Vec<String> = self
+                .network
+                .sockets
+                .iter()
+                .map(SocketGrant::to_string_form)
+                .collect();
+            network.insert("sockets".into(), sockets.into());
+        }
         let mut obj = Map::new();
         obj.insert("network".into(), Value::Object(network));
         obj.insert(
@@ -827,14 +924,39 @@ impl Access {
         }
     }
 
-    /// Raw TCP authority comes only from host grants, never HTTP path or method
-    /// grants. Host grants cover every port accepted by the socket API.
-    pub fn allows_socket(&self, host: &str, _port: u16) -> bool {
+    /// Whether a raw TCP connection to `host:port` may be opened: only an
+    /// exact `network.sockets` grant allows it, never `hosts` or `http`
+    /// grants, and [`Capabilities::all`] grants none.
+    pub fn allows_socket(&self, host: &str, port: u16) -> bool {
         if host.is_empty() || host.contains(['/', '@', '?', '#', '\0']) {
             return false;
         }
         let host = host.to_ascii_lowercase();
-        self.each(|c| c.network.hosts.iter().any(|pattern| pattern.matches(&host)))
+        let host = host
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .unwrap_or(&host)
+            .trim_end_matches('.');
+        self.each(|c| {
+            c.network
+                .sockets
+                .iter()
+                .any(|grant| grant.port == port && grant.host == host)
+        })
+    }
+
+    /// Whether a WebSocket to `url` (`ws:` / `wss:`) may connect. The
+    /// handshake is an HTTP GET, so it is checked as a GET of the same URL
+    /// over `http:` / `https:`; legacy rules may also list `ws` / `wss`.
+    pub fn allows_websocket(&self, url: &str) -> bool {
+        let http = if let Some(rest) = url.strip_prefix("wss:") {
+            format!("https:{rest}")
+        } else if let Some(rest) = url.strip_prefix("ws:") {
+            format!("http:{rest}")
+        } else {
+            return false;
+        };
+        self.allows_http("GET", &http) || self.allows_http("GET", url)
     }
 
     /// Whether `fetch(url, { method })` may go out. `asset:` URIs are always
@@ -1135,6 +1257,80 @@ mod tests {
                 "{line}"
             );
         }
+    }
+
+    #[test]
+    fn sockets_need_exact_host_and_port_grants() {
+        let declared = caps(
+            r#"{"network":{"hosts":["*"],"sockets":["MQTT.example.com:8883","[::1]:9000","127.0.0.1:22"]}}"#,
+        );
+        assert_eq!(
+            Capabilities::from_json(&declared.to_json()).unwrap(),
+            declared
+        );
+        let access = Access {
+            declared,
+            granted: None,
+        };
+        assert!(access.allows_socket("mqtt.example.com", 8883));
+        assert!(access.allows_socket("MQTT.example.com.", 8883));
+        assert!(!access.allows_socket("mqtt.example.com", 1883));
+        assert!(!access.allows_socket("example.com", 8883));
+        assert!(!access.allows_socket("a.mqtt.example.com", 8883));
+        assert!(access.allows_socket("::1", 9000));
+        assert!(access.allows_socket("[::1]", 9000));
+        assert!(access.allows_socket("127.0.0.1", 22));
+        assert!(!access.allows_socket("127.0.0.1", 0));
+        // `hosts: ["*"]` (and the unrestricted default) grant no sockets.
+        assert!(!access.allows_socket("localhost", 22));
+        assert!(!Access::all().allows_socket("127.0.0.1", 22));
+        assert!(!Access::all().allows_socket("example.com", 443));
+        let narrowed = Access {
+            granted: Some(caps(r#"{"network":{"sockets":["127.0.0.1:22"]}}"#)),
+            ..access
+        };
+        assert!(narrowed.allows_socket("127.0.0.1", 22));
+        assert!(!narrowed.allows_socket("mqtt.example.com", 8883));
+        for bad in [
+            "*.example.com:443",
+            "*:443",
+            "example.com",
+            "example.com:0",
+            "example.com:65536",
+            "example.com:*",
+            ":443",
+            "::1:443",
+            "[]:443",
+            "exa mple.com:1",
+        ] {
+            assert!(
+                Capabilities::from_json(&serde_json::json!({"network":{"sockets":[bad]}}))
+                    .unwrap_err()
+                    .contains("invalid socket grant"),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn websockets_follow_http_grants() {
+        let access = Access {
+            declared: caps(
+                r#"{"network":{"hosts":["ws.example.com"],"http":[
+                    {"host":"chat.example.com","methods":["GET"],"paths":["/socket"]},
+                    {"host":"legacy.example.com","schemes":["wss"]}
+                ]}}"#,
+            ),
+            granted: None,
+        };
+        assert!(access.allows_websocket("ws://ws.example.com:8080/x"));
+        assert!(access.allows_websocket("wss://chat.example.com/socket"));
+        assert!(!access.allows_websocket("ws://chat.example.com/socket"));
+        assert!(!access.allows_websocket("wss://chat.example.com/other"));
+        assert!(access.allows_websocket("wss://legacy.example.com/"));
+        assert!(!access.allows_websocket("ws://legacy.example.com/"));
+        assert!(!access.allows_websocket("https://ws.example.com/"));
+        assert!(!access.allows_socket("ws.example.com", 8080));
     }
 
     #[test]

@@ -84,9 +84,9 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 ## Network permissions and boundaries
 
-Global `fetch` retains NSH's streaming HTTP implementation, checking `network.hosts` or `network.http` for requests and redirect hops. Native-host WebSocket supports `ws:` / `wss:`, text and binary messages, event listeners and closing handshakes. Permission checks map `ws` to `http` and `wss` to `https`, using GET; the handshake connects to the original URL and rejects redirects. Each VM supports at most 32 WebSockets, messages up to 8 MiB, and a send queue of eight messages with at most 8 MiB buffered. Handshake and writes time out after 30 seconds; closing waits up to 5 seconds.
+Global `fetch` retains NSH's streaming HTTP implementation, checking `network.hosts` or `network.http` for requests and redirect hops. Native-host WebSocket supports `ws:` / `wss:`, text and binary messages, event listeners and closing handshakes. A WebSocket handshake is an HTTP GET, so both the global `WebSocket` and the `websocket` module's `WebSocket.connect` use the HTTP grants: `ws` is checked as `http` and `wss` as `https`, using GET (a legacy rule may also list `ws` / `wss` in `schemes`). The check runs on the normalized URL before DNS lookup, the handshake connects to that same URL and rejects redirects. Each VM supports at most 32 WebSockets across both APIs, messages up to 8 MiB, and a send queue of eight messages with at most 8 MiB buffered. Handshake and writes time out after 30 seconds; closing waits up to 5 seconds.
 
-`net.connect` uses only `network.hosts`, checked before DNS lookup. Host grants cover all valid ports on that host; HTTP method or path grants do not grant raw TCP access. The returned socket provides `read(size?)`, `write(text)` and `close()`; reads return `Uint8Array`, or `null` at EOF. Connections and I/O have 30-second timeouts, each read/write is limited to 1 MiB, and each direction allows one pending operation. This is a promise-based client socket interface.
+`net.connect(host, port)` uses only `network.sockets`, a list of exact `"host:port"` destinations (`"[::1]:9000"` for IPv6), checked before DNS lookup. Each entry grants one port on one host; host patterns, `network.hosts` and HTTP grants cover HTTP traffic only, and an app without `"capabilities"` lists its sockets too. The returned socket provides `read(size?)`, `write(text)` and `close()`; reads return `Uint8Array`, or `null` at EOF. Connections and I/O have 30-second timeouts, each read/write is limited to 1 MiB, at most 4 MiB of writes may wait to be sent, and `close()` ends pending reads and writes at once. Each VM keeps at most 32 sockets open or connecting. This is a promise-based client socket interface.
 
 Raw TCP and this WebSocket transport use native hosts. Browser apps use the platform's [global APIs](./globals.md); availability follows the actual host. Embedding grants intersect the app's capability declaration.
 
@@ -117,12 +117,12 @@ socket.addEventListener("message", (event) => console.log(event.data));
 
 ## TCP grant example
 
-TCP uses a host grant. This grant covers every valid port on the host; `9000` is the connection parameter.
+TCP uses a socket grant: the exact host and port the app connects to.
 
 ```json
 {
   "capabilities": {
-    "network": { "hosts": ["tcp.example.com"] }
+    "network": { "sockets": ["tcp.example.com:9000"] }
   }
 }
 ```

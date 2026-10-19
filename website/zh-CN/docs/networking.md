@@ -233,7 +233,7 @@ NSH 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 - **`data:` 和 `blob:` URL** 在本地应答。`URL.createObjectURL(blob)` 生成一个 `blob:` URL，在撤销之前 `fetch` 都可以读取它。
 - 浏览器专用的选项（`mode`、`credentials`、`cache`、`referrer`、`integrity`、`keepalive`、`priority`）为兼容各种库而被接受。
 
-基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`，也没有 WebSocket API。
+基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`；原生宿主提供全局 `WebSocket` 和 [`websocket` 模块](../modules/standard-modules.md)，按与 `fetch` 相同的授权检查。
 
 ## 在 Rust 组件中
 

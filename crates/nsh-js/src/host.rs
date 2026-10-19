@@ -49,6 +49,10 @@ pub(crate) struct Shared {
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
+    /// Open (or connecting) `net` sockets, capped per VM.
+    pub(crate) sockets: Rc<Cell<usize>>,
+    /// Open (or connecting) WebSockets of both APIs, capped per VM.
+    pub(crate) websockets: Rc<Cell<usize>>,
     /// Worker completion wakes the owning engine without polling.
     pub(crate) system_wake: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub(crate) warnings: RefCell<Warnings>,

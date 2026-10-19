@@ -15,6 +15,25 @@ mod zlib;
 
 pub(crate) const NAMES: &[&str] = nsh_core::js::STANDARD_MODULES;
 
+/// One of a VM's limited connections; dropping it frees the place.
+pub(crate) struct Slot(std::rc::Rc<std::cell::Cell<usize>>);
+
+impl Slot {
+    /// Takes a place in `count` when fewer than `max` are taken.
+    pub(crate) fn acquire(count: &std::rc::Rc<std::cell::Cell<usize>>, max: usize) -> Option<Self> {
+        (count.get() < max).then(|| {
+            count.set(count.get() + 1);
+            Self(count.clone())
+        })
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
+}
+
 /// Only canonical reference specifiers are accepted; aliases stay denied.
 pub(crate) fn normalize(name: &str) -> Option<&str> {
     NAMES.iter().copied().find(|candidate| *candidate == name)

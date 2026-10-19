@@ -98,7 +98,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
   "capabilities": {
     "network": {
       "hosts": ["api.example.com", "*.cdn.example.com"],
-      "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }]
+      "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }],
+      "sockets": ["feed.example.com:7000"]
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
@@ -108,13 +109,13 @@ An app declares what it may reach outside its VM in `nsh.json`:
 ```
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
-restricted. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
+restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
 build errors, so a typo is caught when you build instead of becoming a missing permission at runtime.
 
 ### `network`
 
-Covers `fetch` (including every redirect), remote images (`<Image>`, `defaultSource`, canvas images,
-`Image.getSize` / `Image.prefetch`) and video sources.
+Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `defaultSource`, canvas images,
+`Image.getSize` / `Image.prefetch`), video sources and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
 |---|---|---|
@@ -124,10 +125,15 @@ Covers `fetch` (including every redirect), remote images (`<Image>`, `defaultSou
 | `http[].methods` | `string[]` | Allowed methods, such as `["GET", "HEAD"]`. Empty or missing: any. |
 | `http[].schemes` | `string[]` | Allowed schemes. Empty or missing: any of `http`, `https`, `ws`, `wss`. |
 | `http[].pathPrefix` | `string` | The URL's path must start with it. |
+| `sockets` | `string[]` | Raw TCP destinations for [`net.connect`](../modules/standard-modules.md), each an exact `"host:port"` (`"[::1]:9000"` for IPv6). |
 
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
 `https://api.example.com@evil.io/` is checked as `evil.io`.
+
+A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss://` as `https://`, so the hosts and
+`http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
+`sockets` lists each host and port exactly, and only `sockets` grants them.
 
 `asset:` URIs (the app's own files) are always allowed; images and videos may also use `data:` URIs and relative
 paths.

@@ -31,11 +31,17 @@ fn tcp_permissions_never_inherit_http_grants() {
     );
     assert!(a.allows_http("GET", "https://127.0.0.1/"));
     assert!(!a.allows_socket("127.0.0.1", 1234));
-    let mut a = access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}}));
+    let a = access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}}));
+    assert!(!a.allows_socket("127.0.0.1", 1234));
+    let mut a = access(serde_json::json!({"network":{"sockets":["127.0.0.1:1234"]}}));
     assert!(a.allows_socket("127.0.0.1", 1234));
-    assert!(a.allows_socket("127.0.0.1", 0));
+    assert!(!a.allows_socket("127.0.0.1", 1235));
+    assert!(!a.allows_socket("127.0.0.1", 0));
     a.granted = Some(Capabilities::default());
     assert!(!a.allows_socket("127.0.0.1", 1234));
+}
+fn sockets(port: u16) -> Access {
+    access(serde_json::json!({"network":{"sockets":[format!("127.0.0.1:{port}")]}}))
 }
 #[test]
 fn socket_roundtrip_eof_and_limits() {
@@ -52,10 +58,7 @@ fn socket_roundtrip_eof_and_limits() {
         stream.write_all(b"pong").unwrap();
     });
     let host = Host::new().unwrap();
-    host.set_system_access(
-        access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}})),
-        None,
-    );
+    host.set_system_access(sockets(port), None);
     host.eval_source(&format!(
         r#"import net from 'net';
         globalThis.done = false; globalThis.failure = '';
@@ -95,10 +98,7 @@ fn socket_vm_drop_releases_peer() {
         tx.send(result).unwrap();
     });
     let host = Host::new().unwrap();
-    host.set_system_access(
-        access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}})),
-        None,
-    );
+    host.set_system_access(sockets(port), None);
     host.eval_source(&format!("import {{connect}} from 'net'; connect('127.0.0.1', {port}).then(s => {{ globalThis.socket = s; globalThis.connected = true; s.read().catch(() => {{}}); }});")).unwrap();
     wait(&host, "globalThis.connected === true");
     drop(host);
@@ -107,10 +107,17 @@ fn socket_vm_drop_releases_peer() {
 }
 #[test]
 fn denied_socket_rejects_before_connecting() {
-    let host = Host::new().unwrap();
-    host.set_system_access(access(serde_json::json!({})), None);
-    host.eval_source("import {connect} from 'net'; globalThis.denied = false; try { connect('127.0.0.1', 9); } catch(e) { globalThis.denied = String(e).includes('capabilities.network.hosts'); }").unwrap();
-    wait(&host, "globalThis.denied === true");
+    for access in [
+        access(serde_json::json!({})),
+        access(serde_json::json!({"network":{"hosts":["*"]}})),
+        Access::all(),
+        sockets(10),
+    ] {
+        let host = Host::new().unwrap();
+        host.set_system_access(access, None);
+        host.eval_source("import {connect} from 'net'; globalThis.denied = false; try { connect('127.0.0.1', 9); } catch(e) { globalThis.denied = String(e).includes('add \"127.0.0.1:9\" to capabilities.network.sockets'); }").unwrap();
+        wait(&host, "globalThis.denied === true");
+    }
 }
 
 #[test]
@@ -126,10 +133,7 @@ fn closing_socket_cancels_pending_read() {
         assert_eq!(stream.read(&mut byte).unwrap(), 0);
     });
     let host = Host::new().unwrap();
-    host.set_system_access(
-        access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}})),
-        None,
-    );
+    host.set_system_access(sockets(port), None);
     host.eval_source(&format!("import {{connect}} from 'net'; connect('127.0.0.1', {port}).then(s => {{ globalThis.socket = s; globalThis.connected = true; s.read().then(v => globalThis.cancelled = v === null); }});")).unwrap();
     wait(&host, "globalThis.connected === true");
     host.eval_script("close", "globalThis.socket.close()")
@@ -139,12 +143,74 @@ fn closing_socket_cancels_pending_read() {
 }
 
 #[test]
-fn port_zero_is_an_io_failure_not_a_permission_error() {
+fn closing_socket_cancels_pending_write() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // The peer never reads, so the kernel's buffers fill and writes wait.
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let peer = std::thread::spawn(move || {
+        let (_stream, _) = listener.accept().unwrap();
+        let _ = done_rx.recv_timeout(Duration::from_secs(10));
+    });
     let host = Host::new().unwrap();
-    host.set_system_access(
-        access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}})),
-        None,
+    host.set_system_access(sockets(port), None);
+    host.eval_source(&format!(
+        r#"import {{connect}} from 'net';
+        globalThis.failure = '';
+        connect('127.0.0.1', {port}).then(s => {{
+            globalThis.socket = s;
+            const chunk = 'x'.repeat(1048576);
+            let limited = false;
+            const writes = [];
+            for (let i = 0; i < 5; i++) {{
+                try {{ writes.push(s.write(chunk).then(() => 'sent', e => String(e))); }}
+                catch (e) {{ limited = e instanceof RangeError && String(e).includes('4194304 byte limit'); }}
+            }}
+            if (!limited) globalThis.failure = 'pending writes must be capped';
+            globalThis.writes = Promise.all(writes);
+            globalThis.connected = true;
+        }});"#
+    ))
+    .unwrap();
+    wait(&host, "globalThis.connected === true");
+    let start = Instant::now();
+    host.eval_script(
+        "close",
+        "globalThis.socket.close(); globalThis.writes.then(r => { globalThis.results = r; }); true",
+    )
+    .unwrap();
+    wait(
+        &host,
+        "Array.isArray(globalThis.results) && globalThis.results.some(r => r.includes('socket is closed'))",
     );
-    host.eval_source("import {connect} from 'net'; globalThis.zeroPort = false; connect('127.0.0.1', 0).catch(e => globalThis.zeroPort = String(e).includes('connecting to 127.0.0.1:0 failed:'));").unwrap();
-    wait(&host, "globalThis.zeroPort === true");
+    assert!(start.elapsed() < Duration::from_secs(3));
+    assert!(
+        host.eval_script("result", "globalThis.failure === ''")
+            .unwrap()
+    );
+    done_tx.send(()).unwrap();
+    peer.join().unwrap();
+}
+
+#[test]
+fn sockets_are_capped_per_vm() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let host = Host::new().unwrap();
+    host.set_system_access(sockets(port), None);
+    host.eval_source(&format!(
+        r#"import {{connect}} from 'net';
+        const pending = [];
+        for (let i = 0; i < 32; i++) pending.push(connect('127.0.0.1', {port}));
+        globalThis.capped = false;
+        try {{ connect('127.0.0.1', {port}); }} catch (e) {{ globalThis.capped = e instanceof RangeError; }}
+        Promise.all(pending).then(all => {{
+            all[0].close();
+            connect('127.0.0.1', {port}).then(s => {{ s.close(); globalThis.reused = true; }});
+        }});"#
+    ))
+    .unwrap();
+    wait(&host, "globalThis.capped === true");
+    wait(&host, "globalThis.reused === true");
+    drop(listener);
 }

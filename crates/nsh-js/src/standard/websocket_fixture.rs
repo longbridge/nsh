@@ -315,3 +315,52 @@ fn websocket_module_pending_read_is_released_with_vm() {
     ended_rx.recv_timeout(Duration::from_secs(1)).unwrap();
     server.join().unwrap();
 }
+
+#[test]
+fn websocket_connections_are_capped_per_vm_across_both_apis() {
+    // Connections wait in the listener's backlog: their handshakes never end.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let host = host(true);
+    host.eval_source(&format!(
+        r#"
+        import {{ WebSocket as ShellWebSocket }} from 'websocket';
+        const open = [];
+        for (let i = 0; i < 16; i++) open.push(new WebSocket('ws://{address}/'));
+        for (let i = 0; i < 16; i++) open.push(ShellWebSocket.connect('ws://{address}/').catch(() => {{}}));
+        globalThis.keep = open;
+        for (const connect of [() => new WebSocket('ws://{address}/'), () => ShellWebSocket.connect('ws://{address}/')]) {{
+            let capped = false;
+            try {{ connect(); }} catch (error) {{ capped = error instanceof RangeError && /At most 32/.test(String(error)); }}
+            if (!capped) throw Error('the 33rd WebSocket was not refused');
+        }}
+    "#
+    ))
+    .unwrap();
+    drop(host);
+    drop(listener);
+}
+
+#[test]
+fn websocket_module_needs_http_grants_not_socket_grants() {
+    let host = Host::new().unwrap();
+    host.set_system_access(
+        Access {
+            declared: Capabilities::from_json(
+                &serde_json::json!({"network": {"sockets": ["127.0.0.1:9"]}}),
+            )
+            .unwrap(),
+            granted: None,
+        },
+        None,
+    );
+    host.eval_source(
+        r#"
+        import { WebSocket as ShellWebSocket } from 'websocket';
+        let denied = false;
+        try { ShellWebSocket.connect('ws://127.0.0.1:9/'); } catch (error) { denied = /capabilities.network.http/.test(String(error)); }
+        if (!denied) throw Error('a socket grant allowed a WebSocket');
+    "#,
+    )
+    .unwrap();
+}

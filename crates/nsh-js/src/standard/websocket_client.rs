@@ -116,23 +116,22 @@ fn connect<'js>(ctx: Ctx<'js>, url: String, options: Opt<Options>) -> Result<Pro
     let port = parsed.port_or_known_default().ok_or_else(|| {
         Exception::throw_type(&ctx, "WebSocket URL has no port and no known default")
     })?;
-    if !crate::dom::shared(ctx.as_raw().as_ptr())
-        .system_access
-        .borrow()
-        .allows_socket(host, port)
-    {
+    // A handshake is an HTTP GET: the same grants as `fetch` and the global
+    // WebSocket, checked on the URL connected to.
+    if !super::allowed(&ctx, &parsed) {
         return Err(Exception::throw_type(
             &ctx,
             &format!(
-                "network access to `{host}` is not granted; add it to capabilities.network.hosts"
+                "network access to `{host}` is not granted; add it to capabilities.network.hosts or a GET rule in capabilities.network.http"
             ),
         ));
     }
     let host = host.to_owned();
     let headers = options.0.unwrap_or_default().headers;
+    let slot = super::acquire_slot(&ctx)?;
     let task_ctx = ctx.clone();
     Promise::wrap_future(&ctx, async move {
-        let mut request = url.into_client_request().map_err(|error| {
+        let mut request = parsed.as_str().into_client_request().map_err(|error| {
             Exception::throw_message(&task_ctx, &format!("WebSocket handshake failed: {error}"))
         })?;
         request.headers_mut().extend(headers);
@@ -202,7 +201,10 @@ fn connect<'js>(ctx: Ctx<'js>, url: String, options: Opt<Options>) -> Result<Pro
             Exception::throw_message(&task_ctx, &format!("WebSocket handshake failed: {error}"))
         })?;
         let (tx, rx) = mpsc::channel(8);
-        task_ctx.spawn(actor(socket, rx));
+        task_ctx.spawn(async move {
+            let _slot = slot;
+            actor(socket, rx).await
+        });
         socket_object(&task_ctx, tx)
     })
 }

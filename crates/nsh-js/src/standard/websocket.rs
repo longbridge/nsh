@@ -29,6 +29,31 @@ impl rquickjs::module::ModuleDef for WebSocketModule {
 
 const MAX_MESSAGE: usize = 8 * 1024 * 1024;
 const QUEUE: usize = 8;
+/// WebSockets open or connecting at once in one VM, of both APIs.
+const MAX_CONNECTIONS: usize = 32;
+
+/// A place among the VM's WebSockets, or the `RangeError` saying there is none.
+fn acquire_slot(ctx: &Ctx<'_>) -> Result<super::Slot> {
+    super::Slot::acquire(
+        &crate::dom::shared(ctx.as_raw().as_ptr()).websockets,
+        MAX_CONNECTIONS,
+    )
+    .ok_or_else(|| {
+        Exception::throw_range(
+            ctx,
+            &format!("At most {MAX_CONNECTIONS} concurrent WebSockets are allowed per VM"),
+        )
+    })
+}
+
+/// Whether the app may open a WebSocket to `url`, checked before any DNS
+/// lookup: the handshake is a GET of the same URL over HTTP.
+fn allowed(ctx: &Ctx<'_>, url: &url::Url) -> bool {
+    crate::dom::shared(ctx.as_raw().as_ptr())
+        .system_access
+        .borrow()
+        .allows_websocket(url.as_str())
+}
 
 enum Command {
     Send(Message),
@@ -37,13 +62,8 @@ enum Command {
 
 /// Installs the global constructor after the existing web globals.
 pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
-    let active = Rc::new(Cell::new(0usize));
-    ctx.globals().set(
-        "__nshWebSocketConnect",
-        Func::from(move |ctx, url, protocols, callback| {
-            connect(ctx, url, protocols, callback, active.clone())
-        }),
-    )?;
+    ctx.globals()
+        .set("__nshWebSocketConnect", Func::from(connect))?;
     ctx.eval::<(), _>(FACADE)?;
     Ok(())
 }
@@ -57,14 +77,7 @@ fn connect<'js>(
     url: String,
     protocols: Vec<String>,
     callback: Function<'js>,
-    active: Rc<Cell<usize>>,
 ) -> Result<Object<'js>> {
-    if active.get() >= 32 {
-        return Err(Exception::throw_range(
-            &ctx,
-            "At most 32 concurrent WebSockets are allowed per VM",
-        ));
-    }
     let parsed = url::Url::parse(&url)
         .map_err(|_| Exception::throw_syntax(&ctx, "Invalid WebSocket URL"))?;
     if !matches!(parsed.scheme(), "ws" | "wss")
@@ -77,27 +90,16 @@ fn connect<'js>(
             "WebSocket requires a ws/wss URL without credentials or fragment",
         ));
     }
-    // Check before any DNS lookup. The handshake API does not follow redirects.
-    let http_url = format!(
-        "{}{}",
-        if parsed.scheme() == "wss" {
-            "https"
-        } else {
-            "http"
-        },
-        &parsed.as_str()[parsed.scheme().len()..]
-    );
-    if !crate::dom::shared(ctx.as_raw().as_ptr())
-        .system_access
-        .borrow()
-        .allows_http("GET", &http_url)
-    {
+    // The handshake API does not follow redirects. The URL checked is the
+    // one connected to: the parsed, normalized form.
+    if !allowed(&ctx, &parsed) {
         return Err(Exception::throw_type(
             &ctx,
             "WebSocket network capability denied",
         ));
     }
-    let mut request = url
+    let slot = acquire_slot(&ctx)?;
+    let mut request = parsed
         .as_str()
         .into_client_request()
         .map_err(|_| Exception::throw_syntax(&ctx, "Invalid WebSocket URL"))?;
@@ -209,16 +211,8 @@ fn connect<'js>(
         crate::hot::undo_on_rerun(raw, owned_cleanup);
     }
     let task_ctx = ctx.clone();
-    active.set(active.get() + 1);
-    struct ConnectionGuard(Rc<Cell<usize>>);
-    impl Drop for ConnectionGuard {
-        fn drop(&mut self) {
-            self.0.set(self.0.get() - 1);
-        }
-    }
-    let guard = ConnectionGuard(active);
     ctx.spawn(async move {
-        let _guard = guard;
+        let _slot = slot;
         let _abort_lifetime = abort;
         let operation = async {
             let config = WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE)).max_frame_size(Some(MAX_MESSAGE));

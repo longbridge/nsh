@@ -8,6 +8,11 @@ use rquickjs::{
 };
 
 const IO_LIMIT: usize = 1024 * 1024;
+/// Bytes queued for writing on one socket: native memory the heap limit
+/// does not cover.
+const PENDING_WRITE_LIMIT: usize = 4 * IO_LIMIT;
+/// Sockets open or connecting at once in one VM, like WebSockets.
+const MAX_SOCKETS: usize = 32;
 const TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) struct NetModule;
 impl ModuleDef for NetModule {
@@ -32,6 +37,10 @@ struct Socket {
     closer: std::net::TcpStream,
     closed: std::cell::Cell<bool>,
     cancel: tokio::sync::Notify,
+    /// Bytes of writes not finished yet.
+    pending: std::cell::Cell<usize>,
+    /// The VM's place for this socket, given back on close.
+    slot: std::cell::RefCell<Option<super::Slot>>,
 }
 #[cfg(not(target_arch = "wasm32"))]
 impl Socket {
@@ -39,6 +48,7 @@ impl Socket {
         self.closed.set(true);
         let _ = self.closer.shutdown(std::net::Shutdown::Both);
         self.cancel.notify_waiters();
+        self.slot.borrow_mut().take();
     }
 }
 
@@ -67,16 +77,18 @@ async fn connect_tcp(host: &str, port: u16) -> std::result::Result<tokio::net::T
 }
 
 fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Promise<'js>> {
-    if !crate::dom::shared(ctx.as_raw().as_ptr())
-        .system_access
-        .borrow()
-        .allows_socket(&host, port)
-    {
+    let shared = crate::dom::shared(ctx.as_raw().as_ptr());
+    if !shared.system_access.borrow().allows_socket(&host, port) {
+        let host = host.to_ascii_lowercase();
+        let host = if host.contains(':') && !host.starts_with('[') {
+            format!("[{host}]")
+        } else {
+            host
+        };
         return Err(Exception::throw_type(
             &ctx,
             &format!(
-                "network access to `{}` is not granted; add it to capabilities.network.hosts",
-                host.to_ascii_lowercase()
+                "a socket to `{host}:{port}` is not granted; add \"{host}:{port}\" to capabilities.network.sockets"
             ),
         ));
     }
@@ -89,6 +101,12 @@ fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Promise<'js>> 
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let slot = super::Slot::acquire(&shared.sockets, MAX_SOCKETS).ok_or_else(|| {
+            Exception::throw_range(
+                &ctx,
+                &format!("At most {MAX_SOCKETS} concurrent sockets are allowed per VM"),
+            )
+        })?;
         let owned = ctx.clone();
         Promise::wrap_future(&ctx, async move {
             let ctx = owned;
@@ -110,6 +128,8 @@ fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Promise<'js>> 
                 write: tokio::sync::Mutex::new(write),
                 closed: std::cell::Cell::new(false),
                 cancel: tokio::sync::Notify::new(),
+                pending: std::cell::Cell::new(0),
+                slot: std::cell::RefCell::new(Some(slot)),
             });
             let object = Object::new(ctx.clone())?;
             let reader = socket.clone();
@@ -148,19 +168,49 @@ fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Promise<'js>> 
                         ));
                     }
                     let socket = writer.clone();
+                    let queued = socket.pending.get() + data.len();
+                    if queued > PENDING_WRITE_LIMIT {
+                        return Err(Exception::throw_range(
+                            &ctx,
+                            &format!(
+                                "socket writes waiting to be sent exceeded the {PENDING_WRITE_LIMIT} byte limit"
+                            ),
+                        ));
+                    }
+                    socket.pending.set(queued);
                     let owned = ctx.clone();
                     Promise::wrap_future(&ctx, async move {
                         use tokio::io::AsyncWriteExt;
                         let ctx = owned;
-                        let mut writer = socket.write.lock().await;
-                        tokio::time::timeout(TIMEOUT, writer.write_all(data.as_bytes()))
-                            .await
-                            .map_err(|_| {
-                                Exception::throw_message(&ctx, "socket.write(data) timed out")
-                            })?
-                            .map_err(|e| {
-                                Exception::throw_message(&ctx, &format!("socket write failed: {e}"))
-                            })
+                        struct Pending<'a>(&'a Socket, usize);
+                        impl Drop for Pending<'_> {
+                            fn drop(&mut self) {
+                                self.0.pending.set(self.0.pending.get() - self.1);
+                            }
+                        }
+                        let _pending = Pending(&socket, data.len());
+                        let closed = || Exception::throw_message(&ctx, "socket is closed");
+                        // `close()` interrupts a write waiting for its turn
+                        // or for a peer that stopped reading.
+                        let mut writer = tokio::select! {
+                            biased;
+                            _ = socket.cancel.notified() => return Err(closed()),
+                            writer = socket.write.lock() => writer,
+                        };
+                        if socket.closed.get() {
+                            return Err(closed());
+                        }
+                        tokio::select! {
+                            biased;
+                            _ = socket.cancel.notified() => Err(closed()),
+                            result = tokio::time::timeout(TIMEOUT, writer.write_all(data.as_bytes())) => result
+                                .map_err(|_| {
+                                    Exception::throw_message(&ctx, "socket.write(data) timed out")
+                                })?
+                                .map_err(|e| {
+                                    Exception::throw_message(&ctx, &format!("socket write failed: {e}"))
+                                }),
+                        }
                     })
                 }),
             )?;
@@ -179,12 +229,12 @@ pub(crate) const TYPES: &str = r#"
 export interface Socket {
  /** Reads at most 1 MiB; resolves null after the peer closes. */
  read(size?: number): Promise<Uint8Array | null>;
- /** Writes at most 1 MiB of UTF-8 data. */
+ /** Writes at most 1 MiB of UTF-8 data; at most 4 MiB may wait to be sent. */
  write(data: string): Promise<void>;
  /** Interrupts pending reads and writes and closes the native socket. */
  close(): void;
 }
-/** Connects only to destinations granted by capabilities.network.hosts. */
+/** Connects only to `host:port` pairs granted by capabilities.network.sockets; at most 32 sockets per VM. */
 export function connect(host: string, port: number): Promise<Socket>;
 declare const net: { connect: typeof connect };
 export default net;

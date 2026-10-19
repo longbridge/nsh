@@ -84,9 +84,9 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 ## 网络授权与边界
 
-全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。授权时 `ws` 映射为 `http`、`wss` 映射为 `https`，使用 GET 检查；握手按原 URL 连接，拒绝重定向。每个 VM 最多 32 个 WebSocket，单条消息最多 8 MiB，发送队列最多 8 条且缓冲总量最多 8 MiB。握手和写入超时为 30 秒，关闭最多等待 5 秒。
+全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（旧式规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。每个 VM 的两种 API 合计最多 32 个 WebSocket，单条消息最多 8 MiB，发送队列最多 8 条且缓冲总量最多 8 MiB。握手和写入超时为 30 秒，关闭最多等待 5 秒。
 
-`net.connect` 仅使用 `network.hosts` 授权，检查发生在 DNS 查询之前。主机授权涵盖该主机的所有有效端口；HTTP 方法或路径授权不赋予原始 TCP 权限。返回的 socket 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB；每个方向同时允许一个待完成操作。这是 Promise 客户端 socket 接口。
+`net.connect(host, port)` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 socket 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
 
 原始 TCP 和此 WebSocket 传输使用原生宿主。浏览器应用使用平台提供的 [全局 API](./globals.md)；平台支持以实际运行的宿主为准。嵌入宿主的能力授权与应用声明取交集。
 
@@ -117,12 +117,12 @@ socket.addEventListener("message", (event) => console.log(event.data));
 
 ## TCP 授权示例
 
-TCP 使用主机授权。下面的授权适用于该主机的所有有效端口；`9000` 是连接参数。
+TCP 使用 socket 授权：应用所连接的精确主机与端口。
 
 ```json
 {
   "capabilities": {
-    "network": { "hosts": ["tcp.example.com"] }
+    "network": { "sockets": ["tcp.example.com:9000"] }
   }
 }
 ```

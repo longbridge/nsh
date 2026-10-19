@@ -74,8 +74,13 @@ Standard networking: global `fetch` keeps engine checks and redirect handling. S
 Paths match exactly; prefixes match slash-delimited boundaries. `{host, methods}` grants no paths. A scoped rule
 names one exact host: a wildcard there is a parse error (it would compare exactly and match nothing), so host
 patterns go in `hosts` or legacy rules. Legacy rules are explicitly selected by `schemes` or `pathPrefix`; mixing
-rule forms is rejected and serialization preserves the form. Native `websocket` checks GET permission before DNS and rejects handshake redirects. Raw TCP
-`net.connect` requires `network.hosts` (all valid ports on a granted host); HTTP path/method grants cannot
-authorize raw sockets. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
+rule forms is rejected and serialization preserves the form. WebSockets (the global and the `websocket` module)
+go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
+`https` (or under their own scheme, for legacy rules listing it), on the parsed URL the handshake then connects
+to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (`Shared::websockets`). Raw TCP
+`net.connect` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
+bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
+declaration) has none. Sockets are capped at 32 per VM (`Shared::sockets`) and 4 MiB of pending writes each;
+`close()` ends pending reads and writes. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
 standard catalog is eleven canonical bare modules; its connection and file APIs follow their generated
 signatures. See `website/modules/standard-modules.md` for the public surface.
