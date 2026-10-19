@@ -21,11 +21,13 @@
 //! NSH's ([`layers`]).
 //!
 //! ```sh
-//! nsh build examples/embed-gpui/app -o examples/embed-gpui/build/app
-//! cargo run --manifest-path examples/embed-gpui/Cargo.toml --target-dir target
+//! cargo run                          # here
+//! cargo run -p example-embed-gpui    # from the repository's root
 //! ```
 //!
-//! `cargo run -- <bundle.nshc or its directory>` runs another bundle;
+//! `build.rs` bundles and compiles `app/` as `nsh build` does, so the app
+//! is built with the example. `cargo run -- <bundle.nshc or its
+//! directory>` runs another bundle;
 //! `--alone` runs one surface in a window of its own (no host widgets).
 
 mod layers;
@@ -38,7 +40,6 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{
     assets::Assets,
-    base::Selectable,
     component::{
         ActiveTheme, IconName, Sizable, Theme, ThemeMode, WindowExt,
         button::{Button, ButtonVariants},
@@ -47,6 +48,7 @@ use gpui_kit::{
         notification::Notification,
         resizable::{h_resizable, resizable_panel},
         sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
+        switch::Switch,
         v_flex,
     },
     prelude::FluentBuilder,
@@ -353,13 +355,15 @@ impl Render for Shell {
                         cx.listener(|this, _, window, cx| this.set_violet(false, window, cx)),
                     ),
             )
+            // A switch, so its state shows: on, the outlines and the legend.
             .child(
-                Button::new("layers")
+                Switch::new("layers")
                     .small()
-                    .outline()
-                    .selected(shown)
+                    .checked(shown)
                     .label("Show layers")
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_layers(window, cx))),
+                    .on_change(
+                        cx.listener(|this, _: &bool, window, cx| this.toggle_layers(window, cx)),
+                    ),
             )
             .child(
                 Button::new("dialog")
@@ -434,8 +438,8 @@ impl Render for Shell {
 
 /// A new view running `path`'s bundle, in the host's theme.
 fn open_app(path: &Path, window: &mut Window, cx: &mut App) -> Option<Entity<AppView>> {
-    // SAFETY: the bundle is this app's own build output (`nsh build`), the
-    // same trust as the app's resources.
+    // SAFETY: the bundle is this app's own build output (`build.rs`), or
+    // one its developer names, the same trust as the app's resources.
     let bundle = match unsafe { Bundle::read_trusted(path) } {
         Ok(bundle) => bundle,
         Err(err) => {
@@ -444,7 +448,7 @@ fn open_app(path: &Path, window: &mut Window, cx: &mut App) -> Option<Entity<App
         }
     };
     let options = AppOptions {
-        // `nsh build` copies imported assets next to the bundle.
+        // The build copies imported assets next to the bundle.
         asset_base: path
             .parent()
             .map(|dir| AssetBase::Directory(dir.join("assets"))),
@@ -470,14 +474,14 @@ fn open_app(path: &Path, window: &mut Window, cx: &mut App) -> Option<Entity<App
     Some(view)
 }
 
-/// The bundle to run: the argument (a `.nshc` or its directory), else the
-/// example's own build.
+/// The bundle to run: the argument (a `.nshc` or its directory), else
+/// `app/` as `build.rs` built it.
 fn bundle_path() -> PathBuf {
     let arg = std::env::args_os()
         .skip(1)
         .find(|a| a != "--alone")
         .map(PathBuf::from);
-    let path = arg.unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("build/app"));
+    let path = arg.unwrap_or_else(|| Path::new(env!("OUT_DIR")).join("app"));
     if path.is_dir() {
         path.join("bundle.nshc")
     } else {

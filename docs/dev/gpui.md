@@ -29,7 +29,10 @@ Off the three desktops the crates are empty.
 The three crates are a workspace of their own, `crates/gpui` (its own `Cargo.toml`, `Cargo.lock` and the dependencies
 only they use: GPUI, wry, GStreamer, tiny-skia, ...), excluded from the main workspace, so the main workspace's builds,
 `cargo test --workspace`, clippy and CI never build GPUI. It builds into the repository's `target/`
-(`crates/gpui/.cargo/config.toml`; the CLI and xtask pass `--manifest-path` and `--target-dir` from the root).
+(`crates/gpui/.cargo/config.toml`; the CLI and xtask pass `--manifest-path` and `--target-dir` from the root). The
+GPUI Kit example `examples/embed-gpui` is a workspace of its own too, built into `target/` the same way; its
+`build.rs` bundles its app, so `cargo run` there starts it, and the main workspace's member `example-embed-gpui`
+(`examples/embed-gpui/run`, std only) makes `cargo run -p example-embed-gpui` from the root run that command.
 
 ```sh
 cd crates/gpui
@@ -42,8 +45,9 @@ cargo build -p nsh-gpui-host                      # ../../target/debug/nsh-gpui-
 The GPUI binaries are built for the machine itself, so the CLI finds them in `target/<profile>` and builds them first
 in a checkout; `cargo xtask dist` puts them in `dist/nsh/runtime/gpui/` on each of the three OSes (`tooling.md`,
 `embedding.md`). CI: `.github/workflows/gpui.yml` (Ubuntu 24.04, macOS 15 and Windows: clippy with `-D warnings` and
-tests of the GPUI workspace), run when `crates/gpui` changes and daily, which catches what changes to the crates it
-shares with the main workspace (`nsh-core`, `nsh-engine`, ...) break.
+tests of the GPUI workspace; on Linux clippy of `examples/embed-gpui` too), run when `crates/gpui` or the example
+changes and daily, which catches what changes to the crates it shares with the main workspace (`nsh-core`,
+`nsh-engine`, ...) break.
 
 Features:
 

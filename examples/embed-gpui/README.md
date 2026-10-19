@@ -7,12 +7,13 @@ surfaces' fields, GPUI Kit's dialogs and notifications draw above the surfaces, 
 which stops its engine. "Violet theme" loads `themes/violet.json` (an NSH theme file) into GPUI Kit's theme registry.
 
 ```sh
-cargo build -p nsh-cli
-./target/debug/nsh build examples/embed-gpui/app -o examples/embed-gpui/build/app
-cargo run --manifest-path examples/embed-gpui/Cargo.toml --target-dir target
+cargo run                              # in examples/embed-gpui
+cargo run -p example-embed-gpui        # from the repository's root
 ```
 
-The app is built with the stock `nsh build`: everything the host provides, it connects by name when it runs the app.
+`build.rs` bundles and compiles `app/` as `nsh build` does (with NSH's own modules and UI set), so `cargo run` builds
+the app with the host and rebuilds it when a file under `app/` changes. Everything the host provides, it connects by
+name when it runs the app.
 
 - **The host's functions.** `src/trading.rs` is the host's paper-trading desk (sample prices; no order leaves the
   process), registered as the UI set `host/trading` with `set_ui_sets`, next to NSH's `nsh/ui/mobile`. The app
@@ -29,12 +30,13 @@ The app is built with the stock `nsh build`: everything the host provides, it co
   GPUI Kit widgets the host registers as native components and the app places with `nativeComponent`: the
   watchlist shows the desk's symbol and hands the one picked to `Trading.select`; the switch is the ticket's
   "Extended hours". Both take their own clicks and keys and are Tab stops among the app's fields.
-- **Show layers** (on at the start, `src/layers.rs`) outlines each NSH surface and tags it "NSH · TSX app", and
-  outlines and tags the GPUI widgets inside the apps "GPUI"; a legend under the tickets names the three layers. Off,
-  the window is seamless.
+- **Show layers** (a switch in the toolbar, on at the start, `src/layers.rs`) outlines each NSH surface and tags it
+  "NSH · TSX app", and outlines and tags the GPUI widgets inside the apps "GPUI"; a legend under the tickets names the
+  three layers. Off, the window is seamless.
 
 `cargo run … -- <bundle.nshc or its directory>` runs another bundle; `--alone` runs one surface in a window of its
 own (no host widgets: Tab wraps around its fields and the switch). The example is its own Cargo workspace, so GPUI
-Kit stays out of NSH's workspace builds; `--target-dir target` shares what NSH's workspace built. It depends on
-`gpui-kit` with feature `gpui-fast`, so GPUI Kit and NSH draw with the same GPUI (`cargo tree -i gpui-fast` shows
-one version). See "GPUI and GPUI Kit apps" in `docs/dev/embedding.md`.
+Kit stays out of NSH's workspace builds, and builds into the repository's `target/` (`.cargo/config.toml`). From the
+root, `cargo run -p example-embed-gpui` runs `run/`, a member of NSH's workspace with no dependencies, which only
+runs `cargo run` here (same profile, arguments forwarded). On Linux it needs GPUI's packages (`docs/dev/gpui.md`). It depends on `gpui-kit` with feature `gpui-fast`, so GPUI Kit and NSH draw with the same GPUI
+(`cargo tree -i gpui-fast` shows one version). See "GPUI and GPUI Kit apps" in `docs/dev/embedding.md`.

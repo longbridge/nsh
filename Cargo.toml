@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples/gallery-rs/native"]
+members = ["crates/*", "examples/gallery-rs/native", "examples/embed-gpui/run"]
 # The GPUI backend is a workspace of its own (`crates/gpui/Cargo.toml`).
 exclude = ["crates/gpui"]
 # `cargo run` runs the gallery (`crates/xtask/src/run.rs`).
