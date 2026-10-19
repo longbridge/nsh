@@ -493,7 +493,9 @@ fn resolved(path: &Path) -> Result<PathBuf, String> {
 /// A checked path: the granted root, opened, and the path within it.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct Grant {
-    dir: cap_std::fs::Dir,
+    /// The root, opened; `None`: a read root that does not exist (yet), in
+    /// which every entry is missing.
+    dir: Option<cap_std::fs::Dir>,
     relative: PathBuf,
     name: String,
     /// The path as the call gave it (an error's `path`).
@@ -539,6 +541,9 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
         } else {
             path
         };
+        // A read root that does not exist yet (`${dataDir}` before the app
+        // writes): its entries are missing, unless another root has them.
+        let mut missing = None;
         for raw in roots {
             let Ok(root) = paths.resolve_root(raw, &data).and_then(|p| resolved(&p)) else {
                 continue;
@@ -589,20 +594,33 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
             if write && !root.exists() && std::fs::create_dir_all(&root).is_err() {
                 continue;
             }
-            let Ok(dir) = confined::open_root(&root) else {
-                continue;
-            };
             let (relative, name) = if relative.as_os_str().is_empty() {
                 (PathBuf::from("."), ".".to_owned())
             } else {
                 (relative.to_owned(), relative.display().to_string())
             };
+            let dir = match confined::open_root(&root) {
+                Ok(dir) => dir,
+                Err(e) if !write && e.kind() == std::io::ErrorKind::NotFound => {
+                    missing.get_or_insert(Grant {
+                        dir: None,
+                        relative,
+                        name,
+                        path: given.to_owned(),
+                    });
+                    continue;
+                }
+                Err(_) => continue,
+            };
             return Ok(Grant {
-                dir,
+                dir: Some(dir),
                 relative,
                 name,
                 path: given.to_owned(),
             });
+        }
+        if let Some(grant) = missing {
+            return Ok(grant);
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -651,6 +669,13 @@ impl Grant {
         &self.name
     }
 
+    /// The opened root: `NotFound` for a root that does not exist.
+    fn dir(&self) -> std::io::Result<&cap_std::fs::Dir> {
+        self.dir
+            .as_ref()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+
     /// I/O error `error` of `syscall` as Node's: the message names the
     /// entry, `code`, `syscall` and `path` tell it apart.
     fn error(&self, verb: &str, syscall: &'static str, error: std::io::Error) -> JsError {
@@ -673,7 +698,9 @@ impl Grant {
             .with_code("ERR_FS_FILE_TOO_LARGE")
         };
         let (grant, file, size) = blocking(move || {
-            let file = confined::open_file(&self.dir, &self.relative, false)
+            let file = self
+                .dir()
+                .and_then(|dir| confined::open_file(dir, &self.relative, false))
                 .map_err(|e| self.error("read", "open", e))?;
             let size = file
                 .metadata()
@@ -737,7 +764,9 @@ impl Grant {
     async fn write(self, bytes: Vec<u8>) -> Result<(), JsError> {
         blocking(move || {
             use std::io::Write;
-            let mut file = confined::open_file(&self.dir, &self.relative, true)
+            let mut file = self
+                .dir()
+                .and_then(|dir| confined::open_file(dir, &self.relative, true))
                 .map_err(|e| self.error("write", "open", e))?;
             file.set_len(0)
                 .map_err(|e| self.error("write", "ftruncate", e))?;
@@ -749,10 +778,11 @@ impl Grant {
 
     async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
         blocking(move || {
+            let dir = self.dir();
             if recursive {
-                self.dir.create_dir_all(&self.relative)
+                dir.and_then(|dir| dir.create_dir_all(&self.relative))
             } else {
-                self.dir.create_dir(&self.relative)
+                dir.and_then(|dir| dir.create_dir(&self.relative))
             }
             .map_err(|e| self.error("create", "mkdir", e))
         })
@@ -762,15 +792,21 @@ impl Grant {
     /// Whether the entry exists; a symlink exists even when its target does
     /// not.
     async fn exists(self) -> Result<bool, JsError> {
-        blocking(move || Ok(self.dir.symlink_metadata(&self.relative).is_ok())).await
+        blocking(move || {
+            Ok(self
+                .dir()
+                .is_ok_and(|dir| dir.symlink_metadata(&self.relative).is_ok()))
+        })
+        .await
     }
 
     async fn stat(self, link: bool) -> Result<Stats, JsError> {
         blocking(move || {
+            let dir = self.dir();
             if link {
-                self.dir.symlink_metadata(&self.relative)
+                dir.and_then(|dir| dir.symlink_metadata(&self.relative))
             } else {
-                self.dir.metadata(&self.relative)
+                dir.and_then(|dir| dir.metadata(&self.relative))
             }
             .map(confined::stats)
             .map_err(|e| self.error("stat", if link { "lstat" } else { "stat" }, e))
@@ -780,8 +816,8 @@ impl Grant {
 
     async fn readlink(self) -> Result<String, JsError> {
         blocking(move || {
-            self.dir
-                .read_link_contents(&self.relative)
+            self.dir()
+                .and_then(|dir| dir.read_link_contents(&self.relative))
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|e| self.error("read link", "readlink", e))
         })
@@ -790,8 +826,8 @@ impl Grant {
 
     async fn unlink(self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir
-                .remove_file(&self.relative)
+            self.dir()
+                .and_then(|dir| dir.remove_file(&self.relative))
                 .map_err(|e| self.error("remove", "unlink", e))
         })
         .await
@@ -799,8 +835,8 @@ impl Grant {
 
     async fn rmdir(self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir
-                .remove_dir(&self.relative)
+            self.dir()
+                .and_then(|dir| dir.remove_dir(&self.relative))
                 .map_err(|e| self.error("remove", "rmdir", e))
         })
         .await
@@ -808,8 +844,8 @@ impl Grant {
 
     async fn rename(self, to: Self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir
-                .rename(&self.relative, &to.dir, &to.relative)
+            self.dir()
+                .and_then(|dir| dir.rename(&self.relative, to.dir()?, &to.relative))
                 .map_err(|e| self.error("rename", "rename", e))
         })
         .await
@@ -821,8 +857,8 @@ impl Grant {
             let mut entries = Vec::new();
             let mut name_bytes = 0;
             for entry in self
-                .dir
-                .read_dir(&self.relative)
+                .dir()
+                .and_then(|dir| dir.read_dir(&self.relative))
                 .map_err(|e| self.error("list", "scandir", e))?
             {
                 let entry = entry.map_err(|e| self.error("list", "scandir", e))?;

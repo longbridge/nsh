@@ -690,3 +690,28 @@ const failure = (p) => p.then(() => "none", (e) => `${e.constructor.name}:${e.co
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn a_read_root_that_does_not_exist_yet_has_no_entries() {
+    // A fresh install: the data root exists, the app's directory does not.
+    let root = scratch("fresh");
+    let (_engine, rx) = start(
+        r#"
+import fs from "fs/promises";
+const code = (p) => p.then(() => "none", (e) => `${e.constructor.name}:${e.code}`);
+(async () => {
+  const before = [await fs.exists("notes.txt"), await code(fs.readFile("notes.txt", "utf8")), await code(fs.readdir("."))];
+  await fs.writeFile("notes.txt", "kept");
+  report([...before, await fs.readFile("notes.txt", "utf8")].join("|"));
+})().catch((e) => report(String(e)));
+"#,
+        DATA_GRANT,
+        Some(root.clone()),
+        Default::default(),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done false|Error:ENOENT|Error:ENOENT|kept"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
