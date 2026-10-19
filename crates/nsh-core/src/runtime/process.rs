@@ -397,6 +397,9 @@ mod native {
     const CHILDREN: &str = "process.children";
     /// How long a child has to exit after it is asked to before it is killed.
     const GRACE: Duration = Duration::from_millis(250);
+    /// How long a killed child may take to exit before its supervisor gives
+    /// it up: a child of another user (setuid) cannot be signalled.
+    const ABANDON: Duration = Duration::from_secs(2);
     /// stdin queued for one child.
     const MAX_STDIN: usize = 1024 * 1024;
     /// Host variables every child gets; others only when
@@ -1231,6 +1234,22 @@ mod native {
         }
     }
 
+    /// Joins the threads that end by `deadline`. One still blocked then (on a
+    /// pipe a process outside the tree keeps open) ends by itself later;
+    /// waiting for it could hold the VM's teardown forever.
+    pub(super) fn join_by(threads: Vec<JoinHandle<()>>, deadline: Instant) {
+        for thread in threads {
+            while !thread.is_finished() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            if thread.is_finished() {
+                let _ = thread.join();
+            } else {
+                log::warn!("a process pipe thread is still blocked; it is left to end by itself");
+            }
+        }
+    }
+
     /// Whether `pid` is still this process's child to wait for: running, or
     /// exited and not reaped. False once the system reaped it (a host that
     /// ignores SIGCHLD; `ECHILD`), when its pid may be another's.
@@ -1305,7 +1324,8 @@ mod native {
         let err = thread::spawn(move || read_pipe(stderr, err_mail, true, err_stop));
         let started = Instant::now();
         let mut terminating: Option<Instant> = None;
-        let mut forced = false;
+        let mut forced: Option<Instant> = None;
+        let mut abandoned = false;
         let mut error = None;
         loop {
             let mut kill = mailbox.stopped.load(Ordering::Acquire);
@@ -1336,9 +1356,9 @@ mod native {
             }
             // A VM being torn down gives no grace period.
             let stopped = mailbox.stopped.load(Ordering::Acquire);
-            if !forced && terminating.is_some_and(|at| stopped || at.elapsed() >= GRACE) {
+            if forced.is_none() && terminating.is_some_and(|at| stopped || at.elapsed() >= GRACE) {
                 leader.terminate(true);
-                forced = true;
+                forced = Some(Instant::now());
             }
             match leader.exited() {
                 Ok(true) => break,
@@ -1348,11 +1368,21 @@ mod native {
                     break;
                 }
             }
+            if forced.is_some_and(|at| at.elapsed() >= ABANDON) {
+                error = Some("the process could not be ended (it may run as another user)".into());
+                abandoned = true;
+                break;
+            }
         }
         // The leader may exit with descendants still holding its pipe handles.
         // It is not reaped yet, so its pid still names the group signalled here.
-        leader.terminate(true);
-        let status = leader.reap();
+        // One that could not be ended is not waited for.
+        let status = if abandoned {
+            None
+        } else {
+            leader.terminate(true);
+            leader.reap()
+        };
         let _ = writer_tx.send(Input::Close);
         drop(writer_tx);
         // Drain final buffered output, but an escaped/detached descendant must
@@ -1367,9 +1397,10 @@ mod native {
             thread::sleep(Duration::from_millis(5));
         }
         io_stop.store(true, Ordering::Release);
-        let _ = writer.join();
-        let _ = out.join();
-        let _ = err.join();
+        join_by(
+            vec![writer, out, err],
+            Instant::now() + Duration::from_millis(100),
+        );
         #[cfg(unix)]
         let signal = {
             use std::os::unix::process::ExitStatusExt;
@@ -1424,6 +1455,20 @@ mod tests {
         }
         // Getters are the object's, never named exports.
         assert!(!d.contains("export declare function env"), "{d}");
+    }
+
+    #[test]
+    fn a_blocked_pipe_thread_does_not_hold_the_supervisor() {
+        use std::time::{Duration, Instant};
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let blocked = std::thread::spawn(move || {
+            let _ = rx.recv();
+        });
+        let done = std::thread::spawn(|| {});
+        let start = Instant::now();
+        super::native::join_by(vec![done, blocked], start + Duration::from_millis(50));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(tx);
     }
 
     /// A child the system reaped (its host ignores SIGCHLD) is not
