@@ -618,11 +618,15 @@ mod native {
             if let Ok(path) = executable(&candidate) {
                 return Ok(path);
             }
+            // Programs only, in PATHEXT's default order: a batch file runs
+            // through a granted cmd.exe, whose quoting the app then controls.
             #[cfg(target_os = "windows")]
-            if candidate.extension().is_none()
-                && let Ok(path) = executable(&candidate.with_extension("exe"))
-            {
-                return Ok(path);
+            if candidate.extension().is_none() {
+                for extension in ["com", "exe"] {
+                    if let Ok(path) = executable(&candidate.with_extension(extension)) {
+                        return Ok(path);
+                    }
+                }
             }
         }
         Err(JsError::Error(format!(
