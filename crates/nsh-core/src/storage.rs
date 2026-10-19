@@ -47,8 +47,70 @@ impl std::fmt::Debug for dyn StorageBackend {
     }
 }
 
+/// The app's key-value storage, from Rust: the same entries the app's JS
+/// reads and writes with `nsh/storage`, so an app with a TSX entry and a
+/// Rust entry sees one set of data. The functions are synchronous, as the
+/// entries are in memory; call them where components run (their bodies,
+/// handlers and tasks).
+///
+/// ```ignore
+/// use nsh_core::storage::Storage;
+///
+/// let draft = Storage::get_item("draft");
+/// Storage::set_item("draft", "hello")?;
+/// ```
+pub struct Storage;
+
+impl Storage {
+    /// The value of `key`, `None` when it has none (TS: `getItem`).
+    pub fn get_item(key: &str) -> Option<String> {
+        crate::ui::ambient::with_storage(|s| s.get(key))
+    }
+
+    /// Sets `key` to `value` (TS: `setItem`); fails when the storage would
+    /// grow past [`QUOTA`], keeping what it held.
+    pub fn set_item(key: impl Into<String>, value: impl Into<String>) -> Result<(), StorageFull> {
+        crate::ui::ambient::with_storage(|s| s.set(key.into(), value.into()))
+    }
+
+    /// Removes `key` (TS: `removeItem`).
+    pub fn remove_item(key: &str) {
+        crate::ui::ambient::with_storage(|s| s.remove(key));
+    }
+
+    /// Every key, in order (TS: `getAllKeys`).
+    pub fn get_all_keys() -> Vec<String> {
+        crate::ui::ambient::with_storage(|s| s.keys())
+    }
+
+    /// Removes every key (TS: `clear`).
+    pub fn clear() {
+        crate::ui::ambient::with_storage(|s| s.clear());
+    }
+}
+
+/// A value refused because the storage would grow past [`QUOTA`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageFull {
+    /// The bytes the storage would have held.
+    pub bytes: usize,
+}
+
+impl std::fmt::Display for StorageFull {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "storage is full: {} bytes would exceed the quota of {QUOTA}",
+            self.bytes
+        )
+    }
+}
+
+impl std::error::Error for StorageFull {}
+
 /// An app's entries, shared by cores using the same backend.
-pub(crate) struct Storage {
+#[derive(Clone)]
+pub(crate) struct Store {
     state: Arc<Mutex<Entries>>,
 }
 
@@ -58,7 +120,7 @@ struct Shared {
     state: Weak<Mutex<Entries>>,
 }
 
-impl Storage {
+impl Store {
     /// Shares the state of `backend`; `None` creates independent in-memory
     /// storage for this core.
     pub(crate) fn new(backend: Option<Arc<dyn StorageBackend>>) -> Self {
@@ -88,38 +150,33 @@ impl Storage {
         Self { state }
     }
 
+    fn entries(&self) -> std::sync::MutexGuard<'_, Entries> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The value of `key`.
-    pub(crate) fn get(&mut self, key: &str) -> Result<Option<String>, String> {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(key)
+    pub(crate) fn get(&self, key: &str) -> Option<String> {
+        self.entries().get(key)
     }
 
     /// Sets `key` to `value`; fails past [`QUOTA`].
-    pub(crate) fn set(&mut self, key: String, value: String) -> Result<(), String> {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .set(key, value)
+    pub(crate) fn set(&self, key: String, value: String) -> Result<(), StorageFull> {
+        self.entries().set(key, value)
     }
 
     /// Removes `key`.
-    pub(crate) fn remove(&mut self, key: &str) -> Result<(), String> {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(key)
+    pub(crate) fn remove(&self, key: &str) {
+        self.entries().remove(key)
     }
 
     /// Every key, in order.
-    pub(crate) fn keys(&mut self) -> Result<Vec<String>, String> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).keys()
+    pub(crate) fn keys(&self) -> Vec<String> {
+        self.entries().keys()
     }
 
     /// Removes every entry.
-    pub(crate) fn clear(&mut self) -> Result<(), String> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).clear()
+    pub(crate) fn clear(&self) {
+        self.entries().clear()
     }
 }
 
@@ -142,10 +199,10 @@ impl Entries {
         }
     }
 
-    fn entries(&mut self) -> Result<&mut BTreeMap<String, String>, String> {
+    fn entries(&mut self) -> &mut BTreeMap<String, String> {
         let backend = &self.backend;
         let bytes = &mut self.bytes;
-        Ok(self.entries.get_or_insert_with(|| {
+        self.entries.get_or_insert_with(|| {
             let entries = match backend.as_ref().map(|b| b.load()) {
                 Some(Ok(entries)) => entries,
                 Some(Err(e)) => {
@@ -156,7 +213,7 @@ impl Entries {
             };
             *bytes = entries.iter().map(|(k, v)| k.len() + v.len()).sum();
             entries
-        }))
+        })
     }
 
     fn write(&self, change: StorageChange) {
@@ -166,22 +223,20 @@ impl Entries {
     }
 
     /// The value of `key`.
-    fn get(&mut self, key: &str) -> Result<Option<String>, String> {
-        Ok(self.entries()?.get(key).cloned())
+    fn get(&mut self, key: &str) -> Option<String> {
+        self.entries().get(key).cloned()
     }
 
     /// Sets `key` to `value`; fails past [`QUOTA`].
-    fn set(&mut self, key: String, value: String) -> Result<(), String> {
+    fn set(&mut self, key: String, value: String) -> Result<(), StorageFull> {
         // Loaded first: what the device kept counts too.
-        self.entries()?;
+        self.entries();
         let bytes = self.bytes;
-        let entries = self.entries()?;
+        let entries = self.entries();
         let old = entries.get(&key).map_or(0, |v| key.len() + v.len());
         let new = bytes - old + key.len() + value.len();
         if new > QUOTA {
-            return Err(format!(
-                "storage is full: {new} bytes would exceed the quota of {QUOTA}"
-            ));
+            return Err(StorageFull { bytes: new });
         }
         if entries.get(&key) == Some(&value) {
             return Ok(());
@@ -193,30 +248,28 @@ impl Entries {
     }
 
     /// Removes `key`.
-    fn remove(&mut self, key: &str) -> Result<(), String> {
-        let Some(value) = self.entries()?.remove(key) else {
-            return Ok(());
+    fn remove(&mut self, key: &str) {
+        let Some(value) = self.entries().remove(key) else {
+            return;
         };
         self.bytes -= key.len() + value.len();
         self.write(StorageChange::Remove(key.to_owned()));
-        Ok(())
     }
 
     /// Every key, in order.
-    fn keys(&mut self) -> Result<Vec<String>, String> {
-        Ok(self.entries()?.keys().cloned().collect())
+    fn keys(&mut self) -> Vec<String> {
+        self.entries().keys().cloned().collect()
     }
 
     /// Removes every entry.
-    fn clear(&mut self) -> Result<(), String> {
-        let entries = self.entries()?;
+    fn clear(&mut self) {
+        let entries = self.entries();
         if entries.is_empty() {
-            return Ok(());
+            return;
         }
         entries.clear();
         self.bytes = 0;
         self.write(StorageChange::Clear);
-        Ok(())
     }
 }
 
@@ -248,14 +301,14 @@ mod tests {
             kept: BTreeMap::from([("a".into(), "1".into())]),
             ..Recorder::default()
         });
-        let mut storage = Storage::new(Some(backend.clone()));
-        assert_eq!(storage.get("a").unwrap().as_deref(), Some("1"));
+        let storage = Store::new(Some(backend.clone()));
+        assert_eq!(storage.get("a").as_deref(), Some("1"));
         storage.set("b".into(), "2".into()).unwrap();
         storage.set("b".into(), "2".into()).unwrap();
-        storage.remove("a").unwrap();
-        storage.remove("missing").unwrap();
-        assert_eq!(storage.keys().unwrap(), ["b"]);
-        storage.clear().unwrap();
+        storage.remove("a");
+        storage.remove("missing");
+        assert_eq!(storage.keys(), ["b"]);
+        storage.clear();
         assert_eq!(
             *backend.changes.lock().unwrap(),
             [
@@ -269,17 +322,17 @@ mod tests {
     #[test]
     fn views_share_reads_removals_and_clear() {
         let backend = Arc::new(Recorder::default());
-        let mut first = Storage::new(Some(backend.clone()));
-        let mut second = Storage::new(Some(backend));
-        assert_eq!(second.get("draft").unwrap(), None);
+        let first = Store::new(Some(backend.clone()));
+        let second = Store::new(Some(backend));
+        assert_eq!(second.get("draft"), None);
         first.set("draft".into(), "saved".into()).unwrap();
-        assert_eq!(second.get("draft").unwrap().as_deref(), Some("saved"));
-        assert_eq!(second.keys().unwrap(), ["draft"]);
-        second.remove("draft").unwrap();
-        assert_eq!(first.get("draft").unwrap(), None);
+        assert_eq!(second.get("draft").as_deref(), Some("saved"));
+        assert_eq!(second.keys(), ["draft"]);
+        second.remove("draft");
+        assert_eq!(first.get("draft"), None);
         first.set("draft".into(), "new".into()).unwrap();
-        second.clear().unwrap();
-        assert!(first.keys().unwrap().is_empty());
+        second.clear();
+        assert!(first.keys().is_empty());
     }
 
     #[test]
@@ -288,9 +341,9 @@ mod tests {
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let views: Vec<_> = (0..2)
             .map(|id| {
-                let mut storage = Storage::new(Some(backend.clone()));
+                let storage = Store::new(Some(backend.clone()));
                 // Both views load before either writes.
-                assert!(storage.keys().unwrap().is_empty());
+                assert!(storage.keys().is_empty());
                 let barrier = barrier.clone();
                 std::thread::spawn(move || {
                     barrier.wait();
@@ -313,18 +366,18 @@ mod tests {
             ],
         ] {
             let [first, second] = backends;
-            let mut first = Storage::new(first);
-            let mut second = Storage::new(second);
+            let first = Store::new(first);
+            let second = Store::new(second);
             first.set("draft".into(), "saved".into()).unwrap();
-            assert_eq!(second.get("draft").unwrap(), None);
-            second.clear().unwrap();
-            assert_eq!(first.get("draft").unwrap().as_deref(), Some("saved"));
+            assert_eq!(second.get("draft"), None);
+            second.clear();
+            assert_eq!(first.get("draft").as_deref(), Some("saved"));
         }
     }
 
     #[test]
     fn checks_the_quota() {
-        let mut storage = Storage::new(None);
+        let storage = Store::new(None);
         storage.set("k".into(), "x".repeat(QUOTA - 1)).unwrap();
         assert!(storage.set("j".into(), "y".into()).is_err());
         // Replacing a value counts the new one only.
@@ -333,7 +386,7 @@ mod tests {
 
     #[test]
     fn the_quota_counts_utf8_bytes_and_frees_on_removal() {
-        let mut storage = Storage::new(None);
+        let storage = Store::new(None);
         // "键" is three bytes, "😀" four.
         storage
             .set("键".into(), "😀".repeat((QUOTA - 3) / 4))
@@ -341,11 +394,11 @@ mod tests {
         let used = 3 + (QUOTA - 3) / 4 * 4;
         assert!(storage.set("x".into(), "y".repeat(QUOTA - used)).is_err());
         // A refused value leaves the entries as they were.
-        assert_eq!(storage.keys().unwrap(), ["键"]);
-        storage.remove("键").unwrap();
+        assert_eq!(storage.keys(), ["键"]);
+        storage.remove("键");
         storage.set("x".into(), "y".repeat(QUOTA - 1)).unwrap();
-        storage.clear().unwrap();
-        assert!(storage.keys().unwrap().is_empty());
+        storage.clear();
+        assert!(storage.keys().is_empty());
         storage.set("x".into(), "y".repeat(QUOTA - 1)).unwrap();
     }
 
@@ -355,7 +408,7 @@ mod tests {
             kept: BTreeMap::from([("k".into(), "v".repeat(QUOTA - 1))]),
             ..Recorder::default()
         });
-        let mut storage = Storage::new(Some(backend));
+        let storage = Store::new(Some(backend));
         assert!(storage.set("a".into(), "b".into()).is_err());
         storage.set("k".into(), "small".into()).unwrap();
         storage.set("a".into(), "b".into()).unwrap();
@@ -371,9 +424,9 @@ mod tests {
 
             fn write(&self, _: StorageChange) {}
         }
-        let mut storage = Storage::new(Some(Arc::new(Broken)));
-        assert_eq!(storage.get("a").unwrap(), None);
+        let storage = Store::new(Some(Arc::new(Broken)));
+        assert_eq!(storage.get("a"), None);
         storage.set("a".into(), "1".into()).unwrap();
-        assert_eq!(storage.get("a").unwrap().as_deref(), Some("1"));
+        assert_eq!(storage.get("a").as_deref(), Some("1"));
     }
 }

@@ -6,6 +6,7 @@ use std::{path::PathBuf, time::Duration};
 use crossbeam_channel::Receiver;
 use nsh_core::{
     ApproxTextEngine, MountBatch, MountItem, Size,
+    storage::Storage,
     ui::{Root, prelude::*},
 };
 use nsh_engine::{App, Bundle, Engine, EngineConfig, Environment, FileStorage};
@@ -126,10 +127,10 @@ struct ReaderProps {}
 /// JS wrote and writes for it.
 #[component]
 fn Reader(_props: ReaderProps) -> impl IntoElement {
-    let seen = storage_item("launches").unwrap_or_default();
-    set_storage_item("launches", "2").unwrap();
-    set_storage_item("from_rust", "hi").unwrap();
-    let keys = storage_keys().join(",");
+    let seen = Storage::get_item("launches").unwrap_or_default();
+    Storage::set_item("launches", "2").unwrap();
+    Storage::set_item("from_rust", "hi").unwrap();
+    let keys = Storage::get_all_keys().join(",");
     text(move || format!("rust saw {seen} {keys}"))
 }
 
@@ -207,15 +208,15 @@ struct EditorProps {}
 /// Every function Rust has for the app's storage.
 #[component]
 fn Editor(_props: EditorProps) -> impl IntoElement {
-    set_storage_item("a", "1").unwrap();
-    set_storage_item("b", "2").unwrap();
-    remove_storage_item("a");
-    remove_storage_item("missing");
-    let after_remove = storage_keys().join(",");
-    let full = set_storage_item("big", "x".repeat(nsh_core::storage::QUOTA)).is_err();
-    clear_storage();
-    let after_clear = storage_keys().len();
-    let missing = storage_item("b").is_none();
+    Storage::set_item("a", "1").unwrap();
+    Storage::set_item("b", "2").unwrap();
+    Storage::remove_item("a");
+    Storage::remove_item("missing");
+    let after_remove = Storage::get_all_keys().join(",");
+    let full = Storage::set_item("big", "x".repeat(nsh_core::storage::QUOTA)).is_err();
+    Storage::clear();
+    let after_clear = Storage::get_all_keys().len();
+    let missing = Storage::get_item("b").is_none();
     text(move || format!("rust {after_remove} {full} {after_clear} {missing}"))
 }
 

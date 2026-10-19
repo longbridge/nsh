@@ -803,7 +803,7 @@ impl<M: TextEngine> Core<M> {
     pub fn set_storage(&mut self, backend: Option<Arc<dyn crate::storage::StorageBackend>>) {
         self.components
             .runtime
-            .set_storage(crate::storage::Storage::new(backend));
+            .set_storage(crate::storage::Store::new(backend));
     }
 
     /// Logs (once) that the app was refused `what`.

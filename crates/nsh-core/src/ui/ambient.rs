@@ -48,7 +48,7 @@ pub(crate) struct Ambient {
     insets: FxHashMap<NodeId, Signal<EdgeInsets>>,
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
-    storage: Option<Rc<std::cell::RefCell<crate::storage::Storage>>>,
+    storage: Option<crate::storage::Store>,
 }
 
 impl Ambient {
@@ -117,9 +117,9 @@ impl super::Runtime {
     }
 
     /// Where the app's storage is kept.
-    pub(crate) fn set_storage(&self, storage: crate::storage::Storage) {
+    pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
         let _entered = self.enter();
-        with_data(|d| d.ambient.storage = Some(Rc::new(std::cell::RefCell::new(storage))));
+        with_data(|d| d.ambient.storage = Some(storage));
     }
 
     /// How text is measured (the core's text engine).
@@ -369,40 +369,16 @@ pub fn announce_for_accessibility(message: impl Into<String>) {
     act(super::services::announce(message.into()));
 }
 
-/// Runs `f` with the app's storage (`nsh/storage`); an error when the
-/// core has none.
-pub(crate) fn with_storage<R>(
-    f: impl FnOnce(&mut crate::storage::Storage) -> Result<R, String>,
-) -> Result<R, String> {
-    let storage = with_data(|d| d.ambient.storage.clone()).ok_or("the app has no storage")?;
-    f(&mut storage.borrow_mut())
-}
-
-/// The value of `key` in the app's storage (TS: `Storage.getItem`): the
-/// same entries the app's JS reads and writes, kept across launches.
-pub fn storage_item(key: &str) -> Option<String> {
-    with_storage(|s| s.get(key)).ok().flatten()
-}
-
-/// Sets `key` to `value` in the app's storage (TS: `Storage.setItem`);
-/// fails when the storage would grow past its quota.
-pub fn set_storage_item(key: impl Into<String>, value: impl Into<String>) -> Result<(), String> {
-    with_storage(|s| s.set(key.into(), value.into()))
-}
-
-/// Removes `key` from the app's storage (TS: `Storage.removeItem`).
-pub fn remove_storage_item(key: &str) {
-    let _ = with_storage(|s| s.remove(key));
-}
-
-/// Every key in the app's storage, in order (TS: `Storage.getAllKeys`).
-pub fn storage_keys() -> Vec<String> {
-    with_storage(|s| s.keys()).unwrap_or_default()
-}
-
-/// Removes every key of the app's storage (TS: `Storage.clear`).
-pub fn clear_storage() {
-    let _ = with_storage(|s| s.clear());
+/// Runs `f` with the app's storage (`nsh/storage`, [`crate::storage::Storage`]):
+/// the one the engine was given, or one in memory when it was given none.
+pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R {
+    let storage = with_data(|d| {
+        d.ambient
+            .storage
+            .get_or_insert_with(|| crate::storage::Store::new(None))
+            .clone()
+    });
+    f(&storage)
 }
 
 /// Puts `text` on the system clipboard (TS: `Clipboard.setString`).

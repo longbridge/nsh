@@ -12,27 +12,27 @@ pub(crate) struct Storage;
 #[module]
 impl Storage {
     /// The value of `key`, `null` when it has none.
-    pub(crate) async fn get_item(key: String) -> Result<Option<String>, String> {
+    pub(crate) async fn get_item(key: String) -> Option<String> {
         with_storage(|s| s.get(&key))
     }
 
     /// Sets `key` to `value`; rejects when the storage would be full.
     pub(crate) async fn set_item(key: String, value: String) -> Result<(), String> {
-        with_storage(|s| s.set(key, value))
+        with_storage(|s| s.set(key, value)).map_err(|e| e.to_string())
     }
 
     /// Removes `key`.
-    pub(crate) async fn remove_item(key: String) -> Result<(), String> {
+    pub(crate) async fn remove_item(key: String) {
         with_storage(|s| s.remove(&key))
     }
 
     /// Every key, in order.
-    pub(crate) async fn get_all_keys() -> Result<Vec<String>, String> {
+    pub(crate) async fn get_all_keys() -> Vec<String> {
         with_storage(|s| s.keys())
     }
 
     /// Removes every key.
-    pub(crate) async fn clear() -> Result<(), String> {
+    pub(crate) async fn clear() {
         with_storage(|s| s.clear())
     }
 }
