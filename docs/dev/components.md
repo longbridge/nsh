@@ -243,6 +243,12 @@ reasons: `reactive-components.md`.
 - **Element attributes for system UI**: `.inset_padding(insets)` / `.inset_margin(insets)` add to the padding /
   margin the styles resolve to (what `SafeAreaView` and `KeyboardAvoidingView` use, so the app's own padding stays),
   `.inline_style(props.content_container_style)` applies a `ui::Style` prop (a value or a binding) (`KeyboardAvoidingView`'s `contentContainerStyle`).
+- **What a view gives a nested component's element** (`Button::element(props)`) goes on the component's root, after
+  the root's own, as its styles do: an inline style (`.inline_style(..)`), animated values (`.bind_opacity(&v)`,
+  `.bind_translate_y(&v)`), insets (bound ones are a binding, applied again when they change), on a rooted
+  component's host as on any (`Instance::given`, `RootContext`: the inner first, the outer last, then the app's style
+  on the top host). Listeners and accessibility are not on it (`ComponentElement` is not `Interactive` or
+  `Accessible`): a component says what it hears and is through its events and props.
 - An app's own types become static values for setters with `nsh_core::static_reactive!(Tone: Tone);`. A closure
   returning a bare float literal for an `f32` setter needs its type: `move || if on { 0.5_f32 } else { 1.0 }`.
 

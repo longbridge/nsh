@@ -1687,7 +1687,10 @@ impl IntoElement for Children {
 }
 
 /// Another component in a view ([`Component::element`]). Its styles go
-/// after the component's own, like an app's classes.
+/// after the component's own, like an app's classes, and so do its inline
+/// style, animated values and insets ([`Element`]'s), on the component's
+/// root. It hears and is to assistive technologies what the component says
+/// (its events and props): it is not [`Interactive`] or [`Accessible`].
 pub struct ComponentElement<C: Component> {
     node: ElNode,
     _component: PhantomData<fn() -> C>,

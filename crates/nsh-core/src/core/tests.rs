@@ -8369,6 +8369,94 @@ mod views {
         assert_eq!(sizes[3].1, sizes[sizes.len() - 1].1, "{sizes:?}");
     }
 
+    /// A text as its root.
+    #[derive(Default)]
+    struct Lit;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct LitProps {}
+
+    impl Component for Lit {
+        type Props = LitProps;
+        type Event = NoEvent;
+
+        fn view(_: LitProps, _: Scope<NoEvent>) -> impl IntoElement {
+            text("lit").p_1()
+        }
+    }
+
+    /// Gives a lit text an animated opacity, an inline style and insets a
+    /// press changes; and a plaque (rooted in a counter) an inline style.
+    #[derive(Default)]
+    struct Lighting;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct LightingProps {}
+
+    impl Component for Lighting {
+        type Props = LightingProps;
+        type Event = NoEvent;
+
+        fn view(_: LightingProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let v = animated_value(0.5);
+            let wide = signal(false);
+            let red = crate::ui::Style::default().with(
+                crate::StyleKey::BackgroundColor,
+                crate::PatchValue::Str("#ff0000".into()),
+            );
+            view()
+                .on_press(move || wide.update(|w| *w = !*w))
+                .child(
+                    Lit::element(LitProps {})
+                        .bind_opacity(&v)
+                        .inline_style(red.clone())
+                        .inset_padding(move || EdgeInsets::all(if wide.get() { 8.0 } else { 4.0 })),
+                )
+                .child(Plaque::element(PlaqueProps {}).inline_style(red))
+        }
+    }
+
+    #[test]
+    fn what_a_view_gives_a_component_element_goes_on_its_root() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Lighting>(|| LightingProps {}));
+        let batch = c.commit().unwrap();
+        let root = root_host(&batch);
+        let lit = text_node(&batch, "lit");
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::AnimationBindings { id, .. } if *id == lit)),
+            "the opacity is bound on the text: {:?}",
+            batch.items
+        );
+        let red = crate::Color::rgba(0xff, 0, 0, 0xff);
+        assert_eq!(
+            view_style_of(&batch, lit).map(|s| s.background_color),
+            Some(red)
+        );
+        let insets = |c: &Core<FakeEngine>, id| {
+            let key = c.key(id).unwrap();
+            c.nodes[key as usize]
+                .insets
+                .as_deref()
+                .copied()
+                .unwrap_or_default()[0]
+        };
+        assert_eq!(insets(&c, lit), EdgeInsets::all(4.0));
+        // On a rooted component's host too, over the counter's own style.
+        let plaque = native_children(&c, root)[1];
+        assert_eq!(
+            view_style_of(&batch, plaque).map(|s| s.background_color),
+            Some(red)
+        );
+        // A bound inset follows.
+        assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+        c.commit();
+        assert_eq!(insets(&c, lit), EdgeInsets::all(8.0));
+    }
+
     /// A count its API reads.
     #[derive(Default)]
     struct Dial;

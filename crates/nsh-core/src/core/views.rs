@@ -61,6 +61,9 @@ pub(super) enum Patch {
         host: NodeId,
         style: StyleRefinement,
     },
+    /// The attributes a view gives a nested component (its host) besides
+    /// styles, the bound parts read again.
+    NestedAttrs { host: NodeId, attrs: Box<Attrs> },
     /// A list's rows, its bound count or keys read again.
     Rows {
         list: NodeId,
@@ -74,7 +77,7 @@ pub(super) type Patches = Rc<RefCell<Vec<Patch>>>;
 
 /// What was last applied to a node with bindings.
 pub(super) struct BoundNode {
-    attrs: Attrs,
+    pub(super) attrs: Attrs,
     pub(super) style: StyleRefinement,
     pub(super) classes: Classes,
     /// Its text's content and raw text node.
@@ -270,6 +273,33 @@ impl<M: TextEngine> Core<M> {
         first.take().unwrap_or_default()
     }
 
+    /// Binds the attributes a view gives nested component `host` (`base`
+    /// with the bound `parts`) under the current owner: them now; later
+    /// changes are patches.
+    pub(super) fn bind_nested_attrs(
+        &mut self,
+        host: NodeId,
+        base: Attrs,
+        parts: Vec<crate::ui::element::BoundAttrs>,
+    ) -> Attrs {
+        let patches = self.components.patches.clone();
+        let (runs, first) = Runs::new();
+        let resolve = base.clone();
+        render_effect(move || {
+            let mut attrs = resolve.clone();
+            for part in &parts {
+                part(&mut attrs);
+            }
+            runs.run(attrs, |attrs| {
+                patches.borrow_mut().push(Patch::NestedAttrs {
+                    host,
+                    attrs: Box::new(attrs),
+                });
+            });
+        });
+        first.take().unwrap_or(base)
+    }
+
     /// Binds the bound parts of list `list`'s layout over `base` under the
     /// current owner: the layout now, to apply; later changes are patches.
     pub(super) fn bind_list_layout(
@@ -397,6 +427,11 @@ impl<M: TextEngine> Core<M> {
         match patch {
             Patch::Region { region, elements } => self.reconcile_region(region, elements),
             Patch::Rows { list, count, keys } => self.set_list_rows(list, count, keys),
+            Patch::NestedAttrs { host, attrs } => {
+                if self.is_host(host) {
+                    self.set_given(host, *attrs);
+                }
+            }
             Patch::Nested { host, style } => {
                 if self.is_host(host) {
                     let user = (!style.is_empty()).then(|| self.components.lowered(&style));
@@ -434,34 +469,41 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Patch::Attrs { host, id, attrs } => {
-                let Some(inst) = self.components.instances.get_mut(&host) else {
-                    return;
-                };
-                let (own, above) = (inst.app_style.clone(), inst.above);
-                // On another component's host, the app's style is the top
-                // host's.
-                let app = match above {
-                    Some(_) if id == host => self.above_context(above, None).1,
-                    _ if id == host => own,
-                    _ => None,
+                // The root: what the views and components above give it
+                // goes after its own.
+                let ctx = if id == host {
+                    self.root_context_of(host)
+                } else {
+                    None
                 };
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
+                };
+                let app = match &ctx {
+                    Some(ctx) if ctx.combined => ctx.app.clone(),
+                    Some(_) => inst.app_style.clone(),
+                    None => None,
                 };
                 let Some(node) = inst.bound.get_mut(&id) else {
                     return;
                 };
                 let attrs = *attrs;
                 let old = std::mem::replace(&mut node.attrs, attrs.clone());
+                let (attrs, old) = match &ctx {
+                    Some(ctx) => {
+                        let mut old = old;
+                        (old.inset_padding, old.inset_margin) = inst.root_insets_applied;
+                        let attrs = ctx.over(attrs);
+                        inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+                        (attrs, old)
+                    }
+                    None => (attrs, old),
+                };
                 self.apply_attrs_over(id, &attrs, &old, app.as_ref());
             }
             Patch::Style { host, id, style } => {
-                let Some(inst) = self.components.instances.get_mut(&host) else {
-                    return;
-                };
-                let (own, above) = (inst.user.clone(), inst.above);
                 let user = if id == host {
-                    self.above_context(above, own).0
+                    self.root_context_of(host).and_then(|ctx| ctx.user)
                 } else {
                     None
                 };
