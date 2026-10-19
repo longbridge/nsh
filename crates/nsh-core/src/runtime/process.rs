@@ -1,0 +1,1325 @@
+//! `process`: desktop subprocesses owned by one VM, and the VM's process
+//! metadata (`platform`, `arch`, `env`, `dataDir`, `exit`). `nsh-js` makes
+//! the module's default object the global `process` and adds `nextTick`
+//! (a JS job).
+//!
+//! A child runs under a supervisor thread with a reader per pipe and a
+//! writer for stdin; they never touch the VM. Output goes through a channel
+//! to a task of the core, which posts it to the app's listeners, or, for
+//! `run`, captures it. The VM's children are a [`Local`]: when the VM goes,
+//! every child is killed at once and the supervisors are joined together.
+
+use std::{
+    cell::{Cell, RefCell},
+    collections::BTreeMap,
+    rc::Rc,
+};
+
+use crate::ui::{
+    CallCx, Callback, Instance, JsError, JsObject, JsValue, Later, Local, PropEnum, PropError,
+    System, TsTypes, class, module,
+};
+
+/// The process metadata and subprocesses of the VM.
+pub(crate) struct Process;
+
+/// Subprocesses owned by this app's VM, and its process metadata.
+#[module(flat, default)]
+impl Process {
+    /// The native operating system name.
+    #[allow(non_upper_case_globals)]
+    pub(crate) const platform: &'static str = std::env::consts::OS;
+    /// The native CPU architecture name.
+    #[allow(non_upper_case_globals)]
+    pub(crate) const arch: &'static str = std::env::consts::ARCH;
+
+    /// Runs `command` (granted by capabilities.process.execute; no shell)
+    /// and captures up to 8 MiB per stream, with a default 30-second
+    /// deadline. A child's environment is PATH, HOME, USERPROFILE,
+    /// SystemRoot, TEMP, TMP, TMPDIR, LANG and LC_* from the host, plus the
+    /// names capabilities.process.env grants; never the whole host
+    /// environment. A refused command or option throws; a launch failure,
+    /// a timeout and output past the limit reject.
+    pub(crate) fn run(
+        command: String,
+        args: Option<Vec<String>>,
+        options: Option<RunOptions>,
+        sys: System,
+        cx: CallCx<'_>,
+    ) -> Result<Later<CommandOutput>, JsError> {
+        let options = options.unwrap_or_default();
+        let launch = native::Launch::new(
+            &sys,
+            command,
+            args.unwrap_or_default(),
+            options.cwd,
+            timeout(options.timeout_ms)?.or(Some(RUN_TIMEOUT)),
+        )?;
+        #[cfg(not(target_arch = "wasm32"))]
+        return Ok(native::run(&sys, launch, cx));
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (launch, cx);
+            Err(JsError::Type(UNAVAILABLE.into()))
+        }
+    }
+
+    /// Starts `command` as `run` does and streams its decoded UTF-8 output,
+    /// or complete lines with `lines: true`; stdin is closed unless
+    /// `stdin: "pipe"`. Listeners get the event's payload only (gpui-shell's
+    /// also get a context).
+    pub(crate) fn spawn(
+        command: String,
+        args: Option<Vec<String>>,
+        options: Option<SpawnOptions>,
+        sys: System,
+        cx: CallCx<'_>,
+    ) -> Result<ChildProcess, JsError> {
+        let options = options.unwrap_or_default();
+        let launch = native::Launch::new(
+            &sys,
+            command,
+            args.unwrap_or_default(),
+            options.cwd,
+            timeout(options.timeout_ms)?,
+        )?;
+        #[cfg(not(target_arch = "wasm32"))]
+        return native::spawn(
+            &sys,
+            launch,
+            options.stdin == Some(Stdin::Pipe),
+            options.lines.unwrap_or(false),
+            cx,
+        );
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (launch, cx);
+            Err(JsError::Type(UNAVAILABLE.into()))
+        }
+    }
+
+    /// Asks the host to exit (capabilities.process.exit); never exits the
+    /// host process directly.
+    pub(crate) fn exit(code: Option<i32>, sys: System) -> Result<(), JsError> {
+        if !sys.access.allows_exit() {
+            return Err(JsError::Type(
+                "process.exit() is not granted; set capabilities.process.exit to true in the \
+                 manifest"
+                    .into(),
+            ));
+        }
+        let handler = sys.exit.ok_or_else(|| {
+            JsError::Error(
+                "process.exit() is granted but this host installed no exit request handler".into(),
+            )
+        })?;
+        handler(code.unwrap_or(0));
+        Ok(())
+    }
+
+    /// The environment variables the app may read: the default metadata
+    /// names and those capabilities.process.env grants; a new object each
+    /// time.
+    #[getter]
+    pub(crate) fn env(sys: System) -> BTreeMap<String, String> {
+        std::env::vars_os()
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .filter(|(name, _)| sys.access.allows_env(name))
+            .collect()
+    }
+
+    /// The app's own data directory, `null` when the host has none.
+    #[getter]
+    pub(crate) fn data_dir(sys: System) -> Option<String> {
+        sys.data_dir.map(|dir| dir.to_string_lossy().into_owned())
+    }
+}
+
+/// Options of `run`.
+#[derive(Debug, Clone, Default, JsObject)]
+pub(crate) struct RunOptions {
+    /// An existing directory within a capabilities.fs.write root (the child
+    /// may write there); defaults to the app's data directory, created when
+    /// missing.
+    cwd: Option<String>,
+    /// Kills the process tree after this many milliseconds; `run` defaults
+    /// to 30 seconds.
+    timeout_ms: Option<f64>,
+}
+
+/// Options of `spawn`.
+#[derive(Debug, Clone, Default, JsObject)]
+pub(crate) struct SpawnOptions {
+    /// As `run`'s.
+    cwd: Option<String>,
+    /// As `run`'s; a spawned child has no deadline by default.
+    timeout_ms: Option<f64>,
+    /// `"pipe"` lets `write` and `end` feed stdin; it is closed otherwise.
+    stdin: Option<Stdin>,
+    /// Delivers complete lines (without `\n` or `\r\n`) instead of chunks.
+    lines: Option<bool>,
+}
+
+/// A child's stdin.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
+pub(crate) enum Stdin {
+    /// Written by `write`, closed by `end`.
+    Pipe,
+    /// Closed at once.
+    #[default]
+    Null,
+}
+
+/// What `run` resolves with.
+#[derive(Debug, Clone, Default, JsObject)]
+pub(crate) struct CommandOutput {
+    /// The exit status; -1 when a signal ended the child.
+    code: i32,
+    stdout: String,
+    stderr: String,
+}
+
+/// How a spawned child ended.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct ExitResult {
+    /// The exit status, `null` when a signal ended it.
+    code: Option<i32>,
+    /// The signal that ended it (`"SIGTERM"`).
+    signal: Option<String>,
+    /// Why the runtime ended it (a timeout, an over-long line).
+    error: Option<String>,
+}
+
+/// A child's events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum ChildEvent {
+    Stdout,
+    Stderr,
+    Exit,
+}
+
+/// What a listener gets: output text, or the exit.
+#[derive(Debug, Clone)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) enum Payload {
+    Text(String),
+    Exit(ExitResult),
+}
+
+impl JsValue for Payload {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("string | {}", ExitResult::ts_type(types))
+    }
+
+    fn from_js(value: crate::ui::JsIn<'_>) -> Result<Self, PropError> {
+        Err(value.expected("no value (a payload goes to JS only)"))
+    }
+
+    fn to_js<'a>(
+        &self,
+        host: &'a dyn crate::ui::JsHost,
+    ) -> Result<crate::ui::JsOwned<'a>, PropError> {
+        match self {
+            Payload::Text(text) => text.to_js(host),
+            Payload::Exit(exit) => exit.to_js(host),
+        }
+    }
+}
+
+/// A child process started by `spawn`.
+#[class]
+pub(crate) struct ChildProcess {
+    pid: u32,
+    child: Rc<Child>,
+}
+
+#[class]
+impl ChildProcess {
+    /// The child's process id.
+    #[getter]
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Calls `handler` with each piece (or line) of output, or once with
+    /// the exit after the final output (at once when the child has exited).
+    #[overload(r#"on(event: "stdout" | "stderr", handler: (text: string) => void): ChildProcess"#)]
+    #[overload(r#"on(event: "exit", handler: (result: ExitResult) => void): ChildProcess"#)]
+    pub(crate) fn on(
+        this: Instance<Self>,
+        event: ChildEvent,
+        handler: Callback<Payload>,
+    ) -> Result<Instance<Self>, JsError> {
+        let child = this.with(|c| c.child.clone());
+        let exited = child.exited.borrow().clone();
+        if let Some(exit) = exited {
+            if event == ChildEvent::Exit {
+                handler.call(Payload::Exit(exit)).map_err(JsError::Error)?;
+            }
+            return Ok(this);
+        }
+        let mut listeners = child.listeners.borrow_mut();
+        let list = &mut listeners[event as usize];
+        if list.len() >= MAX_LISTENERS {
+            return Err(JsError::Type(format!(
+                "a child takes at most {MAX_LISTENERS} listeners per event"
+            )));
+        }
+        list.push(handler);
+        drop(listeners);
+        Ok(this)
+    }
+
+    /// Queues UTF-8 for stdin (`stdin: "pipe"`); at most 1 MiB may wait.
+    pub(crate) fn write(&self, text: String) -> Result<(), JsError> {
+        if !self.child.stdin_open.get() {
+            return Err(JsError::Type(
+                "ChildProcess.write needs stdin:\"pipe\" and an open stdin".into(),
+            ));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        return native::write(&self.child, text);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = text;
+            Err(JsError::Type(UNAVAILABLE.into()))
+        }
+    }
+
+    /// Closes stdin.
+    pub(crate) fn end(&self) {
+        if self.child.stdin_open.replace(false) {
+            #[cfg(not(target_arch = "wasm32"))]
+            native::close_stdin(&self.child);
+        }
+    }
+
+    /// Ends the whole process tree: SIGTERM to its process group, SIGKILL
+    /// after 250 ms.
+    pub(crate) fn kill(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        native::kill(&self.child);
+    }
+}
+
+/// `run`'s deadline when none is given.
+const RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const MAX_LISTENERS: usize = 64;
+#[cfg(target_arch = "wasm32")]
+const UNAVAILABLE: &str = "process is available on desktop hosts";
+
+fn timeout(ms: Option<f64>) -> Result<Option<std::time::Duration>, JsError> {
+    match ms {
+        None => Ok(None),
+        Some(ms) if ms.is_finite() && ms > 0.0 && ms <= u32::MAX as f64 => {
+            Ok(Some(std::time::Duration::from_secs_f64(ms / 1000.0)))
+        }
+        Some(_) => Err(JsError::Type(
+            "process timeoutMs must be a positive number of milliseconds".into(),
+        )),
+    }
+}
+
+/// One spawned child as its object and its task see it.
+pub(crate) struct Child {
+    /// stdout, stderr and exit listeners, released at the exit.
+    listeners: RefCell<[Vec<Callback<Payload>>; 3]>,
+    /// How it ended, once it has.
+    exited: RefCell<Option<ExitResult>>,
+    stdin_open: Cell<bool>,
+    #[cfg(not(target_arch = "wasm32"))]
+    control: native::Control,
+}
+
+/// The VM's children: killed and joined when the VM goes.
+#[derive(Default)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) struct Children {
+    #[cfg(not(target_arch = "wasm32"))]
+    inner: native::Children,
+    /// Children started, for their ids.
+    next: Cell<u64>,
+}
+
+impl Local for Children {
+    fn close(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.inner.close();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native {
+    use std::{
+        cell::{Cell, RefCell},
+        ffi::OsString,
+        io::{Read, Write},
+        path::{Path, PathBuf},
+        process::{Child as StdChild, Command, ExitStatus, Stdio},
+        rc::Rc,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            mpsc,
+        },
+        thread::{self, JoinHandle},
+        time::{Duration, Instant},
+    };
+
+    use tokio::sync::mpsc as channel;
+
+    use super::{Child, ChildEvent, ChildProcess, CommandOutput, ExitResult, Payload};
+    use crate::{
+        access::Access,
+        ui::{CallCx, JsError, Later, System},
+    };
+
+    /// Output one VM holds in flight, and what `run` captures per stream
+    /// (and the longest line `lines: true` delivers).
+    const QUEUE_BYTES: usize = 8 * 1024 * 1024;
+    const MAX_CHILDREN: usize = 32;
+    /// How long a child has to exit after it is asked to before it is killed.
+    const GRACE: Duration = Duration::from_millis(250);
+    /// stdin queued for one child.
+    const MAX_STDIN: usize = 1024 * 1024;
+    /// Host variables every child gets; others only when
+    /// `capabilities.process.env` grants them. Names match regardless of
+    /// case; `LC_*` are included too.
+    const CHILD_ENV: &[&str] = &[
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+    ];
+
+    pub(super) enum Input {
+        Write(Vec<u8>),
+        Close,
+        Kill,
+    }
+    pub(super) enum Event {
+        Output(bool, String),
+        Exit(Option<i32>, Option<i32>, Option<String>),
+    }
+
+    /// The VM's side of its children.
+    #[derive(Default)]
+    pub(super) struct Children {
+        /// Set when the VM goes: supervisors kill at once, readers stop.
+        stopped: Arc<AtomicBool>,
+        /// Output queued for the VM, across its children.
+        queued: Arc<AtomicUsize>,
+        /// Each running child's id, input and supervisor.
+        running: RefCell<Vec<Running>>,
+    }
+
+    impl Children {
+        /// Every supervisor is told before any is joined, and kills at once
+        /// (no grace) when the VM stops, so teardown takes about as long as
+        /// one child does.
+        pub(super) fn close(&self) {
+            self.stopped.store(true, Ordering::Release);
+            let running = std::mem::take(&mut *self.running.borrow_mut());
+            for (_, input, _) in &running {
+                let _ = input.send(Input::Kill);
+            }
+            for (_, _, worker) in running {
+                if let Some(worker) = worker {
+                    let _ = worker.join();
+                }
+            }
+        }
+
+        /// Forgets a child that exited, joining its supervisor (which sent
+        /// the exit as its last act).
+        fn finished(&self, id: u64) {
+            let worker = {
+                let mut running = self.running.borrow_mut();
+                running
+                    .iter()
+                    .position(|(i, ..)| *i == id)
+                    .and_then(|at| running.remove(at).2)
+            };
+            if let Some(worker) = worker {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    type Running = (u64, mpsc::Sender<Input>, Option<JoinHandle<()>>);
+
+    /// A started child: its id and pid, its control, its events and the
+    /// VM's children it is one of.
+    type Started = (
+        u64,
+        u32,
+        Control,
+        channel::UnboundedReceiver<Event>,
+        Rc<super::Children>,
+    );
+
+    /// What the object and its task use to reach the child.
+    pub(super) struct Control {
+        input: mpsc::Sender<Input>,
+        queued_input: Arc<AtomicUsize>,
+    }
+
+    /// A checked launch: the command, its arguments, where and how long.
+    pub(super) struct Launch {
+        command: String,
+        args: Vec<String>,
+        cwd: PathBuf,
+        timeout: Option<Duration>,
+        env: Vec<(OsString, OsString)>,
+    }
+
+    impl Launch {
+        pub(super) fn new(
+            sys: &System,
+            command: String,
+            args: Vec<String>,
+            cwd: Option<String>,
+            timeout: Option<Duration>,
+        ) -> Result<Self, JsError> {
+            if !cfg!(any(
+                target_os = "linux",
+                target_os = "macos",
+                target_os = "windows"
+            )) || !sys.os.is_desktop()
+            {
+                return Err(JsError::Type(
+                    "process is available on desktop hosts".into(),
+                ));
+            }
+            if command.is_empty() || command.contains('\0') {
+                return Err(JsError::Type("invalid executable".into()));
+            }
+            if !sys.access.allows_process(&command) {
+                return Err(JsError::Type(format!(
+                    "process capability denied for `{command}`"
+                )));
+            }
+            if args.len() > 4096 {
+                return Err(JsError::Type("too many arguments".into()));
+            }
+            let cwd = match cwd {
+                // A child may write where it runs: its directory needs a write grant.
+                Some(cwd) => sys
+                    .access
+                    .authorize_file_with_paths(
+                        Path::new(&cwd),
+                        &sys.data_dir.clone().unwrap_or_default(),
+                        &sys.paths,
+                        true,
+                    )
+                    .map_err(JsError::Type)?,
+                // The app's own data directory, which needs no grant.
+                None => {
+                    let dir = sys.data_dir.clone().ok_or_else(|| {
+                        JsError::Type(
+                            "this host configured no app data directory for a default cwd; \
+                             pass options.cwd"
+                                .into(),
+                        )
+                    })?;
+                    std::fs::create_dir_all(&dir).map_err(|e| {
+                        JsError::Type(format!("could not create the app data directory: {e}"))
+                    })?;
+                    dir
+                }
+            };
+            if !cwd.is_dir() {
+                return Err(JsError::Type("cwd must be an existing directory".into()));
+            }
+            Ok(Self {
+                command,
+                args,
+                cwd,
+                timeout,
+                env: child_env(&sys.access),
+            })
+        }
+    }
+
+    /// The host variables a child gets: [`CHILD_ENV`], `LC_*`, and the names
+    /// both the app's `capabilities.process.env` and its host grant list.
+    fn child_env(access: &Access) -> Vec<(OsString, OsString)> {
+        let listed =
+            |names: &[String], name: &str| names.iter().any(|n| n.eq_ignore_ascii_case(name));
+        std::env::vars_os()
+            .filter(|(name, _)| {
+                let Some(name) = name.to_str() else {
+                    return false;
+                };
+                CHILD_ENV.iter().any(|n| n.eq_ignore_ascii_case(name))
+                    || name.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("LC_"))
+                    || (listed(&access.declared.process.env, name)
+                        && access
+                            .granted
+                            .as_ref()
+                            .is_none_or(|g| listed(&g.process.env, name)))
+            })
+            .collect()
+    }
+
+    fn resolve_executable(command: &str) -> Result<PathBuf, String> {
+        let path = Path::new(command);
+        if path.is_absolute() {
+            return executable(path);
+        }
+        if command.contains('/') || command.contains('\\') {
+            return Err("use a bare executable name or an absolute path".into());
+        }
+        let host_path = std::env::var_os("PATH").ok_or("host PATH is unset")?;
+        for directory in std::env::split_paths(&host_path).filter(|p| p.is_absolute()) {
+            let candidate = directory.join(command);
+            if let Ok(path) = executable(&candidate) {
+                return Ok(path);
+            }
+            #[cfg(target_os = "windows")]
+            if candidate.extension().is_none()
+                && let Ok(path) = executable(&candidate.with_extension("exe"))
+            {
+                return Ok(path);
+            }
+        }
+        Err(format!(
+            "executable `{command}` was not found in the host PATH"
+        ))
+    }
+
+    fn executable(path: &Path) -> Result<PathBuf, String> {
+        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("executable is not a file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                return Err("file is not executable".into());
+            }
+        }
+        std::fs::canonicalize(path).map_err(|e| e.to_string())
+    }
+
+    /// Launches `launch` under a supervisor: its id, pid, control and
+    /// events. The VM's quota of children is checked here.
+    fn start(sys: &System, launch: Launch, stdin: bool) -> Result<Started, String> {
+        let children = sys.locals.get::<super::Children>();
+        if children.inner.running.borrow().len() >= MAX_CHILDREN {
+            return Err(format!("a VM may run at most {MAX_CHILDREN} children"));
+        }
+        let mut cmd = Command::new(resolve_executable(&launch.command)?);
+        cmd.env_clear()
+            .envs(launch.env)
+            .args(launch.args)
+            .current_dir(launch.cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            // CREATE_NO_WINDOW: a console child gets no console window of its own.
+            cmd.creation_flags(0x08000000);
+        }
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("could not launch process: {e}"))?;
+        let pid = child.id();
+        let id = children.next.get() + 1;
+        children.next.set(id);
+        let (input, inputs) = mpsc::channel();
+        let (events_tx, events) = channel::unbounded_channel();
+        let mailbox = Mailbox {
+            tx: events_tx,
+            queued: children.inner.queued.clone(),
+            stopped: children.inner.stopped.clone(),
+            unreadable: Arc::new(AtomicBool::new(false)),
+        };
+        let queued_input = Arc::new(AtomicUsize::new(0));
+        let worker_input = queued_input.clone();
+        let timeout = launch.timeout;
+        let worker = thread::Builder::new()
+            .name("nsh-process".into())
+            .spawn(move || supervise(child, inputs, mailbox, timeout, worker_input))
+            .map_err(|e| format!("could not supervise the process: {e}"))?;
+        if !stdin {
+            let _ = input.send(Input::Close);
+        }
+        children
+            .inner
+            .running
+            .borrow_mut()
+            .push((id, input.clone(), Some(worker)));
+        Ok((
+            id,
+            pid,
+            Control {
+                input,
+                queued_input,
+            },
+            events,
+            children,
+        ))
+    }
+
+    /// `run`: the captured output once the child exits.
+    pub(super) fn run(sys: &System, launch: Launch, cx: CallCx<'_>) -> Later<CommandOutput> {
+        let (id, _, control, mut events, children) = match start(sys, launch, false) {
+            Ok(started) => started,
+            Err(e) => return Later::new(async move { Err::<CommandOutput, _>(e) }),
+        };
+        let kill = control.input.clone();
+        cx.on_cleanup(move || {
+            let _ = kill.send(Input::Kill);
+        });
+        let queued = children.inner.queued.clone();
+        Later::new(async move {
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            let mut overflowed = false;
+            loop {
+                let Some(event) = events.recv().await else {
+                    return Err("the process ended without an exit status".to_owned());
+                };
+                match event {
+                    Event::Output(err, chunk) => {
+                        queued.fetch_sub(chunk.len(), Ordering::AcqRel);
+                        let captured = if err { &mut stderr } else { &mut stdout };
+                        if overflowed {
+                        } else if captured.len() + chunk.len() > QUEUE_BYTES {
+                            overflowed = true;
+                            let _ = control.input.send(Input::Kill);
+                        } else {
+                            captured.push_str(&chunk);
+                        }
+                    }
+                    Event::Exit(code, _, error) => {
+                        children.inner.finished(id);
+                        if overflowed {
+                            return Err(format!(
+                                "process output exceeded {QUEUE_BYTES} bytes on one stream"
+                            ));
+                        }
+                        if let Some(error) = error {
+                            return Err(error);
+                        }
+                        return Ok(CommandOutput {
+                            code: code.unwrap_or(-1),
+                            stdout,
+                            stderr,
+                        });
+                    }
+                }
+            }
+        })
+    }
+
+    /// `spawn`: the child's object; a task of the core delivers its events.
+    pub(super) fn spawn(
+        sys: &System,
+        launch: Launch,
+        stdin: bool,
+        lines: bool,
+        cx: CallCx<'_>,
+    ) -> Result<ChildProcess, JsError> {
+        let (id, pid, control, events, children) =
+            start(sys, launch, stdin).map_err(JsError::Type)?;
+        let kill = control.input.clone();
+        let child = Rc::new(Child {
+            listeners: RefCell::default(),
+            exited: RefCell::default(),
+            stdin_open: Cell::new(stdin),
+            control,
+        });
+        cx.on_cleanup(move || {
+            let _ = kill.send(Input::Kill);
+        });
+        cx.start(deliver(child.clone(), events, children, id, lines));
+        Ok(ChildProcess { pid, child })
+    }
+
+    /// Posts a child's events to its listeners until it exits.
+    async fn deliver(
+        child: Rc<Child>,
+        mut events: channel::UnboundedReceiver<Event>,
+        children: Rc<super::Children>,
+        id: u64,
+        lines: bool,
+    ) {
+        let queued = children.inner.queued.clone();
+        let mut pending = [String::new(), String::new()];
+        let mut line_error = None;
+        let post = |stream: usize, text: String| {
+            for listener in &child.listeners.borrow()[stream] {
+                listener.post(Payload::Text(text.clone()));
+            }
+        };
+        loop {
+            let Some(event) = events.recv().await else {
+                return;
+            };
+            match event {
+                Event::Output(err, chunk) => {
+                    queued.fetch_sub(chunk.len(), Ordering::AcqRel);
+                    let stream = usize::from(err);
+                    if !lines {
+                        post(stream, chunk);
+                        continue;
+                    }
+                    let mut parts = chunk.split('\n').peekable();
+                    while let Some(part) = parts.next() {
+                        pending[stream].push_str(part);
+                        if pending[stream].len() > QUEUE_BYTES {
+                            line_error = Some(
+                                "a line of output exceeded 8 MiB without a newline".to_owned(),
+                            );
+                            pending[stream].clear();
+                            kill(&child);
+                            break;
+                        }
+                        if parts.peek().is_some() {
+                            let mut line = std::mem::take(&mut pending[stream]);
+                            if line.ends_with('\r') {
+                                line.pop();
+                            }
+                            post(stream, line);
+                        }
+                    }
+                }
+                Event::Exit(code, signal, error) => {
+                    for (stream, rest) in pending.iter_mut().enumerate() {
+                        if !rest.is_empty() {
+                            post(stream, std::mem::take(rest));
+                        }
+                    }
+                    children.inner.finished(id);
+                    let exit = ExitResult {
+                        code,
+                        signal: signal.map(signal_name),
+                        error: line_error.or(error),
+                    };
+                    *child.exited.borrow_mut() = Some(exit.clone());
+                    child.stdin_open.set(false);
+                    // The listeners go with the exit: nothing calls them again.
+                    let listeners = std::mem::take(&mut *child.listeners.borrow_mut());
+                    for listener in &listeners[ChildEvent::Exit as usize] {
+                        listener.post(Payload::Exit(exit.clone()));
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    pub(super) fn write(child: &Child, text: String) -> Result<(), JsError> {
+        let control = &child.control;
+        let len = text.len();
+        if control.queued_input.fetch_add(len, Ordering::AcqRel) + len > MAX_STDIN {
+            control.queued_input.fetch_sub(len, Ordering::AcqRel);
+            return Err(JsError::Type("stdin queue exceeded 1 MB".into()));
+        }
+        control
+            .input
+            .send(Input::Write(text.into_bytes()))
+            .map_err(|_| JsError::Type("process input is closed".into()))
+    }
+
+    pub(super) fn close_stdin(child: &Child) {
+        let _ = child.control.input.send(Input::Close);
+    }
+
+    pub(super) fn kill(child: &Child) {
+        let _ = child.control.input.send(Input::Kill);
+    }
+
+    /// A signal's name (`"SIGTERM"`).
+    fn signal_name(signal: i32) -> String {
+        #[cfg(unix)]
+        {
+            match signal {
+                libc::SIGKILL => "SIGKILL",
+                libc::SIGTERM => "SIGTERM",
+                libc::SIGINT => "SIGINT",
+                libc::SIGHUP => "SIGHUP",
+                libc::SIGQUIT => "SIGQUIT",
+                libc::SIGABRT => "SIGABRT",
+                libc::SIGSEGV => "SIGSEGV",
+                libc::SIGPIPE => "SIGPIPE",
+                _ => return format!("signal {signal}"),
+            }
+            .to_owned()
+        }
+        #[cfg(not(unix))]
+        {
+            format!("signal {signal}")
+        }
+    }
+
+    struct Mailbox {
+        tx: channel::UnboundedSender<Event>,
+        queued: Arc<AtomicUsize>,
+        stopped: Arc<AtomicBool>,
+        unreadable: Arc<AtomicBool>,
+    }
+
+    impl Mailbox {
+        /// Queues output, waiting while the VM already holds [`QUEUE_BYTES`].
+        fn output(&self, stderr: bool, chunk: String) -> bool {
+            let len = chunk.len();
+            loop {
+                if self.stopped.load(Ordering::Acquire) {
+                    return false;
+                }
+                if self.queued.fetch_add(len, Ordering::AcqRel) + len <= QUEUE_BYTES {
+                    break;
+                }
+                self.queued.fetch_sub(len, Ordering::AcqRel);
+                thread::sleep(Duration::from_millis(5));
+            }
+            if self.tx.send(Event::Output(stderr, chunk)).is_err() {
+                self.queued.fetch_sub(len, Ordering::AcqRel);
+                return false;
+            }
+            true
+        }
+
+        fn exit(&self, code: Option<i32>, signal: Option<i32>, error: Option<String>) {
+            let _ = self.tx.send(Event::Exit(code, signal, error));
+        }
+    }
+
+    #[cfg(unix)]
+    trait Pipe: std::os::fd::AsRawFd {}
+    #[cfg(unix)]
+    impl<T: std::os::fd::AsRawFd> Pipe for T {}
+    #[cfg(not(unix))]
+    trait Pipe {}
+    #[cfg(not(unix))]
+    impl<T> Pipe for T {}
+
+    fn prepare_pipe(pipe: &impl Pipe) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            // SAFETY: the borrowed pipe owns a live fd; preserve its other flags.
+            let flags = unsafe { libc::fcntl(pipe.as_raw_fd(), libc::F_GETFL) };
+            if flags < 0
+            // SAFETY: as above, with the flags just read.
+                || unsafe { libc::fcntl(pipe.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) }
+                    < 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = pipe;
+        Ok(())
+    }
+
+    fn read_pipe(
+        mut pipe: impl Read + Pipe,
+        mailbox: Arc<Mailbox>,
+        stderr: bool,
+        stop: Arc<AtomicBool>,
+    ) {
+        if prepare_pipe(&pipe).is_err() {
+            mailbox.unreadable.store(true, Ordering::Release);
+            return;
+        }
+        let mut buffer = [0; 4096];
+        let mut pending = Vec::new();
+        loop {
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            match pipe.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    pending.extend_from_slice(&buffer[..n]);
+                    loop {
+                        match std::str::from_utf8(&pending) {
+                            Ok(s) => {
+                                if !s.is_empty() && !mailbox.output(stderr, s.to_owned()) {
+                                    return;
+                                }
+                                pending.clear();
+                                break;
+                            }
+                            Err(e) => {
+                                let valid = e.valid_up_to();
+                                if valid != 0 {
+                                    let s = String::from_utf8_lossy(&pending[..valid]).into_owned();
+                                    if !mailbox.output(stderr, s) {
+                                        return;
+                                    }
+                                    pending.drain(..valid);
+                                }
+                                if let Some(n) = e.error_len() {
+                                    pending.drain(..n);
+                                    if !mailbox.output(stderr, "\u{fffd}".into()) {
+                                        return;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => break,
+            }
+        }
+        if !pending.is_empty() {
+            mailbox.output(stderr, String::from_utf8_lossy(&pending).into_owned());
+        }
+    }
+
+    fn write_pipe(
+        mut pipe: impl Write + Pipe,
+        input: mpsc::Receiver<Input>,
+        queued: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+    ) {
+        if prepare_pipe(&pipe).is_err() {
+            return;
+        }
+        while !stop.load(Ordering::Acquire) {
+            let command = match input.recv_timeout(Duration::from_millis(5)) {
+                Ok(command) => command,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            let Input::Write(bytes) = command else { break };
+            queued.fetch_sub(bytes.len(), Ordering::AcqRel);
+            let mut remaining = bytes.as_slice();
+            while !remaining.is_empty() && !stop.load(Ordering::Acquire) {
+                match pipe.write(remaining) {
+                    Ok(0) => return,
+                    Ok(n) => remaining = &remaining[n..],
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(_) => return,
+                }
+            }
+        }
+    }
+
+    /// The child a supervisor owns: the leader of a process group (Unix) or
+    /// of a process tree (Windows). On Linux and Apple platforms its exit is
+    /// noticed without reaping it, so its pid, which is also the group's id,
+    /// stays taken (by the zombie) for as long as the group is signalled by
+    /// it.
+    struct Leader {
+        child: StdChild,
+        /// The status once the leader is reaped. On Unix its pid may then be
+        /// reused, and the group is no longer signalled.
+        reaped: Option<ExitStatus>,
+        #[cfg(target_vendor = "apple")]
+        exits: Option<std::os::fd::OwnedFd>,
+        /// `taskkill` was started for the tree.
+        #[cfg(target_os = "windows")]
+        tree_killed: bool,
+    }
+
+    impl Leader {
+        fn new(child: StdChild) -> Self {
+            Self {
+                #[cfg(target_vendor = "apple")]
+                exits: exit_queue(child.id()),
+                child,
+                reaped: None,
+                #[cfg(target_os = "windows")]
+                tree_killed: false,
+            }
+        }
+
+        /// Whether the leader has exited; it stays unreaped where that can be
+        /// told.
+        fn exited(&mut self) -> std::io::Result<bool> {
+            if self.reaped.is_some() {
+                return Ok(true);
+            }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            {
+                // SAFETY: an all-zero siginfo_t is valid; waitid fills it for this child.
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                // SAFETY: WNOWAIT leaves the child waitable; info outlives the call.
+                let result = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        self.child.id() as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                    )
+                };
+                if result < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // SAFETY: waitid succeeded, so si_pid is set (0 while the child runs).
+                Ok(unsafe { info.si_pid() } != 0)
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            {
+                #[cfg(target_vendor = "apple")]
+                if let Some(queue) = &self.exits {
+                    use std::os::fd::AsRawFd;
+                    // SAFETY: an all-zero kevent is a valid output buffer.
+                    let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+                    let now = libc::timespec {
+                        tv_sec: 0,
+                        tv_nsec: 0,
+                    };
+                    // SAFETY: polls the live queue for one event without blocking.
+                    let n = unsafe {
+                        libc::kevent(queue.as_raw_fd(), std::ptr::null(), 0, &mut event, 1, &now)
+                    };
+                    return if n < 0 {
+                        Err(std::io::Error::last_os_error())
+                    } else {
+                        Ok(n > 0)
+                    };
+                }
+                self.reaped = self.child.try_wait()?;
+                Ok(self.reaped.is_some())
+            }
+        }
+
+        /// Asks the tree to stop (SIGTERM to the group), or forces it
+        /// (SIGKILL).
+        fn terminate(&mut self, force: bool) {
+            #[cfg(unix)]
+            if self.reaped.is_none() {
+                // SAFETY: the child leads its own process group and is not
+                // reaped yet, so its pid still names that group.
+                unsafe {
+                    libc::kill(
+                        -(self.child.id() as i32),
+                        if force { libc::SIGKILL } else { libc::SIGTERM },
+                    );
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                // Windows has no group signal: taskkill ends the tree, started once
+                // and not waited for; forcing ends the leader itself. The open
+                // process handle keeps the pid from being reused while it is owned.
+                if !self.tree_killed {
+                    self.tree_killed = true;
+                    let system_root = std::env::var_os("SystemRoot")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+                    let _ = Command::new(system_root.join("System32").join("taskkill.exe"))
+                        .args(["/PID", &self.child.id().to_string(), "/T", "/F"])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
+                }
+                if force && self.reaped.is_none() {
+                    let _ = self.child.kill();
+                }
+            }
+            #[cfg(not(any(unix, target_os = "windows")))]
+            {
+                let _ = force;
+                let _ = self.child.kill();
+            }
+        }
+
+        fn reap(mut self) -> Option<ExitStatus> {
+            self.reaped.take().or_else(|| self.child.wait().ok())
+        }
+    }
+
+    /// A kqueue that reports the child's exit without reaping it; `None` when
+    /// it cannot be made, and then the exit is noticed by reaping.
+    #[cfg(target_vendor = "apple")]
+    fn exit_queue(pid: u32) -> Option<std::os::fd::OwnedFd> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        // SAFETY: kqueue takes no arguments and returns a new descriptor or -1.
+        let fd = unsafe { libc::kqueue() };
+        if fd < 0 {
+            return None;
+        }
+        // SAFETY: kqueue returned a descriptor nothing else owns.
+        let queue = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+        // SAFETY: an all-zero kevent is valid; the fields below make the request.
+        let mut change: libc::kevent = unsafe { std::mem::zeroed() };
+        change.ident = pid as usize;
+        change.filter = libc::EVFILT_PROC;
+        change.flags = libc::EV_ADD;
+        change.fflags = libc::NOTE_EXIT;
+        // SAFETY: registers one change on the live queue and receives nothing.
+        let result = unsafe {
+            libc::kevent(
+                queue.as_raw_fd(),
+                &change,
+                1,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null(),
+            )
+        };
+        // The child may already have exited (ESRCH): its exit is then found by reaping.
+        (result == 0).then_some(queue)
+    }
+
+    fn supervise(
+        mut child: StdChild,
+        input: mpsc::Receiver<Input>,
+        mailbox: Mailbox,
+        timeout: Option<Duration>,
+        queued_input: Arc<AtomicUsize>,
+    ) {
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let mut leader = Leader::new(child);
+        let mailbox = Arc::new(mailbox);
+        let io_stop = Arc::new(AtomicBool::new(false));
+        let (writer_tx, writer_rx) = mpsc::channel();
+        let writer_stop = io_stop.clone();
+        let writer = thread::spawn(move || write_pipe(stdin, writer_rx, queued_input, writer_stop));
+        let (out_mail, err_mail) = (mailbox.clone(), mailbox.clone());
+        let (out_stop, err_stop) = (io_stop.clone(), io_stop.clone());
+        let out = thread::spawn(move || read_pipe(stdout, out_mail, false, out_stop));
+        let err = thread::spawn(move || read_pipe(stderr, err_mail, true, err_stop));
+        let started = Instant::now();
+        let mut terminating: Option<Instant> = None;
+        let mut forced = false;
+        let mut error = None;
+        loop {
+            let mut kill = mailbox.stopped.load(Ordering::Acquire);
+            if mailbox.unreadable.load(Ordering::Acquire) {
+                kill = true;
+                error.get_or_insert_with(|| "process output could not be read".to_owned());
+            }
+            if timeout.is_some_and(|limit| started.elapsed() >= limit) {
+                kill = true;
+                error.get_or_insert_with(|| "process timed out".to_owned());
+            }
+            // A pipe write may block: stdin is written on its own thread, never
+            // this supervisor.
+            match input.recv_timeout(Duration::from_millis(10)) {
+                Ok(Input::Write(bytes)) => {
+                    let _ = writer_tx.send(Input::Write(bytes));
+                }
+                Ok(Input::Close) => {
+                    let _ = writer_tx.send(Input::Close);
+                }
+                Ok(Input::Kill) | Err(mpsc::RecvTimeoutError::Disconnected) => kill = true,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if kill && terminating.is_none() {
+                leader.terminate(false);
+                terminating = Some(Instant::now());
+                let _ = writer_tx.send(Input::Close);
+            }
+            // A VM being torn down gives no grace period.
+            let stopped = mailbox.stopped.load(Ordering::Acquire);
+            if !forced && terminating.is_some_and(|at| stopped || at.elapsed() >= GRACE) {
+                leader.terminate(true);
+                forced = true;
+            }
+            match leader.exited() {
+                Ok(true) => break,
+                Ok(false) => {}
+                Err(e) => {
+                    error = Some(e.to_string());
+                    break;
+                }
+            }
+        }
+        // The leader may exit with descendants still holding its pipe handles.
+        // It is not reaped yet, so its pid still names the group signalled here.
+        leader.terminate(true);
+        let status = leader.reap();
+        let _ = writer_tx.send(Input::Close);
+        drop(writer_tx);
+        // Drain final buffered output, but an escaped/detached descendant must
+        // not keep inherited pipe handles (and therefore VM teardown) alive
+        // forever. The output of a VM being torn down goes nowhere and is not
+        // waited for.
+        let drain_until = Instant::now() + Duration::from_millis(100);
+        while !(writer.is_finished() && out.is_finished() && err.is_finished())
+            && Instant::now() < drain_until
+            && !mailbox.stopped.load(Ordering::Acquire)
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
+        io_stop.store(true, Ordering::Release);
+        let _ = writer.join();
+        let _ = out.join();
+        let _ = err.join();
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+            status.as_ref().and_then(|s| s.signal())
+        };
+        #[cfg(not(unix))]
+        let signal = None;
+        mailbox.exit(status.and_then(|s| s.code()), signal, error);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod native {
+    use crate::ui::{JsError, System};
+
+    pub(super) struct Launch;
+
+    impl Launch {
+        pub(super) fn new(
+            _: &System,
+            _: String,
+            _: Vec<String>,
+            _: Option<String>,
+            _: Option<std::time::Duration>,
+        ) -> Result<Self, JsError> {
+            Err(JsError::Type(super::UNAVAILABLE.into()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn declarations_come_from_the_spec() {
+        let registry = crate::runtime::registries()
+            .iter()
+            .find(|registry| registry.specifier() == Some("process"))
+            .unwrap();
+        let d = crate::ui::declarations(registry, &[]);
+        for expected in [
+            "export declare function run(command: string, args?: (string)[] | null, options?: RunOptions | null): Promise<CommandOutput>;",
+            "export declare function spawn(command: string, args?: (string)[] | null, options?: SpawnOptions | null): ChildProcess;",
+            "export declare const platform: string;",
+            "  readonly env: Record<string, string>;",
+            "  readonly dataDir: string | null;",
+            "} & { nextTick: typeof nextTick };",
+            r#"  on(event: "exit", handler: (result: ExitResult) => void): ChildProcess;"#,
+            "  get pid(): number;",
+        ] {
+            assert!(d.contains(expected), "{expected}\n{d}");
+        }
+        // Getters are the object's, never named exports.
+        assert!(!d.contains("export declare function env"), "{d}");
+    }
+}

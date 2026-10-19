@@ -24,6 +24,8 @@ log.workspace = true
 # `net`'s sockets (`runtime/net.rs`); WebAssembly has none.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["net", "io-util", "sync", "macros"] }
+# `process`'s children: their process groups and exits (`runtime/process.rs`).
+libc.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }

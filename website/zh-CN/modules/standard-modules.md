@@ -11,7 +11,7 @@ Native Shell 在同一个 QuickJS VM 中提供一组固定版本的 LLRT 标准�
 | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder` | LLRT native utility modules |
 | `os` | `platform()`、`arch()`、`EOL`、`homedir()`：实际宿主的系统元数据 |
 | `console` | 默认导出当前 VM 的日志对象：`log`、`info`、`debug`、`warn`、`error` |
-| `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
+| `process` | `spawn` (a `ChildProcess`), `run`, `exit`, `platform`, `arch`, `nextTick`; `env` and `dataDir` on the default object, which is also the global `process` |
 | `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
 | `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
 | `websocket` | `WebSocket` constructor, also installed globally on native hosts |
@@ -74,7 +74,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`exit` 在最后一次输出之后触发一次，参数为 `{ code, signal, error? }`；之后添加的监听器会立即收到它。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
+`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal, error }`（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
 
 | 限制 | 值 |
 |---|---|

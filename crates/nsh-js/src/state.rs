@@ -34,7 +34,6 @@ pub(crate) struct State {
     pub(crate) hot: crate::hot::Hot,
     pub(crate) keymap: crate::keymap::Keymap,
     pub(crate) chunks: crate::chunks::Chunks,
-    pub(crate) processes: crate::process::Processes,
     pub(crate) files: crate::fs::FileSystem,
     /// The native modules the context serves (the loader reads it).
     pub(crate) modules: ModuleTable,
@@ -91,7 +90,6 @@ pub(crate) fn install(
             hot: Default::default(),
             keymap: Default::default(),
             chunks: Default::default(),
-            processes: Default::default(),
             files: Default::default(),
             modules: ModuleTable::new(ui_sets),
         }));
@@ -144,6 +142,5 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
 /// Cancels native work while the context state is still reachable.
 fn state_system_cleanup(raw: *mut qjs::JSContext) {
     crate::dom::shared(raw).system_locals.close_all();
-    crate::process::free_all(raw);
     crate::fs::free_all(raw);
 }

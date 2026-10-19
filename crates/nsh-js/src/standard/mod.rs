@@ -53,7 +53,6 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
         "path" => declare!(llrt_path::PathModule),
         "url" => declare!(url::UrlModule),
         "zlib" => declare!(zlib::ZlibModule),
-        "process" => declare!(process::ProcessModule),
         "fs/promises" => declare!(fs::FsModule),
         "console" => declare!(console::ConsoleModule),
         #[cfg(not(target_arch = "wasm32"))]

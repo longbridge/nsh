@@ -11,7 +11,7 @@ Native Shell provides a pinned subset of LLRT standard modules inside its existi
 | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder` | LLRT native utility modules |
 | `os` | `platform()`, `arch()`, `EOL`, `homedir()`: actual host OS metadata |
 | `console` | Default export of the per-VM logger: `log`, `info`, `debug`, `warn`, `error` |
-| `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
+| `process` | `spawn` (a `ChildProcess`), `run`, `exit`, `platform`, `arch`, `nextTick`; `env` and `dataDir` on the default object, which is also the global `process` |
 | `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
 | `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
 | `websocket` | `WebSocket` constructor, also installed globally on native hosts |
@@ -74,7 +74,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` resolves `{ code, stdout, stderr }` for any exit status and rejects on launch failures, timeouts and output past its limit. `spawn` returns a child at once; `stdin: "pipe"` enables `write` and `end`, and `lines: true` delivers complete lines. `exit` fires once, after the final output, with `{ code, signal, error? }`, and at once for a listener added later. `kill`, a timeout, the reactive owner's cleanup and the VM's teardown end the whole process tree: on Unix its process group gets SIGTERM and then SIGKILL after 250 ms (at teardown, SIGKILL at once).
+`run` resolves `{ code, stdout, stderr }` for any exit status and rejects on launch failures, timeouts and output past its limit. `spawn` returns a child at once; `stdin: "pipe"` enables `write` and `end`, and `lines: true` delivers complete lines. `on(event, handler)` returns the child, and a handler gets the event's payload: the text, or `{ code, signal, error }` once, after the final output (at once for a listener added later). `pid` is the child's process id. `process.dataDir` is `null` when the host has no data directory. `kill`, a timeout, the reactive owner's cleanup and the VM's teardown end the whole process tree: on Unix its process group gets SIGTERM and then SIGKILL after 250 ms (at teardown, SIGKILL at once).
 
 | Limit | Value |
 |---|---|

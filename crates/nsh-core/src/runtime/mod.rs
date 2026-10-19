@@ -18,6 +18,7 @@ mod desktop;
 mod image;
 mod net;
 mod os;
+mod process;
 mod storage;
 
 /// The runtime's Rust modules, one registry per JS module (its
@@ -42,6 +43,10 @@ pub fn registries() -> &'static [Registry] {
         desktop.module::<desktop::Window>();
         let mut os = Registry::runtime("os");
         os.module::<os::Os>();
+        let mut process = Registry::runtime("process");
+        process
+            .module::<process::Process>()
+            .native_values(&["nextTick"]);
         let mut net = Registry::runtime("net");
         net.module::<net::Net>();
         vec![
@@ -53,6 +58,7 @@ pub fn registries() -> &'static [Registry] {
             desktop,
             os,
             net,
+            process,
         ]
     })
 }

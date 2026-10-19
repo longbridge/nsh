@@ -424,6 +424,18 @@ impl ModuleTable {
             .collect()
     }
 
+    /// The default object of the typed module `name` (its flat default
+    /// module's), made once per VM; `None`: it has none.
+    pub(crate) fn default_object(&self, ctx: *mut JsContext, name: &str) -> Option<JsValue> {
+        let spec = self
+            .registries
+            .iter()
+            .filter(|r| r.specifier() == Some(name))
+            .flat_map(|r| r.module_specs())
+            .find(|m| m.flat && m.default)?;
+        Some(self.object(ctx, name, &spec))
+    }
+
     /// Module `spec`'s object (owned), made once per VM: its functions,
     /// getters and constants, and on a flat default module the registry's
     /// native values too.

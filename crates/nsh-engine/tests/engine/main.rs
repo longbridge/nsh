@@ -30,6 +30,7 @@ mod native;
 mod net;
 mod package;
 mod platform;
+mod process;
 mod rust_animation;
 mod rust_app;
 mod rust_classes;

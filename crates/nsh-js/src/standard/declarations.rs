@@ -320,7 +320,6 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
     }
     for (name, body) in [
         ("fs/promises", super::fs::TYPES),
-        ("process", super::process::TYPES),
         ("console", super::console::TYPES),
     ] {
         adapter(&mut public, name, body);
@@ -351,7 +350,7 @@ pub(crate) fn globals() -> String {
         r#"
 declare var Buffer: typeof import("buffer").Buffer;
 type Buffer = import("buffer").Buffer;
-declare var process: import("process").StandardProcess;
+declare var process: typeof import("process").default;
 declare var crypto: Pick<typeof import("crypto").default, "createHash" | "createHmac" | "randomBytes" | "randomInt" | "randomUUID" | "randomFill" | "randomFillSync" | "getRandomValues"> & { readonly subtle: typeof import("@nsh/llrt-types/crypto").subtle };
 /** Native constructor without an upstream constructor signature. */
 declare const Crypto: unknown;
