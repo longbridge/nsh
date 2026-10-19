@@ -30,7 +30,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 - `fs/promises` 的 `exists` 对目标不存在的符号链接返回 `true`；`unlink`、`rename`、`rmdir`、`lstat` 和 `readlink` 作用于符号链接本身。
 - `Stats` 和 `Dirent` 的字段（`size`、`mtimeMs`、`name` 等）与 Node 一样是对象自身的属性，`isFile()`、`isDirectory()` 和 `isSymbolicLink()` 在其原型上。
-- `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal, error }`。`on` 返回子进程本身。
+- `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal }`（由运行时结束子进程时还带有 `error`）。`on` 返回子进程本身。
 - 子进程的环境是宿主的一小组变量加上应用获授权的变量名；它在应用的数据目录中运行，或在 `fs.write` 根目录内的 `cwd` 中运行（见[进程](#进程)）。
 - 宿主没有数据目录时 `process.dataDir` 为 `null`；`process.exit` 请求宿主退出。
 - 限制是每个接口的一部分：大小、数量和超时在下面各模块中列出。

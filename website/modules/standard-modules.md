@@ -30,7 +30,7 @@ The modules follow Node's names and shapes for the subset they export, and gpui-
 
 - `fs/promises`' `exists` is `true` for a symlink whose target is missing, and `unlink`, `rename`, `rmdir`, `lstat` and `readlink` act on a symlink itself.
 - `Stats` and `Dirent` have their fields (`size`, `mtimeMs`, `name`, ...) as own properties, as Node's do, and `isFile()`, `isDirectory()` and `isSymbolicLink()` on their prototype.
-- A `ChildProcess` listener receives the event's payload: the output text, or the exit's `{ code, signal, error }`. `on` returns the child.
+- A `ChildProcess` listener receives the event's payload: the output text, or the exit's `{ code, signal }` (with `error` when the runtime ended the child). `on` returns the child.
 - A child's environment is a small set from the host plus the names the app is granted, and it runs in the app's data directory or a `cwd` within an `fs.write` root ([Processes](#processes)).
 - `process.dataDir` is `null` when the host has no data directory; `process.exit` asks the host to exit.
 - Limits are part of each API: sizes, counts and timeouts are listed with each module below.
