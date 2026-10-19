@@ -15,6 +15,7 @@ The environment an app runs in changes while it runs: the window resizes (rotati
 | `windowSize()` | `nsh/device` | `{ width, height }` of the surface, in points. |
 | `colorScheme()` | `nsh/device` | `"light"` or `"dark"`: the system's, or the app's own (`setColorScheme`). |
 | `fontScale()` | `nsh/device` | The user's preferred text size relative to the default (1 is the default). |
+| `locale()` | `nsh/device` | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
 | `safeArea()` | `nsh/ui/mobile` | Insets of the surface not covered by system UI: `{ top, right, bottom, left }`. |
 | `useSafeAreaInsets()` | `nsh/ui/mobile` | The insets where the calling component renders (a screen, a modal). |
 | `keyboard()` | `nsh/ui/mobile` | `{ height, duration }` of the software keyboard. |
@@ -124,6 +125,25 @@ import { colorScheme, setColorScheme } from "nsh/device";
 ```
 
 Read `fontScale()` to adapt layout that does not follow text automatically, such as switching a row to a column when the text gets large: `flexDirection: fontScale() > 1.3 ? "column" : "row"`.
+
+The text size scales text: every `<Text>` and `<Input>` that allows font scaling, the labels of `nsh/ui/mobile`'s components, and the platform's alerts and toasts. Lengths keep their size: spacing, widths and heights, corner radii, borders and images, in points or in classes (`p-4`, `rounded-lg`, `w-[2rem]`). Boxes sized by their content grow with their text.
+
+## Language and region
+
+`locale()` is the user's locale, as a BCP 47 tag. `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. Read `locale()` to pick the strings of your own translations: the texts that read it update when it changes.
+
+```tsx
+import { Text } from "nsh";
+import { locale } from "nsh/device";
+
+const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
+
+<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+```
+
+## In an embedding app
+
+An app shown inside a native app follows that app's own settings when it sets them: the embedding API's `set_locale` and `set_font_scale` (`locale` and `fontScale` in Swift, `setLocale` and `setFontScale` in Java; [iOS](./embedding-ios.md), [Android](./embedding-android.md)) stand in for the system's language and text size. `locale()`, `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
 
 ## Safe areas
 

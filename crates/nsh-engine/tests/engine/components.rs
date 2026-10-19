@@ -1246,3 +1246,28 @@ fn menus_reach_the_platform_and_call_back() {
         }
     )));
 }
+
+const LOCALE: &str = r#"import { mount, Text } from "nsh";
+import { fontScale, locale } from "nsh/device";
+
+mount(() => (
+  <Text>{`${locale()} ${new Intl.NumberFormat().format(1234.5)} ${fontScale()}`}</Text>
+));
+"#;
+
+#[test]
+fn locale_and_font_scale_follow_the_environment() {
+    let (engine, rx) = start(LOCALE);
+    let first = until(&rx, |b| shows(b, "en-US 1,234.5 1"));
+    assert!(first.iter().any(|b| shows(b, "en-US 1,234.5 1")));
+    // What an embedding app sets in place of the system's.
+    let mut environment = Environment::default();
+    nsh_engine::HostEnvironment {
+        locale: nsh_engine::Locale::parse("de-DE"),
+        font_scale: Some(1.5),
+    }
+    .apply(&mut environment);
+    engine.control().set_environment(environment);
+    let after = until(&rx, |b| shows(b, "de-DE 1.234,5 1.5"));
+    assert!(after.iter().any(|b| shows(b, "de-DE 1.234,5 1.5")));
+}

@@ -34,7 +34,7 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   the primitives `View`, `Text`, `Scroll`, `Input`.
 - `nsh:rt` (only compiled code imports it): `element`, `text`, `append`, `insert`, `prop`, `bindProp`, `spread`,
   `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`.
-- `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `Platform`, `PixelRatio`, `I18nManager`) and
+- `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `locale`, `Platform`, `PixelRatio`, `I18nManager`) and
   `nsh/accessibility` (`reduceMotion`, `screenReaderEnabled`, `AccessibilityInfo`): the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.
 - `nsh/list`, `nsh/gesture`, `nsh/animated`, `nsh/canvas`, `nsh/webview`, `nsh/video`, `nsh/native`, `nsh/ios`,

@@ -15,6 +15,7 @@ demo: guide-device
 | `windowSize()` | `nsh/device` | surface 的 `{ width, height }`，单位为点。 |
 | `colorScheme()` | `nsh/device` | `"light"` 或 `"dark"`。 |
 | `fontScale()` | `nsh/device` | 用户偏好的文字大小相对于默认值的比例（1 为默认）。 |
+| `locale()` | `nsh/device` | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
 | `safeArea()` | `nsh/ui/mobile` | surface 中未被系统 UI 遮挡的 inset：`{ top, right, bottom, left }`。 |
 | `useSafeAreaInsets()` | `nsh/ui/mobile` | 调用组件渲染位置（页面、模态视图）的 inset。 |
 | `keyboard()` | `nsh/ui/mobile` | 软键盘的 `{ height, duration }`。 |
@@ -108,6 +109,25 @@ const palette = computed(() =>
 ```
 
 对于不会自动跟随文字的布局，读取 `fontScale()` 来调整，例如文字变大时把横排改为竖排：`flexDirection: fontScale() > 1.3 ? "column" : "row"`。
+
+文字大小缩放的是文字：所有允许字体缩放的 `<Text>` 和 `<Input>`、`nsh/ui/mobile` 组件的文字，以及平台的提示框和 toast。长度保持原样：间距、宽高、圆角、边框和图片，无论写成点数还是类名（`p-4`、`rounded-lg`、`w-[2rem]`）。按内容决定大小的盒子会随文字一起变大。
+
+## 语言和地区
+
+`locale()` 是用户的区域设置，形式为 BCP 47 标签。`Intl` 默认按它格式化数字和日期，所以 `new Intl.NumberFormat().format(1234.5)` 在 `en-US` 下得到 `1,234.5`，在 `de-DE` 下得到 `1.234,5`。读取 `locale()` 来选择你自己的翻译文案：读取它的文字会在它变化时更新。
+
+```tsx
+import { Text } from "nsh";
+import { locale } from "nsh/device";
+
+const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
+
+<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+```
+
+## 在嵌入它的应用中
+
+嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 的 `set_locale` 和 `set_font_scale`（Swift 中为 `locale` 和 `fontScale`，Java 中为 `setLocale` 和 `setFontScale`；见 [iOS](./embedding-ios.md)、[Android](./embedding-android.md)）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
 
 ## 安全区域
 

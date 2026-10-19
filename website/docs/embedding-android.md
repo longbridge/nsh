@@ -155,6 +155,8 @@ again replaces the running app. The complete sample is
 | `setErrorListener(ErrorListener listener)` | Receives fatal app errors (load failures, uncaught JS exceptions, a VM stopped by a limit) on the UI thread. They are always logged. |
 | `setLimits(int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes)` | VM limits of the apps loaded next; 0 keeps a default. |
 | `setGrantedCapabilities(String json)` | The most the apps loaded next may do, as JSON in the form of `nsh.json`'s `capabilities`; `null` grants what each app declares. Returns `false` (and is ignored) for an invalid grant. |
+| `setLocale(Locale locale)` | The app's language and region in place of the user's: `Intl`, `locale()` and the components follow it at once, and the apps loaded later start in it. `null` follows the system's. |
+| `setFontScale(float scale)` | The text size in place of the system's font size (1 is the default): texts and inputs are laid out again at it and `fontScale()` reads it, at once and for the apps loaded later; lengths keep their size. `0` follows the system's. |
 | `setStorageDirectory(File dir)` | Where the apps loaded next keep their [storage](../modules/nsh-storage.md); `null`: `files/nsh/<app id>` in the app's private directory, by the app's own id. |
 | `loadAssetBundle(String dir)` | Runs `dir/bundle.nshc` from the APK's assets; app assets come from `dir/assets/`. Returns `false` if it cannot be read (also reported to the error listener). |
 | `loadBundleFile(File file)` | Runs a `bundle.js` file; assets come from `assets/` next to it. Refuses `.nshc` files. |

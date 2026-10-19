@@ -120,6 +120,9 @@ so only load it from your own app's files.
   256 MB heap); the development host and the release runner run apps with `Limits::standalone_desktop()`.
 - `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
   with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
+- `AppView::set_locale(locale, cx)` and `AppView::set_font_scale(scale, cx)` give the app your app's language and
+  text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+  follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 - `set_ui_sets(sets)` replaces the default `nsh/ui/mobile` set, for apps with Rust components of their own, and gives
   your app's own sets: an app reaches the functions and classes of one by name with
   [`nativeModule`](../modules/nsh-native.md#nativemodule) and is built with the stock `nsh build`. The repository's

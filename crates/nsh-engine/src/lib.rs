@@ -31,8 +31,8 @@ pub use nsh_core::{
     access::{Access, Capabilities},
     js::Limits,
     platform::{
-        ColorScheme, Environment, FetchEvent, FetchOp, HttpBody, HttpHead, HttpRequest, Idiom,
-        Insets, Locale, Os,
+        ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
+        HttpRequest, Idiom, Insets, Locale, Os,
     },
     storage::{StorageBackend, StorageChange},
     ui::{Root, Theme},

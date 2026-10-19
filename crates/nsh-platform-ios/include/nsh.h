@@ -58,6 +58,16 @@ void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint
 /// or NULL.
 char *_Nullable nsh_app_set_storage_directory(NshApp *app, const char *_Nullable path);
 
+/// The embedding app's locale, standing in for the user's: a BCP 47 tag or a
+/// platform identifier (`zh-Hans-CN`, `en_US`); NULL follows the system's
+/// again. Applies at once and to every app loaded later. Returns why `tag` is
+/// no locale, or NULL.
+char *_Nullable nsh_app_set_locale(NshApp *app, const char *_Nullable tag);
+
+/// The embedding app's text size relative to the default (1.0), standing in
+/// for Dynamic Type's; 0 follows the system's again.
+void nsh_app_set_font_scale(NshApp *app, float scale);
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change. Returns an error without development support,
 /// or NULL.
