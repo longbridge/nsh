@@ -113,12 +113,16 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
 | 键 | 类型 | 说明 |
 |---|---|---|
 | `hosts` | `string[]` | 应用可以用任意方法和协议（`http`、`https`、`ws`、`wss`）访问的主机。 |
-| `http` | `object[]` | 更细粒度的授权，每个主机一条。 |
-| `http[].host` | `string` | 主机（必填）。 |
-| `http[].methods` | `string[]` | 允许的方法，例如 `["GET", "HEAD"]`。为空或缺省：任意。 |
-| `http[].schemes` | `string[]` | 允许的协议。为空或缺省：`http`、`https`、`ws`、`wss` 中的任意一种。 |
-| `http[].pathPrefix` | `string` | URL 的路径必须以它开头。 |
+| `http` | `object[]` | 更细粒度的授权：一个主机，由下面任意的键进一步限定。 |
+| `http[].host` | `string` | 主机或主机模式（必填）。 |
+| `http[].methods` | `string[]` | 允许的方法，例如 `["GET", "HEAD"]`。缺省：任意。 |
+| `http[].schemes` | `string[]` | 允许的协议（`scheme`：以字符串写一个）。缺省：`http`、`https`、`ws`、`wss` 中的任意一种。 |
+| `http[].port` | `number` | 端口；URL 未写端口时按其协议的默认端口（`https` 为 443）。缺省：任意。 |
+| `http[].paths` | `string[]` | 精确路径，例如 `["/v1/quote"]`（查询参数不属于路径）。 |
+| `http[].pathPrefixes` | `string[]` | 按完整路径段匹配的前缀：`/v1` 覆盖 `/v1` 和 `/v1/quote`，`/v1/` 覆盖其后的路径。`pathPrefix`（以字符串写一个）和 `path_prefixes` 含义相同。 |
 | `sockets` | `string[]` | [`net.connect`](../modules/standard-modules.md) 可连接的原始 TCP 目标，每项是精确的 `"host:port"`（IPv6 写作 `"[::1]:9000"`）。 |
+
+`http` 规则没有列出 `paths` 或 `pathPrefixes` 时覆盖所有路径；两者都列出时，匹配其一的路径即被覆盖。
 
 主机模式可以是 `*`（任意主机）、`*.example.com`（`example.com` 的任意子域名，不包括 `example.com` 本身）或一个确切的
 主机名。匹配时忽略大小写和端口。主机取最后一个 `@` 之后的部分，因此 `https://api.example.com@evil.io/` 会按 `evil.io`

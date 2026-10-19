@@ -212,7 +212,7 @@ try {
 | 键 | 说明 |
 |---|---|
 | `network.hosts` | 可以用任何方法访问的主机：`"*"`（任意主机）、`"*.example.com"`（其子域名，不含 `example.com` 本身）或主机名。 |
-| `network.http` | 更精细的授权：一个 `host`，可以再限制 `methods`、`schemes` 和 `pathPrefix`。 |
+| `network.http` | 更精细的授权：一个 `host`，可以再限制 `methods`、`schemes`、`port`、精确的 `paths` 和 `pathPrefixes`。 |
 
 这些检查在 Rust 中、在你的 JS 之外执行，请求到达网络之前就已完成：
 

@@ -31,13 +31,13 @@
 //! sockets, processes and the filesystem always require an explicit
 //! declaration.
 
-//! Scoped HTTP rules use `scheme`, `port`, `methods`, `paths` and
-//! `path_prefixes`. They default to HTTPS and require GET/POST methods and
-//! at least one matching exact path or slash-delimited prefix, on an exact
-//! host (a wildcard host is rejected: use `hosts` for those). Breaking change:
-//! `{host, methods}` now follows this scoped form and grants no paths. Legacy
-//! NSH rules remain explicit through `schemes` or `pathPrefix`; mixing the two
-//! forms is rejected. Serialization preserves the chosen rule form.
+//! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
+//! other key narrows it and is optional: `methods` (any when left out),
+//! `schemes` or `scheme` (any of http, https, ws, wss), `port` (any),
+//! `paths` (exact) and `pathPrefixes` / `pathPrefix` / `path_prefixes`
+//! (whole segments: `/v1` covers `/v1` and `/v1/x`, not `/v10`). Without
+//! paths or prefixes a rule covers every path. Rules serialize in one form:
+//! `schemes` and `pathPrefixes`.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -85,8 +85,8 @@ impl HostPattern {
     }
 }
 
-/// A finer HTTP grant: a host, optionally limited to methods, schemes and a
-/// path prefix.
+/// A finer HTTP grant: a host, narrowed by any of methods, schemes, a port,
+/// exact paths and path prefixes (each left empty: any).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HttpGrant {
@@ -94,12 +94,16 @@ pub struct HttpGrant {
     pub host: HostPattern,
     /// Upper-case methods; empty: any.
     pub methods: Vec<String>,
-    /// Lower-case schemes; empty: any of http(s) and ws(s).
+    /// Lower-case schemes (`http`, `https`, `ws`, `wss`); empty: any of them.
     pub schemes: Vec<String>,
-    /// The path must start with it.
-    pub path_prefix: Option<String>,
-    /// A reference-compatible scoped HTTP rule, when present.
-    pub scope: Option<HttpScope>,
+    /// The port, the scheme's default when the URL has none; `None`: any.
+    pub port: Option<u16>,
+    /// Exact paths (without the query).
+    pub paths: Vec<String>,
+    /// Path prefixes, matching whole segments (`/v1` covers `/v1/x`, not
+    /// `/v10`). With `paths`, a path matching either is covered; with
+    /// neither, every path is.
+    pub path_prefixes: Vec<String>,
 }
 
 impl Default for HttpGrant {
@@ -108,24 +112,36 @@ impl Default for HttpGrant {
             host: HostPattern(String::new()),
             methods: Vec::new(),
             schemes: Vec::new(),
-            path_prefix: None,
-            scope: None,
+            port: None,
+            paths: Vec::new(),
+            path_prefixes: Vec::new(),
         }
     }
 }
 
-/// Strict HTTP request scope used by reference-compatible manifest rules.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct HttpScope {
-    /// HTTP or HTTPS.
-    pub scheme: String,
-    /// Explicit port; absent means the scheme's default.
-    pub port: Option<u16>,
-    /// Exact URL paths.
-    pub paths: Vec<String>,
-    /// Path prefixes matching a complete slash-delimited boundary.
-    pub path_prefixes: Vec<String>,
+impl HttpGrant {
+    fn allows(&self, method: &str, url: &UrlParts<'_>) -> bool {
+        let default_port = match url.scheme.as_str() {
+            "https" | "wss" => 443,
+            _ => 80,
+        };
+        let path = url.path.split(['?', '#']).next().unwrap_or("/");
+        let path = if path.is_empty() { "/" } else { path };
+        self.host.matches(&url.host)
+            && (self.methods.is_empty()
+                || self.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
+            && (self.schemes.is_empty() || self.schemes.contains(&url.scheme))
+            && self
+                .port
+                .is_none_or(|p| url.port.unwrap_or(default_port) == p)
+            && ((self.paths.is_empty() && self.path_prefixes.is_empty())
+                || self.paths.iter().any(|allowed| allowed == path)
+                || self.path_prefixes.iter().any(|prefix| {
+                    path.strip_prefix(prefix.as_str()).is_some_and(|tail| {
+                        tail.is_empty() || prefix.ends_with('/') || tail.starts_with('/')
+                    })
+                }))
+    }
 }
 
 /// `capabilities.network`.
@@ -411,128 +427,16 @@ impl Capabilities {
                         &[
                             "host",
                             "methods",
-                            "schemes",
-                            "pathPrefix",
                             "scheme",
+                            "schemes",
                             "port",
                             "paths",
+                            "pathPrefix",
+                            "pathPrefixes",
                             "path_prefixes",
                         ],
                     )?;
-                    let host = g
-                        .get("host")
-                        .and_then(Value::as_str)
-                        .ok_or("capabilities.network.http[] needs a `host`")?;
-                    let normalized_strings = |key: &str,
-                                              upper: bool|
-                     -> Result<Vec<String>, String> {
-                        match g.get(key) {
-                            None => Ok(Vec::new()),
-                            Some(v) => strings(v, &format!("capabilities.network.http[].{key}"))
-                                .map(|l| {
-                                    l.into_iter()
-                                        .map(|s| {
-                                            if upper {
-                                                s.to_ascii_uppercase()
-                                            } else {
-                                                s.to_ascii_lowercase()
-                                            }
-                                        })
-                                        .collect()
-                                }),
-                        }
-                    };
-                    let legacy = g.contains_key("schemes") || g.contains_key("pathPrefix");
-                    let scoped_keys = ["scheme", "port", "paths", "path_prefixes"]
-                        .iter()
-                        .any(|key| g.contains_key(*key));
-                    if legacy && scoped_keys {
-                        return Err(
-                            "network.http cannot mix scoped and legacy HTTP rule keys".into()
-                        );
-                    }
-                    let reference = !legacy;
-                    // Scoped rules compare the host exactly; a pattern there
-                    // would silently match nothing.
-                    if reference && host.contains('*') {
-                        return Err(format!(
-                            "scoped network.http rules need an exact host, not `{host}`; list wildcard hosts in capabilities.network.hosts"
-                        ));
-                    }
-                    let scope = if reference {
-                        let scheme = g
-                            .get("scheme")
-                            .map(|v| v.as_str().ok_or("network.http.scheme must be a string"))
-                            .transpose()?
-                            .unwrap_or("https")
-                            .to_owned();
-                        if !matches!(scheme.as_str(), "http" | "https") {
-                            return Err("network.http.scheme must be http or https".into());
-                        }
-                        let methods = g
-                            .get("methods")
-                            .and_then(Value::as_array)
-                            .and_then(|values| {
-                                values.iter().map(Value::as_str).collect::<Option<Vec<_>>>()
-                            })
-                            .ok_or("scoped network.http.methods must be an array")?;
-                        if methods.is_empty()
-                            || methods
-                                .iter()
-                                .any(|method| !matches!(*method, "GET" | "POST"))
-                        {
-                            return Err("scoped network.http.methods needs GET or POST".into());
-                        }
-                        let paths = g
-                            .get("paths")
-                            .map(|value| strings(value, "network.http.paths"))
-                            .transpose()?
-                            .unwrap_or_default();
-                        let path_prefixes = g
-                            .get("path_prefixes")
-                            .map(|value| strings(value, "network.http.path_prefixes"))
-                            .transpose()?
-                            .unwrap_or_default();
-                        if paths
-                            .iter()
-                            .chain(&path_prefixes)
-                            .any(|path| !path.starts_with('/'))
-                        {
-                            return Err("network.http paths must start with /".into());
-                        }
-                        Some(HttpScope {
-                            scheme,
-                            port: g
-                                .get("port")
-                                .map(|value| {
-                                    value
-                                        .as_u64()
-                                        .and_then(|port| u16::try_from(port).ok())
-                                        .ok_or("network.http.port must be a u16")
-                                })
-                                .transpose()?,
-                            paths,
-                            path_prefixes,
-                        })
-                    } else {
-                        None
-                    };
-                    caps.network.http.push(HttpGrant {
-                        host: HostPattern::new(host)?,
-                        scope,
-                        methods: normalized_strings("methods", true)?,
-                        schemes: normalized_strings("schemes", false)?,
-                        path_prefix: match g.get("pathPrefix") {
-                            None => None,
-                            Some(v) => Some(
-                                v.as_str()
-                                    .ok_or(
-                                        "capabilities.network.http[].pathPrefix must be a string",
-                                    )?
-                                    .to_owned(),
-                            ),
-                        },
-                    });
+                    caps.network.http.push(http_grant(g)?);
                 }
             }
         }
@@ -615,19 +519,17 @@ impl Capabilities {
                 if !g.methods.is_empty() {
                     o.insert("methods".into(), g.methods.clone().into());
                 }
-                if let Some(scope) = &g.scope {
-                    o.insert("scheme".into(), scope.scheme.clone().into());
-                    if let Some(port) = scope.port {
-                        o.insert("port".into(), port.into());
-                    }
-                    o.insert("paths".into(), scope.paths.clone().into());
-                    o.insert("path_prefixes".into(), scope.path_prefixes.clone().into());
-                }
-                if g.scope.is_none() || !g.schemes.is_empty() {
+                if !g.schemes.is_empty() {
                     o.insert("schemes".into(), g.schemes.clone().into());
                 }
-                if let Some(p) = &g.path_prefix {
-                    o.insert("pathPrefix".into(), p.clone().into());
+                if let Some(port) = g.port {
+                    o.insert("port".into(), port.into());
+                }
+                if !g.paths.is_empty() {
+                    o.insert("paths".into(), g.paths.clone().into());
+                }
+                if !g.path_prefixes.is_empty() {
+                    o.insert("pathPrefixes".into(), g.path_prefixes.clone().into());
                 }
                 Value::Object(o)
             })
@@ -667,38 +569,7 @@ impl Capabilities {
             return false;
         }
         self.network.hosts.iter().any(|h| h.matches(&url.host))
-            || self.network.http.iter().any(|g| {
-                if let Some(scope) = &g.scope {
-                    let port = |scheme: &str, explicit: Option<u16>| {
-                        explicit.or(match scheme {
-                            "https" => Some(443),
-                            "http" => Some(80),
-                            _ => None,
-                        })
-                    };
-                    let path = url.path.split(['?', '#']).next().unwrap_or("/");
-                    return g.host.as_str().eq_ignore_ascii_case(&url.host)
-                        && scope.scheme.eq_ignore_ascii_case(&url.scheme)
-                        && port(&scope.scheme, scope.port) == port(&url.scheme, url.port)
-                        && g.methods
-                            .iter()
-                            .any(|allowed| allowed.eq_ignore_ascii_case(method))
-                        && (scope.paths.iter().any(|allowed| allowed == path)
-                            || scope.path_prefixes.iter().any(|allowed| {
-                                path == allowed
-                                    || path.strip_prefix(allowed).is_some_and(|tail| {
-                                        allowed.ends_with('/') || tail.starts_with('/')
-                                    })
-                            }));
-                }
-                g.host.matches(&url.host)
-                    && (g.methods.is_empty()
-                        || g.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
-                    && (g.schemes.is_empty() || g.schemes.contains(&url.scheme))
-                    && g.path_prefix
-                        .as_deref()
-                        .is_none_or(|p| url.path.starts_with(p))
-            })
+            || self.network.http.iter().any(|g| g.allows(method, url))
     }
 
     fn allows_webview(&self, url: &UrlParts<'_>) -> bool {
@@ -805,6 +676,85 @@ fn strings(value: &Value, what: &str) -> Result<Vec<String>, String> {
         .as_array()
         .and_then(|a| a.iter().map(|v| v.as_str().map(str::to_owned)).collect())
         .ok_or_else(|| format!("{what} must be an array of strings"))
+}
+
+/// One `network.http` rule: `host`, and any of `methods`, `scheme` /
+/// `schemes`, `port`, `paths` and `pathPrefix` / `pathPrefixes` /
+/// `path_prefixes` (the spellings of one key are merged).
+fn http_grant(g: &Map<String, Value>) -> Result<HttpGrant, String> {
+    let what = "capabilities.network.http[]";
+    let host = g
+        .get("host")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{what} needs a `host`"))?;
+    // A key as a string or an array of strings.
+    let list = |key: &str| -> Result<Vec<String>, String> {
+        match g.get(key) {
+            None => Ok(Vec::new()),
+            Some(Value::String(s)) => Ok(vec![s.clone()]),
+            Some(v) => strings(v, &format!("{what}.{key}")),
+        }
+    };
+    let methods = list("methods")?
+        .into_iter()
+        .map(|m| {
+            if !m.is_empty() && m.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-') {
+                Ok(m.to_ascii_uppercase())
+            } else {
+                Err(format!("{what}.methods: `{m}` is not an HTTP method"))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut schemes = Vec::new();
+    for scheme in list("scheme")?.into_iter().chain(list("schemes")?) {
+        let scheme = scheme.to_ascii_lowercase();
+        if !matches!(scheme.as_str(), "http" | "https" | "ws" | "wss") {
+            return Err(format!(
+                "{what}.schemes: `{scheme}` is not http, https, ws or wss"
+            ));
+        }
+        if !schemes.contains(&scheme) {
+            schemes.push(scheme);
+        }
+    }
+    let port = match g.get("port") {
+        None => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|p| u16::try_from(p).ok())
+                .filter(|&p| p != 0)
+                .ok_or_else(|| format!("{what}.port must be a port from 1 to 65535"))?,
+        ),
+    };
+    let paths = list("paths")?;
+    let mut path_prefixes = Vec::new();
+    for prefix in list("pathPrefix")?
+        .into_iter()
+        .chain(list("pathPrefixes")?)
+        .chain(list("path_prefixes")?)
+    {
+        if !path_prefixes.contains(&prefix) {
+            path_prefixes.push(prefix);
+        }
+    }
+    // A path is matched as written: a pattern in it would match nothing.
+    if let Some(bad) = paths
+        .iter()
+        .chain(&path_prefixes)
+        .find(|p| !p.starts_with('/') || p.contains(['*', '?', '#']))
+    {
+        return Err(format!(
+            "{what}: path `{bad}` must start with / and has no `*`, `?` or `#` (paths match as written)"
+        ));
+    }
+    Ok(HttpGrant {
+        host: HostPattern::new(host)?,
+        methods,
+        schemes,
+        port,
+        paths,
+        path_prefixes,
+    })
 }
 
 fn patterns(value: &Value, what: &str) -> Result<Vec<HostPattern>, String> {
@@ -1151,51 +1101,102 @@ mod tests {
     }
 
     #[test]
-    fn reference_scoped_http_rules_keep_ports_and_path_boundaries() {
-        let legacy = caps(r#"{"network":{"http":[{"host":"api.example.com","schemes":[]}]}}"#);
-        assert_eq!(Capabilities::from_json(&legacy.to_json()).unwrap(), legacy);
-        let c = caps(
-            r#"{"network":{"http":[{"host":"api.example.com","methods":["GET"],"paths":["/exact"],"path_prefixes":["/v1"]}]}}"#,
+    fn http_rules_are_one_form_whose_keys_all_narrow() {
+        let allows = |rule: serde_json::Value, method: &str, url: &str| {
+            Access {
+                declared: Capabilities::from_json(&serde_json::json!({"network":{"http":[rule]}}))
+                    .unwrap(),
+                granted: None,
+            }
+            .allows_http(method, url)
+        };
+        // `{host, methods}` covers every path, scheme and port, as manifests had it.
+        let plain = serde_json::json!({"host": "api.example.com", "methods": ["GET"]});
+        assert!(allows(plain.clone(), "GET", "https://api.example.com/"));
+        assert!(allows(
+            plain.clone(),
+            "GET",
+            "http://api.example.com:8080/any/path"
+        ));
+        assert!(!allows(plain.clone(), "POST", "https://api.example.com/"));
+        assert!(allows(
+            serde_json::json!({"host": "api.example.com"}),
+            "PUT",
+            "https://api.example.com/x"
+        ));
+        // Paths are exact, prefixes whole segments; either one covers a path.
+        let scoped = serde_json::json!({
+            "host": "api.example.com", "methods": ["GET"], "scheme": "https", "port": 443,
+            "paths": ["/exact"], "pathPrefixes": ["/v1"]
+        });
+        assert!(allows(
+            scoped.clone(),
+            "GET",
+            "https://api.example.com/exact?q=1"
+        ));
+        assert!(allows(scoped.clone(), "GET", "https://api.example.com/v1"));
+        assert!(allows(
+            scoped.clone(),
+            "GET",
+            "https://api.example.com/v1/child"
+        ));
+        assert!(!allows(
+            scoped.clone(),
+            "GET",
+            "https://api.example.com/v10"
+        ));
+        assert!(!allows(
+            scoped.clone(),
+            "GET",
+            "https://api.example.com/exact/more"
+        ));
+        assert!(!allows(
+            scoped.clone(),
+            "GET",
+            "http://api.example.com/exact"
+        ));
+        assert!(!allows(
+            scoped.clone(),
+            "GET",
+            "https://api.example.com:444/exact"
+        ));
+        assert!(allows(scoped, "GET", "https://api.example.com:443/exact"));
+        // Main's spelling still reads, and a prefix ending in `/` covers what follows it.
+        let legacy = serde_json::json!({"host": "*.example.com", "schemes": ["https", "wss"], "pathPrefix": "/v1/"});
+        assert!(allows(
+            legacy.clone(),
+            "GET",
+            "https://quotes.example.com/v1/quote"
+        ));
+        assert!(!allows(legacy, "GET", "https://quotes.example.com/v2/"));
+        // Every spelling of a key is merged, and one form is written back.
+        let mixed = caps(
+            r#"{"network":{"http":[{"host":"a.example.com","methods":["get"],"scheme":"https","schemes":["wss","https"],"pathPrefix":"/a","path_prefixes":["/b"],"pathPrefixes":["/a","/c"]}]}}"#,
         );
-        assert_eq!(Capabilities::from_json(&c.to_json()).unwrap(), c);
-        let access = Access {
-            declared: c,
-            granted: None,
-        };
-        assert!(access.allows_http("GET", "https://api.example.com/exact?q=1"));
-        assert!(access.allows_http("GET", "https://api.example.com/v1/child"));
-        assert!(!access.allows_http("GET", "https://api.example.com/v10"));
-        assert!(!access.allows_http("GET", "http://api.example.com/exact"));
-        assert!(!access.allows_http("GET", "https://api.example.com:444/exact"));
-        assert!(!access.allows_http("POST", "https://api.example.com/exact"));
-        let ambiguous = Access {
-            declared: caps(
-                r#"{"network":{"http":[{"host":"api.example.com","methods":["GET"]}]}}"#,
-            ),
-            granted: None,
-        };
-        assert!(!ambiguous.allows_http("GET", "https://api.example.com/"));
-        assert!(
-            Capabilities::from_json(
-                &serde_json::json!({"network":{"http":[{"host":"api.example.com"}]}})
-            )
-            .is_err()
+        let grant = &mixed.network.http[0];
+        assert_eq!(grant.methods, ["GET"]);
+        assert_eq!(grant.schemes, ["https", "wss"]);
+        assert_eq!(grant.path_prefixes, ["/a", "/c", "/b"]);
+        assert_eq!(
+            mixed.to_json()["network"]["http"][0],
+            serde_json::json!({"host":"a.example.com","methods":["GET"],"schemes":["https","wss"],"pathPrefixes":["/a","/c","/b"]})
         );
-        let no_paths = Access {
-            declared: caps(
-                r#"{"network":{"http":[{"host":"api.example.com","scheme":"https","methods":["GET"]}]}}"#,
-            ),
-            granted: None,
-        };
-        assert!(!no_paths.allows_http("GET", "https://api.example.com/"));
+        assert_eq!(Capabilities::from_json(&mixed.to_json()).unwrap(), mixed);
+        // What cannot match is an error, not a rule that grants nothing.
         for bad in [
-            r#"{"scheme":"https","schemes":[],"host":"api.example.com","methods":["GET"]}"#,
-            r#"{"scheme":"https","host":"api.example.com","methods":["PUT"]}"#,
-            r#"{"scheme":"https","host":"api.example.com","methods":[]}"#,
+            serde_json::json!({"host": "a.example.com", "schemes": ["ftp"]}),
+            serde_json::json!({"host": "a.example.com", "port": 0}),
+            serde_json::json!({"host": "a.example.com", "port": 70000}),
+            serde_json::json!({"host": "a.example.com", "paths": ["relative"]}),
+            serde_json::json!({"host": "a.example.com", "pathPrefixes": ["/v1/*"]}),
+            serde_json::json!({"host": "a.example.com", "methods": ["*"]}),
+            serde_json::json!({"host": "a.example.com", "paths": "/x", "query": true}),
+            serde_json::json!({"methods": ["GET"]}),
         ] {
-            let grant: serde_json::Value = serde_json::from_str(bad).unwrap();
             assert!(
-                Capabilities::from_json(&serde_json::json!({"network":{"http":[grant]}})).is_err()
+                Capabilities::from_json(&serde_json::json!({"network":{"http":[bad.clone()]}}))
+                    .is_err(),
+                "{bad}"
             );
         }
     }
@@ -1317,7 +1318,7 @@ mod tests {
         let access = Access {
             declared: caps(
                 r#"{"network":{"hosts":["ws.example.com"],"http":[
-                    {"host":"chat.example.com","methods":["GET"],"paths":["/socket"]},
+                    {"host":"chat.example.com","methods":["GET"],"scheme":"https","paths":["/socket"]},
                     {"host":"legacy.example.com","schemes":["wss"]}
                 ]}}"#,
             ),
@@ -1331,25 +1332,6 @@ mod tests {
         assert!(!access.allows_websocket("ws://legacy.example.com/"));
         assert!(!access.allows_websocket("https://ws.example.com/"));
         assert!(!access.allows_socket("ws.example.com", 8080));
-    }
-
-    #[test]
-    fn scoped_http_rules_reject_wildcard_hosts() {
-        for host in ["*.example.com", "*"] {
-            let error = Capabilities::from_json(&serde_json::json!({"network":{"http":[
-                {"host": host, "methods": ["GET"], "paths": ["/"]}
-            ]}}))
-            .unwrap_err();
-            assert!(error.contains("exact host"), "{error}");
-        }
-        // Legacy rules match host patterns, so they keep accepting them.
-        let legacy = Access {
-            declared: caps(
-                r#"{"network":{"http":[{"host":"*.example.com","schemes":["https"]}]}}"#,
-            ),
-            granted: None,
-        };
-        assert!(legacy.allows_http("GET", "https://api.example.com/"));
     }
 
     #[cfg(unix)]

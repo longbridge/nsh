@@ -212,7 +212,7 @@ An app may declare in `nsh.json` which hosts it talks to. Once `"capabilities"` 
 | Key | Description |
 |---|---|
 | `network.hosts` | Hosts reachable with any method: `"*"` (any host), `"*.example.com"` (its subdomains, not `example.com` itself) or a host name. |
-| `network.http` | Finer grants: a `host`, optionally limited to `methods`, `schemes` and a `pathPrefix`. |
+| `network.http` | Finer grants: a `host`, optionally limited to `methods`, `schemes`, a `port`, exact `paths` and `pathPrefixes`. |
 
 The checks are enforced in Rust, outside your JS, before a request reaches the network:
 

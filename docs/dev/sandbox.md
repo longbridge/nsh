@@ -24,7 +24,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   without that, `Sub.prototype.constructor = Sub` or `obj.toString = …` throws (the "override mistake"), which breaks
   libraries such as axios. Hot updates are evaluated from Rust and need none of it.
 - **Capabilities** (`nsh_core::access`): an app declares what it may reach in `nsh.json` `"capabilities"` — `network`
-  (`hosts`: `*`, `*.example.com` or a host; `http`: scoped scheme/host/port/method/path rules),
+  (`hosts`: `*`, `*.example.com` or a host; `http`: a host narrowed by methods, schemes, a port, paths and path prefixes),
   `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
@@ -69,14 +69,17 @@ trusted: every limit and check is enforced in Rust, never in JS.
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).
 
-Standard networking: global `fetch` keeps engine checks and redirect handling. Scoped `network.http` rules use
-`scheme` (HTTPS by default), `host`, optional `port`, required GET/POST `methods`, and `paths` / `path_prefixes`.
-Paths match exactly; prefixes match slash-delimited boundaries. `{host, methods}` grants no paths. A scoped rule
-names one exact host: a wildcard there is a parse error (it would compare exactly and match nothing), so host
-patterns go in `hosts` or legacy rules. Legacy rules are explicitly selected by `schemes` or `pathPrefix`; mixing
-rule forms is rejected and serialization preserves the form. WebSockets (the global and the `websocket` module)
+Standard networking: global `fetch` keeps engine checks and redirect handling. A `network.http` rule (`HttpGrant`,
+one form) names a `host` pattern; every other key narrows it and is optional: `methods` (any), `schemes` / `scheme`
+(any of `http`, `https`, `ws`, `wss`), `port` (any; a URL without one has its scheme's default), `paths` (exact,
+without the query) and `pathPrefixes` / `pathPrefix` / `path_prefixes` (whole segments: `/v1` covers `/v1/x`, not
+`/v10`; a prefix ending in `/` covers what follows). Without paths or prefixes a rule covers every path, so
+`{host, methods}` means what it always did. The spellings of a key are merged and may appear together (gpui-shell's
+`scheme` and `path_prefixes` read as they are); rules serialize in one form (`schemes`, `pathPrefixes`). What cannot
+match is a parse error rather than a silent grant of nothing: a scheme outside the four, port 0, a path without a
+leading `/` or with `*`, `?` or `#`, a method that is not a token. WebSockets (the global and the `websocket` module)
 go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
-`https` (or under their own scheme, for legacy rules listing it), on the parsed URL the handshake then connects
+`https` (or under their own scheme, for rules listing `ws` / `wss`), on the parsed URL the handshake then connects
 to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). Raw TCP
 `net.connect` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
 bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
