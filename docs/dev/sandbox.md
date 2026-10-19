@@ -50,7 +50,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   and the names `process.env` grants (`nsh_core::runtime::process`). A child leads its own process group; its exit is noticed
   without reaping it (`waitid(WNOWAIT)` on Linux, a kqueue `NOTE_EXIT` on Apple platforms), so the group is only
   signalled while the leader's pid is still taken. VM teardown sends every child SIGKILL before joining any
-  supervisor. Windows ends trees with one `taskkill /T /F` per child, started without waiting. Filesystem checks
+  supervisor. On Windows a child starts suspended, runs once it is in a job object of its own
+  (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), and ending it terminates the job, so everything it started ends with it;
+  pipe threads still blocked at teardown have their I/O cancelled (`CancelSynchronousIo`). Filesystem checks
   work on the path's text (`.` and `..` resolved as written) against each granted root in both its written and its
   canonical form (the nearest existing ancestor canonicalized once per VM, `Roots` in `sys.locals`), so the call
   does no disk work on the engine thread; a path reaching a root through an outside symlink is refused. The
