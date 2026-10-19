@@ -307,6 +307,17 @@ fn within(anchor: &Path, tail: &Path, root: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// Whether environment names `a` and `b` are one variable: ignoring ASCII
+/// case on Windows, whose environment does; exactly elsewhere (`lang` is
+/// not `LANG` on Unix).
+pub(crate) fn env_names_match(a: &str, b: &str) -> bool {
+    if cfg!(windows) {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
+
 /// What an app may do (one declaration, or one grant).
 /// Start with [`Self::default`] and set the fields to grant; new capabilities
 /// default to denied.
@@ -904,12 +915,12 @@ impl Access {
         });
         defaults
             .into_iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+            .any(|allowed| env_names_match(allowed, name))
             || self.each(|caps| {
                 caps.process
                     .env
                     .iter()
-                    .any(|allowed| allowed.eq_ignore_ascii_case(name))
+                    .any(|allowed| env_names_match(allowed, name))
             })
     }
 
@@ -1151,6 +1162,17 @@ mod tests {
     }
 
     #[test]
+    fn environment_names_match_exactly_except_on_windows() {
+        let access = Access {
+            declared: caps(r#"{"process":{"env":["MY_TOKEN"]}}"#),
+            granted: None,
+        };
+        assert!(access.allows_env("MY_TOKEN"));
+        assert_eq!(access.allows_env("my_token"), cfg!(windows));
+        assert_eq!(super::env_names_match("Path", "PATH"), cfg!(windows));
+    }
+
+    #[test]
     fn roots_stay_within_their_anchor_and_bare_commands_have_no_drive() {
         let anchor = Path::new(if cfg!(windows) { "C:\\app" } else { "/app" });
         assert!(super::within(anchor, Path::new("data/x"), "r").is_ok());
@@ -1369,14 +1391,15 @@ mod tests {
         );
         let access = Access {
             declared,
-            granted: Some(caps(r#"{"process":{"env":["nsh_secret"]}}"#)),
+            granted: Some(caps(r#"{"process":{"env":["NSH_SECRET"]}}"#)),
         };
         assert!(access.allows_env("NSH_SECRET"));
         assert!(!access.allows_env("OTHER"));
         assert!(!access.allows_exit());
         assert!(!Access::all().allows_exit());
         assert!(!Access::all().allows_env("NSH_SECRET"));
-        assert!(Access::all().allows_env("lang"));
+        assert!(Access::all().allows_env("LANG"));
+        assert_eq!(Access::all().allows_env("lang"), cfg!(windows));
         assert!(Access::all().allows_env("TZ"));
         // Identity, paths and proxy credentials need an explicit grant.
         for name in [

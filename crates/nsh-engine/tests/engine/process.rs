@@ -359,7 +359,7 @@ fn granted_environment_names_reach_the_child() {
     // `USER` is not one every child gets; the manifest grants it here.
     let app = App::start(
         r#"process.run("/usr/bin/env").then((r) => report(r.stdout.split("\n").find((l) => l.startsWith("USER=")) ?? "none"));"#,
-        serde_json::json!({ "process": { "execute": ["/usr/bin/env"], "env": ["user"] } }),
+        serde_json::json!({ "process": { "execute": ["/usr/bin/env"], "env": ["USER"] } }),
     );
     let expected = std::env::var("USER").map_or("none".to_owned(), |user| format!("USER={user}"));
     assert_eq!(app.shown("done"), format!("done {expected}"));
