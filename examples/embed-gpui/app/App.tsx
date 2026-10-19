@@ -87,15 +87,14 @@ function App() {
   const muted = { opacity: 0.7 };
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
-      <Card header={<Text style={{ fontSize: 17, fontWeight: "600" }}>Order ticket</Text>}>
-        <HostWatchlist
-          symbol={desk().symbol}
-          onSelect={(e) => Trading.select(e.symbol)}
-          style={{ height: 32, alignSelf: "flex-start" }}
-        />
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-          <Text style={{ fontSize: 22, fontWeight: "600" }}>{`$${desk().price.toFixed(2)}`}</Text>
-          <Text style={muted}>{`${desk().symbol} · held ${held()}`}</Text>
+      {/* No heading: the host's pane names the ticket. */}
+      <Card>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <HostWatchlist symbol={desk().symbol} onSelect={(e) => Trading.select(e.symbol)} style={{ height: 32 }} />
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={{ fontSize: 22, fontWeight: "600" }}>{`$${desk().price.toFixed(2)}`}</Text>
+            <Text style={muted}>{`${desk().symbol} · held ${held()}`}</Text>
+          </View>
         </View>
         <TextField label="Symbol" value={draft()} onChange={edit} clearable />
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>

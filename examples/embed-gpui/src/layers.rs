@@ -69,10 +69,12 @@ pub fn nsh_overlay(cx: &App) -> impl IntoElement {
         .inset_0()
         .border_2()
         .border_color(colors.0)
+        // At the bottom, clear of the pane's title bar and of the app's
+        // content, which starts at the top.
         .child(
             div()
                 .absolute()
-                .top(px(4.))
+                .bottom(px(4.))
                 .right(px(4.))
                 .child(tag("NSH · TSX app", colors)),
         )

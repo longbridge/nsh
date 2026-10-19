@@ -1,10 +1,12 @@
 # embed-gpui
 
 A GPUI Kit app embedding NSH apps (`nsh_platform_gpui::AppView`): a sidebar, an input, buttons and a dialog of GPUI
-Kit around two order tickets in a resizable split, each running `app/` in its own engine. The host's theme and light
-or dark mode reach the surfaces on every change (`src/theme.rs`), Tab moves through the host's widgets and the
-surfaces' fields, GPUI Kit's dialogs and notifications draw above the surfaces, and closing a pane drops its view,
-which stops its engine. "Violet theme" loads `themes/violet.json` (an NSH theme file) into GPUI Kit's theme registry.
+Kit around two order tickets in a resizable split, each running `app/` in its own engine. Each pane's GPUI Kit title
+bar names its ticket (the app shows no heading of its own) with the desk's symbol and orders, and closes it. The
+host's theme and light or dark mode reach the surfaces on every change (`src/theme.rs`), Tab moves through the host's
+widgets and the surfaces' fields, GPUI Kit's dialogs and notifications draw above the surfaces, and closing a pane
+drops its view, which stops its engine. "Violet theme" loads `themes/violet.json` (an NSH theme file) into GPUI Kit's
+theme registry.
 
 ```sh
 cargo run                              # in examples/embed-gpui

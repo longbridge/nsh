@@ -40,8 +40,9 @@ use std::path::{Path, PathBuf};
 
 use gpui_kit::{
     assets::Assets,
+    base::StyledExt,
     component::{
-        ActiveTheme, IconName, Sizable, Theme, ThemeMode, WindowExt,
+        ActiveTheme, Icon, IconName, Sizable, Theme, ThemeMode, WindowExt,
         button::{Button, ButtonVariants},
         h_flex,
         input::{Input, InputEvent, InputState},
@@ -55,6 +56,10 @@ use gpui_kit::{
     *,
 };
 use nsh_platform_gpui::{App as NshApp, AppOptions, AppView, AssetBase, Bundle};
+
+/// The icon of a ticket, in its pane's title bar and in the sidebar (one of
+/// the icons GPUI Kit's `Assets` embeds).
+const TICKET: IconName = IconName::FileText;
 
 /// Which panes show.
 #[derive(Clone, Copy, PartialEq)]
@@ -212,6 +217,18 @@ impl Shell {
     fn pane(&self, i: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let pane = &self.panes[i];
         let theme = cx.theme();
+        let open = pane.view.is_some();
+        // The pane's one name is the host's: the app shows no heading of
+        // its own. Next to it, the desk the ticket trades on.
+        let orders = match self.desk.orders.len() {
+            1 => "1 order".to_owned(),
+            n => format!("{n} orders"),
+        };
+        let session = if open {
+            format!("{} ${:.2} · {orders}", self.desk.symbol, self.desk.price)
+        } else {
+            "Closed".to_owned()
+        };
         v_flex()
             .size_full()
             .border_1()
@@ -220,18 +237,34 @@ impl Shell {
             .overflow_hidden()
             .child(
                 h_flex()
-                    .px_3()
-                    .py_1()
+                    .h(px(36.))
+                    .pl_3()
+                    .pr_1()
                     .gap_2()
                     .border_b_1()
                     .border_color(theme.border)
                     .bg(theme.title_bar)
-                    .child(div().flex_1().text_sm().child(pane.title.clone()))
+                    .child(Icon::new(TICKET).small().text_color(theme.muted_foreground))
+                    .child(div().text_sm().font_medium().child(pane.title.clone()))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(session),
+                    )
                     .child(
                         Button::new(("close", i))
                             .ghost()
                             .xsmall()
-                            .label(if pane.view.is_some() { "Close" } else { "Open" })
+                            .icon(if open {
+                                IconName::Close
+                            } else {
+                                IconName::Plus
+                            })
+                            .tooltip(if open { "Close ticket" } else { "Open ticket" })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.toggle_pane(i, window, cx)
                             })),
@@ -270,9 +303,9 @@ impl Render for Shell {
                 })
         };
         let menu = SidebarMenu::new().children([
-            item("Both apps", Layout::Split, cx).icon(IconName::LayoutDashboard),
-            item("Ticket A", Layout::Single(0), cx).icon(IconName::SquareTerminal),
-            item("Ticket B", Layout::Single(1), cx).icon(IconName::SquareTerminal),
+            item("Both tickets", Layout::Split, cx).icon(IconName::LayoutDashboard),
+            item("Ticket A", Layout::Single(0), cx).icon(TICKET),
+            item("Ticket B", Layout::Single(1), cx).icon(TICKET),
         ]);
         // The host's watchlist: the desk's symbol, picked here or in a
         // ticket.
