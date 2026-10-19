@@ -33,5 +33,15 @@ url.workspace = true
 # `process`'s children: their process groups and exits (`runtime/process.rs`).
 libc.workspace = true
 
+# `process`'s children on Windows: their jobs (`runtime/process.rs`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }

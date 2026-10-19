@@ -310,7 +310,7 @@ impl ChildProcess {
     }
 
     /// Ends the whole process tree: SIGTERM to its process group, SIGKILL
-    /// after 250 ms.
+    /// after 250 ms; on Windows its job ends at once.
     pub(crate) fn kill(&self) {
         #[cfg(not(target_arch = "wasm32"))]
         native::kill(&self.child);
@@ -397,6 +397,9 @@ mod native {
     const CHILDREN: &str = "process.children";
     /// How long a child has to exit after it is asked to before it is killed.
     const GRACE: Duration = Duration::from_millis(250);
+    /// How long a killed child may take to exit before its supervisor gives
+    /// it up: a child of another user (setuid) cannot be signalled.
+    const ABANDON: Duration = Duration::from_secs(2);
     /// stdin queued for one child.
     const MAX_STDIN: usize = 1024 * 1024;
     /// Host variables every child gets; others only when
@@ -615,11 +618,15 @@ mod native {
             if let Ok(path) = executable(&candidate) {
                 return Ok(path);
             }
+            // Programs only, in PATHEXT's default order: a batch file runs
+            // through a granted cmd.exe, whose quoting the app then controls.
             #[cfg(target_os = "windows")]
-            if candidate.extension().is_none()
-                && let Ok(path) = executable(&candidate.with_extension("exe"))
-            {
-                return Ok(path);
+            if candidate.extension().is_none() {
+                for extension in ["com", "exe"] {
+                    if let Ok(path) = executable(&candidate.with_extension(extension)) {
+                        return Ok(path);
+                    }
+                }
             }
         }
         Err(JsError::Error(format!(
@@ -676,8 +683,12 @@ mod native {
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
-            // CREATE_NO_WINDOW: a console child gets no console window of its own.
-            cmd.creation_flags(0x08000000);
+            // A console child gets no console window of its own, and starts
+            // suspended: it runs once it is in its job, so all it starts is.
+            cmd.creation_flags(
+                windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+                    | windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
+            );
         }
         let child = cmd.spawn().map_err(|e| {
             let message = format!("could not launch process: {e}");
@@ -687,6 +698,8 @@ mod native {
             }
         })?;
         let pid = child.id();
+        let leader = Leader::start(child)
+            .map_err(|e| JsError::Error(format!("could not start the process in its job: {e}")))?;
         let id = children.next.get() + 1;
         children.next.set(id);
         let (input, inputs) = mpsc::channel();
@@ -700,10 +713,30 @@ mod native {
         let queued_input = Arc::new(AtomicUsize::new(0));
         let worker_input = queued_input.clone();
         let timeout = launch.timeout;
+        // The leader goes to the supervisor once it runs: a child whose
+        // supervisor cannot start is killed here, not left running.
+        let (hand, handed) = mpsc::channel::<Leader>();
         let worker = thread::Builder::new()
             .name("nsh-process".into())
-            .spawn(move || supervise(child, inputs, mailbox, timeout, worker_input))
-            .map_err(|e| JsError::Error(format!("could not supervise the process: {e}")))?;
+            .spawn(move || {
+                if let Ok(leader) = handed.recv() {
+                    supervise(leader, inputs, mailbox, timeout, worker_input);
+                }
+            });
+        let worker = match worker {
+            Ok(worker) => {
+                let _ = hand.send(leader);
+                worker
+            }
+            Err(e) => {
+                let mut leader = leader;
+                leader.terminate(true);
+                let _ = leader.reap();
+                return Err(JsError::Error(format!(
+                    "could not supervise the process: {e}"
+                )));
+            }
+        };
         if !stdin {
             let _ = input.send(Input::Close);
         }
@@ -731,7 +764,7 @@ mod native {
             Err(e) => return Later::new(async move { Err::<CommandOutput, _>(e) }),
         };
         let kill = control.input.clone();
-        cx.on_cleanup(move || {
+        let cleanup = cx.on_cleanup(move || {
             let _ = kill.send(Input::Kill);
         });
         let queued = children.inner.queued.clone();
@@ -757,6 +790,7 @@ mod native {
                     }
                     Event::Exit(code, _, error) => {
                         children.inner.finished(id);
+                        cleanup.release();
                         if overflowed {
                             return Err(format!(
                                 "process output exceeded {QUEUE_BYTES} bytes on one stream"
@@ -792,10 +826,10 @@ mod native {
             stdin_open: Cell::new(stdin),
             control,
         });
-        cx.on_cleanup(move || {
+        let cleanup = cx.on_cleanup(move || {
             let _ = kill.send(Input::Kill);
         });
-        cx.start(deliver(child.clone(), events, children, id, lines));
+        cx.start(deliver(child.clone(), events, children, id, lines, cleanup));
         Ok(ChildProcess { pid, child })
     }
 
@@ -806,6 +840,7 @@ mod native {
         children: Rc<super::Children>,
         id: u64,
         lines: bool,
+        cleanup: crate::ui::Cleanup,
     ) {
         let queued = children.inner.queued.clone();
         let mut pending = [String::new(), String::new()];
@@ -854,6 +889,9 @@ mod native {
                         }
                     }
                     children.inner.finished(id);
+                    // An owner that lives long must not collect one cleanup
+                    // per child it ever ran.
+                    cleanup.release();
                     let exit = ExitResult {
                         code,
                         signal: signal.map(signal_name),
@@ -1071,7 +1109,7 @@ mod native {
     }
 
     /// The child a supervisor owns: the leader of a process group (Unix) or
-    /// of a process tree (Windows). On Linux and Apple platforms its exit is
+    /// of a job (Windows). On Linux and Apple platforms its exit is
     /// noticed without reaping it, so its pid, which is also the group's id,
     /// stays taken (by the zombie) for as long as the group is signalled by
     /// it.
@@ -1080,29 +1118,54 @@ mod native {
         /// The status once the leader is reaped. On Unix its pid may then be
         /// reused, and the group is no longer signalled.
         reaped: Option<ExitStatus>,
+        /// Reaped by the system instead (a host that ignores SIGCHLD): its
+        /// pid, and the group it named, may be another's now, so nothing is
+        /// signalled or waited for any more.
+        #[cfg(unix)]
+        gone: bool,
         #[cfg(target_vendor = "apple")]
         exits: Option<std::os::fd::OwnedFd>,
-        /// `taskkill` was started for the tree.
+        /// The job the child and everything it starts run in: it ends them
+        /// all, and they end with its last handle, whatever ends the host.
         #[cfg(target_os = "windows")]
-        tree_killed: bool,
+        job: std::os::windows::io::OwnedHandle,
     }
 
     impl Leader {
-        fn new(child: StdChild) -> Self {
-            Self {
+        /// The leader of `child`, just spawned. On Windows the child starts
+        /// suspended and runs once it is in its job; a child that cannot be
+        /// put in one is killed.
+        fn start(child: StdChild) -> std::io::Result<Self> {
+            #[cfg(target_os = "windows")]
+            let job = match job::contain(&child) {
+                Ok(job) => job,
+                Err(e) => {
+                    let mut child = child;
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(e);
+                }
+            };
+            Ok(Self {
                 #[cfg(target_vendor = "apple")]
                 exits: exit_queue(child.id()),
                 child,
                 reaped: None,
+                #[cfg(unix)]
+                gone: false,
                 #[cfg(target_os = "windows")]
-                tree_killed: false,
-            }
+                job,
+            })
         }
 
         /// Whether the leader has exited; it stays unreaped where that can be
         /// told.
         fn exited(&mut self) -> std::io::Result<bool> {
             if self.reaped.is_some() {
+                return Ok(true);
+            }
+            #[cfg(unix)]
+            if self.gone {
                 return Ok(true);
             }
             #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -1119,7 +1182,12 @@ mod native {
                     )
                 };
                 if result < 0 {
-                    return Err(std::io::Error::last_os_error());
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() == Some(libc::ECHILD) {
+                        self.gone = true;
+                        return Ok(true);
+                    }
+                    return Err(error);
                 }
                 // SAFETY: waitid succeeded, so si_pid is set (0 while the child runs).
                 Ok(unsafe { info.si_pid() } != 0)
@@ -1145,7 +1213,16 @@ mod native {
                         Ok(n > 0)
                     };
                 }
-                self.reaped = self.child.try_wait()?;
+                match self.child.try_wait() {
+                    Ok(status) => self.reaped = status,
+                    #[cfg(unix)]
+                    Err(e) if e.raw_os_error() == Some(libc::ECHILD) => self.gone = true,
+                    Err(e) => return Err(e),
+                }
+                #[cfg(unix)]
+                if self.gone {
+                    return Ok(true);
+                }
                 Ok(self.reaped.is_some())
             }
         }
@@ -1154,9 +1231,14 @@ mod native {
         /// (SIGKILL).
         fn terminate(&mut self, force: bool) {
             #[cfg(unix)]
-            if self.reaped.is_none() {
-                // SAFETY: the child leads its own process group and is not
-                // reaped yet, so its pid still names that group.
+            if self.reaped.is_none() && !self.gone && !waitable(self.child.id()) {
+                self.gone = true;
+            }
+            #[cfg(unix)]
+            if self.reaped.is_none() && !self.gone {
+                // SAFETY: the child leads its own process group and is still
+                // this process's to wait for, so its pid still names that
+                // group.
                 unsafe {
                     libc::kill(
                         -(self.child.id() as i32),
@@ -1164,26 +1246,12 @@ mod native {
                     );
                 }
             }
+            // Windows has no signal to ask with: the job ends the whole tree,
+            // the leader and every process it started, at once.
             #[cfg(target_os = "windows")]
             {
-                // Windows has no group signal: taskkill ends the tree, started once
-                // and not waited for; forcing ends the leader itself. The open
-                // process handle keeps the pid from being reused while it is owned.
-                if !self.tree_killed {
-                    self.tree_killed = true;
-                    let system_root = std::env::var_os("SystemRoot")
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-                    let _ = Command::new(system_root.join("System32").join("taskkill.exe"))
-                        .args(["/PID", &self.child.id().to_string(), "/T", "/F"])
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn();
-                }
-                if force && self.reaped.is_none() {
-                    let _ = self.child.kill();
-                }
+                let _ = force;
+                job::terminate(&self.job);
             }
             #[cfg(not(any(unix, target_os = "windows")))]
             {
@@ -1193,8 +1261,163 @@ mod native {
         }
 
         fn reap(mut self) -> Option<ExitStatus> {
+            #[cfg(unix)]
+            if self.gone {
+                return None;
+            }
             self.reaped.take().or_else(|| self.child.wait().ok())
         }
+    }
+
+    /// The Windows job of a child: what ends its whole tree.
+    #[cfg(target_os = "windows")]
+    mod job {
+        use std::{
+            ffi::c_void,
+            io,
+            os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+            thread::JoinHandle,
+        };
+
+        use windows_sys::Win32::{
+            Foundation::INVALID_HANDLE_VALUE,
+            System::{
+                Diagnostics::ToolHelp::{
+                    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
+                    Thread32Next,
+                },
+                IO::CancelSynchronousIo,
+                JobObjects::{
+                    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+                    SetInformationJobObject, TerminateJobObject,
+                },
+                Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME},
+            },
+        };
+
+        /// Puts suspended `child` in a new job, which ends everything in it
+        /// when its last handle closes, then lets the child run.
+        pub(super) fn contain(child: &std::process::Child) -> io::Result<OwnedHandle> {
+            // SAFETY: no name and default security; the handle is owned below.
+            let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if raw.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: a new handle nothing else owns.
+            let job = unsafe { OwnedHandle::from_raw_handle(raw) };
+            // SAFETY: an all-zero limit information is valid; one flag is set.
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            // SAFETY: the live job; the structure and its size match the class.
+            let set = unsafe {
+                SetInformationJobObject(
+                    job.as_raw_handle(),
+                    JobObjectExtendedLimitInformation,
+                    &limits as *const _ as *const c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            };
+            if set == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: the live job and the child's live process handle.
+            if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) } == 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            resume(child.id())?;
+            Ok(job)
+        }
+
+        /// Resumes the threads of suspended process `pid`: its one, main
+        /// thread (`std` keeps no handle to it).
+        fn resume(pid: u32) -> io::Result<()> {
+            // SAFETY: a snapshot of the system's threads; owned below.
+            let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+            if raw == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: a new handle nothing else owns.
+            let snapshot = unsafe { OwnedHandle::from_raw_handle(raw) };
+            // SAFETY: an all-zero entry is valid once its size is set.
+            let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+            entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let mut resumed = false;
+            // SAFETY: the live snapshot fills the entry it is given.
+            let mut more = unsafe { Thread32First(snapshot.as_raw_handle(), &mut entry) } != 0;
+            while more {
+                if entry.th32OwnerProcessID == pid {
+                    // SAFETY: opens the thread by id; owned below when opened.
+                    let thread =
+                        unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                    if !thread.is_null() {
+                        // SAFETY: a new handle nothing else owns.
+                        let thread = unsafe { OwnedHandle::from_raw_handle(thread) };
+                        // SAFETY: the live thread handle, opened to resume it.
+                        resumed |= unsafe { ResumeThread(thread.as_raw_handle()) } != u32::MAX;
+                    }
+                }
+                // SAFETY: as above.
+                more = unsafe { Thread32Next(snapshot.as_raw_handle(), &mut entry) } != 0;
+            }
+            if resumed {
+                Ok(())
+            } else {
+                Err(io::Error::other("its main thread could not be resumed"))
+            }
+        }
+
+        /// Ends every process in `job`.
+        pub(super) fn terminate(job: &OwnedHandle) {
+            // SAFETY: the live job handle.
+            unsafe { TerminateJobObject(job.as_raw_handle(), 1) };
+        }
+
+        /// Cancels the blocking read or write `thread` is in, if any.
+        pub(super) fn cancel_io(thread: &JoinHandle<()>) {
+            // SAFETY: the live thread's handle, which the JoinHandle holds.
+            unsafe { CancelSynchronousIo(thread.as_raw_handle()) };
+        }
+    }
+
+    /// Joins the threads that end by `deadline`. One still blocked then (on a
+    /// pipe a process outside the tree keeps open) ends by itself later;
+    /// waiting for it could hold the VM's teardown forever.
+    pub(super) fn join_by(threads: Vec<JoinHandle<()>>, deadline: Instant) {
+        for thread in threads {
+            while !thread.is_finished() && Instant::now() < deadline {
+                // A blocking read or write of an anonymous pipe has no
+                // timeout on Windows: it is cancelled.
+                #[cfg(target_os = "windows")]
+                job::cancel_io(&thread);
+                thread::sleep(Duration::from_millis(1));
+            }
+            if thread.is_finished() {
+                let _ = thread.join();
+            } else {
+                log::warn!("a process pipe thread is still blocked; it is left to end by itself");
+            }
+        }
+    }
+
+    /// Whether `pid` is still this process's child to wait for: running, or
+    /// exited and not reaped. False once the system reaped it (a host that
+    /// ignores SIGCHLD; `ECHILD`), when its pid may be another's.
+    #[cfg(unix)]
+    pub(super) fn waitable(pid: u32) -> bool {
+        // SAFETY: an all-zero siginfo_t is valid; waitid fills it.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: WNOWAIT | WNOHANG neither reaps nor blocks; info outlives the call.
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ECHILD)
     }
 
     /// A kqueue that reports the child's exit without reaping it; `None` when
@@ -1231,16 +1454,15 @@ mod native {
     }
 
     fn supervise(
-        mut child: StdChild,
+        mut leader: Leader,
         input: mpsc::Receiver<Input>,
         mailbox: Mailbox,
         timeout: Option<Duration>,
         queued_input: Arc<AtomicUsize>,
     ) {
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
-        let stdin = child.stdin.take().expect("piped stdin");
-        let mut leader = Leader::new(child);
+        let stdout = leader.child.stdout.take().expect("piped stdout");
+        let stderr = leader.child.stderr.take().expect("piped stderr");
+        let stdin = leader.child.stdin.take().expect("piped stdin");
         let mailbox = Arc::new(mailbox);
         let io_stop = Arc::new(AtomicBool::new(false));
         let (writer_tx, writer_rx) = mpsc::channel();
@@ -1252,7 +1474,8 @@ mod native {
         let err = thread::spawn(move || read_pipe(stderr, err_mail, true, err_stop));
         let started = Instant::now();
         let mut terminating: Option<Instant> = None;
-        let mut forced = false;
+        let mut forced: Option<Instant> = None;
+        let mut abandoned = false;
         let mut error = None;
         loop {
             let mut kill = mailbox.stopped.load(Ordering::Acquire);
@@ -1283,9 +1506,9 @@ mod native {
             }
             // A VM being torn down gives no grace period.
             let stopped = mailbox.stopped.load(Ordering::Acquire);
-            if !forced && terminating.is_some_and(|at| stopped || at.elapsed() >= GRACE) {
+            if forced.is_none() && terminating.is_some_and(|at| stopped || at.elapsed() >= GRACE) {
                 leader.terminate(true);
-                forced = true;
+                forced = Some(Instant::now());
             }
             match leader.exited() {
                 Ok(true) => break,
@@ -1295,11 +1518,21 @@ mod native {
                     break;
                 }
             }
+            if forced.is_some_and(|at| at.elapsed() >= ABANDON) {
+                error = Some("the process could not be ended (it may run as another user)".into());
+                abandoned = true;
+                break;
+            }
         }
         // The leader may exit with descendants still holding its pipe handles.
         // It is not reaped yet, so its pid still names the group signalled here.
-        leader.terminate(true);
-        let status = leader.reap();
+        // One that could not be ended is not waited for.
+        let status = if abandoned {
+            None
+        } else {
+            leader.terminate(true);
+            leader.reap()
+        };
         let _ = writer_tx.send(Input::Close);
         drop(writer_tx);
         // Drain final buffered output, but an escaped/detached descendant must
@@ -1314,9 +1547,10 @@ mod native {
             thread::sleep(Duration::from_millis(5));
         }
         io_stop.store(true, Ordering::Release);
-        let _ = writer.join();
-        let _ = out.join();
-        let _ = err.join();
+        join_by(
+            vec![writer, out, err],
+            Instant::now() + Duration::from_millis(100),
+        );
         #[cfg(unix)]
         let signal = {
             use std::os::unix::process::ExitStatusExt;
@@ -1371,5 +1605,37 @@ mod tests {
         }
         // Getters are the object's, never named exports.
         assert!(!d.contains("export declare function env"), "{d}");
+    }
+
+    #[test]
+    fn a_blocked_pipe_thread_does_not_hold_the_supervisor() {
+        use std::time::{Duration, Instant};
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let blocked = std::thread::spawn(move || {
+            let _ = rx.recv();
+        });
+        let done = std::thread::spawn(|| {});
+        let start = Instant::now();
+        super::native::join_by(vec![done, blocked], start + Duration::from_millis(50));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(tx);
+    }
+
+    /// A child the system reaped (its host ignores SIGCHLD) is not
+    /// signalled: its pid may be another process's.
+    #[cfg(unix)]
+    #[test]
+    fn only_children_still_waited_for_are_signalled() {
+        // The init process is no child of this one.
+        assert!(!super::native::waitable(1));
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        // Running or exited, it is waitable until it is reaped.
+        assert!(super::native::waitable(child.id()));
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!super::native::waitable(pid));
     }
 }

@@ -1096,10 +1096,22 @@ impl JsHost for CallHost<'_> {
         }
     }
 
-    fn on_cleanup(&self, f: Box<dyn FnOnce()>) {
+    fn on_cleanup(&self, f: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
         let ctx = self.ctx;
+        // Cleared when the JS function goes (it ran and its owner let it
+        // go, or the VM went): the release then has nothing to find, and
+        // until then the function's address is its own.
+        struct Alive(Rc<Cell<bool>>);
+        impl Drop for Alive {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        let alive = Rc::new(Cell::new(true));
+        let guard = Alive(alive.clone());
         let f = RefCell::new(Some(f));
         let cleanup = js::closure(ctx, Vec::new(), move |_, _, _| {
+            let _alive = &guard;
             if let Some(f) = f.borrow_mut().take() {
                 f();
             }
@@ -1107,18 +1119,40 @@ impl JsHost for CallHost<'_> {
         });
         let Ok(cleanup) = cleanup else {
             let _ = js::take_exception(ctx);
-            return;
+            return Box::new(|| {});
         };
+        let raw = cleanup.raw();
         // The reactive owner the call runs under, or the module's run
         // (hot reload); otherwise the VM's end runs the module's teardown.
         if crate::reactive::has_owner(ctx) {
+            // SAFETY: no other reference to the graph is held here.
+            let owner = unsafe { crate::reactive::graph(ctx) }.owner();
             let mut callback = cleanup.raw();
             // SAFETY: one borrowed callback; the owner duplicates it.
             let result = unsafe { crate::reactive::on_cleanup(ctx, UNDEFINED, 1, &mut callback) };
             // SAFETY: on_cleanup's owned result.
             unsafe { qjs::JS_FreeValue(ctx, result) };
+            drop(cleanup);
+            Box::new(move || {
+                if !alive.get() {
+                    return;
+                }
+                // SAFETY: the function lives, and so does its VM; a release
+                // runs outside JS, holding no other reference to the graph.
+                let removed = unsafe { crate::reactive::graph(ctx) }
+                    .remove_cleanup(owner, |c| js::same(*c, raw));
+                if let Some(removed) = removed {
+                    // SAFETY: the owner's reference, taken back.
+                    unsafe { qjs::JS_FreeValue(ctx, removed) };
+                }
+            })
         } else {
             crate::hot::undo_on_rerun(ctx, cleanup);
+            Box::new(move || {
+                if alive.get() {
+                    drop(crate::hot::forget_undo(ctx, raw));
+                }
+            })
         }
     }
 
@@ -1453,6 +1487,11 @@ pub(crate) mod tests {
     }
 
     thread_local! {
+        /// The cleanups `Tally.guard` registered that ran.
+        static CLEANED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    thread_local! {
         /// The callbacks `Tally.keep` keeps.
         static KEPT: std::cell::RefCell<Vec<Callback>> = const { std::cell::RefCell::new(Vec::new()) };
     }
@@ -1613,6 +1652,15 @@ pub(crate) mod tests {
         /// Drops the kept callbacks.
         pub(crate) fn forget() {
             KEPT.with(|k| k.borrow_mut().clear());
+        }
+
+        /// Counts a cleanup when the call's owner goes; `release` takes it
+        /// back at once.
+        pub(crate) fn guard(release: bool, cx: CallCx<'_>) {
+            let cleanup = cx.on_cleanup(|| CLEANED.with(|c| c.set(c.get() + 1)));
+            if release {
+                cleanup.release();
+            }
         }
 
         /// Raises `token`'s id.
@@ -2172,6 +2220,31 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(shown, ["9 undefined true"]);
+    }
+
+    #[test]
+    fn released_cleanups_leave_their_owner() {
+        let host = host();
+        host.with_raw(|raw| {
+            // SAFETY: the host owns the live context for this closure.
+            let ctx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+            crate::reactive::install_globals(&ctx);
+        });
+        run(
+            &host,
+            r#"
+            globalThis.dispose = __nsh_reactive.createRoot((dispose) => {
+                Tally.guard(false);
+                for (let i = 0; i < 5; i++) Tally.guard(true);
+                return dispose;
+            });
+            "#,
+        )
+        .unwrap();
+        assert_eq!(CLEANED.with(Cell::get), 0);
+        run(&host, "dispose();").unwrap();
+        // Only the cleanup never released ran.
+        assert_eq!(CLEANED.with(Cell::get), 1);
     }
 
     #[test]

@@ -143,9 +143,11 @@ pub trait JsHost {
     }
 
     /// Runs `f` when what owns the call in JS goes (`CallCx::on_cleanup`);
-    /// a host without owners keeps it until it goes itself.
-    fn on_cleanup(&self, f: Box<dyn FnOnce()>) {
+    /// a host without owners keeps it until it goes itself. Returns what
+    /// unregisters `f` without running it.
+    fn on_cleanup(&self, f: Box<dyn FnOnce()>) -> Box<dyn FnOnce()> {
         drop(f);
+        Box::new(|| {})
     }
 }
 
