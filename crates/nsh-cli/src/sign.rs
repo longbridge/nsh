@@ -133,6 +133,9 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
             "a package needs a build number (nsh.json `build` or --build): older builds are refused once a newer one was installed"
         );
     };
+    if let Some(min) = &config.min_runtime {
+        nsh_package::check_min_runtime(min).map_err(anyhow::Error::msg)?;
+    }
     let key = read_secret(options.key)?;
     let cert_path = options.cert;
     let cert = Certificate::from_json(
@@ -179,7 +182,7 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
         bytecode: Some((built.bytecode, nsh_js::BYTECODE_VERSION.to_owned())),
         source_map: built.source_map,
         assets,
-        min_runtime: None,
+        min_runtime: config.min_runtime.clone(),
     };
     let bytes = build(&contents, &key, &cert)?;
     let out = options
@@ -196,14 +199,18 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
         ));
     }
     println!(
-        "{}: {} {} (build {}), {} assets, {} KB, signed by {}",
+        "{}: {} {} (build {}), {} assets, {} KB, signed by {}, for runtime {} or newer",
         out.display(),
         id,
         contents.app.version,
         build_number,
         contents.assets.len(),
         bytes.len().div_ceil(1024),
-        key.public().id()
+        key.public().id(),
+        contents
+            .min_runtime
+            .as_deref()
+            .unwrap_or(nsh_package::RUNTIME_VERSION)
     );
     Ok(())
 }
@@ -255,8 +262,11 @@ pub(crate) fn verify(
         let header = verify_signature(&bytes)?;
         let app = header.app();
         println!(
-            "signature valid: {} {} (build {}); the certificate was not checked (pass --root)",
-            app.id, app.version, app.build
+            "signature valid: {} {} (build {}), for runtime {} or newer; the certificate was not checked (pass --root)",
+            app.id,
+            app.version,
+            app.build,
+            header.min_runtime()
         );
         return Ok(());
     }

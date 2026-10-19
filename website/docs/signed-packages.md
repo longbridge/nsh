@@ -85,7 +85,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 ```
 
 ```text
-out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee
+out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee, for runtime 0.1.1 or newer
 ```
 
 `nsh publish` builds the app in release mode and signs it. The app id, name, version and build come from `nsh.json`
@@ -101,6 +101,7 @@ next to the entry, overridden by the flags:
 | `--build <n>` | Build number. Required (here or in `nsh.json`); it must grow with every release. |
 | `--source-map <where>` | `package` (the default): in the package. `file`: in `<package>.map` next to it, not in the package. `none`: left out. See [Errors from published packages](#errors-from-published-packages). |
 | `--strip-debug` | Leave the line and column tables out of the bytecode: a smaller package whose error stacks have no positions. |
+| `--min-runtime <version>` | The lowest runtime that runs the package, such as `0.2.0` (`nsh.json` `minRuntime`). Default: this CLI's version. See [Which runtimes run a package](#which-runtimes-run-a-package). |
 
 `nsh publish` refuses to sign what a device would refuse: the certificate must cover the app id and the current time.
 
@@ -108,10 +109,31 @@ next to the entry, overridden by the flags:
 error the release key's certificate does not cover this package: it does not cover app `com.example.counter` (only com.other.app)
 ```
 
+### Which runtimes run a package
+
+A package names the lowest NSH runtime that runs it, and host apps with an older runtime refuse it before anything
+runs:
+
+```text
+error the package needs runtime 0.2.0 or newer; this runtime is 0.1.1
+```
+
+By default this is the version of the CLI that built the package: the bundle is compiled against that CLI's modules,
+so that runtime is the one known to run it. When host apps in the field have an older runtime and the app uses only
+what that runtime has, publish for it with `--min-runtime` (or `minRuntime` in `nsh.json`):
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --min-runtime 0.1.0
+```
+
+The version is `MAJOR.MINOR.PATCH`; a pre-release suffix (`0.2.0-beta.1`) counts as its version without it. It cannot
+be newer than the CLI. Try the package on a host app with that runtime before you upload it: an import or a function
+the older runtime lacks fails when the module loads.
+
 ### What a package holds
 
 A package is one file: a JSON header (app id, name, version, build, the declared capabilities, the bytecode version,
-the signing time, the release key's certificate and a table of files with their SHA-256), then the files, then the
+the minimum runtime, the signing time, the release key's certificate and a table of files with their SHA-256), then the files, then the
 release key's Ed25519 signature over everything before it. The files are:
 
 - the app's JS source (always),

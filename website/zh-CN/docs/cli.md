@@ -235,7 +235,7 @@ nsh certify --root <ROOT.secret> --key <KEY.pub> --apps <PATTERN>... [--days <DA
 
 ```sh
 nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--app-version <V>] [--build <N>]
-            [--source-map package|file|none] [--strip-debug]
+            [--source-map package|file|none] [--strip-debug] [--min-runtime <VERSION>]
 ```
 
 以 release 模式构建应用并签名为一个包。元数据来自 `nsh.json`，可被参数覆盖。
@@ -250,6 +250,7 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 | `--build <BUILD>` | 构建号：每次发布都必须递增。 |
 | `--source-map <WHERE>` | source map 放在哪里：`package`（默认）、`file`（包旁边的 `<package>.map`）或 `none`（[签名包](./signed-packages.md#已发布包的报错)）。 |
 | `--strip-debug` | 字节码中不保留行号和列号表：更小，但报错调用栈里没有位置。 |
+| `--min-runtime <VERSION>` | 能运行该包的最低运行时版本，例如 `0.2.0`；更旧的运行时会拒绝它。默认：本 CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 
 ### nsh verify
 

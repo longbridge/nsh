@@ -91,7 +91,9 @@ pub struct Contents {
     pub source_map: Option<String>,
     /// Assets: path (as in `asset:/<path>`) and bytes.
     pub assets: Vec<(String, Vec<u8>)>,
-    /// The lowest runtime that runs it (default: this one).
+    /// The lowest runtime that runs it, `MAJOR.MINOR.PATCH` (default: this
+    /// one, [`crate::RUNTIME_VERSION`]). Older runtimes refuse the package;
+    /// it must not be newer than this runtime.
     pub min_runtime: Option<String>,
 }
 
@@ -113,7 +115,8 @@ fn check_path(path: &str) -> Result<(), Error> {
 }
 
 /// Builds a package signed by `key`, which `certificate` certifies (it must
-/// cover the app now).
+/// cover the app now). A minimum runtime must pass
+/// [`crate::check_min_runtime`].
 pub fn build(
     contents: &Contents,
     key: &SecretKey,
@@ -126,6 +129,9 @@ pub fn build(
     let created_at = crate::now();
     // Devices would refuse it: fail here instead.
     claimed.covers(&contents.app.id, created_at)?;
+    if let Some(min) = &contents.min_runtime {
+        crate::check_min_runtime(min).map_err(Error::Format)?;
+    }
     assemble(contents, key, certificate, created_at)
 }
 
@@ -306,6 +312,11 @@ impl Header {
     pub fn app(&self) -> &App {
         &self.app
     }
+
+    /// The lowest runtime that runs the package (`0.2.0`).
+    pub fn min_runtime(&self) -> &str {
+        &self.min_runtime
+    }
 }
 
 /// Verifies `bytes` against `roots`, refusing revoked release keys.
@@ -440,5 +451,23 @@ mod tests {
             store.verify(&stolen, "v"),
             Err(Error::BadSignature)
         ));
+    }
+
+    /// A package for a newer runtime is refused with both versions named.
+    #[test]
+    fn devices_refuse_packages_for_newer_runtimes() {
+        let root = SecretKey::generate().unwrap();
+        let release = SecretKey::generate().unwrap();
+        let mut store = TrustStore::new();
+        store.add_root(root.public());
+        let cert = certify(&root, &release.public(), &["*".into()], 0, u64::MAX);
+        let newer = Contents {
+            min_runtime: Some("999.0.0".into()),
+            ..contents("com.example.demo")
+        };
+        let bytes = assemble(&newer, &release, &cert, 150).unwrap();
+        let err = store.verify(&bytes, "v").unwrap_err();
+        assert!(matches!(err, Error::RuntimeTooOld { ref needs, .. } if needs == "999.0.0"));
+        assert!(err.to_string().contains(crate::RUNTIME_VERSION), "{err}");
     }
 }

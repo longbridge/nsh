@@ -70,6 +70,7 @@ mount(App);
 | `id` | string | `package`, `publish`, `nsh/storage` | Bundle identifier / application id，反向 DNS 形式，例如 `com.yourcompany.app`；`package` 和 `publish` 必须提供。没有时 `nsh run` 使用 `com.example.<name>`。 |
 | `version` | string | `package`, `publish` | 用户可见的版本号，例如 `1.2.0`（`CFBundleShortVersionString`，Android 的 `versionName`）。 |
 | `build` | number | `package`, `publish` | 构建号（`CFBundleVersion`，Android 的 `versionCode`）。签名包要求它在每次发布时递增。 |
+| `minRuntime` | string | `publish` | 能运行该签名包的最低 NSH 运行时版本，例如 `0.2.0`。默认：CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
 | `icon` | string | `package` | 一张正方形 PNG，最好是 1024×1024，路径相对于 `nsh.json`。 |
 | `tailwind` | object | 每次构建 | 扩展 `class` 字符串所依据的 Tailwind 主题（[Tailwind](./tailwind.md)）。 |
 | `theme` | string 或 object | 每次构建 | `nsh/ui/mobile` 组件的主题：相对于 `nsh.json` 的主题文件路径，或直接内联的主题（[组件](../components/index.md)）。 |
@@ -77,7 +78,7 @@ mount(App);
 | `rust` | string 或 string[] | 每个命令 | 应用的 Rust crate 或 crate 列表，路径相对于 `nsh.json`：其中的组件和模块，TSX 按每个 crate 的 `#[native_module]` 名称导入（[用 Rust 开发](./rust.md#多个-crate)）。 |
 | `root` | string | `run`, `package` | Rust 应用的根组件，即它在 `rust` crate（列表时为第一个）中的路径（`App`、`shell::Gallery`）：对应用目录执行 `nsh run` 和 `nsh package` 时，在所有平台上直接挂载它，不使用 QuickJS；`nsh run App.tsx` 仍然运行 TSX 入口（[用 Rust 开发](./rust.md)）。 |
 
-`nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`）会覆盖文件中的值（[CLI](./cli.md)）。
+`nsh package` 和 `nsh publish` 的参数（`--name`、`--id`、`--app-version`、`--build`、`--icon`、`--min-runtime`）会覆盖文件中的值（[CLI](./cli.md)）。
 
 `tailwind`、`theme` 和 `capabilities` 在构建应用时会被校验。拼写错误会导致构建失败，而不是变成一个悄无声息不起作用的设置：
 

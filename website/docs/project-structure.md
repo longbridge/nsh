@@ -70,6 +70,7 @@ mount(App);
 | `id` | string | `package`, `publish`, `nsh/storage` | Bundle identifier / application id in reverse-DNS form, e.g. `com.yourcompany.app`; required by `package` and `publish`. `nsh run` uses `com.example.<name>` without one. |
 | `version` | string | `package`, `publish` | The user-visible version, e.g. `1.2.0` (`CFBundleShortVersionString`, Android `versionName`). |
 | `build` | number | `package`, `publish` | The build number (`CFBundleVersion`, Android `versionCode`). Signed packages require it to grow with every release. |
+| `minRuntime` | string | `publish` | The lowest NSH runtime that runs the signed package, e.g. `0.2.0`. Default: the CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 | `icon` | string | `package` | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 | `tailwind` | object | every build | Extends the Tailwind theme your `class` strings resolve against ([Tailwind](./tailwind.md#theme)). |
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
@@ -78,7 +79,7 @@ mount(App);
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `root` | string | `run`, `package` | A Rust app's root component, its path in the `rust` crate, the first one of a list (`App`, `shell::Gallery`): `nsh run` and `nsh package` of the app's directory mount it with no QuickJS, on every platform; `nsh run App.tsx` still runs the TSX entry ([Building with Rust](./rust.md)). |
 
-The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`) override the file's values ([CLI](./cli.md)).
+The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
 `tailwind`, `theme`, `appearance` and `capabilities` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
 
