@@ -29,7 +29,7 @@ crates/
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); the runtime's Rust
                        modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs),
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
-                       `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
+                       `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
                        `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
@@ -46,7 +46,7 @@ crates/
                        decoding JS values into core types (`protocol.rs`); the web APIs of TS apps (`web/`: fetch, streams,
                        Blob / FormData, URL, encoding, events), native classes; the standard modules' VM side (`standard/`:
                        the catalog and its loader, LLRT's `buffer` / `crypto` / `path` / `url` / `zlib`, `console`,
-                       `websocket`, the global `process` and `nextTick`); the TypeScript declarations of all of it
+                       the globals `WebSocket`, `process` and `nextTick`); the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
   nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store

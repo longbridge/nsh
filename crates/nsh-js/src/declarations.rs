@@ -430,8 +430,9 @@ fn references(body: &str) -> (Vec<String>, Vec<String>) {
             local.push(word.to_owned());
         } else if prev.ends_with('.') {
             // A member (`JSX.Element`, `Symbol.iterator`).
-        } else if after.starts_with(':') || after.starts_with("?:") {
-            // A field's or parameter's name (`signal?: string`), not a type.
+        } else if after.trim_start_matches('?').starts_with([':', '(']) {
+            // A field's, method's or parameter's name (`signal?: string`,
+            // `connect(url: string)`), not a type.
         } else {
             used.push(word.to_owned());
         }

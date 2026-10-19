@@ -319,8 +319,6 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
         public.push_str("}\n");
     }
     adapter(&mut public, "console", super::console::TYPES);
-    #[cfg(not(target_arch = "wasm32"))]
-    adapter(&mut public, "websocket", super::websocket::TYPES);
     vec![
         ("standard/llrt-sources.d.ts".into(), source_text),
         ("standard/index.d.ts".into(), public),

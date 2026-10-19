@@ -21,11 +21,15 @@ nsh-macros.workspace = true
 tokio = { workspace = true, features = ["rt", "time"] }
 log.workspace = true
 
-# `net`'s sockets (`runtime/net.rs`) and `fs/promises`' files
-# (`runtime/fs.rs`, confined by cap-std); WebAssembly has neither.
+# `net`'s sockets (`runtime/net.rs`), `websocket`'s connections
+# (`runtime/websocket.rs`) and `fs/promises`' files (`runtime/fs.rs`,
+# confined by cap-std); WebAssembly has none of them.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["net", "io-util", "sync", "macros"] }
 cap-std.workspace = true
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+url.workspace = true
 # `process`'s children: their process groups and exits (`runtime/process.rs`).
 libc.workspace = true
 

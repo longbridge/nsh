@@ -18,7 +18,7 @@ Native Shell provides eleven standard modules, imported by their bare names: Nod
 | `fs/promises` | `readFile`, `writeFile`, `readdir`, `exists`, `mkdir`, `rename`, `unlink`, `rmdir`, `stat`, `lstat`, `readlink`, default |
 | `process` | `run`, `spawn`, `exit`, `platform`, `arch`, `nextTick`, `ChildProcess`, default; the default object also has `env` and `dataDir` and is the global `process` |
 | `net` | `connect`, `Socket`, default |
-| `websocket` | `WebSocket.connect` (native hosts); the global `WebSocket` constructor |
+| `websocket` | `WebSocket.connect(url, options?)` resolving a `WebSocketConnection` (`read`, `write`, `close`), `WebSocketConnection`; the global `WebSocket` constructor on native hosts |
 
 ## Imports and generated types
 

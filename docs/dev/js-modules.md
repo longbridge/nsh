@@ -96,7 +96,7 @@ The loader asks the module table first (typed registries own their names), then 
 | `process` | `nsh_core::runtime::process`, `nsh-js` `standard/process.rs` | `run`, `spawn`, `exit`, `platform`, `arch`, `nextTick`, `ChildProcess`, default (also `env` / `dataDir` getters); the default object is the global `process` |
 | `net` | `nsh_core::runtime::net` | `connect`, `Socket`, default |
 | `console` | `nsh-js` `standard/console.rs` | default: the VM's `console` (`log`, `info`, `debug`, `warn`, `error`) |
-| `websocket` | `nsh-js` `standard/websocket.rs` (native hosts) | `WebSocket` (`connect`); the global `WebSocket` constructor |
+| `websocket` | `nsh_core::runtime::websocket`, `nsh-js` `standard/websocket.rs` (the global) | `WebSocket` (`connect`), `WebSocketConnection`; the global `WebSocket` constructor |
 | `buffer`, `crypto`, `path`, `url`, `zlib` | LLRT, pinned (`standard/mod.rs`) | their LLRT exports, projected by `standard/declarations.rs`; `Buffer` and `crypto` are globals |
 
 The typed modules' JS face and `.nsh/types` come from their specs (`#[module]`, `#[class]`; `docs/dev/rust-classes.md`):
@@ -106,12 +106,16 @@ the work runs as core tasks on the engine's tokio runtime (`fs/promises` on its 
 `process`'s children, killed at once and joined together when the VM goes). `process.spawn` returns its
 `ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
 adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
-`os.homedir()` and `process.dataDir` are metadata and grant no file access.
+`websocket`'s URL, options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake
+is a core task, and a task spawned per connection drives the socket (answering pings, keeping up to eight unread
+messages); connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`, which the global `WebSocket`
+(`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
+and grant no file access.
 
 LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs`
 projects their actual exports from checksummed upstream assets in `third_party/llrt-types`. `zlib` bounds each
 decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
-keep their identity. `console` and `websocket` carry their declarations next to their implementation. The
+keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
 they differ (a symlink `exists`, listeners get the payload only, `Stats` reads through getters, the child
 environment and `cwd` rules), `website/modules/standard-modules.md` says so.

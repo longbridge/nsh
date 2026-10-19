@@ -147,7 +147,8 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, crate::ui_sets())?;
     // SAFETY: compiled just now by this runtime.
     let mut bytecode = unsafe { Bundle::bytecode(bytecode) };
-    bytecode.policy = nsh_engine::Policy::development();
+    // Hardened, as a release build runs (docs: "Test the release behavior
+    // with `nsh trace`"); the app's declared capabilities apply.
     bytecode.policy.declared = bundle.capabilities.clone();
     bytecode.app_id = crate::package::app_id(entry).ok();
     let mut paths = nsh_core::access::TrustedPaths::default();

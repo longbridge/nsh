@@ -18,7 +18,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 | `fs/promises` | `readFile`、`writeFile`、`readdir`、`exists`、`mkdir`、`rename`、`unlink`、`rmdir`、`stat`、`lstat`、`readlink`、默认导出 |
 | `process` | `run`、`spawn`、`exit`、`platform`、`arch`、`nextTick`、`ChildProcess`、默认导出；默认导出对象还有 `env` 和 `dataDir`，它也是全局 `process` |
 | `net` | `connect`、`Socket`、默认导出 |
-| `websocket` | `WebSocket.connect`（原生宿主）；全局 `WebSocket` 构造器 |
+| `websocket` | `WebSocket.connect(url, options?)` 解析为 `WebSocketConnection`（`read`、`write`、`close`）、`WebSocketConnection`；原生宿主上另有全局 `WebSocket` 构造器 |
 
 ## 导入与类型
 

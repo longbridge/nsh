@@ -2,7 +2,7 @@
 //! `nsh/accessibility`'s commands, all of `nsh/image`, `nsh/clipboard` and
 //! `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
-//! `net`'s sockets and `fs/promises`' files. Their JS face is made
+//! `net`'s sockets, `websocket`'s connections and `fs/promises`' files. Their JS face is made
 //! from their specs like a UI set's (`nsh-js` `components.rs`), and so are
 //! their declarations ([`crate::ui::declarations`]); `nsh-js` adds what has
 //! to run in JS (the app's listeners, reactive accessors).
@@ -21,6 +21,15 @@ mod net;
 mod os;
 mod process;
 mod storage;
+#[cfg(not(target_arch = "wasm32"))]
+mod websocket;
+
+/// The [`crate::ui::Quotas`] kind WebSockets count under: the `websocket`
+/// module's connections and the global `WebSocket`'s (`nsh-js`) share
+/// [`MAX_WEBSOCKETS`] per VM.
+pub const WEBSOCKETS: &str = "websocket.connections";
+/// WebSockets open or connecting at once in one VM, of both APIs.
+pub const MAX_WEBSOCKETS: usize = 32;
 
 /// The runtime's Rust modules, one registry per JS module (its
 /// [`Registry::namespace`]: `nsh/android`).
@@ -52,6 +61,12 @@ pub fn registries() -> &'static [Registry] {
         net.module::<net::Net>();
         let mut fs = Registry::runtime("fs/promises");
         fs.module::<fs::Fs>();
+        #[cfg(not(target_arch = "wasm32"))]
+        let websocket = {
+            let mut websocket = Registry::runtime("websocket");
+            websocket.module::<websocket::WebSocket>();
+            websocket
+        };
         vec![
             android,
             accessibility,
@@ -63,6 +78,8 @@ pub fn registries() -> &'static [Registry] {
             net,
             process,
             fs,
+            #[cfg(not(target_arch = "wasm32"))]
+            websocket,
         ]
     })
 }

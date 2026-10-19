@@ -1,4 +1,6 @@
-//! Capability-checked WebSocket transport on the owning LLRT VM.
+//! The global `WebSocket`: a capability-checked transport on the owning VM.
+//! (The `websocket` module's `WebSocket.connect` is the runtime's Rust
+//! registry, `nsh_core::runtime`; both count under one per-VM cap.)
 //!
 //! The small JS facade inherits NSH's EventTarget; it does not replace any web
 //! primitive. Transport futures are owned by QuickJS and disappear with the VM.
@@ -13,37 +15,21 @@ use tokio_tungstenite::tungstenite::{
     protocol::{CloseFrame, WebSocketConfig, frame::coding::CloseCode},
 };
 
-#[path = "websocket_client.rs"]
-mod client;
-pub(crate) struct WebSocketModule;
-impl rquickjs::module::ModuleDef for WebSocketModule {
-    fn declare(exports: &rquickjs::module::Declarations) -> Result<()> {
-        exports.declare("WebSocket")?;
-        Ok(())
-    }
-    fn evaluate<'js>(ctx: &Ctx<'js>, exports: &rquickjs::module::Exports<'js>) -> Result<()> {
-        exports.export("WebSocket", client::export(ctx)?)?;
-        Ok(())
-    }
-}
-
 const MAX_MESSAGE: usize = 8 * 1024 * 1024;
 const QUEUE: usize = 8;
-/// WebSockets open or connecting at once in one VM, of both APIs.
-const MAX_CONNECTIONS: usize = 32;
-
-/// A place among the VM's WebSockets, or the `RangeError` saying there is none.
-fn acquire_slot(ctx: &Ctx<'_>) -> Result<super::Slot> {
-    super::Slot::acquire(
-        &crate::dom::shared(ctx.as_raw().as_ptr()).websockets,
-        MAX_CONNECTIONS,
-    )
-    .ok_or_else(|| {
-        Exception::throw_range(
-            ctx,
-            &format!("At most {MAX_CONNECTIONS} concurrent WebSockets are allowed per VM"),
-        )
-    })
+/// A place among the VM's WebSockets (shared with the `websocket` module),
+/// or the `RangeError` saying there is none.
+fn acquire_slot(ctx: &Ctx<'_>) -> Result<nsh_core::ui::Held> {
+    use nsh_core::runtime::{MAX_WEBSOCKETS, WEBSOCKETS};
+    crate::dom::shared(ctx.as_raw().as_ptr())
+        .system_quotas
+        .take(WEBSOCKETS, MAX_WEBSOCKETS)
+        .ok_or_else(|| {
+            Exception::throw_range(
+                ctx,
+                &format!("At most {MAX_WEBSOCKETS} concurrent WebSockets are allowed per VM"),
+            )
+        })
 }
 
 /// Whether the app may open a WebSocket to `url`, checked before any DNS
@@ -60,11 +46,15 @@ enum Command {
     Close(Option<CloseFrame>),
 }
 
-/// Installs the global constructor after the existing web globals.
-pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
-    ctx.globals()
-        .set("__nshWebSocketConnect", Func::from(connect))?;
-    ctx.eval::<(), _>(FACADE)?;
+/// Makes the global constructor, on the first use of `WebSocket`
+/// (`standard::LAZY`). The facade receives the native transport as an
+/// argument, so no other global is defined.
+pub(crate) fn init(ctx: &Ctx<'_>) -> Result<()> {
+    if super::take_lazy(ctx, "WebSocket")? {
+        let make: Function = ctx.eval(FACADE)?;
+        let constructor: Value = make.call((Func::from(connect),))?;
+        ctx.globals().set("WebSocket", constructor)?;
+    }
     Ok(())
 }
 
@@ -300,9 +290,7 @@ fn closed<'js>(
     emit(callback, "close", data.into_value())
 }
 
-const FACADE: &str = r#"(() => {
-const connect = globalThis.__nshWebSocketConnect;
-delete globalThis.__nshWebSocketConnect;
+const FACADE: &str = r#"((connect) => {
 class WebSocket extends EventTarget {
   #handle; #state = 0; #protocol = ''; #url; #binaryType = 'blob'; #handlers = {};
   constructor(url, protocols = []) {
@@ -370,24 +358,12 @@ for (const [key, value] of Object.entries({ CONNECTING: 0, OPEN: 1, CLOSING: 2, 
   Object.defineProperty(WebSocket, key, { value });
   Object.defineProperty(WebSocket.prototype, key, { value });
 }
-globalThis.WebSocket = WebSocket;
-})();"#;
+return WebSocket;
+})"#;
 
 #[cfg(test)]
 #[path = "websocket_fixture.rs"]
 mod tests;
-
-/// Module declarations, kept beside the native export definition.
-pub(crate) const TYPES: &str = r#"
-export interface WebSocketConnection {
-  write(data: string | Uint8Array): Promise<void>;
-  read(): Promise<string | Uint8Array>;
-  close(): Promise<void>;
-}
-export const WebSocket: {
-  connect(url: string, options?: { headers?: Record<string, string> }): Promise<WebSocketConnection>;
-};
-"#;
 
 /// Global facade declarations. Message and close payloads are native Event objects.
 pub(crate) const GLOBALS: &str = r#"

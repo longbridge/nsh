@@ -55,9 +55,8 @@ pub(crate) struct Shared {
     /// The VM's state of the runtime's Rust modules (`process`'s
     /// children), closed when the VM goes.
     pub(crate) system_locals: nsh_core::ui::Locals,
-    /// Open (or connecting) WebSockets of both APIs, capped per VM.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) websockets: Rc<Cell<usize>>,
+    /// The lazy standard globals installed so far (bits of `standard::LAZY`).
+    pub(crate) lazy_globals: Cell<u8>,
     /// Worker completion wakes the owning engine without polling.
     pub(crate) system_wake: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub(crate) warnings: RefCell<Warnings>,
