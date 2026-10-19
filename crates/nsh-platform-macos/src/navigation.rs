@@ -478,6 +478,10 @@ struct ModalNav {
     /// Dims the window behind a sheet; clicking it asks to close.
     scrim: Option<Retained<Scrim>>,
     reported: Option<(Size, EdgeInsets)>,
+    /// What had the keyboard focus when it was presented (not the root):
+    /// it gets it back when the modal closes, as on the other desktops
+    /// (a popover's trigger, a field).
+    focus_before: Option<Retained<NSView>>,
 }
 
 /// What leaves the screen during a pop.
@@ -709,6 +713,37 @@ fn drop_focus(surface: &Surface, view: &NSView) {
         .is_some_and(|r| r.isDescendantOf(view))
     {
         window.makeFirstResponder(Some(surface.root.ns()));
+    }
+}
+
+/// The view with the keyboard focus in `surface`'s window, unless it is the
+/// root (which holds it when nothing else does).
+fn focused(surface: &Surface) -> Option<Retained<NSView>> {
+    let responder = surface.root.ns().window()?.firstResponder()?;
+    let view = responder.downcast::<NSView>().ok()?;
+    (&*view != surface.root.ns() && view.isDescendantOf(surface.root.ns())).then_some(view)
+}
+
+/// Gives the keyboard focus back to `view` (what had it before a modal
+/// opened), if the focus fell to the root and `view` is still shown in
+/// the window.
+fn restore_focus(surface: &Surface, view: Option<Retained<NSView>>) {
+    let Some(view) = view else { return };
+    let Some(window) = surface.root.ns().window() else {
+        return;
+    };
+    // Nothing else took it meanwhile: the root, or the window itself,
+    // holds it.
+    let at_root = window.firstResponder().is_none_or(|r| {
+        r.downcast_ref::<NSView>()
+            .is_none_or(|v| v == surface.root.ns())
+    });
+    if at_root
+        && view.window().is_some()
+        && view.isDescendantOf(surface.root.ns())
+        && !view.isHiddenOrHasHiddenAncestor()
+    {
+        window.makeFirstResponder(Some(&view));
     }
 }
 
@@ -1545,6 +1580,7 @@ impl Nav {
         };
         let Some(view) = m.view.take() else { return };
         let scrim = m.scrim.take();
+        let focus_before = m.focus_before.take();
         let frame = view.state().frame;
         let motion = modal_motion(surface, m.config.animation);
         let shown = view.ns().window().is_some();
@@ -1553,6 +1589,7 @@ impl Nav {
             drop_focus(surface, view.ns());
             view.unparent();
         }
+        restore_focus(surface, focus_before);
         if let Some(b) = m.backdrop.take() {
             b.removeFromSuperview();
         }
@@ -1967,6 +2004,7 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     m.view = Some(view.clone());
     m.closed = false;
     m.reported = None;
+    m.focus_before = focused(surface);
     if view.has_parent() {
         view.unparent();
     }

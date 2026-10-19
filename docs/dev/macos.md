@@ -285,7 +285,11 @@ A mounted non-input view listening to `onPress` participates in AppKit's key
 view loop alongside native text inputs. Disabled accessibility state, removed
 press listeners, hidden views and views leaving the tree exclude a control.
 Tab/Shift+Tab stay within the newest modal and advance from the currently
-focused control. The root and passive layout views stay outside that loop.
+focused control. The root and passive layout views stay outside that loop. A
+modal remembers the view that had the focus when it was presented
+(`ModalNav::focus_before`) and gives it back when it closes, if the focus fell
+to the root or the window meanwhile and the view is still shown: Escape on a
+popover returns to its trigger.
 
 Focused controls update the existing `focus:` interaction state. Unmodified
 Return, keypad Enter and Space emit PressIn/PressOut/Press once on key-down;
@@ -299,7 +303,9 @@ resolve its surface through ancestors; pointer and drawing callbacks keep their
 existing root-only lookup. This avoids attaching per-button monitors or changing
 the public event protocol.
 
-No builds or tests were run for this change at the user's request. Native
-acceptance remains pending: mixed input/button traversal in both directions,
-modal isolation and restoration, disabling/deleting a focused control, repeat
-suppression, modifier shortcuts, screen-reader focus and window deactivation.
+Checked with `--script` (`key Tab`, `key Return`, `key space`, `key Escape`,
+`tap`): Tab between pressables, Return and Space pressing the focused one, Tab
+staying in a transparent modal, and the focus returning to the trigger after
+Escape or a click outside. Still to check natively: Shift+Tab, mixed inputs and
+buttons, disabling or deleting a focused control, repeat suppression, modifier
+shortcuts, screen-reader focus and window deactivation.
