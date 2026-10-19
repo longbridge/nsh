@@ -95,12 +95,10 @@ fn show(level: Level, target: &str, message: &str, device: Option<&Device<'_>>) 
 }
 
 /// A target as verbose lines show it: the command line's own modules as
-/// `nsh::build`, other crates without `nsh_` (`bundler::...`).
+/// they are (`nsh::build`, the binary's name), other crates without `nsh_`
+/// (`bundler::...`).
 fn source(target: &str) -> String {
-    match target.strip_prefix("nsh_cli") {
-        Some(rest) => format!("nsh{rest}"),
-        None => target.strip_prefix("nsh_").unwrap_or(target).to_owned(),
-    }
+    target.strip_prefix("nsh_").unwrap_or(target).to_owned()
 }
 
 impl Log for Logger {

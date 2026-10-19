@@ -100,9 +100,11 @@ crates/
   gpui/nsh-gpui-app/   Release runner on GPUI: the executable of apps built by `nsh package --target gpui`
   nsh-ios-host/        Development host app (Catalyst / iOS simulator); connects to a dev server or runs a local bundle
   nsh-ios-app/         Release runner: the executable of iOS apps built by `nsh package`
-  nsh-cli/             The `nsh` command line (a library: `main_with(ui_sets)`): init / build / trace / check / dev / run / package; keygen /
+  nsh-cli/             The `nsh` command line (a binary): init / build / trace / check / dev / run / package; keygen /
                        certify / publish / verify / revoke; apps with Rust components of their own (`rust_app.rs`: each crate
-                       nsh.json `"rust"` names, one or a list, has a `#[native_module("…")]` fn; its hosts take nsh's crates where the app's crates do:
+                       nsh.json `"rust"` names, one or a list, has a `#[native_module("…")]` fn; a generated workspace in `.nsh/rust`
+                       with a `describe` program, which prints the sets as data for the CLI to bundle, compile and declare with, the
+                       hosts and runners, and the headless runner of `nsh trace`; it takes nsh's crates where the app's crates do:
                        crates.io at the CLI's version, or the checkout they depend on by path; docs/dev/tooling.md); web packages and the
                        browser host's pages (`web.rs`, `web/`); what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
@@ -121,7 +123,8 @@ examples/             Example apps (gallery: a demo index, one module per demo; 
 
 Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ←
 `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host` / `nsh-gpui-app`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-ui-mobile` depends
-on `nsh-core` only and is used by the bundler (declarations), the platforms and the CLI (registry). `nsh-core` must not depend
+on `nsh-core` only and is used by the bundler (declarations), the platforms and the CLI (registry). An app's own crates
+are never linked into the CLI: it reads their UI sets as data (`nsh_core::ui::description`). `nsh-core` must not depend
 on any platform or JS crate.
 
 ## Documentation

@@ -65,12 +65,10 @@ pub(crate) fn init(verbose: bool) {
     #[cfg(unix)]
     // SAFETY: a zeroed `sigaction` is a valid value (no flags, an empty
     // mask) before the fields are set; the handler only uses
-    // async-signal-safe calls (`write`, `signal`, `raise`, `getppid`) and
-    // atomics.
+    // async-signal-safe calls (`write`, `signal`, `raise`) and atomics.
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
         action.sa_sigaction = on_signal as *const () as libc::sighandler_t;
-        action.sa_flags = libc::SA_SIGINFO;
         libc::sigemptyset(&mut action.sa_mask);
         libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut());
         libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
@@ -140,23 +138,15 @@ fn exit_by_signal(signal: libc::c_int) {
 
 /// Ctrl-C (or a stop): asks a [`Stoppable`] command to stop, else (or the
 /// second time) clears a spinner's line and ends the process as the signal
-/// would have. A stop the parent passes on ([`pass_stop_on`]) after this
-/// one had it is not a second.
+/// would have.
 #[cfg(unix)]
-extern "C" fn on_signal(signal: libc::c_int, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
-    if STOPPABLE.load(Ordering::SeqCst) > 0 {
-        if STOP_SIGNAL
+extern "C" fn on_signal(signal: libc::c_int) {
+    if STOPPABLE.load(Ordering::SeqCst) > 0
+        && STOP_SIGNAL
             .compare_exchange(0, signal, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
-        {
-            return;
-        }
-        // SAFETY: the kernel passes a valid `siginfo_t` with SA_SIGINFO.
-        let sender = unsafe { info.as_ref() }.map_or(0, sender);
-        // SAFETY: `getppid` is async-signal-safe and cannot fail.
-        if sender != 0 && sender == unsafe { libc::getppid() } {
-            return;
-        }
+    {
+        return;
     }
     if SPINNER_DRAWN.load(Ordering::SeqCst) {
         let clear = b"\r\x1b[2K";
@@ -168,16 +158,6 @@ extern "C" fn on_signal(signal: libc::c_int, info: *mut libc::siginfo_t, _: *mut
         libc::signal(signal, libc::SIG_DFL);
         libc::raise(signal);
     }
-}
-
-/// The process that sent a signal (0: the kernel, the terminal's Ctrl-C).
-#[cfg(unix)]
-fn sender(info: &libc::siginfo_t) -> libc::pid_t {
-    #[cfg(target_os = "linux")]
-    // SAFETY: SIGINT and SIGTERM carry the sender's pid.
-    return unsafe { info.si_pid() };
-    #[cfg(not(target_os = "linux"))]
-    return info.si_pid;
 }
 
 /// The console's side of [`init`] and [`columns`] on Windows.
