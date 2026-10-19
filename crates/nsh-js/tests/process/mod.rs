@@ -1,4 +1,5 @@
-//! Offline native subprocess tests: streaming, writable stdin and VM lifetime.
+//! Offline `process` module tests: streaming, writable stdin, the child's
+//! environment and VM lifetime.
 #![cfg(target_os = "linux")]
 
 use std::{
@@ -92,15 +93,14 @@ impl Drop for Fixture {
     }
 }
 
-const REPORT: &str =
-    "import { text as report } from 'nsh:rt'; import { Process } from 'nsh/process';";
+const REPORT: &str = "import { text as report } from 'nsh:rt'; import process from 'process';";
 
 #[test]
 fn output_arrives_before_stdin_roundtrip_and_exit_is_last() {
     let f = Fixture::new();
     f.host.eval_source(&format!(r#"{REPORT}
       globalThis.events = [];
-      globalThis.child = Process.spawn('/bin/sh', ['-c', 'printf ready; read line; printf "%s" "$line"; printf err >&2']);
+      globalThis.child = process.spawn('/bin/sh', ['-c', 'printf ready; read line; printf "%s" "$line"; printf err >&2'], {{stdin: 'pipe'}});
       child.on('stdout', text => {{ events.push(['out', text]); report(text); }});
       child.on('stderr', text => events.push(['err', text]));
       child.on('exit', result => {{ events.push(['exit', result.code]); report(JSON.stringify(events)); }});
@@ -119,7 +119,7 @@ fn output_arrives_before_stdin_roundtrip_and_exit_is_last() {
         "child must still be awaiting stdin"
     );
     f.host
-        .eval_source("child.write('roundtrip\\n'); child.closeStdin();")
+        .eval_source("child.write('roundtrip\\n'); child.end();")
         .unwrap();
     f.complete();
     let output = f.outputs();
@@ -149,7 +149,7 @@ fn output_arrives_before_stdin_roundtrip_and_exit_is_last() {
 fn run_preserves_split_utf8_and_captures_both_pipes() {
     let f = Fixture::new();
     f.host.eval_source(&format!(r#"{REPORT}
-      Process.run('/bin/sh', ['-c', "printf '\\342'; sleep 0.03; printf '\\202\\254'; printf warning >&2"])
+      process.run('/bin/sh', ['-c', "printf '\\342'; sleep 0.03; printf '\\202\\254'; printf warning >&2"])
         .then(r => report(JSON.stringify(r)));
     "#)).unwrap();
     f.complete();
@@ -167,7 +167,7 @@ fn capability_and_launch_failures_are_separate_from_exit() {
         .eval_source(&format!(
             r#"{REPORT}
       for (const command of ['definitely-not-granted', '/nonexistent/nsh-fixture']) {{
-        try {{ Process.spawn(command); report('unexpected'); }} catch (e) {{ report(String(e)); }}
+        try {{ process.spawn(command); report('unexpected'); }} catch (e) {{ report(String(e)); }}
       }}
     "#
         ))
@@ -190,7 +190,7 @@ fn kill_terminates_descendants_and_emits_one_exit_after_output() {
     f.host
         .eval_source(&format!(
             r#"{REPORT}
-      globalThis.child = Process.spawn('/bin/sh', ['-c', {script}]);
+      globalThis.child = process.spawn('/bin/sh', ['-c', {script}]);
       child.on('stdout', t => report(t));
       child.on('exit', r => report(JSON.stringify(r)));
     "#
@@ -234,7 +234,7 @@ fn dropping_vm_terminates_its_process_tree_even_with_blocked_stdin() {
     f.host
         .eval_source(&format!(
             r#"{REPORT}
-      globalThis.child = Process.spawn('/bin/sh', ['-c', {script}]);
+      globalThis.child = process.spawn('/bin/sh', ['-c', {script}], {{stdin: 'pipe'}});
       child.write('x'.repeat(900000));
     "#
         ))
@@ -258,15 +258,25 @@ fn dropping_vm_terminates_its_process_tree_even_with_blocked_stdin() {
 #[test]
 fn bounded_run_rejects_timeout_and_output_overflow() {
     let f = Fixture::new();
-    f.host.eval_source(&format!(r#"{REPORT}
-      Process.run('/bin/sh', ['-c', 'sleep 30'], {{timeoutMs: 25}}).catch(e => report(String(e)));
-      Process.run('/bin/sh', ['-c', 'printf 123456789'], {{maxOutputBytes: 4}}).catch(e => report(String(e)));
-    "#)).unwrap();
+    f.host
+        .eval_source(&format!(
+            r#"{REPORT}
+      process.run('/bin/sh', ['-c', 'sleep 30'], {{timeoutMs: 25}}).catch(e => report(String(e)));
+      // `head` is found on the child's PATH, which the host passes on.
+      process.run('/bin/sh', ['-c', 'head -c 9437184 /dev/zero']).catch(e => report(String(e)));
+    "#
+        ))
+        .unwrap();
     f.complete();
     let output = f.outputs();
     assert_eq!(output.len(), 2);
     assert!(output.iter().any(|s| s.contains("timed out")));
-    assert!(output.iter().any(|s| s.contains("maxOutputBytes")));
+    assert!(
+        output
+            .iter()
+            .any(|s| s.contains("exceeded 8388608 bytes on one stream")),
+        "{output:?}"
+    );
 }
 
 #[test]
@@ -282,7 +292,7 @@ fn reactive_owner_cleanup_cancels_child() {
       globalThis.enabled = signal(true);
       effect(() => {{
         if (!enabled()) return;
-        const owned = Process.spawn('/bin/sh', ['-c', {script}]);
+        const owned = process.spawn('/bin/sh', ['-c', {script}]);
         owned.on('exit', r => report(JSON.stringify(r)));
       }});
     "#
@@ -339,7 +349,7 @@ fn detached_inherited_pipes_do_not_block_exit_or_vm_drop() {
         f.host
             .eval_source(&format!(
                 r#"{REPORT}
-                globalThis.detached = Process.spawn('/bin/sh', ['-c', {script}]);
+                globalThis.detached = process.spawn('/bin/sh', ['-c', {script}], {{stdin: 'pipe'}});
                 detached.write('x'.repeat(900000));
                 detached.on('stdout', text => report(text));
                 detached.on('exit', result => report(JSON.stringify(result)));

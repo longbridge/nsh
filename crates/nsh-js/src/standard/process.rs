@@ -1,8 +1,9 @@
 //! Standard `process` module over NSH's checked per-VM subprocess runtime.
 //!
-//! The standard import and the global share one object. The underlying native
-//! functions enforce executable/cwd grants and retain the VM's existing lifecycle,
-//! queue bounds, streaming and cancellation behavior; this adapter starts no workers.
+//! The standard import and the global share one object. The native functions
+//! (`crate::process`) check executables, the working directory and limits, and
+//! own each child's lifecycle; this adapter frames streams and results and
+//! starts no workers.
 
 use rquickjs::{
     Ctx, Error, Exception, Function, Object, Result, Value,
@@ -39,7 +40,7 @@ impl ModuleDef for ProcessModule {
 /// Installs one process facade in this VM, before application code runs.
 pub(crate) fn install(ctx: &Ctx<'_>) -> Result<()> {
     let raw = ctx.as_raw().as_ptr();
-    let value = crate::process::standard_module(raw);
+    let value = crate::process::module(raw);
     // SAFETY: `module` returns an owned value in this same live context.
     let value = unsafe { Value::from_raw(ctx.clone(), value) };
     let native = value.into_object().ok_or(Error::Exception)?;
@@ -149,7 +150,7 @@ const PROCESS_ADAPTER: &str = r#"
     const handlers = {stdout:[], stderr:[], exit:[]};
     const pending = {stdout:[], stderr:[]};
     const bytes = {stdout:0, stderr:0};
-    let lineError, closed = stdin !== 'pipe';
+    let lineError, exited, closed = stdin !== 'pipe';
     if (closed) child.closeStdin();
     const dispatch = (event, payload) => { for (const fn of handlers[event].slice()) fn(payload); };
     const receive = (event, text) => {
@@ -171,6 +172,7 @@ const PROCESS_ADAPTER: &str = r#"
       for (const event of ['stdout','stderr']) if (bytes[event]) { dispatch(event,pending[event].join('')); pending[event]=[]; bytes[event]=0; }
       const exit = {code:result.code, signal:native.signalName(result.signal) ?? null};
       if (lineError || result.error) exit.error = lineError || result.error;
+      exited = exit;
       dispatch('exit', exit);
     });
     const handle = {
@@ -178,6 +180,7 @@ const PROCESS_ADAPTER: &str = r#"
       on(event, handler) {
         if (!Object.hasOwn(handlers,event)) throw new TypeError('event must be stdout, stderr or exit');
         if (typeof handler !== 'function') throw new TypeError('handler must be a function');
+        if (exited) { if (event === 'exit') handler(exited); return handle; }
         handlers[event].push(handler); return handle;
       },
       write(text) { if (closed) throw new TypeError('ChildProcess.write needs stdin:"pipe" and an open stdin'); child.write(text); },
@@ -196,7 +199,13 @@ const PROCESS_ADAPTER: &str = r#"
 /// Module declarations assembled by the standard runtime's declaration writer.
 pub(crate) const TYPES: &str = r#"
 export interface CommandOutput { code: number; stdout: string; stderr: string; }
-export interface RunOptions { cwd?: string; timeoutMs?: number; }
+export interface RunOptions {
+  /** An existing directory within a capabilities.fs.write root (the child may write
+   * there); defaults to the app's data directory, created when missing. */
+  cwd?: string;
+  /** Kills the process tree after this many milliseconds; run defaults to 30 seconds. */
+  timeoutMs?: number;
+}
 export interface SpawnOptions extends RunOptions { stdin?: "pipe" | "null"; lines?: boolean; }
 export interface ExitResult { code: number | null; signal: string | null; error?: string; }
 export interface ChildProcess {
@@ -207,9 +216,20 @@ export interface ChildProcess {
   end(): void;
   kill(): void;
 }
-/** Captures up to 8 MiB per stream, with a default 30-second deadline; child environment is empty. */
+/**
+ * Captures up to 8 MiB per stream, with a default 30-second deadline.
+ *
+ * Commands run directly, with no shell, when capabilities.process.execute lists them.
+ * A child's environment is PATH, HOME, USERPROFILE, SystemRoot, TEMP, TMP, TMPDIR,
+ * LANG and LC_* from the host, plus the names capabilities.process.env grants;
+ * never the whole host environment.
+ */
 export function run(command: string, args?: string[], options?: RunOptions): Promise<CommandOutput>;
-/** Streams decoded UTF-8 or complete lines; stdin defaults to null. */
+/**
+ * Streams decoded UTF-8 or complete lines; stdin defaults to null. The child gets
+ * the environment `run` describes. exit fires once, after the final output, and
+ * at once for a listener added later; kill ends the whole process tree.
+ */
 export function spawn(command: string, args?: string[], options?: SpawnOptions): ChildProcess;
 /** Requests host-defined exit after capability checks; never exits the host process directly. */
 export function exit(code?: number): void;
@@ -365,21 +385,33 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     fn checked_host(commands: &[&str]) -> Host {
+        checked_host_with(serde_json::json!({"process":{"execute":commands}}))
+    }
+    #[cfg(target_os = "linux")]
+    fn checked_host_with(capabilities: serde_json::Value) -> Host {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let root = std::env::var_os("TMPDIR")
+            .map(std::path::PathBuf::from)
+            .expect("tests must provide TMPDIR outside /tmp");
+        assert!(!root.starts_with("/tmp"));
+        // The default cwd: created by the first child, as an app's data directory is.
+        let data = root.join(format!(
+            "standard-process-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         let host = Host::new().unwrap();
         host.set_environment(&nsh_core::platform::Environment {
             os: nsh_core::platform::Os::Linux,
             ..Default::default()
         });
-        let declared = nsh_core::access::Capabilities::from_json(
-            &serde_json::json!({"process":{"execute":commands}}),
-        )
-        .unwrap();
+        let declared = nsh_core::access::Capabilities::from_json(&capabilities).unwrap();
         host.set_system_access(
             nsh_core::access::Access {
                 declared,
                 granted: None,
             },
-            None,
+            Some(data),
         );
         host
     }
@@ -395,7 +427,7 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     #[test]
-    fn reference_lines_stdin_chaining_and_empty_child_environment() {
+    fn reference_lines_stdin_chaining_and_minimal_child_environment() {
         let host = checked_host(&["/bin/sh", "/usr/bin/env"]);
         host.eval_source(r#"
             import process from 'process'; import {text} from 'nsh:rt';
@@ -421,10 +453,28 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert!(
-            texts.iter().any(|text| text == r#"["env",0,""]"#),
-            "{texts:?}"
-        );
+        let env: serde_json::Value = serde_json::from_str(
+            texts
+                .iter()
+                .find(|text| text.starts_with("[\"env\""))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(env[1], 0);
+        let names = env[2]
+            .as_str()
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.split_once('=').map(|(name, _)| name.to_owned()))
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "PATH"), "{names:?}");
+        for name in &names {
+            assert!(
+                ["PATH", "HOME", "TMPDIR", "LANG"].contains(&name.as_str())
+                    || name.starts_with("LC_"),
+                "{name} reached the child"
+            );
+        }
         let line_result: serde_json::Value =
             serde_json::from_str(texts.iter().find(|text| text.starts_with("[true")).unwrap())
                 .unwrap();
@@ -524,6 +574,77 @@ mod tests {
             texts.contains(&r#"["signal",null,"SIGTERM","string"]"#.to_owned()),
             "{texts:?}"
         );
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn granted_environment_names_reach_the_child() {
+        // `USER` is not one every child gets; the manifest grants it here.
+        let host = checked_host_with(serde_json::json!({
+            "process": {"execute": ["/usr/bin/env"], "env": ["user"]}
+        }));
+        host.eval_source(
+            r#"import process from 'process';import {text} from 'nsh:rt';
+            process.run('/usr/bin/env').then(r=>text(r.stdout));"#,
+        )
+        .unwrap();
+        finish(&host);
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let stdout = ops
+            .into_iter()
+            .find_map(|op| match op {
+                Op::CreateText { text, .. } => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        let user = std::env::var("USER").ok();
+        assert_eq!(
+            stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("USER="))
+                .map(str::to_owned),
+            user
+        );
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cwd_defaults_to_the_data_directory_and_needs_a_write_grant() {
+        let root = std::env::var_os("TMPDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap();
+        let readable = root.join(format!("standard-process-readable-{}", std::process::id()));
+        std::fs::create_dir_all(&readable).unwrap();
+        let host = checked_host_with(serde_json::json!({
+            "process": {"execute": ["/bin/sh"]},
+            "fs": {"read": [readable]}
+        }));
+        let cwd = serde_json::to_string(&readable).unwrap();
+        host.eval_source(&format!(
+            r#"import process from 'process';import {{text}} from 'nsh:rt';
+            process.run('/bin/sh',['-c','pwd']).then(r=>text(JSON.stringify(['default',r.stdout.trim()===process.dataDir])));
+            let refused=false;try{{process.spawn('/bin/sh',[],{{cwd:{cwd}}})}}catch(e){{refused=String(e).includes('write is not granted')}}
+            text(JSON.stringify(['read-only',refused]));"#
+        ))
+        .unwrap();
+        finish(&host);
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        let texts = ops
+            .into_iter()
+            .filter_map(|op| match op {
+                Op::CreateText { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            texts.contains(&r#"["default",true]"#.to_owned()),
+            "{texts:?}"
+        );
+        assert!(
+            texts.contains(&r#"["read-only",true]"#.to_owned()),
+            "{texts:?}"
+        );
+        std::fs::remove_dir_all(readable).unwrap();
     }
     #[cfg(target_os = "linux")]
     #[test]

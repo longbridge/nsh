@@ -42,9 +42,12 @@ trusted: every limit and check is enforced in Rust, never in JS.
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
-- **Desktop system APIs**: `nsh/process` and `fs/promises` check the intersection of the declaration and the optional host
-  grant in Rust. Process commands match exactly: a grant for `codex` grants that command, while `/usr/bin/codex`
-  requires its own entry. The runtime launches the executable directly with an argument array. Filesystem checks
+- **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
+  declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
+  command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an
+  argument array, in the app data directory or a `cwd` within an `fs.write` root, with a cleared environment
+  refilled from the host's `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_*`
+  and the names `process.env` grants (`process.rs`). Filesystem checks
   reject traversal and canonicalize the nearest existing ancestor before checking containment in each granted root,
   including symlinks and paths whose final components will be created. The operation then runs in the granted
   root, opened once (on Unix component by component with `O_NOFOLLOW` from `/`) as a cap-std `Dir`, so no symlink

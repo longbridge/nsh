@@ -58,7 +58,7 @@ fn finish(host: &Host) {
 #[test]
 fn sequential_spawn_and_gc_leave_no_retired_registry_entries() {
     let (host, dir) = configured();
-    host.eval_source("import {Process} from 'nsh/process'; globalThis.Process = Process;")
+    host.eval_source("import process from 'process'; globalThis.Process = process;")
         .unwrap();
     for _ in 0..100 {
         // Even a listener capturing its child must stop rooting the child at exit.
@@ -93,7 +93,7 @@ fn sequential_spawn_and_gc_leave_no_retired_registry_entries() {
 #[test]
 fn retained_child_delivers_late_exit_after_registry_release_and_gc() {
     let (host, dir) = configured();
-    host.eval_source("import {Process} from 'nsh/process'; globalThis.child = Process.spawn('/bin/sh', ['-c','exit 17']);").unwrap();
+    host.eval_source("import process from 'process'; globalThis.child = process.spawn('/bin/sh', ['-c','exit 17']);").unwrap();
     finish(&host);
     host.with_raw(|ctx| {
         assert!(super::processes(ctx).entries.borrow().is_empty());
@@ -133,7 +133,7 @@ fn process_cwd_uses_host_plugin_and_home_anchors_with_escape_checks() {
     host.set_system_paths(paths);
     let declared = Capabilities::from_json(&serde_json::json!({
         "process": {"execute": ["/bin/sh"]},
-        "fs": {"read": ["${pluginDir}", "${homeDir}"]}
+        "fs": {"write": ["${pluginDir}", "${homeDir}"]}
     }))
     .unwrap();
     host.set_system_access(
@@ -145,10 +145,9 @@ fn process_cwd_uses_host_plugin_and_home_anchors_with_escape_checks() {
     );
     host.eval_source(
         r#"
-        import {Process} from 'nsh/process';
         import process from 'process';
         import {text} from 'nsh:rt';
-        Process.run('/bin/sh',['-c','pwd'],{cwd:'${pluginDir}'})
+        process.run('/bin/sh',['-c','pwd'],{cwd:'${pluginDir}'})
             .then(r=>text(JSON.stringify(['plugin',r.stdout.trim()])));
         process.run('/bin/sh',['-c','pwd'],{cwd:'${homeDir}'})
             .then(r=>text(JSON.stringify(['home',r.stdout.trim()])));

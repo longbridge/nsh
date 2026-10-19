@@ -1,10 +1,12 @@
-//! Desktop subprocesses owned by one VM. Pipe readers never enter QuickJS;
-//! they send bounded events and wake the engine, which delivers them in a JS turn.
+//! Desktop subprocesses owned by one VM, the native side of the `process`
+//! module (`standard/process.rs` frames streams and results for JS). Pipe
+//! readers never enter QuickJS; they send bounded events and wake the engine,
+//! which delivers them in a JS turn.
 
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    ffi::{CStr, CString, c_int},
+    ffi::{CStr, CString, OsString, c_int},
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -22,7 +24,6 @@ use rquickjs::qjs;
 
 use crate::{
     dom,
-    modules::{Export, Item, Ts},
     reactive::{self, arg},
 };
 
@@ -30,8 +31,25 @@ type Value = qjs::JSValue;
 type Context = qjs::JSContext;
 type Wake = Arc<dyn Fn() + Send + Sync>;
 const U: Value = qjs::JS_UNDEFINED;
+/// Output one VM holds in flight, and what `run` captures per stream.
 const QUEUE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CHILDREN: usize = 32;
+/// `run`'s deadline when none is given.
+const RUN_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a child has to exit after SIGTERM before it is killed.
+const GRACE: Duration = Duration::from_millis(250);
+/// Host variables every child gets; others only when `capabilities.process.env`
+/// grants them. Names match regardless of case; `LC_*` are included too.
+const CHILD_ENV: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "LANG",
+];
 
 enum Input {
     Write(Vec<u8>),
@@ -52,8 +70,7 @@ struct Entry {
     stdout: String,
     stderr: String,
     capture: bool,
-    max_output: usize,
-    per_stream: bool,
+    overflowed: bool,
     handle: Weak<HandleState>,
     queued_input: Arc<AtomicUsize>,
     stdin_closed: Cell<bool>,
@@ -177,30 +194,6 @@ fn option_text(ctx: *mut Context, v: Value, key: &CStr) -> Result<Option<String>
     free(ctx, x);
     result
 }
-fn option_number(
-    ctx: *mut Context,
-    v: Value,
-    key: &CStr,
-    default: usize,
-    max: usize,
-) -> Result<usize, String> {
-    let x = get(ctx, v, key);
-    if nullish(x) {
-        free(ctx, x);
-        return Ok(default);
-    }
-    let mut n = 0.0;
-    // SAFETY: conversion of a live property value.
-    let ok = unsafe { qjs::JS_IsNumber(x) && qjs::JS_ToFloat64(ctx, &mut n, x) == 0 };
-    free(ctx, x);
-    if !ok || !n.is_finite() || n < 1.0 || n.fract() != 0.0 || n > max as f64 {
-        return Err(format!(
-            "{} must be an integer from 1 to {max}",
-            key.to_string_lossy()
-        ));
-    }
-    Ok(n as usize)
-}
 fn available(ctx: *mut Context) -> bool {
     // SAFETY: short projection of renderer state.
     cfg!(any(
@@ -211,12 +204,11 @@ fn available(ctx: *mut Context) -> bool {
 }
 
 struct Options {
-    command: PathBuf,
+    command: String,
     args: Vec<String>,
     cwd: PathBuf,
     timeout: Option<Duration>,
-    max_output: usize,
-    standard: bool,
+    env: Vec<(OsString, OsString)>,
 }
 
 fn options(
@@ -224,17 +216,17 @@ fn options(
     argc: c_int,
     argv: *mut Value,
     capture: bool,
-    standard: bool,
 ) -> Result<Options, String> {
     if !available(ctx) {
-        return Err("nsh/process is available on desktop hosts".into());
+        return Err("process is available on desktop hosts".into());
     }
     let command = text(ctx, arg(argc, argv, 0))?;
     if command.is_empty() || command.contains('\0') {
         return Err("invalid executable".into());
     }
     let shared = dom::shared(ctx);
-    if !shared.system_access.borrow().allows_process(&command) {
+    let access = shared.system_access.borrow().clone();
+    if !access.allows_process(&command) {
         return Err(format!("process capability denied for `{command}`"));
     }
     let argv_value = arg(argc, argv, 1);
@@ -271,107 +263,76 @@ fn options(
     } else {
         option_text(ctx, opts, c"cwd")?.map(PathBuf::from)
     };
-    let cwd = if standard && requested_cwd.is_none() {
-        std::env::current_dir().map_err(|e| e.to_string())?
-    } else {
-        let data_dir = data_dir.ok_or("host did not configure an application data directory")?;
-        let cwd = requested_cwd.unwrap_or_else(|| data_dir.clone());
-        shared.system_access.borrow().authorize_file_with_paths(
+    let cwd = match requested_cwd {
+        // A child may write where it runs: its directory needs a write grant.
+        Some(cwd) => access.authorize_file_with_paths(
             &cwd,
-            &data_dir,
+            &data_dir.unwrap_or_default(),
             &shared.system_paths.borrow(),
-            false,
-        )?
+            true,
+        )?,
+        // The app's own data directory, which needs no grant.
+        None => {
+            let dir = data_dir.ok_or(
+                "this host configured no app data directory for a default cwd; pass options.cwd",
+            )?;
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| format!("could not create the app data directory: {e}"))?;
+            dir
+        }
     };
     if !cwd.is_dir() {
         return Err("cwd must be an existing directory".into());
     }
-    // Resolve before changing cwd. Child lookup never consults a workspace or app-provided PATH.
-    let command = if standard && capture {
-        PathBuf::from(command)
+    let value = if nullish(opts) {
+        U
     } else {
-        resolve_executable(&command)?
+        get(ctx, opts, c"timeoutMs")
     };
-    let default_ms = if standard { 30_000 } else { 10_000 };
-    let timeout = if standard {
-        let value = if nullish(opts) {
-            U
-        } else {
-            get(ctx, opts, c"timeoutMs")
-        };
-        let result = if nullish(value) {
-            Ok(capture.then(|| Duration::from_millis(default_ms)))
-        } else {
-            let mut ms = 0.0;
-            // SAFETY: converting the owned timeout property of the options object.
-            if !unsafe { qjs::JS_IsNumber(value) && qjs::JS_ToFloat64(ctx, &mut ms, value) == 0 }
-                || !ms.is_finite()
-                || ms <= 0.0
-                || ms > u32::MAX as f64
-            {
-                Err("process timeoutMs must be a positive number of milliseconds".to_owned())
-            } else {
-                Ok(Some(Duration::from_secs_f64(ms / 1000.0)))
-            }
-        };
-        free(ctx, value);
-        result?
-    } else if nullish(opts) {
-        if capture {
-            Some(Duration::from_millis(default_ms))
-        } else {
-            None
-        }
+    let timeout = if nullish(value) {
+        Ok(capture.then_some(RUN_TIMEOUT))
     } else {
-        let t = get(ctx, opts, c"timeoutMs");
-        let supplied = !nullish(t);
-        free(ctx, t);
-        if supplied || capture {
-            Some(Duration::from_millis(option_number(
-                ctx,
-                opts,
-                c"timeoutMs",
-                default_ms as usize,
-                if standard {
-                    u32::MAX as usize
-                } else {
-                    3_600_000
-                },
-            )? as u64))
-        } else {
-            None
-        }
-    };
-    let max_output = if standard {
-        QUEUE_BYTES
-    } else if nullish(opts) {
-        1024 * 1024
-    } else {
-        option_number(ctx, opts, c"maxOutputBytes", 1024 * 1024, QUEUE_BYTES)?
-    };
-    if !nullish(opts) && !standard {
-        if let Some(stdin) = option_text(ctx, opts, c"stdin")?
-            && stdin != "pipe"
+        let mut ms = 0.0;
+        // SAFETY: converting the owned timeout property of the options object.
+        if !unsafe { qjs::JS_IsNumber(value) && qjs::JS_ToFloat64(ctx, &mut ms, value) == 0 }
+            || !ms.is_finite()
+            || ms <= 0.0
+            || ms > u32::MAX as f64
         {
-            return Err("stdin must be 'pipe'".into());
+            Err("process timeoutMs must be a positive number of milliseconds".to_owned())
+        } else {
+            Ok(Some(Duration::from_secs_f64(ms / 1000.0)))
         }
-        let env = get(ctx, opts, c"env");
-        let has_env = !nullish(env);
-        free(ctx, env);
-        if has_env && !standard {
-            return Err(
-                "custom environment is not supported; children inherit the host environment".into(),
-            );
-        }
-    }
+    };
+    free(ctx, value);
     Ok(Options {
         command,
         args,
         cwd,
-        timeout,
-        max_output,
-        standard,
+        timeout: timeout?,
+        env: child_env(&access),
     })
+}
+
+/// The host variables a child gets: [`CHILD_ENV`], `LC_*`, and the names both
+/// the app's `capabilities.process.env` and its host grant list. Never the
+/// whole host environment.
+fn child_env(access: &nsh_core::access::Access) -> Vec<(OsString, OsString)> {
+    let listed = |names: &[String], name: &str| names.iter().any(|n| n.eq_ignore_ascii_case(name));
+    std::env::vars_os()
+        .filter(|(name, _)| {
+            let Some(name) = name.to_str() else {
+                return false;
+            };
+            CHILD_ENV.iter().any(|n| n.eq_ignore_ascii_case(name))
+                || name.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("LC_"))
+                || (listed(&access.declared.process.env, name)
+                    && access
+                        .granted
+                        .as_ref()
+                        .is_none_or(|g| listed(&g.process.env, name)))
+        })
+        .collect()
 }
 
 fn resolve_executable(command: &str) -> Result<PathBuf, String> {
@@ -420,28 +381,21 @@ struct Mailbox {
     tx: mpsc::Sender<Event>,
     queued: Arc<AtomicUsize>,
     stopped: Arc<AtomicBool>,
-    overflow: Arc<AtomicBool>,
+    unreadable: Arc<AtomicBool>,
     wake: Option<Wake>,
-    backpressure: bool,
 }
 impl Mailbox {
+    /// Queues output, waiting while the VM already holds [`QUEUE_BYTES`].
     fn output(&self, stderr: bool, chunk: String) -> bool {
-        if self.stopped.load(Ordering::Acquire) {
-            return false;
-        }
         let len = chunk.len();
         loop {
+            if self.stopped.load(Ordering::Acquire) {
+                return false;
+            }
             if self.queued.fetch_add(len, Ordering::AcqRel) + len <= QUEUE_BYTES {
                 break;
             }
             self.queued.fetch_sub(len, Ordering::AcqRel);
-            if !self.backpressure {
-                self.overflow.store(true, Ordering::Release);
-                return false;
-            }
-            if self.stopped.load(Ordering::Acquire) {
-                return false;
-            }
             thread::sleep(Duration::from_millis(5));
         }
         if self.tx.send(Event::Output(self.id, stderr, chunk)).is_err() {
@@ -487,7 +441,7 @@ fn prepare_pipe(pipe: &impl Pipe) -> std::io::Result<()> {
 
 fn read_pipe(mut pipe: impl Read + Pipe, mailbox: Mailbox, stderr: bool, stop: Arc<AtomicBool>) {
     if prepare_pipe(&pipe).is_err() {
-        mailbox.overflow.store(true, Ordering::Release);
+        mailbox.unreadable.store(true, Ordering::Release);
         return;
     }
     let mut buffer = [0; 4096];
@@ -629,16 +583,16 @@ fn supervise(
     let mut terminating = None;
     let mut error = None;
     let status = loop {
-        let mut kill =
-            mailbox.stopped.load(Ordering::Acquire) || mailbox.overflow.load(Ordering::Acquire);
-        if mailbox.overflow.load(Ordering::Acquire) {
-            error.get_or_insert_with(|| "process output queue exceeded 8 MB".to_owned());
+        let mut kill = mailbox.stopped.load(Ordering::Acquire);
+        if mailbox.unreadable.load(Ordering::Acquire) {
+            kill = true;
+            error.get_or_insert_with(|| "process output could not be read".to_owned());
         }
         if timeout.is_some_and(|limit| started.elapsed() >= limit) {
             kill = true;
             error.get_or_insert_with(|| "process timed out".to_owned());
         }
-        // A pipe write may block: stdin is written on its own thread below, never this supervisor.
+        // A pipe write may block: stdin is written on its own thread, never this supervisor.
         match input.recv_timeout(Duration::from_millis(10)) {
             Ok(Input::Write(bytes)) => {
                 let _ = writer_tx.send(Input::Write(bytes));
@@ -654,7 +608,7 @@ fn supervise(
             terminating = Some(Instant::now());
             let _ = writer_tx.send(Input::Close);
         }
-        if terminating.is_some_and(|at| at.elapsed() >= Duration::from_millis(250)) {
+        if terminating.is_some_and(|at: Instant| at.elapsed() >= GRACE) {
             terminate(&mut child, true);
         }
         match child.try_wait() {
@@ -702,18 +656,12 @@ fn start(
 ) -> Result<(u32, u32), String> {
     let p = processes(ctx);
     if p.entries.borrow().len() >= MAX_CHILDREN {
-        return Err("a VM may run at most 32 children".into());
+        return Err(format!("a VM may run at most {MAX_CHILDREN} children"));
     }
-    let executable = if opts.standard && capture {
-        resolve_executable(opts.command.to_str().ok_or("invalid executable encoding")?)?
-    } else {
-        opts.command.clone()
-    };
-    let mut cmd = Command::new(executable);
-    if opts.standard {
-        cmd.env_clear();
-    }
-    cmd.args(opts.args)
+    let mut cmd = Command::new(resolve_executable(&opts.command)?);
+    cmd.env_clear()
+        .envs(opts.env)
+        .args(opts.args)
         .current_dir(opts.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -726,6 +674,7 @@ fn start(
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: a console child gets no console window of its own.
         cmd.creation_flags(0x08000000);
     }
     let child = cmd
@@ -745,9 +694,8 @@ fn start(
         tx: p.tx.clone(),
         queued: p.queued.clone(),
         stopped: p.stopped.clone(),
-        overflow: Arc::new(AtomicBool::new(false)),
+        unreadable: Arc::new(AtomicBool::new(false)),
         wake: shared.system_wake.borrow().clone(),
-        backpressure: opts.standard,
     };
     let queued_input = Arc::new(AtomicUsize::new(0));
     let worker_input = queued_input.clone();
@@ -766,8 +714,7 @@ fn start(
             stdout: String::new(),
             stderr: String::new(),
             capture,
-            max_output: opts.max_output,
-            per_stream: opts.standard,
+            overflowed: false,
             handle: Weak::new(),
             queued_input,
             stdin_closed: Cell::new(capture),
@@ -792,24 +739,14 @@ fn start(
     Ok((id, pid))
 }
 
+/// Capability, option and launch errors throw.
 unsafe extern "C" fn spawn(
     ctx: *mut Context,
     _this: Value,
     argc: c_int,
     argv: *mut Value,
 ) -> Value {
-    spawn_impl(ctx, argc, argv, false)
-}
-unsafe extern "C" fn standard_spawn(
-    ctx: *mut Context,
-    _this: Value,
-    argc: c_int,
-    argv: *mut Value,
-) -> Value {
-    spawn_impl(ctx, argc, argv, true)
-}
-fn spawn_impl(ctx: *mut Context, argc: c_int, argv: *mut Value, standard: bool) -> Value {
-    let opts = match options(ctx, argc, argv, false, standard) {
+    let opts = match options(ctx, argc, argv, false) {
         Ok(o) => o,
         Err(e) => return throw(ctx, &e),
     };
@@ -852,27 +789,16 @@ fn spawn_impl(ctx: *mut Context, argc: c_int, argv: *mut Value, standard: bool) 
         child
     }
 }
+/// Capability and option errors throw; a launch failure rejects.
 unsafe extern "C" fn run(ctx: *mut Context, _this: Value, argc: c_int, argv: *mut Value) -> Value {
-    run_impl(ctx, argc, argv, false)
-}
-unsafe extern "C" fn standard_run(
-    ctx: *mut Context,
-    _this: Value,
-    argc: c_int,
-    argv: *mut Value,
-) -> Value {
-    run_impl(ctx, argc, argv, true)
-}
-fn run_impl(ctx: *mut Context, argc: c_int, argv: *mut Value, standard: bool) -> Value {
-    let options = options(ctx, argc, argv, true, standard);
-    if standard && let Err(message) = &options {
-        return throw(ctx, message);
-    }
+    let options = match options(ctx, argc, argv, true) {
+        Ok(o) => o,
+        Err(message) => return throw(ctx, &message),
+    };
     let mut callbacks = [U; 2];
     // SAFETY: creates an owned promise and two owned resolving functions.
     let promise = unsafe { qjs::JS_NewPromiseCapability(ctx, callbacks.as_mut_ptr()) };
-    let result = options.and_then(|o| start(ctx, o, true, callbacks[0], callbacks[1]));
-    if let Err(e) = result {
+    if let Err(e) = start(ctx, options, true, callbacks[0], callbacks[1]) {
         call(ctx, callbacks[1], string(ctx, &e));
         free(ctx, callbacks[0]);
         free(ctx, callbacks[1]);
@@ -1017,24 +943,13 @@ pub(crate) fn pump(ctx: *mut Context) -> bool {
                     let Some(e) = entries.get_mut(&id) else {
                         continue;
                     };
-                    if e.capture {
-                        let captured = if e.per_stream {
-                            if stderr {
-                                e.stderr.len()
-                            } else {
-                                e.stdout.len()
-                            }
-                        } else {
-                            e.stdout.len() + e.stderr.len()
-                        };
-                        if captured + chunk.len() > e.max_output {
+                    if e.capture && !e.overflowed {
+                        let captured = if stderr { &mut e.stderr } else { &mut e.stdout };
+                        if captured.len() + chunk.len() > QUEUE_BYTES {
                             let _ = e.input.send(Input::Kill);
-                            e.stderr = "process capture exceeded maxOutputBytes".into();
-                            e.max_output = 0;
-                        } else if stderr {
-                            e.stderr.push_str(&chunk);
+                            e.overflowed = true;
                         } else {
-                            e.stdout.push_str(&chunk);
+                            captured.push_str(&chunk);
                         }
                     }
                     e.callbacks[usize::from(stderr)]
@@ -1054,8 +969,10 @@ pub(crate) fn pump(ctx: *mut Context) -> bool {
                         continue;
                     };
                     drop(entries);
-                    if e.max_output == 0 {
-                        error = Some("process capture exceeded maxOutputBytes".into());
+                    if e.overflowed {
+                        error = Some(format!(
+                            "process output exceeded {QUEUE_BYTES} bytes on one stream"
+                        ));
                     }
                     // SAFETY: fresh result object owns all of its property values.
                     let value = unsafe { qjs::JS_NewObject(ctx) };
@@ -1130,8 +1047,8 @@ pub(crate) fn has_pending(ctx: *mut Context) -> bool {
     !processes(ctx).entries.borrow().is_empty()
 }
 
-/// Checked standard process functions with empty child environments and reference limits.
-pub(crate) fn standard_module(ctx: *mut Context) -> Value {
+/// The native `spawn` and `run` the `process` module frames for JS.
+pub(crate) fn module(ctx: *mut Context) -> Value {
     // SAFETY: a fresh object takes both native functions.
     unsafe {
         let object = qjs::JS_NewObject(ctx);
@@ -1139,88 +1056,17 @@ pub(crate) fn standard_module(ctx: *mut Context) -> Value {
             ctx,
             object,
             c"spawn",
-            reactive::new_function(ctx, c"spawn", standard_spawn, 3),
+            reactive::new_function(ctx, c"spawn", spawn, 3),
         );
         put(
             ctx,
             object,
             c"run",
-            reactive::new_function(ctx, c"run", standard_run, 3),
+            reactive::new_function(ctx, c"run", run, 3),
         );
         object
     }
 }
-
-pub(crate) fn module(ctx: *mut Context) -> Value {
-    // SAFETY: fresh module object owns both native functions.
-    unsafe {
-        let v = qjs::JS_NewObject(ctx);
-        put(
-            ctx,
-            v,
-            c"spawn",
-            reactive::new_function(ctx, c"spawn", spawn, 3),
-        );
-        put(ctx, v, c"run", reactive::new_function(ctx, c"run", run, 3));
-        v
-    }
-}
-
-/// `nsh/process`'s native exports and colocated generated declarations.
-pub(crate) const EXPORTS: &[Item] = &[
-    (
-        "isAvailable",
-        Export::Value(|ctx| {
-            if available(ctx) {
-                qjs::JS_TRUE
-            } else {
-                qjs::JS_FALSE
-            }
-        }),
-        Ts::value("Desktop subprocess support.", "boolean"),
-    ),
-    (
-        "Process",
-        Export::Value(module),
-        Ts::value(
-            "Subprocesses owned by this app VM; capabilities are checked before launch.",
-            "ProcessModule",
-        ),
-    ),
-];
-
-/// TypeScript types assembled into the generated module declaration.
-pub(crate) const TYPES: &str = r#"
-export interface ProcessOptions {
-  /** Existing directory within a filesystem read grant; defaults to the app data directory. */
-  cwd?: string;
-  /** Children inherit the host environment, including its PATH. No shell is started. */
-  stdin?: "pipe";
-  /** Terminates the process tree after this duration; run defaults to 10 seconds. */
-  timeoutMs?: number;
-  /** run's combined stdout/stderr limit, default 1 MB, maximum 8 MB. */
-  maxOutputBytes?: number;
-}
-export interface ProcessExit { code: number | null; signal?: number; error?: string; }
-export interface ProcessResult extends ProcessExit { stdout: string; stderr: string; }
-export interface ChildProcess {
-  readonly pid: number;
-  /** Output is incremental UTF-8; exit follows the final output and fires once per listener. */
-  on(event: "stdout" | "stderr", listener: (text: string) => void): void;
-  on(event: "exit", listener: (result: ProcessExit) => void): void;
-  /** Enqueues UTF-8 stdin; throws if the outstanding queue exceeds 1 MB. */
-  write(text: string): void;
-  closeStdin(): void;
-  /** Terminates the complete child process group, escalating after 250 ms. */
-  kill(): void;
-}
-export interface ProcessModule {
-  /** Direct execution; a launch failure throws synchronously. VM shutdown terminates its children. */
-  spawn(command: string, args?: readonly string[], options?: ProcessOptions): ChildProcess;
-  /** Captures bounded output; launch failures, timeouts and output limits reject. */
-  run(command: string, args?: readonly string[], options?: ProcessOptions): Promise<ProcessResult>;
-}
-"#;
 
 #[cfg(test)]
 #[path = "process_tests.rs"]

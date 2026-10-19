@@ -48,7 +48,39 @@ LLRT 实现固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`。工具模块�
 
 ## 进程
 
-`process.spawn` / `run` 与 [nsh/process](./nsh-process.md) 使用同一套权限和进程生命周期。
+`process.spawn` 和 `process.run` 在桌面宿主（macOS、Windows 和 Linux）上启动命令。运行时以参数数组直接执行程序，不经过 shell，并管理其管道；stdout 和 stderr 以增量 UTF-8 送达。
+
+```json
+{
+  "capabilities": {
+    "process": { "execute": ["git"], "env": ["GIT_AUTHOR_NAME"] },
+    "fs": { "write": ["${dataDir}"] }
+  }
+}
+```
+
+命令须与 `process.execute` 完全一致：`git` 和 `/usr/bin/git` 是两项不同的授权。裸命令通过宿主 `PATH` 中的绝对目录解析。子进程的环境是宿主的 `PATH`、`HOME`、`USERPROFILE`、`SystemRoot`、`TEMP`、`TMP`、`TMPDIR`、`LANG` 和 `LC_*`，加上 `process.env` 授权的变量名。子进程在应用的数据目录（不存在时创建）中运行，或在 `cwd` 中运行；`cwd` 须是 `fs.write` 根目录内已存在的目录，因为子进程可以在其运行目录中写入。嵌入应用可以进一步缩小授权。
+
+```ts
+import process from "process";
+
+const { code, stdout } = await process.run("git", ["status", "--short"]);
+const child = process.spawn("git", ["log", "--oneline"], { lines: true });
+child.on("stdout", (line) => console.log(line));
+child.on("exit", ({ code, signal }) => console.log("done", code, signal));
+```
+
+`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`exit` 在最后一次输出之后触发一次，参数为 `{ code, signal, error? }`；之后添加的监听器会立即收到它。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL。
+
+| 限制 | 值 |
+|---|---|
+| `timeoutMs` | 最多 4,294,967,295 ms；`run` 默认 30 秒，`spawn` 运行到退出 |
+| `run` 的捕获 | 每个流 8 MiB |
+| `lines: true` 时的单行 | 8 MiB |
+| 每个 VM 的子进程 | 32 |
+| 每个 VM 进行中的输出 | 8 MiB；读取端等待 JS 取走 |
+| 每个子进程待写入的 stdin | 1 MiB；超出时 `write` 抛出错误 |
+| 监听器 | 每个子进程每个事件 64 个 |
 
 ## 网络授权与边界
 

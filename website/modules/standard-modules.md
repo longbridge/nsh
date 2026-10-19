@@ -48,7 +48,39 @@ Roots are absolute paths, `${dataDir}` (this app's data directory, chosen by the
 
 ## Processes
 
-`process.spawn` / `run` share the permissions and process lifecycle of [nsh/process](./nsh-process.md).
+`process.spawn` and `process.run` launch commands on desktop hosts (macOS, Windows and Linux). The runtime executes the program directly with an argument array, with no shell, and owns its pipes; stdout and stderr arrive as incremental UTF-8.
+
+```json
+{
+  "capabilities": {
+    "process": { "execute": ["git"], "env": ["GIT_AUTHOR_NAME"] },
+    "fs": { "write": ["${dataDir}"] }
+  }
+}
+```
+
+Commands match `process.execute` exactly: `git` and `/usr/bin/git` are separate grants. Bare commands resolve through the absolute directories of the host's `PATH`. A child's environment is `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`, `LANG` and `LC_*` from the host, plus the names `process.env` grants. A child runs in the app's data directory (created when missing), or in `cwd`, an existing directory within an `fs.write` root, since the child may write where it runs. An embedding host can narrow the grants.
+
+```ts
+import process from "process";
+
+const { code, stdout } = await process.run("git", ["status", "--short"]);
+const child = process.spawn("git", ["log", "--oneline"], { lines: true });
+child.on("stdout", (line) => console.log(line));
+child.on("exit", ({ code, signal }) => console.log("done", code, signal));
+```
+
+`run` resolves `{ code, stdout, stderr }` for any exit status and rejects on launch failures, timeouts and output past its limit. `spawn` returns a child at once; `stdin: "pipe"` enables `write` and `end`, and `lines: true` delivers complete lines. `exit` fires once, after the final output, with `{ code, signal, error? }`, and at once for a listener added later. `kill`, a timeout, the reactive owner's cleanup and the VM's teardown end the whole process tree: on Unix its process group gets SIGTERM and then SIGKILL after 250 ms.
+
+| Limit | Value |
+|---|---|
+| `timeoutMs` | Up to 4,294,967,295 ms; `run` defaults to 30 seconds, `spawn` runs until exit |
+| `run`'s capture | 8 MiB per stream |
+| One line with `lines: true` | 8 MiB |
+| Children per VM | 32 |
+| Output in flight per VM | 8 MiB; readers wait for JS to take it |
+| Pending stdin per child | 1 MiB; `write` throws past it |
+| Listeners | 64 per event per child |
 
 ## Network permissions and boundaries
 
