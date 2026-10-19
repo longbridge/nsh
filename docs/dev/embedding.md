@@ -120,7 +120,9 @@ NSH draws (`src/layers.rs`).
 - **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_core::ui::Theme`
   (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the components of
   the UI sets render with it instead of the app's own theme (`Core::set_host_theme`, which wins until cleared with
-  `None`), and the surface is drawn on its `background`. It applies at once and to every app loaded later, in their
+  `None`), and the surface is drawn on its `background`. The app's classes naming its tokens (`bg-primary`,
+  `bg-sidebar`, `rounded-(--radius)`; every key of the theme, so a GPUI Kit theme's own keys too) restyle with it;
+  keys it lacks keep the app's values. It applies at once and to every app loaded later, in their
   first frame (the surface starts engines with `Engine::start_with`, sending the theme before the start).
   `set_appearance(Appearance::Light | Dark, cx)` is the host's mode, standing in for the system's (`System` follows
   the window again); an app that sets its own appearance still wins, as over the system's. The example's

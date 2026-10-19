@@ -135,7 +135,37 @@ With this theme, `bg-brand-500`, `text-brand` (the `DEFAULT` shade), `border-ink
 
 Unknown keys and invalid values are build errors (`nsh.json: tailwind: unknown theme key 'colours'`). The theme is compiled into the bundle and applied before the first frame.
 
-The theme only shapes your own classes. The components of `nsh/ui/mobile` take their colors from the component theme, `"theme"` in `nsh.json` ([Components](../components/index.md)).
+The Tailwind theme only shapes your own classes. The components of `nsh/ui/mobile` take their colors from the component theme, `"theme"` in `nsh.json` ([Components](../components/index.md)).
+
+## Theme tokens
+
+Your classes can also name the colors and numbers of the component theme, so the app follows the same theme its components do:
+
+```tsx
+<View class="rounded-(--radius-lg) border border-border bg-background p-4">
+  <Text class="text-foreground">Balance</Text>
+  <Text class="text-muted-foreground">Updated just now</Text>
+  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
+    <Text class="text-primary-foreground text-(length:--font-size)">Continue</Text>
+  </View>
+</View>
+```
+
+A token is a key of the theme file with its dots written as dashes: `muted.foreground` is `muted-foreground`, `radius.lg` is `--radius-lg`. Keys ending in `.background` can leave it out: `bg-primary` is `primary.background`, and `bg-primary-background` works too.
+
+| Form | Takes | Example |
+|---|---|---|
+| A color name in any color utility | A theme color | `bg-primary`, `text-muted-foreground/70`, `border-t-border`, `ring-ring`, `from-accent`, `placeholder:text-muted-foreground` |
+| `(--name)`, Tailwind 4's variable shorthand | A theme color or number | `bg-(--primary)`, `rounded-(--radius)`, `p-(--gap-card)` |
+| `(color:--name)`, `(length:--name)`, `(number:--name)` | The same, typed where a utility takes several kinds | `text-(color:--link)`, `text-(length:--font-size)` |
+
+- **Every key is a token.** The keys the components use (`primary.background`, `border`, `radius`, `font.size`, ...; the list is in [Components](../components/index.md)), and any other key a theme file has: `"sidebar.background"` makes `bg-sidebar`, `"chart.up": "#16a34a"` makes `text-chart-up`, a number `"radius.card": 10` makes `rounded-(--radius-card)`. Numbers are points; `(number:--name)` passes the plain number.
+- **Both appearances.** A token has the light and the dark value of the theme: `bg-primary` switches with the appearance by itself, with no `dark:` class. A color the theme sets in one mode only is used in both.
+- **Your Tailwind colors win.** A name in `"tailwind"` `colors` or Tailwind's palette is that color, so `bg-primary` is a theme token only when the Tailwind theme has no color `primary`.
+- **The theme can change while the app runs.** When an app embedded in a native app is given that app's theme, and whenever the theme changes, the classes naming tokens are restyled natively, with no JavaScript running. Tokens the embedding app's theme does not have keep the values of the app's own `"theme"` (then the default theme's).
+- **Checked like other classes.** A name that is no token of the default theme or of the app's `"theme"` is an unknown class when building (`unknown class 'bg-chart-up'`). To use a token only the embedding app provides, give it a value in the app's `"theme"` too: that value shows when the app runs on its own.
+
+Classes naming tokens are resolved once per theme, like any other class: drawing them costs what a palette color does.
 
 ## The class check
 

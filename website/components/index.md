@@ -123,8 +123,9 @@ You can also write the theme's content inline as the value. The format is gpui-k
 - If you leave out a pressed color (`primary.active.background`, `secondary.active.background`,
   `danger.active.background`, ...), NSH derives it from the base color: 12% darker in light mode, 12% lighter in
   dark mode.
-- Keys that only gpui-kit's desktop components use (sidebars, title bars, ...) are ignored, so you can use a gpui-kit
-  theme file as it is.
+- Keys the mobile components do not use (gpui-kit's sidebars and title bars, or your own such as `chart.up` or
+  `radius.card`) leave the components as they are, so you can use a gpui-kit theme file as it is. Your app's classes
+  can name every key: see [Theme tokens](../docs/tailwind.md#theme-tokens).
 - The bundler checks the theme when it builds. A missing file, invalid JSON, an unknown `mode` or a value that is not
   a color fails the build with an `nsh.json: theme: …` error.
 
