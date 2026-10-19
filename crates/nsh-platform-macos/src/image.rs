@@ -17,6 +17,12 @@
 //! the frame, so [`set`] waits for [`crate::decor::apply`] to see a size
 //! (or the next display frame, for views that stay empty).
 //!
+//! SVG images (sniffed from their bytes) are drawn by
+//! [`nsh_core::svg`] at the view's size in pixels (at its natural size, at
+//! the backing scale), then go through the same blur, color matrix, tint
+//! and cache as decoded bitmaps; their size is their intrinsic size in
+//! points (CSS pixels of the SVG). Canvases draw bitmaps only.
+//!
 //! Animated GIF / PNG / WebP images play through a keyframe animation of the
 //! layer's `contents`. `defaultSource` shows until the image arrives (and
 //! stays on error); an image that had to load fades in over `fadeDuration`
@@ -33,7 +39,7 @@ use std::{
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, GlobalQueueIdentifier};
 use nsh_core::{
     Command, EventKind, EventPayload, ImageOptions, ImageSource, NodeId, PayloadValue, ResizeMode,
-    geometry::{DevicePixels, size},
+    geometry::{DevicePixels, Points, Size, size},
 };
 use objc2::{
     AnyThread, DefinedClass, define_class, msg_send,
@@ -239,10 +245,13 @@ pub(crate) struct Decoded {
     pub(crate) key_times: Arc<[f64]>,
     /// One loop of the animation, in seconds.
     pub(crate) duration: f64,
-    /// The source's width in pixels.
+    /// The source's width in pixels (an SVG's: in whole points).
     pub(crate) width: u32,
-    /// The source's height in pixels.
+    /// The source's height in pixels (an SVG's: in whole points).
     pub(crate) height: u32,
+    /// An SVG's intrinsic size, unrounded: what it lays out at, whatever its
+    /// file name says.
+    pub(crate) points: Option<Size<Points>>,
 }
 
 // SAFETY: CGImages are immutable and documented as thread-safe; they are
@@ -264,12 +273,25 @@ impl Decoded {
 }
 
 /// How a request decodes: the longer side in pixels (0: natural), the
-/// blur radius in pixels, a color matrix.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// backing scale (what an SVG at its natural size is drawn at), the blur
+/// radius in pixels, a color matrix.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Decoding {
     max_pixels: u32,
+    scale: f64,
     blur: f64,
     matrix: Option<[f32; 20]>,
+}
+
+impl Default for Decoding {
+    fn default() -> Self {
+        Decoding {
+            max_pixels: 0,
+            scale: 1.0,
+            blur: 0.0,
+            matrix: None,
+        }
+    }
 }
 
 impl Decoding {
@@ -277,6 +299,9 @@ impl Decoding {
     /// size or look is another image.
     fn key(&self, location: &str) -> String {
         let mut key = format!("{}@", self.max_pixels);
+        if self.max_pixels == 0 && self.scale != 1.0 {
+            key.push_str(&format!("s{}@", self.scale));
+        }
         if self.blur > 0.0 {
             key.push_str(&format!("b{}@", self.blur));
         }
@@ -341,6 +366,8 @@ struct Loader {
     inflight: FxHashMap<String, Inflight>,
     /// Running reads and downloads, by location.
     downloads: FxHashMap<String, Vec<Want>>,
+    /// `Image.getSize` answers waiting for a measure off the main thread.
+    infos: FxHashMap<u64, InfoDone>,
 }
 
 thread_local! {
@@ -542,15 +569,46 @@ fn serve(location: &str, bytes: Arc<Vec<u8>>, want: Want) {
             });
         }
         Want::Info(done) => {
-            let data = CFData::from_bytes(&bytes);
-            // SAFETY: valid data; only the header is read.
-            let size = unsafe { CGImageSource::with_data(&data, None) }.map(|s| source_size(&s));
-            done(match size {
-                Some((w, h)) if w > 0 && h > 0 => Ok((w, h)),
-                _ => Err(format!("cannot read the size of {location}")),
+            // An SVG's size takes parsing it: measured off the main thread.
+            let id = with(|l| {
+                let id = l.tick();
+                l.infos.insert(id, done);
+                id
+            });
+            let what = location.to_owned();
+            in_background(move || {
+                let size =
+                    info_size(&bytes).ok_or_else(|| format!("cannot read the size of {what}"));
+                on_main(move || {
+                    if let Some(done) = with(|l| l.infos.remove(&id)) {
+                        done(size);
+                    }
+                });
             });
         }
     }
+}
+
+/// The size `Image.getSize` reports: pixels, or an SVG's whole points.
+fn info_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let size = if nsh_core::svg::sniff(bytes) {
+        nsh_core::svg::size(bytes)
+            .inspect_err(|e| log::warn!("{e}"))
+            .ok()
+            .map(svg_size)
+    } else {
+        let data = CFData::from_bytes(bytes);
+        // SAFETY: valid data; only the header is read.
+        unsafe { CGImageSource::with_data(&data, None) }.map(|s| source_size(&s))
+    };
+    size.filter(|(w, h)| *w > 0 && *h > 0)
+}
+
+/// An SVG's intrinsic size in whole points, as `onLoad` and
+/// `Image.getSize` report it.
+fn svg_size(size: Size<Points>) -> (u32, u32) {
+    let reported = nsh_core::svg::reported_size(size);
+    (reported.width.0 as u32, reported.height.0 as u32)
 }
 
 /// A decode finished: caches it and calls its waiters.
@@ -685,6 +743,9 @@ fn download(url: &NSURL, location: String) {
 
 /// Decodes (downsamples, blurs, filters) with ImageIO; any thread.
 fn decode(bytes: &[u8], d: Decoding) -> Option<Decoded> {
+    if nsh_core::svg::sniff(bytes) {
+        return decode_svg(bytes, d);
+    }
     let data = CFData::from_bytes(bytes);
     // SAFETY: valid data and option dictionaries of the documented types.
     unsafe {
@@ -740,7 +801,72 @@ fn decode(bytes: &[u8], d: Decoding) -> Option<Decoded> {
             duration: total as f64 / 100.0,
             width,
             height,
+            points: None,
         })
+    }
+}
+
+/// Draws an SVG for a view `d.max_pixels` pixels on its longer side, with
+/// its shorter side that long, so it stays sharp in every resize mode
+/// (natural: at its intrinsic size at the backing scale), then blurs and
+/// filters it as [`decode`] does bitmaps; any thread.
+fn decode_svg(bytes: &[u8], d: Decoding) -> Option<Decoded> {
+    let raster = match d.max_pixels {
+        0 => nsh_core::svg::rasterize_scaled(bytes, d.scale as f32),
+        n => nsh_core::svg::rasterize_covering(bytes, n),
+    }
+    .inspect_err(|e| log::warn!("{e}"))
+    .ok()?;
+    let image = rgba_image(&raster)?;
+    let image = if d.blur > 0.0 || d.matrix.is_some() {
+        crate::blur::filtered(&image, d.blur, d.matrix).unwrap_or(image)
+    } else {
+        image
+    };
+    let (width, height) = svg_size(raster.size);
+    Some(Decoded {
+        frames: Arc::new([image]),
+        key_times: Arc::new([0.0, 1.0]),
+        duration: 0.0,
+        width,
+        height,
+        points: Some(raster.size),
+    })
+}
+
+/// A CGImage of premultiplied sRGB RGBA pixels.
+fn rgba_image(raster: &nsh_core::svg::Raster) -> Option<CFRetained<CGImage>> {
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetBytesPerRow,
+        CGBitmapContextGetData, CGColorSpace, CGImageAlphaInfo, CGImageByteOrderInfo,
+        kCGColorSpaceSRGB,
+    };
+    let (width, height) = (raster.width as usize, raster.height as usize);
+    // SAFETY: a constant of CoreGraphics.
+    let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }))?;
+    // SAFETY: CoreGraphics allocates the pixels (null data) of an RGBA
+    // context of these dimensions; the rows are copied within
+    // `bytes_per_row * height` bytes while `context` lives.
+    unsafe {
+        let context = CGBitmapContextCreate(
+            std::ptr::null_mut(),
+            width,
+            height,
+            8,
+            width * 4,
+            Some(&space),
+            CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0,
+        )?;
+        let data = CGBitmapContextGetData(Some(&context)).cast::<u8>();
+        if data.is_null() {
+            return None;
+        }
+        let stride = CGBitmapContextGetBytesPerRow(Some(&context));
+        let pixels = std::slice::from_raw_parts_mut(data, stride * height);
+        for (row, src) in raster.pixels.chunks_exact(width * 4).enumerate() {
+            pixels[row * stride..row * stride + width * 4].copy_from_slice(src);
+        }
+        CGBitmapContextCreateImage(Some(&context))
     }
 }
 
@@ -828,10 +954,11 @@ fn frame_delay(source: &CGImageSource, i: usize) -> u32 {
     }
 }
 
-/// Loads `uri` (`https://…`, `asset:/…`, a file path, `data:`) at its
-/// natural size, through the cache, and hands over its (first) frame;
-/// `done` runs on the main thread (before this returns when it is cached:
-/// callers must not hold a borrow `done` takes).
+/// Loads the bitmap `uri` (`https://…`, `asset:/…`, a file path, `data:`)
+/// for a canvas, at its natural size, through the cache, and hands over its
+/// (first) frame; `done` runs on the main thread (before this returns when
+/// it is cached: callers must not hold a borrow `done` takes). Canvases
+/// draw bitmaps: an SVG is an image that failed to load.
 pub(crate) fn load(
     surface: &Rc<Surface>,
     uri: &str,
@@ -839,10 +966,21 @@ pub(crate) fn load(
 ) {
     match resolve(uri, surface.asset_base.borrow().as_ref()) {
         Some(location) => {
-            let done = move |r: Result<Decoded, String>| done(r.map(|d| d.frames[0].clone()));
+            let uri = uri.to_owned();
+            let done = move |r: Result<Decoded, String>| done(r.and_then(|d| bitmap(&uri, d)));
             request(location, Decoding::default(), None, Box::new(done));
         }
         None => done(Err(format!("unsupported image source `{uri}`"))),
+    }
+}
+
+/// The first frame of `image`, loaded from `uri`, unless it is an SVG.
+fn bitmap(uri: &str, image: Decoded) -> Result<CFRetained<CGImage>, String> {
+    match image.points {
+        Some(_) => Err(format!(
+            "{uri} is an SVG image: canvases draw bitmaps (PNG, JPEG, ...)"
+        )),
+        None => Ok(image.frames[0].clone()),
     }
 }
 
@@ -1016,6 +1154,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
         image.pending = false;
         let decoding = Decoding {
             max_pixels: (w.max(h) as CGFloat * scale).ceil() as u32,
+            scale,
             blur: ((image.options.blur_radius.0 + blur) as CGFloat * scale).max(0.0),
             matrix,
         };
@@ -1092,6 +1231,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
     };
     let plain = Decoding {
         max_pixels: decoding.max_pixels,
+        scale: decoding.scale,
         ..Decoding::default()
     };
     request(
@@ -1192,13 +1332,17 @@ fn density(uri: &str) -> f32 {
 }
 
 /// The natural size in points of `image` loaded from `source`: the size
-/// the source declares, or its pixels over the file name's density.
+/// the source declares, an SVG's intrinsic size, or its pixels over the
+/// file name's density.
 fn natural(image: &Decoded, source: Option<&ImageSource>) -> (f32, f32) {
     if let Some(size) = source
         .and_then(|s| s.size)
         .filter(|s| s.width.0 > 0.0 && s.height.0 > 0.0)
     {
         return (size.width.0, size.height.0);
+    }
+    if let Some(points) = image.points {
+        return (points.width.0, points.height.0);
     }
     let d = source.map_or(1.0, |s| density(&s.uri));
     (image.width as f32 / d, image.height as f32 / d)
@@ -1237,6 +1381,155 @@ mod tests {
         );
         assert_eq!(data_uri("data:text/plain,a%20b%zz").unwrap(), b"a b%zz");
         assert!(data_uri("data:nocomma").is_err());
+    }
+
+    const SVG_ICON: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="#000"/></svg>"##;
+    const SVG_LOGO: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="24"><rect width="24" height="24" fill="#f00"/><rect x="24" width="24" height="24" fill="#00f"/></svg>"##;
+
+    /// The pixels of `image` as premultiplied sRGB RGBA, row by row.
+    fn rgba(image: &CGImage) -> (usize, usize, Vec<u8>) {
+        use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+        use objc2_core_graphics::{
+            CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo,
+            kCGColorSpaceSRGB,
+        };
+        let (w, h) = (CGImage::width(Some(image)), CGImage::height(Some(image)));
+        let mut pixels = vec![0u8; w * h * 4];
+        // SAFETY: `pixels` holds `w * 4 * h` bytes and outlives the context.
+        unsafe {
+            let space = CGColorSpace::with_name(Some(kCGColorSpaceSRGB)).unwrap();
+            let context = CGBitmapContextCreate(
+                pixels.as_mut_ptr().cast(),
+                w,
+                h,
+                8,
+                w * 4,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0,
+            )
+            .unwrap();
+            CGContext::draw_image(
+                Some(&context),
+                CGRect::new(CGPoint::ZERO, CGSize::new(w as f64, h as f64)),
+                Some(image),
+            );
+        }
+        (w, h, pixels)
+    }
+
+    fn at((w, _, pixels): &(usize, usize, Vec<u8>), x: usize, y: usize) -> [u8; 4] {
+        let i = (y * w + x) * 4;
+        pixels[i..i + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn svg_decodes_at_the_view_size() {
+        let d = |max_pixels| Decoding {
+            max_pixels,
+            ..Decoding::default()
+        };
+        let icon = decode(SVG_ICON, d(54)).unwrap();
+        assert_eq!(icon.points, Some(Size::new(Points(24.0), Points(24.0))));
+        assert_eq!(
+            (icon.width, icon.height),
+            (24, 24),
+            "intrinsic size in points"
+        );
+        assert_eq!(icon.frames.len(), 1);
+        assert_eq!(icon.pixel_width(), 54);
+        let logo = decode(SVG_LOGO, d(144)).unwrap();
+        let first = &logo.frames[0];
+        assert_eq!(
+            (CGImage::width(Some(first)), CGImage::height(Some(first))),
+            (288, 144),
+            "the shorter side at the view's longer one: sharp when `cover` crops it"
+        );
+        // Natural size: at the backing scale.
+        assert_eq!(decode(SVG_LOGO, d(0)).unwrap().pixel_width(), 48);
+        let retina = Decoding {
+            scale: 2.0,
+            ..Decoding::default()
+        };
+        assert_eq!(decode(SVG_LOGO, retina).unwrap().pixel_width(), 96);
+        assert_ne!(retina.key("a.svg"), Decoding::default().key("a.svg"));
+        // Colours survive the trip through CGImage.
+        let pixels = rgba(first);
+        assert_eq!(at(&pixels, 10, 36), [255, 0, 0, 255]);
+        assert_eq!(at(&pixels, 270, 72), [0, 0, 255, 255]);
+        assert!(decode(b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect", d(24)).is_none());
+    }
+
+    #[test]
+    fn svg_info_reports_points() {
+        assert_eq!(info_size(SVG_ICON), Some((24, 24)));
+        assert_eq!(info_size(SVG_LOGO), Some((48, 24)));
+        assert_eq!(info_size(b"<svg><rect"), None);
+        // A file name's density does not apply to an SVG.
+        let source = ImageSource {
+            uri: "asset:/logo@2x.svg".into(),
+            size: None,
+        };
+        let logo = decode(SVG_LOGO, Decoding::default()).unwrap();
+        assert_eq!(natural(&logo, Some(&source)), (48.0, 24.0));
+        // Fractions lay out as they are; reports round them.
+        let odd = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10.5" height="10"/>"#;
+        let decoded = decode(odd, Decoding::default()).unwrap();
+        assert_eq!(natural(&decoded, None), (10.5, 10.0));
+        assert_eq!((decoded.width, decoded.height), (11, 10));
+        let huge = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1e30" height="1"/>"#;
+        assert_eq!(info_size(huge), Some((i32::MAX as u32, 1)));
+    }
+
+    /// A 1 × 1 PNG.
+    fn png_pixel() -> Vec<u8> {
+        base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==").unwrap()
+    }
+
+    #[test]
+    fn svg_is_no_canvas_image() {
+        let logo = decode(SVG_LOGO, Decoding::default()).unwrap();
+        let error = bitmap("asset:/logo.svg", logo).unwrap_err();
+        assert!(error.starts_with("asset:/logo.svg"), "{error}");
+        let png = decode(&png_pixel(), Decoding::default()).unwrap();
+        assert!(bitmap("asset:/a.png", png).is_ok());
+    }
+
+    #[test]
+    fn svg_tints_through_alpha() {
+        // `tintColor` shows a color through the image's alpha (a mask): the
+        // SVG's shape is opaque, the rest transparent, whatever its colour.
+        let icon = decode(
+            SVG_ICON,
+            Decoding {
+                max_pixels: 48,
+                ..Decoding::default()
+            },
+        )
+        .unwrap();
+        let pixels = rgba(&icon.frames[0]);
+        assert_eq!(at(&pixels, 24, 24)[3], 255);
+        assert_eq!(at(&pixels, 1, 1)[3], 0);
+        // Filters apply to SVGs as to bitmaps: an inverting matrix.
+        let mut invert = [0.0f32; 20];
+        invert[0] = -1.0;
+        invert[4] = 1.0;
+        invert[6] = -1.0;
+        invert[9] = 1.0;
+        invert[12] = -1.0;
+        invert[14] = 1.0;
+        invert[18] = 1.0;
+        let inverted = decode(
+            SVG_ICON,
+            Decoding {
+                max_pixels: 48,
+                matrix: Some(invert),
+                ..Decoding::default()
+            },
+        )
+        .unwrap();
+        let pixels = rgba(&inverted.frames[0]);
+        assert_eq!(at(&pixels, 24, 24), [255, 255, 255, 255]);
+        assert_eq!(at(&pixels, 1, 1)[3], 0);
     }
 
     #[test]
