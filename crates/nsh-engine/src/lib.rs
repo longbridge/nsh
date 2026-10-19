@@ -352,7 +352,7 @@ impl Bundle {
             bundle.policy.declared = Some(parse_capabilities(&json).map_err(io::Error::other)?);
         }
         bundle.app_id = read_app_id(&path.with_file_name("app.json"));
-        bundle.system_paths.plugin_dir = std::fs::canonicalize(path)?
+        bundle.system_paths.plugin_dir = nsh_core::access::canonicalize(path)?
             .parent()
             .map(std::path::Path::to_path_buf);
         Ok(bundle)
@@ -578,7 +578,7 @@ pub struct EngineConfig {
 
 fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
     let path = path.filter(|path| path.is_absolute())?;
-    std::fs::canonicalize(path)
+    nsh_core::access::canonicalize(&path)
         .ok()
         .filter(|path| path.is_dir())
 }
@@ -1976,7 +1976,7 @@ mod tests {
         let bundle = super::Bundle::read(&path).unwrap();
         assert_eq!(
             bundle.system_paths.plugin_dir,
-            Some(directory.canonicalize().unwrap())
+            Some(nsh_core::access::canonicalize(&directory).unwrap())
         );
         assert!(bundle.system_paths.home_dir.is_none());
         std::fs::remove_dir_all(directory).unwrap();

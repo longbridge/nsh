@@ -281,7 +281,9 @@ Things that were found the hard way. Read the section of the area you change bef
   (`native::take_keyboard`), and `--script`'s `type` / `key` post to that window while it has the focus. A
   `MoveFocus` right after the click needs a few hundred milliseconds before typed characters reach the page.
 - **`std::fs::canonicalize` returns verbatim paths** (`\\?\C:\…`), which rolldown and path prefix comparisons do not
-  take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid.
+  take: the bundler and the CLI canonicalize with `dunce::canonicalize`, which keeps plain paths when they are valid;
+  capability checks, trusted anchors and grant roots all go through `nsh_core::access::canonicalize`, which does the
+  same, so both sides of a containment check have one form.
 - **Git Bash sets `LANG`** whatever the user's settings: the Windows backend's locale is the user's regional format
   (`GetUserDefaultLocaleName`) and ignores `LANG` / `LC_*`, as Windows programs do.
 - **A `:` in a package's asset path is dangerous**: joined onto the assets directory, a `C:` segment replaces it and

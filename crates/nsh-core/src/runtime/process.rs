@@ -641,7 +641,7 @@ mod native {
                 return Err(JsError::Error("file is not executable".into()).with_code("EACCES"));
             }
         }
-        Ok(std::fs::canonicalize(path)?)
+        Ok(crate::access::canonicalize(path)?)
     }
 
     /// Launches `launch` under a supervisor: its id, pid, control and

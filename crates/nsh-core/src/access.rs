@@ -268,7 +268,11 @@ impl TrustedPaths {
                 let anchor = anchor
                     .filter(|p| p.is_absolute())
                     .ok_or_else(|| format!("host anchor {placeholder} unavailable"))?;
-                return Ok(anchor.join(tail.trim_start_matches('/')));
+                // Component by component: `/` separates nothing in a
+                // verbatim Windows anchor.
+                let mut path = anchor.to_path_buf();
+                path.extend(tail.split('/').filter(|part| !part.is_empty()));
+                return Ok(path);
             }
         }
         let path = PathBuf::from(root);
@@ -624,6 +628,66 @@ fn validate_path_pattern(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `path` resolved as [`std::fs::canonicalize`] resolves it, in the plain
+/// form where Windows has one: canonicalizing there gives verbatim paths
+/// (`\\?\C:\app`), which no path a host or app writes starts with, and
+/// in which `/` separates nothing. Grants, requests and trusted anchors
+/// are all compared in this form.
+pub fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    let path = std::fs::canonicalize(path)?;
+    #[cfg(windows)]
+    if let Some(plain) = path.to_str().and_then(without_verbatim_prefix) {
+        return Ok(PathBuf::from(plain));
+    }
+    Ok(path)
+}
+
+/// The plain form of the Windows verbatim path `path` (`\\?\C:\a` →
+/// `C:\a`, `\\?\UNC\server\share\a` → `\\server\share\a`), when it
+/// names the same file: under the legacy length limit, and no component
+/// that the plain form would read otherwise (empty, `.` or `..`, holding
+/// `/`, ending in a dot or space, or a device name such as `NUL` or
+/// `com1.txt`). `None` for any other path, which then stays as it is.
+/// Text only, so its tests run on every platform.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn without_verbatim_prefix(path: &str) -> Option<String> {
+    let rest = path.strip_prefix(r"\\?\")?;
+    let (plain, tail) = if let Some(unc) = rest.strip_prefix(r"UNC\") {
+        (format!(r"\\{unc}"), unc)
+    } else {
+        let bytes = rest.as_bytes();
+        if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || &bytes[1..3] != b":\\" {
+            return None;
+        }
+        (rest.to_owned(), &rest[3..])
+    };
+    if plain.len() >= 260 {
+        return None;
+    }
+    // A trailing separator ends a root (`C:\`) or a directory.
+    let tail = tail.strip_suffix('\\').unwrap_or(tail);
+    let device = |name: &str| {
+        let stem = name.split('.').next().unwrap_or(name).trim_end();
+        ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
+            .iter()
+            .any(|d| stem.eq_ignore_ascii_case(d))
+            || (stem.len() == 4
+                && ["COM", "LPT"]
+                    .iter()
+                    .any(|d| stem[..3].eq_ignore_ascii_case(d))
+                && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    };
+    let plain_component = |c: &str| {
+        !c.is_empty()
+            && c != "."
+            && c != ".."
+            && !c.contains('/')
+            && !c.ends_with(['.', ' '])
+            && !device(c)
+    };
+    (tail.is_empty() || tail.split('\\').all(plain_component)).then_some(plain)
+}
+
 // Resolve every existing ancestor, including symlinks. Missing tails are
 // permitted so creation receives the same boundary checks as reads.
 fn resolved_path(path: &Path) -> Result<PathBuf, String> {
@@ -635,7 +699,7 @@ fn resolved_path(path: &Path) -> Result<PathBuf, String> {
     loop {
         match std::fs::symlink_metadata(cursor) {
             Ok(_) => {
-                let mut resolved = std::fs::canonicalize(cursor).map_err(|e| e.to_string())?;
+                let mut resolved = canonicalize(cursor).map_err(|e| e.to_string())?;
                 for part in tail.into_iter().rev() {
                     resolved.push(part);
                 }
@@ -1001,6 +1065,66 @@ pub fn resolve_reference(base: &str, location: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn verbatim_windows_paths_compare_in_their_plain_form() {
+        use super::without_verbatim_prefix as plain;
+        assert_eq!(plain(r"\\?\C:\Users\a").as_deref(), Some(r"C:\Users\a"));
+        assert_eq!(plain(r"\\?\d:\").as_deref(), Some(r"d:\"));
+        assert_eq!(plain(r"\\?\C:\app\").as_deref(), Some(r"C:\app\"));
+        assert_eq!(
+            plain(r"\\?\UNC\server\share\a").as_deref(),
+            Some(r"\\server\share\a")
+        );
+        // Plain paths, and verbatim ones of other kinds, stay as they are.
+        for path in [
+            r"C:\a",
+            r"\\server\share",
+            "/home/a",
+            r"\\?\Volume{x}\a",
+            r"\\.\C:\a",
+        ] {
+            assert_eq!(plain(path), None, "{path}");
+        }
+        // Components the plain form reads otherwise keep the verbatim form.
+        for path in [
+            r"\\?\C:\a\NUL",
+            r"\\?\C:\a\com1.txt",
+            r"\\?\C:\a\Lpt9",
+            r"\\?\C:\a\b.",
+            r"\\?\C:\a\b ",
+            r"\\?\C:\a\..\b",
+            r"\\?\C:\a\.\b",
+            r"\\?\C:\a\\b",
+            r"\\?\C:\a/b",
+        ] {
+            assert_eq!(plain(path), None, "{path}");
+        }
+        assert_eq!(
+            plain(r"\\?\C:\a\com10\console").as_deref(),
+            Some(r"C:\a\com10\console")
+        );
+        let long = format!(r"\\?\C:\{}", "a".repeat(260));
+        assert_eq!(plain(&long), None);
+    }
+
+    #[test]
+    fn anchored_roots_join_their_tail_component_by_component() {
+        let app = PathBuf::from(if cfg!(windows) { r"C:\app" } else { "/app" });
+        let paths = super::TrustedPaths {
+            plugin_dir: Some(app.clone()),
+            home_dir: None,
+        };
+        let root = paths.resolve_root("${pluginDir}/a//b/", &app).unwrap();
+        assert_eq!(root, app.join("a").join("b"));
+        let names = root.components().rev().take(2).collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                Component::Normal("b".as_ref()),
+                Component::Normal("a".as_ref())
+            ]
+        );
+    }
     use super::*;
 
     fn caps(json: &str) -> Capabilities {

@@ -475,7 +475,7 @@ fn resolved(path: &Path) -> Result<PathBuf, String> {
     let mut current = path.to_path_buf();
     let mut tail = Vec::new();
     loop {
-        if let Ok(mut real) = current.canonicalize() {
+        if let Ok(mut real) = crate::access::canonicalize(&current) {
             real.extend(tail.into_iter().rev());
             return Ok(real);
         }

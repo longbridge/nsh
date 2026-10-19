@@ -158,7 +158,9 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         bytecode.policy.declared = bundle.capabilities.clone();
         bytecode.app_id = crate::package::app_id(entry).ok();
         let mut paths = nsh_core::access::TrustedPaths::default();
-        paths.plugin_dir = dunce::canonicalize(entry)?.parent().map(Path::to_path_buf);
+        paths.plugin_dir = nsh_core::access::canonicalize(entry)?
+            .parent()
+            .map(Path::to_path_buf);
         bytecode = bytecode.with_system_paths(paths);
         nsh_engine::App::Js(match bundle.source_map {
             Some(map) => bytecode.with_source_map(map),
@@ -170,7 +172,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         .as_ref()
         .map(|path| {
             std::fs::create_dir_all(path)?;
-            std::fs::canonicalize(path)
+            nsh_core::access::canonicalize(path)
         })
         .transpose()?;
 
