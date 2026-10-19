@@ -82,6 +82,11 @@ final class ImageBox extends View implements Node {
     private Object content;
     /** What it fades in over (a placeholder). */
     private Object previous;
+    /**
+     * The width {@code center} shows an SVG's bitmap at, in pixels: its intrinsic size at the display's density (0:
+     * a bitmap, shown a pixel per pixel).
+     */
+    private float contentWidth, previousWidth;
     private final Paint previousPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private long fadeStart;
     private int fading;
@@ -96,16 +101,20 @@ final class ImageBox extends View implements Node {
         invalidate();
     }
 
-    /** Shows {@code image} (a Bitmap or an animated Drawable), fading in over {@code fadeMs}. */
-    void setImage(Object image, int fadeMs) {
+    /** Shows {@code decoded} (a Bitmap or an animated Drawable, or nothing), fading in over {@code fadeMs}. */
+    void setImage(Images.Image decoded, int fadeMs) {
+        Object image = decoded == null ? null : decoded.content;
         if (content instanceof Drawable && content != image) {
             Drawable old = (Drawable) content;
             if (old instanceof Animatable) ((Animatable) old).stop();
             old.setCallback(null);
         }
         previous = fadeMs > 0 && content instanceof Bitmap ? content : null;
+        previousWidth = contentWidth;
         previousPaint.setShader(previous == null ? null : shader((Bitmap) previous));
         content = image;
+        boolean vector = decoded != null && decoded.vector;
+        contentWidth = vector ? decoded.width * getResources().getDisplayMetrics().density : 0;
         paint.setShader(image instanceof Bitmap ? shader((Bitmap) image) : null);
         if (image instanceof Drawable) {
             Drawable d = (Drawable) image;
@@ -148,13 +157,16 @@ final class ImageBox extends View implements Node {
             if (alpha < 1) postInvalidateOnAnimation();
             else previous = null;
         }
-        if (previous != null) draw(canvas, previous, previousPaint, 255);
-        if (content != null) draw(canvas, content, paint, Math.round(alpha * 255));
+        if (previous != null) draw(canvas, previous, previousWidth, previousPaint, 255);
+        if (content != null) draw(canvas, content, contentWidth, paint, Math.round(alpha * 255));
         decor.drawBorders(canvas);
     }
 
-    /** Draws {@code image} placed by the resize mode, inside the view's shape. */
-    private void draw(Canvas canvas, Object image, Paint paint, int alpha) {
+    /**
+     * Draws {@code image} placed by the resize mode, inside the view's shape; {@code center} shows it {@code natural}
+     * pixels wide (0: a pixel per pixel).
+     */
+    private void draw(Canvas canvas, Object image, float natural, Paint paint, int alpha) {
         float w = getWidth(), h = getHeight();
         float bw, bh;
         if (image instanceof Bitmap) {
@@ -169,9 +181,13 @@ final class ImageBox extends View implements Node {
             case 2:
                 matrix.setScale(w / bw, h / bh);
                 break;
-            case 3:
-                matrix.setTranslate((w - bw) / 2, (h - bh) / 2);
+            case 3: {
+                // An SVG at its intrinsic size, at most its bitmap's.
+                float scale = natural > 0 ? Math.min(1, natural / bw) : 1;
+                matrix.setScale(scale, scale);
+                matrix.postTranslate((w - bw * scale) / 2, (h - bh * scale) / 2);
                 break;
+            }
             default: {
                 float scale = resizeMode == 1 ? Math.min(w / bw, h / bh) : Math.max(w / bw, h / bh);
                 matrix.setScale(scale, scale);

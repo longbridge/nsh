@@ -25,6 +25,7 @@ mod logger;
 mod net;
 #[cfg(feature = "js")]
 mod package;
+mod svg;
 mod text;
 
 use std::ffi::c_void;
