@@ -107,3 +107,22 @@ mount(() => (
   </View>
 ));
 ```
+
+## From Rust
+
+Rust components read and write the same storage with functions of `nsh_core::ui::prelude`, so an app with a TSX entry and a Rust entry sees one set of data. They are synchronous: the entries are in memory.
+
+```rust
+use nsh_core::ui::prelude::*;
+
+let count: u32 = storage_item("count").and_then(|n| n.parse().ok()).unwrap_or(0);
+set_storage_item("count", (count + 1).to_string())?;
+```
+
+| TS | Rust |
+|---|---|
+| `await Storage.getItem(key)` | `storage_item(key) -> Option<String>` |
+| `await Storage.setItem(key, value)` | `set_storage_item(key, value) -> Result<(), String>` |
+| `await Storage.removeItem(key)` | `remove_storage_item(key)` |
+| `await Storage.getAllKeys()` | `storage_keys() -> Vec<String>` |
+| `await Storage.clear()` | `clear_storage()` |

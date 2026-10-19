@@ -1,11 +1,14 @@
 //! `nsh/storage`: an app's entries kept in a file across launches, its
-//! quota.
+//! quota, and the same entries read and written from Rust.
 
 use std::{path::PathBuf, time::Duration};
 
 use crossbeam_channel::Receiver;
-use nsh_core::{ApproxTextEngine, MountBatch, MountItem, Size};
-use nsh_engine::{Bundle, Engine, EngineConfig, Environment, FileStorage};
+use nsh_core::{
+    ApproxTextEngine, MountBatch, MountItem, Size,
+    ui::{Root, prelude::*},
+};
+use nsh_engine::{App, Bundle, Engine, EngineConfig, Environment, FileStorage};
 
 use crate::ChannelSink;
 
@@ -114,4 +117,46 @@ fn entries_last_across_launches() {
     }
     let file = std::fs::read_to_string(data.join("storage.json")).unwrap();
     assert_eq!(file, r#"{"launches":"2"}"#);
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct ReaderProps {}
+
+/// The Rust entry of an app whose TSX entry is [`COUNTER`]: reads what the
+/// JS wrote and writes for it.
+#[component]
+fn Reader(_props: ReaderProps) -> impl IntoElement {
+    let seen = storage_item("launches").unwrap_or_default();
+    set_storage_item("launches", "2").unwrap();
+    set_storage_item("from_rust", "hi").unwrap();
+    let keys = storage_keys().join(",");
+    text(move || format!("rust saw {seen} {keys}"))
+}
+
+#[test]
+fn rust_shares_the_entries_of_js() {
+    let data = scratch("shared");
+    let (engine, rx) = start("shared", COUNTER, None, &data);
+    assert_eq!(shown(&rx, "done"), "done 1 launches full null");
+    drop(engine);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        app: App::Rust(Root::new::<Reader>(|| ReaderProps {})),
+        viewport: Size::new(390.0, 844.0),
+        trace: false,
+        network: None,
+        assets: None,
+        environment: Environment::default(),
+        header_heights: (44.0, 96.0),
+        limits: nsh_engine::Limits::default(),
+        ui_sets: Vec::new(),
+        runtime: None,
+        storage: Some(FileStorage::open(&data)),
+    };
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    assert_eq!(shown(&rx, "rust"), "rust saw 1 from_rust,launches");
+    drop(engine);
+    // And the JS sees what Rust wrote.
+    let (_engine, rx) = start("shared-again", COUNTER, None, &data);
+    assert_eq!(shown(&rx, "done"), "done 3 from_rust,launches full null");
 }

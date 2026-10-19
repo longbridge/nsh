@@ -107,3 +107,22 @@ mount(() => (
   </View>
 ));
 ```
+
+## 在 Rust 中使用
+
+Rust 组件通过 `nsh_core::ui::prelude` 中的函数读写同一份存储，因此同时有 TSX 入口和 Rust 入口的应用看到的是同一份数据。这些函数是同步的：数据就在内存中。
+
+```rust
+use nsh_core::ui::prelude::*;
+
+let count: u32 = storage_item("count").and_then(|n| n.parse().ok()).unwrap_or(0);
+set_storage_item("count", (count + 1).to_string())?;
+```
+
+| TS | Rust |
+|---|---|
+| `await Storage.getItem(key)` | `storage_item(key) -> Option<String>` |
+| `await Storage.setItem(key, value)` | `set_storage_item(key, value) -> Result<(), String>` |
+| `await Storage.removeItem(key)` | `remove_storage_item(key)` |
+| `await Storage.getAllKeys()` | `storage_keys() -> Vec<String>` |
+| `await Storage.clear()` | `clear_storage()` |
