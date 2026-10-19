@@ -89,15 +89,26 @@ fn with_node(mut op: AnimationOp, id: nsh_animation::NodeId) -> AnimationOp {
     op
 }
 
-/// Derived nodes by the operation that made them (its node id 0), while
-/// alive, with the handles of each that owners keep: deriving a node again
-/// under an owner that has a handle of it returns that handle, so doing it
-/// over and over (in a listener, a binding run again) adds nothing.
+/// Derived nodes by what made them ([`DerivedKey`]), while alive, with the
+/// handles of each that owners keep: deriving a node again under an owner
+/// that has a handle of it returns that handle, so doing it over and over
+/// (in a listener, a binding run again) adds nothing.
 #[derive(Default)]
 pub(crate) struct Derived(Vec<DerivedNode>);
 
+/// What makes a derived node: its operation (node id 0) and, for colors
+/// that follow the appearance, the dark ones (the operation has the light
+/// ones, whichever appearance is current), so interpolations sharing their
+/// light colors are not one node, and neither are a constant one and an
+/// adaptive one.
+#[derive(Clone, PartialEq)]
+struct DerivedKey {
+    op: AnimationOp,
+    dark: Option<Output>,
+}
+
 struct DerivedNode {
-    key: AnimationOp,
+    key: DerivedKey,
     node: Weak<Node>,
     /// The live handles of it, by the owner keeping each.
     handles: Vec<(Owner, AnimatedNode)>,
@@ -105,7 +116,7 @@ struct DerivedNode {
 
 impl Derived {
     /// The live node `key` made.
-    fn entry(&mut self, key: &AnimationOp) -> Option<&mut DerivedNode> {
+    fn entry(&mut self, key: &DerivedKey) -> Option<&mut DerivedNode> {
         self.0.retain(|d| d.node.strong_count() > 0);
         self.0.iter_mut().find(|d| d.key == *key)
     }
@@ -201,15 +212,18 @@ impl AnimatedNode {
         self.node.with(|node| node.executor.upgrade()).flatten()
     }
 
-    /// The node `op` makes from this one: the live one made by the same
-    /// operation if there is one (a region or a row made again derives it
-    /// again and gets the same node, so its bindings stay as they are),
-    /// through the handle the current owner keeps of it (made the first
-    /// time), and whether that handle is new. Of a node whose owner is gone
-    /// (or with an operand whose owner is gone): no node.
+    /// The node `key` makes from this one: the live one made by the same
+    /// key if there is one (a region or a row made again derives it again
+    /// and gets the same node, so its bindings stay as they are), through
+    /// the handle the current owner keeps of it (made the first time), and
+    /// whether that handle is new. A new node is made by `now` if given (the
+    /// current appearance's colors), else by the key's operation. Of a node
+    /// whose owner is gone (or with an operand whose owner is gone): no
+    /// node.
     fn derive(
         &self,
-        op: impl FnOnce(nsh_animation::NodeId) -> AnimationOp,
+        key: DerivedKey,
+        now: Option<AnimationOp>,
         other: Option<AnimatedNode>,
     ) -> (AnimatedNode, bool) {
         let Some(node) = self.live() else {
@@ -226,7 +240,6 @@ impl AnimatedNode {
             // The surface is gone: a node nothing reads.
             return (*self, false);
         };
-        let key = op(0);
         let owner = Owner::current();
         let mut derived = executor.derived();
         if let Some(entry) = derived.entry(&key) {
@@ -244,7 +257,8 @@ impl AnimatedNode {
         drop(derived);
         let mut inputs = vec![node.0];
         inputs.extend(other.map(|o| o.0));
-        let node = Node::new(&executor, |id| with_node(key.clone(), id), inputs);
+        let op = now.unwrap_or_else(|| key.op.clone());
+        let node = Node::new(&executor, |id| with_node(op, id), inputs);
         let weak = Rc::downgrade(&node);
         let handle = Self::keep(node);
         executor.derived().0.push(DerivedNode {
@@ -291,7 +305,8 @@ impl AnimatedNode {
         }
         let (node, new) = self.interpolate_derived(
             input,
-            pick(super::untracked(super::ambient::dark)),
+            pick(false),
+            Some(pick(true)),
             Interpolation::default(),
         );
         // The appearance's colors from now on; the effect holds the node
@@ -322,28 +337,39 @@ impl AnimatedNode {
         output: Output,
         interpolation: Interpolation,
     ) -> AnimatedNode {
-        self.interpolate_derived(input, output, interpolation).0
+        self.interpolate_derived(input, output, None, interpolation)
+            .0
     }
 
-    /// [`Self::interpolate_with`], and whether its handle is new.
+    /// [`Self::interpolate_with`] to `output`, or, with `dark`, to the
+    /// current appearance's of `output` (light) and `dark`; and whether its
+    /// handle is new.
     fn interpolate_derived(
         &self,
         input: &[f32],
         output: Output,
+        dark: Option<Output>,
         interpolation: Interpolation,
     ) -> (AnimatedNode, bool) {
-        let source = self.id();
-        let input_range = input.to_vec();
+        let op = |output| AnimationOp::CreateInterpolate {
+            node: 0,
+            input: self.id(),
+            input_range: input.to_vec(),
+            output,
+            extrapolate_left: interpolation.extrapolate_left,
+            extrapolate_right: interpolation.extrapolate_right,
+            easing: interpolation.easing,
+        };
+        let now = dark
+            .clone()
+            .filter(|_| super::untracked(super::ambient::dark))
+            .map(op);
         self.derive(
-            move |node| AnimationOp::CreateInterpolate {
-                node,
-                input: source,
-                input_range,
-                output,
-                extrapolate_left: interpolation.extrapolate_left,
-                extrapolate_right: interpolation.extrapolate_right,
-                easing: interpolation.easing,
+            DerivedKey {
+                op: op(output),
+                dark,
             },
+            now,
             None,
         )
     }
@@ -351,11 +377,9 @@ impl AnimatedNode {
     fn math(&self, op: MathOp, other: AnimationOperand) -> AnimatedNode {
         let a = Operand::Node(self.id());
         let b = other.operand;
-        self.derive(
-            move |node| AnimationOp::CreateMath { node, op, a, b },
-            other.node,
-        )
-        .0
+        let op = AnimationOp::CreateMath { node: 0, op, a, b };
+        self.derive(DerivedKey { op, dark: None }, None, other.node)
+            .0
     }
 
     /// The sum with `other`.
@@ -386,17 +410,13 @@ impl AnimatedNode {
     /// Follows the value's changes but stays within `min..=max` (a header
     /// hiding as content scrolls up).
     pub fn diff_clamp(&self, min: f32, max: f32) -> AnimatedNode {
-        let input = self.id();
-        self.derive(
-            move |node| AnimationOp::CreateDiffClamp {
-                node,
-                input,
-                min,
-                max,
-            },
-            None,
-        )
-        .0
+        let op = AnimationOp::CreateDiffClamp {
+            node: 0,
+            input: self.id(),
+            min,
+            max,
+        };
+        self.derive(DerivedKey { op, dark: None }, None, None).0
     }
 }
 

@@ -6992,6 +6992,58 @@ mod views {
         )));
     }
 
+    /// Three tracks sharing their light colors: two theme colors with
+    /// other dark ones, and a constant one.
+    #[component]
+    fn SharedLight() -> impl IntoElement {
+        let on = animated_value(0.0);
+        let green = AdaptiveColor::from(rgb(0x00ff00));
+        let track = |dark| {
+            let off = AdaptiveColor {
+                light: rgb(0x000000),
+                dark,
+            };
+            view()
+                .size_10()
+                .bind_background(&on.interpolate_colors(&[0.0, 1.0], &[off, green]))
+        };
+        view()
+            .child(track(rgb(0xffffff)))
+            .child(track(rgb(0x808080)))
+            .child(track(rgb(0x000000)))
+    }
+
+    #[test]
+    fn color_interpolations_sharing_their_light_colors_are_apart() {
+        let outputs = |batch: &MountBatch| {
+            let mut outputs: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Animation(
+                        nsh_animation::AnimationOp::CreateInterpolate { output, .. }
+                        | nsh_animation::AnimationOp::SetOutput { output, .. },
+                    ) => Some(output.clone()),
+                    _ => None,
+                })
+                .collect();
+            outputs.sort_by_key(|o| format!("{o:?}"));
+            outputs
+        };
+        let colors = |off: u32| nsh_animation::Output::Colors(vec![off, 0x00ff00ff]);
+        let mut c = core();
+        c.mount_root(&Root::new::<SharedLight>(|| ()));
+        assert_eq!(outputs(&c.commit().unwrap()), vec![colors(0x000000ff); 3]);
+        c.set_environment(crate::ui::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            outputs(&c.commit().unwrap()),
+            [colors(0x808080ff), colors(0xffffffff)]
+        );
+    }
+
     /// A style bound to a signal.
     #[derive(Default)]
     struct Lamp;
