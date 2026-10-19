@@ -196,7 +196,11 @@ setTimeout(async () => {
   await attempt("nokey", () => (Storage.getItem as () => Promise<unknown>)());
   Storage.setItem("a", "1");
   Storage.setItem("b", "2");
-  await Storage.clear();
+  // Every call is a promise, also those that return nothing.
+  const removing = Storage.removeItem("missing");
+  const clearing = Storage.clear();
+  outcomes.push(removing instanceof Promise && clearing instanceof Promise ? "promises" : "plain");
+  await clearing;
   const cleared = (await Storage.getAllKeys()).length;
   await Storage.setItem("ключ", "值😀");
   shown.set(`done ${outcomes.join(" ")} ${cleared} ${await Storage.getItem("ключ")}`);
@@ -211,7 +215,7 @@ fn js_arguments_are_checked_and_clear_empties() {
     let (engine, rx) = start("edges", EDGES, None, &data);
     assert_eq!(
         shown(&rx, "done"),
-        "done number:refused nokey:refused 0 值😀"
+        "done number:refused nokey:refused promises 0 值😀"
     );
     drop(engine);
     let file = std::fs::read_to_string(data.join("storage.json")).unwrap();

@@ -9,6 +9,8 @@ pub(crate) struct Storage;
 /// The app's key-value storage: strings by string key, kept on the device
 /// across launches (up to 5 MB). Calls run in order, so a read after a
 /// write sees it.
+/// Every function returns a promise, as `nsh/storage`'s callers await
+/// them alike (a function without a result would be a plain call).
 #[module]
 impl Storage {
     /// The value of `key`, `null` when it has none.
@@ -22,8 +24,9 @@ impl Storage {
     }
 
     /// Removes `key`.
-    pub(crate) async fn remove_item(key: String) {
-        with_storage(|s| s.remove(&key))
+    pub(crate) async fn remove_item(key: String) -> Result<(), String> {
+        with_storage(|s| s.remove(&key));
+        Ok(())
     }
 
     /// Every key, in order.
@@ -32,7 +35,8 @@ impl Storage {
     }
 
     /// Removes every key.
-    pub(crate) async fn clear() {
-        with_storage(|s| s.clear())
+    pub(crate) async fn clear() -> Result<(), String> {
+        with_storage(|s| s.clear());
+        Ok(())
     }
 }

@@ -276,7 +276,14 @@ fn a_host_without_the_apps_ui_set_is_told_it_cannot_run_it() {
     );
 
     // Needed again: reported again.
-    server.publish(vec![4], "v4".into(), None, AppInfo::default(), None, needs());
+    server.publish(
+        vec![4],
+        "v4".into(),
+        None,
+        AppInfo::default(),
+        None,
+        needs(),
+    );
     assert!(matches!(next_non_status(&rx), DevEvent::CannotRun { .. }));
     assert!(matches!(
         client_rx.recv_timeout(TIMEOUT).unwrap(),
