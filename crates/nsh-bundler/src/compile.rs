@@ -115,7 +115,11 @@ pub(crate) fn compile_native(
         meta_path,
         modules,
     )?;
-    elide_unused_imports(&mut program);
+    // Plain JS keeps its imports: an unused one may be there for its side
+    // effects, and no type or compiled tag left it unused.
+    if source_type.is_typescript() || source_type.is_jsx() {
+        elide_unused_imports(&mut program);
+    }
     let out = Codegen::new()
         .with_options(CodegenOptions {
             source_map_path: Some(path.to_path_buf()),

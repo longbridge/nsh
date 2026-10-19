@@ -282,7 +282,8 @@ impl Plugin for NshPlugin {
         let entry = path == self.entry;
         let script = matches!(args.module_type, ModuleType::Ts | ModuleType::Js);
         // A module that reads `import.meta` gets its own URL (`metaUrl`).
-        let meta = args.code.contains("import.meta");
+        // (JSON, text and CSS modules are not code, whatever they say.)
+        let meta = script && args.code.contains("import.meta");
         if !(jsx_module || entry || self.hot && script || meta) {
             return Ok(None);
         }
