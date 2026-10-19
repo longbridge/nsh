@@ -1080,6 +1080,11 @@ mod native {
         /// The status once the leader is reaped. On Unix its pid may then be
         /// reused, and the group is no longer signalled.
         reaped: Option<ExitStatus>,
+        /// Reaped by the system instead (a host that ignores SIGCHLD): its
+        /// pid, and the group it named, may be another's now, so nothing is
+        /// signalled or waited for any more.
+        #[cfg(unix)]
+        gone: bool,
         #[cfg(target_vendor = "apple")]
         exits: Option<std::os::fd::OwnedFd>,
         /// `taskkill` was started for the tree.
@@ -1094,6 +1099,8 @@ mod native {
                 exits: exit_queue(child.id()),
                 child,
                 reaped: None,
+                #[cfg(unix)]
+                gone: false,
                 #[cfg(target_os = "windows")]
                 tree_killed: false,
             }
@@ -1103,6 +1110,10 @@ mod native {
         /// told.
         fn exited(&mut self) -> std::io::Result<bool> {
             if self.reaped.is_some() {
+                return Ok(true);
+            }
+            #[cfg(unix)]
+            if self.gone {
                 return Ok(true);
             }
             #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -1119,7 +1130,12 @@ mod native {
                     )
                 };
                 if result < 0 {
-                    return Err(std::io::Error::last_os_error());
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() == Some(libc::ECHILD) {
+                        self.gone = true;
+                        return Ok(true);
+                    }
+                    return Err(error);
                 }
                 // SAFETY: waitid succeeded, so si_pid is set (0 while the child runs).
                 Ok(unsafe { info.si_pid() } != 0)
@@ -1145,7 +1161,16 @@ mod native {
                         Ok(n > 0)
                     };
                 }
-                self.reaped = self.child.try_wait()?;
+                match self.child.try_wait() {
+                    Ok(status) => self.reaped = status,
+                    #[cfg(unix)]
+                    Err(e) if e.raw_os_error() == Some(libc::ECHILD) => self.gone = true,
+                    Err(e) => return Err(e),
+                }
+                #[cfg(unix)]
+                if self.gone {
+                    return Ok(true);
+                }
                 Ok(self.reaped.is_some())
             }
         }
@@ -1154,9 +1179,14 @@ mod native {
         /// (SIGKILL).
         fn terminate(&mut self, force: bool) {
             #[cfg(unix)]
-            if self.reaped.is_none() {
-                // SAFETY: the child leads its own process group and is not
-                // reaped yet, so its pid still names that group.
+            if self.reaped.is_none() && !self.gone && !waitable(self.child.id()) {
+                self.gone = true;
+            }
+            #[cfg(unix)]
+            if self.reaped.is_none() && !self.gone {
+                // SAFETY: the child leads its own process group and is still
+                // this process's to wait for, so its pid still names that
+                // group.
                 unsafe {
                     libc::kill(
                         -(self.child.id() as i32),
@@ -1193,8 +1223,31 @@ mod native {
         }
 
         fn reap(mut self) -> Option<ExitStatus> {
+            #[cfg(unix)]
+            if self.gone {
+                return None;
+            }
             self.reaped.take().or_else(|| self.child.wait().ok())
         }
+    }
+
+    /// Whether `pid` is still this process's child to wait for: running, or
+    /// exited and not reaped. False once the system reaped it (a host that
+    /// ignores SIGCHLD; `ECHILD`), when its pid may be another's.
+    #[cfg(unix)]
+    pub(super) fn waitable(pid: u32) -> bool {
+        // SAFETY: an all-zero siginfo_t is valid; waitid fills it.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: WNOWAIT | WNOHANG neither reaps nor blocks; info outlives the call.
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ECHILD)
     }
 
     /// A kqueue that reports the child's exit without reaping it; `None` when
@@ -1371,5 +1424,23 @@ mod tests {
         }
         // Getters are the object's, never named exports.
         assert!(!d.contains("export declare function env"), "{d}");
+    }
+
+    /// A child the system reaped (its host ignores SIGCHLD) is not
+    /// signalled: its pid may be another process's.
+    #[cfg(unix)]
+    #[test]
+    fn only_children_still_waited_for_are_signalled() {
+        // The init process is no child of this one.
+        assert!(!super::native::waitable(1));
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        // Running or exited, it is waitable until it is reaped.
+        assert!(super::native::waitable(child.id()));
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!super::native::waitable(pid));
     }
 }
