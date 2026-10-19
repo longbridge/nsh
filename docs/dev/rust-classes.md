@@ -183,7 +183,8 @@ For that, two choices of the first version change:
   conversions and TypeScript types (`Arg` and `Ret` over them); a trailing `Option` parameter is optional.
   `Vec<u8>` is bytes: a `Uint8Array` (a `Buffer` too), copied in the call (`u8` is no `JsValue`, so it never
   overlaps the arrays); `SystemTime` is a `Date`. `#[prop(exact)]` on a `JsObject` struct refuses other own keys
-  (options, where a typo must not pass).
+  (options, where a typo must not pass), and `#[prop(skip_none)]` on an `Option` field leaves it out when `None`
+  rather than `null` (`process`' exit `error`).
 - **Interfaces**: `#[class(interface)]` on the struct makes a class whose objects come from members only: its
   module exports no value of it and TypeScript declares an `interface` (`fs/promises`' `Stats`); it has no
   constructor or statics. A result `Vec<Instance<T>>` is an array of objects.

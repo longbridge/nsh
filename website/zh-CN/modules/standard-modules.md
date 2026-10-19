@@ -87,7 +87,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal, error }`（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。未授权的命令或授权范围之外的 `cwd` 抛出带 `code` `EACCES` 的 `TypeError`；启动失败的错误带有 `code`（可执行文件不存在时为 `ENOENT`，无法执行时为 `EACCES`）、`syscall`（`spawn <命令>`）和 `path`：`spawn` 抛出该错误，`run` 以它拒绝。超过子进程数量上限时，`spawn` 抛出、`run` 以 `RangeError` 拒绝。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
+`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal }`（由运行时结束子进程时，例如超时或行过长，还带有 `error`）（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。未授权的命令或授权范围之外的 `cwd` 抛出带 `code` `EACCES` 的 `TypeError`；启动失败的错误带有 `code`（可执行文件不存在时为 `ENOENT`，无法执行时为 `EACCES`）、`syscall`（`spawn <命令>`）和 `path`：`spawn` 抛出该错误，`run` 以它拒绝。超过子进程数量上限时，`spawn` 抛出、`run` 以 `RangeError` 拒绝。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
 
 | 限制 | 值 |
 |---|---|

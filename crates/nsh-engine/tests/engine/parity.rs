@@ -349,11 +349,10 @@ import process from "process";
     assert_eq!(out["cwd"], true);
     // Lines without their endings, the last partial one delivered; the
     // exit `{ code, signal }` with `null` for the half that does not apply.
-    // gpui-shell sets `error` only when the runtime ended the child; NSH's
-    // exit always has the key (`null`), which `exit.error` reads the same.
+    // `error` only when the runtime ended the child.
     assert_eq!(
         out["lines"],
-        serde_json::json!({ "lines": ["a", "b", "c"], "errs": ["e"], "exit": { "code": 0, "signal": null, "error": null } })
+        serde_json::json!({ "lines": ["a", "b", "c"], "errs": ["e"], "exit": { "code": 0, "signal": null } })
     );
     assert_eq!(
         out["server"]["replies"],

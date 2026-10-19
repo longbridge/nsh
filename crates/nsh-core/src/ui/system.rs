@@ -579,6 +579,8 @@ mod tests {
     #[prop(exact)]
     struct Options {
         recursive: Option<bool>,
+        #[prop(skip_none)]
+        note: Option<String>,
     }
 
     #[test]
@@ -599,6 +601,16 @@ mod tests {
         let options = host.value(serde_json::json!({ "recursive": true }));
         let options = Options::from_js(crate::ui::JsIn::new(&host, options)).unwrap();
         assert_eq!(options.recursive, Some(true));
+        let shown = Options {
+            recursive: None,
+            note: None,
+        }
+        .to_js(&host)
+        .unwrap();
+        assert_eq!(
+            host.read(shown),
+            Some(serde_json::json!({ "recursive": null }))
+        );
         let typo = host.value(serde_json::json!({ "recursive": true, "typo": 1 }));
         let error = Options::from_js(crate::ui::JsIn::new(&host, typo)).unwrap_err();
         assert_eq!(error.0, "unknown field `typo`");

@@ -186,7 +186,9 @@ pub(crate) struct ExitResult {
     code: Option<i32>,
     /// The signal that ended it (`"SIGTERM"`).
     signal: Option<String>,
-    /// Why the runtime ended it (a timeout, an over-long line).
+    /// Why the runtime ended it (a timeout, an over-long line); absent
+    /// otherwise.
+    #[prop(skip_none)]
     error: Option<String>,
 }
 
