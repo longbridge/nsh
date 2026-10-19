@@ -2161,7 +2161,9 @@ mod tests {
         let app = app(&dir, &[("app-native", dir.join("native"))], None);
         app.write_workspace().unwrap();
         let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
-        assert!(!manifest.contains("rust-"), "{manifest}");
+        // No `rust-*` members (paths may hold the word: a checkout in
+        // `yf-rust-exports`).
+        assert!(!manifest.contains("\"rust-"), "{manifest}");
         assert!(!app.workspace.join("rust-web").exists());
         assert!(super::is_root(Path::new("/app/nsh.json")));
         assert!(!super::is_root(Path::new("/app/App.tsx")));
