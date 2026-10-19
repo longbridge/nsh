@@ -40,3 +40,15 @@ fn each_export_is_documented_by_the_item_that_names_it() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn rust_notes_under_a_heading_stay_out_of_ts() {
+    let ts = declarations();
+    assert!(
+        ts.contains(
+            "  /** Puts `text` on the clipboard; resolves with the number of characters copied. */\n  copy(text: string): Promise<number>;"
+        ),
+        "{ts}"
+    );
+    assert!(!ts.contains("cx"), "the `# Rust` section is Rust's:\n{ts}");
+}

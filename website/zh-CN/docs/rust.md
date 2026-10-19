@@ -226,6 +226,22 @@ mount(() => <Overview />);
 错误，因为 TypeScript 不会显示它。每个写入 `.nsh/types` 的命令都会对 TSX 看到的、没有文档注释的导出给出警告，并写出它的名字
 （`Ledger.add`、`Chart.range`）。
 
+TypeScript 只显示文档注释中第一个标题之前的部分。写给 Rust 调用者的说明，例如 `&self` 借用了什么、函数为什么接收 `cx`，放在标题
+`# Rust`（或 rustdoc 的 `# Panics`、`# Examples`）下面，只留在 Rust 文档中：
+
+```rust
+/// 把 `text` 放到剪贴板；resolve 为复制的字符数。
+///
+/// # Rust
+///
+/// 接收 `cx` 让它成为一个 op，与 TS 在它之前做的 UI 改动按顺序执行。
+pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
+    let count = text.chars().count() as u32;
+    cx.set_clipboard(text);
+    count
+}
+```
+
 props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 组件自己的内容、事件和状态留在
 Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型的 prop 传 `level={1.5}`）和内置元素上一样给出警告：这个 prop 保持原值，组件的其余部分照常渲染。
 

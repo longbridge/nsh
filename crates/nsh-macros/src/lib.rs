@@ -22,6 +22,10 @@
 //! - `#[native_module("gallery/native")]` on a function of an app's crate:
 //!   the UI set it registers, which nsh's generated workspace links.
 //!
+//! Doc comments become the TypeScript declarations' up to their first
+//! heading: a `# Rust` section (or `# Panics`, `# Examples`) is for Rust
+//! callers only.
+//!
 //! The code they generate names `::nsh_core::ui`. `style_helpers!` is
 //! internal to `nsh-core`: the spacing and sizing methods of `Styled`.
 
@@ -46,9 +50,13 @@ fn decl(text: &str) -> TokenStream2 {
     quote!(::nsh_core::decl!(#text))
 }
 
-/// The doc comment of an item, lines joined.
+/// The doc comment of an item as TypeScript shows it, lines joined: the
+/// part before its first heading. The sections under headings (`# Rust`,
+/// `# Panics`, `# Examples`, as rustdoc has them) are Rust's: notes about
+/// `&self`, `cx` or how the call crosses stay out of the declarations.
 fn docs(attrs: &[Attribute]) -> String {
     let mut lines = Vec::new();
+    let mut fenced = false;
     for attr in attrs {
         if !attr.path().is_ident("doc") {
             continue;
@@ -57,9 +65,29 @@ fn docs(attrs: &[Attribute]) -> String {
             && let Expr::Lit(lit) = &nv.value
             && let syn::Lit::Str(s) = &lit.lit
         {
-            lines.push(s.value().trim().to_owned());
+            for line in s.value().lines() {
+                let line = line.trim();
+                if line.starts_with("```") {
+                    fenced = !fenced;
+                } else if !fenced && is_heading(line) {
+                    // A heading (`# Rust`): the rest is Rust's.
+                    return finish_docs(lines);
+                }
+                lines.push(line.to_owned());
+            }
         }
     }
+    finish_docs(lines)
+}
+
+/// Whether `line` is a Markdown heading: one to six `#` and a space.
+fn is_heading(line: &str) -> bool {
+    let hashes = line.bytes().take_while(|b| *b == b'#').count();
+    (1..=6).contains(&hashes) && line[hashes..].starts_with(' ')
+}
+
+/// The TS doc of `lines`: one line, rustdoc links as code spans.
+fn finish_docs(lines: Vec<String>) -> String {
     // Rustdoc links (`[`Button`]`) read as code spans in TypeScript.
     lines.join(" ").trim().replace("[`", "`").replace("`]", "`")
 }
@@ -1716,4 +1744,45 @@ fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             const FLAT: bool = #flat;
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    /// The TS doc of a doc comment of `lines`.
+    fn ts(lines: &[&str]) -> String {
+        let attrs: Vec<syn::Attribute> = lines
+            .iter()
+            .map(|l| syn::parse_quote!(#[doc = #l]))
+            .collect();
+        super::docs(&attrs)
+    }
+
+    #[test]
+    fn sections_under_a_heading_stay_rusts() {
+        assert_eq!(
+            ts(&[
+                " Copies `text`; resolves with its length.",
+                "",
+                " # Rust",
+                "",
+                " Taking `cx` makes it an op.",
+            ]),
+            "Copies `text`; resolves with its length."
+        );
+        assert_eq!(
+            ts(&[" Sorts [`Item`]s.", " ## Panics", " Never."]),
+            "Sorts `Item`s."
+        );
+        // Not headings: a `#` in a code block, an attribute, a `#` word.
+        assert_eq!(
+            ts(&[
+                " A list:",
+                " ```",
+                " # use x;",
+                " ```",
+                " #[ignore] and #1."
+            ]),
+            "A list: ``` # use x; ``` #[ignore] and #1."
+        );
+    }
 }

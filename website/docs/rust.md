@@ -239,6 +239,23 @@ enum's own doc comments, and those of `impl` blocks, stay in Rust; a doc comment
 `impl` block is a compile error, since TypeScript would not show it. Each command that writes `.nsh/types` warns
 about an export TSX sees without a doc comment, naming it (`Ledger.add`, `Chart.range`).
 
+TypeScript shows a doc comment up to its first heading. Notes for Rust callers, such as what `&self` borrows or
+why a function takes `cx`, go under a heading, `# Rust` (or rustdoc's `# Panics`, `# Examples`), and stay in the
+Rust docs:
+
+```rust
+/// Puts `text` on the clipboard; resolves with the number of characters copied.
+///
+/// # Rust
+///
+/// Taking `cx` makes it an op, run in order with the UI changes TS made before it.
+pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
+    let count = text.chars().count() as u32;
+    cx.set_clipboard(text);
+    count
+}
+```
+
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
 events. A prop of the wrong type (`level={1.5}` for a `u32` prop) is a warning, as on a built-in element: the

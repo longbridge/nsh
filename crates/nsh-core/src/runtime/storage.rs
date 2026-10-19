@@ -6,8 +6,11 @@ use crate::ui::{ambient::with_storage, module};
 /// The app's key-value storage: strings by string key, kept on the device
 /// across launches (up to 5 MB). Calls run in order, so a read after a
 /// write sees it.
-/// Every function returns a promise, as `nsh/storage`'s callers await
-/// them alike (a function without a result would be a plain call).
+///
+/// # Rust
+///
+/// Every function is `async` (a promise), as `nsh/storage`'s callers
+/// await them alike.
 #[module]
 pub(crate) struct Storage;
 

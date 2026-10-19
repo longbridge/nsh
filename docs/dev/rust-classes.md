@@ -316,7 +316,9 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
   are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations':
   the struct's documents the class, as a module's struct (`#[module]` on it and on its `impl`, `ModuleDoc`) does
   the module and a component's `#[component] fn` the component; one on a `#[class]` or `#[module]` `impl` block is a
-  compile error (TS would not show it). `Registry::undocumented` lists the exports TS sees without a doc comment;
+  compile error (TS would not show it). TS gets a doc comment up to its first heading (`nsh-macros` `docs`, outside
+  code fences): what follows `# Rust` (or rustdoc's `# Panics`, `# Examples`) is for Rust callers only, the place
+  for notes about `&self`, `cx` or how a call crosses. `Registry::undocumented` lists the exports TS sees without a doc comment;
   the command line warns of an app's when it writes `.nsh/types`, and nsh's own sets are tested to have none.
   It implements `ui::Class` (`Class::DEF`, a `ClassDef`: name, doc, members, each a `Member` with its
   `MemberCall`), as `#[module]` implements `Module`; on the struct it implements `Trace` (the callbacks the fields

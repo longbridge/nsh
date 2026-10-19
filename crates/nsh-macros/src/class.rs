@@ -632,8 +632,15 @@ mod tests {
     fn a_doc_comment_on_the_block_is_refused() {
         // TS shows the struct's: one here would be lost.
         assert!(
-            error(quote!(#[doc = " A tally."] impl T { pub fn new() -> Self { T } }))
-                .contains("document the export on its struct")
+            error(quote!(
+                #[doc = " A tally."]
+                impl T {
+                    pub fn new() -> Self {
+                        T
+                    }
+                }
+            ))
+            .contains("document the export on its struct")
         );
     }
 

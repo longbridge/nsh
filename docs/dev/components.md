@@ -78,7 +78,8 @@ reasons: `reactive-components.md`.
 - **Props** are a struct, **events** an enum; the derives produce a decoder per prop (`PropSpec::decode`: the JS
   value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
   defaults, and the TypeScript types (doc comments included: the fields' and variants', while the component's is
-  its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's). Field and variant names become camel case in JS. An
+  its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's, and so does
+  any part of a doc comment from its first heading on, `# Rust` for notes meant for Rust callers). Field and variant names become camel case in JS. An
   event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
   variant names it (`onSelect?: (index: number) => void`). Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
