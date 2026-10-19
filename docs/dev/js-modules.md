@@ -115,8 +115,7 @@ and grant no file access.
 QuickJS comes through `quickjs-jit` (rquickjs 0.14's API, imported as `rquickjs`) and the LLRT modules through
 `quickjs-jit-stdlib`, which vendors LLRT `d9fd873e793c6551c5d92b2e31480f3279e3cd8d` with one feature per module:
 NSH turns on `buffer`, `crypto`, `path`, `zlib` and `zlib-zstd`, and `url` on native targets. The two crates are
-published together at one version (path dependencies on local checkouts until 0.14.0 is out), with no git
-dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
+published together at one version and pinned exactly (`=0.14.0`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
 `third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where

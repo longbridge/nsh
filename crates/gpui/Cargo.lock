@@ -6908,6 +6908,8 @@ dependencies = [
 [[package]]
 name = "quickjs-jit"
 version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33a1afe56f28e603f9a7787fbc952bd179590cb0f8c7b93c67dc8f70046a43a6"
 dependencies = [
  "either",
  "quickjs-jit-core",
@@ -6917,6 +6919,8 @@ dependencies = [
 [[package]]
 name = "quickjs-jit-core"
 version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b635566dfdb833e7cec6b81d0a5bc5f6e88310b58ad7b3e408c8c02a373659fc"
 dependencies = [
  "async-lock",
  "either",
@@ -6929,6 +6933,8 @@ dependencies = [
 [[package]]
 name = "quickjs-jit-macro"
 version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34fb132de1920458c0c003ef222d9b9ef18d1bc3bbe57e980b8caae651fe0974"
 dependencies = [
  "convert_case 0.12.0",
  "indexmap",
@@ -6942,6 +6948,8 @@ dependencies = [
 [[package]]
 name = "quickjs-jit-stdlib"
 version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a40dc34fbb9a7dc0210b9fe755569f0e585f216c411aa2f42d1331f3c500dc67"
 dependencies = [
  "aes 0.9.3",
  "aes-gcm",
@@ -6999,6 +7007,8 @@ dependencies = [
 [[package]]
 name = "quickjs-jit-sys"
 version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c422460d59d19f8d743966426609f540e031d2367f4498eb022c79b500745cf"
 dependencies = [
  "bindgen",
  "cc",
