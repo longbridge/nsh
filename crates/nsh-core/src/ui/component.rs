@@ -228,6 +228,9 @@ pub struct PropSpec {
 pub struct EventSpec {
     /// Its name (`press`: the handler is `onPress`).
     pub name: &'static str,
+    /// The name of the handler's argument in TypeScript (`value`, or what
+    /// `#[args(..)]` on the variant says; unused without data).
+    pub arg: &'static str,
     /// The TypeScript type of its data (`void` for none).
     pub data: String,
     /// Documentation.
@@ -1037,7 +1040,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             let arg = if e.data == "void" {
                 String::new()
             } else {
-                format!("data: {}", e.data)
+                format!("{}: {}", e.arg, e.data)
             };
             let _ = writeln!(out, "  {handler}?: ({arg}) => void;");
         }
@@ -1172,6 +1175,7 @@ mod tests {
         Change {
             new_value: f64,
         },
+        #[args(limit)]
         Limit(u32),
         Reset,
     }
@@ -1218,8 +1222,8 @@ mod tests {
             "  maxValue?: number | null;",
             "  /** Above the control. */\n  label?: JSX.Element;",
             "  children?: JSX.Element;",
-            "  /** The value changed. */\n  onChange?: (data: { newValue: number }) => void;",
-            "  onLimit?: (data: number) => void;",
+            "  /** The value changed. */\n  onChange?: (event: { newValue: number }) => void;",
+            "  onLimit?: (limit: number) => void;",
             "  onReset?: () => void;",
             "/** Picks a number. */",
             "export interface StepperRef {",

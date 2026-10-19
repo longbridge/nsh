@@ -555,6 +555,20 @@ pub(crate) mod __private {
         }
     }
 
+    /// The TypeScript type of `T`, a callback parameter whose function's
+    /// arguments `#[args(..)]` names `names`; nothing in builds without
+    /// declarations.
+    pub fn named_arg_ts<T: crate::ui::callback::NamedArgs>(
+        types: &mut TsTypes,
+        names: &[&str],
+    ) -> String {
+        if crate::ui::DECLARATIONS {
+            T::ts_named(types, names)
+        } else {
+            String::new()
+        }
+    }
+
     /// `T`'s TypeScript type as a result.
     pub const fn ret_ts<T: Ret>() -> TsType {
         if crate::ui::DECLARATIONS {
@@ -811,7 +825,11 @@ mod tests {
             let _ = compare;
         }
 
-        pub(crate) fn on(&mut self, listener: Option<Callback<i64>>, done: Option<Callback>) {
+        pub(crate) fn on(
+            &mut self,
+            #[args(count)] listener: Option<Callback<i64>>,
+            done: Option<Callback>,
+        ) {
             let _ = (listener, done);
         }
 
@@ -873,7 +891,7 @@ export declare class Tally {
   static later(start: number): Promise<Tally>;
   /** Sorts with the app's comparison. */
   sortBy(compare: (a: string, b: string) => number): void;
-  on(listener?: ((a: number) => void) | null, done?: (() => void) | null): void;
+  on(listener?: ((count: number) => void) | null, done?: (() => void) | null): void;
   /** Frees the Rust value now (else when the object is collected); the object throws after. */
   dispose(): void;
   [Symbol.dispose](): void;
@@ -911,6 +929,11 @@ export declare class Token {
         pub(crate) fn measure(text: String, cx: &mut ModuleCx) -> usize {
             let _ = cx;
             text.len()
+        }
+
+        /// Picks with the app's choice, its arguments named.
+        pub(crate) fn pick(#[args(old_value, new_value)] choose: Callback<(f64, f64), f64>) -> f64 {
+            choose.call((0.0, 1.0)).unwrap_or(0.0)
         }
 
         /// An op returning nothing: TS can still await it.
@@ -953,11 +976,13 @@ export declare class Token {
   shout(text: string): void;
   /** A promise of the length. */
   measure(text: string): Promise<number>;
+  /** Picks with the app's choice, its arguments named. */
+  pick(choose: (oldValue: number, newValue: number) => number): number;
   /** An op returning nothing: TS can still await it. */
   beep(): Promise<void>;
   /** A task returning nothing. */
   settle(): Promise<void>;
-  later(listener: (a: number) => string): Promise<string>;
+  later(listener: (value: number) => string): Promise<string>;
 }
 
 export declare const Tools: ToolsModule;

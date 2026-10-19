@@ -10,7 +10,9 @@ use syn::{
     spanned::Spanned,
 };
 
-use crate::{camel, decl, docs, exported, last_segment, module_cx, result_ok};
+use crate::{
+    camel, decl, docs, exported, last_segment, module_cx, param_ts, result_ok, strip_args,
+};
 
 pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     match item {
@@ -240,11 +242,12 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
         }
         members.push(member_def(f, &class_name)?);
     }
-    // The getters' and setters' attributes are the macro's.
+    // The getters', setters' and callbacks' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
             f.attrs
                 .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("setter"));
+            strip_args(&mut f.sig);
         }
     }
     Ok(quote! {
@@ -311,6 +314,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     let is_async = matches!(kind, Kind::AsyncMethod | Kind::AsyncStatic);
     let mut params = Vec::new();
     let mut names = Vec::new();
+    let mut attrs = Vec::new();
     for arg in f.sig.inputs.iter().skip(skip) {
         let FnArg::Typed(t) = arg else {
             return Err(syn::Error::new(arg.span(), "one receiver"));
@@ -329,6 +333,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             ));
         };
         names.push(camel(&name.ident.to_string()));
+        attrs.push(&t.attrs);
         params.push(match &*t.ty {
             Type::Reference(_) if is_async => {
                 return Err(syn::Error::new(
@@ -360,14 +365,17 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .iter()
         .zip(&names)
         .zip(&optional)
-        .map(|((p, name), optional)| {
+        .zip(&attrs)
+        .map(|(((p, name), optional), attrs)| {
             let ts = match p {
-                Param::Value(ty) => quote!(#private::arg_ts::<#ty>()),
-                Param::Borrowed { elem, .. } => quote!(#private::arg_ts::<#ui::Instance<#elem>>()),
+                Param::Value(ty) => param_ts(ty, attrs)?,
+                Param::Borrowed { elem, .. } => {
+                    param_ts(&syn::parse_quote!(#ui::Instance<#elem>), attrs)?
+                }
             };
-            quote!((#name, #ts, #optional))
+            Ok(quote!((#name, #ts, #optional)))
         })
-        .collect();
+        .collect::<syn::Result<_>>()?;
     // The classes the signature names, registered with this one.
     let mut refs: Vec<TokenStream2> = params
         .iter()

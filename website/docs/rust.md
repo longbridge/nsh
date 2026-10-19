@@ -241,7 +241,10 @@ returns its value (`Portfolio.total()` is a number, `ledger.balance` a property)
 taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and returns a Promise
 of its value (`Promise<void>` for `()`, settled once it ran, so `await` waits for it). Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
-(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`). An argument of
+(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`; TS sees
+`(value: number) => void` for a `Callback<f64>`, and `#[args(balance)] listener: Callback<f64>` names the argument,
+`(balance: number) => void`). An event's handler argument is `value` too, and `#[args(index)]` on the event's
+variant names it. An argument of
 the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise; an `Err`
 throws (or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot

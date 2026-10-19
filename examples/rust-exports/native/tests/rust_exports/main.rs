@@ -4,6 +4,7 @@
 //! links the bundler, QuickJS and the engine).
 
 mod common;
+mod declarations;
 
 use common::Running;
 use nsh_core::Command;

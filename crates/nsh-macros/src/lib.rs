@@ -135,6 +135,68 @@ fn camel(name: &str) -> String {
     out
 }
 
+/// The names `#[args(name, amount)]` among `attrs` gives a JS function's
+/// arguments (a callback parameter's, an event handler's), in camel case.
+fn args_attr(attrs: &[Attribute]) -> syn::Result<Option<(Vec<String>, Span)>> {
+    let mut out = None;
+    for attr in attrs {
+        if !attr.path().is_ident("args") {
+            continue;
+        }
+        if out.is_some() {
+            return Err(syn::Error::new(attr.span(), "one `#[args(..)]`"));
+        }
+        let names = attr.parse_args_with(Punctuated::<Ident, Token![,]>::parse_terminated)?;
+        if names.is_empty() {
+            return Err(syn::Error::new(
+                attr.span(),
+                "`#[args(..)]` names the arguments: `#[args(name, amount)]`",
+            ));
+        }
+        out = Some((
+            names.iter().map(|n| camel(&n.to_string())).collect(),
+            attr.span(),
+        ));
+    }
+    Ok(out)
+}
+
+/// Removes the macros' `#[args(..)]` from the parameters of `sig` (the
+/// compiler has no such attribute).
+fn strip_args(sig: &mut syn::Signature) {
+    for input in &mut sig.inputs {
+        if let FnArg::Typed(t) = input {
+            t.attrs.retain(|a| !a.path().is_ident("args"));
+        }
+    }
+}
+
+/// The TypeScript type of a parameter of type `ty`: a callback's with its
+/// arguments named when `#[args(..)]` names them (`attrs`), checked at
+/// compile time to name each.
+fn param_ts(ty: &Type, attrs: &[Attribute]) -> syn::Result<TokenStream2> {
+    let ui = quote!(::nsh_core::ui);
+    let private = quote!(#ui::__private);
+    Ok(match args_attr(attrs)? {
+        None => quote!(#private::arg_ts::<#ty>()),
+        Some((names, span)) => {
+            let n = names.len();
+            let check = quote::quote_spanned! {span=>
+                const {
+                    ::core::assert!(
+                        <#ty as #private::NamedArgs>::ARITY == #n,
+                        "`#[args(..)]` names each argument of the callback, as many names as it has"
+                    )
+                }
+            };
+            quote!({
+                #check;
+                |types: &mut #ui::TsTypes| #private::named_arg_ts::<#ty>(types, &[#(#names),*])
+            })
+        }
+    })
+}
+
 /// The options of `#[prop(...)]`.
 #[derive(Default)]
 struct PropAttr {
@@ -649,8 +711,10 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
 /// camel case (`Press` is `onPress` in JS): a unit variant carries no
 /// data, a variant with named fields an object of them (camel case), a
 /// variant with one unnamed field that value. Doc comments document the
-/// handlers.
-#[proc_macro_derive(Event)]
+/// handlers. The handler's argument is `value` (one field) or `event`
+/// (named fields) in TypeScript; `#[args(index)]` on the variant names it
+/// (`onSelect?: (index: number) => void`).
+#[proc_macro_derive(Event, attributes(args))]
 pub fn derive_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     event(input)
@@ -674,10 +738,29 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
         let ident = &v.ident;
         let js = camel(&ident.to_string());
         let doc = decl(&docs(&v.attrs));
+        let named = match args_attr(&v.attrs)? {
+            None => None,
+            Some((names, _)) if names.len() == 1 && !matches!(v.fields, Fields::Unit) => {
+                Some(names[0].clone())
+            }
+            Some((_, span)) => {
+                return Err(syn::Error::new(
+                    span,
+                    "`#[args(name)]` names the data of an event that has some: one name",
+                ));
+            }
+        };
+        let arg = named.unwrap_or_else(|| {
+            match &v.fields {
+                Fields::Named(_) => "event",
+                _ => "value",
+            }
+            .to_owned()
+        });
         match &v.fields {
             Fields::Unit => {
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, data: ::std::string::String::from("void"), doc: #doc }
+                    #ui::EventSpec { name: #js, arg: #arg, data: ::std::string::String::from("void"), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident => #js));
                 data_arms.push(quote!(Self::#ident => ::core::result::Result::Ok(#ui::JsOwned::new(host, host.undefined()))));
@@ -685,7 +768,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             Fields::Unnamed(f) if f.unnamed.len() == 1 => {
                 let ty = &f.unnamed[0].ty;
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, data: #ui::ts_of::<#ty>()(types), doc: #doc }
+                    #ui::EventSpec { name: #js, arg: #arg, data: #ui::ts_of::<#ty>()(types), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
                 data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_js(v, host)));
@@ -701,6 +784,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 specs.push(quote! {
                     #ui::EventSpec {
                         name: #js,
+                        arg: #arg,
                         data: if #ui::DECLARATIONS {
                             let fields: ::std::vec::Vec<::std::string::String> = ::std::vec![
                                 #(::std::format!("{}: {}", #keys, <#tys as #ui::JsValue>::ts_type(types))),*
@@ -1067,11 +1151,12 @@ pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
+fn methods_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
-    let self_ty = &item.self_ty;
-    let (impl_generics, _, where_clause) = item.generics.split_for_impl();
+    let self_ty = item.self_ty.clone();
+    let generics = item.generics.clone();
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
@@ -1114,7 +1199,8 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             };
             let name = camel(&name.ident.to_string());
             let local = format_ident!("__arg{}", i);
-            params.push(quote!((#name, #private::arg_ts::<#ty>())));
+            let ts = param_ts(ty, &arg.attrs)?;
+            params.push(quote!((#name, #ts)));
             refs.push(quote!(#private::arg_classes::<#ty>(__out);));
             decode.push(quote! {
                 let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
@@ -1164,6 +1250,11 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 },
             }
         });
+    }
+    for member in &mut item.items {
+        if let ImplItem::Fn(f) = member {
+            strip_args(&mut f.sig);
+        }
     }
     Ok(quote! {
         #item
@@ -1302,7 +1393,9 @@ fn module_cx(ty: &Type) -> bool {
 /// an `async fn` runs as a task of the core with the free functions views
 /// use (`dialog(..)`, `clipboard_string()`, ...), a `Promise`. Parameters
 /// are [`JsValue`] types (a trailing `Option` is optional), instances
-/// (`Instance<T>`) and JS functions (`Callback<A, R>`); a function returns
+/// (`Instance<T>`) and JS functions (`Callback<A, R>`; `#[args(name,
+/// amount)]` on the parameter names the function's arguments in TS); a
+/// function returns
 /// nothing, a [`JsValue`], an instance, or a `Result` of one (an `Err`
 /// throws or rejects with its message). A UI set registers the module
 /// (`Registry::module::<Alert>()`); a component exported under the same
@@ -1336,7 +1429,8 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// receiver are statics. They run in the JS call: their parameters are
 /// [`JsValue`] types (a trailing `Option` is optional), instances
 /// (`&Other` / `&mut Other` borrowed for the call, `Instance<Other>` kept)
-/// and JS functions (`Callback<A, R>`);
+/// and JS functions (`Callback<A, R>`; `#[args(name, amount)]` on the
+/// parameter names the function's arguments in TS);
 /// they return nothing, a value, `Self` or another class's value (a new JS
 /// object), an `Instance` (its JS object), or a `Result` of one (an `Err`
 /// throws). An `async fn` (`this: Instance<Self>` first, for a method)
@@ -1366,10 +1460,10 @@ fn result_ok(ty: &Type) -> Option<&Type> {
     }
 }
 
-fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
+fn module_impl(mut item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
-    let self_ty = &item.self_ty;
+    let self_ty = &item.self_ty.clone();
     let Some((type_name, _)) = last_segment(self_ty) else {
         return Err(syn::Error::new(
             self_ty.span(),
@@ -1408,6 +1502,7 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
         let takes_cx = typed.last().is_some_and(|t| module_cx(&t.ty));
         let mut params = Vec::new();
         let mut names = Vec::new();
+        let mut ts = Vec::new();
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
             if module_cx(ty) {
@@ -1433,6 +1528,7 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 ));
             };
             names.push(camel(&name.ident.to_string()));
+            ts.push(param_ts(ty, &arg.attrs)?);
             params.push(ty);
         }
         // An `Option` parameter is optional when the ones after it are too.
@@ -1443,10 +1539,11 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             }
             optional[i] = true;
         }
-        let param_specs =
-            params.iter().zip(&names).zip(&optional).map(
-                |((ty, name), optional)| quote!((#name, #private::arg_ts::<#ty>(), #optional)),
-            );
+        let param_specs = ts
+            .iter()
+            .zip(&names)
+            .zip(&optional)
+            .map(|((ts, name), optional)| quote!((#name, #ts, #optional)));
         let (returns, fallible) = match &f.sig.output {
             ReturnType::Default => (quote!(::core::option::Option::None), false),
             ReturnType::Type(_, ty) => match result_ok(ty) {
@@ -1548,6 +1645,11 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
                 call: #call,
             }
         });
+    }
+    for member in &mut item.items {
+        if let ImplItem::Fn(f) = member {
+            strip_args(&mut f.sig);
+        }
     }
     Ok(quote! {
         #item

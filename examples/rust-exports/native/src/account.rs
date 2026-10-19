@@ -109,7 +109,9 @@ impl Account {
     /// Calls `listener` with the new balance after every change.
     // A `Callback` is the TS function; kept here, it is called with `post`
     // from wherever the balance changes (see `book`).
-    pub fn on_change(&mut self, listener: Callback<f64>) {
+    // `#[args(..)]` names the callback's arguments in TS:
+    // `(balance: number) => void`.
+    pub fn on_change(&mut self, #[args(balance)] listener: Callback<f64>) {
         self.listeners.push(listener);
     }
 

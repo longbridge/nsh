@@ -74,5 +74,6 @@ pub struct SelectListProps {
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum SelectListEvent {
     /// An option was chosen (its index).
+    #[args(index)]
     Select(u32),
 }

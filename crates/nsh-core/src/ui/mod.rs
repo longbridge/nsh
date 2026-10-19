@@ -355,7 +355,7 @@ pub mod prelude {
 pub mod __private {
     pub use serde_json::Map as JsonMap;
 
-    pub use super::class::__private::*;
+    pub use super::{callback::NamedArgs, class::__private::*};
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`

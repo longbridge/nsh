@@ -195,7 +195,11 @@ For that, two choices of the first version change:
 ## Callbacks
 
 A parameter `Callback<A, R = ()>` takes a JS function: `A` is its argument (a `JsValue` type, or a tuple for
-several), `R` what it returns. TS: `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`.
+several), `R` what it returns. TS: `Callback<f64>` is `(value: number) => void`, `Callback<(String, f64), bool>`
+`(a: string, b: number) => boolean`; `#[args(..)]` on the parameter names the function's arguments, checked at
+compile time to name each (`#[args(name, amount)] check: Callback<(String, f64), bool>` is `check: (name: string,
+amount: number) => boolean`), in classes, modules and ref methods alike. The attribute is the macros': it is
+removed from the function they leave.
 
 ```rust
 #[class]

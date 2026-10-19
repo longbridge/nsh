@@ -31,8 +31,10 @@ pub struct TextFieldProps {
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum TextFieldEvent {
     /// The text changed (the new text).
+    #[args(text)]
     Change(String),
     /// The return key was pressed (the text).
+    #[args(text)]
     Submit(String),
 }
 

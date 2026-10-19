@@ -77,7 +77,9 @@ reasons: `reactive-components.md`.
   too (`#[module] impl Alert`: `Alert`).
 - **Props** are a struct, **events** an enum; the derives produce a decoder per prop (`PropSpec::decode`: the JS
   value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
-  defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. Value types
+  defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. An
+  event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
+  variant names it (`onSelect?: (index: number) => void`). Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
