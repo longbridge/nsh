@@ -1,4 +1,4 @@
-# embed-gpui
+# NSH + GPUI Kit (embed-gpui)
 
 A GPUI Kit app embedding NSH apps (`nsh_platform_gpui::AppView`): a sidebar, an input, buttons and a dialog of GPUI
 Kit around two order tickets in a resizable split, each running `app/` in its own engine. Each pane's GPUI Kit title

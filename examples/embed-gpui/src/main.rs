@@ -1,10 +1,10 @@
-//! A GPUI Kit app embedding nsh apps: the Longbridge Pro / Allsum Desktop
-//! case of native UI delivered at run time into a desktop app built with
-//! GPUI Kit.
+//! NSH + GPUI Kit: a GPUI Kit app embedding NSH apps, the Longbridge Pro /
+//! Allsum Desktop case of native UI delivered at run time into a desktop
+//! app built with GPUI Kit.
 //!
 //! The window is GPUI Kit's (its `Root`, a sidebar, buttons, an input, a
 //! dialog); the two panes of the resizable split are [`AppView`]s, each
-//! running its own nsh engine. The host's theme reaches them on every
+//! running its own NSH engine. The host's theme reaches them on every
 //! change ([`theme::nsh_theme`], `observe_global::<Theme>`), Tab moves
 //! through the host's widgets and the surfaces' fields alike, GPUI Kit's
 //! dialogs and notifications draw above the surfaces, closing a pane
@@ -491,7 +491,7 @@ impl Render for Shell {
                         window.open_dialog(cx, |dialog, _, _| {
                             dialog
                                 .title("A GPUI Kit dialog")
-                                .child("It draws above the nsh surfaces, which keep running.")
+                                .child("It draws above the NSH surfaces, which keep running.")
                         });
                         window.push_notification(
                             Notification::new().message("A notification above the surfaces"),
@@ -529,7 +529,7 @@ impl Render for Shell {
             .child(
                 Sidebar::new("sidebar")
                     .w(px(220.))
-                    .header(SidebarHeader::new().child("nsh in GPUI Kit"))
+                    .header(SidebarHeader::new().child("NSH + GPUI Kit"))
                     .child(SidebarGroup::new("Embedded apps").child(menu))
                     .child(SidebarGroup::new("Watchlist").child(watchlist))
                     .footer(orders),
@@ -657,7 +657,7 @@ fn main() {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1280.), px(820.)), cx)),
             titlebar: Some(TitlebarOptions {
-                title: Some("nsh in GPUI Kit".into()),
+                title: Some("NSH + GPUI Kit".into()),
                 ..Default::default()
             }),
             // GPUI draws unfocused windows at 30 fps by default, which

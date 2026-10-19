@@ -1,6 +1,6 @@
 [package]
 name = "embed-gpui-host"
-description = "A GPUI Kit app embedding nsh apps (AppView): host widgets around several surfaces, the host's theme in them."
+description = "NSH + GPUI Kit: a GPUI Kit app embedding NSH apps (AppView): host widgets around several surfaces, the host's theme in them."
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
