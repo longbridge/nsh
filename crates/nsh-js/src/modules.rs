@@ -646,6 +646,8 @@ impl rquickjs::loader::Loader for Loader {
         // remain on their original ModuleDef path in this same VM.
         let registered = ctx
             .userdata::<ModuleTablePtr>()
+            // SAFETY: `install`'s owner (the VM state or the bytecode
+            // compiler) keeps the table alive while the context loads.
             .is_some_and(|table| unsafe { (&*table.0).exports(name).is_some() });
         if !registered && let Some(name) = crate::standard::normalize(name) {
             return crate::standard::load(ctx, name);
@@ -675,6 +677,8 @@ unsafe extern "C" fn load_native(
         // SAFETY: install's owner keeps the table alive through this load.
         Some(table) => unsafe { load(raw, name, table as *mut c_void) },
         None => {
+            // SAFETY: throws on the live context of this callback; the
+            // message is a literal without format directives.
             unsafe {
                 qjs::JS_ThrowInternalError(raw, c"native module table is not installed".as_ptr());
             }
