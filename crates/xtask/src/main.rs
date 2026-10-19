@@ -68,7 +68,7 @@ enum Task {
     /// Build the distribution in `dist/nsh`.
     Dist,
     /// Build only the iOS embedding XCFrameworks.
-    IosEmbed,
+    IosEmbed(ios::Options),
     /// Build the WebAssembly runtime and the website's demos.
     Web {
         /// Output directory.
@@ -130,7 +130,7 @@ fn task(task: Task) -> anyhow::Result<()> {
         }
         Task::ClippyAndroid => android::clippy(),
         Task::Dist => dist::dist(),
-        Task::IosEmbed => ios::build().map(|out| term::note(out.display())),
+        Task::IosEmbed(options) => ios::build(options).map(|out| term::note(out.display())),
         Task::Web { out } => web::build(&out),
     }
 }

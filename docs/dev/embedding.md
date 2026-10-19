@@ -66,7 +66,14 @@
   evolution (`.swiftinterface`: apps on other Swift compilers can import it). The Swift module imports the C ABI's
   module `NativeShellC` with `internal import`, so it is neither in the interface nor shipped; its module map's `link`
   lines become autolink entries of the Swift objects (apps link nothing but the framework). Catalyst frameworks use the
-  versioned macOS layout and Swift needs the SDK's `iOSSupport` paths. The C functions return errors as strings
+  versioned macOS layout and Swift needs the SDK's `iOSSupport` paths. The Rust static library goes in as one
+  relocatable object (`ld -r` with an exported symbols list) that exports only the C ABI (`_nsh_*`): Rust's runtime
+  (`rust_eh_personality`), the standard library and QuickJS (`JS_*`) become local, so apps that link another Rust
+  static library (each defines `rust_eh_personality`) or QuickJS link NativeShell without duplicate symbols (with
+  `-dead_strip` the linker only warns and keeps one of them, which the other runtime then unwinds with).
+  `cargo xtask ios-embed` options: `--x86-64-simulator` adds the x86_64 simulator architecture (merged with arm64 by
+  `lipo`: apps whose simulator builds run under Rosetta; `rustup target add x86_64-apple-ios`), `--no-catalyst` and
+  `--no-dev` leave out the Catalyst slice and `NativeShellDev`. The C functions return errors as strings
   (`nsh_string_free`) that Swift throws as `NshError`; the error handler's context is released by a callback.
 
 ## GPUI and GPUI Kit apps
