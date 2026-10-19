@@ -31,6 +31,7 @@ mod list_bench;
 mod native;
 mod net;
 mod package;
+mod parity;
 mod platform;
 mod process;
 mod rust_animation;
