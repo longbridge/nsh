@@ -246,9 +246,9 @@ one class (a constructor, methods, a getter and a setter, a static, an `async` m
 argument, a callback Rust posts to, `dispose()` and `using`), each with a short doc comment, and headless tests that
 press through the app and check what each one shows.
 
-`examples/gallery-rs` in the repository is a complete Rust app with both entries: every demo is Rust,
-`nsh run examples/gallery-rs --target web` (or `ios`, `android`, …) runs its root, `cargo run -p gallery-native`
-starts it on the desktop backend, and `nsh run examples/gallery-rs/App.tsx` runs it under its TSX entry.
+`examples/gallery-rs` in the repository is a complete Rust app: every demo is Rust, `nsh run examples/gallery-rs
+--target web` (or `ios`, `android`, …) runs its root, `nsh trace examples/gallery-rs` runs it headless, and
+`cargo run -p gallery-native` starts it on the desktop backend.
 
 ## Several crates
 

@@ -229,9 +229,9 @@ Rust 的修改会重新构建并重启应用。
 props，一个事件，子元素）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、
 Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简短的文档注释；它的无界面测试在应用中逐一点按，并检查每个导出显示的内容。
 
-仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用，两种入口都有：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
-（或 `ios`、`android` 等）运行它的根组件，`cargo run -p gallery-native` 在桌面后端上启动它，`nsh run examples/gallery-rs/App.tsx`
-通过 TSX 入口运行它。
+仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
+（或 `ios`、`android` 等）运行它的根组件，`nsh trace examples/gallery-rs` 以无界面方式运行它，`cargo run -p gallery-native`
+在桌面后端上启动它。
 
 ## 多个 crate
 

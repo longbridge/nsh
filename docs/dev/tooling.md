@@ -195,8 +195,8 @@ at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` k
 are target-specific and disable default features, so `cargo run` mounts the Rust root directly.
 `App.tsx` imports that same component; `nsh.json` sets `"rust": "."`, so the existing Rust-component
 build / development / packaging path serves it on the selected platform. The generated app accepts
-`NSH_SCRIPT` for native desktop window checks. `examples/gallery-rs` exercises both entry points and
-has a headless test of the Rust root's input handling.
+`NSH_SCRIPT` for native desktop window checks. `examples/gallery-rs` is a Rust app with a native entry
+(`cargo run`) and headless tests of its Rust root.
 
 The display name becomes a normalized Cargo package name prefixed with `nsh-app-`; the main entry
 uses its Rust crate identifier. Rust creation checks for existing app and Cargo source files before
@@ -212,17 +212,19 @@ app root, and the build directory itself (`CARGO_TARGET_DIR` inside a crate's di
 
 `"rust": "<crate dir>"` names a library crate of the app with a `#[native_module("<specifier>")]` function at its
 root, which registers the crate's Rust components, modules and assets into its UI set, imported by the app's TSX by
-that specifier (`examples/gallery-rs`: `import { Gallery } from "gallery/native"`). `"rust": ["native/charts",
+that specifier (`examples/rust-exports`: `import { Account, Gauge, Ledger } from "rust-exports/native"`). `"rust": ["native/charts",
 "native/storage"]` lists several, each a UI set of its own with its own `#[native_module]` and specifier
 (`import { Chart } from "app/charts"`, `import { Store } from "app/storage"`; `docs/dev/rust-modules.md`):
 
 ```rust
 use nsh_core::ui::prelude::*;
 
-#[native_module("gallery/native")]
+#[native_module("rust-exports/native")]
 fn native(registry: &mut Registry) {
-    registry.register::<Gallery>();
-    registry.assets(assets!());
+    registry
+        .register::<Gauge>()
+        .module::<Ledger>()
+        .class::<Account>();
 }
 ```
 

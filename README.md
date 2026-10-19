@@ -159,7 +159,8 @@ Logs and errors show in the terminal. What each platform needs:
 | [`examples/counter`](examples/counter) | The smallest app |
 | [`examples/hopper`](examples/hopper) | A dark, tabbed dashboard built only from primitives: interactive canvas charts, sliders, menus, animation |
 | [`examples/desktop`](examples/desktop) | A desktop app with a title bar and menus of its own (`nsh/desktop`) |
-| [`examples/gallery-rs`](examples/gallery-rs) | The gallery written in Rust, with a TSX entry for mixed development |
+| [`examples/gallery-rs`](examples/gallery-rs) | The gallery written in Rust: an app with no TSX and no QuickJS |
+| [`examples/rust-exports`](examples/rust-exports) | A TSX app using a component, a module and a class of its own Rust crate |
 | [`examples/embed-ios`](examples/embed-ios), [`examples/embed-android`](examples/embed-android) | NSH inside existing native apps, with a native component the app registers |
 | [`examples/bench`](examples/bench) | Rust components against the same components in TSX |
 
