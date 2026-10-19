@@ -28,15 +28,15 @@ fn bytecode() -> Vec<u8> {
     BYTECODE
         .get_or_init(|| {
             let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../App.tsx");
+            let sets: Vec<_> = ui_sets().iter().map(Into::into).collect();
             let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
                 entry,
                 minify: false,
                 split: false,
-                ui_sets: ui_sets(),
+                ui_sets: sets.clone(),
             })
             .expect("App.tsx bundles");
-            nsh_js::compile_bytecode_with(&bundle.code, false, &ui_sets())
-                .expect("App.tsx compiles")
+            nsh_js::compile_bytecode_with(&bundle.code, false, &sets).expect("App.tsx compiles")
         })
         .clone()
 }

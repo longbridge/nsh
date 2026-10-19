@@ -108,7 +108,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
             entry: entry.to_path_buf(),
             minify: false,
             split: false,
-            ui_sets: crate::ui_sets().to_vec(),
+            ui_sets: crate::described_sets().to_vec(),
         })
         .map_err(|e| BuildError::from(e).into_error(entry))?;
         // Exact numbers: traces are compared.
@@ -121,7 +121,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
                 bundle.elapsed_ms
             ))
         ));
-        let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, crate::ui_sets())?;
+        let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, crate::described_sets())?;
         // SAFETY: compiled just now by this runtime.
         let bytecode = unsafe { Bundle::bytecode(bytecode) };
         nsh_engine::App::Js(match bundle.source_map {

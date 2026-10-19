@@ -54,9 +54,9 @@ const DEV_PAGE: &str = include_str!("web/dev.html");
 /// Rust components of its own the app's set too (its runtime is built with
 /// the sets this command line has, `rust_app::RustApp::web`).
 fn ui_sets() -> Vec<&'static str> {
-    crate::ui_sets()
+    crate::described_sets()
         .iter()
-        .filter_map(nsh_core::ui::Registry::specifier)
+        .map(|set| set.specifier.as_str())
         .collect()
 }
 

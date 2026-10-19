@@ -27,9 +27,9 @@ pub struct BundleOptions {
     /// otherwise the bundle holds the whole app, dynamically imported
     /// modules included.
     pub split: bool,
-    /// The UI sets the hosts serve (`nsh_ui_mobile::registry()`, the app's
-    /// own): their modules stay imports.
-    pub ui_sets: Vec<nsh_core::ui::Registry>,
+    /// The UI sets the hosts serve, described (`nsh_ui_mobile::registry()`
+    /// and an app's own, as `SetDescription`s): their modules stay imports.
+    pub ui_sets: Vec<nsh_core::ui::description::SetDescription>,
 }
 
 /// A failed build, formatted for people.
@@ -454,7 +454,7 @@ fn append_module(
 /// the current thread (`ui_sets` as in [`BundleOptions::ui_sets`]).
 pub fn bundle_hot(
     entry: &std::path::Path,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[nsh_core::ui::description::SetDescription],
 ) -> Result<HotBundle, BundleError> {
     tokio::runtime::Builder::new_current_thread()
         .build()
@@ -465,7 +465,7 @@ pub fn bundle_hot(
 /// Bundles an app for development with hot module replacement.
 pub async fn bundle_hot_async(
     entry: &std::path::Path,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[nsh_core::ui::description::SetDescription],
 ) -> Result<HotBundle, BundleError> {
     let start = Instant::now();
     let entry = dunce::canonicalize(entry)

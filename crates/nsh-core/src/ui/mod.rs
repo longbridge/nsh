@@ -37,6 +37,7 @@ pub(crate) mod call;
 mod callback;
 pub(crate) mod class;
 mod component;
+pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;

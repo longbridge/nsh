@@ -117,7 +117,8 @@ fn drain(rx: &Receiver<MountBatch>, screen: &mut Screen) {
 }
 
 fn update(dir: &Path, previous: &mut nsh_bundler::HotBundle, n: u32) -> Option<HotUpdate> {
-    let next = nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry()]).unwrap();
+    let next =
+        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry().into()]).unwrap();
     let patch = next.patch(previous);
     *previous = next;
     match patch {
@@ -151,7 +152,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
     .unwrap();
 
     let mut bundle =
-        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry()]).unwrap();
+        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry().into()]).unwrap();
     let (code, map) = bundle.script();
     let (tx, rx) = crossbeam_channel::unbounded();
     let (failed_tx, failed) = crossbeam_channel::unbounded();
@@ -238,7 +239,8 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         format!("import {{ windowSize }} from \"nsh/device\";\nwindowSize();\n{counter}"),
     )
     .unwrap();
-    let next = nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry()]).unwrap();
+    let next =
+        nsh_bundler::bundle_hot(&dir.join("App.tsx"), &[nsh_ui_mobile::registry().into()]).unwrap();
     assert!(matches!(next.patch(&bundle), nsh_bundler::HotPatch::Reload));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -296,7 +298,8 @@ fn entry_edits_keep_navigation_and_state() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("App.tsx"), &app).unwrap();
         let sets = [nsh_ui_mobile::registry()];
-        let mut bundle = nsh_bundler::bundle_hot(&dir.join("App.tsx"), &sets).unwrap();
+        let described: Vec<_> = sets.iter().map(Into::into).collect();
+        let mut bundle = nsh_bundler::bundle_hot(&dir.join("App.tsx"), &described).unwrap();
         let (code, map) = bundle.script();
         let (tx, rx) = crossbeam_channel::unbounded();
         let (failed_tx, failed) = crossbeam_channel::unbounded();

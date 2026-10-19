@@ -371,10 +371,11 @@ pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<Moun
         entry,
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &ui_sets).unwrap();
+    let described: Vec<_> = ui_sets.iter().map(Into::into).collect();
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &described).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.

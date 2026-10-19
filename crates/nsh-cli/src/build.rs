@@ -100,12 +100,12 @@ pub(crate) struct Asset {
 /// The files the UI sets' crates ship (`Registry::assets`), published
 /// under `@<package>/`.
 pub(crate) fn crate_assets() -> impl Iterator<Item = Asset> {
-    crate::ui_sets()
+    crate::described_sets()
         .iter()
-        .flat_map(nsh_core::ui::Registry::asset_files)
+        .flat_map(|set| &set.assets)
         .map(|file| Asset {
-            path: file.path().to_owned(),
-            source: PathBuf::from(file.source),
+            path: file.path.clone(),
+            source: PathBuf::from(&file.source),
         })
 }
 
@@ -116,9 +116,9 @@ fn imported_sets(natives: &[String]) -> Vec<String> {
     natives
         .iter()
         .filter(|spec| {
-            crate::ui_sets()
+            crate::described_sets()
                 .iter()
-                .any(|set| set.specifier() == Some(spec.as_str()))
+                .any(|set| set.specifier == **spec)
         })
         .cloned()
         .collect()
@@ -204,19 +204,19 @@ fn compile_with(
         entry: entry.to_path_buf(),
         minify: release,
         split,
-        ui_sets: crate::ui_sets().to_vec(),
+        ui_sets: crate::described_sets().to_vec(),
     })?;
     let dir = dunce::canonicalize(entry)
         .ok()
         .and_then(|e| e.parent().map(Path::to_path_buf));
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, strip, crate::ui_sets())?;
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, strip, crate::described_sets())?;
     let sources: Vec<(&str, &str)> = bundle
         .chunks
         .iter()
         .map(|c| (c.id.as_str(), c.code.as_str()))
         .collect();
     let chunk_bytecode =
-        nsh_js::compile_chunk_bytecode(&bundle.code, &sources, strip, crate::ui_sets())?;
+        nsh_js::compile_chunk_bytecode(&bundle.code, &sources, strip, crate::described_sets())?;
     let chunks = bundle
         .chunks
         .into_iter()
@@ -245,12 +245,12 @@ fn compile_with(
 /// app (source and bytecode) plus the modules, to compute later updates.
 pub(crate) fn compile_hot(entry: &Path) -> Result<(Built, nsh_bundler::HotBundle), BuildError> {
     let start = Instant::now();
-    let hot = nsh_bundler::bundle_hot(entry, crate::ui_sets())?;
+    let hot = nsh_bundler::bundle_hot(entry, crate::described_sets())?;
     let dir = dunce::canonicalize(entry)
         .ok()
         .and_then(|e| e.parent().map(Path::to_path_buf));
     let (code, source_map) = hot.script();
-    let bytecode = nsh_js::compile_bytecode_with(&code, false, crate::ui_sets())?;
+    let bytecode = nsh_js::compile_bytecode_with(&code, false, crate::described_sets())?;
     let built = Built {
         code,
         bytecode,

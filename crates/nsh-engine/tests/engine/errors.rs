@@ -43,7 +43,7 @@ fn failing_app(name: &str, minify: bool) -> nsh_bundler::Bundle {
         entry,
         minify,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let _ = std::fs::remove_dir_all(&dir);

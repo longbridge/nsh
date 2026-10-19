@@ -44,6 +44,18 @@ pub(crate) fn ui_sets() -> &'static [Registry] {
     UI_SETS.get_or_init(|| vec![nsh_ui_mobile::registry()])
 }
 
+/// [`ui_sets`] as data, as the bundler, the bytecode compiler and
+/// `.nsh/types` take them.
+pub(crate) fn described_sets() -> &'static [nsh_core::ui::description::SetDescription] {
+    static DESCRIBED: OnceLock<Vec<nsh_core::ui::description::SetDescription>> = OnceLock::new();
+    DESCRIBED.get_or_init(|| {
+        ui_sets()
+            .iter()
+            .filter_map(nsh_core::ui::description::SetDescription::of)
+            .collect()
+    })
+}
+
 #[derive(Parser)]
 #[command(name = "nsh", version, about = "Build and run nsh apps")]
 struct Cli {

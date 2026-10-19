@@ -38,7 +38,7 @@ pub use types::{TSCONFIG, type_definitions};
 pub fn compile_module(
     name: &str,
     source: &str,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[nsh_core::ui::description::SetDescription],
 ) -> Result<String, String> {
     let path = std::path::Path::new(name);
     let source_type = oxc::span::SourceType::from_path(path).map_err(|e| e.to_string())?;
@@ -59,7 +59,7 @@ mod tests {
              const n: number = 1;\n\
              function App() { const c = signal(n); return <View><Button title=\"x\" onPress={() => c.set(2)} /></View>; }\n\
              mount(App);\n",
-            &[nsh_ui_mobile::registry()],
+            &[nsh_ui_mobile::registry().into()],
         )
         .unwrap();
         assert!(code.contains("from \"nsh:rt\""), "{code}");
