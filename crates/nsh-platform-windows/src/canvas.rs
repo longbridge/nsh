@@ -33,8 +33,8 @@
 //! Text is laid out with DirectWrite (layouts cached per canvas) in the
 //! fonts the text engine measures with, so drawn widths match
 //! `measureText`; `strokeText` and conic-filled text use the glyphs'
-//! outlines. Images are loaded through [`crate::image::load`] when a
-//! drawing names them and kept per canvas (their frames make bitmaps per
+//! outlines. Images are loaded through [`crate::image::load_bitmap`] when
+//! a drawing names them and kept per canvas (their frames make bitmaps per
 //! device).
 
 use std::{cell::RefCell, f64::consts::TAU, rc::Rc, sync::Arc};
@@ -179,9 +179,9 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     for uri in load {
         let weak = Rc::downgrade(surface);
         let key = uri.clone();
-        crate::image::load(surface, &uri, move |result| {
+        crate::image::load_bitmap(surface, &uri, move |result| {
             let frame = match result {
-                Ok((frame, _)) => frame,
+                Ok(frame) => frame,
                 Err(e) => {
                     log::warn!("canvas: {e}");
                     return;
