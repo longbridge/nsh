@@ -27,7 +27,9 @@ crates/
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, the theme;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); the runtime's Rust
-                       modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs)
+                       modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs),
+                       the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
+                       `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
                        `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
@@ -42,7 +44,9 @@ crates/
                        responder system (`touch.rs`), the environment (`env.rs`), hot module replacement (`hot.rs`),
                        Rust classes (`classes.rs`: on the web classes' machinery);
                        decoding JS values into core types (`protocol.rs`); the web APIs of TS apps (`web/`: fetch, streams,
-                       Blob / FormData, URL, encoding, events), native classes; the TypeScript declarations of all of it
+                       Blob / FormData, URL, encoding, events), native classes; the standard modules' VM side (`standard/`:
+                       the catalog and its loader, LLRT's `buffer` / `crypto` / `path` / `url` / `zlib`, `console`,
+                       `websocket`, the global `process` and `nextTick`); the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
   nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
@@ -223,11 +227,17 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 
 ## Rules
 
-- **Two module layers.** `nsh` / `nsh/<module>` (native, `crates/nsh-js`) are the primitives and the environment
+- **Two module layers, and the standard catalog.** `nsh` / `nsh/<module>` (native, `crates/nsh-js`) are the primitives and the environment
   every UI set builds on; `nsh/ui/<set>` is a whole UI for one form factor (`nsh/ui/mobile`; a desktop set will be
   separate, never an abstraction over both). Shared vs one form factor decides the layer, not JS vs native. Platform-only APIs go to
   `nsh/ios` / `nsh/android`, platform-only props into `ios={{…}}` / `android={{…}}` / `desktop={{…}}`. `nsh` has no
-  catch-all re-exports; moved APIs get no compatibility re-exports.
+  catch-all re-exports; moved APIs get no compatibility re-exports. Beside them sits a fixed catalog of eleven
+  standard modules with bare specifiers (`nsh_core::js::STANDARD_MODULES`: `buffer`, `console`, `crypto`,
+  `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib`): Node-shaped subsets compatible with
+  gpui-shell's, built on the same native machinery (typed registries, capability checks in Rust) with generated
+  declarations. Exactly these names import; `node:` prefixes and other Node modules (`fs`, `events`, `util`, ...)
+  are refused. Files and processes are these modules (`fs/promises`, `process`), never an `nsh/<module>`; the
+  catalog grows only by a design decision.
 - **Primitives only.** The runtime adds capabilities, not widgets: components are drawn with the primitives in a UI
   set and look the same on every platform; no platform-styled widgets. React Native is a reference for which
   capabilities exist, not an API to be compatible with.

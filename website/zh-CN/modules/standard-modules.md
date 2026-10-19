@@ -1,34 +1,45 @@
 ---
 title: 标准模块
-description: "固定版本 LLRT 标准模块与 NSH 文件、进程和网络适配器。"
+description: "十一个 Node 风格的标准模块：固定版本的 LLRT 工具模块，以及经能力检查的文件、进程和网络。"
 order: 14.5
 ---
 
-Native Shell 在同一个 QuickJS VM 中提供一组固定版本的 LLRT 标准模块，并以 NSH 自身的能力检查接入文件、进程和网络。应用继续使用 TS/TSX；运行时按下表提供明确的模块子集。
+Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shell 兼容的 Node 风格接口，运行在应用的 VM 中，由 NSH 的原生运行时实现，能力检查在 Rust 中进行。`.nsh/types` 中的 TypeScript 声明与模块由同一份规格生成，类型所示即运行时所导出。
 
-| Module | Surface |
+| 模块 | 导出 |
 |---|---|
-| `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder` | LLRT native utility modules |
-| `os` | `platform()`、`arch()`、`EOL`、`homedir()`：实际宿主的系统元数据 |
-| `console` | 默认导出当前 VM 的日志对象：`log`、`info`、`debug`、`warn`、`error` |
-| `process` | `spawn` (a `ChildProcess`), `run`, `exit`, `platform`, `arch`, `nextTick`; `env` and `dataDir` on the default object, which is also the global `process` |
-| `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
-| `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
-| `websocket` | `WebSocket` constructor, also installed globally on native hosts |
+| `buffer` | `Buffer`、`atob`、`btoa`、`constants`、默认导出（LLRT）；`Buffer` 也是全局对象 |
+| `crypto` | `createHash`、`createHmac`、`randomBytes`、`randomFill`、`randomFillSync`、`randomInt`、`randomUUID`、`getRandomValues`、`webcrypto`、`crypto`、`Crc32`、`Crc32c`、`Md5`、`Sha1`、`Sha256`、`Sha384`、`Sha512`、默认导出（LLRT）；`crypto` 也是全局对象 |
+| `path` | `basename`、`delimiter`、`dirname`、`extname`、`format`、`isAbsolute`、`join`、`normalize`、`parse`、`relative`、`resolve`、`sep`、默认导出（LLRT） |
+| `url` | `URL`、`URLSearchParams`、`domainToASCII`、`domainToUnicode`、`fileURLToPath`、`format`、`pathToFileURL`、`urlToHttpOptions`、默认导出；`URL` 和 `URLSearchParams` 是 NSH 的全局类 |
+| `zlib` | `deflate`、`deflateRaw`、`inflate`、`inflateRaw`、`gzip`、`gunzip`、`brotliCompress`、`brotliDecompress`、`zstdCompress`、`zstdDecompress` 及各自的 `Sync` 形式、默认导出（LLRT） |
+| `os` | `platform()`、`arch()`、`homedir()`、`EOL`、默认导出 |
+| `console` | 默认导出：VM 的 `console`（`log`、`info`、`debug`、`warn`、`error`） |
+| `fs/promises` | `readFile`、`writeFile`、`readdir`、`exists`、`mkdir`、`rename`、`unlink`、`rmdir`、`stat`、`lstat`、`readlink`、默认导出 |
+| `process` | `run`、`spawn`、`exit`、`platform`、`arch`、`nextTick`、`ChildProcess`、默认导出；默认导出对象还有 `env` 和 `dataDir`，它也是全局 `process` |
+| `net` | `connect`、`Socket`、默认导出 |
+| `websocket` | `WebSocket.connect`（原生宿主）；全局 `WebSocket` 构造器 |
 
 ## 导入与类型
 
-裸模块名和单个 `node:` 前缀指向同一实现，例如 `buffer` 和 `node:buffer`。打包器保留这些原生模块导入。可用接口以生成的 `.nsh/types` 为准；这里提供的是明确的兼容子集，Node.js 的完整模块和事件循环行为不属于此接口承诺。
+每个模块都按表中的名称导入：`import { join } from "path"`、`import fs from "fs/promises"`。打包器保留这些导入，由运行时原生提供；标准模块目录就是这十一个名称。`buffer`、`crypto`、`path`、`url` 和 `zlib` 采用 LLRT 的实现，固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`，其声明从该版本投影到运行时实际具有的导出。其余模块由 NSH 自己实现。NSH 的 URL、Blob、流和事件类保留其对象身份。
 
-LLRT 实现固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`。工具模块的声明从同一版本的上游源码资产生成，并按运行时实际导出筛选；文件、进程和网络适配器的声明与实现一起维护。`Buffer` 和 `crypto` 是全局对象；NSH 原有的 URL、Blob、流和事件构造器保留其对象身份。
+## 与 Node.js 和 gpui-shell 的比较
 
-兼容性测试覆盖已导出的子集及其与 NSH 的集成；工具函数的边界行为遵循固定版本的 LLRT 实现。
+这些模块在其导出的子集内沿用 Node 的名称和形态，在 gpui-shell 定义了行为之处沿用 gpui-shell 的行为。NSH 自己的选择：
+
+- `fs/promises` 的 `exists` 对目标不存在的符号链接返回 `true`；`unlink`、`rename`、`rmdir`、`lstat` 和 `readlink` 作用于符号链接本身。
+- `Stats` 和 `Dirent` 的字段（`size`、`mtimeMs`、`name` 等）是 getter，并带有 `isFile()`、`isDirectory()` 和 `isSymbolicLink()` 方法。
+- `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal, error }`。`on` 返回子进程本身。
+- 子进程的环境是宿主的一小组变量加上应用获授权的变量名；它在应用的数据目录中运行，或在 `fs.write` 根目录内的 `cwd` 中运行（见[进程](#进程)）。
+- 宿主没有数据目录时 `process.dataDir` 为 `null`；`process.exit` 请求宿主退出。
+- 限制是每个接口的一部分：大小、数量和超时在下面各模块中列出。
 
 ## 系统元数据与日志
 
 `os.platform(): string` 和 `os.arch(): string` 返回实际原生宿主的系统与架构；`os.EOL: string` 是系统换行符。`os.homedir(): string` 返回配置为绝对路径的宿主主目录，在缺少此配置时抛出错误。返回目录路径只是元数据，文件操作仍需要 `fs.read` / `fs.write` 授权。
 
-`import console from "node:console"` 与全局 `console` 是同一个 VM 日志对象。该模块仅默认导出，支持 `log`、`info`、`debug`、`warn`、`error`，每个方法的签名为 `(...values: unknown[]): void`。接口采用 NSH 的日志格式，公开接口为上述五方法对象。
+`import console from "console"` 与全局 `console` 是同一个 VM 日志对象。该模块仅默认导出，支持 `log`、`info`、`debug`、`warn`、`error`，每个方法的签名为 `(...values: unknown[]): void`。接口采用 NSH 的日志格式。
 
 ## 压缩
 
@@ -48,7 +59,7 @@ LLRT 实现固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`。工具模块�
 
 根目录可以是绝对路径、`${dataDir}`（宿主为此应用选定的数据目录）、`${pluginDir}`（应用目录）、`${homeDir}`，或相对于应用目录的路径。调用中的相对路径依次在每个授权根目录中解析。嵌入应用可以进一步缩小授权。每个操作都限定在其授权根目录之内，符号链接也是如此。`lstat`、`readlink`、`exists`、`unlink`、`rename` 和 `rmdir` 作用于符号链接本身：目标不存在的符号链接 `exists` 为 `true`，`unlink` 删除链接并保留其目标。
 
-`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名，传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
+`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名，传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`（其字段是 getter），包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
 
 ## 进程
 
@@ -132,7 +143,7 @@ TCP 使用 socket 授权：应用所连接的精确主机与端口。
 ```
 
 ```ts
-import { connect } from "node:net";
+import { connect } from "net";
 
 const socket = await connect("tcp.example.com", 9000);
 try {

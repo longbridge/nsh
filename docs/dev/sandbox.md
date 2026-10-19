@@ -80,9 +80,11 @@ go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `ws
 to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (`Shared::websockets`). Raw TCP
 `net.connect` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
 bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
-declaration) has none. Sockets are capped at 32 per VM (`Shared::sockets`) and 4 MiB of pending writes each;
+declaration) has none. Sockets are capped at 32 per VM (the call's `System` quotas) and 4 MiB of pending writes each;
 `close()` ends pending reads and writes. `zlib` decompression output is capped at 64 MiB or the heap limit if
 smaller (`standard/zlib.rs` wraps LLRT's module and clamps `maxOutputLength`), as it is native memory until it
-becomes a buffer. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
-standard catalog is eleven canonical bare modules; its connection and file APIs follow their generated
-signatures. See `website/modules/standard-modules.md` for the public surface.
+becomes a buffer. `fs/promises`, `process` and `net` check the call's `System` (the VM's `Access`, data directory,
+`TrustedPaths`) in Rust before any work starts, and count their limits in its quotas. The standard catalog is
+eleven bare specifiers and nothing else: `node:` prefixes and other Node modules (`fs`, `child_process`,
+`events`, ...) do not import, so no module reaches files, processes or sockets around these checks. See
+`website/modules/standard-modules.md` for the public surface.

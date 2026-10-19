@@ -82,28 +82,36 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
 
 ## Standard modules
 
-The exact standard catalog uses eleven canonical bare specifiers: `buffer`, `console`, `crypto`, `fs/promises`,
-`net`, `os`, `path`, `process`, `url`, `websocket` and `zlib`. `nsh_core::js::STANDARD_MODULES` is shared by the
-bundler and loader. Standard modules use the same VM and native module machinery; registry-backed modules are
-looked up alongside the hand-written runtime modules. Canonical names are required; `node:` aliases are rejected.
+The standard catalog is eleven bare specifiers, `nsh_core::js::STANDARD_MODULES`, shared by the bundler (which
+keeps their imports) and the loader: `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`,
+`process`, `url`, `websocket` and `zlib`. Only these names import: `node:buffer` and the Node modules outside the
+catalog (`fs`, `events`, `assert`, `util`, `string_decoder`, `child_process`, ...) are refused (tests:
+`nsh-js` `tests/standard/imports.rs`, which also checks that each module's runtime exports are its declared ones).
+The loader asks the module table first (typed registries own their names), then `standard::load`.
 
-`os` is a typed Rust `#[module(flat, default)]` in `nsh_core::runtime`, registered under `os`: its associated
-`EOL` constant, `platform`, `arch` and `homedir` functions generate flat named exports, the default namespace and
-their TypeScript declarations from one native spec. Returned paths are metadata and grant no file access.
-`console` default-exports the VM's existing five-method logger. `net` is one too (`nsh_core::runtime::net`: the
-`Net` module's `connect`, flat and default, and its `Socket` class): its JS face and declarations come from the
-spec, its limits throw in the call (`Later`, `JsError`), its capability check reads the call's `System`, and its
-connections, reads and writes are core tasks on the engine's tokio runtime. So is `fs/promises`
-(`nsh_core::runtime::fs`: the `Fs` module, flat and default, with `#[overload]`s for `readFile` and `readdir`;
-`Stats` and `Dirent` are `#[class(interface)]`, declared as interfaces and exported as no value): grants and
-limits throw in the call, and the disk work runs on the tokio runtime's blocking threads. `process` too
-(`nsh_core::runtime::process`): `run`, `spawn` (a `ChildProcess` whose `on(..)` keeps `Callback`s that a core
-task posts the child's output to), `exit`, `platform`, `arch` and the `env` / `dataDir` getters; `nsh-js` makes
-its default object the global `process` and adds `nextTick`, a JS job (`standard/process.rs`). The VM's children
-are a `Local`, closed (killed at once, joined together) when the VM goes.
+| Module | Where | Exports |
+|---|---|---|
+| `os` | `nsh_core::runtime::os` (`#[module(flat, default)]`) | `platform()`, `arch()`, `homedir()`, `EOL`, default |
+| `fs/promises` | `nsh_core::runtime::fs` | `readFile`, `writeFile`, `readdir`, `exists`, `unlink`, `rmdir`, `mkdir`, `stat`, `lstat`, `rename`, `readlink`, default; `Stats` and `Dirent` are `#[class(interface)]` (declared, no value) |
+| `process` | `nsh_core::runtime::process`, `nsh-js` `standard/process.rs` | `run`, `spawn`, `exit`, `platform`, `arch`, `nextTick`, `ChildProcess`, default (also `env` / `dataDir` getters); the default object is the global `process` |
+| `net` | `nsh_core::runtime::net` | `connect`, `Socket`, default |
+| `console` | `nsh-js` `standard/console.rs` | default: the VM's `console` (`log`, `info`, `debug`, `warn`, `error`) |
+| `websocket` | `nsh-js` `standard/websocket.rs` (native hosts) | `WebSocket` (`connect`); the global `WebSocket` constructor |
+| `buffer`, `crypto`, `path`, `url`, `zlib` | LLRT, pinned (`standard/mod.rs`) | their LLRT exports, projected by `standard/declarations.rs`; `Buffer` and `crypto` are globals |
 
-LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs` projects
-actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `websocket` adapters
-share the owning VM and NSH capability checks. Their declared interfaces, rather
-than complete Node.js or browser compatibility, define the app API. Existing WHATWG constructor identities stay
-intact. Standard `websocket` is an explicit connection API, distinct from the browser WebSocket interface.
+The typed modules' JS face and `.nsh/types` come from their specs (`#[module]`, `#[class]`; `docs/dev/rust-classes.md`):
+grants and limits throw in the call (`Later`, `JsError`: a `TypeError` or `RangeError`), I/O failures reject, and
+the work runs as core tasks on the engine's tokio runtime (`fs/promises` on its blocking threads). A call's
+`System` carries the VM's `Access`, data directory, `TrustedPaths`, `Quotas` and per-VM state (`Locals`:
+`process`'s children, killed at once and joined together when the VM goes). `process.spawn` returns its
+`ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
+adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
+`os.homedir()` and `process.dataDir` are metadata and grant no file access.
+
+LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs`
+projects their actual exports from checksummed upstream assets in `third_party/llrt-types`. `zlib` bounds each
+decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
+keep their identity. `console` and `websocket` carry their declarations next to their implementation. The
+declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
+they differ (a symlink `exists`, listeners get the payload only, `Stats` reads through getters, the child
+environment and `cwd` rules), `website/modules/standard-modules.md` says so.

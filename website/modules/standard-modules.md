@@ -1,34 +1,45 @@
 ---
 title: Standard modules
-description: "Pinned LLRT utilities and capability-checked NSH file, process and network adapters."
+description: "Eleven Node-shaped standard modules: pinned LLRT utilities and capability-checked files, processes and networking."
 order: 14.5
 ---
 
-Native Shell provides a pinned subset of LLRT standard modules inside its existing QuickJS VM, with NSH capability adapters for files, processes and networking. Applications stay in TS/TSX and use the explicit module surface below.
+Native Shell provides eleven standard modules, imported by their bare names: Node-shaped APIs compatible with gpui-shell's, running in the app's VM on NSH's native runtime, with their capabilities checked in Rust. Their TypeScript declarations in `.nsh/types` are generated from the same specs as the modules, so what the types show is what the runtime exports.
 
-| Module | Surface |
+| Module | Exports |
 |---|---|
-| `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder` | LLRT native utility modules |
-| `os` | `platform()`, `arch()`, `EOL`, `homedir()`: actual host OS metadata |
-| `console` | Default export of the per-VM logger: `log`, `info`, `debug`, `warn`, `error` |
-| `process` | `spawn` (a `ChildProcess`), `run`, `exit`, `platform`, `arch`, `nextTick`; `env` and `dataDir` on the default object, which is also the global `process` |
-| `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
-| `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
-| `websocket` | `WebSocket` constructor, also installed globally on native hosts |
+| `buffer` | `Buffer`, `atob`, `btoa`, `constants`, default (LLRT); `Buffer` is also a global |
+| `crypto` | `createHash`, `createHmac`, `randomBytes`, `randomFill`, `randomFillSync`, `randomInt`, `randomUUID`, `getRandomValues`, `webcrypto`, `crypto`, `Crc32`, `Crc32c`, `Md5`, `Sha1`, `Sha256`, `Sha384`, `Sha512`, default (LLRT); `crypto` is also a global |
+| `path` | `basename`, `delimiter`, `dirname`, `extname`, `format`, `isAbsolute`, `join`, `normalize`, `parse`, `relative`, `resolve`, `sep`, default (LLRT) |
+| `url` | `URL`, `URLSearchParams`, `domainToASCII`, `domainToUnicode`, `fileURLToPath`, `format`, `pathToFileURL`, `urlToHttpOptions`, default; `URL` and `URLSearchParams` are NSH's global classes |
+| `zlib` | `deflate`, `deflateRaw`, `inflate`, `inflateRaw`, `gzip`, `gunzip`, `brotliCompress`, `brotliDecompress`, `zstdCompress`, `zstdDecompress`, each with its `Sync` form, default (LLRT) |
+| `os` | `platform()`, `arch()`, `homedir()`, `EOL`, default |
+| `console` | default: the VM's `console` (`log`, `info`, `debug`, `warn`, `error`) |
+| `fs/promises` | `readFile`, `writeFile`, `readdir`, `exists`, `mkdir`, `rename`, `unlink`, `rmdir`, `stat`, `lstat`, `readlink`, default |
+| `process` | `run`, `spawn`, `exit`, `platform`, `arch`, `nextTick`, `ChildProcess`, default; the default object also has `env` and `dataDir` and is the global `process` |
+| `net` | `connect`, `Socket`, default |
+| `websocket` | `WebSocket.connect` (native hosts); the global `WebSocket` constructor |
 
 ## Imports and generated types
 
-Bare names and one `node:` prefix identify the same implementation, for example `buffer` and `node:buffer`. The bundler preserves these native imports. Generated `.nsh/types` describe the available interfaces. This is an explicit compatibility subset; full Node.js modules and event-loop semantics are outside its API contract.
+Each module is imported by exactly the name in the table: `import { join } from "path"`, `import fs from "fs/promises"`. The bundler keeps these imports, and the runtime serves them natively; the catalog is these eleven names. `buffer`, `crypto`, `path`, `url` and `zlib` are LLRT's implementations, pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`, with declarations projected from that revision onto the exports the runtime has. The others are NSH's own. NSH keeps the identity of its URL, Blob, stream and event classes.
 
-LLRT implementations are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`. Utility declarations are generated from upstream source assets at that revision and projected onto actual runtime exports; file, process and network adapters carry declarations beside their implementations. `Buffer` and `crypto` are globals. NSH retains the identity of its existing URL, Blob, stream and event constructors.
+## How they compare with Node.js and gpui-shell
 
-Compatibility tests cover the exported subset and NSH integration; utility edge cases follow the pinned LLRT implementation.
+The modules follow Node's names and shapes for the subset they export, and gpui-shell's behavior where it defines one. NSH's own choices:
+
+- `fs/promises`' `exists` is `true` for a symlink whose target is missing, and `unlink`, `rename`, `rmdir`, `lstat` and `readlink` act on a symlink itself.
+- `Stats` and `Dirent` are objects whose fields (`size`, `mtimeMs`, `name`, ...) are getters, with `isFile()`, `isDirectory()` and `isSymbolicLink()` methods.
+- A `ChildProcess` listener receives the event's payload: the output text, or the exit's `{ code, signal, error }`. `on` returns the child.
+- A child's environment is a small set from the host plus the names the app is granted, and it runs in the app's data directory or a `cwd` within an `fs.write` root ([Processes](#processes)).
+- `process.dataDir` is `null` when the host has no data directory; `process.exit` asks the host to exit.
+- Limits are part of each API: sizes, counts and timeouts are listed with each module below.
 
 ## OS metadata and logging
 
 `os.platform(): string` and `os.arch(): string` report the actual native host OS and architecture; `os.EOL: string` is its line separator. `os.homedir(): string` returns a configured absolute host home path and throws when none is configured. Directory paths are metadata: file operations still require `fs.read` / `fs.write` grants.
 
-`import console from "node:console"` shares the VM's global `console` object. The module has a default export only, supporting `log`, `info`, `debug`, `warn`, `error`, each with signature `(...values: unknown[]): void`. It uses NSH's logger formatting; its public surface is this five-method object.
+`import console from "console"` shares the VM's global `console` object. The module has a default export only, supporting `log`, `info`, `debug`, `warn`, `error`, each with signature `(...values: unknown[]): void`. It uses NSH's logger formatting.
 
 ## Compression
 
@@ -48,7 +59,7 @@ Compatibility tests cover the exported subset and NSH integration; utility edge 
 
 Roots are absolute paths, `${dataDir}` (this app's data directory, chosen by the host), `${pluginDir}` (the app's directory), `${homeDir}`, or paths relative to the app's directory. A relative path in a call is resolved in each granted root in turn. An embedding host may narrow the grants further. Every operation stays inside its granted root, symlinks included. `lstat`, `readlink`, `exists`, `unlink`, `rename` and `rmdir` act on a symlink itself: `exists` is `true` for a symlink whose target is missing, and `unlink` removes the link and keeps its target.
 
-`readFile` returns a `Uint8Array`, or a string with `"utf8"`, and reads files up to 64 MiB. `writeFile` writes a string or `Uint8Array` of up to 8 MiB, creating or replacing a regular file. `readdir` lists up to 10 000 names, sorted, or `Dirent`s (`name`, `isDirectory()`) with `{ withFileTypes: true }`. `stat` and `lstat` resolve a `Stats` with `size`, `mode`, `mtimeMs` / `atimeMs` / `birthtimeMs`, `mtime` / `atime` / `birthtime` as `Date`s, and `isFile()`, `isDirectory()` and `isSymbolicLink()`. `rmdir` removes one empty directory. One VM runs up to 1024 operations at a time and holds up to 64 MiB of file data in flight (data handed to `writeFile` until it is written, data read until its promise settles); a call past these limits throws a `RangeError`, a read past them rejects.
+`readFile` returns a `Uint8Array`, or a string with `"utf8"`, and reads files up to 64 MiB. `writeFile` writes a string or `Uint8Array` of up to 8 MiB, creating or replacing a regular file. `readdir` lists up to 10 000 names, sorted, or `Dirent`s (`name`, `isDirectory()`) with `{ withFileTypes: true }`. `stat` and `lstat` resolve a `Stats` (its fields are getters) with `size`, `mode`, `mtimeMs` / `atimeMs` / `birthtimeMs`, `mtime` / `atime` / `birthtime` as `Date`s, and `isFile()`, `isDirectory()` and `isSymbolicLink()`. `rmdir` removes one empty directory. One VM runs up to 1024 operations at a time and holds up to 64 MiB of file data in flight (data handed to `writeFile` until it is written, data read until its promise settles); a call past these limits throws a `RangeError`, a read past them rejects.
 
 ## Processes
 
@@ -132,7 +143,7 @@ TCP uses a socket grant: the exact host and port the app connects to.
 ```
 
 ```ts
-import { connect } from "node:net";
+import { connect } from "net";
 
 const socket = await connect("tcp.example.com", 9000);
 try {
