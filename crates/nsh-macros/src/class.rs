@@ -6,7 +6,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, Fields, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type,
+    Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type,
     spanned::Spanned,
 };
 
@@ -35,28 +35,24 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let doc = decl(&docs(&item.attrs));
     // Every field, traced when its type implements `Trace` (by its type,
     // not its name: aliases and wrappers that implement it are traced,
-    // other types skipped).
-    let members: Vec<TokenStream2> = match &item.fields {
-        Fields::Named(fields) => fields
-            .named
-            .iter()
-            .map(|f| {
-                let ident = f.ident.as_ref().expect("named");
-                quote!(#ident)
-            })
-            .collect(),
-        Fields::Unnamed(fields) => (0..fields.unnamed.len())
-            .map(|i| {
-                let index = syn::Index::from(i);
-                quote!(#index)
-            })
-            .collect(),
-        Fields::Unit => Vec::new(),
-    };
-    let traced: Vec<TokenStream2> = members
+    // other types skipped), under the field's own `#[cfg]`.
+    let fields: Vec<&syn::Field> = item.fields.iter().collect();
+    let traced: Vec<TokenStream2> = fields
         .iter()
-        .map(|m| quote!((&&#ui::__private::Field(&self.#m)).trace_field(tracer);))
+        .enumerate()
+        .map(|(i, f)| {
+            let member = match &f.ident {
+                Some(ident) => quote!(#ident),
+                None => {
+                    let index = syn::Index::from(i);
+                    quote!(#index)
+                }
+            };
+            let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
+            quote!(#(#cfgs)* (&&#ui::__private::Field(&self.#member)).trace_field(tracer);)
+        })
         .collect();
+    // A field may be configured out: the tracer is used either way.
     let tracer = if traced.is_empty() {
         quote!(_tracer)
     } else {
@@ -68,6 +64,8 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         // SAFETY: each field is reported through its own type's `Trace`,
         // once.
         unsafe impl #ui::Trace for #name {
+            // Unused when every traced field is configured out.
+            #[allow(unused_variables)]
             fn trace(&self, #tracer: &mut #ui::Tracer<'_>) {
                 #[allow(unused_imports)]
                 use #ui::__private::{SkipField as _, TraceField as _};

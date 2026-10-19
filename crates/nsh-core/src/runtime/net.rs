@@ -51,17 +51,11 @@ impl Net {
     }
 }
 
-/// What a socket holds: nothing on WebAssembly, which has none.
-#[cfg(not(target_arch = "wasm32"))]
-type Inner = native::Inner;
-#[cfg(target_arch = "wasm32")]
-type Inner = ();
-
 /// A connected TCP socket.
 #[class]
 pub(crate) struct Socket {
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    inner: std::rc::Rc<Inner>,
+    #[cfg(not(target_arch = "wasm32"))]
+    inner: std::rc::Rc<native::Inner>,
 }
 
 #[class]

@@ -744,6 +744,22 @@ mod tests {
     #[allow(dead_code)]
     fn drop() {}
 
+    /// A field configured out is not traced: its type need not exist.
+    #[class]
+    struct Configured {
+        #[cfg(any())]
+        gone: NoSuchType,
+        kept: Option<Callback>,
+    }
+
+    #[class]
+    impl Configured {}
+
+    #[allow(dead_code)]
+    fn configured() -> Configured {
+        Configured { kept: None }
+    }
+
     /// A tally kept in Rust.
     #[class]
     struct Tally {
