@@ -32,6 +32,11 @@ name when it runs the app.
   GPUI Kit widgets the host registers as native components and the app places with `nativeComponent`: the
   watchlist shows the desk's symbol and hands the one picked to `Trading.select`; the switch is the ticket's
   "Extended hours". Both take their own clicks and keys and are Tab stops among the app's fields.
+- **GPUI Kit popovers and dialogs over NSH.** "Positions" in the toolbar opens a popover that hangs over the tickets;
+  the watchlist's info button (a GPUI widget inside the app) opens the symbol's details in a popover anchored to it,
+  which follows it when the split is resized or the ticket scrolls. Buy and Sell ask `Trading.confirm(message)`
+  first: an `async` host function that sends the question to the window (a channel the shell listens on), which asks
+  it in GPUI Kit's alert dialog and answers through a oneshot channel.
 - **Show layers** (a switch in the toolbar, on at the start, `src/layers.rs`) outlines each NSH surface and tags it
   "NSH · TSX app", and outlines and tags the GPUI widgets inside the apps "GPUI"; a legend under the tickets names the
   three layers. Off, the window is seamless.

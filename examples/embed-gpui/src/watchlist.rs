@@ -2,17 +2,22 @@
 //! component. The app gives it the desk's symbol (`symbol`) and hears the
 //! one picked (`onSelect`, `{ symbol }`, by a click or Left / Right /
 //! Home / End while focused), which it hands to the host
-//! (`Trading.select`); the host's desk then selects it everywhere. While
-//! the layers show it is framed as a GPUI widget ([`crate::layers`]).
+//! (`Trading.select`); the host's desk then selects it everywhere. Its info
+//! button opens the selected symbol's details in a GPUI Kit popover, which
+//! hangs over the NSH layout around the widget. While the layers show it
+//! is framed as a GPUI widget ([`crate::layers`]).
 
 use gpui_kit::{
-    AnyElement, App, FocusHandle, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    Styled, Window,
+    Anchor, AnyElement, App, FocusHandle, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Styled, Window,
     component::{
-        ActiveTheme, Sizable,
+        ActiveTheme, IconName, Sizable,
         button::{Button, ButtonVariants},
         h_flex,
+        popover::Popover,
+        v_flex,
     },
+    div, px,
 };
 use nsh_platform_gpui::{ComponentContext, NativeComponent};
 use serde_json::{Value, json};
@@ -31,9 +36,9 @@ pub(crate) struct Watchlist {
     reported: f32,
 }
 
-/// The buttons' row, with its focus ring (the app's style gives the
-/// height).
-const ROW: f32 = 190.0;
+/// The buttons' row and the info button, with its focus ring (the app's
+/// style gives the height).
+const ROW: f32 = 222.0;
 
 impl Watchlist {
     /// The component's factory (`AppView::register_component`).
@@ -114,6 +119,57 @@ impl NativeComponent for Watchlist {
                 button.outline()
             });
         }
+        let symbol = self.symbol.clone();
+        row = row.child(
+            Popover::new("details")
+                .anchor(Anchor::TopLeft)
+                .trigger(
+                    Button::new("details-button")
+                        .small()
+                        .ghost()
+                        .tab_stop(false)
+                        .icon(IconName::Info)
+                        .tooltip("Symbol details"),
+                )
+                .content(move |_, _, cx| details(&symbol, cx)),
+        );
         Some(crate::layers::widget_frame(row, cx).into_any_element())
     }
+}
+
+/// The details of `symbol` on the host's desk, as it is now.
+fn details(symbol: &str, cx: &App) -> gpui_kit::Div {
+    let desk = crate::trading::desk();
+    let theme = cx.theme();
+    let price = SYMBOLS
+        .iter()
+        .find(|(s, _)| *s == symbol)
+        .map_or(0.0, |&(_, p)| p);
+    let held = desk
+        .positions
+        .iter()
+        .find(|p| p.symbol == symbol)
+        .map_or(0, |p| p.shares);
+    let orders = desk.orders.iter().filter(|o| o.symbol == symbol).count();
+    let line = |label: &'static str, value: String| {
+        h_flex()
+            .justify_between()
+            .child(div().text_color(theme.muted_foreground).child(label))
+            .child(value)
+    };
+    v_flex()
+        .w(px(260.))
+        .gap_1()
+        .text_sm()
+        .child(div().text_lg().child(symbol.to_owned()))
+        .child(line("Sample price", format!("${price:.2}")))
+        .child(line("Held", format!("{held:+} shares")))
+        .child(line("Orders on the desk", orders.to_string()))
+        .child(
+            div()
+                .pt_2()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child("A GPUI Kit popover, opened by a GPUI widget inside the NSH app."),
+        )
 }

@@ -8,10 +8,10 @@
 //! whoever changes it (the host's watchlist, a ticket's watchlist, a
 //! ticket's order) changes it for all of them.
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use nsh_core::ui::prelude::*;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, oneshot, watch};
 
 /// The symbols the desk trades, with their sample prices.
 pub const SYMBOLS: [(&str, f64); 3] = [("AAPL", 227.52), ("MSFT", 428.76), ("NVDA", 138.85)];
@@ -84,6 +84,24 @@ pub fn watch() -> watch::Receiver<Desk> {
 /// The desk now.
 pub fn desk() -> Desk {
     DESK.borrow().clone()
+}
+
+/// A ticket's question for the host's user (`Trading.confirm`), which the
+/// host asks in a dialog of its own and answers through `answer`.
+pub struct Confirm {
+    /// What to ask.
+    pub message: String,
+    /// The answer: `true` to go ahead.
+    pub answer: oneshot::Sender<bool>,
+}
+
+static CONFIRMS: OnceLock<mpsc::UnboundedSender<Confirm>> = OnceLock::new();
+
+/// The questions the tickets ask (`Trading.confirm`), for the host that
+/// asks them; one host takes them.
+pub fn confirms() -> Option<mpsc::UnboundedReceiver<Confirm>> {
+    let (sender, receiver) = mpsc::unbounded_channel();
+    CONFIRMS.set(sender).ok().map(|()| receiver)
 }
 
 /// The sample price of `symbol`.
@@ -179,6 +197,21 @@ impl Trading {
         extended: bool,
     ) -> Result<Order, String> {
         place(&symbol, quantity, side, extended)
+    }
+
+    /// Asks the host's user `message` in a dialog of the host (GPUI Kit's)
+    /// and resolves with the answer: `true` to go ahead. Where no host
+    /// asks (a surface on its own, `--alone`), the answer is yes.
+    pub async fn confirm(message: String) -> bool {
+        let Some(confirms) = CONFIRMS.get() else {
+            return true;
+        };
+        let (answer, answered) = oneshot::channel();
+        if confirms.send(Confirm { message, answer }).is_err() {
+            return true;
+        }
+        // Dropped unanswered (the window closed): no.
+        answered.await.unwrap_or(false)
     }
 
     /// Calls `on_change` with the desk now and after every change, for as

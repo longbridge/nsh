@@ -36,7 +36,11 @@ mod theme;
 mod trading;
 mod watchlist;
 
-use std::path::{Path, PathBuf};
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use gpui_kit::{
     assets::Assets,
@@ -47,6 +51,7 @@ use gpui_kit::{
         h_flex,
         input::{Input, InputEvent, InputState},
         notification::Notification,
+        popover::Popover,
         resizable::{h_resizable, resizable_panel},
         sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
         switch::Switch,
@@ -87,6 +92,7 @@ struct Shell {
     _theme: Subscription,
     _search: Subscription,
     _desk: Task<()>,
+    _confirms: Task<()>,
 }
 
 impl Shell {
@@ -121,6 +127,20 @@ impl Shell {
                 }
             }
         });
+        // The tickets' questions (`Trading.confirm`), asked in this window.
+        let confirms = cx.spawn_in(window, async move |this, cx| {
+            let Some(mut confirms) = trading::confirms() else {
+                return;
+            };
+            while let Some(request) = confirms.recv().await {
+                if this
+                    .update_in(cx, |_, window, cx| confirm(request, window, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         let mut shell = Shell {
             bundle,
             panes: Vec::new(),
@@ -130,6 +150,7 @@ impl Shell {
             _theme: theme,
             _search: search_events,
             _desk: follow,
+            _confirms: confirms,
         };
         for title in ["Ticket A", "Ticket B"] {
             let view = shell.open_app(window, cx);
@@ -212,6 +233,69 @@ impl Shell {
             self.panes[i].view = self.open_app(window, cx);
         }
         cx.notify();
+    }
+
+    /// The toolbar's positions, a button opening the desk's positions and
+    /// orders in a GPUI Kit popover that hangs over the tickets.
+    fn positions_popover(&self, summary: String) -> impl IntoElement {
+        let desk = self.desk.clone();
+        Popover::new("positions")
+            .anchor(Anchor::TopRight)
+            .trigger(
+                Button::new("positions-button")
+                    .small()
+                    .ghost()
+                    .label(format!("Positions: {summary}"))
+                    .icon(IconName::ChevronDown),
+            )
+            .content(move |_, _, cx| {
+                let theme = cx.theme();
+                let muted = theme.muted_foreground;
+                let heading = |text: &'static str| div().text_xs().text_color(muted).child(text);
+                v_flex()
+                    .w(px(340.))
+                    .gap_2()
+                    .text_sm()
+                    .child(heading("Positions"))
+                    .children(trading::SYMBOLS.map(|(symbol, price)| {
+                        let shares = desk
+                            .positions
+                            .iter()
+                            .find(|p| p.symbol == symbol)
+                            .map_or(0, |p| p.shares);
+                        h_flex()
+                            .justify_between()
+                            .child(symbol)
+                            .child(format!("{shares:+} · ${:.2}", shares as f64 * price))
+                    }))
+                    .child(heading("Orders, all tickets"))
+                    .children(desk.orders.iter().map(|o| {
+                        let (side, color) = match o.side {
+                            trading::Side::Buy => ("Buy", theme.chart_bullish),
+                            trading::Side::Sell => ("Sell", theme.chart_bearish),
+                        };
+                        h_flex()
+                            .gap_2()
+                            .child(div().text_color(muted).child(format!("#{}", o.id)))
+                            .child(div().text_color(color).child(side))
+                            .child(format!("{} {} at ${:.2}", o.quantity, o.symbol, o.price))
+                    }))
+                    .when(desk.orders.is_empty(), |d| {
+                        d.child(div().text_color(muted).child("None yet"))
+                    })
+                    .child(
+                        div()
+                            .pt_2()
+                            .border_t_1()
+                            .border_color(theme.border)
+                            .text_xs()
+                            .text_color(muted)
+                            .child(
+                                "A GPUI Kit popover of the host, drawn above the NSH tickets. \
+                                 Click outside or press Esc to close it.",
+                            ),
+                    )
+            })
     }
 
     fn pane(&self, i: usize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -416,12 +500,7 @@ impl Render for Shell {
                     }),
             )
             .child(div().flex_1())
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(format!("Positions: {positions}")),
-            );
+            .child(self.positions_popover(positions));
         // A gap on each side of the divider: the panes never touch it.
         let content = match layout {
             Layout::Split => h_resizable("panes")
@@ -467,6 +546,37 @@ impl Render for Shell {
                     .when(shown, |d| d.child(legend)),
             )
     }
+}
+
+/// Asks a ticket's question (`Trading.confirm`) in GPUI Kit's alert dialog
+/// and answers it: OK yes, Cancel or Esc no.
+fn confirm(request: trading::Confirm, window: &mut Window, cx: &mut App) {
+    // The dialog's builder runs on every frame, and its buttons and
+    // closing each answer: the first answer goes.
+    let answer = Rc::new(RefCell::new(Some(request.answer)));
+    let reply = |answer: &RefCell<Option<_>>, yes: bool| {
+        if let Some(answer) = answer.borrow_mut().take() {
+            let _: Result<(), bool> = tokio::sync::oneshot::Sender::send(answer, yes);
+        }
+    };
+    let message = SharedString::from(request.message);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let (ok, cancel, close) = (answer.clone(), answer.clone(), answer.clone());
+        alert
+            .title("Place this order?")
+            .description(message.clone())
+            .confirm()
+            .ok_text("Place order")
+            .on_ok(move |_, _, _| {
+                reply(&ok, true);
+                true
+            })
+            .on_cancel(move |_, _, _| {
+                reply(&cancel, false);
+                true
+            })
+            .on_close(move |_, _, _| reply(&close, false))
+    });
 }
 
 /// A new view running `path`'s bundle, in the host's theme.
