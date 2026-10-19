@@ -94,6 +94,7 @@ pub(crate) struct Context {
     scheduler: Rc<Scheduler>,
 }
 impl Context {
+    #[cfg(not(feature = "bytecode-only"))]
     pub(crate) fn full(runtime: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Self> {
         let inner = scheduler.ready(AsyncContext::full(runtime))?;
         Ok(Self {
