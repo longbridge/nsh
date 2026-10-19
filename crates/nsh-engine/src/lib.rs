@@ -584,6 +584,7 @@ fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::Path
 }
 
 /// Native hosts choose these anchors before any application JavaScript runs.
+#[cfg(feature = "js")]
 fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
     let mut paths = bundle.system_paths.clone();
     paths.plugin_dir = trusted_directory(paths.plugin_dir);
@@ -1019,14 +1020,8 @@ impl<M: TextEngine + 'static> Driver<M> {
         rx: &Receiver<Message>,
         stop: Arc<std::sync::atomic::AtomicBool>,
     ) -> Option<Self> {
-        let system_data_dir = config
-            .data_dir
-            .as_ref()
-            .map(|root| root.join(app_dir_name(config.app.app_id())));
+        #[cfg(feature = "js")]
         let system_tx = tx.clone();
-        let system_wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-            let _ = system_tx.send(Message::Wake);
-        });
         let text_engine = Rc::new(text_engine);
         let access = Arc::new(match &config.app {
             App::Js(bundle) => bundle.policy.access(),
@@ -1137,6 +1132,22 @@ impl<M: TextEngine + 'static> Driver<M> {
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
+                #[cfg(feature = "js")]
+                let system = {
+                    script::SystemConfig {
+                        access: (*access).clone(),
+                        data_dir: config
+                            .data_dir
+                            .as_ref()
+                            .map(|root| root.join(app_dir_name(config.app.app_id()))),
+                        paths: bundle_system_paths(bundle),
+                        wake: Arc::new(move || {
+                            let _ = system_tx.send(Message::Wake);
+                        }),
+                    }
+                };
+                #[cfg(not(feature = "js"))]
+                let system = script::SystemConfig;
                 let (script, eval_us) = Script::start(
                     bundle,
                     config.limits,
@@ -1146,12 +1157,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     text_engine,
                     stop,
                     sink,
-                    script::SystemConfig {
-                        access: (*access).clone(),
-                        data_dir: system_data_dir,
-                        paths: bundle_system_paths(bundle),
-                        wake: system_wake,
-                    },
+                    system,
                 )?;
                 driver.script = Some(script);
                 eval_us

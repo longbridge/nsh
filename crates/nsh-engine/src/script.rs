@@ -4,12 +4,16 @@
 //! uninhabited, so the loop needs no `cfg`).
 
 /// Host-owned permissions, data root and event wakeup for native system modules.
+#[cfg(feature = "js")]
 pub(crate) struct SystemConfig {
     pub(crate) access: nsh_core::access::Access,
     pub(crate) data_dir: Option<std::path::PathBuf>,
     pub(crate) paths: nsh_core::access::TrustedPaths,
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
 }
+
+#[cfg(not(feature = "js"))]
+pub(crate) struct SystemConfig;
 
 #[cfg(feature = "js")]
 pub(crate) use imp::Script;

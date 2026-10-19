@@ -36,6 +36,10 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
 
 /// What [`run_app`] runs.
 #[derive(Debug)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one source per view; keep the public constructor API without allocation"
+)]
 pub enum AppSource {
     /// A Rust app: its root component.
     Rust(Root),
