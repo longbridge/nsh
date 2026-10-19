@@ -70,7 +70,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` resolves `{ code, stdout, stderr }` for any exit status and rejects on launch failures, timeouts and output past its limit. `spawn` returns a child at once; `stdin: "pipe"` enables `write` and `end`, and `lines: true` delivers complete lines. `exit` fires once, after the final output, with `{ code, signal, error? }`, and at once for a listener added later. `kill`, a timeout, the reactive owner's cleanup and the VM's teardown end the whole process tree: on Unix its process group gets SIGTERM and then SIGKILL after 250 ms.
+`run` resolves `{ code, stdout, stderr }` for any exit status and rejects on launch failures, timeouts and output past its limit. `spawn` returns a child at once; `stdin: "pipe"` enables `write` and `end`, and `lines: true` delivers complete lines. `exit` fires once, after the final output, with `{ code, signal, error? }`, and at once for a listener added later. `kill`, a timeout, the reactive owner's cleanup and the VM's teardown end the whole process tree: on Unix its process group gets SIGTERM and then SIGKILL after 250 ms (at teardown, SIGKILL at once).
 
 | Limit | Value |
 |---|---|

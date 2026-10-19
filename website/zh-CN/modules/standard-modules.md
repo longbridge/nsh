@@ -70,7 +70,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`exit` 在最后一次输出之后触发一次，参数为 `{ code, signal, error? }`；之后添加的监听器会立即收到它。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL。
+`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`exit` 在最后一次输出之后触发一次，参数为 `{ code, signal, error? }`；之后添加的监听器会立即收到它。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
 
 | 限制 | 值 |
 |---|---|

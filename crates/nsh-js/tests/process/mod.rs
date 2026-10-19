@@ -256,6 +256,54 @@ fn dropping_vm_terminates_its_process_tree_even_with_blocked_stdin() {
 }
 
 #[test]
+fn dropping_vm_kills_every_child_at_once_even_when_they_ignore_sigterm() {
+    let f = Fixture::new();
+    let pids = (0..32)
+        .map(|i| f.dir.join(format!("stubborn-{i}.pid")))
+        .collect::<Vec<_>>();
+    for pidfile in &pids {
+        // The shell and its sleep both ignore SIGTERM: only SIGKILL stops them.
+        let script = serde_json::to_string(&format!(
+            "trap '' TERM; echo $$ > '{}'; sleep 30; sleep 30",
+            pidfile.display()
+        ))
+        .unwrap();
+        f.host
+            .eval_source(&format!(
+                "{REPORT} process.spawn('/bin/sh', ['-c', {script}]);"
+            ))
+            .unwrap();
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    while !pids.iter().all(|p| p.exists()) {
+        assert!(Instant::now() < until, "children did not start");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::thread::sleep(Duration::from_millis(20));
+    let pids = pids
+        .iter()
+        .map(|p| {
+            std::fs::read_to_string(p)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let start = Instant::now();
+    drop(f);
+    // Serially, a 250 ms grace per child would take 8 seconds.
+    assert!(
+        start.elapsed() < Duration::from_secs(1),
+        "teardown took {:?}",
+        start.elapsed()
+    );
+    for pid in pids {
+        assert_process_stopped(pid);
+    }
+}
+
+#[test]
 fn bounded_run_rejects_timeout_and_output_overflow() {
     let f = Fixture::new();
     f.host

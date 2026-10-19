@@ -47,7 +47,10 @@ trusted: every limit and check is enforced in Rust, never in JS.
   command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an
   argument array, in the app data directory or a `cwd` within an `fs.write` root, with a cleared environment
   refilled from the host's `PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_*`
-  and the names `process.env` grants (`process.rs`). Filesystem checks
+  and the names `process.env` grants (`process.rs`). A child leads its own process group; its exit is noticed
+  without reaping it (`waitid(WNOWAIT)` on Linux, a kqueue `NOTE_EXIT` on Apple platforms), so the group is only
+  signalled while the leader's pid is still taken. VM teardown sends every child SIGKILL before joining any
+  supervisor. Windows ends trees with one `taskkill /T /F` per child, started without waiting. Filesystem checks
   reject traversal and canonicalize the nearest existing ancestor before checking containment in each granted root,
   including symlinks and paths whose final components will be created. The operation then runs in the granted
   root, opened once (on Unix component by component with `O_NOFOLLOW` from `/`) as a cap-std `Dir`, so no symlink

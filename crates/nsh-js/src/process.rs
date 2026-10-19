@@ -9,7 +9,7 @@ use std::{
     ffi::{CStr, CString, OsString, c_int},
     io::{Read, Write},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     rc::{Rc, Weak},
     sync::{
         Arc,
@@ -36,7 +36,7 @@ const QUEUE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CHILDREN: usize = 32;
 /// `run`'s deadline when none is given.
 const RUN_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a child has to exit after SIGTERM before it is killed.
+/// How long a child has to exit after it is asked to before it is killed.
 const GRACE: Duration = Duration::from_millis(250);
 /// Host variables every child gets; others only when `capabilities.process.env`
 /// grants them. Names match regardless of case; `LC_*` are included too.
@@ -117,11 +117,21 @@ impl Default for Processes {
 }
 
 impl Processes {
-    /// Terminates owned process trees before freeing the VM's callbacks.
+    /// Kills owned process trees before freeing the VM's callbacks. Every
+    /// supervisor is told before any is joined, and kills at once (no grace)
+    /// when the VM stops, so teardown takes about as long as one child does.
     pub(crate) fn free_all(&mut self, ctx: *mut Context) {
         self.stopped.store(true, Ordering::Release);
-        for (_, mut e) in self.entries.get_mut().drain() {
+        let entries = self
+            .entries
+            .get_mut()
+            .drain()
+            .map(|(_, e)| e)
+            .collect::<Vec<_>>();
+        for e in &entries {
             let _ = e.input.send(Input::Kill);
+        }
+        for mut e in entries {
             if let Some(worker) = e.worker.take() {
                 let _ = worker.join();
             }
@@ -528,35 +538,156 @@ fn write_pipe(
     }
 }
 
-fn terminate(child: &mut Child, force: bool) {
-    #[cfg(unix)]
-    {
-        // SAFETY: the child was created in a new process group with its pid as pgid.
-        unsafe {
-            libc::kill(
-                -(child.id() as i32),
-                if force { libc::SIGKILL } else { libc::SIGTERM },
-            );
+/// The child a supervisor owns: the leader of a process group (Unix) or of a
+/// process tree (Windows). On Linux and Apple platforms its exit is noticed
+/// without reaping it, so its pid, which is also the group's id, stays taken
+/// (by the zombie) for as long as the group is signalled by it.
+struct Leader {
+    child: Child,
+    /// The status once the leader is reaped. On Unix its pid may then be
+    /// reused, and the group is no longer signalled.
+    reaped: Option<ExitStatus>,
+    #[cfg(target_vendor = "apple")]
+    exits: Option<std::os::fd::OwnedFd>,
+    /// `taskkill` was started for the tree.
+    #[cfg(target_os = "windows")]
+    tree_killed: bool,
+}
+impl Leader {
+    fn new(child: Child) -> Self {
+        Self {
+            #[cfg(target_vendor = "apple")]
+            exits: exit_queue(child.id()),
+            child,
+            reaped: None,
+            #[cfg(target_os = "windows")]
+            tree_killed: false,
         }
     }
-    #[cfg(target_os = "windows")]
-    {
-        // Windows' system utility terminates the complete child tree; no app text is interpreted by a shell.
-        let system_root = std::env::var_os("SystemRoot")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-        let utility = system_root.join("System32").join("taskkill.exe");
-        let _ = Command::new(utility)
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    /// Whether the leader has exited; it stays unreaped where that can be told.
+    fn exited(&mut self) -> std::io::Result<bool> {
+        if self.reaped.is_some() {
+            return Ok(true);
+        }
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            // SAFETY: an all-zero siginfo_t is valid; waitid fills it for this child.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: WNOWAIT leaves the child waitable; info outlives the call.
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    self.child.id() as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            if result < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: waitid succeeded, so si_pid is set (0 while the child runs).
+            Ok(unsafe { info.si_pid() } != 0)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        {
+            #[cfg(target_vendor = "apple")]
+            if let Some(queue) = &self.exits {
+                use std::os::fd::AsRawFd;
+                // SAFETY: an all-zero kevent is a valid output buffer.
+                let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+                let now = libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                };
+                // SAFETY: polls the live queue for one event without blocking.
+                let n = unsafe {
+                    libc::kevent(queue.as_raw_fd(), std::ptr::null(), 0, &mut event, 1, &now)
+                };
+                return if n < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(n > 0)
+                };
+            }
+            self.reaped = self.child.try_wait()?;
+            Ok(self.reaped.is_some())
+        }
     }
-    #[cfg(not(any(unix, target_os = "windows")))]
-    {
-        let _ = force;
-        let _ = child.kill();
+    /// Asks the tree to stop (SIGTERM to the group), or forces it (SIGKILL).
+    fn terminate(&mut self, force: bool) {
+        #[cfg(unix)]
+        if self.reaped.is_none() {
+            // SAFETY: the child leads its own process group and is not reaped
+            // yet, so its pid still names that group.
+            unsafe {
+                libc::kill(
+                    -(self.child.id() as i32),
+                    if force { libc::SIGKILL } else { libc::SIGTERM },
+                );
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // Windows has no group signal: taskkill ends the tree, started once and
+            // not waited for; forcing ends the leader itself. The open process
+            // handle keeps the pid from being reused while the child is owned.
+            if !self.tree_killed {
+                self.tree_killed = true;
+                let system_root = std::env::var_os("SystemRoot")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+                let _ = Command::new(system_root.join("System32").join("taskkill.exe"))
+                    .args(["/PID", &self.child.id().to_string(), "/T", "/F"])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
+            if force && self.reaped.is_none() {
+                let _ = self.child.kill();
+            }
+        }
+        #[cfg(not(any(unix, target_os = "windows")))]
+        {
+            let _ = force;
+            let _ = self.child.kill();
+        }
     }
+    fn reap(mut self) -> Option<ExitStatus> {
+        self.reaped.take().or_else(|| self.child.wait().ok())
+    }
+}
+/// A kqueue that reports the child's exit without reaping it; `None` when it
+/// cannot be made, and then the exit is noticed by reaping.
+#[cfg(target_vendor = "apple")]
+fn exit_queue(pid: u32) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    // SAFETY: kqueue takes no arguments and returns a new descriptor or -1.
+    let fd = unsafe { libc::kqueue() };
+    if fd < 0 {
+        return None;
+    }
+    // SAFETY: kqueue returned a descriptor nothing else owns.
+    let queue = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+    // SAFETY: an all-zero kevent is valid; the fields below make the request.
+    let mut change: libc::kevent = unsafe { std::mem::zeroed() };
+    change.ident = pid as usize;
+    change.filter = libc::EVFILT_PROC;
+    change.flags = libc::EV_ADD;
+    change.fflags = libc::NOTE_EXIT;
+    // SAFETY: registers one change on the live queue and receives nothing.
+    let result = unsafe {
+        libc::kevent(
+            queue.as_raw_fd(),
+            &change,
+            1,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+        )
+    };
+    // The child may already have exited (ESRCH): its exit is then found by reaping.
+    (result == 0).then_some(queue)
 }
 
 fn supervise(
@@ -569,6 +700,7 @@ fn supervise(
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
     let stdin = child.stdin.take().expect("piped stdin");
+    let mut leader = Leader::new(child);
     let io_stop = Arc::new(AtomicBool::new(false));
     let (writer_tx, writer_rx) = mpsc::channel();
     let writer_stop = io_stop.clone();
@@ -580,9 +712,10 @@ fn supervise(
     let out = thread::spawn(move || read_pipe(stdout, out_mail, false, out_stop));
     let err = thread::spawn(move || read_pipe(stderr, err_mail, true, err_stop));
     let started = Instant::now();
-    let mut terminating = None;
+    let mut terminating: Option<Instant> = None;
+    let mut forced = false;
     let mut error = None;
-    let status = loop {
+    loop {
         let mut kill = mailbox.stopped.load(Ordering::Acquire);
         if mailbox.unreadable.load(Ordering::Acquire) {
             kill = true;
@@ -604,32 +737,38 @@ fn supervise(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
         if kill && terminating.is_none() {
-            terminate(&mut child, false);
+            leader.terminate(false);
             terminating = Some(Instant::now());
             let _ = writer_tx.send(Input::Close);
         }
-        if terminating.is_some_and(|at: Instant| at.elapsed() >= GRACE) {
-            terminate(&mut child, true);
+        // A VM being torn down gives no grace period.
+        let stopped = mailbox.stopped.load(Ordering::Acquire);
+        if !forced && terminating.is_some_and(|at| stopped || at.elapsed() >= GRACE) {
+            leader.terminate(true);
+            forced = true;
         }
-        match child.try_wait() {
-            Ok(Some(s)) => break Some(s),
-            Ok(None) => {}
+        match leader.exited() {
+            Ok(true) => break,
+            Ok(false) => {}
             Err(e) => {
                 error = Some(e.to_string());
-                terminate(&mut child, true);
-                break child.wait().ok();
+                break;
             }
         }
-    };
-    // The leader may exit with descendants still holding its pipe handles.
-    terminate(&mut child, true);
+    }
+    // The leader may exit with descendants still holding its pipe handles. It
+    // is not reaped yet, so its pid still names the group signalled here.
+    leader.terminate(true);
+    let status = leader.reap();
     let _ = writer_tx.send(Input::Close);
     drop(writer_tx);
     // Drain final buffered output, but an escaped/detached descendant must not
     // keep inherited pipe handles (and therefore VM teardown) alive forever.
+    // The output of a VM being torn down goes nowhere and is not waited for.
     let drain_until = Instant::now() + Duration::from_millis(100);
     while !(writer.is_finished() && out.is_finished() && err.is_finished())
         && Instant::now() < drain_until
+        && !mailbox.stopped.load(Ordering::Acquire)
     {
         thread::sleep(Duration::from_millis(5));
     }
