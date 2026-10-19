@@ -51,6 +51,15 @@ enum Command {
 /// argument, so no other global is defined.
 pub(crate) fn init(ctx: &Ctx<'_>) -> Result<()> {
     if super::take_lazy(ctx, "WebSocket")? {
+        // Its transports do I/O on the VM's tokio runtime.
+        if let Some(scheduler) = crate::dom::shared(ctx.as_raw().as_ptr())
+            .scheduler
+            .upgrade()
+        {
+            scheduler.start_io().map_err(|e| {
+                Exception::throw_message(ctx, &format!("cannot start WebSocket I/O: {e}"))
+            })?;
+        }
         let make: Function = ctx.eval(FACADE)?;
         let constructor: Value = make.call((Func::from(connect),))?;
         ctx.globals().set("WebSocket", constructor)?;

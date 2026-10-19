@@ -52,6 +52,8 @@ pub(crate) struct Shared {
     /// The VM's counts of limited resources for Rust modules (`net`'s
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::ui::Quotas,
+    /// The VM's scheduler, for the APIs that start its I/O runtime.
+    pub(crate) scheduler: std::rc::Weak<Scheduler>,
     /// The VM's state of the runtime's Rust modules (`process`'s
     /// children), closed when the VM goes.
     pub(crate) system_locals: nsh_core::ui::Locals,
@@ -177,8 +179,7 @@ impl Host {
         // The allocator enforces the heap limit (`set_memory_limit` does
         // nothing with one) and tells when it was reached.
         let (allocator, exhausted) = sandbox::HeapAllocator::new(limits.memory_bytes);
-        let scheduler = Scheduler::new()
-            .map_err(|e| JsError::new(format!("cannot start JS I/O scheduler: {e}")))?;
+        let scheduler = Scheduler::new();
         let rt = AsyncRuntime::new_with_alloc(allocator)?;
         scheduler.ready(rt.set_loader(crate::modules::Resolver, crate::modules::Loader));
         // The engine thread is spawned with a larger stack; keep a margin.
@@ -188,6 +189,7 @@ impl Host {
         let ctx = new_context(&rt, scheduler.clone())?;
         let shared = Rc::new(Shared {
             limits,
+            scheduler: Rc::downgrade(&scheduler),
             ..Shared::default()
         });
         ctx.with(|ctx| {
@@ -1264,6 +1266,7 @@ const report = (v) => text(String(v));
     #[test]
     fn native_future_wakes_engine_and_resumes_without_idle_polling() {
         let host = Host::new().unwrap();
+        host.scheduler.start_io().unwrap();
         let (send, receive) = std::sync::mpsc::channel();
         host.set_system_wake(Arc::new(move || {
             let _ = send.send(());
@@ -1306,6 +1309,7 @@ const report = (v) => text(String(v));
         let dropped = Arc::new(AtomicBool::new(false));
         let callback_dropped = Arc::new(AtomicBool::new(false));
         let host = Host::new().unwrap();
+        host.scheduler.start_io().unwrap();
         let callback_guard = Dropped(callback_dropped.clone());
         host.set_system_wake(Arc::new(move || {
             let _ = &callback_guard;
@@ -1343,6 +1347,7 @@ const report = (v) => text(String(v));
         let dropped = Arc::new(AtomicBool::new(false));
         let callback_dropped = Arc::new(AtomicBool::new(false));
         let host = Host::new().unwrap();
+        host.scheduler.start_io().unwrap();
         let callback_guard = Dropped(callback_dropped.clone());
         host.set_system_wake(Arc::new(move || {
             let _ = &callback_guard;
@@ -1391,6 +1396,7 @@ const report = (v) => text(String(v));
     #[test]
     fn top_level_await_resumes_and_reports_rejection_on_native_wake() {
         let mut host = Host::new().unwrap();
+        host.scheduler.start_io().unwrap();
         let errors = Rc::new(RefCell::new(Vec::new()));
         let captured = errors.clone();
         host.set_error_handler(Box::new(move |error| {
@@ -1436,6 +1442,7 @@ const report = (v) => text(String(v));
             memory_bytes: 16 << 20,
             ..Limits::default()
         });
+        host.scheduler.start_io().unwrap();
         let guard = Dropped(dropped.clone());
         host.ctx.with(|ctx| {
             ctx.spawn(async move {
