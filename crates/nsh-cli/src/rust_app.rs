@@ -1847,6 +1847,7 @@ mod tests {
                 component: "App".into(),
                 theme: None,
                 appearance: None,
+                app_id: None,
             };
             let app = app(&dir, &[(package, dir.join("native"))], Some(root));
             app.write_workspace().unwrap();
