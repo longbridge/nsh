@@ -486,20 +486,28 @@ impl<M: TextEngine> Core<M> {
         let (out, placeholder) = self.match_children(parent, state.children, new, host, &mut inst);
         self.forget_released(host, &mut inst);
         // The JS children's place went with what the region released.
-        if let Placement::At(at, _) = inst.children_at
-            && at != host
-            && !self.components.owners.contains_key(&at)
-        {
+        let gone = match inst.children_at {
+            Placement::At(at, _) => at != host && !self.components.owners.contains_key(&at),
+            Placement::Nested(nested, _) => !self.is_host(nested),
+            _ => false,
+        };
+        if gone {
             inst.children_at = Placement::None;
         }
         let anchor = self.anchor_node(state.anchor);
+        // A nested component's content joins it as JS children do.
+        let nested = parent != host && self.is_host(parent);
         if let Some(at) = placeholder {
             let after = out[at + 1..]
                 .iter()
                 .find(|e| e.id != 0)
                 .map(|e| e.id)
                 .or(anchor);
-            inst.children_at = Placement::At(parent, after);
+            inst.children_at = if nested {
+                Placement::Nested(parent, after)
+            } else {
+                Placement::At(parent, after)
+            };
         }
         // In place: from the last, each before the next, from the anchor.
         let nodes: Vec<NodeId> = out
@@ -520,8 +528,6 @@ impl<M: TextEngine> Core<M> {
                 children: out,
             },
         );
-        // A nested component's content joins it as JS children do.
-        let nested = parent != host && self.is_host(parent);
         let mut before = anchor;
         for &child in nodes.iter().rev() {
             if nested {

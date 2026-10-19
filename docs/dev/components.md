@@ -491,6 +491,11 @@ what changed.
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS
   children: one wrapper per child, so a child added or removed leaves the others' wrappers in place.
+- A view passes its children on by placing its `Children` among a nested component's (`<Inset>{children}</Inset>`):
+  they become that component's children (`Placement::Nested`), in that place among the content the view gives it,
+  so its view places them, as deep as they are passed on; JS's insertions and removals follow them there, and content
+  of the view above that is released leaves the children of every level it was passed on to. When the nested
+  component goes, they leave its view and stay (JS's, or the content of the view above).
 - Named slots: the JS face creates one holder view per slot **the app passes** (`componentSlot`), filled with that
   prop's JSX. `Prop<Option<Slot>>` is `Some` while the holder has children (the core sets it when it fills or
   empties); `place(..)` is a region of it, and the slot's element *is* the holder: its styles and handlers apply to

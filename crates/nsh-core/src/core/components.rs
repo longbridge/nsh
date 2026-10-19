@@ -106,6 +106,10 @@ pub(super) enum Placement {
     /// Each in its own wrapper ([`ParentElement::children_each`]): placed
     /// by the view's region of wrappers.
     Each,
+    /// Passed on as the children of the nested component hosted by this
+    /// node (`<Inset>{children}</Inset>`), before the content after them
+    /// (their anchor): its view places them.
+    Nested(NodeId, Option<NodeId>),
 }
 
 /// A component instance on its host node.
@@ -822,6 +826,9 @@ impl<M: TextEngine> Core<M> {
                         child,
                         before: at.and(before).or(anchor),
                     })?,
+                    Placement::Nested(nested, anchor) => {
+                        self.join_nested_at(nested, child, at.and(before).or(anchor));
+                    }
                     // Its wrapper is the view's (a region of them).
                     Placement::Each => self.detach_id(child),
                     Placement::None => self.detach_id(child),
@@ -834,10 +841,11 @@ impl<M: TextEngine> Core<M> {
                 if let Some(children) = inst.js_kids {
                     children.set(inst.js_children.clone());
                 }
-                if inst.js_children.is_empty() || inst.children_at == Placement::Each {
+                let place = inst.children_at;
+                if inst.js_children.is_empty() || place == Placement::Each {
                     self.components.mark(parent);
                 }
-                self.detach_id(child);
+                self.unplace(place, child);
                 Ok(None)
             }
             Op::SetProp {
@@ -1702,7 +1710,7 @@ impl<M: TextEngine> Core<M> {
         // No `Children` any more: the JS children leave the tree.
         if inst.children_at == Placement::None && old_place != Placement::None {
             for &child in &inst.js_children {
-                self.detach_id(child);
+                self.unplace(old_place, child);
             }
         }
         // Lazy children are made while the view places them: by JS, or by
@@ -1733,6 +1741,20 @@ impl<M: TextEngine> Core<M> {
         *inst
             .lazy_wanted
             .get_or_insert_with(|| crate::ui::signal(inst.children_wanted))
+    }
+
+    /// JS child `child`, placed at `place`, leaves the tree (and the
+    /// nested component it was passed on to).
+    fn unplace(&mut self, place: Placement, child: NodeId) {
+        match place {
+            Placement::Nested(nested, _) if self.is_host(nested) => {
+                let _ = self.intercept(Op::Remove {
+                    parent: nested,
+                    child,
+                });
+            }
+            _ => self.detach_id(child),
+        }
     }
 
     fn detach_id(&mut self, id: NodeId) {
@@ -1886,7 +1908,14 @@ impl<M: TextEngine> Core<M> {
         }
         let nested = parent != host && self.is_host(parent);
         if nested {
-            self.join_nested(parent, &out);
+            if let Some(at) = placeholder {
+                let anchor = out[at + 1..]
+                    .iter()
+                    .flat_map(|e| self.placed(e))
+                    .find(|&id| id != 0);
+                inst.children_at = Placement::Nested(parent, anchor);
+            }
+            self.join_nested(parent, &out, &inst.js_children);
             return out;
         }
         if let Some(at) = placeholder {
@@ -2037,7 +2066,12 @@ impl<M: TextEngine> Core<M> {
         // component's view places it.
         let nested = parent != host && self.is_host(parent);
         for o in old.into_iter().flatten() {
-            if nested {
+            if nested && o.part == Part::Children {
+                // The JS children passed on stay (JS's): they leave.
+                for &child in &inst.js_children {
+                    let _ = self.intercept(Op::Remove { parent, child });
+                }
+            } else if nested {
                 for node in self.placed(&o) {
                     self.forget_nested(parent, node);
                 }
@@ -2250,15 +2284,23 @@ impl<M: TextEngine> Core<M> {
         if let Some(children) = inst.js_kids {
             children.set(inst.js_children.clone());
         }
-        if inst.js_children.is_empty() || inst.children_at == Placement::Each {
+        let place = inst.children_at;
+        if inst.js_children.is_empty() || place == Placement::Each {
             self.components.mark(nested);
+        }
+        // Passed on deeper, it leaves those components' children too.
+        if let Placement::Nested(deeper, _) = place
+            && self.is_host(deeper)
+        {
+            self.forget_nested(deeper, child);
         }
     }
 
     /// The content `out` of the nested component hosted by `nested`, in
-    /// order: its children as the host's JS children, its slots' holders
+    /// order: its children as the host's JS children (`js_children`, the
+    /// view's own JS children, where it passes them on), its slots' holders
     /// in their slots (inserted only when that changed).
-    fn join_nested(&mut self, nested: NodeId, out: &[Expanded]) {
+    fn join_nested(&mut self, nested: NodeId, out: &[Expanded], js_children: &[NodeId]) {
         let insert = |core: &mut Self, child: NodeId, before: Option<NodeId>| {
             if let Ok(Some(op)) = core.intercept(Op::Insert {
                 parent: nested,
@@ -2270,7 +2312,10 @@ impl<M: TextEngine> Core<M> {
         };
         let (slots, children): (Vec<NodeId>, Vec<NodeId>) = out
             .iter()
-            .flat_map(|e| self.placed(e))
+            .flat_map(|e| match e.part {
+                Part::Children => js_children.to_vec(),
+                _ => self.placed(e),
+            })
             .partition(|id| self.components.slot_names.contains_key(id));
         for slot in slots {
             if self.components.slot_hosts.get(&slot) != Some(&nested) {
@@ -2967,7 +3012,10 @@ impl<M: TextEngine> Core<M> {
             }
             // Its content is this view's, released below: deleting it
             // detaches it.
-            Part::Component(_) => self.release_component(e.id, false),
+            Part::Component(_) => {
+                let content: Vec<NodeId> = e.children.iter().flat_map(|c| self.placed(c)).collect();
+                self.release_component(e.id, &content);
+            }
             // Its nodes are the region's.
             Part::Region(region) => {
                 self.release_region(region);
@@ -2991,14 +3039,14 @@ impl<M: TextEngine> Core<M> {
     /// Frees what a component made (not its host nor its JS children,
     /// which leave its view).
     fn release_instance(&mut self, host: NodeId) {
-        self.release_component(host, true);
+        self.release_component(host, &[]);
     }
 
-    /// [`Self::release_instance`]; `detach`: its JS children leave the
-    /// view natively (they stay, JS's), else they are released right after
-    /// (a view's content of a nested component: deleting them detaches
-    /// them).
-    fn release_component(&mut self, host: NodeId, detach: bool) {
+    /// [`Self::release_instance`], but of its JS children and slots, those
+    /// in `content` are released right after (a view's content of a nested
+    /// component: deleting them detaches them); the others leave its view
+    /// natively (they stay: JS's, or passed on by the view).
+    fn release_component(&mut self, host: NodeId, content: &[NodeId]) {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
@@ -3013,14 +3061,16 @@ impl<M: TextEngine> Core<M> {
         if let Some(owner) = inst.cell_owner.take() {
             owner.dispose();
         }
-        if detach {
-            for &child in &inst.js_children {
+        for &child in &inst.js_children {
+            if !content.contains(&child) {
                 self.detach_id(child);
             }
         }
         for (_, node) in inst.slots {
             self.components.slot_hosts.remove(&node);
-            self.detach_id(node);
+            if !content.contains(&node) {
+                self.detach_id(node);
+            }
         }
         if let Some(root) = inst.root {
             if let Some(r) = &root.attrs.element_ref {

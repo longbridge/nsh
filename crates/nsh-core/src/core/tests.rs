@@ -7480,6 +7480,359 @@ mod views {
         assert!(holder.is_none(), "no holder keeps what left it");
     }
 
+    /// Passes its children on to a holder while shown; a press hides and
+    /// shows the holder.
+    #[derive(Default)]
+    struct Forward;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ForwardProps {
+        children: Children,
+    }
+
+    impl Component for Forward {
+        type Props = ForwardProps;
+        type Event = NoEvent;
+
+        fn view(props: ForwardProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(true);
+            let children = props.children;
+            view()
+                .on_press(move || shown.update(|s| *s = !*s))
+                .child(If::new(shown, move || {
+                    Holder::element(HolderProps {
+                        children: Children::default(),
+                    })
+                    .child(text("first"))
+                    .child(children)
+                }))
+        }
+    }
+
+    /// Gives a forward three texts, the middle one in a region; a press
+    /// toggles it.
+    #[derive(Default)]
+    struct Relay;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RelayProps {}
+
+    impl Component for Relay {
+        type Props = RelayProps;
+        type Event = NoEvent;
+
+        fn view(_: RelayProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let middle = signal(false);
+            view().on_press(move || middle.update(|m| *m = !*m)).child(
+                Forward::element(ForwardProps {
+                    children: Children::default(),
+                })
+                .child(text("a"))
+                .child(If::new(middle, || text("b")))
+                .child(text("c")),
+            )
+        }
+    }
+
+    /// The ids of the native children of `id`.
+    fn native_children<M: TextEngine>(c: &Core<M>, id: NodeId) -> Vec<NodeId> {
+        let key = c.key(id).expect("a node");
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect()
+    }
+
+    #[test]
+    fn children_passed_on_to_a_nested_component_are_placed_by_it() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Relay>(|| RelayProps {}));
+        let batch = c.commit().unwrap();
+        let relay = root_host(&batch);
+        let [first, a, cc] = ["first", "a", "c"].map(|t| text_node(&batch, t));
+        let holder = native_parent(&c, a).expect("placed");
+        assert_eq!(native_children(&c, holder), [first, a, cc]);
+        let forward = native_parent(&c, holder).expect("in the forward");
+        assert_eq!(native_parent(&c, forward), Some(relay));
+        // Content joining the forward's children goes in its place there.
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let b = text_node(&batch, "b");
+        assert_eq!(native_children(&c, holder), [first, a, b, cc]);
+        // The holder goes: the children it was passed leave it, kept.
+        assert!(c.component_event(forward, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        for id in [a, b, cc] {
+            assert_eq!(native_parent(&c, id), None);
+            assert!(
+                batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Remove { id: r } if *r == id)),
+                "{id} is removed: {:?}",
+                batch.items
+            );
+            assert!(
+                !batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Delete { id: d } if *d == id)),
+                "{id} stays"
+            );
+        }
+        // Shown again: a new holder places them.
+        assert!(c.component_event(forward, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let holder = native_parent(&c, a).expect("placed again");
+        let first = text_node(&batch, "first");
+        assert_eq!(native_children(&c, holder), [first, a, b, cc]);
+        // Leaving the content, a child leaves the holder.
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        c.commit();
+        assert_eq!(native_children(&c, holder), [first, a, cc]);
+    }
+
+    #[test]
+    fn content_passed_on_two_deep_leaves_every_level() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Relay>(|| RelayProps {}));
+        let batch = c.commit().unwrap();
+        let relay = root_host(&batch);
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        let b = text_node(&c.commit().unwrap(), "b");
+        let holding = |c: &Core<FakeEngine>| {
+            c.components
+                .instances
+                .iter()
+                .filter(|(_, i)| i.js_children.contains(&b))
+                .count()
+        };
+        assert_eq!(holding(&c), 2, "the forward's and the holder's");
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        assert!(c.key(b).is_err(), "released");
+        assert_eq!(holding(&c), 0, "no component keeps it");
+    }
+
+    #[test]
+    fn js_children_through_a_forward() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Forward>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Forward>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let first = text_node(&batch, "first");
+        let holder = native_parent(&c, 6).expect("placed");
+        assert_eq!(native_children(&c, holder), [first, 6]);
+        // Hide.
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(native_parent(&c, 6), None, "{:?}", batch.items);
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id: 6 })),
+            "{:?}",
+            batch.items
+        );
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id: 6 }))
+        );
+        // While hidden: JS adds 8, removes 6.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 8,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 8,
+                    before: None,
+                },
+                Op::Remove {
+                    parent: 2,
+                    child: 6,
+                },
+            ],
+        );
+        let batch = c.commit();
+        assert_eq!(
+            native_parent(&c, 8),
+            None,
+            "hidden: {:?}",
+            batch.map(|b| b.items)
+        );
+        assert_eq!(native_parent(&c, 6), None);
+        // Show.
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let first = text_node(&batch, "first");
+        let holder = native_parent(&c, 8).expect("placed again");
+        assert_eq!(native_children(&c, holder), [first, 8], "{:?}", batch.items);
+        // JS inserts 6 before 8, then moves 8 before 6.
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 6,
+                before: Some(8),
+            }],
+        );
+        c.commit();
+        assert_eq!(native_children(&c, holder), [first, 6, 8]);
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 8,
+                before: Some(6),
+            }],
+        );
+        c.commit();
+        assert_eq!(native_children(&c, holder), [first, 8, 6]);
+        // The host goes; JS's children stay.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        for id in [6, 8] {
+            assert!(c.key(id).is_ok());
+            assert_eq!(native_parent(&c, id), None, "{id}: {:?}", batch.items);
+            assert!(
+                !batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Delete { id: d } if *d == id))
+            );
+        }
+        assert!(c.components.instances.is_empty());
+        // JS re-inserts 6 into root: fine.
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: ROOT_ID,
+                child: 6,
+                before: None,
+            }],
+        );
+        c.commit();
+        assert_eq!(native_parent(&c, 6), Some(ROOT_ID));
+    }
+
+    /// Shows whether it has children, and places them while shown; a press
+    /// hides and shows them.
+    #[derive(Default)]
+    struct Shy;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ShyProps {
+        children: crate::ui::Prop<Children>,
+    }
+
+    impl Component for Shy {
+        type Props = ShyProps;
+        type Event = NoEvent;
+
+        fn view(props: ShyProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(true);
+            let children = props.children;
+            view()
+                .on_press(move || shown.update(|s| *s = !*s))
+                .child(text(move || format!("empty {}", children.get().is_empty())))
+                .child(If::new(shown, move || {
+                    view().child(children.get_untracked())
+                }))
+        }
+    }
+
+    /// Passes its children on to a shy one.
+    #[component]
+    fn PassOn(props: HolderProps) -> impl IntoElement {
+        view().child(
+            Shy::element(ShyProps {
+                children: Default::default(),
+            })
+            .child(props.children),
+        )
+    }
+
+    /// Gives a pass-on one text while on; a press turns it off.
+    #[component]
+    fn Giver() -> impl IntoElement {
+        let on = signal(true);
+        view().on_press(move || on.update(|o| *o = !*o)).child(
+            PassOn::element(HolderProps {
+                children: Children::default(),
+            })
+            .child(If::new(on, || text("given"))),
+        )
+    }
+
+    #[test]
+    fn a_deep_component_knows_when_its_only_child_left() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Giver>(|| ()));
+        let batch = c.commit().unwrap();
+        let giver = root_host(&batch);
+        let shy = native_parent(&c, text_node(&batch, "empty false")).unwrap();
+        assert!(c.component_event(giver, EventKind::Press, &EventPayload::None));
+        assert!(texts(&c.commit().unwrap()).contains(&"empty true".to_owned()));
+        // Hidden and shown again, it places nothing.
+        for _ in 0..2 {
+            assert!(c.component_event(shy, EventKind::Press, &EventPayload::None));
+            let _ = c.commit();
+        }
+        let dead = c
+            .components
+            .instances
+            .values()
+            .flat_map(|i| &i.js_children)
+            .filter(|&&id| c.key(id).is_err())
+            .count();
+        assert_eq!(dead, 0, "no released child");
+    }
+
     /// A view passing content to nested components: a pocket's lazy
     /// children and a region in a holder's; a press opens and closes.
     #[derive(Default)]
