@@ -75,6 +75,8 @@ fn projected_values(public: &str, name: &str) -> BTreeSet<String> {
             }
         } else if let Some(rest) = line.strip_prefix("export function ") {
             names.insert(rest.split(['(', '<']).next().unwrap().to_owned());
+        } else if let Some(rest) = line.strip_prefix("export class ") {
+            names.insert(rest.split([' ', '<', '{']).next().unwrap().to_owned());
         } else if let Some(rest) = line.strip_prefix("export const ") {
             names.insert(rest.split(':').next().unwrap().to_owned());
         } else if line.starts_with("export default ") {
@@ -113,7 +115,12 @@ fn every_public_standard_value_is_declared_and_every_declared_value_exists() {
             line.strip_prefix("declare module \"")
                 .and_then(|rest| rest.split('"').next())
         })
-        .filter(|name| *name != "nsh" && !name.starts_with("nsh/") && !name.starts_with("nsh:") && !name.starts_with("@nsh/"))
+        .filter(|name| {
+            *name != "nsh"
+                && !name.starts_with("nsh/")
+                && !name.starts_with("nsh:")
+                && !name.starts_with("@nsh/")
+        })
         .collect();
     let expected_modules: BTreeSet<_> = REFERENCE_MODULES
         .iter()

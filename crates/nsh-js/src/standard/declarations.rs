@@ -321,7 +321,6 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
     for (name, body) in [
         ("fs/promises", super::fs::TYPES),
         ("process", super::process::TYPES),
-        ("net", super::net::TYPES),
         ("console", super::console::TYPES),
     ] {
         adapter(&mut public, name, body);

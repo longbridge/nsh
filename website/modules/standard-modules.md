@@ -13,7 +13,7 @@ Native Shell provides a pinned subset of LLRT standard modules inside its existi
 | `console` | Default export of the per-VM logger: `log`, `info`, `debug`, `warn`, `error` |
 | `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
 | `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
-| `net` | `connect(host, port)` returning a promise-based client socket |
+| `net` | `connect(host, port)` resolving a `Socket` (a promise-based client socket) |
 | `websocket` | `WebSocket` constructor, also installed globally on native hosts |
 
 ## Imports and generated types
@@ -90,7 +90,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 Global `fetch` retains NSH's streaming HTTP implementation, checking `network.hosts` or `network.http` for requests and redirect hops. Native-host WebSocket supports `ws:` / `wss:`, text and binary messages, event listeners and closing handshakes. A WebSocket handshake is an HTTP GET, so both the global `WebSocket` and the `websocket` module's `WebSocket.connect` use the HTTP grants: `ws` is checked as `http` and `wss` as `https`, using GET (a legacy rule may also list `ws` / `wss` in `schemes`). The check runs on the normalized URL before DNS lookup, the handshake connects to that same URL and rejects redirects. Each VM supports at most 32 WebSockets across both APIs, messages up to 8 MiB, and a send queue of eight messages with at most 8 MiB buffered. Handshake and writes time out after 30 seconds; closing waits up to 5 seconds.
 
-`net.connect(host, port)` uses only `network.sockets`, a list of exact `"host:port"` destinations (`"[::1]:9000"` for IPv6), checked before DNS lookup. Each entry grants one port on one host; host patterns, `network.hosts` and HTTP grants cover HTTP traffic only, and an app without `"capabilities"` lists its sockets too. The returned socket provides `read(size?)`, `write(text)` and `close()`; reads return `Uint8Array`, or `null` at EOF. Connections and I/O have 30-second timeouts, each read/write is limited to 1 MiB, at most 4 MiB of writes may wait to be sent, and `close()` ends pending reads and writes at once. Each VM keeps at most 32 sockets open or connecting. This is a promise-based client socket interface.
+`net.connect(host, port)` uses only `network.sockets`, a list of exact `"host:port"` destinations (`"[::1]:9000"` for IPv6), checked before DNS lookup. Each entry grants one port on one host; host patterns, `network.hosts` and HTTP grants cover HTTP traffic only, and an app without `"capabilities"` lists its sockets too. The returned `Socket` provides `read(size?)`, `write(text)` and `close()`; reads return `Uint8Array`, or `null` at EOF. A refused grant throws a `TypeError` and a limit a `RangeError` at the call; connection and I/O failures reject. Connections and I/O have 30-second timeouts, each read/write is limited to 1 MiB, at most 4 MiB of writes may wait to be sent, and `close()` ends pending reads and writes at once. Each VM keeps at most 32 sockets open or connecting. This is a promise-based client socket interface.
 
 Raw TCP and this WebSocket transport use native hosts. Browser apps use the platform's [global APIs](./globals.md); availability follows the actual host. Embedding grants intersect the app's capability declaration.
 

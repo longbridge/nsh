@@ -90,10 +90,13 @@ looked up alongside the hand-written runtime modules. Canonical names are requir
 `os` is a typed Rust `#[module(flat, default)]` in `nsh_core::runtime`, registered under `os`: its associated
 `EOL` constant, `platform`, `arch` and `homedir` functions generate flat named exports, the default namespace and
 their TypeScript declarations from one native spec. Returned paths are metadata and grant no file access.
-`console` default-exports the VM's existing five-method logger.
+`console` default-exports the VM's existing five-method logger. `net` is one too (`nsh_core::runtime::net`: the
+`Net` module's `connect`, flat and default, and its `Socket` class): its JS face and declarations come from the
+spec, its limits throw in the call (`Later`, `JsError`), its capability check reads the call's `System`, and its
+connections, reads and writes are core tasks on the engine's tokio runtime.
 
 LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs` projects
-actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `process`, `fs/promises`,
-`net` and `websocket` adapters share the owning VM and NSH capability checks. Their declared interfaces, rather
+actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `process`, `fs/promises`
+and `websocket` adapters share the owning VM and NSH capability checks. Their declared interfaces, rather
 than complete Node.js or browser compatibility, define the app API. Existing WHATWG constructor identities stay
 intact. Standard `websocket` is an explicit connection API, distinct from the browser WebSocket interface.

@@ -27,6 +27,7 @@ mod keymap;
 mod list;
 mod list_bench;
 mod native;
+mod net;
 mod package;
 mod platform;
 mod rust_animation;
