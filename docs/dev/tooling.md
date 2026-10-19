@@ -178,8 +178,9 @@ package`, `publish`, the dev server) the bundle holds the whole app.
 
 ## `nsh trace`
 
-`crates/nsh-cli/src/trace.rs` runs the app in the CLI's process (`ApproxTextEngine`, a channel as the mount sink, 60 Hz
-frames from a timer thread) and prints every batch. It keeps a model of the native tree from the mount items
+`nsh-engine`'s `headless` module (feature `headless`) does the run: `headless::trace` starts the app on an engine
+(`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread) and prints every batch;
+`crates/nsh-cli/src/trace.rs` bundles the app and calls it in the CLI's process. It keeps a model of the native tree from the mount items
 (inserts, removals, `ViewProps`' `testID` and `accessibilityLabel`, texts, event masks) to find what to tap:
 `--tap id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` or a bare string (testID, then label,
 then text), the first match in tree order below the root, or its nearest pressable ancestor; it is dispatched as

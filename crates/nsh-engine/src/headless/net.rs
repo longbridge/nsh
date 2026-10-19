@@ -1,9 +1,10 @@
 //! Network and assets for headless runs (`nsh trace`): `fetch` on ureq (one
-//! thread per request, streaming both ways), assets from the source
-//! directory.
+//! thread per request, streaming both ways), assets from the app's source
+//! directory and its UI sets' files.
 
 use std::{
     io::Read,
+    path::PathBuf,
     sync::{
         Arc, Condvar, Mutex,
         mpsc::{Receiver, Sender, channel},
@@ -11,23 +12,36 @@ use std::{
     time::Duration,
 };
 
-use nsh_engine::{
-    Assets, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network,
-};
 use ureq::{Agent, ResponseExt, SendBody, http};
 
-/// `asset:/…` files: the UI sets' crates' files, else relative to the
-/// app's source directory.
-pub(crate) struct DirectoryAssets(pub(crate) std::path::PathBuf);
+use crate::{Assets, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
+
+/// `asset:/…` files: the UI sets' files (`Registry::assets`), else
+/// relative to the app's source directory.
+pub struct DirectoryAssets {
+    dir: PathBuf,
+    /// The sets' files: (path among the app's assets, file).
+    files: Vec<(String, PathBuf)>,
+}
+
+impl DirectoryAssets {
+    /// The assets of the app whose sources are in `dir`, with the UI sets'
+    /// `files` (path among the app's assets, file).
+    pub fn new(dir: PathBuf, files: Vec<(String, PathBuf)>) -> Self {
+        Self { dir, files }
+    }
+}
 
 impl Assets for DirectoryAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
         let path = uri
             .strip_prefix("asset:/")
             .ok_or_else(|| format!("not an asset URI: {uri}"))?;
-        let file = crate::build::crate_assets()
-            .find(|a| a.path == path)
-            .map_or_else(|| self.0.join(path), |a| a.source);
+        let file = self
+            .files
+            .iter()
+            .find(|(p, _)| p == path)
+            .map_or_else(|| self.dir.join(path), |(_, file)| file.clone());
         std::fs::read(file).map_err(|e| e.to_string())
     }
 }
@@ -35,13 +49,16 @@ impl Assets for DirectoryAssets {
 /// Bytes read from the response per chunk.
 const CHUNK: usize = 64 << 10;
 
-pub(crate) struct UreqNetwork {
+/// `fetch` for headless runs, on ureq: redirects followed (at most 10)
+/// or not, as each request asks.
+pub struct UreqNetwork {
     follow: Agent,
     manual: Agent,
 }
 
 impl UreqNetwork {
-    pub(crate) fn new() -> Self {
+    /// A network with a 60 s timeout per request.
+    pub fn new() -> Self {
         let agent = |redirects| {
             Agent::config_builder()
                 .http_status_as_error(false)
@@ -55,6 +72,12 @@ impl UreqNetwork {
             follow: agent(10),
             manual: agent(0),
         }
+    }
+}
+
+impl Default for UreqNetwork {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

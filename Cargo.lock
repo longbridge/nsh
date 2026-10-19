@@ -2272,6 +2272,7 @@ dependencies = [
  "rustc-hash",
  "serde_json",
  "tokio",
+ "ureq",
 ]
 
 [[package]]
