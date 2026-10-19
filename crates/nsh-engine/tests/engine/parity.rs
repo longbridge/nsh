@@ -48,6 +48,18 @@ impl App {
         network: Option<Arc<dyn Network>>,
         setup: impl FnOnce(&std::path::Path),
     ) -> Self {
+        Self::start_in(body, capabilities, network, setup, true)
+    }
+
+    /// [`App::start`], the app's directory its `${pluginDir}` when
+    /// `located` (as a local or packaged desktop app's is).
+    fn start_in(
+        body: &str,
+        capabilities: serde_json::Value,
+        network: Option<Arc<dyn Network>>,
+        setup: impl FnOnce(&std::path::Path),
+        located: bool,
+    ) -> Self {
         static APPS: AtomicUsize = AtomicUsize::new(0);
         let tmp = std::env::var_os("TMPDIR")
             .map(PathBuf::from)
@@ -83,8 +95,13 @@ mount(() => <Text>{{shown()}}</Text>);
             ui_sets: Vec::new(),
         })
         .unwrap();
+        let mut paths = nsh_core::access::TrustedPaths::default();
+        if located {
+            paths.plugin_dir = Some(root.canonicalize().unwrap());
+        }
         let bundle = Bundle::source(bundled.code)
             .with_app_id(Some(APP_ID))
+            .with_system_paths(paths)
             .with_capabilities_json(Some(&capabilities.to_string()))
             .unwrap();
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -559,23 +576,27 @@ fn fetch_and_url_shapes() {
 
 /// finder `main.js`: `new URL(".", import.meta.url).pathname` names the
 /// app's own directory; gpui-shell sets `import.meta.url` to each module's
-/// `file:` URL. NSH bundles the app, and QuickJS gives the bundle's module
-/// no `url`, so `import.meta.url` is `undefined` (and `new URL(".", ...)`
-/// throws): ignored until the runtime sets it.
+/// `file:` URL; NSH's bundler makes each module's `import.meta.url` its
+/// own URL in the app's directory (`${pluginDir}`).
 #[test]
-#[ignore = "import.meta.url is not set for bundled apps yet"]
 fn import_meta_url() {
-    let app = App::start(
-        r##"
+    const BODY: &str = r##"
+import { helperUrl } from "./lib/helper.js";
 let url = null, root = null;
 try { url = import.meta.url ?? null; root = decodeURIComponent(new URL(".", import.meta.url).pathname).replace(/\/$/, ""); }
 catch (e) { root = e.constructor.name; }
-report({ url, root });
-"##,
-        serde_json::json!({}),
-        None,
-        |_| {},
-    );
+report({ url, root, helperUrl, image: new URL("./logo.png", import.meta.url).href });
+"##;
+    let helper = |data: &std::path::Path| {
+        let root = data.ancestors().nth(2).unwrap();
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(
+            root.join("lib/helper.js"),
+            "export const helperUrl = import.meta.url;\n",
+        )
+        .unwrap();
+    };
+    let app = App::start(BODY, serde_json::json!({}), None, helper);
     let out = app.result();
     let dir = app.root.canonicalize().unwrap();
     assert_eq!(
@@ -583,6 +604,19 @@ report({ url, root });
         serde_json::json!({
             "url": format!("file://{}/App.tsx", dir.display()),
             "root": dir.to_str().unwrap(),
+            "helperUrl": format!("file://{}/lib/helper.js", dir.display()),
+            "image": format!("file://{}/logo.png", dir.display()),
+        })
+    );
+    // Without an app directory (a packaged mobile app), the app's assets.
+    let app = App::start_in(BODY, serde_json::json!({}), None, helper, false);
+    assert_eq!(
+        app.result(),
+        serde_json::json!({
+            "url": "asset:/App.tsx",
+            "root": "",
+            "helperUrl": "asset:/lib/helper.js",
+            "image": "asset:/logo.png",
         })
     );
 }

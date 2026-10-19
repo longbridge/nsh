@@ -281,7 +281,9 @@ impl Plugin for NshPlugin {
         let path = Path::new(args.id);
         let entry = path == self.entry;
         let script = matches!(args.module_type, ModuleType::Ts | ModuleType::Js);
-        if !(jsx_module || entry || self.hot && script) {
+        // A module that reads `import.meta` gets its own URL (`metaUrl`).
+        let meta = args.code.contains("import.meta");
+        if !(jsx_module || entry || self.hot && script || meta) {
             return Ok(None);
         }
         let hot_key = self.hot.then(|| self.rel(path));
@@ -305,6 +307,7 @@ impl Plugin for NshPlugin {
             args.code,
             prologue.as_deref(),
             hot_key.as_deref(),
+            Some(&self.rel(path)),
             &self.modules,
         )
         .map_err(|detail| self.fail(path, &detail))?;

@@ -43,7 +43,7 @@ pub fn compile_module(
     let path = std::path::Path::new(name);
     let source_type = oxc::span::SourceType::from_path(path).map_err(|e| e.to_string())?;
     let modules = compile::NativeModules::new(ui_sets);
-    compile::compile_native(path, source_type, source, None, None, &modules)
+    compile::compile_native(path, source_type, source, None, None, Some(name), &modules)
         .map(|(code, _)| code)
         .map_err(|e| compile::strip_ansi(&e))
 }
