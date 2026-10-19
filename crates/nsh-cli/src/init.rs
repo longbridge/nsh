@@ -361,7 +361,7 @@ mod tests {
         let checkout =
             dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
         let local = manifest(Some(&checkout));
-        let core = checkout.join("crates/nsh-core");
+        let core = checkout.join("crates").join("nsh-core");
         assert!(
             local.contains(&format!(
                 "nsh-core = {{ path = {:?} }}",
