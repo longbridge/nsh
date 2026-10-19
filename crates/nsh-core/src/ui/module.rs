@@ -4,8 +4,8 @@
 //! The signature decides how a call runs: a function without a context
 //! runs in the JS call and returns its value (as a class's method does);
 //! one taking `cx: &mut ModuleCx` is an op, ordered with the props set
-//! before it (a `Promise` when it returns a value); an `async fn` runs as a
-//! task of the core (a `Promise`). In every kind the arguments are
+//! before it (a `Promise`, of `void` when it returns nothing: settled once
+//! the op ran); an `async fn` runs as a task of the core (a `Promise`). In every kind the arguments are
 //! converted in the JS call, and the op carries a closure holding them
 //! (`super::call`).
 
@@ -85,9 +85,11 @@ impl FunctionCall {
 pub enum FunctionKind {
     /// In the JS call: TS gets the value.
     Sync,
-    /// An op: TS gets a promise of the value (nothing without one).
+    /// An op: TS gets a promise of the value (`Promise<void>` without one,
+    /// settled once the op ran).
     Op,
-    /// A task: TS gets a promise of the value (nothing without one).
+    /// A task: TS gets a promise of the value (`Promise<void>` without
+    /// one, settled when the task ends).
     Async,
 }
 
@@ -99,7 +101,8 @@ pub struct Function {
     pub doc: &'static str,
     /// Its parameters.
     pub params: &'static [ModuleParam],
-    /// The TypeScript type of its result; `None`: nothing to wait for.
+    /// The TypeScript type of its result; `None`: nothing (`void`; a
+    /// promise of it for an op or a task).
     pub returns: Option<TsType>,
     /// The classes its parameters and result name.
     pub refs: super::ClassRefs,

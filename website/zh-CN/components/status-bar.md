@@ -66,8 +66,8 @@ StatusBar.setHidden(false);
 
 | 函数 | 说明 |
 |---|---|
-| `StatusBar.setBarStyle(barStyle: BarStyle, animated?: boolean \| null): void` | 设置内容的颜色。`animated` 默认为 `false`。 |
-| `StatusBar.setHidden(hidden: boolean, animation?: "none" \| "fade" \| "slide" \| null): void` | 隐藏或显示状态栏。除 `"none"` 以外的任何动画值都会让变化以动画呈现。 |
+| `StatusBar.setBarStyle(barStyle: BarStyle, animated?: boolean \| null): Promise<void>` | 设置内容的颜色。`animated` 默认为 `false`。 |
+| `StatusBar.setHidden(hidden: boolean, animation?: "none" \| "fade" \| "slide" \| null): Promise<void>` | 隐藏或显示状态栏。除 `"none"` 以外的任何动画值都会让变化以动画呈现。 |
 
 ## 状态栏样式
 

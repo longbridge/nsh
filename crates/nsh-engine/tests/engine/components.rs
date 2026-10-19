@@ -520,8 +520,10 @@ const shown = signal("waiting");
 let stepper!: StepperRef;
 setTimeout(async () => {
   let refused = "";
-  try { (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
-  stepper.setValue(42.4);
+  // A method returning nothing is a promise too: a wrong argument rejects it.
+  try { await (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
+  const set = stepper.setValue(42.4);
+  if (!(set instanceof Promise)) refused = "not a promise";
   const value = await stepper.value();
   shown.set(`got ${value} | ${refused}`);
 }, 0);

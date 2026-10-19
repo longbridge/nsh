@@ -137,7 +137,7 @@ a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
 - **`fn` without a context:** synchronous, called directly in the JS call like a class's method (`parse(text)`,
   `checksum(bytes)`): TS gets the value, not a promise.
 - **`fn` taking `cx: &mut ModuleCx`:** an op, run in order with what JS set before it (a dialog, the status bar,
-  focus), a promise when it returns a value.
+  focus), a promise of its value (`Promise<void>` for `()`, settled once the op ran, so TS can await an op).
 - **`async fn`:** a task of the core, a promise.
 
 A plain `fn` that returns a value (today a promise in TS) becomes synchronous: no runtime module has one (theirs

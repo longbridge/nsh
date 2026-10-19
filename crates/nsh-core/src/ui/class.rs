@@ -913,6 +913,14 @@ export declare class Token {
             text.len()
         }
 
+        /// An op returning nothing: TS can still await it.
+        pub(crate) fn beep(cx: &mut ModuleCx) {
+            let _ = cx;
+        }
+
+        /// A task returning nothing.
+        pub(crate) async fn settle() {}
+
         pub(crate) async fn later(listener: Callback<i64, String>) -> Result<String, String> {
             listener.call_async(1).await
         }
@@ -945,6 +953,10 @@ export declare class Token {
   shout(text: string): void;
   /** A promise of the length. */
   measure(text: string): Promise<number>;
+  /** An op returning nothing: TS can still await it. */
+  beep(): Promise<void>;
+  /** A task returning nothing. */
+  settle(): Promise<void>;
   later(listener: (a: number) => string): Promise<string>;
 }
 

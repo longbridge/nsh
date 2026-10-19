@@ -433,17 +433,16 @@ unsafe extern "C" fn call_sync(
 
 /// Sends a call into Rust that runs as an op, with the call's `this` and
 /// `args`: `make` converts them in this call into what the op runs (the
-/// instances and callbacks among them ride in it). With `returns`, a
-/// promise of its result, rejected when they do not convert; else
-/// `undefined`, and a conversion error throws.
+/// instances and callbacks among them ride in it). Returns a promise of
+/// its result (`undefined` for `()`: settled once the op ran, in order
+/// with the UI), rejected when they do not convert.
 pub(crate) fn send(
     ctx: Ctx,
     this: Raw,
     args: js::Args<'_>,
-    returns: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(returns, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -601,7 +600,7 @@ impl<'a> CallHost<'a> {
     fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(start) => self.send(true, |host| start(host).map(RustCall::Task)),
+            MemberCall::Async(start) => self.send(|host| start(host).map(RustCall::Task)),
         }
     }
 
@@ -619,11 +618,7 @@ impl<'a> CallHost<'a> {
 
     /// Sends the call `make` converts this call's values into as an op
     /// ([`send`]).
-    fn send(
-        &self,
-        returns: bool,
-        make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
-    ) -> Raw {
+    fn send(&self, make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>) -> Raw {
         let ctx = self.ctx;
         // The app's conversions: a panic in one fails the call.
         let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| make(self)))
@@ -637,30 +632,19 @@ impl<'a> CallHost<'a> {
                 run
             }
             Err(e) => {
-                // Thrown (or rethrown) as a synchronous call's error.
-                let thrown = self.finish(Err(e));
-                return if returns {
-                    rejected_with_exception(ctx)
-                } else {
-                    thrown
-                };
+                // Thrown (or rethrown) as a synchronous call's error, then
+                // taken as the promise's.
+                let _ = self.finish(Err(e));
+                return rejected_with_exception(ctx);
             }
         };
-        let call = if returns {
-            crate::components::next_call(ctx)
-        } else {
-            0
-        };
+        let call = crate::components::next_call(ctx);
         // Not queued (over the op limit): the call and what it holds go
         // here, before any promise is made.
         if let Err(e) = crate::dom::push_op(ctx, nsh_core::Op::Rust(RustOp { call, run })) {
             return e;
         }
-        if returns {
-            crate::components::promise(ctx, call)
-        } else {
-            UNDEFINED
-        }
+        crate::components::promise(ctx, call)
     }
 
     /// Whether an operation threw (its exception is pending).

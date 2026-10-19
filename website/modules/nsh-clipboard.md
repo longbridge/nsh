@@ -14,7 +14,7 @@ import { Clipboard } from "nsh/clipboard";
 
 ```ts
 const Clipboard: {
-  setString(text: string): void;
+  setString(text: string): Promise<void>;
   getString(): Promise<string>;
   hasString(): Promise<boolean>;
 };
@@ -25,7 +25,7 @@ The user can also copy from a [selectable text](../elements/text.md) themselves;
 ## Clipboard.setString
 
 ```ts
-setString(text: string): void;
+setString(text: string): Promise<void>;
 ```
 
 Puts `text` on the clipboard, replacing what was there.

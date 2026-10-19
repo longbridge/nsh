@@ -239,7 +239,7 @@ A function or a member runs the way its Rust signature says. One that is not `as
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
 `async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs); a module function
 taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and returns a Promise
-of its value. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
+of its value (`Promise<void>` for `()`, settled once it ran, so `await` waits for it). Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
 (`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`). An argument of
 the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise; an `Err`

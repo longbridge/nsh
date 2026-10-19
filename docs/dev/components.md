@@ -264,11 +264,11 @@ write: `#[methods] impl StepperApi { pub fn set_value(&self, v: f64) {..} pub fn
 implements `Api`, the view registers it with `cx.methods(StepperApi { .. })` for as long as it lives, and
 `#[component(methods = StepperApi)]` (`Component::METHODS = Methods::of::<StepperApi>()`) names it in the spec, so the
 JS face builds the ref (`StepperRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
-written. A call converts its arguments in the JS call (a wrong one throws, or rejects the promise of a method that
-returns a value) into a closure an op carries (`RustCall::Method`), so it runs in order with the props JS set
-before it, with the API the view registered. A method returning nothing is called and forgotten; one returning a
-value gives JS a `Promise`, settled from the core's events (`JsEvent::Reply`, the boxed value converted then) in
-the same frame's commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
+written. A call converts its arguments in the JS call (a wrong one rejects its promise) into a closure an op
+carries (`RustCall::Method`), so it runs in order with the props JS set before it, with the API the view
+registered. Every method gives JS a `Promise` of its value (`Promise<void>` for one returning nothing, settled once
+it ran), settled from the core's events (`JsEvent::Reply`, the boxed value converted then) in the same frame's
+commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
 
 ## Modules
 
@@ -281,8 +281,8 @@ parameters at the end may be left out). The signature decides how a call runs (`
   (signals, `dialog`, `theme()`) are not there (the reactive graph is not entered).
 - **A last `cx: &mut ModuleCx`** (`Op`): the platform's services, applied in order right after the call (a dialog,
   the status bar, focus). Its arguments are converted in the JS call into a closure an op carries
-  (`RustCall::Op`, in order with the ops before it); one returning a value gives JS a `Promise`, settled like a
-  method's, and a conversion error rejects it.
+  (`RustCall::Op`, in order with the ops before it); JS gets a `Promise` of its value, settled like a method's
+  (`Promise<void>` for `()`, once the op ran), and a conversion error rejects it.
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions
   views use (`Alert.alert` awaits `dialog(..)`), sent as the op above; a `Promise` of its value, rejected with an
   `Err`'s message or a panic's.

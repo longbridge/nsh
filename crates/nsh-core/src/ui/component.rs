@@ -106,8 +106,8 @@ pub struct Method {
     pub doc: &'static str,
     /// Its parameters: JS names and TypeScript types.
     pub params: &'static [Param],
-    /// The TypeScript type of its result (`None`: it returns nothing, and
-    /// JS does not wait for it).
+    /// The TypeScript type of its result (`None`: it returns nothing; JS
+    /// gets a `Promise<void>`, settled once the method ran).
     pub returns: Option<TsType>,
     /// The classes its parameters and result name.
     pub refs: super::ClassRefs,
@@ -180,7 +180,7 @@ pub struct MethodSpec {
     pub doc: &'static str,
     /// Its parameters: JS names and TypeScript types.
     pub params: Vec<(&'static str, String)>,
-    /// The TypeScript type of its result; `None`: nothing to wait for.
+    /// The TypeScript type of its result; `None`: nothing (`void`).
     pub returns: Option<String>,
     /// Its call (the arguments converted in the JS call).
     pub call: fn(&dyn JsHost) -> Result<MethodCall, Thrown>,
@@ -966,10 +966,12 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
             .collect::<Vec<_>>()
             .join(", ");
-        let returns = match (&f.returns, f.kind) {
-            (Some(ts), super::module::FunctionKind::Sync) => ts.clone(),
-            (Some(ts), _) => format!("Promise<{ts}>"),
-            (None, _) => "void".to_owned(),
+        let value = f.returns.clone().unwrap_or_else(|| "void".to_owned());
+        let returns = match f.kind {
+            super::module::FunctionKind::Sync => value,
+            // An op or a task: a promise, of `void` too (settled once it
+            // ran).
+            _ => format!("Promise<{value}>"),
         };
         (params, returns)
     };
@@ -1006,10 +1008,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
                     .map(|(n, ts)| format!("{n}: {ts}"))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let returns = match &m.returns {
-                    Some(ts) => format!("Promise<{ts}>"),
-                    None => "void".to_owned(),
-                };
+                let returns = format!("Promise<{}>", m.returns.as_deref().unwrap_or("void"));
                 let _ = writeln!(out, "  {}({params}): {returns};", m.name);
             }
             out.push_str("}\n\n");
@@ -1224,7 +1223,7 @@ mod tests {
             "  onReset?: () => void;",
             "/** Picks a number. */",
             "export interface StepperRef {",
-            "  /** Jumps to `value`. */\n  jumpTo(value: number): void;",
+            "  /** Jumps to `value`. */\n  jumpTo(value: number): Promise<void>;",
             "  value(): Promise<number>;",
             "export interface StepperProps extends Omit<ComponentHostProps, \"ref\"> {\n  ref?: StepperRef | ((ref: StepperRef) => void);",
             "export declare const Stepper: ((props: StepperProps) => JSX.Element);",

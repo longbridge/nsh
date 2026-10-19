@@ -223,7 +223,7 @@ Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型
 
 函数和成员按 Rust 签名运行。不是 `async` 的在 TSX 调用中直接运行并返回值（`Portfolio.total()` 是数字，`ledger.balance` 是属性）：
 它们计算并保存状态。`async fn` 返回 Promise，作为任务运行，可以使用 NSH 的服务（`fetch`、`timer`、对话框）；带
-`cx: &mut ModuleCx` 参数的模块函数与 UI 按顺序作用于平台（toast、状态栏），返回其值的 Promise。参数和返回值的类型来自签名：数字、
+`cx: &mut ModuleCx` 参数的模块函数与 UI 按顺序作用于平台（toast、状态栏），返回其值的 Promise（返回 `()` 时是 `Promise<void>`，在它运行后完成，所以可以 `await` 它）。参数和返回值的类型来自签名：数字、
 字符串、`Option`、`Vec`、你的 `#[derive(JsObject)]` 结构体和 `#[derive(PropEnum)]` 枚举、你的类的实例，以及 TSX 函数
 （`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用）。类型不对的参数在调用中抛出 `TypeError`，
 返回 Promise 的调用则以它 reject；`Err` 以其消息抛出（或 reject）。类的对象拥有它的

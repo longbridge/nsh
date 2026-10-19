@@ -71,8 +71,8 @@ StatusBar.setHidden(false);
 
 | Function | Description |
 |---|---|
-| `StatusBar.setBarStyle(barStyle: BarStyle, animated?: boolean \| null): void` | Sets the color of the content. `animated` defaults to `false`. |
-| `StatusBar.setHidden(hidden: boolean, animation?: "none" \| "fade" \| "slide" \| null): void` | Hides or shows the bar. Any animation other than `"none"` animates the change. |
+| `StatusBar.setBarStyle(barStyle: BarStyle, animated?: boolean \| null): Promise<void>` | Sets the color of the content. `animated` defaults to `false`. |
+| `StatusBar.setHidden(hidden: boolean, animation?: "none" \| "fade" \| "slide" \| null): Promise<void>` | Hides or shows the bar. Any animation other than `"none"` animates the change. |
 
 ## Bar styles
 

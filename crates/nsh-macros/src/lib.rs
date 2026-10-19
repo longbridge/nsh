@@ -1048,9 +1048,10 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
 /// of the component's ref in JS, named in camel case (`set_value` is
 /// `setValue`), documented by its doc comment; a function without one is a
 /// helper, Rust's only. A
-/// function takes `&self`, then [`JsValue`] parameters; it returns nothing
-/// (JS calls it and moves on; the call is ordered with the props set before
-/// it) or a [`JsValue`] (JS gets a `Promise`). The view registers the API with
+/// function takes `&self`, then [`JsValue`] parameters, and returns
+/// nothing or a [`JsValue`]: JS gets a `Promise` of it (`Promise<void>`
+/// for nothing, settled once the method ran), the call ordered with the
+/// props set before it. The view registers the API with
 /// `cx.methods(api)`, and the component names it in its spec with
 /// `#[component(methods = StepperApi)]`.
 #[proc_macro_attribute]
@@ -1296,7 +1297,8 @@ fn module_cx(ty: &Type) -> bool {
 /// a function without a context runs in the JS call and returns its value
 /// (`checksum(bytes)`), as a class's method does; one whose last parameter
 /// is `cx: &mut ModuleCx` is an op, run in order with what JS set before it
-/// (a dialog, the status bar, focus), a `Promise` when it returns a value;
+/// (a dialog, the status bar, focus), a `Promise` (`Promise<void>` when it
+/// returns nothing: settled once the op ran);
 /// an `async fn` runs as a task of the core with the free functions views
 /// use (`dialog(..)`, `clipboard_string()`, ...), a `Promise`. Parameters
 /// are [`JsValue`] types (a trailing `Option` is optional), instances
