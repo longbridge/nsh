@@ -980,6 +980,19 @@ mod confined {
 
     use cap_std::fs::{Dir, File, Metadata, OpenOptions};
 
+    /// How a root's ancestors are opened: for search only where the OS has
+    /// such a mode (`O_PATH` on Linux and Android, `O_SEARCH` on Apple's),
+    /// else for reading.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const SEARCH: libc::c_int = libc::O_PATH;
+    #[cfg(target_vendor = "apple")]
+    const SEARCH: libc::c_int = libc::O_SEARCH;
+    #[cfg(all(
+        unix,
+        not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))
+    ))]
+    const SEARCH: libc::c_int = libc::O_RDONLY;
+
     /// Opens a canonical root. On Unix every component is opened with
     /// `O_NOFOLLOW` from `/`, so a symlink swapped in after the grant check
     /// cannot redirect the root.
@@ -996,33 +1009,36 @@ mod confined {
         let mut current = std::fs::File::open("/")?;
         let parts: Vec<_> = path.components().collect();
         for (i, part) in parts.iter().enumerate() {
-            // An ancestor is only passed through: on Linux `O_PATH` needs no
-            // read permission of it (a home directory may be 0711).
-            #[cfg(target_os = "linux")]
-            let access = if i + 1 < parts.len() {
-                libc::O_PATH
-            } else {
-                libc::O_RDONLY
-            };
-            #[cfg(not(target_os = "linux"))]
-            let access = {
-                let _ = i;
-                libc::O_RDONLY
-            };
+            // An ancestor is only passed through: opened for search, it
+            // needs no read permission (a home directory may be 0711).
+            let through = i + 1 < parts.len();
             match part {
                 Component::RootDir => (),
                 Component::Normal(name) => {
                     let name = CString::new(name.as_bytes())
                         .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-                    // SAFETY: current is a live directory and name is
-                    // NUL-terminated; the returned descriptor is owned below.
-                    let fd = unsafe {
-                        libc::openat(
-                            current.as_raw_fd(),
-                            name.as_ptr(),
-                            access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-                        )
+                    let open = |access: libc::c_int| {
+                        // SAFETY: current is a live directory and name is
+                        // NUL-terminated; the descriptor returned is owned
+                        // below.
+                        unsafe {
+                            libc::openat(
+                                current.as_raw_fd(),
+                                name.as_ptr(),
+                                access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                            )
+                        }
                     };
+                    let mut fd = if through {
+                        open(SEARCH)
+                    } else {
+                        open(libc::O_RDONLY)
+                    };
+                    // A kernel without the search mode (macOS before 13)
+                    // refuses it: read the directory then.
+                    if fd < 0 && through && SEARCH != libc::O_RDONLY {
+                        fd = open(libc::O_RDONLY);
+                    }
                     if fd < 0 {
                         return Err(io::Error::last_os_error());
                     }
