@@ -663,7 +663,7 @@ impl Host {
         *self.shared.system_exit_handler.borrow_mut() = Some(handler);
     }
 
-    /// Wakes this host's engine when a process or filesystem worker produces an event.
+    /// Wakes this host's engine when a process worker produces an event.
     pub fn set_system_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) {
         if self.fatal().is_some() {
             return;
@@ -672,19 +672,18 @@ impl Host {
         *self.shared.system_wake.borrow_mut() = Some(wake);
     }
 
-    /// Delivers queued native process and file events, then drains resulting promise jobs.
+    /// Delivers queued native process events, then drains resulting promise jobs.
     pub fn run_system(&self) {
         self.guarded(Phase::Call, || {
             self.ctx.with(|ctx| {
                 let raw = ctx.as_raw().as_ptr();
                 crate::process::pump(raw);
-                crate::fs::pump(raw);
             });
             self.run_jobs();
         });
     }
 
-    /// Whether native process or filesystem work is still owned by this VM.
+    /// Whether native process work is still owned by this VM.
     /// Workers wake the engine; this predicate does not schedule polling.
     pub fn has_system_tasks(&self) -> bool {
         if self.fatal().is_some() {
@@ -696,7 +695,7 @@ impl Host {
                 .ready(self.rt.borrow().as_ref().expect("live VM").is_job_pending())
             || self.ctx.with(|ctx| {
                 let raw = ctx.as_raw().as_ptr();
-                crate::process::has_pending(raw) || crate::fs::has_pending(raw)
+                crate::process::has_pending(raw)
             })
     }
 

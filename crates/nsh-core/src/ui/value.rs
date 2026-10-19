@@ -432,6 +432,35 @@ impl JsValue for Vec<u8> {
     }
 }
 
+/// A time is a `Date` (its milliseconds since the Unix epoch).
+impl JsValue for std::time::SystemTime {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Date".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        let millis = value
+            .as_date()
+            .filter(|m| m.is_finite())
+            .ok_or_else(|| value.expected("a valid Date"))?;
+        let since = std::time::Duration::from_secs_f64(millis.abs() / 1000.0);
+        let time = if millis < 0.0 {
+            std::time::UNIX_EPOCH.checked_sub(since)
+        } else {
+            std::time::UNIX_EPOCH.checked_add(since)
+        };
+        time.ok_or_else(|| value.expected("a Date in range"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let millis = match self.duration_since(std::time::UNIX_EPOCH) {
+            Ok(since) => since.as_secs_f64() * 1000.0,
+            Err(before) => -before.duration().as_secs_f64() * 1000.0,
+        };
+        Ok(JsOwned::new(host, host.new_date(millis)?))
+    }
+}
+
 impl<T: JsValue> JsValue for Vec<T> {
     fn ts_type(types: &mut TsTypes) -> String {
         format!("({})[]", T::ts_type(types))

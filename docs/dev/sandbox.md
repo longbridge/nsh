@@ -56,7 +56,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   root, opened once (on Unix component by component with `O_NOFOLLOW` from `/`) as a cap-std `Dir`, so no symlink
   leads it outside; operations on links (`lstat`, `readlink`, `exists`, `unlink`, `rename`, `rmdir`) resolve only
   the parent. Files are opened non-blocking and must be regular files. One VM has at most 1024 operations and
-  64 MiB of file data in flight (`fs.rs`). `${dataDir}`, `${pluginDir}` and
+  64 MiB of file data in flight (`nsh_core::runtime::fs`, counted in the VM's `Quotas`). `${dataDir}`, `${pluginDir}` and
   `${homeDir}` are resolved from trusted host configuration. Relative roots are anchored at the host plugin
   directory; an unconfigured anchor grants nothing. Read and write grants are separate. Environment visibility
   uses the default metadata-name list in `default-env` (language, time zone, terminal and desktop kind only: no

@@ -51,6 +51,10 @@ pub struct ClassDef {
     pub type_name: fn() -> &'static str,
     /// Its members: the constructor, methods, accessors and statics.
     pub members: &'static [Member],
+    /// Its objects come from members only and its module exports no value
+    /// of it: declared as an `interface` (`#[class(interface)]`: `fs`'s
+    /// `Stats`).
+    pub interface: bool,
 }
 
 impl ClassDef {
@@ -463,6 +467,27 @@ impl<C: Class> Ret for Instance<C> {
     }
 }
 
+/// An array of instances' objects.
+impl<C: Class> Ret for Vec<Instance<C>> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("{}[]", types.class(C::DEF))
+    }
+
+    fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        // Owned until the array takes them, as `Vec<T>`'s items are.
+        let mut items = Vec::with_capacity(self.len());
+        for instance in self {
+            items.push(instance.into_js(host)?);
+        }
+        let raws = items.into_iter().map(JsOwned::into_raw).collect();
+        Ok(JsOwned::new(host, host.new_array(raws)?))
+    }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
+    }
+}
+
 impl<C: Class> Ret for Option<Instance<C>> {
     fn ts_type(types: &mut TsTypes) -> String {
         format!("{} | null", <Instance<C> as Ret>::ts_type(types))
@@ -695,6 +720,8 @@ pub(crate) mod __private {
     pub trait ClassDoc {
         /// The struct's doc comment.
         const DOC: &'static str;
+        /// `#[class(interface)]`: [`super::ClassDef::interface`].
+        const INTERFACE: bool;
     }
 
     /// A field of a class's struct, traced when its type implements

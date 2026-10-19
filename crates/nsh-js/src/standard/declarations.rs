@@ -319,7 +319,6 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
         public.push_str("}\n");
     }
     for (name, body) in [
-        ("fs/promises", super::fs::TYPES),
         ("process", super::process::TYPES),
         ("console", super::console::TYPES),
     ] {

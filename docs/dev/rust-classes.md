@@ -182,15 +182,23 @@ For that, two choices of the first version change:
   `JsonValue`, `#[derive(JsObject)]` structs, `#[derive(PropEnum)]` enums), so classes and modules share one set of
   conversions and TypeScript types (`Arg` and `Ret` over them); a trailing `Option` parameter is optional.
   `Vec<u8>` is bytes: a `Uint8Array` (a `Buffer` too), copied in the call (`u8` is no `JsValue`, so it never
-  overlaps the arrays).
+  overlaps the arrays); `SystemTime` is a `Date`. `#[prop(exact)]` on a `JsObject` struct refuses other own keys
+  (options, where a typo must not pass).
+- **Overloads**: `#[overload(fn(path: String, encoding: Encoding) -> String)]` on a module function gives
+  TypeScript that signature instead of the function's own (one attribute per signature, Rust types as in a
+  signature; the result is a promise when the function's is), for results whose type depends on the arguments
+  (`fs/promises`' `readFile`).
+- **Interfaces**: `#[class(interface)]` on the struct makes a class whose objects come from members only: its
+  module exports no value of it and TypeScript declares an `interface` (`fs/promises`' `Stats`); it has no
+  constructor or statics. A result `Vec<Instance<T>>` is an array of objects.
 - **The VM's `System`**: a parameter `sys: System` of a function or member (any kind) is not one JS passes: the
   call fills it in (an `async` one when it is made) with the app's `Access`, its data directory, the host's
-  `TrustedPaths` and the VM's `Quotas` (counts of limited resources, `quotas.take(kind, max)` giving a `Held`
-  back when dropped). The host provides it (`JsHost::system`); one that configured nothing grants nothing.
+  `TrustedPaths`, the VM's `Quotas` (counts of limited resources, `quotas.take(kind, max)` or
+  `quotas.reserve(kind, amount, max)` giving a `Held` back when dropped) and the surface's `Os`. The host provides it (`JsHost::system`); one that configured nothing grants nothing.
 - **Work started in the call**: a function or method that is not `async` and returns `Later<T>` (or
   `Result<Later<T>, E>`) runs in the JS call, where its checks throw as a synchronous call's do, and the work it
   returns runs as a core task: TS `Promise<T>` (`FunctionCall::Start`, `MemberCall::Start`). The system modules
-  use it to keep Node's shape, a `RangeError` at the call and I/O errors as rejections (`net`).
+  use it to keep Node's shape, a `RangeError` at the call and I/O errors as rejections (`net`, `fs/promises`).
 - **Errors of a chosen class**: `Result<T, JsError>` throws a `TypeError`, `RangeError` or `Error`
   (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A task's `Err`
   rejects with an `Error` as before.

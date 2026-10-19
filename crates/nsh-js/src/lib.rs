@@ -21,7 +21,6 @@ mod desktop;
 mod dom;
 mod env;
 mod error;
-mod fs;
 mod host;
 mod hot;
 mod keymap;

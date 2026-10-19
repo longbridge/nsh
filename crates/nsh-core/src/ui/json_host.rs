@@ -131,6 +131,18 @@ impl JsHost for JsonHost {
         Ok(self.put(field.map_or(Val::Undefined, Val::Json)))
     }
 
+    fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError> {
+        Ok(match self.json_of(v) {
+            Some(JsonValue::Object(map)) => map.keys().cloned().collect(),
+            _ => Vec::new(),
+        })
+    }
+
+    /// A `{ "$date": millis }` object stands for a `Date` here.
+    fn date(&self, v: JsRaw) -> Option<f64> {
+        self.json_of(v)?.get("$date")?.as_f64()
+    }
+
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError> {
         Ok(self.json_of(v).unwrap_or(JsonValue::Null))
     }
@@ -203,6 +215,10 @@ impl JsHost for JsonHost {
 
     fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
         Ok(self.value(JsonValue::from(bytes.to_vec())))
+    }
+
+    fn new_date(&self, millis: f64) -> Result<JsRaw, PropError> {
+        Ok(self.value(serde_json::json!({ "$date": millis })))
     }
 
     fn new_bool(&self, b: bool) -> JsRaw {

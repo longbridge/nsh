@@ -27,6 +27,8 @@ pub struct System {
     pub paths: TrustedPaths,
     /// The VM's counts of limited resources.
     pub quotas: Quotas,
+    /// The OS of the surface the VM runs on (its environment's).
+    pub os: crate::platform::Os,
 }
 
 impl System {
@@ -42,7 +44,14 @@ impl System {
             data_dir,
             paths,
             quotas,
+            os: crate::platform::Os::default(),
         }
+    }
+
+    /// The same, on a surface of `os`.
+    pub fn with_os(mut self, os: crate::platform::Os) -> Self {
+        self.os = os;
+        self
     }
 }
 
@@ -50,12 +59,14 @@ impl fmt::Debug for System {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("System")
             .field("data_dir", &self.data_dir)
+            .field("os", &self.os)
             .finish_non_exhaustive()
     }
 }
 
-/// One VM's counts of limited resources (open sockets, ...), by kind: a
-/// host keeps one per VM and hands it to every [`System`].
+/// One VM's counts of limited resources (open sockets, bytes of file data
+/// in flight, ...), by kind: a host keeps one per VM and hands it to every
+/// [`System`].
 #[derive(Clone, Default)]
 pub struct Quotas(Rc<RefCell<FxHashMap<&'static str, usize>>>);
 
@@ -63,14 +74,20 @@ impl Quotas {
     /// Takes one `kind` when fewer than `max` are held; dropping the
     /// [`Held`] gives it back.
     pub fn take(&self, kind: &'static str, max: usize) -> Option<Held> {
+        self.reserve(kind, 1, max)
+    }
+
+    /// Takes `amount` of `kind` (bytes, ...) when the held total stays at
+    /// most `max`; dropping the [`Held`] gives them back.
+    pub fn reserve(&self, kind: &'static str, amount: usize, max: usize) -> Option<Held> {
         let mut counts = self.0.borrow_mut();
         let count = counts.entry(kind).or_default();
-        (*count < max).then(|| {
-            *count += 1;
-            Held {
-                quotas: self.clone(),
-                kind,
-            }
+        let total = count.checked_add(amount).filter(|&total| total <= max)?;
+        *count = total;
+        Some(Held {
+            quotas: self.clone(),
+            kind,
+            amount,
         })
     }
 
@@ -80,23 +97,32 @@ impl Quotas {
     }
 }
 
-/// One resource of a [`Quotas`] kind, given back when dropped.
+/// Resources of a [`Quotas`] kind (one, or an amount), given back when
+/// dropped.
 pub struct Held {
     quotas: Quotas,
     kind: &'static str,
+    amount: usize,
+}
+
+impl Held {
+    /// How much it holds.
+    pub fn amount(&self) -> usize {
+        self.amount
+    }
 }
 
 impl Drop for Held {
     fn drop(&mut self) {
         if let Some(count) = self.quotas.0.borrow_mut().get_mut(self.kind) {
-            *count -= 1;
+            *count -= self.amount;
         }
     }
 }
 
 impl fmt::Debug for Held {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Held({})", self.kind)
+        write!(f, "Held({} {})", self.amount, self.kind)
     }
 }
 
@@ -235,6 +261,35 @@ mod tests {
         assert!(<Vec<u8>>::from_js(crate::ui::JsIn::new(&host, bad)).is_err());
     }
 
+    #[derive(Debug, JsObject)]
+    #[prop(exact)]
+    struct Options {
+        recursive: Option<bool>,
+    }
+
+    #[test]
+    fn times_are_dates_and_exact_objects_refuse_other_keys() {
+        let host = json_host::JsonHost::default();
+        let time = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1500);
+        let out = time.to_js(&host).unwrap();
+        assert_eq!(host.read(out), Some(serde_json::json!({ "$date": 1500.0 })));
+        let date = host.value(serde_json::json!({ "$date": -250.0 }));
+        let back = std::time::SystemTime::from_js(crate::ui::JsIn::new(&host, date)).unwrap();
+        assert_eq!(
+            std::time::UNIX_EPOCH
+                .duration_since(back)
+                .unwrap()
+                .as_millis(),
+            250
+        );
+        let options = host.value(serde_json::json!({ "recursive": true }));
+        let options = Options::from_js(crate::ui::JsIn::new(&host, options)).unwrap();
+        assert_eq!(options.recursive, Some(true));
+        let typo = host.value(serde_json::json!({ "recursive": true, "typo": 1 }));
+        let error = Options::from_js(crate::ui::JsIn::new(&host, typo)).unwrap_err();
+        assert_eq!(error.0, "unknown field `typo`");
+    }
+
     #[test]
     fn quotas_count_what_is_held() {
         let quotas = super::Quotas::default();
@@ -244,5 +299,19 @@ mod tests {
         drop(a);
         assert_eq!(quotas.held("k"), 1);
         assert!(quotas.take("other", 1).is_some());
+    }
+
+    #[test]
+    fn quotas_reserve_amounts_up_to_their_limit() {
+        let quotas = super::Quotas::default();
+        let a = quotas.reserve("bytes", 40, 64).unwrap();
+        assert!(quotas.reserve("bytes", 25, 64).is_none());
+        let b = quotas.reserve("bytes", 24, 64).unwrap();
+        assert_eq!((quotas.held("bytes"), a.amount()), (64, 40));
+        assert!(quotas.reserve("bytes", usize::MAX, usize::MAX).is_none());
+        drop(a);
+        assert_eq!(quotas.held("bytes"), 24);
+        drop(b);
+        assert!(quotas.reserve("bytes", 64, 64).is_some());
     }
 }

@@ -72,6 +72,12 @@ pub trait JsHost {
     fn index(&self, v: JsRaw, i: usize) -> Result<JsRaw, PropError>;
     /// Field `key` of object `v` (`undefined` when it has none), owned.
     fn field(&self, v: JsRaw, key: &str) -> Result<JsRaw, PropError>;
+    /// The own enumerable string keys of object `v` (none when it is not
+    /// one).
+    fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError>;
+    /// The time `Date` `v` stands for, in milliseconds since the Unix
+    /// epoch (`None`: not a `Date`).
+    fn date(&self, v: JsRaw) -> Option<f64>;
     /// `v` as JSON (as `JSON.stringify` sees it).
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError>;
     /// A short text showing `v`, for errors (`"abc"`, `{}`).
@@ -102,6 +108,8 @@ pub trait JsHost {
     fn new_string(&self, s: &str) -> Result<JsRaw, PropError>;
     /// A `Uint8Array` of `bytes` (copied).
     fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError>;
+    /// A `Date` of `millis` since the Unix epoch.
+    fn new_date(&self, millis: f64) -> Result<JsRaw, PropError>;
     /// An array of `items` (taken).
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError>;
     /// An empty object.
@@ -208,6 +216,16 @@ impl<'a> JsIn<'a> {
     pub fn field(&self, key: &str) -> Result<JsOwned<'a>, PropError> {
         let raw = self.host.field(self.raw, key)?;
         Ok(JsOwned::new(self.host, raw))
+    }
+
+    /// Its own enumerable string keys (none when it is not an object).
+    pub fn keys(&self) -> Result<Vec<String>, PropError> {
+        self.host.keys(self.raw)
+    }
+
+    /// The milliseconds since the Unix epoch of the `Date` it is.
+    pub fn as_date(&self) -> Option<f64> {
+        self.host.date(self.raw)
     }
 
     /// The value as JSON.

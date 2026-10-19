@@ -19,6 +19,8 @@ mod components;
 mod counter;
 mod errors;
 mod fetch;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod fs;
 mod handle_bench;
 mod hot;
 mod hover;

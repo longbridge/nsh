@@ -12,9 +12,13 @@ use syn::{
 
 use crate::{camel, decl, docs, last_segment, module_cx, result_ok, sync_returns, system_param};
 
-pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
+pub(crate) fn class(item: syn::Item, interface: bool) -> syn::Result<TokenStream2> {
     match item {
-        syn::Item::Struct(s) => class_struct(s),
+        syn::Item::Struct(s) => class_struct(s, interface),
+        syn::Item::Impl(i) if interface => Err(syn::Error::new(
+            i.span(),
+            "`interface` goes on the class's struct",
+        )),
         syn::Item::Impl(i) => class_impl(i),
         other => Err(syn::Error::new(
             other.span(),
@@ -23,7 +27,7 @@ pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     }
 }
 
-fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
+fn class_struct(item: ItemStruct, interface: bool) -> syn::Result<TokenStream2> {
     if !item.generics.params.is_empty() {
         return Err(syn::Error::new(
             item.generics.span(),
@@ -77,6 +81,7 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
         impl #ui::__private::ClassDoc for #name {
             const DOC: &'static str = #doc;
+            const INTERFACE: bool = #interface;
         }
 
         /// A new instance (a new JS object).
@@ -222,8 +227,14 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     };
     let class_name = type_name.to_string();
     let mut members = Vec::new();
+    // Whether JS would need the class's value: an interface has none.
+    let mut needs_value = false;
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
+        needs_value |= matches!(
+            kind_of(f)?,
+            Kind::Constructor | Kind::Static | Kind::AsyncStatic
+        );
         members.push(member_def(f, &class_name)?);
     }
     // The getters' and setters' attributes are the macro's.
@@ -243,8 +254,14 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
                 type_id: #ui::__private::type_id::<Self>,
                 type_name: #ui::__private::type_name::<Self>,
                 members: &[#(#members),*],
+                interface: <Self as #ui::__private::ClassDoc>::INTERFACE,
             };
         }
+
+        const _: () = ::core::assert!(
+            !(<#self_ty as #ui::__private::ClassDoc>::INTERFACE && #needs_value),
+            "a `#[class(interface)]` has no constructor or statics: JS has no value of it",
+        );
     })
 }
 
@@ -618,10 +635,26 @@ mod tests {
 
     /// The error `#[class]` gives `item`.
     fn error(item: proc_macro2::TokenStream) -> String {
-        match super::class(syn::parse2(item).unwrap()) {
+        match super::class(syn::parse2(item).unwrap(), false) {
             Ok(_) => "no error".to_owned(),
             Err(e) => e.to_string(),
         }
+    }
+
+    #[test]
+    fn interface_goes_on_the_struct() {
+        let item = syn::parse2(quote!(impl T { fn get(&self) -> u32 { 0 } })).unwrap();
+        let error = super::class(item, true).err().unwrap().to_string();
+        assert!(
+            error.contains("`interface` goes on the class's struct"),
+            "{error}"
+        );
+        let item = syn::parse2(quote!(
+            struct T;
+        ))
+        .unwrap();
+        let made = super::class(item, true).unwrap().to_string();
+        assert!(made.contains("const INTERFACE : bool = true"), "{made}");
     }
 
     #[test]

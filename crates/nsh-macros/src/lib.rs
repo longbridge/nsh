@@ -35,9 +35,9 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, Data, DeriveInput, Expr, Fields, FnArg, GenericArgument, Ident, ImplItem, ItemFn,
-    ItemImpl, LitStr, Pat, PathArguments, ReturnType, Token, Type, bracketed, parse::Parse,
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned,
+    Attribute, Data, DeriveInput, Expr, Fields, FnArg, GenericArgument, Ident, ImplItem,
+    ImplItemFn, ItemFn, ItemImpl, LitStr, Pat, PathArguments, ReturnType, Token, Type, bracketed,
+    parse::Parse, parse_macro_input, punctuated::Punctuated, spanned::Spanned,
 };
 
 /// `text` as declaration text in generated code: left out of builds
@@ -1162,6 +1162,8 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
 /// JS (fields in camel case). A field is optional in TypeScript when it is
 /// an `Option` or has `#[prop(default)]` / `#[prop(default = expr)]`;
 /// missing, it takes its default. Doc comments document the fields.
+/// `#[prop(exact)]` on the struct refuses an object with other own
+/// enumerable keys (options where a typo must not pass unnoticed).
 #[proc_macro_derive(JsObject, attributes(prop))]
 pub fn derive_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -1185,9 +1187,21 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
         ));
     };
     let ui = quote!(::nsh_core::ui);
+    let mut exact = false;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("prop")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("exact") {
+                exact = true;
+                Ok(())
+            } else {
+                Err(meta.error("expected `exact` on a `JsObject` struct"))
+            }
+        })?;
+    }
     let mut ts = Vec::new();
     let mut from_js = Vec::new();
     let mut to_js = Vec::new();
+    let mut keys = Vec::new();
     for field in &fields.named {
         let ident = field.ident.as_ref().expect("named");
         let ty = &field.ty;
@@ -1197,6 +1211,7 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
             .clone()
             .unwrap_or_else(|| camel(&ident.to_string()));
         let doc = docs(&field.attrs);
+        keys.push(js.clone());
         let is_option = matches!(last_segment(ty), Some((id, _)) if id == "Option");
         let optional = is_option || attr.default.is_some();
         let mark = if optional { "?" } else { "" };
@@ -1231,6 +1246,17 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
             host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
         });
     }
+    let check = exact.then(|| {
+        quote! {
+            for key in value.keys()? {
+                if ![#(#keys),*].contains(&key.as_str()) {
+                    return ::core::result::Result::Err(#ui::PropError(
+                        ::std::format!("unknown field `{key}`"),
+                    ));
+                }
+            }
+        }
+    });
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let type_name = name.to_string();
     let doc = docs(&input.attrs);
@@ -1252,6 +1278,7 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 if value.kind() != #ui::JsKind::Object {
                     return ::core::result::Result::Err(value.expected("an object"));
                 }
+                #check
                 ::core::result::Result::Ok(Self { #(#from_js),* })
             }
 
@@ -1355,15 +1382,25 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// (`Instance<Other>`, not `&Other`). Doc comments document the class and
 /// its members. On the struct, the fields whose types name `Callback` or
 /// `Instance` report the callbacks they keep to JS's collector.
+/// `#[class(interface)]` on the struct: its objects come from members
+/// only, so the module exports no value of it and TypeScript declares an
+/// `interface` (no constructor or statics).
 #[proc_macro_attribute]
 pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if !attr.is_empty() {
-        return syn::Error::new(Span::call_site(), "`#[class]` takes no arguments")
+    let interface = match syn::parse::<Option<Ident>>(attr) {
+        Ok(None) => false,
+        Ok(Some(flag)) if flag == "interface" => true,
+        _ => {
+            return syn::Error::new(
+                Span::call_site(),
+                "`#[class]` takes nothing, or `interface` on the struct",
+            )
             .into_compile_error()
             .into();
-    }
+        }
+    };
     let item = parse_macro_input!(item as syn::Item);
-    class::class(item)
+    class::class(item, interface)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
@@ -1666,6 +1703,7 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
                 }
             }
         };
+        let (overloads, overload_refs) = overloads(f)?;
         // `#[cfg]` of the function applies to its entry too.
         let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
         entries.push(quote! {
@@ -1678,10 +1716,19 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
                 refs: |__out| {
                     let _ = &__out;
                     #(#refs)*
+                    #(#overload_refs)*
                 },
                 call: #call,
+                overloads: &[#(#overloads),*],
             }
         });
+    }
+    // The overloads' attributes are the macro's.
+    let mut item = item.clone();
+    for member in &mut item.items {
+        if let ImplItem::Fn(f) = member {
+            f.attrs.retain(|a| !a.path().is_ident("overload"));
+        }
     }
     Ok(quote! {
         #item
@@ -1695,6 +1742,56 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
             const CONSTANTS: &'static [#ui::Constant] = &[#(#constants),*];
         }
     })
+}
+
+/// The `#[overload(fn(path: String, encoding: Encoding) -> String)]`
+/// signatures of module function `f`, and the classes they name: Rust
+/// types whose TypeScript types make the declaration (a trailing `Option`
+/// is optional; the result is a promise when the function's is).
+fn overloads(f: &ImplItemFn) -> syn::Result<(Vec<TokenStream2>, Vec<TokenStream2>)> {
+    let private = quote!(::nsh_core::ui::__private);
+    let mut overloads = Vec::new();
+    let mut refs = Vec::new();
+    for attr in f.attrs.iter().filter(|a| a.path().is_ident("overload")) {
+        let sig: syn::TypeBareFn = attr.parse_args()?;
+        let mut params = Vec::new();
+        for arg in &sig.inputs {
+            let Some((name, _)) = &arg.name else {
+                return Err(syn::Error::new(
+                    arg.span(),
+                    "an overload's parameters are named: `fn(path: String)`",
+                ));
+            };
+            params.push((camel(&name.to_string()), &arg.ty));
+        }
+        let mut optional = vec![false; params.len()];
+        for i in (0..params.len()).rev() {
+            if !matches!(last_segment(params[i].1), Some((id, _)) if id == "Option") {
+                break;
+            }
+            optional[i] = true;
+        }
+        let specs = params
+            .iter()
+            .zip(&optional)
+            .map(|((name, ty), optional)| quote!((#name, #private::arg_ts::<#ty>(), #optional)));
+        refs.extend(
+            params
+                .iter()
+                .map(|(_, ty)| quote!(#private::arg_classes::<#ty>(__out);)),
+        );
+        let returns = match &sig.output {
+            ReturnType::Default => quote!(::core::option::Option::None),
+            ReturnType::Type(_, ty) => {
+                refs.push(quote!(#private::ret_classes::<#ty>(__out);));
+                quote!(::core::option::Option::Some(#private::ret_ts::<#ty>()))
+            }
+        };
+        overloads.push(quote! {
+            ::nsh_core::ui::Overload { params: &[#(#specs),*], returns: #returns }
+        });
+    }
+    Ok((overloads, refs))
 }
 
 #[cfg(test)]
