@@ -53,6 +53,7 @@ pub(crate) struct Shared {
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::ui::Quotas,
     /// Open (or connecting) WebSockets of both APIs, capped per VM.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) websockets: Rc<Cell<usize>>,
     /// Worker completion wakes the owning engine without polling.
     pub(crate) system_wake: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,

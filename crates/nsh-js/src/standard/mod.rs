@@ -15,8 +15,10 @@ mod zlib;
 pub(crate) const NAMES: &[&str] = nsh_core::js::STANDARD_MODULES;
 
 /// One of a VM's limited connections; dropping it frees the place.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct Slot(std::rc::Rc<std::cell::Cell<usize>>);
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Slot {
     /// Takes a place in `count` when fewer than `max` are taken.
     pub(crate) fn acquire(count: &std::rc::Rc<std::cell::Cell<usize>>, max: usize) -> Option<Self> {
@@ -27,6 +29,7 @@ impl Slot {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for Slot {
     fn drop(&mut self) {
         self.0.set(self.0.get() - 1);
