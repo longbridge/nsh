@@ -1,5 +1,5 @@
 import { cleanup, type GestureResponderEvent, signal, Text, View } from "nsh";
-import { Animated, createNativeValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { PanResponder } from "nsh/gesture";
 import { Image } from "nsh/image";
@@ -47,10 +47,10 @@ function Api(props: { label: string; api: string }) {
 
 /** Drag, pinch and rotate one photo at the same time, all on the UI thread. */
 function Transformable() {
-  const x = createNativeValue(0);
-  const y = createNativeValue(0);
-  const scale = createNativeValue(1);
-  const angle = createNativeValue(0);
+  const x = createAnimatedValue(0);
+  const y = createAnimatedValue(0);
+  const scale = createAnimatedValue(1);
+  const angle = createAnimatedValue(0);
   const last = signal({ scale: 1, angle: 0, drag: 0 });
   const reset = () => {
     x.spring(0);
@@ -107,7 +107,7 @@ function Transformable() {
 function Ball() {
   const pos = signal({ x: 0, y: 0 });
   const state = signal<{ label: string; tone: "neutral" | "accent" | "info" | "warn" }>({ label: "Idle", tone: "neutral" });
-  const grab = createNativeValue(0);
+  const grab = createAnimatedValue(0);
   let start = { x: 0, y: 0 };
   const pan = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -225,7 +225,7 @@ function TouchPad() {
 /** Each press event lights up its chip as it arrives. */
 function PressEvents() {
   const names = ["pressIn", "press", "longPress", "pressOut"] as const;
-  const flashes = names.map(() => createNativeValue(0));
+  const flashes = names.map(() => createAnimatedValue(0));
   const count = signal(0);
   const log = signal<string[]>([]);
   const fire = (name: string) => {
@@ -327,7 +327,7 @@ function PressEvents() {
 /** A tiny dot with a ring showing the 30 pt around it that also takes taps. */
 function HitSlop() {
   const taps = signal(0);
-  const ring = createNativeValue(0);
+  const ring = createAnimatedValue(0);
   const breathe = Animated.loop(
     Animated.sequence([
       Animated.timing(ring, { toValue: 1, duration: 1400, easing: Easing.inOut(Easing.sin) }),

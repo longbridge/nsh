@@ -148,8 +148,8 @@ What TSX imports from NSH is made two ways today:
 - **Runtime modules in Rust** (`crates/nsh-core/src/runtime/`: `nsh/accessibility`, `nsh/android`,
   `nsh/clipboard`, `nsh/desktop`, `nsh/image`'s functions) already use `#[module]` and `Registry`, the app crates'
   mechanism; they take the synchronous functions and classes as they come.
-- **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh/animated`'s `NativeValue` and
-  `NativeNode`, `nsh/canvas`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
+- **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh/animated`'s `AnimatedValue` and
+  `AnimatedNode`, `nsh/canvas`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
   web globals (`URL`, `Headers`, `Blob`, `fetch`, streams, events). Their classes already sit on one piece of
   machinery: a QuickJS class whose opaque is the Rust value in a `RefCell` (`nsh-js` `web/mod.rs`).
 
@@ -161,7 +161,7 @@ need beyond the first version:
 |---|---|---|
 | `Path2D`, `CanvasGradient` | plain values, called often | when calls convert QuickJS values directly (below) |
 | `CanvasRenderingContext2D` | 17 500 calls in ~1 ms (`docs/dev/performance.md`) | stays recorded natively: a class front adds nothing |
-| `NativeValue`, `NativeNode` | values the renderer reads from style props, ops ordered with the UI | stays: it is part of the renderer |
+| `AnimatedValue`, `AnimatedNode` | values the renderer reads from style props, ops ordered with the UI | stays: it is part of the renderer |
 | `URL`, `TextEncoder` | WebIDL coercion, `new.target`, iterators | after subclassing and iterators |
 | `Headers`, `Blob`, streams, `EventTarget` | callbacks, events, promises interleaved with JS | after callbacks and events |
 | `nsh` itself (signals, `View`, `mount`) | the reactive graph and the JSX compiler's calls | stays: it is the runtime |

@@ -511,7 +511,7 @@ public class NshView extends FrameLayout {
         if (handle != 0) mounter.outputs(Native.tick(handle, nanos));
     }
 
-    /** Keeps frames coming while native values animate. */
+    /** Keeps frames coming while animated values animate. */
     void requestFrames() {
         if (!ticking) {
             ticking = true;

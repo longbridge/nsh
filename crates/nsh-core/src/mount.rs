@@ -667,7 +667,7 @@ pub enum MountItem {
         /// Spinner state.
         refreshing: bool,
     },
-    /// What a canvas draws; its native values come as
+    /// What a canvas draws; its animated values come as
     /// [`nsh_animation::AnimationProp::CanvasArg`] bindings.
     Canvas {
         /// The canvas.

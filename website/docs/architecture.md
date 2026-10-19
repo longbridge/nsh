@@ -64,7 +64,7 @@ hand over laid-out text. Besides that it only does what must happen on it:
 - **drawing text** that was already laid out on the engine thread;
 - **native animations**: values from `nsh/animated` are driven frame by frame (a `CADisplayLink` on iOS, a UI-thread
   animator on Android) and written to the views directly;
-- **gestures and scrolling**: touches become events sent to the engine thread; `scrollValue` and `pan` feed native
+- **gestures and scrolling**: touches become events sent to the engine thread; `scrollValue` and `pan` feed animated
   values in the same frame.
 
 **The main thread never waits for JS.** When the system needs an answer on the spot (may this text change, may the

@@ -587,7 +587,8 @@ pub enum DesktopCommand {
         style: TitleBarStyle,
         /// The height of the app's own title bar, in points: the window
         /// controls are centered in it (Windows' caption buttons fill it);
-        /// `None` for the platform's height.
+        /// `None` for the platform's height. On macOS this selects a native
+        /// toolbar style; the environment reports its actual height.
         height: Option<f32>,
     },
     /// Minimizes the window.

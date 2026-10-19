@@ -1,21 +1,21 @@
 ---
 title: nsh/animated
-description: 原生值、动画驱动、组合动画、缓动曲线和布局动画。
+description: 动画值、动画驱动、组合动画、缓动曲线和布局动画。
 order: 3
 demo: mod-animated
 ---
 
 # nsh/animated
 
-`nsh/animated` 在 UI 线程上执行动画。你创建一个**原生值**（native value），把它（或由它派生的值）绑定到样式属性上，然后启动动画；此后每一帧都在原生侧计算，不需要运行 JavaScript。JS 线程再忙也不会让动画卡顿，动画的每一帧也不消耗任何 JS 开销。
+`nsh/animated` 在 UI 线程上执行动画。你创建一个**动画值**（animated value），把它（或由它派生的值）绑定到样式属性上，然后启动动画；此后每一帧都在原生侧计算，不需要运行 JavaScript。JS 线程再忙也不会让动画卡顿，动画的每一帧也不消耗任何 JS 开销。
 
 ```ts
-import { Animated, createNativeValue, Easing, LayoutAnimation, NativeNode, NativeValue } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing, LayoutAnimation, AnimatedNode, AnimatedValue } from "nsh/animated";
 ```
 
 教程见[动画](../docs/animation.md)。
 
-## 原生值可以驱动什么
+## 动画值可以驱动什么
 
 | 位置 | 用法 |
 |---|---|
@@ -28,20 +28,20 @@ import { Animated, createNativeValue, Easing, LayoutAnimation, NativeNode, Nativ
 
 其他样式属性只接受普通值；如果要为布局本身（尺寸、在布局流中的位置）添加动画，请使用 [`LayoutAnimation`](#layoutanimation)。
 
-## createNativeValue
+## createAnimatedValue
 
 ```ts
-function createNativeValue(value?: number): NativeValue;
+function createAnimatedValue(value?: number): AnimatedValue;
 ```
 
-创建一个初始值为 `value`（默认 `0`）的原生值。
+创建一个初始值为 `value`（默认 `0`）的动画值。
 
 ```tsx
 import { mount, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
 function App() {
-  const x = createNativeValue(0);
+  const x = createAnimatedValue(0);
   let right = false;
   const toggle = () => {
     right = !right;
@@ -59,12 +59,12 @@ mount(App);
 ```
 
 > [!NOTE]
-> JS 无法读取原生值的当前值：它存在于 UI 线程，每帧都在那里变化。如果代码需要知道目标值，请像上例一样用变量或 signal 自己记录。手势事件会在结束时报告这些值（`PanEvent.valueX` / `valueY`）。
+> JS 无法读取动画值的当前值：它存在于 UI 线程，每帧都在那里变化。如果代码需要知道目标值，请像上例一样用变量或 signal 自己记录。手势事件会在结束时报告这些值（`PanEvent.valueX` / `valueY`）。
 
-## NativeValue
+## AnimatedValue
 
 ```ts
-class NativeValue extends NativeNode {
+class AnimatedValue extends AnimatedNode {
   constructor(value: number);
   set(value: number): void;
   stop(): void;
@@ -85,15 +85,15 @@ class NativeValue extends NativeNode {
 每个动画方法都返回一个 Promise：动画完成时 resolve 为 `true`，被停止（`stop`、`set` 或同一个值上的另一个动画）时为 `false`。
 
 ```ts
-const opacity = createNativeValue(1);
+const opacity = createAnimatedValue(1);
 const finished = await opacity.timing(0, { duration: 200 });
 if (finished) visible.set(false);
 ```
 
-## NativeNode
+## AnimatedNode
 
 ```ts
-class NativeNode {
+class AnimatedNode {
   interpolate(config: {
     inputRange: number[];
     outputRange: number[] | string[];
@@ -101,19 +101,19 @@ class NativeNode {
     extrapolateLeft?: Extrapolation;
     extrapolateRight?: Extrapolation;
     easing?: Easing;
-  }): NativeNode;
-  diffClamp(min: number, max: number): NativeNode;
-  add(b: NativeNode | number): NativeNode;
-  sub(b: NativeNode | number): NativeNode;
-  mul(b: NativeNode | number): NativeNode;
-  div(b: NativeNode | number): NativeNode;
-  mod(b: NativeNode | number): NativeNode;
+  }): AnimatedNode;
+  diffClamp(min: number, max: number): AnimatedNode;
+  add(b: AnimatedNode | number): AnimatedNode;
+  sub(b: AnimatedNode | number): AnimatedNode;
+  mul(b: AnimatedNode | number): AnimatedNode;
+  div(b: AnimatedNode | number): AnimatedNode;
+  mod(b: AnimatedNode | number): AnimatedNode;
 }
 
 type Extrapolation = "extend" | "clamp" | "identity";
 ```
 
-原生动画图中的一个节点：一个 `NativeValue`，或由其他节点派生的值。派生节点在其输入变化时在 UI 线程上求值。
+原生动画图中的一个节点：一个 `AnimatedValue`，或由其他节点派生的值。派生节点在其输入变化时在 UI 线程上求值。
 
 | 方法 | 说明 |
 |---|---|
@@ -123,7 +123,7 @@ type Extrapolation = "extend" | "clamp" | "identity";
 | `mod(b)` | 取模，`b` 为正时结果不会为负（比如把角度保持在 0..360）。 |
 
 ```tsx
-const scroll = createNativeValue(0);
+const scroll = createAnimatedValue(0);
 const header = scroll.diffClamp(0, 44);
 
 <Scroll scrollValue={scroll} style={{ flex: 1 }}>{/* rows */}</Scroll>
@@ -131,7 +131,7 @@ const header = scroll.diffClamp(0, 44);
 ```
 
 ```ts
-const progress = createNativeValue(0);
+const progress = createAnimatedValue(0);
 const rotate = progress.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
 const color = progress.interpolate({ inputRange: [0, 0.5, 1], outputRange: ["#22c55e", "#eab308", "#ef4444"] });
 ```
@@ -140,20 +140,20 @@ const color = progress.interpolate({ inputRange: [0, 0.5, 1], outputRange: ["#22
 
 ```ts
 const Animated: {
-  timing(value: NativeValue, config: { toValue: number; duration?: number; easing?: Easing; delay?: number }): CompositeAnimation;
-  spring(value: NativeValue, config: { toValue: number; stiffness?: number; damping?: number; mass?: number; velocity?: number }): CompositeAnimation;
-  decay(value: NativeValue, config?: { velocity?: number; deceleration?: number }): CompositeAnimation;
+  timing(value: AnimatedValue, config: { toValue: number; duration?: number; easing?: Easing; delay?: number }): CompositeAnimation;
+  spring(value: AnimatedValue, config: { toValue: number; stiffness?: number; damping?: number; mass?: number; velocity?: number }): CompositeAnimation;
+  decay(value: AnimatedValue, config?: { velocity?: number; deceleration?: number }): CompositeAnimation;
   sequence(list: CompositeAnimation[]): CompositeAnimation;
   parallel(list: CompositeAnimation[], config?: { stopTogether?: boolean }): CompositeAnimation;
   stagger(ms: number, list: CompositeAnimation[]): CompositeAnimation;
   delay(ms: number): CompositeAnimation;
   loop(animation: CompositeAnimation, config?: { iterations?: number; resetBeforeIteration?: boolean }): CompositeAnimation;
-  add(a: NativeNode, b: NativeNode | number): NativeNode;
-  subtract(a: NativeNode, b: NativeNode | number): NativeNode;
-  multiply(a: NativeNode, b: NativeNode | number): NativeNode;
-  divide(a: NativeNode, b: NativeNode | number): NativeNode;
-  modulo(a: NativeNode, b: NativeNode | number): NativeNode;
-  diffClamp(a: NativeNode, min: number, max: number): NativeNode;
+  add(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  subtract(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  multiply(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  divide(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  modulo(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  diffClamp(a: AnimatedNode, min: number, max: number): AnimatedNode;
 };
 
 interface CompositeAnimation {
@@ -167,13 +167,13 @@ interface CompositeAnimation {
 
 | 函数 | 说明 |
 |---|---|
-| `timing`、`spring`、`decay` | 单个值的单个动画；选项和默认值与 [`NativeValue`](#nativevalue) 的同名方法相同，目标值写作 `toValue`。 |
+| `timing`、`spring`、`decay` | 单个值的单个动画；选项和默认值与 [`AnimatedValue`](#animatedvalue) 的同名方法相同，目标值写作 `toValue`。 |
 | `sequence(list)` | 依次运行这些动画。 |
 | `parallel(list, { stopTogether })` | 同时运行。`stopTogether`（默认 `true`）时，停止其中一个会停止全部。 |
 | `stagger(ms, list)` | 并行运行，每个比前一个晚 `ms` 毫秒开始。 |
 | `delay(ms)` | 等待；常用于 `sequence` 中。 |
 | `loop(animation, { iterations, resetBeforeIteration })` | 重复 `animation` `iterations` 次（默认无限次），每次运行前把值恢复到起点，除非 `resetBeforeIteration` 为 `false`。 |
-| `add`、`subtract`、`multiply`、`divide`、`modulo`、`diffClamp` | 与 [`NativeNode`](#nativenode) 的对应方法相同，只是写成函数形式。 |
+| `add`、`subtract`、`multiply`、`divide`、`modulo`、`diffClamp` | 与 [`AnimatedNode`](#animatednode) 的对应方法相同，只是写成函数形式。 |
 
 `CompositeAnimation`：
 
@@ -184,7 +184,7 @@ interface CompositeAnimation {
 | `reset()` | 停止，并把各个值恢复到启动时的值。 |
 
 ```ts
-const ys = [0, 1, 2, 3].map(() => createNativeValue(0));
+const ys = [0, 1, 2, 3].map(() => createAnimatedValue(0));
 const hop = Animated.stagger(
   80,
   ys.map((y) =>

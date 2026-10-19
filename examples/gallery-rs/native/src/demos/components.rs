@@ -497,7 +497,6 @@ fn Accessory() -> impl IntoElement {
     let content = signal(String::new());
     let focused = signal(false);
     let input = element_ref();
-    let done = input.clone();
     ui::Card::new()
         .icon(IconName::Text)
         .title("Input accessory")
@@ -542,7 +541,7 @@ fn Accessory() -> impl IntoElement {
                         ui::Button::new("Clear", move |_: &()| content.set(String::new()))
                             .variant(UiVariant::Secondary),
                     )
-                    .child(ui::Button::new("Done", move |_: &()| done.blur())),
+                    .child(ui::Button::new("Done", move |_: &()| input.blur())),
             ),
         )
 }
@@ -705,7 +704,6 @@ fn PlatformInfo() -> impl IntoElement {
     let announced = stored(0_u32);
     // The note the reader's focus moves to.
     let note_ref = element_ref();
-    let focus = note_ref.clone();
     let os = os();
     let (major, minor) = os_version();
     // A string on iOS ("17.5"), the API level on Android (as TS's).
@@ -793,7 +791,7 @@ fn PlatformInfo() -> impl IntoElement {
                 })))
                 .child(cell(
                     ui::Button::new("Focus the note", move |_: &()| {
-                        focus.set_accessibility_focus();
+                        note_ref.set_accessibility_focus();
                     })
                     .variant(UiVariant::Secondary),
                 )),

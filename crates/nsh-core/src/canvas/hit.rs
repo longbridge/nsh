@@ -498,7 +498,7 @@ fn outline(
 /// `ctx.isPointInPath([path,] x, y, rule)`: whether (`x`, `y`) (view
 /// coordinates, untransformed) is inside `path` (transformed by the
 /// transform after `ops`) or, without one, the current path after `ops`.
-/// Native values (`Num::Slot`) are read through `slot`.
+/// Animated values (`Num::Slot`) are read through `slot`.
 pub fn point_in_path(
     ops: &[CanvasOp],
     path: Option<&[PathOp]>,
@@ -610,7 +610,7 @@ mod tests {
             19.0,
             zero
         ));
-        // Native values read through `slot`.
+        // Animated values read through `slot`.
         let path = [PathOp::Rect([Num::Slot(0), c(0.0), c(10.0), c(10.0)])];
         assert!(point_in_path(
             &[],

@@ -256,4 +256,4 @@ function Good() {
 
 - [JSX and components](./jsx-and-components.md): props as getters, `<If>`, `<Each>`.
 - [`nsh` module reference](../modules/nsh.md): every function's signature.
-- [Animation](./animation.md): native values that animate on the UI thread without signals.
+- [Animation](./animation.md): animated values that animate on the UI thread without signals.

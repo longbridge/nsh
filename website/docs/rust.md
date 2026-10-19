@@ -78,6 +78,10 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
+Listeners are closures of their event (`move |text: &str| ..`), and `move || ..` for an event without data;
+`.child(..)` takes an element, or an `Option`, a `Vec`, an array or an iterator of elements
+(`.child(rows.iter().map(|r| row(r)))`).
+
 `nsh.json` names the root, and `nsh` mounts it:
 
 ```json
@@ -139,7 +143,7 @@ fn TitleBar() -> impl IntoElement {
         .pl(move || px(title_bar().left + 12.0))
         .pr(move || px(title_bar().right + 12.0))
         .child(text("My app").flex_1())
-        .child(text("Close").window_drag(false).on_press(|_: &()| close_window()))
+        .child(text("Close").window_drag(false).on_press(close_window))
 }
 ```
 

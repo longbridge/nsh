@@ -8,7 +8,7 @@ demo: guide-gestures
 
 # Touch and gestures
 
-NSH has three levels of touch handling. **Presses** (`onPress` and friends) cover buttons, rows and links, with press feedback drawn natively. **Native gestures** (`pan`, `pinch`, `rotation`) move [native values](./animation.md#native-values) on the UI thread, so a dragged card follows the finger even while JS is busy. **Raw touches and the responder system** (`onTouchStart`, `onResponderMove`, `PanResponder`) give you every finger position in JS for anything the other two cannot express, such as drawing.
+NSH has three levels of touch handling. **Presses** (`onPress` and friends) cover buttons, rows and links, with press feedback drawn natively. **Native gestures** (`pan`, `pinch`, `rotation`) move [animated values](./animation.md#animated-values) on the UI thread, so a dragged card follows the finger even while JS is busy. **Raw touches and the responder system** (`onTouchStart`, `onResponderMove`, `PanResponder`) give you every finger position in JS for anything the other two cannot express, such as drawing.
 
 Pick the highest level that does the job: the higher the level, the less work crosses from the UI thread to JS.
 
@@ -144,15 +144,15 @@ The Tailwind classes `pointer-events-none` and `pointer-events-auto` set the sam
 
 ## Native gestures: pan, pinch and rotation
 
-For drags, pinches and rotations that move something on screen, bind [native values](./animation.md#native-values) to the gesture. The platform's gesture recognizer writes the values on the UI thread and the views bound to them move in the same frame; JS is told when the gesture starts and ends.
+For drags, pinches and rotations that move something on screen, bind [animated values](./animation.md#animated-values) to the gesture. The platform's gesture recognizer writes the values on the UI thread and the views bound to them move in the same frame; JS is told when the gesture starts and ends.
 
 ```tsx
 import { mount, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
 function App() {
-  const x = createNativeValue(0);
-  const y = createNativeValue(0);
+  const x = createAnimatedValue(0);
+  const y = createAnimatedValue(0);
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
       <View
@@ -173,9 +173,9 @@ mount(App);
 
 | Prop | Type | Description |
 |---|---|---|
-| `pan` | `{ x?: NativeValue; y?: NativeValue }` | One-finger drags move these values, in points. |
-| `pinch` | `{ scale?: NativeValue }` | Two-finger pinches drive `scale` (a factor). |
-| `rotation` | `{ angle?: NativeValue }` | Two-finger rotations drive `angle`, in degrees. |
+| `pan` | `{ x?: AnimatedValue; y?: AnimatedValue }` | One-finger drags move these values, in points. |
+| `pinch` | `{ scale?: AnimatedValue }` | Two-finger pinches drive `scale` (a factor). |
+| `rotation` | `{ angle?: AnimatedValue }` | Two-finger rotations drive `angle`, in degrees. |
 | `onPanStart` / `onPanEnd` | `(e: PanEvent) => void` | The drag started / ended. |
 | `onPinchStart` / `onPinchEnd` | `(e: { scale; velocity }) => void` | The pinch started / ended. |
 | `onRotationStart` / `onRotationEnd` | `(e: { rotation; velocity }) => void` | The rotation started / ended. |
@@ -402,7 +402,7 @@ The main thread never waits for JS. When the system needs an answer on the spot 
 ## Related
 
 - [`View`](../elements/view.md): every touch prop on the basic element.
-- [Animation](./animation.md): native values, springs and decay for gesture-driven motion.
+- [Animation](./animation.md): animated values, springs and decay for gesture-driven motion.
 - [Scrolling](./scrolling.md): `keyboardShouldPersistTaps`, scroll views and nested gestures.
 - [`nsh/gesture`](../modules/nsh-gesture.md): the `PanResponder` reference.
 - [Accessibility](./accessibility.md): pressable views are accessibility elements; give them a role and a label.

@@ -44,7 +44,7 @@ const Window: {
 | 成员 | 说明 |
 |---|---|
 | `setTitle(title)` | 窗口的标题：标题栏、任务栏或 Dock、窗口切换器里显示的名字。 |
-| `setTitleBar(style, height?)` | `"hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度）；省略时使用平台的高度。`"default"` 恢复系统标题栏。 |
+| `setTitleBar(style, height?)` | `"hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度；在 macOS 上，`height` 选择紧凑样式（44 点及以下）或标准样式（44 点以上）；应用根据 `titleBar().height` 返回的实际高度布局，实时缩放时由 AppKit 布置红绿灯。嵌入应用已有的工具栏保留自身的样式和高度）；省略时使用平台的高度。`"default"` 恢复系统标题栏。 |
 | `minimize()` | 最小化窗口。 |
 | `toggleMaximize()` | 最大化窗口，已最大化时还原。 |
 | `toggleFullScreen()` | 进入或退出全屏。 |

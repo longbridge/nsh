@@ -75,6 +75,9 @@ pub fn App() -> impl IntoElement {
 }
 ```
 
+监听器是接收事件的闭包（`move |text: &str| ..`），没有数据的事件也可以写成 `move || ..`；`.child(..)`
+接受一个元素，或元素的 `Option`、`Vec`、数组、迭代器（`.child(rows.iter().map(|r| row(r)))`）。
+
 `nsh.json` 指定根组件，`nsh` 负责挂载它：
 
 ```json
@@ -131,7 +134,7 @@ fn TitleBar() -> impl IntoElement {
         .pl(move || px(title_bar().left + 12.0))
         .pr(move || px(title_bar().right + 12.0))
         .child(text("My app").flex_1())
-        .child(text("Close").window_drag(false).on_press(|_: &()| close_window()))
+        .child(text("Close").window_drag(false).on_press(close_window))
 }
 ```
 

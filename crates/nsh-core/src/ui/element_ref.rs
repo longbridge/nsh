@@ -2,6 +2,17 @@
 //! them commands: focus an input, scroll a scroll view, drive a web view or
 //! a video, call a native component; and to the components it renders, to
 //! call their methods ([`ComponentRef`]).
+//!
+//! Both are `Copy` handles kept by the reactive owner current when one is
+//! made (the component, a region, a row), as signals are: closures share
+//! them as they are, and they are released when that owner is disposed.
+//! Used after that, a ref does nothing and names no node (no panic). The
+//! element carrying a ref holds what it names ([`RefTarget`]) for as long
+//! as it is mounted, so mounting and unmounting it never reach the ref's
+//! owner. Listeners and tasks run under the owner that made them, so a ref
+//! one makes is that owner's; made with no owner at all (outside any
+//! component), a ref lives as long as the surface, as a signal made there
+//! does.
 
 use std::{
     cell::Cell,
@@ -12,6 +23,7 @@ use std::{
 
 use super::{
     Answer, Component,
+    reactive::Kept,
     task::{Action, Executor},
 };
 use crate::{Command, JsonValue, Measurement, NodeId};
@@ -19,43 +31,86 @@ use crate::{Command, JsonValue, Measurement, NodeId};
 /// An element of a view: made with [`super::ambient::element_ref`], put on
 /// the element ([`super::Element::element_ref`]). Its commands go to
 /// whatever element carries it now, in order with the component's other
-/// changes; they do nothing while no rendered element carries it. Works
-/// from listeners and tasks alike.
-#[derive(Clone)]
-pub struct ElementRef {
+/// changes; they do nothing while no rendered element carries it, and once
+/// the owner it was made under is gone. Works from listeners and tasks
+/// alike. A `Copy` handle (see the module's docs).
+#[derive(Clone, Copy)]
+pub struct ElementRef(Kept<Target>);
+
+/// What an element ref names: the node carrying it and where its commands
+/// go.
+pub(crate) struct Target {
     /// The node, 0 while none carries it.
-    node: Rc<Cell<NodeId>>,
+    node: Cell<NodeId>,
     executor: Weak<Executor>,
 }
 
-impl ElementRef {
-    pub(crate) fn new(executor: &Rc<Executor>) -> Self {
-        Self {
-            node: Rc::new(Cell::new(0)),
-            executor: Rc::downgrade(executor),
-        }
-    }
+/// What the element carrying a ref holds, to tell the ref where it is.
+#[derive(Clone)]
+pub(crate) struct RefTarget(Rc<Target>);
 
-    /// The element's node, while one is rendered.
-    pub fn node(&self) -> Option<NodeId> {
-        Some(self.node.get()).filter(|&n| n != 0)
-    }
-
+impl RefTarget {
     pub(crate) fn attach(&self, node: NodeId) {
-        self.node.set(node);
+        self.0.node.set(node);
     }
 
     /// Forgets `node` when it is the one carrying the ref.
     pub(crate) fn detach(&self, node: NodeId) {
-        if self.node.get() == node {
-            self.node.set(0);
+        if self.0.node.get() == node {
+            self.0.node.set(0);
         }
+    }
+}
+
+impl fmt::Debug for RefTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("RefTarget")
+            .field(&self.0.node.get())
+            .finish()
+    }
+}
+
+impl PartialEq for RefTarget {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl ElementRef {
+    pub(crate) fn new(executor: &Rc<Executor>) -> Self {
+        Self(Kept::new(Rc::new(Target {
+            node: Cell::new(0),
+            executor: Rc::downgrade(executor),
+        })))
+    }
+
+    /// The element's node, while one is rendered (and the ref's owner
+    /// lives).
+    pub fn node(&self) -> Option<NodeId> {
+        self.0.with(|t| t.node.get()).filter(|&n| n != 0)
+    }
+
+    /// What an element carrying the ref holds; `None` once its owner is
+    /// gone.
+    pub(crate) fn target(&self) -> Option<RefTarget> {
+        self.0.get().map(RefTarget)
+    }
+
+    /// `act` of the node carrying it and its executor, if one does (it
+    /// runs inside the graph's borrow: queuing an action reaches only the
+    /// executor).
+    fn reach<R>(&self, act: impl FnOnce(NodeId, &Executor) -> R) -> Option<R> {
+        self.0
+            .with(|t| {
+                let node = t.node.get();
+                let executor = t.executor.upgrade().filter(|_| node != 0)?;
+                Some(act(node, &executor))
+            })
+            .flatten()
     }
 
     fn send(&self, command: Command) {
-        if let (Some(node), Some(executor)) = (self.node(), self.executor.upgrade()) {
-            executor.act(Action::Command(node, command));
-        }
+        self.reach(|node, executor| executor.act(Action::Command(node, command)));
     }
 
     /// Focuses an input (showing the keyboard).
@@ -176,9 +231,12 @@ impl ElementRef {
     /// Await it in a task.
     pub fn measure(&self) -> Answer<Option<Measurement>> {
         let (answer, slot) = Answer::new();
-        match (self.node(), self.executor.upgrade()) {
-            (Some(node), Some(executor)) => executor.act(Action::Measure(node, slot)),
-            _ => slot.borrow_mut().deliver(None),
+        let pending = slot.clone();
+        if self
+            .reach(|node, executor| executor.act(Action::Measure(node, pending)))
+            .is_none()
+        {
+            slot.borrow_mut().deliver(None);
         }
         answer
     }
@@ -186,20 +244,22 @@ impl ElementRef {
 
 impl PartialEq for ElementRef {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.node, &other.node)
+        self.0 == other.0
     }
 }
 
 impl fmt::Debug for ElementRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ElementRef").field(&self.node.get()).finish()
+        f.debug_tuple("ElementRef")
+            .field(&self.node().unwrap_or(0))
+            .finish()
     }
 }
 
 /// A component of a view (TS: a `ref` to a component, its methods): made
 /// with [`super::ambient::component_ref`], put on the component's element
 /// ([`super::ComponentElement::component_ref`]); [`Self::api`] reaches its
-/// methods, with no encoding.
+/// methods, with no encoding. A `Copy` handle, as [`ElementRef`] is.
 pub struct ComponentRef<C: Component> {
     element: ElementRef,
     _component: PhantomData<fn() -> C>,
@@ -217,7 +277,8 @@ impl<C: Component> ComponentRef<C> {
         &self.element
     }
 
-    /// The component's host node, while one is rendered.
+    /// The component's host node, while one is rendered (and the ref's
+    /// owner lives).
     pub fn node(&self) -> Option<NodeId> {
         self.element.node()
     }
@@ -232,12 +293,11 @@ impl<C: Component> ComponentRef<C> {
 
 impl<C: Component> Clone for ComponentRef<C> {
     fn clone(&self) -> Self {
-        Self {
-            element: self.element.clone(),
-            _component: PhantomData,
-        }
+        *self
     }
 }
+
+impl<C: Component> Copy for ComponentRef<C> {}
 
 impl<C: Component> PartialEq for ComponentRef<C> {
     fn eq(&self, other: &Self) -> bool {
@@ -248,7 +308,66 @@ impl<C: Component> PartialEq for ComponentRef<C> {
 impl<C: Component> fmt::Debug for ComponentRef<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ComponentRef")
-            .field(&self.element.node.get())
+            .field(&self.node().unwrap_or(0))
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::reactive::{Runtime, create_root};
+
+    fn commands(executor: &Executor) -> Vec<(NodeId, Command)> {
+        executor
+            .take_actions()
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Command(node, command) => Some((node, command)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn refs_are_copies_until_their_owner_goes() {
+        let runtime = Runtime::default();
+        let entered = runtime.enter();
+        let executor = Rc::new(Executor::default());
+        let (owner, field) = create_root(|| ElementRef::new(&executor));
+        let carried = field.target().expect("live");
+        carried.attach(7);
+        // Copies, in closures or not, name the one element.
+        let focus = move || field.focus();
+        let blur = move || field.blur();
+        focus();
+        blur();
+        let copy = field;
+        assert_eq!((copy, copy.node()), (field, Some(7)));
+        assert_eq!(format!("{field:?}"), "ElementRef(7)");
+        assert_eq!(
+            commands(&executor),
+            [(7, Command::Focus), (7, Command::Blur)]
+        );
+
+        // Its owner goes: it names nothing and does nothing; the element
+        // still holding what it named mounts and unmounts as before.
+        owner.dispose();
+        assert_eq!(field.node(), None);
+        focus();
+        field.scroll_to(0.0, 10.0, false);
+        assert_eq!(commands(&executor), []);
+        assert!(field.target().is_none());
+        carried.detach(7);
+        carried.attach(9);
+        assert_eq!(field.node(), None);
+        assert_eq!(format!("{field:?}"), "ElementRef(0)");
+
+        // Off the engine thread (no graph entered), a live ref names
+        // nothing either, and does not panic.
+        let live = ElementRef::new(&executor);
+        live.target().expect("live").attach(3);
+        drop(entered);
+        assert_eq!(live.node(), None);
     }
 }

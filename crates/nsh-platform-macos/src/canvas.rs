@@ -6,7 +6,7 @@
 //! space with the transform current when each piece is added (as in
 //! canvas), and survives `fill` / `stroke`; strokes apply the current
 //! transform again so line widths and dashes scale with it; gradients fill
-//! by clipping to the shape. Native value slots ([`CanvasState::args`])
+//! by clipping to the shape. Animated value slots ([`CanvasState::args`])
 //! are read while replaying: an animation only redraws, without JS.
 //!
 //! Images are loaded through [`crate::image::load`] when a drawing names
@@ -45,7 +45,7 @@ use crate::{
 pub(crate) struct CanvasState {
     /// The drawing.
     drawing: Option<Arc<Drawing>>,
-    /// Native value slots (`AnimationProp::CanvasArg`).
+    /// Animated value slots (`AnimationProp::CanvasArg`).
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
@@ -105,7 +105,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     view.restyle();
 }
 
-/// Native value slots changed (`(slot, value)`, every bound slot on each
+/// Animated value slots changed (`(slot, value)`, every bound slot on each
 /// frame): what has to be drawn again ([`crate::mount::Mounter::draw_when_shown`]).
 /// Only the operations reading a slot whose value changed are redrawn,
 /// where they were and where they are now ([`DamageScan`]).

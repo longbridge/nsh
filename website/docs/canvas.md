@@ -1,6 +1,6 @@
 ---
 title: Canvas
-description: Drawing with Canvas from nsh/canvas - the 2D context subset, paths and Path2D, gradients, text, images, redrawing from signals, and animating drawings with native values.
+description: Drawing with Canvas from nsh/canvas - the 2D context subset, paths and Path2D, gradients, text, images, redrawing from signals, and animating drawings with animated values.
 order: 44
 group: ui
 demo: guide-canvas
@@ -78,7 +78,7 @@ Context calls only record: nothing is drawn while `draw` runs, so you cannot rea
 | Member | Description |
 |---|---|
 | `save()`, `restore()` | Push and pop the drawing state (styles, transform, clip). |
-| `fillStyle`, `strokeStyle` | A CSS color, a gradient, or a native value interpolating colors. |
+| `fillStyle`, `strokeStyle` | A CSS color, a gradient, or an animated value interpolating colors. |
 | `lineWidth`, `lineCap`, `lineJoin`, `miterLimit` | Stroke shape. |
 | `setLineDash(segments)`, `getLineDash()`, `lineDashOffset` | Dashes. |
 | `globalAlpha` | Opacity of what is drawn next, 0..1. |
@@ -116,7 +116,7 @@ const slices = [new Path2D("M50 50 L100 50 A50 50 0 0 1 50 100 Z"), /* ... */];
 />
 ```
 
-Strokes are tested with round joins and without dashes; coordinates given as native values count as 0.
+Strokes are tested with round joins and without dashes; coordinates given as animated values count as 0.
 
 **Gradients**: `createLinearGradient`, `createRadialGradient`, `createConicGradient`, each with `addColorStop(offset, color)`.
 
@@ -215,17 +215,17 @@ import logo from "./logo.png";
 
 The nine-argument form takes the source rectangle in the image's pixels.
 
-## Animating with native values
+## Driving drawings with animated values
 
-Any number argument of a drawing call, and `fillStyle` / `strokeStyle`, can be a [native value](./animation.md#native-values) or a node derived from it. Such arguments are read while the platform draws, and when the value animates, the platform redraws on its own, every frame, without running `draw` or any other JS.
+Any number argument of a drawing call, and `fillStyle` / `strokeStyle`, can be a [animated value](./animation.md#animated-values) or a node derived from it. Such arguments are read while the platform draws, and when the value animates, the platform redraws on its own, every frame, without running `draw` or any other JS.
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
 function Ring() {
-  const progress = createNativeValue(0.3);
+  const progress = createAnimatedValue(0.3);
   const label = signal(30);
   const go = (to: number) => {
     label.set(Math.round(to * 100));
@@ -245,7 +245,7 @@ function Ring() {
           ctx.stroke();
           ctx.strokeStyle = "#6366f1";
           ctx.beginPath();
-          // The end angle reads the native value on every frame.
+          // The end angle reads the animated value on every frame.
           ctx.arc(cx, cy, r, -Math.PI / 2, progress.mul(Math.PI * 2).sub(Math.PI / 2));
           ctx.stroke();
           ctx.fillStyle = "#1f2328";
@@ -303,12 +303,12 @@ const strokes = signal<[number, number][][]>([]);
 ## Performance
 
 - A drawing is recorded in Rust as JS calls the context, and travels to the platform as one operation; there is no per-call bridge crossing.
-- `draw` re-records everything. Keep the work in `draw` proportional to what is shown, and keep data that changes every frame in native values rather than signals.
+- `draw` re-records everything. Keep the work in `draw` proportional to what is shown, and keep data that changes every frame in animated values rather than signals.
 - Split a drawing that has a static part and a frequently changing part into two canvases stacked on top of each other, so only one redraws.
 - Inside a zooming scroll view, canvases are drawn again at the zoomed resolution when the zoom ends.
 
 ## Related
 
 - [`Canvas` element](../elements/canvas.md) and [`nsh/canvas`](../modules/nsh-canvas.md): the reference.
-- [Animation](./animation.md): native values, `interpolate` and `Easing`.
+- [Animation](./animation.md): animated values, `interpolate` and `Easing`.
 - [Images and assets](./images-and-assets.md): importing images.

@@ -122,19 +122,19 @@ const hovered = signal<string | null>(null);
 | `nativeID` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 
-### Gestures driving native values
+### Gestures driving animated values
 
 These props bind a gesture to [native animated values](../modules/nsh-animated.md) that move on the UI thread, with no
 JS per frame. See [touch and gestures](../docs/touch-and-gestures.md).
 
 | Prop | Type | Description |
 |---|---|---|
-| `pan` | `{ x?: NativeValue; y?: NativeValue }` | Drags drive these values (points). |
+| `pan` | `{ x?: AnimatedValue; y?: AnimatedValue }` | Drags drive these values (points). |
 | `onPanStart` | `(e: PanEvent) => void` | A drag started. |
 | `onPanEnd` | `(e: PanEvent) => void` | A drag ended, with the release velocity (e.g. to start a `decay`). |
-| `pinch` | `{ scale?: NativeValue }` | Two-finger pinches drive `scale`. |
+| `pinch` | `{ scale?: AnimatedValue }` | Two-finger pinches drive `scale`. |
 | `onPinchStart` / `onPinchEnd` | `(e: { scale: number; velocity: number }) => void` | A pinch started / ended. |
-| `rotation` | `{ angle?: NativeValue }` | Two-finger rotations drive `angle` (degrees). |
+| `rotation` | `{ angle?: AnimatedValue }` | Two-finger rotations drive `angle` (degrees). |
 | `onRotationStart` / `onRotationEnd` | `(e: { rotation: number; velocity: number }) => void` | A rotation started / ended. |
 
 `PanEvent` is `{ translationX, translationY, velocityX, velocityY, valueX?, valueY? }`: the translation since the start,

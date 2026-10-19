@@ -40,7 +40,7 @@ state) stays native. JS only gets the events the component emits.
   `ListView::element(props).items(virtual_list(n, row).header(..))` for the rows.
 - **State is signals** made in the body: `signal(v)` (equal writes are skipped), `signal_with(v, SignalEquals::Never)`,
   `computed(..)` for what derives from them, `stored(v)` for what nothing displays (a running task). Listeners are
-  closures (`.on_press(move |_: &()| count.update(|c| *c += 1))`) and emit with `cx.emit(ButtonEvent::Press)`. An
+  closures (`.on_press(move || count.update(|c| *c += 1))`) and emit with `cx.emit(ButtonEvent::Press)`. An
   `effect(..)` reacts to a prop. Timers and async work are tasks owned by the component (`set_interval(..)`,
   `spawn(async move { timer(d).await; value.set(..) })`, tokio inside); they end with it. `Stepper` is the example,
   also of methods: `#[methods] impl StepperApi { pub fn set_value(&self, ..), pub fn value(&self) -> f64 }`,
@@ -54,8 +54,9 @@ state) stays native. JS only gets the events the component emits.
   `video(url)`, `native(name)`, with typed props and events (`.value(move || text.get())`, `.on_change_text(move
   |t: &str| ..)`, `on_layout`, `on_pan_end`, `on_scroll`); their setters take bindings too.
 - **Element refs** send commands to what the view made: `element_ref()`, `.element_ref(&r)` on the element,
-  `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after clearing it).
-- **Native values** move styles with no binding per frame: `native_value(0.0)`, `.bind_translate_y(&v)`,
+  `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after clearing it). They are
+  `Copy` handles kept by the view's owner, as signals are, and so are animated values.
+- **Animated values** move styles with no binding per frame: `animated_value(0.0)`, `.bind_translate_y(&v)`,
   `.pan_values(..)` (drags move it natively), `v.spring(..)` (await its `AnimationEnd` in a task). `Sheet` is the
   example.
 - **The component's own rows**: `virtual_list(count, move |at| row)` with `.keys(move || ids)` (and `.header(..)`,

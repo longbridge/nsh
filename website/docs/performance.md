@@ -105,10 +105,10 @@ stutters when the engine thread is busy. [`nsh/animated`](./animation.md) runs a
 
 ```tsx
 import { View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { List } from "nsh/list";
 
-const scrollY = createNativeValue(0);
+const scrollY = createAnimatedValue(0);
 
 <View
   style={{
@@ -122,7 +122,7 @@ const scrollY = createNativeValue(0);
 ```
 
 - `timing`, `spring` and `decay` run on the platform's UI thread, frame by frame, with no JS per frame.
-- `scrollValue` writes a scroll offset into a native value in the same frame; `pan={{ x, y }}` lets drags move a view
+- `scrollValue` writes a scroll offset into an animated value in the same frame; `pan={{ x, y }}` lets drags move a view
   directly. JS hears about the end (the promise resolves, `onPanEnd` gets the velocity).
 - `Animated.sequence` / `parallel` / `stagger` / `loop` run as one native tree: each step starts the moment the
   previous one ends, with no gap waiting for JS.
@@ -210,7 +210,7 @@ From NSH's own baselines (Apple silicon unless noted):
 
 - Interactions: a tap changes a handful of mount items, not dozens.
 - Lists: `List` for anything long, with `estimatedItemSize`; per-item state in data.
-- Animations: native values, not signals written every frame.
+- Animations: animated values, not signals written every frame.
 - Scroll effects: `scrollValue`, not `onScroll`.
 - Handlers: no heavy work per keystroke or per scroll event; cache in `computed`.
 - Components: prefer the Rust components of `nsh/ui/mobile` where they fit; they cost less JS than equivalents written

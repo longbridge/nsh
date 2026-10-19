@@ -1,5 +1,5 @@
-//! `nsh/animated`: native values and the animation graph (`NativeNode`,
-//! `NativeValue`, `Animated`'s drivers and composites), `Easing` and
+//! `nsh/animated`: animated values and the animation graph (`AnimatedNode`,
+//! `AnimatedValue`, `Animated`'s drivers and composites), `Easing` and
 //! `LayoutAnimation`. Everything runs on the UI thread, JS only describes
 //! it.
 //!
@@ -227,7 +227,7 @@ fn classes(ctx: *mut JsContext) -> Classes {
                 id
             };
         let classes = Classes {
-            node: class(c"NativeNode", Some(node_finalize), Some(node_mark)),
+            node: class(c"AnimatedNode", Some(node_finalize), Some(node_mark)),
             composite: class(
                 c"CompositeAnimation",
                 Some(composite_finalize),
@@ -346,7 +346,7 @@ fn get(ctx: *mut JsContext, obj: JsValue, key: &CStr) -> JsValue {
     }
 }
 
-/// A new node object (`value`: a `NativeValue`) reading `inputs` (taken).
+/// A new node object (`value`: a `AnimatedValue`) reading `inputs` (taken).
 fn new_node(ctx: *mut JsContext, value: bool, inputs: Vec<JsValue>) -> (JsValue, u32) {
     let c = classes(ctx);
     let a = animations(ctx);
@@ -358,12 +358,12 @@ fn new_node(ctx: *mut JsContext, value: bool, inputs: Vec<JsValue>) -> (JsValue,
         inputs,
         derived: None,
     }));
-    // SAFETY: an object of the node class owning its data; `__nv` is what
+    // SAFETY: an object of the node class owning its data; `__av` is what
     // the prop decoder reads.
     unsafe {
         let obj = qjs::JS_NewObjectProtoClass(ctx, proto, c.node);
         qjs::JS_SetOpaque(obj, data as *mut c_void);
-        qjs::JS_SetPropertyStr(ctx, obj, c"__nv".as_ptr(), int(id));
+        qjs::JS_SetPropertyStr(ctx, obj, c"__av".as_ptr(), int(id));
         (obj, id)
     }
 }
@@ -379,7 +379,7 @@ fn node_id(ctx: *mut JsContext, v: JsValue) -> Option<u32> {
 fn this_node(ctx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
     node_id(ctx, this).ok_or_else(|| {
         // SAFETY: throws on a live context.
-        unsafe { qjs::JS_ThrowTypeError(ctx, c"not a native node".as_ptr()) }
+        unsafe { qjs::JS_ThrowTypeError(ctx, c"not an animated node".as_ptr()) }
     })
 }
 
@@ -586,8 +586,8 @@ math_method!(node_mul, "mul");
 math_method!(node_div, "div");
 math_method!(node_mod, "mod");
 
-/// `new NativeValue(value)` / `createNativeValue(value)`.
-unsafe extern "C" fn native_value(
+/// `new AnimatedValue(value)` / `createAnimatedValue(value)`.
+unsafe extern "C" fn animated_value(
     ctx: *mut JsContext,
     _this: JsValue,
     argc: c_int,
@@ -609,8 +609,8 @@ unsafe extern "C" fn native_value(
     }
 }
 
-/// `new NativeNode()`: a node of its own (a pass-through input).
-unsafe extern "C" fn native_node(
+/// `new AnimatedNode()`: a node of its own (a pass-through input).
+unsafe extern "C" fn animated_node(
     ctx: *mut JsContext,
     _this: JsValue,
     _argc: c_int,
@@ -1105,7 +1105,7 @@ unsafe extern "C" fn easing_sample(
 fn run_driver(ctx: *mut JsContext, kind: &str, value: JsValue, config: JsValue) -> JsValue {
     let Some(node) = node_id(ctx, value) else {
         // SAFETY: throws on a live context.
-        return unsafe { qjs::JS_ThrowTypeError(ctx, c"not a native value".as_ptr()) };
+        return unsafe { qjs::JS_ThrowTypeError(ctx, c"not an animated value".as_ptr()) };
     };
     let to = get(ctx, config, c"toValue");
     let has_to = !unsafe { qjs::JS_IsUndefined(to) };
@@ -1287,7 +1287,7 @@ macro_rules! math_fn {
             let a = arg(argc, argv, 0);
             if node_id(ctx, a).is_none() {
                 // SAFETY: throws on a live context.
-                return unsafe { qjs::JS_ThrowTypeError(ctx, c"not a native node".as_ptr()) };
+                return unsafe { qjs::JS_ThrowTypeError(ctx, c"not an animated node".as_ptr()) };
             }
             math(ctx, $op, a, arg(argc, argv, 1))
         }
@@ -1667,13 +1667,13 @@ fn layout_animation(ctx: *mut JsContext) -> JsValue {
 /// `nsh/animated`.
 pub(crate) const EXPORTS: &[Item] = &[
     (
-        "NativeNode",
-        Export::Value(|ctx| class_function(ctx, c"NativeNode", native_node, 0)),
+        "AnimatedNode",
+        Export::Value(|ctx| class_function(ctx, c"AnimatedNode", animated_node, 0)),
         Ts::class(
             "A node of the native animation graph: evaluated on the UI thread.",
             r#" {
   #private;
-  constructor(inputs?: NativeNode[]);
+  constructor(inputs?: AnimatedNode[]);
   /** Maps this node through piecewise ranges: numbers, colors or angles
    * (`"45deg"`, `"1rad"`). Outside the input range it clamps by default;
    * `easing` shapes each segment. */
@@ -1684,25 +1684,25 @@ pub(crate) const EXPORTS: &[Item] = &[
     extrapolateLeft?: Extrapolation;
     extrapolateRight?: Extrapolation;
     easing?: Easing;
-  }): NativeNode;
+  }): AnimatedNode;
   /** Follows this node's changes, kept within `min..max` (a header that
    * hides while content scrolls up and comes back as it scrolls down). */
-  diffClamp(min: number, max: number): NativeNode;
-  add(b: NativeNode | number): NativeNode;
-  sub(b: NativeNode | number): NativeNode;
-  mul(b: NativeNode | number): NativeNode;
-  div(b: NativeNode | number): NativeNode;
+  diffClamp(min: number, max: number): AnimatedNode;
+  add(b: AnimatedNode | number): AnimatedNode;
+  sub(b: AnimatedNode | number): AnimatedNode;
+  mul(b: AnimatedNode | number): AnimatedNode;
+  div(b: AnimatedNode | number): AnimatedNode;
   /** Modulo, never negative for a positive `b` (e.g. angles in 0..360). */
-  mod(b: NativeNode | number): NativeNode;
+  mod(b: AnimatedNode | number): AnimatedNode;
 }"#,
         ),
     ),
     (
-        "NativeValue",
-        Export::Value(|ctx| class_function(ctx, c"NativeValue", native_value, 1)),
+        "AnimatedValue",
+        Export::Value(|ctx| class_function(ctx, c"AnimatedValue", animated_value, 1)),
         Ts::class(
-            "A settable, animatable native value.",
-            r#" extends NativeNode {
+            "A settable, animatable animated value.",
+            r#" extends AnimatedNode {
   constructor(value: number);
   /** Jumps to `value`, stopping any animation. */
   set(value: number): void;
@@ -1732,11 +1732,11 @@ pub(crate) const EXPORTS: &[Item] = &[
         ),
     ),
     (
-        "createNativeValue",
-        Export::Function(native_value, 1),
+        "createAnimatedValue",
+        Export::Function(animated_value, 1),
         Ts::function(
-            "Creates a native value. Bind it (or nodes derived from it) to style\nproperties (`opacity`, `transform`, `backgroundColor`, `borderColor`, a\ntext's `color`, `shadowColor` / `shadowOpacity` / `shadowRadius`), to a\nscroll position (`scrollValue`) or to drags (`pan`).",
-            &["(value?: number): NativeValue"],
+            "Creates an animated value. Bind it (or nodes derived from it) to style\nproperties (`opacity`, `transform`, `backgroundColor`, `borderColor`, a\ntext's `color`, `shadowColor` / `shadowOpacity` / `shadowRadius`), to a\nscroll position (`scrollValue`) or to drags (`pan`).",
+            &["(value?: number): AnimatedValue"],
         ),
     ),
     (
@@ -1818,20 +1818,20 @@ export interface CompositeAnimation {
 
 /** Animations composed natively (React Native's `Animated`). */
 export interface AnimatedModule {
-  timing(value: NativeValue, config: { toValue: number; duration?: number; easing?: Easing; delay?: number }): CompositeAnimation;
-  spring(value: NativeValue, config: SpringConfig): CompositeAnimation;
-  decay(value: NativeValue, config?: DecayConfig): CompositeAnimation;
+  timing(value: AnimatedValue, config: { toValue: number; duration?: number; easing?: Easing; delay?: number }): CompositeAnimation;
+  spring(value: AnimatedValue, config: SpringConfig): CompositeAnimation;
+  decay(value: AnimatedValue, config?: DecayConfig): CompositeAnimation;
   sequence(list: CompositeAnimation[]): CompositeAnimation;
   parallel(list: CompositeAnimation[], config?: { stopTogether?: boolean }): CompositeAnimation;
   stagger(ms: number, list: CompositeAnimation[]): CompositeAnimation;
   delay(ms: number): CompositeAnimation;
   loop(animation: CompositeAnimation, config?: { iterations?: number; resetBeforeIteration?: boolean }): CompositeAnimation;
-  add(a: NativeNode, b: NativeNode | number): NativeNode;
-  subtract(a: NativeNode, b: NativeNode | number): NativeNode;
-  multiply(a: NativeNode, b: NativeNode | number): NativeNode;
-  divide(a: NativeNode, b: NativeNode | number): NativeNode;
-  modulo(a: NativeNode, b: NativeNode | number): NativeNode;
-  diffClamp(a: NativeNode, min: number, max: number): NativeNode;
+  add(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  subtract(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  multiply(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  divide(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  modulo(a: AnimatedNode, b: AnimatedNode | number): AnimatedNode;
+  diffClamp(a: AnimatedNode, min: number, max: number): AnimatedNode;
   /** The values a spring moves through from `from` (0), one per frame at
    * `fps` (60) until it rests: the exact curve the native driver runs. */
   sampleSpring(config: SpringConfig & { from?: number }, fps?: number): number[];
@@ -1865,9 +1865,9 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { Animated, NativeValue } from "nsh/animated";
+            import { Animated, AnimatedValue } from "nsh/animated";
             import { text } from "nsh:rt";
-            const v = new NativeValue(0);
+            const v = new AnimatedValue(0);
             globalThis.log = [];
             v.timing(1, { duration: 10 }).then((f) => log.push(`timing ${f}`));
             Animated.sequence([Animated.delay(5), Animated.timing(v, { toValue: 0 })])
@@ -1939,9 +1939,9 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { NativeValue } from "nsh/animated";
+            import { AnimatedValue } from "nsh/animated";
             import { text } from "nsh:rt";
-            const v = new NativeValue(1);
+            const v = new AnimatedValue(1);
             globalThis.log = [];
             v.setOffset(5);
             v.extractOffset();
@@ -1998,9 +1998,9 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { NativeValue } from "nsh/animated";
+            import { AnimatedValue } from "nsh/animated";
             import { text } from "nsh:rt";
-            const v = new NativeValue(0);
+            const v = new AnimatedValue(0);
             const config = { inputRange: [0, 1], outputRange: ["red", "blue"] };
             // As a canvas drawing again would.
             globalThis.keep = [
@@ -2058,8 +2058,8 @@ mod tests {
         let host = Host::new().unwrap();
         host.eval_source(
             r#"
-            import { Animated, NativeValue } from "nsh/animated";
-            globalThis.v = new NativeValue(0);
+            import { Animated, AnimatedValue } from "nsh/animated";
+            globalThis.v = new AnimatedValue(0);
             Animated.loop(Animated.timing(v, { toValue: 1 })).start();
             "#,
         )

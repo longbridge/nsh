@@ -188,15 +188,12 @@ fn Pager() -> impl IntoElement {
     // narrower than the window).
     let width = signal(untracked(window).width - 72.0);
     let page = signal(0_usize);
-    // The scroll offset, fed natively, and the pages' width as a native
+    // The scroll offset, fed natively, and the pages' width as an animated
     // value: the offset in pages (`at`) moves the parallax and the
     // indicator without making them again when the width changes.
-    let x = native_value(0.0);
-    let pages_wide = native_value(width.get_untracked().max(1.0));
-    {
-        let pages_wide = pages_wide.clone();
-        effect(move || pages_wide.set(width.get().max(1.0)));
-    }
+    let x = animated_value(0.0);
+    let pages_wide = animated_value(width.get_untracked().max(1.0));
+    effect(move || pages_wide.set(width.get().max(1.0)));
     let at = x.div(&pages_wide);
     let settle = move |e: &ScrollOffset| {
         let width = width.get_untracked();
@@ -576,7 +573,6 @@ fn Zoom() -> impl IntoElement {
     let bounces = signal(true);
     let tiles = (0..24).map(|i| {
         let tone = TONES[(i * 7) % TONES.len()];
-        let zoom = scroll_ref.clone();
         view()
             .w(px(74.0))
             .h(px(50.0))
@@ -596,7 +592,7 @@ fn Zoom() -> impl IntoElement {
                 } else {
                     1.0
                 };
-                zoom.zoom_to(to, Some((x, y)), true);
+                scroll_ref.zoom_to(to, Some((x, y)), true);
             })
             .child(
                 view()
@@ -613,10 +609,9 @@ fn Zoom() -> impl IntoElement {
             )
     });
     let zoom_button = |label: &'static str, to: f32, variant: ButtonVariant| {
-        let zoom = scroll_ref.clone();
-        view()
-            .flex_1()
-            .child(Button::new(label, move |_: &()| zoom.zoom_to(to, None, true)).variant(variant))
+        view().flex_1().child(
+            Button::new(label, move |_: &()| scroll_ref.zoom_to(to, None, true)).variant(variant),
+        )
     };
     let note = move || {
         let scale = scale.get();

@@ -178,16 +178,27 @@ impl BuildError {
 /// Bundles `entry` and compiles it to bytecode: one bundle, holding what
 /// `import()` loads too (native packages).
 pub(crate) fn compile(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, false)
+    compile_with(entry, release, false, release.into())
 }
 
 /// [`compile`], with what `import()` loads split into chunks
 /// ([`Built::chunks`]) loaded on demand (web apps).
 pub(crate) fn compile_split(entry: &Path, release: bool) -> Result<Built, BuildError> {
-    compile_with(entry, release, true)
+    compile_with(entry, release, true, release.into())
 }
 
-fn compile_with(entry: &Path, release: bool, split: bool) -> Result<Built, BuildError> {
+/// [`compile`] in release mode (minified), with the bytecode stripped as
+/// `strip` says (signed packages keep their line tables by default).
+pub(crate) fn compile_release(entry: &Path, strip: nsh_js::Strip) -> Result<Built, BuildError> {
+    compile_with(entry, true, false, strip)
+}
+
+fn compile_with(
+    entry: &Path,
+    release: bool,
+    split: bool,
+    strip: nsh_js::Strip,
+) -> Result<Built, BuildError> {
     let start = Instant::now();
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
@@ -198,14 +209,14 @@ fn compile_with(entry: &Path, release: bool, split: bool) -> Result<Built, Build
     let dir = dunce::canonicalize(entry)
         .ok()
         .and_then(|e| e.parent().map(Path::to_path_buf));
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, release, crate::ui_sets())?;
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, strip, crate::ui_sets())?;
     let sources: Vec<(&str, &str)> = bundle
         .chunks
         .iter()
         .map(|c| (c.id.as_str(), c.code.as_str()))
         .collect();
     let chunk_bytecode =
-        nsh_js::compile_chunk_bytecode(&bundle.code, &sources, release, crate::ui_sets())?;
+        nsh_js::compile_chunk_bytecode(&bundle.code, &sources, strip, crate::ui_sets())?;
     let chunks = bundle
         .chunks
         .into_iter()

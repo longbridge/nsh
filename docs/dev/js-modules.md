@@ -30,7 +30,7 @@ globals.
 | `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs` |
 | `nsh:rt` | what compiled JSX calls (`element`, `insert`, `spread`, `cond`, `each`, `list`, `font`, ...); apps never import it | `dom.rs`, `list.rs` |
 | (globals) | `If`, `Each` (control flow; their tags compile to `cond` / `each`) | `dom.rs` |
-| `nsh/animated` | `createNativeValue`, `NativeValue`, `NativeNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
+| `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
 | `nsh/device` | `windowSize()`, `colorScheme()`, `fontScale()`, `Platform`, `PixelRatio`, `I18nManager` | `env.rs` |
 | `nsh/accessibility` | `AccessibilityInfo`, `screenReaderEnabled()`, `reduceMotion()` | `env.rs` + its registry (`nsh_core::runtime`) |
 | `nsh/list` | `List` | `list.rs` |
@@ -82,10 +82,20 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   `desktop={{…}}`.
 - Never a compatibility re-export when something moves, never a React Native compatibility wrapper.
 
-## Pinned standard modules
+## Standard modules
 
-`standard/mod.rs` loads the explicit `nsh_core::js::STANDARD_MODULES` list, with one optional `node:` alias.
+The exact standard catalog uses eleven canonical bare specifiers: `buffer`, `console`, `crypto`, `fs/promises`,
+`net`, `os`, `path`, `process`, `url`, `websocket` and `zlib`. `nsh_core::js::STANDARD_MODULES` is shared by the
+bundler and loader. Standard modules use the same VM and native module machinery; registry-backed modules are
+looked up alongside the hand-written runtime modules. Canonical names are required; `node:` aliases are rejected.
+
+`os` is a typed Rust `#[module(flat, default)]` in `nsh_core::runtime`, registered under `os`: its associated
+`EOL` constant, `platform`, `arch` and `homedir` functions generate flat named exports, the default namespace and
+their TypeScript declarations from one native spec. Returned paths are metadata and grant no file access.
+`console` default-exports the VM's existing five-method logger.
+
 LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs` projects
-actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `process`, `fs`, `net`
-and `websocket` adapters share the owning VM and NSH capability checks. Existing WHATWG constructors retain
-their identities. This is a bounded standard-module subset, not a complete Node.js runtime.
+actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `process`, `fs/promises`,
+`net` and `websocket` adapters share the owning VM and NSH capability checks. Their declared interfaces, rather
+than complete Node.js or browser compatibility, define the app API. Existing WHATWG constructor identities stay
+intact. Standard `websocket` is an explicit connection API, distinct from the browser WebSocket interface.

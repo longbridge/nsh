@@ -216,6 +216,8 @@ fn websocket_handshake_redirect_fails_without_contacting_target() {
 }
 
 #[test]
+// Tungstenite's handshake callback fixes the error to an HTTP response.
+#[allow(clippy::result_large_err)]
 fn websocket_module_matches_shell_connect_socket_contract() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

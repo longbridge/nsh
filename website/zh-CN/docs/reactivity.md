@@ -256,4 +256,4 @@ function Good() {
 
 - [JSX 与组件](./jsx-and-components.md)：作为 getter 的 props、`<If>`、`<Each>`。
 - [`nsh` 模块参考](../modules/nsh.md)：每个函数的签名。
-- [动画](./animation.md)：不经过 signal、在 UI 线程上运行动画的原生值。
+- [动画](./animation.md)：不经过 signal、在 UI 线程上运行动画的动画值。

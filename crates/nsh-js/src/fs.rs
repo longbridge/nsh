@@ -102,10 +102,10 @@ pub(crate) fn poll(ctx: Ctx) -> bool {
                     if let Ok(v) = error {
                         if !standard {
                             let code = e.split_once(':').map_or("EIO", |(code, _)| code);
-                            if let Ok(code) = js::string(ctx, code) {
-                                if js::define(ctx, v.raw(), "code", code, true).is_err() {
-                                    let _ = js::take_exception(ctx);
-                                }
+                            if let Ok(code) = js::string(ctx, code)
+                                && js::define(ctx, v.raw(), "code", code, true).is_err()
+                            {
+                                let _ = js::take_exception(ctx);
                             }
                         }
                         d.reject(ctx, v.raw());
@@ -273,7 +273,7 @@ fn submit_kind(
     };
     #[cfg(not(target_arch = "wasm32"))]
     if standard && let Ok(handle) = tokio::runtime::Handle::try_current() {
-        let _ = handle.spawn_blocking(work);
+        drop(handle.spawn_blocking(work));
         return Ok(promise);
     }
     let spawned = std::thread::Builder::new()

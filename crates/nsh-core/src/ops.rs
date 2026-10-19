@@ -1189,12 +1189,12 @@ pub enum Prop {
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
     CellIndex(u32),
-    /// `scrollValue`: a native value fed with the scroll offset (main axis), for
+    /// `scrollValue`: an animated value fed with the scroll offset (main axis), for
     /// scroll-linked effects.
-    #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "NativeValue", on = SCROLL | LIST)]
+    #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "AnimatedValue", on = SCROLL | LIST)]
     ScrollValue(Option<nsh_animation::NodeId>),
-    /// `pan`: drags drive these native values (points) on the UI thread.
-    #[prop(js = "pan", with = crate::js::host_values::pan, reset = Prop::PanValues(None, None), ts = "{ x?: NativeValue; y?: NativeValue }")]
+    /// `pan`: drags drive these animated values (points) on the UI thread.
+    #[prop(js = "pan", with = crate::js::host_values::pan, reset = Prop::PanValues(None, None), ts = "{ x?: AnimatedValue; y?: AnimatedValue }")]
     PanValues(Option<nsh_animation::NodeId>, Option<nsh_animation::NodeId>),
     /// `numberOfLines`: the most lines shown; 0 (default) is unlimited.
     #[prop(js = "numberOfLines", on = TEXT)]
@@ -1390,10 +1390,10 @@ pub enum Prop {
     #[prop(js = "minimumFontScale", min = 0, max = 1, on = TEXT)]
     MinimumFontScale(f32),
     /// `pinch`: two-finger pinches drive `scale` natively.
-    #[prop(js = "pinch", with = crate::js::host_values::pinch, reset = Prop::PinchValue(None), ts = "{ scale?: NativeValue }")]
+    #[prop(js = "pinch", with = crate::js::host_values::pinch, reset = Prop::PinchValue(None), ts = "{ scale?: AnimatedValue }")]
     PinchValue(Option<nsh_animation::NodeId>),
     /// `rotation`: two-finger rotations drive `angle` (degrees) natively.
-    #[prop(js = "rotation", with = crate::js::host_values::rotation, reset = Prop::RotationValue(None), ts = "{ angle?: NativeValue }")]
+    #[prop(js = "rotation", with = crate::js::host_values::rotation, reset = Prop::RotationValue(None), ts = "{ angle?: AnimatedValue }")]
     RotationValue(Option<nsh_animation::NodeId>),
     /// A screen option.
     #[prop(nested)]

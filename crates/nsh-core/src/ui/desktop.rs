@@ -16,6 +16,9 @@ use crate::{
 /// restores the system bar. `height` is the custom bar's height in points:
 /// native window controls are centered in it. Positive finite heights are
 /// capped at 200 points; other values use the platform's default height.
+/// On macOS it selects compact chrome up to 44 points and regular chrome
+/// above; [`title_bar`] reports the actual native height for layout. An
+/// embedding host's existing toolbar keeps its own style and height.
 /// On platforms without desktop windows this has no effect.
 pub fn set_title_bar(style: TitleBarStyle, height: Option<f32>) {
     super::ambient::desktop_command(DesktopCommand::SetTitleBar {

@@ -66,6 +66,8 @@ fn projected_values(public: &str, name: &str) -> BTreeSet<String> {
     let body = body.split("declare module ").next().unwrap();
     let mut names = BTreeSet::new();
     for line in body.lines().map(str::trim) {
+        let normalized = line.replacen("export declare ", "export ", 1);
+        let line = normalized.as_str();
         if let Some(rest) = line.strip_prefix("export { ") {
             let bindings = rest.split_once(" }").expect("export bindings").0;
             for binding in bindings.split(',').map(str::trim) {
@@ -85,11 +87,18 @@ fn projected_values(public: &str, name: &str) -> BTreeSet<String> {
 #[test]
 fn every_public_standard_value_is_declared_and_every_declared_value_exists() {
     let files = type_definitions(&[]);
-    let public = &files
-        .iter()
-        .find(|(path, _)| path == "standard/index.d.ts")
-        .expect("standard declaration index")
-        .1;
+    // Registry-generated modules are external files (for example os.d.ts),
+    // while LLRT adapters use ambient modules in standard/index.d.ts. Inspect
+    // the complete generated output so both paths obey the same exact catalog.
+    let mut public = String::new();
+    for (path, body) in &files {
+        if path.starts_with("nsh/") || path.starts_with("standard/") {
+            public.push_str(body);
+        } else if let Some(name) = path.strip_suffix(".d.ts") {
+            public.push_str(&format!("declare module \"{name}\" {{\n{body}\n}}\n"));
+        }
+        public.push('\n');
+    }
     let names = REFERENCE_MODULES
         .iter()
         .copied()
@@ -104,6 +113,7 @@ fn every_public_standard_value_is_declared_and_every_declared_value_exists() {
             line.strip_prefix("declare module \"")
                 .and_then(|rest| rest.split('"').next())
         })
+        .filter(|name| *name != "nsh" && !name.starts_with("nsh/") && !name.starts_with("nsh:") && !name.starts_with("@nsh/"))
         .collect();
     let expected_modules: BTreeSet<_> = REFERENCE_MODULES
         .iter()
@@ -118,7 +128,7 @@ fn every_public_standard_value_is_declared_and_every_declared_value_exists() {
         let actual: String = serde_json::from_str(&run(&format!(
             "import * as standard from '{name}';\nglobalThis.out = Object.keys(standard).sort().join(',');"
         ))).unwrap();
-        let declared = projected_values(public, name)
+        let declared = projected_values(&public, name)
             .into_iter()
             .collect::<Vec<_>>()
             .join(",");

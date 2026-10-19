@@ -16,39 +16,112 @@ use crate::{
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
-/// writes the signals it captured.
-pub struct Listener<E: ?Sized>(pub(crate) Rc<dyn Fn(&E)>);
+/// writes the signals it captured. It runs under the owner current when it
+/// was made (the component, region or row whose view made it), so what it
+/// makes (signals, animated values, element refs, tasks) is that owner's
+/// and goes with it; once that owner is disposed it no longer runs.
+pub struct Listener<E: ?Sized> {
+    f: Rc<dyn Fn(&E)>,
+    owner: super::Owner,
+}
 
 impl<E: ?Sized + 'static> Listener<E> {
     /// A listener that does nothing (the element still listens).
     pub(crate) fn noop() -> Self {
-        Self(Rc::new(|_| {}))
+        Self::new(Rc::new(|_| {}))
     }
 
-    /// Calls it with `event`.
+    fn new(f: Rc<dyn Fn(&E)>) -> Self {
+        Self {
+            f,
+            owner: super::Owner::current_or_detached(),
+        }
+    }
+
+    /// Calls it with `event`, under its owner; not once that owner is
+    /// disposed: the view it was made for is gone.
     pub(crate) fn call(&self, event: &E) {
-        (self.0)(event);
+        if self.owner == super::Owner::detached() {
+            (self.f)(event);
+        } else if self.owner.is_live() {
+            self.owner.scope(|| (self.f)(event));
+        }
+    }
+
+    /// A listener of `F` that runs `f` with this one's closure, under its
+    /// owner.
+    pub(crate) fn wrap<F: ?Sized>(self, f: impl Fn(&dyn Fn(&E), &F) + 'static) -> Listener<F> {
+        let inner = self.f;
+        Listener {
+            f: Rc::new(move |event: &F| f(&*inner, event)),
+            owner: self.owner,
+        }
     }
 }
 
 impl<E: 'static> Listener<E> {
     /// This listener for events of another type, turned into `E` by `f`.
     pub fn map<F: ?Sized + 'static>(self, f: impl Fn(&F) -> E + 'static) -> Listener<F> {
-        let inner = self.0;
-        Listener(Rc::new(move |event: &F| inner(&f(event))))
+        self.wrap(move |inner, event: &F| inner(&f(event)))
     }
 }
 
 /// A closure as a listener.
 impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
     fn from(f: F) -> Self {
-        Listener(Rc::new(f))
+        Self::new(Rc::new(f))
+    }
+}
+
+/// What a listener method takes (`on_press`, `on_change_text`,
+/// `on_event`, ...): a closure of the event, `move |text: &str| ..`; for an
+/// event without data also one without arguments, `move || ..` (or
+/// `move |_: &()| ..`); or a [`Listener`]. `M` tells them apart: it is
+/// inferred, never written. (One conversion could not take both closures:
+/// a type may implement `Fn()` and `Fn(&())`.)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a listener of `{E}`",
+    label = "not a listener of `{E}`",
+    note = "a listener is a closure `move |event: &{E}| ..` (`move || ..` for an event without data) or a `Listener<{E}>`"
+)]
+pub trait IntoListener<E: ?Sized, M> {
+    /// As the listener.
+    fn into_listener(self) -> Listener<E>;
+}
+
+/// How a closure of the event is a listener ([`IntoListener`]).
+#[doc(hidden)]
+pub struct OfEvent(());
+
+/// How a closure without arguments is a listener of an event without data
+/// ([`IntoListener`]).
+#[doc(hidden)]
+pub struct WithoutEvent(());
+
+impl<E: ?Sized> IntoListener<E, ()> for Listener<E> {
+    fn into_listener(self) -> Listener<E> {
+        self
+    }
+}
+
+impl<E: ?Sized + 'static, F: Fn(&E) + 'static> IntoListener<E, OfEvent> for F {
+    fn into_listener(self) -> Listener<E> {
+        Listener::new(Rc::new(self))
+    }
+}
+
+impl<F: Fn() + 'static> IntoListener<(), WithoutEvent> for F {
+    fn into_listener(self) -> Listener<()> {
+        Listener::new(Rc::new(move |_: &()| self()))
     }
 }
 
 impl<E: ?Sized> Clone for Listener<E> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            f: self.f.clone(),
+            owner: self.owner,
+        }
     }
 }
 
@@ -97,13 +170,14 @@ pub struct Attrs {
     pub(crate) props: Vec<Prop>,
     /// A canvas's drawing.
     pub(crate) drawing: Option<Arc<crate::canvas::Drawing>>,
-    /// The handle the view put on the element (not a prop).
-    pub(crate) element_ref: Option<super::ElementRef>,
-    /// Style properties bound to native animation nodes (kept alive while
+    /// What the ref the view put on the element names (not a prop): held
+    /// while the element is, however long the ref's owner lives.
+    pub(crate) element_ref: Option<super::element_ref::RefTarget>,
+    /// Style properties bound to native animation nodes (held while
     /// bound).
-    pub(crate) animated: Vec<(crate::StyleDecl, super::NativeNode)>,
-    /// Native nodes host props read (drags, scroll offsets), kept alive.
-    pub(crate) bound: Vec<super::NativeNode>,
+    pub(crate) animated: Vec<(crate::StyleDecl, super::LiveNode)>,
+    /// Animated nodes host props read (drags, scroll offsets), held.
+    pub(crate) bound: Vec<super::LiveNode>,
 }
 
 impl Attrs {
@@ -195,8 +269,8 @@ pub(crate) struct ComponentEl {
     /// Its spec (made once per type and kept by the core).
     pub(crate) spec: fn() -> ComponentSpec,
     pub(crate) props: Box<dyn AnyProps>,
-    /// The handler of its events in the view that has it.
-    pub(crate) on_event: Option<Listener<dyn Any>>,
+    /// The handlers of its events in the view that has it, in order.
+    pub(crate) on_event: Vec<Listener<dyn Any>>,
 }
 
 impl Clone for ComponentEl {
@@ -322,8 +396,14 @@ pub(crate) struct ListEl {
 #[derive(Clone)]
 pub(crate) enum ElKind {
     Plain,
-    /// The glue's node of slot `name`.
+    /// Where slot `name` goes (a view placing it).
     Slot(&'static str),
+    /// What a view fills a nested component's slot `name` with: its
+    /// children, placed as they are where the nested view places the slot.
+    Fill(&'static str),
+    /// Where the nested view places what a view filled slot `name` with
+    /// (no node of its own).
+    Filled(&'static str),
     /// Where the JSX children go (a list row's content, in a row).
     Children,
     /// One JSX child (in [`ParentElement::children_each`]).
@@ -505,6 +585,45 @@ impl IntoElement for String {
     }
 }
 
+/// What `.child(..)` takes ([`ParentElement::child`]): an element, or
+/// what holds elements (an `Option`, a `Vec`, an array or an iterator of
+/// them: `rows.iter().map(|r| row(r))`). `M` tells the two apart: it is
+/// inferred, never written. (One blanket conversion could not take both: a
+/// type may be an element and hold elements.)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not an element",
+    label = "not an element",
+    note = "elements are host elements (`view()`, `text(..)`, ...), components' elements, strings, and an `Option`, a `Vec`, an array or an iterator of elements"
+)]
+pub trait IntoChild<M> {
+    /// Adds what it is to `out`.
+    #[doc(hidden)]
+    fn __push_into(self, out: &mut Vec<ElNode>);
+}
+
+/// How an element is a child ([`IntoChild`]).
+#[doc(hidden)]
+pub struct OneChild(());
+
+/// How what holds elements is children ([`IntoChild`]).
+#[doc(hidden)]
+pub struct ManyChildren(());
+
+impl<T: IntoElement> IntoChild<OneChild> for T {
+    fn __push_into(self, out: &mut Vec<ElNode>) {
+        out.push(self.into_element().0);
+    }
+}
+
+impl<I: IntoIterator> IntoChild<ManyChildren> for I
+where
+    I::Item: IntoElement,
+{
+    fn __push_into(self, out: &mut Vec<ElNode>) {
+        out.extend(self.into_iter().map(|c| c.into_element().0));
+    }
+}
+
 /// Conditional building.
 pub trait FluentBuilder: Sized {
     /// `then(self)` when `condition` holds.
@@ -542,22 +661,15 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
-    /// Binds `opacity` to a native value (it moves natively).
-    fn bind_opacity(mut self, value: &impl super::Animated) -> Self {
-        let node = value.native_node();
-        let decl = crate::StyleDecl::Animated(nsh_animation::AnimationProp::Opacity, node.id());
-        self.node().attrs.animated.push((decl, node));
-        self
+    /// Binds `opacity` to an animated value (it moves natively).
+    fn bind_opacity(self, value: &impl super::Animated) -> Self {
+        self.bind(nsh_animation::AnimationProp::Opacity, value)
     }
 
     /// Binds the background color to a node of colors
-    /// ([`super::NativeNode::interpolate_colors`]).
-    fn bind_background(mut self, value: &impl super::Animated) -> Self {
-        let node = value.native_node();
-        let decl =
-            crate::StyleDecl::Animated(nsh_animation::AnimationProp::BackgroundColor, node.id());
-        self.node().attrs.animated.push((decl, node));
-        self
+    /// ([`super::AnimatedNode::interpolate_colors`]).
+    fn bind_background(self, value: &impl super::Animated) -> Self {
+        self.bind(nsh_animation::AnimationProp::BackgroundColor, value)
     }
 
     /// Binds the color of every border side to a node of colors.
@@ -586,47 +698,49 @@ pub trait Element: IntoElement + Sized {
     }
 
     /// Binds `prop` (anything but a transform step or a canvas argument)
-    /// to a native value.
+    /// to an animated value (nothing once the value's owner is gone).
     fn bind(mut self, prop: nsh_animation::AnimationProp, value: &impl super::Animated) -> Self {
-        let node = value.native_node();
-        let decl = crate::StyleDecl::Animated(prop, node.id());
-        self.node().attrs.animated.push((decl, node));
+        if let Some(node) = value.animated_node().live() {
+            let decl = crate::StyleDecl::Animated(prop, node.id());
+            self.node().attrs.animated.push((decl, node));
+        }
         self
     }
 
-    /// Appends a transform step driven by a native value, after the styles'
+    /// Appends a transform step driven by an animated value, after the styles'
     /// transforms.
     fn bind_transform(mut self, kind: crate::TransformKind, value: &impl super::Animated) -> Self {
-        let node = value.native_node();
-        let decl = crate::StyleDecl::Transform(kind, kind.identity(), Some(node.id()));
-        self.node().attrs.animated.push((decl, node));
+        if let Some(node) = value.animated_node().live() {
+            let decl = crate::StyleDecl::Transform(kind, kind.identity(), Some(node.id()));
+            self.node().attrs.animated.push((decl, node));
+        }
         self
     }
 
-    /// Moves it right by a native value (points).
+    /// Moves it right by an animated value (points).
     fn bind_translate_x(self, value: &impl super::Animated) -> Self {
         self.bind_transform(crate::TransformKind::TranslateX, value)
     }
 
-    /// Moves it down by a native value (points).
+    /// Moves it down by an animated value (points).
     fn bind_translate_y(self, value: &impl super::Animated) -> Self {
         self.bind_transform(crate::TransformKind::TranslateY, value)
     }
 
-    /// Scales it by a native value.
+    /// Scales it by an animated value.
     fn bind_scale(self, value: &impl super::Animated) -> Self {
         self.bind_transform(crate::TransformKind::Scale, value)
     }
 
-    /// Rotates it by a native value (degrees, clockwise).
+    /// Rotates it by an animated value (degrees, clockwise).
     fn bind_rotate(self, value: &impl super::Animated) -> Self {
         self.bind_transform(crate::TransformKind::Rotate, value)
     }
 
     /// Puts `handle` on this element: its commands (`focus`, `scroll_to`)
-    /// go here.
+    /// go here (nothing once the ref's owner is gone).
     fn element_ref(mut self, handle: &super::ElementRef) -> Self {
-        self.node().attrs.element_ref = Some(handle.clone());
+        self.node().attrs.element_ref = handle.target();
         self
     }
 
@@ -724,9 +838,10 @@ impl<T: Element> Styled for T {
 
 /// Elements with children.
 pub trait ParentElement: Element {
-    /// Adds a child.
-    fn child(mut self, child: impl IntoElement) -> Self {
-        self.node().children.push(child.into_element().0);
+    /// Adds a child: an element, or the elements an `Option`, a `Vec`, an
+    /// array or an iterator holds.
+    fn child<M>(mut self, child: impl IntoChild<M>) -> Self {
+        child.__push_into(&mut self.node().children);
         self
     }
 
@@ -829,76 +944,76 @@ pub trait Accessible: Element {
 /// Elements that take touches.
 pub trait Interactive: Element {
     /// A local file drag entered this desktop drop destination.
-    fn on_file_drag_enter(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_file_drag_enter<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::FileDragEnter,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// A local file drag left this desktop drop destination.
-    fn on_file_drag_leave(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_file_drag_leave<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::FileDragLeave,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Local files or directories were dropped on this desktop destination.
-    fn on_file_drop(self, listener: impl Into<Listener<events::FileDropEvent>>) -> Self {
+    fn on_file_drop<M>(self, listener: impl IntoListener<events::FileDropEvent, M>) -> Self {
         self.on(
             EventKind::FileDrop,
-            events::typed(listener.into(), events::file_drop),
+            events::typed(listener.into_listener(), events::file_drop),
         )
     }
 
     /// Handles presses.
-    fn on_press(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::Press,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Handles presses held for about half a second.
-    fn on_long_press(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_long_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::LongPress,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// A finger went down on the element.
-    fn on_press_in(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_press_in<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::PressIn,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// The press ended, inside or outside the element.
-    fn on_press_out(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_press_out<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::PressOut,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Its frame changed (relative to its parent).
-    fn on_layout(self, listener: impl Into<Listener<Rect>>) -> Self {
+    fn on_layout<M>(self, listener: impl IntoListener<Rect, M>) -> Self {
         self.on(
             EventKind::Layout,
-            events::typed(listener.into(), events::layout),
+            events::typed(listener.into_listener(), events::layout),
         )
     }
 
     /// Touches on it or inside it, every phase (custom gestures): the
     /// elements around the finger hear them from it outwards. To have them
     /// alone, claim them ([`Interactive::claim_touches`]).
-    fn on_touch(self, listener: impl Into<Listener<TouchEvent>>) -> Self {
+    fn on_touch<M>(self, listener: impl IntoListener<TouchEvent, M>) -> Self {
         self.on(
             EventKind::Touch,
-            events::typed(listener.into(), events::touch),
+            events::typed(listener.into_listener(), events::touch),
         )
     }
 
@@ -924,54 +1039,69 @@ pub trait Interactive: Element {
     }
 
     /// It became the responder (TS: `onResponderGrant`).
-    fn on_responder_grant(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).grant = Some(listener.into());
+    fn on_responder_grant<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).grant = Some(listener.into_listener());
         self
     }
 
     /// It claimed the touches, but the responder kept them (TS:
     /// `onResponderReject`).
-    fn on_responder_reject(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).reject = Some(listener.into());
+    fn on_responder_reject<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).reject = Some(listener.into_listener());
         self
     }
 
     /// As the responder, a finger went down (the first one too, after the
     /// grant; TS: `onResponderStart`).
-    fn on_responder_start(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).start = Some(listener.into());
+    fn on_responder_start<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).start = Some(listener.into_listener());
         self
     }
 
     /// As the responder, the fingers moved (TS: `onResponderMove`).
-    fn on_responder_move(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).moved = Some(listener.into());
+    fn on_responder_move<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).moved = Some(listener.into_listener());
         self
     }
 
     /// As the responder, a finger lifted (TS: `onResponderEnd`).
-    fn on_responder_end(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).end = Some(listener.into());
+    fn on_responder_end<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).end = Some(listener.into_listener());
         self
     }
 
     /// The last finger lifted: it is no longer the responder (TS:
     /// `onResponderRelease`).
-    fn on_responder_release(
+    fn on_responder_release<M>(
         mut self,
-        listener: impl Into<Listener<super::ResponderEvent>>,
+        listener: impl IntoListener<super::ResponderEvent, M>,
     ) -> Self {
-        super::responder::of(self.node()).release = Some(listener.into());
+        super::responder::of(self.node()).release = Some(listener.into_listener());
         self
     }
 
     /// Another element or a native gesture took the touches over, or the
     /// system cancelled them (TS: `onResponderTerminate`).
-    fn on_responder_terminate(
+    fn on_responder_terminate<M>(
         mut self,
-        listener: impl Into<Listener<super::ResponderEvent>>,
+        listener: impl IntoListener<super::ResponderEvent, M>,
     ) -> Self {
-        super::responder::of(self.node()).terminate = Some(listener.into());
+        super::responder::of(self.node()).terminate = Some(listener.into_listener());
         self
     }
 
@@ -981,11 +1111,11 @@ pub trait Interactive: Element {
     /// ended, to spring them on.
     fn pan_values(
         mut self,
-        x: Option<&super::NativeValue>,
-        y: Option<&super::NativeValue>,
+        x: Option<&super::AnimatedValue>,
+        y: Option<&super::AnimatedValue>,
     ) -> Self {
-        let x = x.map(|v| v.node().clone());
-        let y = y.map(|v| v.node().clone());
+        let x = x.and_then(|v| v.node().live());
+        let y = y.and_then(|v| v.node().live());
         let prop = Prop::PanValues(x.as_ref().map(|n| n.id()), y.as_ref().map(|n| n.id()));
         super::host::set(self.node(), prop);
         let bound = &mut self.node().attrs.bound;
@@ -998,83 +1128,85 @@ pub trait Interactive: Element {
     /// has when the pinch starts; TS: `pinch={{ scale }}`); bind it to its
     /// transform ([`Element::bind_scale`]). `on_pinch_start` /
     /// `on_pinch_end` report the pinches.
-    fn pinch_value(mut self, scale: &super::NativeValue) -> Self {
-        let node = scale.node().clone();
-        super::host::set(self.node(), Prop::PinchValue(Some(node.id())));
-        self.node().attrs.bound.push(node);
+    fn pinch_value(mut self, scale: &super::AnimatedValue) -> Self {
+        if let Some(node) = scale.node().live() {
+            super::host::set(self.node(), Prop::PinchValue(Some(node.id())));
+            self.node().attrs.bound.push(node);
+        }
         self
     }
 
     /// Two-finger rotations turn `angle` natively, in degrees (added to
     /// the value it has when the rotation starts; TS: `rotation={{ angle
     /// }}`); bind it to its transform ([`Element::bind_rotate`]).
-    fn rotation_value(mut self, angle: &super::NativeValue) -> Self {
-        let node = angle.node().clone();
-        super::host::set(self.node(), Prop::RotationValue(Some(node.id())));
-        self.node().attrs.bound.push(node);
+    fn rotation_value(mut self, angle: &super::AnimatedValue) -> Self {
+        if let Some(node) = angle.node().live() {
+            super::host::set(self.node(), Prop::RotationValue(Some(node.id())));
+            self.node().attrs.bound.push(node);
+        }
         self
     }
 
     /// A drag started on it (the platform recognizes it).
-    fn on_pan_start(self, listener: impl Into<Listener<PanEvent>>) -> Self {
+    fn on_pan_start<M>(self, listener: impl IntoListener<PanEvent, M>) -> Self {
         self.on(
             EventKind::PanStart,
-            events::typed(listener.into(), events::pan),
+            events::typed(listener.into_listener(), events::pan),
         )
     }
 
     /// The drag ended, with its velocity.
-    fn on_pan_end(self, listener: impl Into<Listener<PanEvent>>) -> Self {
+    fn on_pan_end<M>(self, listener: impl IntoListener<PanEvent, M>) -> Self {
         self.on(
             EventKind::PanEnd,
-            events::typed(listener.into(), events::pan),
+            events::typed(listener.into_listener(), events::pan),
         )
     }
 
     /// A pinch started (its scale).
-    fn on_pinch_start(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_pinch_start<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::PinchStart,
-            events::typed(listener.into(), events::pinch),
+            events::typed(listener.into_listener(), events::pinch),
         )
     }
 
     /// The pinch ended.
-    fn on_pinch_end(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_pinch_end<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::PinchEnd,
-            events::typed(listener.into(), events::pinch),
+            events::typed(listener.into_listener(), events::pinch),
         )
     }
 
     /// A two-finger rotation started (radians).
-    fn on_rotation_start(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_rotation_start<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::RotationStart,
-            events::typed(listener.into(), events::rotation),
+            events::typed(listener.into_listener(), events::rotation),
         )
     }
 
     /// The rotation ended.
-    fn on_rotation_end(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_rotation_end<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::RotationEnd,
-            events::typed(listener.into(), events::rotation),
+            events::typed(listener.into_listener(), events::rotation),
         )
     }
 
     /// An assistive technology performed an action (its name).
-    fn on_accessibility_action(self, listener: impl Into<Listener<str>>) -> Self {
+    fn on_accessibility_action<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.on(
             EventKind::AccessibilityAction,
-            events::typed(listener.into(), events::action),
+            events::typed(listener.into_listener(), events::action),
         )
     }
 
     /// Handles native event `kind` with its raw payload (the element
     /// listens to it).
-    fn on(mut self, kind: EventKind, listener: impl Into<Listener<EventPayload>>) -> Self {
-        self.node().handlers.push((kind, listener.into()));
+    fn on<M>(mut self, kind: EventKind, listener: impl IntoListener<EventPayload, M>) -> Self {
+        self.node().handlers.push((kind, listener.into_listener()));
         self
     }
 
@@ -1243,8 +1375,12 @@ impl Interactive for Image {}
 /// and views and images placed inline, wrapping with the words. The core
 /// merges them into one paragraph.
 impl ParentElement for Text {
-    fn child(mut self, child: impl IntoElement) -> Self {
-        self.0.children.push(span(child.into_element().0));
+    fn child<M>(mut self, child: impl IntoChild<M>) -> Self {
+        let at = self.0.children.len();
+        child.__push_into(&mut self.0.children);
+        for el in &mut self.0.children[at..] {
+            *el = span(std::mem::replace(el, ElNode::new(Tag::View)));
+        }
         self
     }
 
@@ -1367,43 +1503,43 @@ impl Image {
     }
 
     /// It loaded: its size in pixels.
-    pub fn on_load(self, listener: impl Into<Listener<Size>>) -> Self {
+    pub fn on_load<M>(self, listener: impl IntoListener<Size, M>) -> Self {
         self.on(
             EventKind::Load,
-            events::typed(listener.into(), events::size),
+            events::typed(listener.into_listener(), events::size),
         )
     }
 
     /// It failed to load (the message).
-    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
+    pub fn on_error<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.on(
             EventKind::Error,
-            events::typed(listener.into(), events::message),
+            events::typed(listener.into_listener(), events::message),
         )
     }
 
     /// It started loading.
-    pub fn on_load_start(self, listener: impl Into<Listener<()>>) -> Self {
+    pub fn on_load_start<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::LoadStart,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// It finished loading, or failed.
-    pub fn on_load_end(self, listener: impl Into<Listener<()>>) -> Self {
+    pub fn on_load_end<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::LoadEnd,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Its download went on: bytes so far and in all (at most every 100
     /// ms; none for images already in memory).
-    pub fn on_progress(self, listener: impl Into<Listener<events::ImageProgress>>) -> Self {
+    pub fn on_progress<M>(self, listener: impl IntoListener<events::ImageProgress, M>) -> Self {
         self.on(
             EventKind::Progress,
-            events::typed(listener.into(), events::image_progress),
+            events::typed(listener.into_listener(), events::image_progress),
         )
     }
 }
@@ -1551,7 +1687,10 @@ impl IntoElement for Children {
 }
 
 /// Another component in a view ([`Component::element`]). Its styles go
-/// after the component's own, like an app's classes.
+/// after the component's own, like an app's classes, and so do its inline
+/// style, animated values and insets ([`Element`]'s), on the component's
+/// root. It hears and is to assistive technologies what the component says
+/// (its events and props): it is not [`Interactive`] or [`Accessible`].
 pub struct ComponentElement<C: Component> {
     node: ElNode,
     _component: PhantomData<fn() -> C>,
@@ -1565,7 +1704,7 @@ impl<C: Component> ComponentElement<C> {
             make: super::component::make_instance::<C>,
             spec: ComponentSpec::of::<C>,
             props: Box::new(props),
-            on_event: None,
+            on_event: Vec::new(),
         });
         Self {
             node,
@@ -1573,16 +1712,18 @@ impl<C: Component> ComponentElement<C> {
         }
     }
 
-    /// Fills its slot `slot` (its prop's JS name: `header`) with `content`.
+    /// Fills its slot `slot` (its prop's JS name: `header`) with `content`
+    /// (in place of what filled it): the component's view places it as it
+    /// is where it places the slot, with no node around it (a node of its
+    /// own only where the view styles the slot).
     pub fn fill(mut self, slot: &'static str, content: impl IntoElement) -> Self {
-        let mut holder = ElNode::new(Tag::View);
-        holder
-            .attrs
-            .props
-            .push(crate::Prop::ComponentSlot(slot.into()));
-        holder.key = Some(format!("slot:{slot}").into());
-        holder.children.push(content.into_element().0);
-        self.node.children.push(holder);
+        self.node
+            .children
+            .retain(|c| !matches!(c.kind, ElKind::Fill(s) if s == slot));
+        let mut fill = ElNode::new(Tag::View);
+        fill.kind = ElKind::Fill(slot);
+        fill.children.push(content.into_element().0);
+        self.node.children.push(fill);
         self
     }
 
@@ -1605,19 +1746,20 @@ impl<C: Component> ComponentElement<C> {
 
     /// Puts `handle` on this component: its updates go to it.
     pub fn component_ref(mut self, handle: &super::ComponentRef<C>) -> Self {
-        self.node.attrs.element_ref = Some(handle.element().clone());
+        self.node.attrs.element_ref = handle.element().target();
         self
     }
 
-    /// Handles its events (they then do not reach the app).
-    pub fn on_event(mut self, listener: impl Into<Listener<C::Event>>) -> Self {
-        let inner = listener.into().0;
+    /// Handles its events (they then do not reach the app). Given several
+    /// times, every listener hears them, in order.
+    pub fn on_event<M>(mut self, listener: impl IntoListener<C::Event, M>) -> Self {
+        let listener = listener.into_listener();
         if let ElKind::Component(c) = &mut self.node.kind {
-            c.on_event = Some(Listener(Rc::new(move |event: &dyn Any| {
+            c.on_event.push(listener.wrap(|inner, event: &dyn Any| {
                 if let Some(event) = event.downcast_ref::<C::Event>() {
                     inner(event);
                 }
-            })));
+            }));
         }
         self
     }

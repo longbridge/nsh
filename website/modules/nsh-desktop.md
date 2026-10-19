@@ -44,7 +44,7 @@ const Window: {
 | Member | Description |
 |---|---|
 | `setTitle(title)` | The window's title: the title bar, the taskbar or Dock, the window switcher. |
-| `setTitleBar(style, height?)` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it); without it they take the platform's height. `"default"` brings the system's title bar back. |
+| `setTitleBar(style, height?)` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `"default"` brings the system's title bar back. |
 | `minimize()` | Minimizes the window. |
 | `toggleMaximize()` | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | Enters or leaves full screen. |

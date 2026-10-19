@@ -1,7 +1,7 @@
 //! Partial redraws: the area of a drawing that changes when some of its
-//! native values do.
+//! animated values do.
 //!
-//! An animation of a canvas's native values redraws the canvas on every
+//! An animation of a canvas's animated values redraws the canvas on every
 //! frame, but usually moves only a small part of it (a pulsing dot on a
 //! chart). [`DamageScan::damage`] replays the operations for their
 //! geometry only (the transform with `save` / `restore`, the current path's
@@ -28,7 +28,7 @@ use super::{
 };
 use crate::geometry::Rect;
 
-/// What changes when native values do ([`DamageScan::damage`]).
+/// What changes when animated values do ([`DamageScan::damage`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Damage {
     /// Nothing that is drawn.
@@ -374,7 +374,7 @@ pub struct DamageScan {
 }
 
 impl DamageScan {
-    /// The area that the operations of `ops` reading a native value slot
+    /// The area that the operations of `ops` reading an animated value slot
     /// for which `changed` is true paint, with slot values `value`.
     ///
     /// Scanned with the values before a change and after it, the union of

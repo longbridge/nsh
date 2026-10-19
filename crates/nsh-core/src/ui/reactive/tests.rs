@@ -138,3 +138,63 @@ fn batches_and_untracked_reads() {
         },
     );
 }
+
+#[test]
+fn what_is_made_under_an_owner_disposed_while_it_runs_goes_at_once() {
+    let runtime = Runtime::default();
+    let _entered = runtime.enter();
+    let before = runtime.slots_in_use();
+    let (owner, ()) = create_root(|| {
+        let _ = signal(0);
+    });
+    let cleaned = Rc::new(RefCell::new(false));
+    let runs = Rc::new(RefCell::new(0));
+    let (c, r) = (cleaned.clone(), runs.clone());
+    let (made, root) = owner.scope(move || {
+        // A listener closing the view it belongs to, then going on.
+        owner.dispose();
+        let made = signal(1);
+        effect(move || *r.borrow_mut() += 1);
+        cleanup(move || *c.borrow_mut() = true);
+        let (root, inner) = create_root(|| signal(2));
+        (made, (root, inner))
+    });
+    assert_eq!(made.try_get(), None, "disposed at once");
+    assert_eq!(root.1.try_get(), None, "a root made there too");
+    assert!(!root.0.is_live());
+    assert_eq!(*runs.borrow(), 0, "the effect never runs");
+    assert!(*cleaned.borrow(), "a cleanup runs at once");
+    assert_eq!(runtime.slots_in_use(), before, "nothing stays");
+}
+
+#[test]
+fn an_owner_disposed_in_a_nested_run_is_not_current_again() {
+    let runtime = Runtime::default();
+    let _entered = runtime.enter();
+    let before = runtime.slots_in_use();
+    let (outer, ()) = create_root(|| ());
+    let (inner, ()) = outer.run(|| create_root(|| ()));
+    let made = outer.scope(|| {
+        inner.scope(|| outer.dispose());
+        // Back under `outer`, gone meanwhile.
+        signal(1)
+    });
+    assert_eq!(made.try_get(), None);
+    inner.dispose();
+    assert_eq!(runtime.slots_in_use(), before);
+}
+
+#[test]
+fn a_listener_of_a_disposed_owner_does_not_run() {
+    let runtime = Runtime::default();
+    let _entered = runtime.enter();
+    let runs = Rc::new(RefCell::new(0));
+    let r = runs.clone();
+    let (owner, listener) =
+        create_root(move || crate::ui::Listener::<()>::from(move |_: &()| *r.borrow_mut() += 1));
+    listener.call(&());
+    assert_eq!(*runs.borrow(), 1);
+    owner.dispose();
+    listener.call(&());
+    assert_eq!(*runs.borrow(), 1, "its view is gone");
+}

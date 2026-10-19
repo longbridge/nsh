@@ -1,5 +1,5 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Toast } from "nsh/android";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
@@ -149,7 +149,7 @@ function ActionRow(props: { first?: boolean; icon: IconName; tint: string; title
 function Dialogs() {
   const answer = signal<{ text: string; tone: Tone } | null>(null);
   // The answer pops in each time it changes.
-  const pop = createNativeValue(1);
+  const pop = createAnimatedValue(1);
   const show = (text: string, tone: Tone = "neutral") => {
     answer.set({ text, tone });
     pop.set(0.85);
@@ -230,7 +230,7 @@ function FramesAndTimers() {
   const running = signal(false);
   const ticks = signal(0);
   // The beat dot flashes once per tick; the fade runs natively.
-  const beat = createNativeValue(0);
+  const beat = createAnimatedValue(0);
 
   // Frames per second, counted with requestAnimationFrame.
   let frame = 0;

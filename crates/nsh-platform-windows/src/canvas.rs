@@ -1,7 +1,7 @@
 //! Canvas views: a recorded [`Drawing`] replayed with Direct2D.
 //!
 //! The replay is recorded into an `ID2D1CommandList` when the drawing,
-//! one of its native values or an image it draws changes (and when the
+//! one of its animated values or an image it draws changes (and when the
 //! device is replaced); [`draw`] only plays the list back with the view's
 //! transform. Command lists are vector: redrawing the window is cheap and
 //! stays sharp at any scale, and effects (shadows, composite operations)
@@ -121,7 +121,7 @@ const TOLERANCE: f32 = 0.05;
 pub(crate) struct CanvasState {
     /// The drawing.
     drawing: Option<Arc<Drawing>>,
-    /// Native value slots (`AnimationProp::CanvasArg`).
+    /// Animated value slots (`AnimationProp::CanvasArg`).
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
@@ -206,7 +206,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     view.changed();
 }
 
-/// Native value slot `k` changed: draws again if the value did.
+/// Animated value slot `k` changed: draws again if the value did.
 pub(crate) fn set_arg(view: &NshView, k: u16, value: AnimationValue) {
     {
         let mut state = view.state_mut();

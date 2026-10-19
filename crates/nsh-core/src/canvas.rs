@@ -1,7 +1,7 @@
 //! `<canvas>` drawings: what a `draw` callback recorded through the 2D
 //! context (an HTML Canvas 2D subset), decoded in Rust into an immutable
 //! list of operations that platforms replay natively (CGContext, Android
-//! Canvas). Numbers may be native values ([`Num::Slot`]): the platform
+//! Canvas). Numbers may be animated values ([`Num::Slot`]): the platform
 //! reads them while replaying, so animations redraw on the UI thread
 //! without JS.
 
@@ -20,13 +20,13 @@ use crate::{
     ui::PropEnum,
 };
 
-/// A number of a drawing: a constant or the value of native value slot
+/// A number of a drawing: a constant or the value of animated value slot
 /// `n` of the drawing ([`Drawing::slots`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Num {
     /// A constant.
     Const(f32),
-    /// The current value of a native value.
+    /// The current value of an animated value.
     Slot(u16),
 }
 
@@ -223,7 +223,7 @@ impl CanvasGradient {
 pub enum Paint {
     /// A color.
     Color(Color),
-    /// The current value of a native value interpolating colors.
+    /// The current value of an animated value interpolating colors.
     Slot(u16),
     /// A gradient.
     Gradient(Arc<CanvasGradient>),
@@ -637,12 +637,12 @@ pub enum CanvasOp {
 pub struct Drawing {
     /// The operations, in order.
     pub ops: Vec<CanvasOp>,
-    /// The native values the operations read, by slot.
+    /// The animated values the operations read, by slot.
     pub slots: Vec<nsh_animation::NodeId>,
 }
 
 impl Drawing {
-    /// The slot of native value `node`, adding it if new.
+    /// The slot of animated value `node`, adding it if new.
     pub fn slot(&mut self, node: nsh_animation::NodeId) -> u16 {
         match self.slots.iter().position(|&n| n == node) {
             Some(i) => i as u16,

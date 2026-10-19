@@ -1,5 +1,5 @@
 import { computed, Scroll, signal, Text, View } from "nsh";
-import { createNativeValue, type NativeValue } from "nsh/animated";
+import { createAnimatedValue, type AnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { windowSize } from "nsh/device";
 import { Icon } from "../icons";
@@ -22,13 +22,13 @@ type Mode = "spring" | "coast" | "snap";
 /**
  * A card dragged on the UI thread (`pan`) and released into a spring, a
  * decay or the nearest corner, with the drag's velocity. A canvas draws a
- * tether to it from the same native values, without JS.
+ * tether to it from the same animated values, without JS.
  */
 export function Physics() {
-  const x = createNativeValue(0);
-  const y = createNativeValue(0);
-  const pressed = createNativeValue(0);
-  const lift = createNativeValue(0);
+  const x = createAnimatedValue(0);
+  const y = createAnimatedValue(0);
+  const pressed = createAnimatedValue(0);
+  const lift = createAnimatedValue(0);
   const mode = signal<Mode>("spring");
   const feel = signal<Feel>("bouncy");
   const stage = signal({ width: 0, height: 0 });
@@ -36,7 +36,7 @@ export function Physics() {
   const speed = signal(0);
   const corner = signal("—");
 
-  const settle = (v: NativeValue, to: number, velocity: number) => v.spring(to, { velocity, ...feels[feel()] });
+  const settle = (v: AnimatedValue, to: number, velocity: number) => v.spring(to, { velocity, ...feels[feel()] });
   const corners = () => ({ x: Math.max(0, stage().width / 2 - CARD / 2 - 14), y: Math.max(0, stage().height / 2 - CARD / 2 - 14) });
 
   const release = (e: { velocityX: number; velocityY: number; valueX?: number; valueY?: number }) => {
@@ -140,7 +140,7 @@ export function Physics() {
                 }
             }
             ctx.setLineDash([]);
-            // The tether, from native values: it follows drags and springs without JS.
+            // The tether, from animated values: it follows drags and springs without JS.
             ctx.strokeStyle = colors.accent;
             ctx.globalAlpha = 0.45;
             ctx.lineWidth = 1.5;

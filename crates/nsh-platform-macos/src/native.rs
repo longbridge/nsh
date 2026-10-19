@@ -1350,6 +1350,11 @@ impl WebHost {
                     configuration: &*config
                 ];
                 let _: () = msg_send![&web, setNavigationDelegate: &*handler];
+                // Transparent by default (WebKit paints white otherwise): a
+                // page without a background shows the view behind it, the
+                // way `backgroundColor` on the node expects.
+                let no: Retained<AnyObject> = msg_send![class(c"NSNumber")?, numberWithBool: false];
+                let _: () = msg_send![&web, setValue: &*no, forKey: &*NSString::from_str("drawsBackground")];
                 crate::surface::quiet(|| fill(view, as_view(&web)));
                 Some(web)
             }

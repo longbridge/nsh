@@ -30,6 +30,7 @@ use crate::{
 
 /// Receives uncaught JS exceptions.
 pub type ErrorHandler = Box<dyn Fn(&JsError)>;
+type ExitHandler = Rc<dyn Fn(i32)>;
 
 /// State shared between the host and the native functions installed in JS.
 /// Only touched on the JS thread.
@@ -43,7 +44,7 @@ pub(crate) struct Shared {
     pub(crate) animation_releases: RefCell<Vec<nsh_animation::AnimationOp>>,
     timers: RefCell<Timers>,
     /// Per-VM host delegate for capability-gated exit requests.
-    pub(crate) system_exit_handler: RefCell<Option<Rc<dyn Fn(i32)>>>,
+    pub(crate) system_exit_handler: RefCell<Option<ExitHandler>>,
     /// Permissions and host-selected app directory for native system operations.
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,

@@ -24,9 +24,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   without that, `Sub.prototype.constructor = Sub` or `obj.toString = …` throws (the "override mistake"), which breaks
   libraries such as axios. Hot updates are evaluated from Rust and need none of it.
 - **Capabilities** (`nsh_core::access`): an app declares what it may reach in `nsh.json` `"capabilities"` — `network`
-  (`hosts`: `*`, `*.example.com` or a host, any method; `http`: a host with `methods` / `schemes` / `pathPrefix`),
-  `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths), `fs` (`read` / `write`: absolute roots or
-  `${dataDir}` roots, expanded from the host-provided app data directory), `clipboard` (`nsh/clipboard`: reading and
+  (`hosts`: `*`, `*.example.com` or a host; `http`: scoped scheme/host/port/method/path rules),
+  `webview` (`hosts` a web view may show and navigate to), `statusBar`, `process` (`execute`: exact executable names or absolute paths; `exit`: host exit requests; `env`: additional
+  visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
   are build errors; an app without the key retains unrestricted network, webview, status bar and clipboard access.
@@ -46,8 +46,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   grant in Rust. Process commands match exactly: a grant for `codex` grants that command, while `/usr/bin/codex`
   requires its own entry. The runtime launches the executable directly with an argument array. Filesystem checks
   reject traversal and canonicalize the nearest existing ancestor before checking containment in each granted root,
-  including symlinks and paths whose final components will be created. `${dataDir}` is resolved from trusted
-  host configuration, never from a directory supplied by JS. Read and write grants are separate.
+  including symlinks and paths whose final components will be created. `${dataDir}`, `${pluginDir}` and
+  `${homeDir}` are resolved from trusted host configuration. Relative roots are anchored at the host plugin
+  directory; an unconfigured anchor grants nothing. Read and write grants are separate. Environment visibility
+  uses the default metadata-name list in `default-env`, plus explicit case-insensitive `process.env` names
+  allowed by both policies. `process.exit` requests a host handler and never exits the embedding process itself.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
   budgets, node quota; unset / 0 keeps a default), from the next load; on GPUI `AppOptions::limits` /
   `AppView::set_limits` (a whole `Limits`), likewise from the next load.
@@ -55,8 +58,12 @@ trusted: every limit and check is enforced in Rust, never in JS.
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).
 
-Standard networking: global `fetch` keeps engine checks and redirect handling. Native `WebSocket` checks GET
-permission before DNS, mapping ws/wss to http/https for existing scheme grants; its handshake rejects redirects.
-Raw TCP `net.connect` requires `network.hosts` (all valid ports on a granted host); HTTP path/method grants
-cannot authorize raw sockets. Standard `fs` and `process` route through the same checked native dispatchers
-as `nsh/fs` and `nsh/process`. See `website/modules/standard-modules.md` for the bounded public surface.
+Standard networking: global `fetch` keeps engine checks and redirect handling. Scoped `network.http` rules use
+`scheme` (HTTPS by default), `host`, optional `port`, required GET/POST `methods`, and `paths` / `path_prefixes`.
+Paths match exactly; prefixes match slash-delimited boundaries. `{host, methods}` grants no paths. Legacy rules
+are explicitly selected by `schemes` or `pathPrefix`; mixing rule forms is rejected and serialization preserves
+the form. Native `websocket` checks GET permission before DNS and rejects handshake redirects. Raw TCP
+`net.connect` requires `network.hosts` (all valid ports on a granted host); HTTP path/method grants cannot
+authorize raw sockets. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
+standard catalog is eleven canonical bare modules; its connection and file APIs follow their generated
+signatures. See `website/modules/standard-modules.md` for the public surface.

@@ -35,12 +35,10 @@
 
 use std::{
     cell::{Cell, RefCell},
-    ptr::NonNull,
     rc::Rc,
     sync::Arc,
 };
 
-use block2::RcBlock;
 use dispatch2::DispatchQueue;
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
@@ -53,18 +51,17 @@ use nsh_core::{
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::{Retained, Weak},
-    runtime::{ProtocolObject, Sel},
+    runtime::Sel,
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSButton, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSMenu,
-    NSMenuItem, NSNormalWindowLevel, NSRunningApplication, NSViewFrameDidChangeNotification,
-    NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSApplication, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSMenu, NSMenuItem,
+    NSNormalWindowLevel, NSRunningApplication, NSToolbar, NSWindow, NSWindowButton,
+    NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
 use objc2_core_graphics::kCGDesktopIconWindowLevel;
 use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
-    NSString, NSUserDefaults, ns_string,
+    NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
 
 use crate::surface::Surface;
@@ -138,19 +135,8 @@ pub(crate) struct Chrome {
     target: RefCell<Option<Retained<MenuTarget>>>,
     /// The main menu it set (`setApplicationMenu`).
     menu: RefCell<Option<Retained<NSMenu>>>,
-    /// Watches the window controls' frames: AppKit lays the title bar out
-    /// again whenever it likes (the window becoming key, its title, ...),
-    /// which puts them back at the top.
-    controls: RefCell<Option<ControlsWatch>>,
-    /// The traffic lights are being moved (their frame changes are ours).
-    centering: Cell<bool>,
-    /// A frame changed while they were: they are centered again.
-    recenter: Cell<bool>,
-    /// They are centered again once AppKit's layout pass is over.
-    deferred: Cell<bool>,
-    /// The title bar's own height, before an app's height replaced it:
-    /// without one, the controls go back there.
-    natural: Cell<Option<f32>>,
+    /// Only the toolbar this surface attached; dropping it restores the window.
+    toolbar: RefCell<Option<TitleBarToolbar>>,
 }
 
 impl Drop for Chrome {
@@ -163,22 +149,6 @@ impl Drop for Chrome {
         let app = NSApplication::sharedApplication(mtm);
         if app.mainMenu().is_some_and(|m| m == bar) {
             restore_menu(&app);
-        }
-    }
-}
-
-/// The frame observers of a window's controls.
-struct ControlsWatch {
-    window: Weak<NSWindow>,
-    observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
-}
-
-impl Drop for ControlsWatch {
-    fn drop(&mut self) {
-        let center = NSNotificationCenter::defaultCenter();
-        for observer in &self.observers {
-            // SAFETY: removes an observer this surface added.
-            unsafe { center.removeObserver(observer.as_ref()) };
         }
     }
 }
@@ -199,17 +169,20 @@ pub(crate) fn update_area(surface: &Surface) {
             if surface.chrome.style.get() == TitleBarStyle::Hidden && !full_screen(&window) =>
         {
             let frame = window.frame();
-            let layout = window.contentLayoutRect();
-            let height = match surface.chrome.height.get() {
-                Some(height) => {
-                    center_traffic_lights(surface, &window, height);
-                    watch_controls(surface, &window);
-                    height
-                }
-                None => {
-                    restore_traffic_lights(surface, &window);
-                    (frame.size.height - layout.size.height) as f32
-                }
+            let mask = window.styleMask() & !NSWindowStyleMask::FullSizeContentView;
+            let content = NSWindow::contentRectForFrameRect_styleMask(
+                frame,
+                mask,
+                MainThreadMarker::from(&*window),
+            );
+            let natural = (frame.size.height - content.size.height) as f32;
+            // A toolbar's native height is determined by AppKit, not the
+            // requested height that selected its style. Include a host's
+            // toolbar too, so the app reserves its actual obscured area.
+            let height = if window.toolbar().is_some() {
+                toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
+            } else {
+                natural
             };
             let left = window
                 .standardWindowButton(NSWindowButton::ZoomButton)
@@ -239,154 +212,49 @@ pub(crate) fn update_area(surface: &Surface) {
     }
 }
 
-/// Centers the traffic lights in an app's title bar `height` points tall:
-/// the title bar's container takes that height at the window's top and the
-/// buttons are centered in it. AppKit lays them out again on every resize
-/// and full screen change, and whenever else it likes: this runs after
-/// each ([`update_area`], [`watch_controls`]).
-fn center_traffic_lights(surface: &Surface, window: &NSWindow, height: f32) {
-    let chrome = &surface.chrome;
-    if chrome.centering.replace(true) {
-        // Moving one view moves others (the container's autoresizing):
-        // the pass runs again.
-        chrome.recenter.set(true);
-        return;
-    }
-    // A few passes settle it; more would be AppKit fighting back.
-    for _ in 0..4 {
-        chrome.recenter.set(false);
-        center_traffic_lights_once(surface, window, height);
-        if !chrome.recenter.get() {
-            break;
-        }
-    }
-    chrome.centering.set(false);
-}
-
-fn center_traffic_lights_once(surface: &Surface, window: &NSWindow, height: f32) {
-    let buttons = [
-        NSWindowButton::CloseButton,
-        NSWindowButton::MiniaturizeButton,
-        NSWindowButton::ZoomButton,
-    ]
-    .map(|b| window.standardWindowButton(b));
-    // The buttons are in the title bar view, which fills its container.
-    let container = buttons[0]
-        .as_deref()
-        .and_then(|close| crate::view::superview(close))
-        .and_then(|bar| crate::view::superview(&bar));
-    if let Some(container) = container {
-        let natural = &surface.chrome.natural;
-        if natural.get().is_none() {
-            natural.set(Some(container.frame().size.height as f32));
-        }
-        let height = f64::from(height);
-        let mut frame = container.frame();
-        frame.size.height = height;
-        frame.origin.y = window.frame().size.height - height;
-        if container.frame() != frame {
-            container.setFrame(frame);
-        }
-        for button in buttons.iter().flatten() {
-            let f = button.frame();
-            // The title bar view is not flipped: y goes up.
-            let y = ((height - f.size.height) / 2.0).round();
-            if f.origin.y != y {
-                button.setFrameOrigin(NSPoint::new(f.origin.x, y));
-            }
-        }
+/// The unobscured rectangle is in window coordinates, including its origin.
+fn toolbar_height(frame_height: f64, layout: NSRect, natural: f32) -> f32 {
+    let height = frame_height - (layout.origin.y + layout.size.height);
+    if height.is_finite() && height > 0.0 {
+        height as f32
+    } else {
+        natural
     }
 }
 
-/// Puts the traffic lights back where AppKit had them, at the title bar's
-/// own height (the app's height is gone).
-fn restore_traffic_lights(surface: &Surface, window: &NSWindow) {
-    if let Some(natural) = surface.chrome.natural.get() {
-        center_traffic_lights(surface, window, natural);
-        surface.chrome.natural.set(None);
+/// Owns an empty toolbar without retaining the embedding window.
+struct TitleBarToolbar {
+    window: Weak<NSWindow>,
+    toolbar: Retained<NSToolbar>,
+    previous_style: NSWindowToolbarStyle,
+    applied_style: NSWindowToolbarStyle,
+}
+
+impl TitleBarToolbar {
+    /// Whether this window still has the toolbar we installed.
+    fn is_installed(&self, window: &NSWindow) -> bool {
+        self.window
+            .load()
+            .is_some_and(|w| std::ptr::eq(&*w, window))
+            && window.toolbar().is_some_and(|t| t == self.toolbar)
     }
 }
 
-/// Centers the traffic lights again (they moved).
-fn recenter(surface: &Surface) {
-    let (Some(height), TitleBarStyle::Hidden) =
-        (surface.chrome.height.get(), surface.chrome.style.get())
-    else {
-        return;
-    };
-    if let Some(window) = window(surface)
-        && !full_screen(&window)
-    {
-        center_traffic_lights(surface, &window, height);
-    }
-}
-
-/// Centers the traffic lights again whenever AppKit moves them or their
-/// container (once per window).
-fn watch_controls(surface: &Surface, window: &NSWindow) {
-    let mut controls = surface.chrome.controls.borrow_mut();
-    if controls
-        .as_ref()
-        .and_then(|c| c.window.load())
-        .is_some_and(|w| std::ptr::eq(&*w, window))
-    {
-        return;
-    }
-    let buttons: Vec<Retained<NSButton>> = [
-        NSWindowButton::CloseButton,
-        NSWindowButton::MiniaturizeButton,
-        NSWindowButton::ZoomButton,
-    ]
-    .into_iter()
-    .filter_map(|b| window.standardWindowButton(b))
-    .collect();
-    let container = buttons
-        .first()
-        .and_then(|close| crate::view::superview(close))
-        .and_then(|bar| crate::view::superview(&bar));
-    let key = surface.key();
-    let block = RcBlock::new(move |_: NonNull<NSNotification>| {
-        let Some(surface) = Surface::with_key(key) else {
+impl Drop for TitleBarToolbar {
+    fn drop(&mut self) {
+        let Some(window) = self.window.load() else {
             return;
         };
-        recenter(&surface);
-        // AppKit may move the others after this one, in the same layout
-        // pass: once it is over, they are centered again.
-        if !surface.chrome.deferred.replace(true) {
-            DispatchQueue::main().exec_async(move || {
-                if let Some(surface) = Surface::with_key(key) {
-                    surface.chrome.deferred.set(false);
-                    recenter(&surface);
-                }
-            });
-        }
-    });
-    let center = NSNotificationCenter::defaultCenter();
-    let views = buttons
-        .iter()
-        .map(|b| Retained::into_super(Retained::into_super(b.clone())))
-        .chain(container);
-    let observers = views
-        .map(|view| {
-            view.setPostsFrameChangedNotifications(true);
-            // SAFETY: a documented notification of a view of this window;
-            // with no queue the block runs where it is posted (the main
-            // thread, laying the title bar out); the observer is removed
-            // when the watch drops.
-            unsafe {
-                center.addObserverForName_object_queue_usingBlock(
-                    Some(NSViewFrameDidChangeNotification),
-                    Some(&view),
-                    None,
-                    &block,
-                )
+        // A host may have replaced our toolbar or changed its style. Its
+        // later changes take precedence over the state we saved.
+        if self.is_installed(&window) {
+            let restore_style = window.toolbarStyle() == self.applied_style;
+            window.setToolbar(None);
+            if restore_style {
+                window.setToolbarStyle(self.previous_style);
             }
-        })
-        .collect();
-    *controls = Some(ControlsWatch {
-        window: Weak::from(window),
-        observers,
-    });
+        }
+    }
 }
 
 // --- Commands ---------------------------------------------------------------------------
@@ -479,9 +347,6 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
         return;
     };
     let hidden = surface.chrome.style.get() == TitleBarStyle::Hidden;
-    if !hidden && !full_screen(&window) {
-        restore_traffic_lights(surface, &window);
-    }
     let mut mask = window.styleMask();
     if hidden {
         mask |= NSWindowStyleMask::FullSizeContentView;
@@ -489,6 +354,7 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
         mask &= !NSWindowStyleMask::FullSizeContentView;
     }
     window.setStyleMask(mask);
+    apply_toolbar(surface, &window, hidden);
     window.setTitlebarAppearsTransparent(hidden);
     window.setTitleVisibility(if hidden {
         NSWindowTitleVisibility::Hidden
@@ -509,8 +375,54 @@ pub(crate) fn apply_title_bar(surface: &Surface) {
             if content.frame().size != size {
                 content.setFrameSize(size);
             }
+            // Toolbar layout can settle after setToolbar/setStyleMask
+            // returns, even when the full-size content frame stays the same.
+            update_area(&surface);
         }
     });
+}
+
+/// Lets AppKit lay out traffic lights on every live-resize frame. The
+/// height selects a native style; `update_area` reports the measured height.
+fn apply_toolbar(surface: &Surface, window: &NSWindow, hidden: bool) {
+    let height = surface.chrome.height.get().filter(|_| hidden);
+    let mut owned = surface.chrome.toolbar.borrow_mut().take();
+    if height.is_none() || owned.as_ref().is_some_and(|t| !t.is_installed(window)) {
+        // Also restores the old window when this surface moves to another.
+        owned = None;
+    }
+    let Some(height) = height else { return };
+    let style = if height <= 44.0 {
+        NSWindowToolbarStyle::UnifiedCompact
+    } else {
+        NSWindowToolbarStyle::Unified
+    };
+    match &mut owned {
+        Some(toolbar) => {
+            toolbar.applied_style = style;
+            if window.toolbarStyle() != style {
+                window.setToolbarStyle(style);
+            }
+        }
+        None if window.toolbar().is_none() => {
+            let toolbar = NSToolbar::initWithIdentifier(
+                NSToolbar::alloc(MainThreadMarker::from(window)),
+                ns_string!("nsh.title-bar"),
+            );
+            let previous_style = window.toolbarStyle();
+            window.setToolbar(Some(&toolbar));
+            window.setToolbarStyle(style);
+            owned = Some(TitleBarToolbar {
+                window: Weak::from(window),
+                toolbar,
+                previous_style,
+                applied_style: style,
+            });
+        }
+        // The embedding app owns this toolbar, including its style.
+        None => {}
+    }
+    *surface.chrome.toolbar.borrow_mut() = owned;
 }
 
 // --- Drag regions -----------------------------------------------------------------------
@@ -799,6 +711,12 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
 /// The root view moved to a window, or the window changed: a hidden title
 /// bar applies to it (a window keeps its own style otherwise).
 pub(crate) fn window_changed(surface: &Surface) {
+    if window(surface).is_none() {
+        let toolbar = surface.chrome.toolbar.borrow_mut().take();
+        drop(toolbar);
+        update_area(surface);
+        return;
+    }
     if surface.chrome.style.get() == TitleBarStyle::Hidden {
         apply_title_bar(surface);
     } else {
@@ -809,6 +727,23 @@ pub(crate) fn window_changed(surface: &Surface) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toolbar_area_uses_native_geometry_including_its_origin() {
+        let rect = |y, height| NSRect::new(NSPoint::new(0.0, y), NSSize::new(1200.0, height));
+        assert_eq!(toolbar_height(800.0, rect(0.0, 762.0), 22.0), 38.0);
+        assert_eq!(toolbar_height(800.0, rect(12.0, 750.0), 22.0), 38.0);
+        // An embedding host's expanded toolbar occupies its full native area.
+        assert_eq!(toolbar_height(800.0, rect(0.0, 730.0), 22.0), 70.0);
+    }
+
+    #[test]
+    fn incomplete_toolbar_geometry_falls_back_to_the_native_title_bar() {
+        for height in [800.0, 820.0, f64::NAN] {
+            let layout = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1200.0, height));
+            assert_eq!(toolbar_height(800.0, layout, 22.0), 22.0);
+        }
+    }
 
     #[test]
     fn shortcuts_are_key_equivalents() {

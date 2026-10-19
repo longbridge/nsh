@@ -1,5 +1,5 @@
 import { effect, signal, Text, untracked, View } from "nsh";
-import { Animated, createNativeValue, Easing, LayoutAnimation } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh/animated";
 import { Icon } from "../../icons";
 import { Button, colors, finish, isDark, Press, radius, Segmented, tints } from "../../ui";
 import { grouped, type Stock, price } from "./market";
@@ -16,7 +16,7 @@ const sides = [
 
 /** A confirmation that drops in from the top and leaves by itself. */
 export function createBanner() {
-  const t = createNativeValue(0);
+  const t = createAnimatedValue(0);
   const message = signal({ title: "", detail: "", side: "buy" as Side });
   const show = (title: string, detail: string, side: Side) => {
     message.set({ title, detail, side });

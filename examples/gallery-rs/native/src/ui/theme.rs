@@ -5,7 +5,7 @@
 //!
 //! Colors are [`AdaptiveColor`]s, so the platform switches them with the
 //! appearance natively, without a render; what needs one color (a canvas,
-//! a native value's interpolation, a header) takes `cx.color(..)`, which
+//! an animated value's interpolation, a header) takes `cx.color(..)`, which
 //! reads the appearance in the render. Finishes ([`Finish`]) carry their
 //! shadows for both appearances (`.dark(..)` variants: native too).
 

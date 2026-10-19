@@ -74,10 +74,10 @@ Numbers and colors may also be [native animated values](../modules/nsh-animated.
 `CanvasPaint`): the platform then redraws on its own while they animate, without running `draw` or any JS per frame.
 
 ```tsx
-import { Animated, createNativeValue } from "nsh/animated";
+import { Animated, createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
-const angle = createNativeValue(0);
+const angle = createAnimatedValue(0);
 Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
 
 <Canvas

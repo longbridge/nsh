@@ -4606,7 +4606,6 @@ mod components {
         let name = signal(String::new());
         let focused = signal(false);
         let field = element_ref();
-        let back = field.clone();
         view()
             .child(
                 scroll().bounces(false).child(
@@ -4639,8 +4638,8 @@ mod components {
             .child(text(move || if focused.get() { "focused" } else { "idle" }))
             // Back to the field: focus it, the caret at the end.
             .child(view().on_press(move |_: &()| {
-                back.focus();
-                back.set_selection(3, 3);
+                field.focus();
+                field.set_selection(3, 3);
             }))
     }
 
@@ -4760,7 +4759,6 @@ mod components {
         let target = element_ref();
         let unused = element_ref();
         let shown = signal(String::new());
-        let measured = target.clone();
         view()
             .p_4()
             .child(
@@ -4770,7 +4768,7 @@ mod components {
             )
             .child(text(move || shown.get()))
             .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                let (target, unused) = (measured.measure(), unused.measure());
+                let (target, unused) = (target.measure(), unused.measure());
                 spawn(async move {
                     let (m, none) = (target.await, unused.await);
                     let m = m.expect("laid out");
@@ -4915,16 +4913,15 @@ mod components {
     /// A sheet that follows drags natively and springs back when let go.
     #[component]
     fn Sheet(_props: FormProps) -> impl IntoElement {
-        let offset = native_value(0.0);
+        let offset = animated_value(0.0);
         let state = signal("resting");
-        let springing = offset.clone();
         view()
             .bind_translate_y(&offset)
             .bind_opacity(&offset.interpolate(&[0.0, 300.0], &[1.0, 0.2]))
             .pan_values(None, Some(&offset))
             .on_pan_end(move |e: &PanEvent| {
                 assert_eq!(e.value_y, Some(120.0));
-                let end = springing.spring(0.0, Spring::default());
+                let end = offset.spring(0.0, Spring::default());
                 state.set("springing");
                 spawn(async move {
                     let finished = end.await;
@@ -4935,7 +4932,7 @@ mod components {
     }
 
     #[test]
-    fn native_values_bind_animate_and_end() {
+    fn animated_values_bind_animate_and_end() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -5041,6 +5038,336 @@ mod components {
             })
             .count();
         assert_eq!(released, 2, "{batch:?}");
+    }
+
+    /// Handles made under an owner of their own, which a press disposes
+    /// while the view stays: the view's binding and input hold what they
+    /// name, so the fade goes on; the handles, shared by two listeners,
+    /// do nothing from then on.
+    #[component]
+    fn Outlived() -> impl IntoElement {
+        let (owner, (fade, field)) =
+            crate::ui::create_root(|| (animated_value(1.0), element_ref()));
+        let _ = fade.timing(0.0, 300.0, Easing::Linear);
+        let shown = signal(String::new());
+        view()
+            .bind_opacity(&fade)
+            .child(input().element_ref(&field))
+            .child(view().on_press(move |_: &()| {
+                field.focus();
+                fade.set(0.5);
+            }))
+            .child(view().on_press(move |_: &()| {
+                owner.dispose();
+                fade.set(0.25);
+                fade.stop();
+                let _ = fade.spring(1.0, Spring::default());
+                field.focus();
+                let gone = fade.interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+                shown.set(format!("{:?} {:?}", field.node(), gone.live().is_none()));
+            }))
+            .child(text(move || shown.get()))
+    }
+
+    #[test]
+    fn handles_outlived_by_what_binds_them_do_nothing() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Outlived>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Outlived>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let animations = |batch: &MountBatch| -> Vec<nsh_animation::AnimationOp> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Animation(op) => Some(op.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let commands = |batch: &MountBatch| -> Vec<(NodeId, Command)> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Command { id, command } => Some((*id, command.clone())),
+                    _ => None,
+                })
+                .collect()
+        };
+        let batch = c.commit().unwrap();
+        let ops = animations(&batch);
+        let fade = match ops[..] {
+            [
+                nsh_animation::AnimationOp::CreateValue { node, value: 1.0 },
+                nsh_animation::AnimationOp::Start { node: started, .. },
+            ] if started == node => node,
+            _ => panic!("{ops:?}"),
+        };
+        let input = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Input,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("an input");
+        let buttons: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let [first, second] = buttons[..] else {
+            panic!("{buttons:?}");
+        };
+
+        // The handles work while their owner lives.
+        assert!(c.component_event(first, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            animations(&batch),
+            [nsh_animation::AnimationOp::Set {
+                node: fade,
+                value: 0.5
+            }]
+        );
+        assert_eq!(commands(&batch), [(input, Command::Focus)]);
+
+        // Its owner goes: the binding holds the node (no release, its fade
+        // runs on); the handles do nothing and name nothing, with no panic.
+        assert!(c.component_event(second, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(animations(&batch), []);
+        assert_eq!(commands(&batch), []);
+        assert_eq!(texts(&batch), ["None true"]);
+        assert!(c.component_event(first, EventKind::Press, &EventPayload::None));
+        assert!(
+            c.commit()
+                .is_none_or(|b| animations(&b).is_empty() && commands(&b).is_empty())
+        );
+
+        // The node goes with the view that binds it.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        let released: Vec<_> = [c.commit(), c.commit()]
+            .iter()
+            .flatten()
+            .flat_map(animations)
+            .collect();
+        assert_eq!(
+            released,
+            [nsh_animation::AnimationOp::Release { node: fade }]
+        );
+    }
+
+    /// One press derives nodes from the view's value (colors that follow
+    /// the appearance too); the other makes state of its own, and a task
+    /// that makes more.
+    #[component]
+    fn Repeated() -> impl IntoElement {
+        let v = animated_value(0.0);
+        let presses = signal(0);
+        let colors = [AdaptiveColor {
+            light: Color::BLACK,
+            dark: Color::TRANSPARENT,
+        }; 2];
+        view()
+            .bind_opacity(&v)
+            .child(view().on_press(move |_: &()| {
+                let half = v.mul(0.5);
+                let _ = half.interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+                let _ = v.interpolate_colors(&[0.0, 1.0], &colors);
+                presses.update(|n| *n += 1);
+            }))
+            .child(view().on_press(move |_: &()| {
+                let _ = (signal(0), animated_value(1.0), element_ref(), stored(0));
+                spawn(async move {
+                    let _ = (signal(1), animated_value(2.0));
+                });
+            }))
+            .child(text(move || presses.get().to_string()))
+    }
+
+    #[test]
+    fn repeated_presses_do_not_grow_the_graph() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Repeated>();
+        c.set_components(registry);
+        let mount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    Op::SetProp {
+                        id,
+                        prop: Prop::Component(std::any::type_name::<Repeated>().into()),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+            let batch = c.commit().unwrap();
+            let buttons: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            [buttons[0], buttons[1]]
+        };
+        let unmount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Remove {
+                        parent: ROOT_ID,
+                        child: id,
+                    },
+                    Op::Release { id },
+                ],
+            );
+            let _ = (c.commit(), c.commit());
+        };
+        let press = |c: &mut Core<FakeEngine>, button| {
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            c.run_component_tasks();
+            let _ = c.commit();
+        };
+        let slots = |c: &Core<FakeEngine>| c.components.runtime.slots_in_use();
+        // What the surface makes once (its environment, the theme) first.
+        let _ = mount(&mut c, 2);
+        unmount(&mut c, 2);
+        let empty = slots(&c);
+
+        let [derive, make] = mount(&mut c, 4);
+        for _ in 0..5 {
+            press(&mut c, derive);
+        }
+        let derived = slots(&c);
+        for _ in 0..500 {
+            press(&mut c, derive);
+        }
+        assert_eq!(slots(&c), derived, "deriving again adds nothing");
+
+        // State a press makes is the component's: it goes with it.
+        for _ in 0..50 {
+            press(&mut c, make);
+        }
+        assert!(slots(&c) > derived);
+        unmount(&mut c, 4);
+        assert_eq!(slots(&c), empty, "released with the component");
+    }
+
+    /// A press disposes the branch its view is in (as what closes it does,
+    /// unbatched), then makes state and a task.
+    #[component]
+    fn SelfClosing() -> impl IntoElement {
+        let open = signal(true);
+        view().child(If::new(open, move || {
+            view().on_press(move |_: &()| {
+                Owner::current().dispose();
+                let _ = (signal(5), animated_value(1.0), element_ref());
+                spawn(async {});
+            })
+        }))
+    }
+
+    #[test]
+    fn a_listener_closing_its_own_view_leaves_nothing() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<SelfClosing>();
+        c.set_components(registry);
+        let mount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    Op::SetProp {
+                        id,
+                        prop: Prop::Component(std::any::type_name::<SelfClosing>().into()),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+            let batch = c.commit().unwrap();
+            batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let unmount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Remove {
+                        parent: ROOT_ID,
+                        child: id,
+                    },
+                    Op::Release { id },
+                ],
+            );
+            let _ = (c.commit(), c.commit());
+        };
+        let _ = mount(&mut c, 2);
+        unmount(&mut c, 2);
+        let empty = c.components.runtime.slots_in_use();
+        let button = mount(&mut c, 4);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let _ = c.commit();
+        unmount(&mut c, 4);
+        assert_eq!(c.components.runtime.slots_in_use(), empty);
     }
 
     /// Its own rows indexing its data; a press clears the data. Its errors
@@ -5783,7 +6110,7 @@ mod touch {
     /// A card scaled and turned by two-finger gestures.
     #[component]
     fn Card() -> impl IntoElement {
-        let (scale, angle) = (native_value(1.0), native_value(0.0));
+        let (scale, angle) = (animated_value(1.0), animated_value(0.0));
         view()
             .pinch_value(&scale)
             .rotation_value(&angle)
@@ -5792,7 +6119,7 @@ mod touch {
     }
 
     #[test]
-    fn pinches_and_rotations_drive_native_values() {
+    fn pinches_and_rotations_drive_animated_values() {
         let mut c = core();
         c.mount_root(&crate::ui::Root::new::<Card>(|| ()));
         let batch = c.commit().unwrap();
@@ -5858,10 +6185,10 @@ mod painter {
     }
 
     /// A label placed by its measured width, gradients, a stroked SVG path
-    /// and an operation built by hand reading a native value.
+    /// and an operation built by hand reading an animated value.
     #[component]
     fn Label() -> impl IntoElement {
-        let offset = native_value(3.0);
+        let offset = animated_value(3.0);
         let width = crate::ui::prelude::measure_text("600 20px system-ui", "100%");
         let mut p = Painter::new()
             .stroke_style(
@@ -5918,7 +6245,7 @@ mod painter {
                 ..
             }
         ));
-        // The native value is a slot of the drawing.
+        // The animated value is a slot of the drawing.
         assert_eq!(ops[5], CanvasOp::LineDashOffset(Num::Slot(0)));
         assert_eq!(drawing.slots.len(), 1);
     }
@@ -6225,6 +6552,13 @@ mod views {
             .unwrap_or_else(|| panic!("no text {content:?}"))
     }
 
+    /// The native parent of node `id`.
+    fn native_parent<M: TextEngine>(c: &Core<M>, id: NodeId) -> Option<NodeId> {
+        let key = c.key(id).expect("a node");
+        let parent = c.nodes[key as usize].parent;
+        (parent != NO_KEY).then(|| c.nodes[parent as usize].id)
+    }
+
     /// Counts presses: the text is a binding, nothing renders again.
     #[derive(Default)]
     struct Counter;
@@ -6279,6 +6613,65 @@ mod views {
             "no node made or freed: {:?}",
             batch.items
         );
+    }
+
+    /// Two listeners of one event on one element, and of a nested
+    /// component's events, each noting itself.
+    #[component]
+    fn Twice() -> impl IntoElement {
+        let log = signal(String::new());
+        let note = move |c: char| log.update(|l| l.push(c));
+        view()
+            .on_press(move || note('a'))
+            .on_press(move || note('b'))
+            .child(
+                Counter::element(CounterProps::default())
+                    .on_event(move |_: &CounterEvent| note('c'))
+                    .on_event(move |_: &CounterEvent| note('d')),
+            )
+            .child(text(move || format!("log {}", log.get())))
+    }
+
+    #[test]
+    fn every_listener_of_an_event_runs_in_order() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Twice>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let counter = native_parent(&c, text_node(&batch, "Taps 0")).unwrap();
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["log ab"]);
+        assert!(c.component_event(counter, EventKind::Press, &EventPayload::None));
+        assert!(texts(&c.commit().unwrap()).contains(&"log abcd".to_owned()));
+    }
+
+    /// A region made again with what it read: its pressable text is kept
+    /// (the same node), its listener the new run's.
+    #[component]
+    fn Rerun() -> impl IntoElement {
+        let log = signal(String::new());
+        let run = signal(0);
+        view()
+            .child(dynamic(move || {
+                let at = run.get();
+                text("tap").on_press(move || log.update(|l| l.push_str(&at.to_string())))
+            }))
+            .child(text("again").on_press(move || run.update(|r| *r += 1)))
+            .child(text(move || format!("log {}", log.get())))
+    }
+
+    #[test]
+    fn a_node_made_again_hears_only_its_new_listeners() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Rerun>(|| ()));
+        let batch = c.commit().unwrap();
+        let (tap, again) = (text_node(&batch, "tap"), text_node(&batch, "again"));
+        for _ in 0..3 {
+            assert!(c.component_event(again, EventKind::Press, &EventPayload::None));
+            let _ = c.commit();
+        }
+        assert!(c.component_event(tap, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["log 3"]);
     }
 
     #[test]
@@ -6621,7 +7014,7 @@ mod views {
     /// A track whose color moves between two theme colors natively.
     #[component]
     fn Track() -> impl IntoElement {
-        let on = native_value(0.0);
+        let on = animated_value(0.0);
         let off_color = AdaptiveColor {
             light: rgb(0xeeeeee),
             dark: rgb(0x222222),
@@ -6663,6 +7056,58 @@ mod views {
             i,
             MountItem::Animation(nsh_animation::AnimationOp::CreateInterpolate { .. })
         )));
+    }
+
+    /// Three tracks sharing their light colors: two theme colors with
+    /// other dark ones, and a constant one.
+    #[component]
+    fn SharedLight() -> impl IntoElement {
+        let on = animated_value(0.0);
+        let green = AdaptiveColor::from(rgb(0x00ff00));
+        let track = |dark| {
+            let off = AdaptiveColor {
+                light: rgb(0x000000),
+                dark,
+            };
+            view()
+                .size_10()
+                .bind_background(&on.interpolate_colors(&[0.0, 1.0], &[off, green]))
+        };
+        view()
+            .child(track(rgb(0xffffff)))
+            .child(track(rgb(0x808080)))
+            .child(track(rgb(0x000000)))
+    }
+
+    #[test]
+    fn color_interpolations_sharing_their_light_colors_are_apart() {
+        let outputs = |batch: &MountBatch| {
+            let mut outputs: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Animation(
+                        nsh_animation::AnimationOp::CreateInterpolate { output, .. }
+                        | nsh_animation::AnimationOp::SetOutput { output, .. },
+                    ) => Some(output.clone()),
+                    _ => None,
+                })
+                .collect();
+            outputs.sort_by_key(|o| format!("{o:?}"));
+            outputs
+        };
+        let colors = |off: u32| nsh_animation::Output::Colors(vec![off, 0x00ff00ff]);
+        let mut c = core();
+        c.mount_root(&Root::new::<SharedLight>(|| ()));
+        assert_eq!(outputs(&c.commit().unwrap()), vec![colors(0x000000ff); 3]);
+        c.set_environment(crate::ui::Environment {
+            dark: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            outputs(&c.commit().unwrap()),
+            [colors(0x808080ff), colors(0xffffffff)]
+        );
     }
 
     /// A style bound to a signal.
@@ -6982,6 +7427,1097 @@ mod views {
 
         fn view(props: HolderProps, _: Scope<NoEvent>) -> impl IntoElement {
             view().child(props.children)
+        }
+    }
+
+    /// A label (a component whose root is a text).
+    #[component]
+    fn Label() -> impl IntoElement {
+        text("label")
+    }
+
+    /// Shows a label (a component), a text and a holder of a text while
+    /// open, as a holder's content; a press closes.
+    #[component]
+    fn Shutter() -> impl IntoElement {
+        let open = signal(true);
+        view().on_press(move || open.set(false)).child(
+            Holder::element(HolderProps {
+                children: Children::default(),
+            })
+            .child(If::new(open, || {
+                vec![
+                    Label::element(()).into_element(),
+                    text("plain").into_element(),
+                    Holder::element(HolderProps {
+                        children: Children::default(),
+                    })
+                    .child(text("inside"))
+                    .into_element(),
+                ]
+            })),
+        )
+    }
+
+    #[test]
+    fn content_leaving_a_nested_component_is_only_deleted() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Shutter>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        // Deleting a view detaches it natively: no `Remove` before.
+        let count = |f: fn(&MountItem) -> bool| batch.items.iter().filter(|i| f(i)).count();
+        let removes = count(|i| matches!(i, MountItem::Remove { .. }));
+        let deletes = count(|i| matches!(i, MountItem::Delete { .. }));
+        assert_eq!((removes, deletes), (0, 4), "{:?}", batch.items);
+        let holder = c
+            .components
+            .instances
+            .values()
+            .find(|i| !i.js_children.is_empty());
+        assert!(holder.is_none(), "no holder keeps what left it");
+    }
+
+    /// Passes its children on to a holder while shown; a press hides and
+    /// shows the holder.
+    #[derive(Default)]
+    struct Forward;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ForwardProps {
+        children: Children,
+    }
+
+    impl Component for Forward {
+        type Props = ForwardProps;
+        type Event = NoEvent;
+
+        fn view(props: ForwardProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(true);
+            let children = props.children;
+            view()
+                .on_press(move || shown.update(|s| *s = !*s))
+                .child(If::new(shown, move || {
+                    Holder::element(HolderProps {
+                        children: Children::default(),
+                    })
+                    .child(text("first"))
+                    .child(children)
+                }))
+        }
+    }
+
+    /// Gives a forward three texts, the middle one in a region; a press
+    /// toggles it.
+    #[derive(Default)]
+    struct Relay;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct RelayProps {}
+
+    impl Component for Relay {
+        type Props = RelayProps;
+        type Event = NoEvent;
+
+        fn view(_: RelayProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let middle = signal(false);
+            view().on_press(move || middle.update(|m| *m = !*m)).child(
+                Forward::element(ForwardProps {
+                    children: Children::default(),
+                })
+                .child(text("a"))
+                .child(If::new(middle, || text("b")))
+                .child(text("c")),
+            )
+        }
+    }
+
+    /// The ids of the native children of `id`.
+    fn native_children<M: TextEngine>(c: &Core<M>, id: NodeId) -> Vec<NodeId> {
+        let key = c.key(id).expect("a node");
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect()
+    }
+
+    #[test]
+    fn children_passed_on_to_a_nested_component_are_placed_by_it() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Relay>(|| RelayProps {}));
+        let batch = c.commit().unwrap();
+        let relay = root_host(&batch);
+        let [first, a, cc] = ["first", "a", "c"].map(|t| text_node(&batch, t));
+        let holder = native_parent(&c, a).expect("placed");
+        assert_eq!(native_children(&c, holder), [first, a, cc]);
+        let forward = native_parent(&c, holder).expect("in the forward");
+        assert_eq!(native_parent(&c, forward), Some(relay));
+        // Content joining the forward's children goes in its place there.
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let b = text_node(&batch, "b");
+        assert_eq!(native_children(&c, holder), [first, a, b, cc]);
+        // The holder goes: the children it was passed leave it, kept.
+        assert!(c.component_event(forward, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        for id in [a, b, cc] {
+            assert_eq!(native_parent(&c, id), None);
+            assert!(
+                batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Remove { id: r } if *r == id)),
+                "{id} is removed: {:?}",
+                batch.items
+            );
+            assert!(
+                !batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Delete { id: d } if *d == id)),
+                "{id} stays"
+            );
+        }
+        // Shown again: a new holder places them.
+        assert!(c.component_event(forward, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let holder = native_parent(&c, a).expect("placed again");
+        let first = text_node(&batch, "first");
+        assert_eq!(native_children(&c, holder), [first, a, b, cc]);
+        // Leaving the content, a child leaves the holder.
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        c.commit();
+        assert_eq!(native_children(&c, holder), [first, a, cc]);
+    }
+
+    #[test]
+    fn content_passed_on_two_deep_leaves_every_level() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Relay>(|| RelayProps {}));
+        let batch = c.commit().unwrap();
+        let relay = root_host(&batch);
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        let b = text_node(&c.commit().unwrap(), "b");
+        let holding = |c: &Core<FakeEngine>| {
+            c.components
+                .instances
+                .iter()
+                .filter(|(_, i)| i.js_children.contains(&b))
+                .count()
+        };
+        assert_eq!(holding(&c), 2, "the forward's and the holder's");
+        assert!(c.component_event(relay, EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        assert!(c.key(b).is_err(), "released");
+        assert_eq!(holding(&c), 0, "no component keeps it");
+    }
+
+    #[test]
+    fn js_children_through_a_forward() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Forward>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Forward>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let first = text_node(&batch, "first");
+        let holder = native_parent(&c, 6).expect("placed");
+        assert_eq!(native_children(&c, holder), [first, 6]);
+        // Hide.
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(native_parent(&c, 6), None, "{:?}", batch.items);
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { id: 6 })),
+            "{:?}",
+            batch.items
+        );
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Delete { id: 6 }))
+        );
+        // While hidden: JS adds 8, removes 6.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 8,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 8,
+                    before: None,
+                },
+                Op::Remove {
+                    parent: 2,
+                    child: 6,
+                },
+            ],
+        );
+        let batch = c.commit();
+        assert_eq!(
+            native_parent(&c, 8),
+            None,
+            "hidden: {:?}",
+            batch.map(|b| b.items)
+        );
+        assert_eq!(native_parent(&c, 6), None);
+        // Show.
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let first = text_node(&batch, "first");
+        let holder = native_parent(&c, 8).expect("placed again");
+        assert_eq!(native_children(&c, holder), [first, 8], "{:?}", batch.items);
+        // JS inserts 6 before 8, then moves 8 before 6.
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 6,
+                before: Some(8),
+            }],
+        );
+        c.commit();
+        assert_eq!(native_children(&c, holder), [first, 6, 8]);
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 8,
+                before: Some(6),
+            }],
+        );
+        c.commit();
+        assert_eq!(native_children(&c, holder), [first, 8, 6]);
+        // The host goes; JS's children stay.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        for id in [6, 8] {
+            assert!(c.key(id).is_ok());
+            assert_eq!(native_parent(&c, id), None, "{id}: {:?}", batch.items);
+            assert!(
+                !batch
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, MountItem::Delete { id: d } if *d == id))
+            );
+        }
+        assert!(c.components.instances.is_empty());
+        // JS re-inserts 6 into root: fine.
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: ROOT_ID,
+                child: 6,
+                before: None,
+            }],
+        );
+        c.commit();
+        assert_eq!(native_parent(&c, 6), Some(ROOT_ID));
+    }
+
+    /// Shows whether it has children, and places them while shown; a press
+    /// hides and shows them.
+    #[derive(Default)]
+    struct Shy;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ShyProps {
+        children: crate::ui::Prop<Children>,
+    }
+
+    impl Component for Shy {
+        type Props = ShyProps;
+        type Event = NoEvent;
+
+        fn view(props: ShyProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let shown = signal(true);
+            let children = props.children;
+            view()
+                .on_press(move || shown.update(|s| *s = !*s))
+                .child(text(move || format!("empty {}", children.get().is_empty())))
+                .child(If::new(shown, move || {
+                    view().child(children.get_untracked())
+                }))
+        }
+    }
+
+    /// Passes its children on to a shy one.
+    #[component]
+    fn PassOn(props: HolderProps) -> impl IntoElement {
+        view().child(
+            Shy::element(ShyProps {
+                children: Default::default(),
+            })
+            .child(props.children),
+        )
+    }
+
+    /// Gives a pass-on one text while on; a press turns it off.
+    #[component]
+    fn Giver() -> impl IntoElement {
+        let on = signal(true);
+        view().on_press(move || on.update(|o| *o = !*o)).child(
+            PassOn::element(HolderProps {
+                children: Children::default(),
+            })
+            .child(If::new(on, || text("given"))),
+        )
+    }
+
+    #[test]
+    fn a_deep_component_knows_when_its_only_child_left() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Giver>(|| ()));
+        let batch = c.commit().unwrap();
+        let giver = root_host(&batch);
+        let shy = native_parent(&c, text_node(&batch, "empty false")).unwrap();
+        assert!(c.component_event(giver, EventKind::Press, &EventPayload::None));
+        assert!(texts(&c.commit().unwrap()).contains(&"empty true".to_owned()));
+        // Hidden and shown again, it places nothing.
+        for _ in 0..2 {
+            assert!(c.component_event(shy, EventKind::Press, &EventPayload::None));
+            let _ = c.commit();
+        }
+        let dead = c
+            .components
+            .instances
+            .values()
+            .flat_map(|i| &i.js_children)
+            .filter(|&&id| c.key(id).is_err())
+            .count();
+        assert_eq!(dead, 0, "no released child");
+    }
+
+    thread_local! {
+        static PLAQUE_TAPS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// A counter as its view's root, dimmed, hearing its taps.
+    #[derive(Default)]
+    struct Plaque;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct PlaqueProps {}
+
+    impl Component for Plaque {
+        type Props = PlaqueProps;
+        type Event = NoEvent;
+
+        fn view(_: PlaqueProps, _: Scope<NoEvent>) -> impl IntoElement {
+            Counter::element(CounterProps {
+                label: "Plaque".into(),
+            })
+            .opacity(0.5)
+            .on_event(|e: &CounterEvent| {
+                let CounterEvent::Tap(n) = e;
+                PLAQUE_TAPS.with(|t| t.set(*n));
+            })
+        }
+    }
+
+    /// A plaque as its view's root: two components deep.
+    #[derive(Default)]
+    struct Shelf;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ShelfProps {}
+
+    impl Component for Shelf {
+        type Props = ShelfProps;
+        type Event = NoEvent;
+
+        fn view(_: ShelfProps, _: Scope<NoEvent>) -> impl IntoElement {
+            Plaque::element(PlaqueProps {}).bg(rgb(0xff0000))
+        }
+    }
+
+    #[test]
+    fn a_component_rooted_in_another_shares_its_host() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Counter>(|| CounterProps {
+            label: "Plaque".into(),
+        }));
+        let alone = creates(&c.commit().unwrap());
+        for deep in [false, true] {
+            let mut c = core();
+            if deep {
+                c.mount_root(&Root::new::<Shelf>(|| ShelfProps {}));
+            } else {
+                c.mount_root(&Root::new::<Plaque>(|| PlaqueProps {}));
+            }
+            let batch = c.commit().unwrap();
+            // The counter's view makes the host: no view of its own.
+            assert_eq!(creates(&batch), alone, "{:?}", batch.items);
+            let host = root_host(&batch);
+            let style = view_style_of(&batch, host).expect("styled");
+            assert_eq!(style.opacity, 0.5, "the styles the view gives it");
+            if deep {
+                assert_ne!(style.background_color, crate::Color::TRANSPARENT);
+            }
+            assert_eq!(texts(&batch), ["Plaque 0", "static"]);
+            let text = text_node(&batch, "Plaque 0");
+            assert_eq!(native_parent(&c, text), Some(host));
+            // Its listener runs on the host, its events reach the view.
+            assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+            let batch = c.commit().unwrap();
+            assert_eq!(texts(&batch), ["Plaque 1"]);
+            assert_eq!(PLAQUE_TAPS.with(Cell::get), 1);
+            PLAQUE_TAPS.with(|t| t.set(0));
+            assert!(
+                batch.items.iter().all(|i| match i {
+                    MountItem::Insert { parent, child, .. } =>
+                        c.key(*parent).is_ok() && c.key(*child).is_ok(),
+                    _ => true,
+                }),
+                "only nodes' own ids"
+            );
+        }
+    }
+
+    /// A holder of its children as its view's root.
+    #[derive(Default)]
+    struct Tray;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct TrayProps {
+        children: Children,
+    }
+
+    impl Component for Tray {
+        type Props = TrayProps;
+        type Event = NoEvent;
+
+        fn view(props: TrayProps, _: Scope<NoEvent>) -> impl IntoElement {
+            Holder::element(HolderProps {
+                children: Children::default(),
+            })
+            .opacity(0.5)
+            .child(props.children)
+        }
+    }
+
+    #[test]
+    fn a_js_host_of_a_rooted_component_takes_the_apps_styles_events_and_children() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Tray>();
+        registry.register::<Plaque>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Plaque>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Class("opacity-25".into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        // The app's class goes after what the view gives the counter.
+        assert_eq!(view_style_of(&batch, 2).map(|s| s.opacity), Some(0.25));
+        // JS stops listening to presses: the counter's view still does.
+        apply(
+            &mut c,
+            vec![
+                Op::Listen {
+                    id: 2,
+                    event: EventKind::Press,
+                    enabled: true,
+                },
+                Op::Listen {
+                    id: 2,
+                    event: EventKind::Press,
+                    enabled: false,
+                },
+            ],
+        );
+        c.commit();
+        let key = c.key(2).unwrap();
+        assert!(c.nodes[key as usize].events.contains(EventKind::Press));
+        // The app's classes change: the node follows.
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::Class("opacity-75".into()),
+        })
+        .unwrap();
+        let batch = c.commit().unwrap();
+        assert_eq!(view_style_of(&batch, 2).map(|s| s.opacity), Some(0.75));
+        // A tray: JS's children go into the host itself.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::Component(std::any::type_name::<Tray>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 4,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(native_parent(&c, 6), Some(4));
+        assert_eq!(creates(&batch), 2, "{:?}", batch.items);
+        // Released: its nodes go, JS's child stays.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 4,
+                },
+                Op::Release { id: 4 },
+                Op::Release { id: 2 },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        assert!(c.key(6).is_ok());
+        assert_eq!(native_parent(&c, 6), None);
+        assert!(c.components.instances.is_empty());
+        let deleted: Vec<NodeId> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Delete { id } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert!(deleted.contains(&2) && deleted.contains(&4), "{deleted:?}");
+        assert_eq!(c.nodes.len(), 2, "the root and JS's child are left");
+    }
+
+    /// Places its corner slot as it is after a title, or padded when
+    /// `framed`.
+    #[derive(Default)]
+    struct Corner;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct CornerProps {
+        #[prop(default)]
+        framed: bool,
+        corner: crate::ui::Prop<Option<Slot>>,
+    }
+
+    impl Component for Corner {
+        type Props = CornerProps;
+        type Event = NoEvent;
+
+        fn view(props: CornerProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let framed = props.framed;
+            view().child(text("title")).child(
+                props
+                    .corner
+                    .place(move |c| if framed { c.p_2() } else { c }),
+            )
+        }
+    }
+
+    /// Fills corners: with a counter, with what a press switches (a
+    /// text, a view of a text), with a text shown while on, and framed.
+    #[derive(Default)]
+    struct Corners;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct CornersProps {}
+
+    impl Component for Corners {
+        type Props = CornersProps;
+        type Event = NoEvent;
+
+        fn view(_: CornersProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let n = signal(0);
+            view()
+                .on_press(move || n.update(|n| *n += 1))
+                .child(Corner::element(CornerProps::default()).fill(
+                    "corner",
+                    Counter::element(CounterProps {
+                        label: "Aside".into(),
+                    }),
+                ))
+                .child(dynamic(move || {
+                    // A corner each run, filled anew.
+                    let fill = if n.get() % 2 == 0 {
+                        text("even").into_element()
+                    } else {
+                        view().child(text("odd")).into_element()
+                    };
+                    Corner::element(CornerProps::default()).fill("corner", fill)
+                }))
+                .child(Corner::element(CornerProps::default()).fill(
+                    "corner",
+                    dynamic(move || (n.get() == 1).then(|| text("one"))),
+                ))
+                .child(
+                    Corner::element(CornerProps {
+                        framed: true,
+                        ..Default::default()
+                    })
+                    .fill("corner", text("framed")),
+                )
+        }
+    }
+
+    #[test]
+    fn a_slot_a_view_fills_is_placed_as_it_is() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Corners>(|| CornersProps {}));
+        let batch = c.commit().unwrap();
+        let root = root_host(&batch);
+        let corners = native_children(&c, root);
+        assert_eq!(corners.len(), 4);
+        // The third corner's fill shows nothing: its title alone.
+        assert_eq!(native_children(&c, corners[2]).len(), 1);
+        // The counter's host is the corner's child: no holder.
+        let counted = native_parent(&c, text_node(&batch, "Aside 0")).expect("placed");
+        assert_eq!(native_parent(&c, counted), Some(corners[0]));
+        assert_eq!(native_children(&c, corners[0]).len(), 2);
+        assert_eq!(
+            native_parent(&c, text_node(&batch, "even")),
+            Some(corners[1])
+        );
+        // Styled: in a node of the corner's own.
+        let framed = native_parent(&c, text_node(&batch, "framed")).expect("placed");
+        assert_ne!(framed, corners[3]);
+        assert_eq!(native_parent(&c, framed), Some(corners[3]));
+        // Its listener and events are its own.
+        assert!(c.component_event(counted, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["Aside 1"]);
+        // Filled anew: the new element takes the old one's place.
+        assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let odd = native_parent(&c, text_node(&batch, "odd")).expect("placed");
+        let corners = native_children(&c, root);
+        assert_eq!(native_parent(&c, odd), Some(corners[1]));
+        assert_eq!(native_children(&c, corners[1]).len(), 2);
+        // A fill that shows something now: placed in its corner.
+        let one = text_node(&batch, "one");
+        assert_eq!(native_parent(&c, one), Some(corners[2]));
+        // And gone again (released with no holder to leave); even again.
+        assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(c.key(one).is_err(), "released");
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { .. })),
+            "{:?}",
+            batch.items
+        );
+        let corners = native_children(&c, root);
+        assert_eq!(native_children(&c, corners[2]).len(), 1, "the title alone");
+        let even = text_node(&batch, "even");
+        assert_eq!(native_parent(&c, even), Some(corners[1]));
+        assert_eq!(native_children(&c, corners[1]).len(), 2);
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct MidProps {
+        corner: crate::ui::Prop<Option<Slot>>,
+    }
+
+    /// Passes its corner slot on to a corner's.
+    #[component]
+    fn Mid(props: MidProps) -> impl IntoElement {
+        view().child(
+            Corner::element(CornerProps::default()).fill("corner", props.corner.place(|c| c)),
+        )
+    }
+
+    /// Fills a mid's corner with a text, and another's with what a press
+    /// switches (a text, nothing, a view of a text).
+    #[component]
+    fn Top() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .on_press(move || n.update(|n| *n += 1))
+            .child(Mid::element(MidProps::default()).fill("corner", text("deep")))
+            .child(Mid::element(MidProps::default()).fill(
+                "corner",
+                dynamic(move || match n.get() % 3 {
+                    0 => Some(text("switched").into_element()),
+                    1 => None,
+                    _ => Some(view().child(text("boxed")).into_element()),
+                }),
+            ))
+    }
+
+    #[test]
+    fn a_filled_slot_passed_on_to_another_slot_is_placed_there() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Top>(|| ()));
+        let batch = c.commit().unwrap();
+        let top = root_host(&batch);
+        // Each mid's view is its corner.
+        let mids = native_children(&c, top);
+        let [first, second] = [0, 1].map(|i| native_children(&c, mids[i])[0]);
+        let deep = text_node(&batch, "deep");
+        assert_eq!(native_parent(&c, deep), Some(first), "{:?}", batch.items);
+        let switched = text_node(&batch, "switched");
+        assert_eq!(native_parent(&c, switched), Some(second));
+        // Gone, then a view of a text: the deeper corner follows.
+        assert!(c.component_event(top, EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        assert_eq!(native_children(&c, second).len(), 1, "the title alone");
+        assert!(c.component_event(top, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let boxed = native_parent(&c, text_node(&batch, "boxed")).expect("placed");
+        assert_eq!(native_parent(&c, boxed), Some(second), "{:?}", batch.items);
+    }
+
+    /// A corner as its view's root, its fill switched by a press on it
+    /// (a text, a view of a text).
+    #[component]
+    fn RootedCorner() -> impl IntoElement {
+        let on = signal(true);
+        let flip = move || on.update(|o| *o = !*o);
+        Corner::element(CornerProps::default()).fill(
+            "corner",
+            dynamic(move || {
+                if on.get() {
+                    text("x").on_press(flip).into_element()
+                } else {
+                    view().on_press(flip).child(text("y")).into_element()
+                }
+            }),
+        )
+    }
+
+    #[test]
+    fn a_component_rooted_in_another_fills_its_slot() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RootedCorner>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        assert_eq!(native_parent(&c, text_node(&batch, "x")), Some(host));
+        assert_eq!(native_children(&c, host).len(), 2);
+        for round in 0..4 {
+            let fill = native_children(&c, host)[1];
+            assert!(c.component_event(fill, EventKind::Press, &EventPayload::None));
+            let batch = c.commit().unwrap();
+            assert_eq!(
+                native_children(&c, host).len(),
+                2,
+                "{round}: {:?}",
+                batch.items
+            );
+        }
+    }
+
+    /// Rows of a list, each with a filled corner, a holder of a text and a
+    /// plaque.
+    #[component]
+    fn FilledRows() -> impl IntoElement {
+        view().flex_1().child(
+            virtual_list(200, move |at| {
+                let i = at.index();
+                view()
+                    .h(px(40.0))
+                    .child(
+                        Corner::element(CornerProps::default())
+                            .fill("corner", text(format!("r{i}"))),
+                    )
+                    .child(
+                        Holder::element(HolderProps {
+                            children: Children::default(),
+                        })
+                        .child(text(format!("h{i}"))),
+                    )
+                    .child(Plaque::element(PlaqueProps {}))
+            })
+            .estimated_item_size(40.0)
+            .flex_1(),
+        )
+    }
+
+    #[test]
+    fn list_rows_with_filled_slots_follow_their_rows() {
+        let mut c = core();
+        c.mount_root(&Root::new::<FilledRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let list = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("a list");
+        let mut shown: std::collections::HashMap<String, NodeId> = Default::default();
+        let record = |b: &MountBatch, shown: &mut std::collections::HashMap<String, NodeId>| {
+            for i in &b.items {
+                if let MountItem::Text { id, text, .. } = i {
+                    shown.retain(|_, v| v != id);
+                    shown.insert(text.text.clone(), *id);
+                }
+            }
+        };
+        record(&batch, &mut shown);
+        let mut sizes = Vec::new();
+        for step in 1..=12u32 {
+            let y = (step as f32 * 900.0) % 7000.0;
+            c.set_scroll_offset(list, 0.0, y, u32::MAX);
+            for _ in 0..3 {
+                if let Some(b) = c.commit() {
+                    record(&b, &mut shown);
+                }
+            }
+            sizes.push((c.nodes.len(), c.components.instances.len()));
+            // Every r<i> shown is in the corner of the row showing h<i>.
+            for (t, &id) in &shown {
+                let Some(n) = t.strip_prefix('r') else {
+                    continue;
+                };
+                if c.key(id).is_err() {
+                    continue;
+                }
+                let Some(corner) = native_parent(&c, id) else {
+                    continue;
+                };
+                let row = native_parent(&c, corner).expect("a corner in a row");
+                if let Some(&h) = shown.get(&format!("h{n}"))
+                    && c.key(h).is_ok()
+                {
+                    let holder = native_parent(&c, h).unwrap();
+                    assert_eq!(native_parent(&c, holder), Some(row), "{step}: {t} and h{n}");
+                }
+            }
+        }
+        assert!(
+            sizes
+                .windows(2)
+                .skip(2)
+                .all(|w| w[0].0.abs_diff(w[1].0) < 40),
+            "{sizes:?}"
+        );
+        assert_eq!(sizes[3].1, sizes[sizes.len() - 1].1, "{sizes:?}");
+    }
+
+    /// A text as its root.
+    #[derive(Default)]
+    struct Lit;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct LitProps {}
+
+    impl Component for Lit {
+        type Props = LitProps;
+        type Event = NoEvent;
+
+        fn view(_: LitProps, _: Scope<NoEvent>) -> impl IntoElement {
+            text("lit").p_1()
+        }
+    }
+
+    /// Gives a lit text an animated opacity, an inline style and insets a
+    /// press changes; and a plaque (rooted in a counter) an inline style.
+    #[derive(Default)]
+    struct Lighting;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct LightingProps {}
+
+    impl Component for Lighting {
+        type Props = LightingProps;
+        type Event = NoEvent;
+
+        fn view(_: LightingProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let v = animated_value(0.5);
+            let wide = signal(false);
+            let red = crate::ui::Style::default().with(
+                crate::StyleKey::BackgroundColor,
+                crate::PatchValue::Str("#ff0000".into()),
+            );
+            view()
+                .on_press(move || wide.update(|w| *w = !*w))
+                .child(
+                    Lit::element(LitProps {})
+                        .bind_opacity(&v)
+                        .inline_style(red.clone())
+                        .inset_padding(move || EdgeInsets::all(if wide.get() { 8.0 } else { 4.0 })),
+                )
+                .child(Plaque::element(PlaqueProps {}).inline_style(red))
+        }
+    }
+
+    #[test]
+    fn what_a_view_gives_a_component_element_goes_on_its_root() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Lighting>(|| LightingProps {}));
+        let batch = c.commit().unwrap();
+        let root = root_host(&batch);
+        let lit = text_node(&batch, "lit");
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::AnimationBindings { id, .. } if *id == lit)),
+            "the opacity is bound on the text: {:?}",
+            batch.items
+        );
+        let red = crate::Color::rgba(0xff, 0, 0, 0xff);
+        assert_eq!(
+            view_style_of(&batch, lit).map(|s| s.background_color),
+            Some(red)
+        );
+        let insets = |c: &Core<FakeEngine>, id| {
+            let key = c.key(id).unwrap();
+            c.nodes[key as usize]
+                .insets
+                .as_deref()
+                .copied()
+                .unwrap_or_default()[0]
+        };
+        assert_eq!(insets(&c, lit), EdgeInsets::all(4.0));
+        // On a rooted component's host too, over the counter's own style.
+        let plaque = native_children(&c, root)[1];
+        assert_eq!(
+            view_style_of(&batch, plaque).map(|s| s.background_color),
+            Some(red)
+        );
+        // A bound inset follows.
+        assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+        c.commit();
+        assert_eq!(insets(&c, lit), EdgeInsets::all(8.0));
+    }
+
+    /// A count its API reads.
+    #[derive(Default)]
+    struct Dial;
+
+    #[derive(Clone, Copy)]
+    struct DialApi {
+        at: crate::ui::Signal<i32>,
+    }
+
+    #[crate::ui::methods]
+    impl DialApi {
+        /// Where it is.
+        fn at(&self) -> i32 {
+            self.at.get_untracked()
+        }
+    }
+
+    impl Component for Dial {
+        type Props = ();
+        type Event = NoEvent;
+        const METHODS: crate::ui::Methods = crate::ui::Methods::of::<DialApi>();
+
+        fn view(_: (), cx: Scope<NoEvent>) -> impl IntoElement {
+            let at = signal(7);
+            cx.methods(DialApi { at });
+            text(move || format!("at {}", at.get()))
+        }
+    }
+
+    thread_local! {
+        static DIAL: Cell<Option<crate::ui::ComponentRef<Dial>>> = const { Cell::new(None) };
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct DialPanelProps {
+        rooted: bool,
+    }
+
+    /// A dial with a ref, as its view's root or inside a view.
+    #[component]
+    fn DialPanel(props: DialPanelProps) -> impl IntoElement {
+        let dial = component_ref::<Dial>();
+        DIAL.with(|d| d.set(Some(dial)));
+        let el = Dial::element(()).component_ref(&dial);
+        if props.rooted {
+            el.into_element()
+        } else {
+            view().child(el).into_element()
+        }
+    }
+
+    #[test]
+    fn the_api_of_a_component_rooted_in_another_is_its_refs() {
+        for rooted in [false, true] {
+            let mut c = core();
+            c.mount_root(&Root::new::<DialPanel>(move || DialPanelProps { rooted }));
+            let _ = c.commit().unwrap();
+            let dial = DIAL.with(Cell::get).unwrap();
+            let _entered = c.components.runtime.enter();
+            let at = dial.api::<DialApi>().map(|api| api.at());
+            assert_eq!(at, Some(7), "rooted: {rooted}");
         }
     }
 
@@ -7678,5 +9214,115 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         EventKind::FileDrop,
     ] {
         assert!(!events.contains(event));
+    }
+}
+
+/// What builders take: listeners without arguments, children in an
+/// `Option`, a `Vec`, an array or an iterator.
+mod builders {
+    use super::*;
+    use crate::ui::{Listener, Root, prelude::*};
+
+    /// The mount items of `C`'s first frame and of the frames after a press
+    /// on each text of `taps`, in order.
+    fn run<C: Component>(
+        props: impl Fn() -> C::Props + Send + Sync + 'static,
+        taps: &[&str],
+    ) -> Vec<String> {
+        let mut c = core();
+        c.mount_root(&Root::new::<C>(props));
+        let mut nodes = std::collections::HashMap::new();
+        let mut out = Vec::new();
+        let mut batch = c.commit().unwrap();
+        for tap in taps.iter().map(Some).chain([None]) {
+            for item in &batch.items {
+                if let MountItem::Text { id, text, .. } = item {
+                    nodes.insert(text.text.clone(), *id);
+                }
+            }
+            out.push(format!("{:?}", batch.items));
+            let Some(tap) = tap else { break };
+            let node = *nodes
+                .get(*tap)
+                .unwrap_or_else(|| panic!("no text {tap:?} in {nodes:?}"));
+            assert!(c.component_event(node, EventKind::Press, &EventPayload::None));
+            batch = c.commit().unwrap_or_default();
+        }
+        out
+    }
+
+    /// A pressable text, through a helper that passes a listener on.
+    fn tap<M>(label: &'static str, on_press: impl IntoListener<(), M>) -> Text {
+        text(label).on_press(on_press)
+    }
+
+    #[component]
+    fn ListenersOfEvents() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .child(text("one").on_press(move |_: &()| n.update(|n| *n += 1)))
+            .child(tap("ten", move |_: &()| n.update(|n| *n += 10)))
+            .child(tap(
+                "hundred",
+                Listener::from(move |_: &()| n.update(|n| *n += 100)),
+            ))
+            .child(input().on_focus(move |_: &()| n.set(0)))
+            .child(text(move || format!("n {}", n.get())))
+    }
+
+    #[component]
+    fn ListenersWithout() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .child(text("one").on_press(move || n.update(|n| *n += 1)))
+            .child(tap("ten", move || n.update(|n| *n += 10)))
+            .child(tap(
+                "hundred",
+                Listener::from(move |_: &()| n.update(|n| *n += 100)),
+            ))
+            .child(input().on_focus(move || n.set(0)))
+            .child(text(move || format!("n {}", n.get())))
+    }
+
+    #[test]
+    fn listeners_of_events_without_data_take_closures_without_arguments() {
+        let taps = ["one", "ten", "hundred", "one"];
+        let of_events = run::<ListenersOfEvents>(|| (), &taps);
+        assert_eq!(run::<ListenersWithout>(|| (), &taps), of_events);
+        assert!(of_events[4].contains("\"n 112\""), "{}", of_events[4]);
+    }
+
+    #[component]
+    fn ChildrenOneByOne() -> impl IntoElement {
+        view()
+            .child(text("a"))
+            .child(text("c"))
+            .child(text("d"))
+            .child(text("e"))
+            .child(text("f"))
+            .child(text("row 0"))
+            .child(text("row 1"))
+            .child(text("x").child("y").child("z"))
+            .child(dynamic(|| vec![text("left"), text("right")]))
+    }
+
+    #[component]
+    fn ChildrenTogether() -> impl IntoElement {
+        view()
+            .child(Some(text("a")))
+            .child(None::<Text>)
+            .child(vec![text("c"), text("d")])
+            .child(["e", "f"].map(text))
+            .child((0..2).map(|i| text(format!("row {i}"))))
+            .child(text("x").child(["y", "z"]))
+            .child(dynamic(|| [text("left"), text("right")]))
+    }
+
+    #[test]
+    fn options_vecs_arrays_and_iterators_are_children() {
+        let one_by_one = run::<ChildrenOneByOne>(|| (), &[]);
+        assert_eq!(run::<ChildrenTogether>(|| (), &[]), one_by_one);
+        assert!(one_by_one[0].contains("\"row 1\""));
+        assert!(one_by_one[0].contains("\"right\""));
     }
 }

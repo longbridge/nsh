@@ -1,10 +1,11 @@
 //! The gpui-shell websocket module contract, on NSH's async VM and policy.
+use std::{cell::Cell, collections::VecDeque, rc::Rc, time::Duration};
+
 use futures_util::{SinkExt, StreamExt};
 use rquickjs::{
     Ctx, Exception, FromJs, Object, Promise, Result, TypedArray, Value,
     function::{Func, Opt},
 };
-use std::{cell::Cell, collections::VecDeque, rc::Rc, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::{
     Message,

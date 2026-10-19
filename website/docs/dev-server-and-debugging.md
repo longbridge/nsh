@@ -204,7 +204,8 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 ```
 
 `nsh build` writes the map as `bundle.js.map`; an embedding app that loads a bundle from a folder reads it from next to
-the bundle, and [signed packages](./signed-packages.md) carry it too.
+the bundle, and [signed packages](./signed-packages.md) carry it too, unless it is kept next to the package and applied
+with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#errors-from-published-packages)).
 
 ## Debugging tips
 

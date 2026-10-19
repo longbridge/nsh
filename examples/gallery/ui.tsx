@@ -1,6 +1,6 @@
 import type { JSX, ScrollProps, ViewStyle } from "nsh";
 import { computed, effect, Scroll, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { colorScheme, Platform, windowSize } from "nsh/device";
 import { keymap } from "nsh/keymap";
 import { Icon, type IconName } from "./icons";
@@ -341,7 +341,7 @@ export function Press(props: {
   hitSlop?: number;
   children: JSX.Element;
 }) {
-  const s = createNativeValue(1);
+  const s = createAnimatedValue(1);
   return (
     <View
       onPress={props.onPress}
@@ -365,7 +365,7 @@ export function Press(props: {
  * (40 ms apart). `flex` lets it wrap a page that fills its parent.
  */
 export function Appear(props: { index?: number; flex?: boolean; children: JSX.Element }) {
-  const t = createNativeValue(0);
+  const t = createAnimatedValue(0);
   t.timing(1, { ...motion.enter, delay: Math.min(8, props.index ?? 0) * 40 });
   return (
     <View style={{ flex: props.flex ? 1 : undefined, opacity: t, transform: [{ translateY: t.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }] }}>
@@ -679,7 +679,7 @@ export function Section(props: { title: string; note?: string; style?: ViewStyle
 
 /** An on / off switch: the knob springs across, the track changes color natively. */
 export function Toggle(props: { value: boolean; onChange: (value: boolean) => void; label?: string }) {
-  const t = createNativeValue(props.value ? 1 : 0);
+  const t = createAnimatedValue(props.value ? 1 : 0);
   let last = props.value;
   return (
     <View
@@ -730,7 +730,7 @@ export function Segmented<T extends string>(props: {
   size?: "small" | "regular";
 }) {
   const width = signal(0);
-  const x = createNativeValue(0);
+  const x = createAnimatedValue(0);
   const index = () => Math.max(0, props.options.findIndex((o) => o.value === props.value));
   const segment = () => (width() - 6) / Math.max(1, props.options.length);
   const height = props.size === "small" ? 32 : 40;

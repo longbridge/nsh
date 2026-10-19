@@ -736,8 +736,21 @@ impl RustApp {
 
     /// Whether `path` is part of the app's Rust code (the sources and
     /// manifest of a crate it builds with, and the files of its `assets/`
-    /// directory: the crate reads them when it builds).
+    /// directory: the crate reads them when it builds), never what its
+    /// builds write (a `target/`, or `CARGO_TARGET_DIR` in a crate's
+    /// directory).
     pub(crate) fn is_rust(&self, path: &Path) -> bool {
+        self.is_rust_in(path, self.target_dir().ok().as_deref())
+    }
+
+    /// [`Self::is_rust`] with the builds in `target`.
+    fn is_rust_in(&self, path: &Path, target: Option<&Path>) -> bool {
+        if let Some(target) = target
+            && (path.starts_with(target)
+                || fs::canonicalize(target).is_ok_and(|t| path.starts_with(t)))
+        {
+            return false;
+        }
         self.watched.iter().any(|dir| {
             let Ok(rest) = path.strip_prefix(dir) else {
                 return false;
@@ -894,9 +907,10 @@ opt-level = 3
         write(
             &ws.join("android/Cargo.toml"),
             &format!(
-                "{}\n[lib]\nname = \"nsh_app\"\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
+                "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-platform-android = {}\nnsh-ui-mobile = {}\n{app}\n",
                 package("android"),
+                self.android_lib(false),
                 src("nsh-core"),
                 src("nsh-platform-android"),
                 src("nsh-ui-mobile"),
@@ -929,11 +943,12 @@ opt-level = 3
             &ws.join("rust-android/Cargo.toml"),
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
-                 [lib]\nname = \"nsh_rust_app\"\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
+                 [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-ui-mobile = {}\n{app}\n\n\
                  [target.'cfg(target_os = \"android\")'.dependencies]\n\
                  nsh-platform-android = {}\n",
                 self.bin("rust-android"),
+                self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-ui-mobile", ""),
                 self.nsh
@@ -1080,6 +1095,15 @@ opt-level = 3
     /// The Rust app's web runtime's library name ([`Self::web_lib`]).
     fn rust_web_lib(&self) -> String {
         self.bin("rust-web").replace('-', "_")
+    }
+
+    /// The library name of the app's Android library (`rust`: a Rust app's
+    /// runner), named after the app as its binaries are, so apps sharing a
+    /// target directory (`CARGO_TARGET_DIR`) never take each other's; it is
+    /// installed as `libnsh.so`.
+    fn android_lib(&self, rust: bool) -> String {
+        self.bin(if rust { "rust-android" } else { "android" })
+            .replace('-', "_")
     }
 
     /// Writes the crate `<ws>/web`: the web runtime (`nsh-platform-web`, a
@@ -1339,15 +1363,12 @@ opt-level = 3
         )
     }
 
-    /// The target directory: the app's own `target` (the workspace is
-    /// `<app>/.nsh/rust`), where its crates build with `cargo` too.
+    /// The target directory: `CARGO_TARGET_DIR` when it is set, as for any
+    /// Cargo build (a directory several checkouts or CI jobs share), else
+    /// the app's own `target` (the workspace is `<app>/.nsh/rust`), where its
+    /// crates build with `cargo` too.
     fn target_dir(&self) -> anyhow::Result<PathBuf> {
-        let app = self
-            .workspace
-            .parent()
-            .and_then(Path::parent)
-            .context("the generated workspace is not in an app's .nsh")?;
-        Ok(app.join("target"))
+        target_dir(&self.workspace, env::var_os("CARGO_TARGET_DIR"))
     }
 
     /// `cargo build`s package `package` of the workspace `workspace` (for
@@ -1553,11 +1574,8 @@ opt-level = 3
             } else {
                 &[]
             };
-            let (package, artifact) = if rust {
-                (self.bin("rust-android"), "libnsh_rust_app.so")
-            } else {
-                (self.bin("android"), "libnsh_app.so")
-            };
+            let package = self.bin(if rust { "rust-android" } else { "android" });
+            let artifact = format!("lib{}.so", self.android_lib(rust));
             let build = Build {
                 workspace: &self.workspace,
                 package: &package,
@@ -1565,7 +1583,7 @@ opt-level = 3
                 release: !dev,
                 profile: None,
                 extra: features,
-                artifact,
+                artifact: &artifact,
                 what: &format!("libnsh.so of {} for {abi}", self.packages()),
             };
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
@@ -1704,6 +1722,28 @@ fn cargo() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
 
+/// The target directory of the generated `workspace` ([`RustApp::target_dir`]):
+/// `cargo_target_dir` (a relative one against the current directory, as Cargo
+/// takes it), else the app's `target`.
+fn target_dir(
+    workspace: &Path,
+    cargo_target_dir: Option<std::ffi::OsString>,
+) -> anyhow::Result<PathBuf> {
+    if let Some(dir) = cargo_target_dir.filter(|d| !d.is_empty()) {
+        let dir = PathBuf::from(dir);
+        return Ok(if dir.is_absolute() {
+            dir
+        } else {
+            env::current_dir()?.join(dir)
+        });
+    }
+    let app = workspace
+        .parent()
+        .and_then(Path::parent)
+        .context("the generated workspace is not in an app's .nsh")?;
+    Ok(app.join("target"))
+}
+
 /// The directory of nsh's crate `name` in the checkout at `source`: the GPUI
 /// backend's crates are a workspace of their own, in `crates/gpui`.
 fn nsh_crate(source: &Path, name: &str) -> PathBuf {
@@ -1778,6 +1818,49 @@ mod tests {
             ("/shared/other.rs", false),
         ] {
             assert_eq!(app.is_rust(Path::new(path)), rust, "{path}");
+        }
+    }
+
+    #[test]
+    fn what_builds_write_in_a_crate_is_not_its_code() {
+        let app = app(
+            Path::new("/app"),
+            &[("app-native", "/app/native".into())],
+            None,
+        );
+        let target = Some(Path::new("/app/native/build-cache"));
+        for (path, rust) in [
+            ("/app/native/src/lib.rs", true),
+            ("/app/native/build-cache/debug/build/out.rs", false),
+            ("/app/native/build-cache/Cargo.toml", false),
+        ] {
+            assert_eq!(app.is_rust_in(Path::new(path), target), rust, "{path}");
+        }
+    }
+
+    #[test]
+    fn android_libraries_are_named_after_the_app() {
+        let lib = |package: &str, file: &str| {
+            let dir = std::env::temp_dir()
+                .join(format!("nsh-rust-android-{package}-{}", std::process::id()));
+            let root = RootConfig {
+                component: "App".into(),
+                theme: None,
+                appearance: None,
+                app_id: None,
+            };
+            let app = app(&dir, &[(package, dir.join("native"))], Some(root));
+            app.write_workspace().unwrap();
+            let manifest = std::fs::read_to_string(app.workspace.join(file)).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            let at = manifest.find("[lib]\nname = ").expect("a [lib]");
+            manifest[at..].lines().nth(1).unwrap().to_owned()
+        };
+        for file in ["android/Cargo.toml", "rust-android/Cargo.toml"] {
+            // Apps sharing CARGO_TARGET_DIR build libraries of their own.
+            let (charts, notes) = (lib("charts", file), lib("notes", file));
+            assert_ne!(charts, notes, "{file}");
+            assert!(charts.contains("charts"), "{file}: {charts}");
         }
     }
 
@@ -2122,6 +2205,18 @@ mod tests {
             "{app_json}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn builds_go_to_cargo_target_dir_else_the_app_s_target() {
+        let ws = Path::new("/apps/charts/.nsh/rust");
+        let app = super::target_dir(ws, None).unwrap();
+        assert_eq!(app, Path::new("/apps/charts/target"));
+        assert_eq!(super::target_dir(ws, Some("".into())).unwrap(), app);
+        let shared = super::target_dir(ws, Some("/cache/target".into())).unwrap();
+        assert_eq!(shared, Path::new("/cache/target"));
+        let relative = super::target_dir(ws, Some("build".into())).unwrap();
+        assert_eq!(relative, std::env::current_dir().unwrap().join("build"));
     }
 
     #[test]

@@ -251,12 +251,54 @@ fn header(bytes: &[u8]) -> Result<(Header, usize, usize), Error> {
 /// Checks only the package signature against its own certificate's key —
 /// for `nsh verify` without a root. Returns the header.
 pub fn verify_signature(bytes: &[u8]) -> Result<Header, Error> {
-    let (header, _, signed) = header(bytes)?;
+    self_signed(bytes).map(|(header, ..)| header)
+}
+
+/// [`verify_signature`], with where the files start and the signed length.
+fn self_signed(bytes: &[u8]) -> Result<(Header, usize, usize), Error> {
+    let (header, data_start, signed) = header(bytes)?;
     let key = header.certificate.claimed_key()?;
     if !key.verify(PACKAGE, &bytes[..signed], &bytes[signed..]) {
         return Err(Error::BadSignature);
     }
-    Ok(header)
+    Ok((header, data_start, signed))
+}
+
+/// The source map in a package, checked against its hash, after checking
+/// only the package signature against its own certificate's key (as
+/// [`verify_signature`]): for tools that map the stacks of errors a package
+/// reported to the app's sources (`nsh symbolicate`).
+pub fn source_map(bytes: &[u8]) -> Result<Option<String>, Error> {
+    let (header, data_start, signed) = self_signed(bytes)?;
+    let Some(file) = header.files.iter().find(|f| f.kind == FileKind::SourceMap) else {
+        return Ok(None);
+    };
+    let data = file_data(bytes, data_start, signed, file)?;
+    String::from_utf8(data.to_vec())
+        .map(Some)
+        .map_err(|_| Error::Format("the source map is not UTF-8".into()))
+}
+
+/// The bytes of `file`, checked against its hash.
+fn file_data<'a>(
+    bytes: &'a [u8],
+    data_start: usize,
+    signed: usize,
+    file: &FileEntry,
+) -> Result<&'a [u8], Error> {
+    let begin = data_start
+        .checked_add(file.offset as usize)
+        .filter(|&b| b <= signed)
+        .ok_or_else(|| Error::Format(format!("file `{}` out of range", file.path)))?;
+    let end = begin
+        .checked_add(file.size as usize)
+        .filter(|&e| e <= signed)
+        .ok_or_else(|| Error::Format(format!("file `{}` out of range", file.path)))?;
+    let data = &bytes[begin..end];
+    if hex(&Sha256::digest(data)) != file.sha256 {
+        return Err(Error::Integrity(file.path.clone()));
+    }
+    Ok(data)
 }
 
 impl Header {
@@ -317,18 +359,7 @@ pub(crate) fn open(
     };
     let mut seen_source = false;
     for file in &header.files {
-        let begin = data_start
-            .checked_add(file.offset as usize)
-            .filter(|&b| b <= signed)
-            .ok_or_else(|| Error::Format(format!("file `{}` out of range", file.path)))?;
-        let end = begin
-            .checked_add(file.size as usize)
-            .filter(|&e| e <= signed)
-            .ok_or_else(|| Error::Format(format!("file `{}` out of range", file.path)))?;
-        let data = &bytes[begin..end];
-        if hex(&Sha256::digest(data)) != file.sha256 {
-            return Err(Error::Integrity(file.path.clone()));
-        }
+        let data = file_data(bytes, data_start, signed, file)?;
         match file.kind {
             FileKind::Source => {
                 package.source = String::from_utf8(data.to_vec())

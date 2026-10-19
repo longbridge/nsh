@@ -25,7 +25,7 @@ const ROW: f32 = 28.0;
 
 /// The newest trades (`shown`), drawn `width` wide with prices of
 /// `decimals`, slid down by `offset`.
-fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &NativeValue) -> Painter {
+fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &AnimatedValue) -> Painter {
     let height = SHOWN as f32 * ROW;
     let mut p = Painter::new()
         .save()
@@ -100,9 +100,8 @@ pub(crate) fn Tape(props: StockProps) -> impl IntoElement {
         quarter.get();
         market.borrow().tape.clone()
     });
-    let offset = native_value(0.0);
+    let offset = animated_value(0.0);
     {
-        let offset = offset.clone();
         // The newest trade shown so far (-1: none yet).
         let top = stored(-1_i64);
         effect(move || {

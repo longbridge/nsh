@@ -26,7 +26,10 @@ fn wait(host: &Host, expression: &str) {
 }
 #[test]
 fn tcp_permissions_never_inherit_http_grants() {
-    let a = access(serde_json::json!({"network":{"http":[{"host":"127.0.0.1"}]}}));
+    let a = access(
+        serde_json::json!({"network":{"http":[{"host":"127.0.0.1","methods":["GET"],"paths":["/"]}]}}),
+    );
+    assert!(a.allows_http("GET", "https://127.0.0.1/"));
     assert!(!a.allows_socket("127.0.0.1", 1234));
     let mut a = access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}}));
     assert!(a.allows_socket("127.0.0.1", 1234));

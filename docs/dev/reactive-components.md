@@ -239,8 +239,8 @@ view().w(move || px(width.get()))
 - Styles that depend on app state: `.style_when(selected, |s| s.bg(theme.accent))` takes a reactive condition,
   lowers the extra layer once, and the binding switches it on and off. Native states (`.active`, `.hover`, `.dark`,
   `group_*`) stay native and need no binding, as today.
-- `NativeValue` animation bindings (`bind_opacity`, `bind_translate_y`, ...) stay: they are bindings already, evaluated
-  on the UI thread. A plain signal is for values the app computes; a native value for values the UI thread drives.
+- `AnimatedValue` animation bindings (`bind_opacity`, `bind_translate_y`, ...) stay: they are bindings already, evaluated
+  on the UI thread. A plain signal is for values the app computes; an animated value for values the UI thread drives.
 
 ### Control flow
 
@@ -313,7 +313,7 @@ bindings, and pushes `Op`s into a queue the core applies, exactly as JS's ops ar
 
 What leaves the core: `render_components`, `MAX_RENDERS`, `Expanded`, `reconcile_children` / `reconcile_node` /
 `reconcile_raw`, `Attrs::changes`, `ListConfig::changes`, per-render handler tables, `RenderReads` and the scans for
-readers of the environment, globals and context, `NativeNode::derive`'s de-duplication (it existed because renders ran
+readers of the environment, globals and context, `AnimatedNode::derive`'s de-duplication (it existed because renders ran
 again), the "absent means default" resets. What stays: host nodes, odd ids, prop decoding, event routing, slots and
 children holders, the JS glue, the declarations.
 

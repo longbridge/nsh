@@ -421,6 +421,11 @@ function webBridge(token) {
 })();`;
 }
 
+/// Measurements between dropping the measuring context (see `measure_text`):
+/// 5000 ≈ 4 seconds for a table that measures on every frame, which holds
+/// Blink's shape cache around 5 MB.
+const MEASURE_ROUNDS = 5000;
+
 function measureContext() {
   const canvas = typeof OffscreenCanvas !== "undefined"
     ? new OffscreenCanvas(1, 1)
@@ -474,6 +479,7 @@ class Player {
     this.timer = 0;
     this.frame = 0;
     this.measure = measureContext();
+    this.measureUses = 0;
     this.metricsCache = new Map();
     this.layoutAnimation = null;
     // Views created and removed while a layout animation is configured.
@@ -500,6 +506,18 @@ class Player {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
         measure_text: (fp, fl, tp, tl) => {
+          // Blink keeps every shaped string in the measuring context's
+          // PlainTextPainter (a FrameShapeCache keyed by font), and drops it
+          // only under critical memory pressure: an app that measures strings
+          // it has not measured before — a price table measuring the numbers
+          // that changed, every frame — piles up `blink::PlainTextNode`s
+          // without bound (25 MB in 20s, 52 MB in 6 minutes for a 40-row
+          // table). A context is cheap, and a fresh one starts empty; the old
+          // one, its painter and its cache become unreachable and go.
+          if (++this.measureUses >= MEASURE_ROUNDS) {
+            this.measureUses = 0;
+            this.measure = measureContext();
+          }
           this.measure.font = this.str(fp, fl);
           return this.measure.measureText(this.str(tp, tl)).width;
         },
@@ -3827,7 +3845,7 @@ class Player {
     return true;
   }
 
-  /** Ctrl + wheel pinches the view under the pointer (native values),
+  /** Ctrl + wheel pinches the view under the pointer (animated values),
    * ending when the wheel stops for 150 ms. */
   wheelPinch(e) {
     let t = this.wheelPinchState;

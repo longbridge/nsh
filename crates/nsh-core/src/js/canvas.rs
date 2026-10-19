@@ -90,7 +90,7 @@ pub fn decode<L: HostList<Item: HostInput>>(
     Ok(drawing)
 }
 
-/// A constant, or a native value the canvas reads while it draws (a slot
+/// A constant, or an animated value the canvas reads while it draws (a slot
 /// of the drawing); anything else is 0.
 impl OpArg<Drawing> for Num {
     #[inline]
@@ -102,7 +102,7 @@ impl OpArg<Drawing> for Num {
         if let Some(n) = v.as_number() {
             return Ok(Some(Num::Const(n as f32)));
         }
-        Ok(Some(match v.native_node() {
+        Ok(Some(match v.animated_node() {
             Some(node) => Num::Slot(drawing.slot(node)),
             None => Num::Const(0.0),
         }))
@@ -144,7 +144,7 @@ impl OpArg<Drawing> for Option<Path> {
     }
 }
 
-/// A color, a native value interpolating colors, or a gradient
+/// A color, an animated value interpolating colors, or a gradient
 /// (`[kind, ...geometry, [offset, color, ...]]`); anything else drops the
 /// operation.
 impl OpArg<Drawing> for Paint {
@@ -156,7 +156,7 @@ impl OpArg<Drawing> for Paint {
         if let Some(s) = v.as_string() {
             return Ok(Color::parse(&s).map(Paint::Color));
         }
-        if let Some(node) = v.native_node() {
+        if let Some(node) = v.animated_node() {
             return Ok(Some(Paint::Slot(drawing.slot(node))));
         }
         let Some(list) = v.as_list() else {
@@ -332,9 +332,9 @@ pub fn declarations() -> String {
     CanvasOp::methods(&mut types, &mut context);
     CanvasOp::properties(&mut types, &mut properties);
     let mut out = String::from(
-        "/** A number in a drawing: a constant, or a native value the canvas reads\n \
+        "/** A number in a drawing: a constant, or an animated value the canvas reads\n \
          * while it draws (its animations redraw natively, without JS). */\n\
-         export type CanvasNumber = number | NativeNode;\n",
+         export type CanvasNumber = number | AnimatedNode;\n",
     );
     for declaration in types.declarations() {
         let _ = write!(out, "\n{declaration}\n");

@@ -1064,16 +1064,16 @@ style_keys! {
     BorderTopEndRadius = "borderTopEndRadius": View "number",
     BorderBottomEndRadius = "borderBottomEndRadius": View "number",
     BorderBottomStartRadius = "borderBottomStartRadius": View "number",
-    BackgroundColor = "backgroundColor": View "ColorValue | NativeNode",
+    BackgroundColor = "backgroundColor": View "ColorValue | AnimatedNode",
     BorderRadius = "borderRadius": View "number",
     BorderTopLeftRadius = "borderTopLeftRadius": View "number",
     BorderTopRightRadius = "borderTopRightRadius": View "number",
     BorderBottomRightRadius = "borderBottomRightRadius": View "number",
     BorderBottomLeftRadius = "borderBottomLeftRadius": View "number",
-    ShadowColor = "shadowColor": View "ColorValue | NativeNode",
-    ShadowOpacity = "shadowOpacity": View "number | NativeNode",
-    ShadowRadius = "shadowRadius": View "number | NativeNode",
-    BorderColor = "borderColor": View "ColorValue | NativeNode",
+    ShadowColor = "shadowColor": View "ColorValue | AnimatedNode",
+    ShadowOpacity = "shadowOpacity": View "number | AnimatedNode",
+    ShadowRadius = "shadowRadius": View "number | AnimatedNode",
+    BorderColor = "borderColor": View "ColorValue | AnimatedNode",
     BorderTopColor = "borderTopColor": View "ColorValue",
     BorderRightColor = "borderRightColor": View "ColorValue",
     BorderBottomColor = "borderBottomColor": View "ColorValue",
@@ -1083,9 +1083,9 @@ style_keys! {
     TintColor = "tintColor": Image "ColorValue" "Recolors a template image.",
     BackfaceVisibility = "backfaceVisibility": View "\"visible\" | \"hidden\"" "`\"hidden\"`: invisible while turned away (3D rotations).",
     TransformOrigin = "transformOrigin": View "string | (number | string)[]" "The point `transform` acts around: keywords, percentages and lengths (\"top left\", \"50% 0\", `[10, 20]`). Default the center.",
-    Opacity = "opacity": View "number | NativeNode",
+    Opacity = "opacity": View "number | AnimatedNode",
     Overflow = "overflow": View "\"visible\" | \"hidden\"",
-    Color = "color": Text "ColorValue | NativeNode",
+    Color = "color": Text "ColorValue | AnimatedNode",
     FontSize = "fontSize": Text "number",
     FontWeight = "fontWeight": Text "\"normal\" | \"bold\" | number | `${number}`" "`\"normal\"` (400), `\"bold\"` (700) or 100–900.",
     LineHeight = "lineHeight": Text "number",
@@ -1154,7 +1154,7 @@ pub enum StyleDecl {
     /// Starts the `transform` list over: a `transform` replaces the
     /// transforms set before it (by classes).
     ClearTransform,
-    /// Appends a `transform` entry, driven by a native value when given
+    /// Appends a `transform` entry, driven by an animated value when given
     /// (the amount is then the identity until it is bound).
     Transform(TransformKind, f32, Option<nsh_animation::NodeId>),
     /// `shadowOffset`; `None` restores the default.
