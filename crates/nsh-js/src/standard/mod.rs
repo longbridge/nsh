@@ -46,9 +46,8 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
 type Init = fn(&Ctx<'_>) -> Result<()>;
 
 /// The standard globals made on first use: an app that never touches
-/// `process`, `crypto` or `WebSocket` pays nothing for them when its VM
-/// starts (`process` and `WebSocket` evaluate JS facades, about 190 µs
-/// each in a release build). Each name is an accessor until then; reading
+/// `process` or `crypto` pays nothing for them when its VM starts. Each
+/// name is an accessor until then; reading
 /// or assigning any name of a group installs the whole group, which
 /// replaces the accessors with plain data properties.
 const LAZY: &[(&[&str], Init)] = &[
@@ -57,8 +56,6 @@ const LAZY: &[(&[&str], Init)] = &[
         &["crypto", "Crypto", "SubtleCrypto", "CryptoKey"],
         init_crypto,
     ),
-    #[cfg(not(target_arch = "wasm32"))]
-    (&["WebSocket"], websocket::init),
 ];
 
 /// Installs `Buffer` and the lazy standard globals. `Buffer` is made now
@@ -246,14 +243,15 @@ mod tests {
             host.eval_script(
                 "lazy",
                 r#"const lazy = name => typeof Object.getOwnPropertyDescriptor(globalThis, name).get === 'function';
-                const names = ['process', 'crypto', 'Crypto', 'SubtleCrypto', 'CryptoKey', 'WebSocket'];
+                const names = ['process', 'crypto', 'Crypto', 'SubtleCrypto', 'CryptoKey'];
                 const web = [URL, Blob, File, TextEncoder, EventTarget, ReadableStream, AbortController];
                 const before = names.every(lazy) && !('__nshWebSocketConnect' in globalThis);
                 const buffer = Buffer.from('hi').toString('base64') === 'aGk=';
-                const proc = typeof process.nextTick === 'function' && !lazy('process') && lazy('crypto') && lazy('WebSocket');
+                const proc = typeof process.nextTick === 'function' && !lazy('process') && lazy('crypto');
                 const crypto = globalThis.crypto.randomBytes(4).length === 4
                     && CryptoKey === globalThis.CryptoKey && !lazy('CryptoKey');
-                const socket = typeof WebSocket === 'function' && WebSocket.OPEN === 1 && !lazy('WebSocket');
+                const socket = typeof WebSocket === 'function' && WebSocket.OPEN === 1
+                    && Object.getPrototypeOf(WebSocket.prototype) === EventTarget.prototype;
                 const same = [URL, Blob, File, TextEncoder, EventTarget, ReadableStream, AbortController]
                     .every((value, i) => value === web[i]);
                 before && buffer && proc && crypto && socket && same

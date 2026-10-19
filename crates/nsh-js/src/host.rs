@@ -1270,9 +1270,7 @@ mod tests {
     /// bytecode and the standard modules and globals are native. Its
     /// runtime cannot compile source at all (`bytecode-only`), so a setup
     /// step or first use that needs QuickJS' parser would stop every
-    /// published app from starting. The global `WebSocket` is left out: the
-    /// web build has none, and native hosts, which compile its facade, have
-    /// the parser.
+    /// published app from starting.
     #[test]
     fn bytecode_only_vms_start_and_use_the_standard_apis_without_source() {
         let imports: String = crate::standard::NAMES
@@ -1289,6 +1287,9 @@ mod tests {
             if (typeof process.platform !== "string" || typeof process.nextTick !== "function") throw Error("process");
             if (typeof process.run !== "function" || typeof process.env !== "object") throw Error("process");
             if (new URL("https://a.b/c").pathname !== "/c") throw Error("URL");
+            const socket = new WebSocket("ws://127.0.0.1:9/");
+            if (!(socket instanceof EventTarget) || socket.readyState !== WebSocket.CONNECTING) throw Error("WebSocket");
+            socket.close();
             text("started");
             "#,
             modules = (0..crate::standard::NAMES.len())

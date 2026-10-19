@@ -23,6 +23,8 @@ mod intl;
 mod iterator;
 mod streams;
 mod url;
+#[cfg(not(target_arch = "wasm32"))]
+mod websocket;
 
 use std::{
     any::Any,
@@ -89,6 +91,9 @@ pub(crate) enum Class {
     Headers,
     Request,
     Response,
+    /// Not on the web: its transport is native hosts' (`standard/websocket.rs`).
+    #[cfg(not(target_arch = "wasm32"))]
+    WebSocket,
     NumberFormat,
     DateTimeFormat,
 }
@@ -164,6 +169,8 @@ fn specs() -> impl Iterator<Item = &'static Spec> {
         encoding::SPECS,
         blob::SPECS,
         fetch::SPECS,
+        #[cfg(not(target_arch = "wasm32"))]
+        websocket::SPECS,
         intl::SPECS,
     ]
     .into_iter()
@@ -208,6 +215,8 @@ pub(crate) const TYPES: &[&str] = &[
     streams::writable::TYPES,
     streams::transform::TYPES,
     fetch::TYPES,
+    #[cfg(not(target_arch = "wasm32"))]
+    websocket::TYPES,
 ];
 
 /// The per-context state: the classes and the prototypes.

@@ -2,8 +2,8 @@
 //! (The `websocket` module's `WebSocket.connect` is the runtime's Rust
 //! registry, `nsh_core::runtime`; both count under one per-VM cap.)
 //!
-//! The small JS facade inherits NSH's EventTarget; it does not replace any web
-//! primitive. Transport futures are owned by QuickJS and disappear with the VM.
+//! The class itself is native, an `EventTarget` (`web/websocket.rs`).
+//! Transport futures are owned by QuickJS and disappear with the VM.
 use std::{cell::Cell, rc::Rc};
 
 use futures_util::{SinkExt, StreamExt};
@@ -46,32 +46,44 @@ enum Command {
     Close(Option<CloseFrame>),
 }
 
-/// Makes the global constructor, on the first use of `WebSocket`
-/// (`standard::LAZY`). The facade receives the native transport as an
-/// argument, so no other global is defined.
-pub(crate) fn init(ctx: &Ctx<'_>) -> Result<()> {
-    if super::take_lazy(ctx, "WebSocket")? {
-        // Its transports do I/O on the VM's tokio runtime.
-        if let Some(scheduler) = crate::dom::shared(ctx.as_raw().as_ptr())
-            .scheduler
-            .upgrade()
-        {
-            scheduler.start_io().map_err(|e| {
-                Exception::throw_message(ctx, &format!("cannot start WebSocket I/O: {e}"))
-            })?;
-        }
-        let make: Function = ctx.eval(FACADE)?;
-        let constructor: Value = make.call((Func::from(connect),))?;
-        ctx.globals().set("WebSocket", constructor)?;
+/// Opens the transport of the global `WebSocket` (`web/websocket.rs`):
+/// `callback(kind, data)` hears `open` (`{ protocol }`), `message`,
+/// `error` (its message) and `close` (`{ code, reason, wasClean }`). The
+/// URL is checked here, against the app's capabilities. Its `send`,
+/// `close` and `bufferedAmount` object, or the pending exception.
+pub(crate) fn connect(
+    ctx: crate::web::js::Ctx,
+    url: String,
+    protocols: Vec<String>,
+    callback: crate::web::js::V,
+) -> crate::web::js::R<crate::web::js::V> {
+    // SAFETY: a live context, borrowed for this call.
+    let rq = unsafe { Ctx::from_raw(std::ptr::NonNull::new(ctx).expect("a live context")) };
+    // SAFETY: the value takes the callback's reference.
+    let callback = unsafe { Value::from_raw(rq.clone(), callback.take()) };
+    let callback = callback
+        .into_function()
+        .ok_or(crate::web::js::Throw)
+        .inspect_err(|_| {
+            crate::web::js::type_error(ctx, "WebSocket callback is not a function");
+        })?;
+    // Its transports do I/O on the VM's tokio runtime.
+    if let Some(scheduler) = crate::dom::shared(ctx).scheduler.upgrade() {
+        scheduler.start_io().map_err(|e| {
+            crate::web::js::type_error(ctx, &format!("cannot start WebSocket I/O: {e}"))
+        })?;
     }
-    Ok(())
+    match open(rq, url, protocols, callback) {
+        Ok(handle) => Ok(crate::web::js::V::dup(ctx, handle.as_raw())),
+        Err(_) => Err(crate::web::js::Throw),
+    }
 }
 
 fn emit<'js>(callback: &Function<'js>, kind: &str, data: Value<'js>) -> Result<()> {
     callback.call((kind, data))
 }
 
-fn connect<'js>(
+fn open<'js>(
     ctx: Ctx<'js>,
     url: String,
     protocols: Vec<String>,
@@ -299,108 +311,6 @@ fn closed<'js>(
     emit(callback, "close", data.into_value())
 }
 
-const FACADE: &str = r#"((connect) => {
-class WebSocket extends EventTarget {
-  #handle; #state = 0; #protocol = ''; #url; #binaryType = 'blob'; #handlers = {};
-  constructor(url, protocols = []) {
-    super();
-    if (typeof protocols === 'string') protocols = [protocols];
-    if (!Array.isArray(protocols)) throw new TypeError('protocols must be a string or string array');
-    protocols = protocols.map(String);
-    if (new Set(protocols).size !== protocols.length || protocols.some(p => !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(p))) throw new SyntaxError('Invalid or duplicate WebSocket protocol');
-    this.#url = new URL(String(url)).href;
-    this.#handle = connect(this.#url, protocols, (kind, data) => {
-      if (kind === 'open') {
-        if (this.#state === 2) { this.#handle.close(1000, ''); return; }
-        this.#state = 1; this.#protocol = data.protocol;
-      }
-      if (kind === 'close') this.#state = 3;
-      const event = new Event(kind);
-      if (kind === 'message') Object.defineProperty(event, 'data', { value: typeof data === 'string' || this.#binaryType === 'arraybuffer' ? data : new Blob([data]) });
-      if (kind === 'close') for (const key of ['code', 'reason', 'wasClean']) Object.defineProperty(event, key, { value: data[key] });
-      if (kind === 'error') Object.defineProperty(event, 'message', { value: data });
-      this.dispatchEvent(event);
-    });
-  }
-  #setHandler(kind, value) {
-    const entry = this.#handlers[kind];
-    if (typeof value !== 'function') {
-      if (entry) this.removeEventListener(kind, entry.listener);
-      delete this.#handlers[kind];
-    } else if (entry) entry.value = value;
-    else {
-      const next = { value, listener: event => next.value.call(this, event) };
-      this.#handlers[kind] = next;
-      this.addEventListener(kind, next.listener);
-    }
-  }
-  get onopen() { return this.#handlers.open?.value ?? null; }
-  set onopen(value) { this.#setHandler('open', value); }
-  get onmessage() { return this.#handlers.message?.value ?? null; }
-  set onmessage(value) { this.#setHandler('message', value); }
-  get onerror() { return this.#handlers.error?.value ?? null; }
-  set onerror(value) { this.#setHandler('error', value); }
-  get onclose() { return this.#handlers.close?.value ?? null; }
-  set onclose(value) { this.#setHandler('close', value); }
-  get url() { return this.#url; }
-  get readyState() { return this.#state; }
-  get protocol() { return this.#protocol; }
-  get extensions() { return ''; }
-  get bufferedAmount() { return this.#handle.bufferedAmount(); }
-  get binaryType() { return this.#binaryType; }
-  set binaryType(value) { if (value === 'blob' || value === 'arraybuffer') this.#binaryType = value; }
-  send(data) {
-    if (this.#state === 0) throw new DOMException('WebSocket is connecting', 'InvalidStateError');
-    if (this.#state !== 1) return;
-    this.#handle.send(data);
-  }
-  close(code = 1000, reason = '') {
-    code = Number(code); reason = String(reason);
-    if (!Number.isInteger(code) || (code !== 1000 && (code < 3000 || code > 4999))) throw new DOMException('Invalid close code', 'InvalidAccessError');
-    if (new TextEncoder().encode(reason).length > 123) throw new SyntaxError('Close reason exceeds 123 bytes');
-    if (this.#state >= 2) return;
-    this.#handle.close(code, reason);
-    this.#state = 2;
-  }
-}
-for (const [key, value] of Object.entries({ CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 })) {
-  Object.defineProperty(WebSocket, key, { value });
-  Object.defineProperty(WebSocket.prototype, key, { value });
-}
-return WebSocket;
-})"#;
-
 #[cfg(test)]
 #[path = "websocket_fixture.rs"]
 mod tests;
-
-/// Global facade declarations. Message and close payloads are native Event objects.
-pub(crate) const GLOBALS: &str = r#"
-interface WebSocketMessageEvent extends Event { readonly data: string | Blob | ArrayBuffer; }
-interface WebSocketCloseEvent extends Event { readonly code: number; readonly reason: string; readonly wasClean: boolean; }
-interface WebSocketErrorEvent extends Event { readonly message: string; }
-declare class WebSocket extends EventTarget {
-  constructor(url: string, protocols?: string | string[]);
-  static readonly CONNECTING: 0;
-  static readonly OPEN: 1;
-  static readonly CLOSING: 2;
-  static readonly CLOSED: 3;
-  readonly CONNECTING: 0;
-  readonly OPEN: 1;
-  readonly CLOSING: 2;
-  readonly CLOSED: 3;
-  readonly url: string;
-  readonly readyState: number;
-  readonly protocol: string;
-  readonly extensions: string;
-  readonly bufferedAmount: number;
-  binaryType: 'blob' | 'arraybuffer';
-  onopen: ((event: Event) => void) | null;
-  onmessage: ((event: WebSocketMessageEvent) => void) | null;
-  onerror: ((event: WebSocketErrorEvent) => void) | null;
-  onclose: ((event: WebSocketCloseEvent) => void) | null;
-  send(data: string | Blob | ArrayBuffer | ArrayBufferView): void;
-  close(code?: number, reason?: string): void;
-}
-type NSHWebSocketConstructor = typeof WebSocket;
-"#;
