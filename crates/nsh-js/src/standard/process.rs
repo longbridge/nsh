@@ -392,7 +392,10 @@ mod tests {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let root = std::env::var_os("TMPDIR")
             .map(std::path::PathBuf::from)
-            .expect("tests must provide TMPDIR outside /tmp");
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+                    .join(".cache/nsh-benchs-test-tmp")
+            });
         assert!(!root.starts_with("/tmp"));
         // The default cwd: created by the first child, as an app's data directory is.
         let data = root.join(format!(
@@ -611,7 +614,10 @@ mod tests {
     fn cwd_defaults_to_the_data_directory_and_needs_a_write_grant() {
         let root = std::env::var_os("TMPDIR")
             .map(std::path::PathBuf::from)
-            .unwrap();
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+                    .join(".cache/nsh-benchs-test-tmp")
+            });
         let readable = root.join(format!("standard-process-readable-{}", std::process::id()));
         std::fs::create_dir_all(&readable).unwrap();
         let host = checked_host_with(serde_json::json!({
