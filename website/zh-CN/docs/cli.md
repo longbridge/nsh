@@ -52,23 +52,29 @@ warn iOS Simulator: image failed: An SSL error has occurred and a secure connect
 ## nsh init
 
 ```sh
-nsh init [DIR] [--name <NAME>] [--rust [--nsh-source <DIR>]]
+nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 ```
 
-默认在 `DIR`（默认为当前目录，不存在时会创建）中创建 TSX 应用：`App.tsx`、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。
+按模板在 `DIR`（默认为当前目录，不存在时会创建）中创建应用。不带 `--template` 时，`nsh init` 在终端中会询问使用哪个模板（直接回车选择 `ts`），在其他环境（脚本、CI）中使用 `ts`。
+
+| 模板 | 创建的内容 |
+|---|---|
+| `ts` | TSX 应用：`App.tsx`、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
+| `rust` | 用 Rust 编写的应用：一个 Cargo 项目（`Cargo.toml`、包含根组件的 `src/lib.rs`、供 `cargo run` 使用的 `src/main.rs`），设置了 `"rust": "."` 和 `"root": "App"` 的 `nsh.json`、`.gitignore` 和 README（其中也说明了之后如何添加 TSX 入口）。`nsh run`、`nsh trace` 和 `nsh package` 在所有目标（包括浏览器）上挂载根组件，不使用 QuickJS（见[用 Rust 开发](./rust.md)）；`cargo run` 直接在 macOS、Windows 或 Linux 上启动它。 |
+| `mixed` | 带有自己 Rust crate 的 TSX 应用：`App.tsx`、`tsconfig.json`、设置了 `"rust": "native"` 的 `nsh.json`、`.gitignore`、`.nsh/types`、README，以及 `native/` 中的 crate，它的 `#[native_module("<name>/native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用。 |
 
 | 参数 | 说明 |
 |---|---|
-| `--name <NAME>` | 写入 `nsh.json` 的显示名称。默认为目录名。id 会是 `com.example.<name>`（只保留字母和数字，转为小写）。 |
-| `--rust` | 创建 Cargo 项目，提供原生 Rust 入口（`cargo run`）和共享 Rust 组件的 TSX 入口。需要 Rust 工具链及原生桌面后端的开发库。 |
-| `--nsh-source <DIR>` | 与 `--rust` 一起使用：项目按路径依赖 `DIR` 中 NSH 源码仓库的 crate，基于 NSH 源码构建应用。 |
+| `--name <NAME>` | 写入 `nsh.json` 的显示名称。默认为目录名。id 会是 `com.example.<name>`（只保留字母和数字，转为小写），crate 的导入说明符是 `<name>/native`（小写，单词以 `-` 连接）。 |
+| `--template <TEMPLATE>` | `ts`、`rust` 或 `mixed`（见上表）。`rust` 和 `mixed` 需要 Rust 工具链；`cargo run` 还需要原生桌面后端的开发库。 |
+| `--nsh-source <DIR>` | 与 `rust` 或 `mixed` 一起使用：crate 按路径依赖 `DIR` 中 NSH 源码仓库的 crate，基于 NSH 源码构建应用。 |
 
-使用 `--rust` 时还会生成 `Cargo.toml`、`src/main.rs` 、`src/lib.rs` 和 README，并在 `nsh.json` 中设置 `"rust": "."` 和 `"root": "App"`。在 macOS、Windows 或 Linux 上通过 `cargo run` 运行 Rust 入口；`nsh run` 和 `nsh package` 会在所有目标（包括浏览器）上直接挂载 Rust 根组件，不使用 QuickJS（见[用 Rust 开发](./rust.md)）；`nsh run App.tsx` 运行 TSX 入口。项目依赖 crates.io 上与 CLI 同版本的 NSH crate（使用 `--nsh-source` 时依赖该源码仓库中的 crate），`nsh` 命令用同样的 crate 构建应用的运行器。请在新的应用目录中创建 Rust 项目；已有的 Cargo 清单、Rust 入口文件、`App.tsx` 或 `nsh.json` 会在写入应用文件之前报告为冲突。
+`rust` 和 `mixed` 的 crate 依赖 crates.io 上与 CLI 同版本的 NSH crate（使用 `--nsh-source` 时依赖该源码仓库中的 crate），`nsh` 命令用同样的 crate 构建应用的运行器和宿主。请在新的应用目录中创建它们：只要其中任何一个文件已存在，就会在写入之前报告为冲突。
 
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--trace] [--fps]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>] [--script <STEPS>]
 ```
 
 启动开发服务器（同 `nsh dev`），启动一个从它加载应用的开发宿主，并在每次保存时重新构建。热模块替换会就地修补正在运行的应用；应用的日志和错误会打印在终端里。用 Ctrl-C 停止（或关闭 Catalyst、macOS、Linux、Windows 或 GPUI 窗口）。
@@ -83,6 +89,9 @@ Rust 应用（`nsh.json` 中有 `"root"`，见[用 Rust 开发](./rust.md)）运
 | `--release` | | 压缩代码并去掉调试信息。release 包没有热模块替换：每次保存都会重新加载应用。 |
 | `--trace` | | 宿主把每次 commit 的耗时（JS、布局、挂载项）记录到终端。 |
 | `--fps` | | 在应用上方显示性能监视器：帧率、每帧和每次 commit 的开销、CPU、GPU 和内存（[macOS](./macos.md#性能监视器)；目前仅限 `--target macos`）。 |
+| `--name <NAME>` | `nsh.json` 的 name | 菜单栏中的应用显示名称及初始窗口标题（`--target macos`，TSX 入口）。 |
+| `--window-size <WIDTHxHEIGHT>` | 宿主默认值 | 初始窗口尺寸，单位为点，例如 `800x600`（`--target macos`，TSX 入口）。 |
+| `--script <STEPS>` | | 执行以分号分隔的自动化步骤，例如 `"wait 800; shot a.png; quit"`（`--target macos`，TSX 入口）。纯截图脚本在后台启动；脚本中的按下操作会按需激活应用。 |
 
 使用 `--target android` 时，会选用 `adb devices` 列出的第一台设备；开发服务器的端口通过 `adb reverse` 转发到设备上。参见[快速开始](./getting-started.md)和[开发服务器与调试](./dev-server-and-debugging.md)。
 
@@ -110,7 +119,7 @@ nsh dev [ENTRY] [--port <PORT>] [--release]
 nsh trace [ENTRY] [--taps <N>] [--idle-ms <MS>] [--scroll <POINTS>] [--width <W>] [--height <H>] [--data-dir <DIR>] [--os <OS>]
 ```
 
-以无界面方式运行应用：在 CLI 自己的进程里，使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。
+以无界面方式运行应用：在 CLI 自己的进程里，使用与设备上相同的 core 和运行时，只是没有视图；它会打印每条挂载指令（create、insert、style、frame、text）和每次 commit 的耗时。之后它会点击第一个可按压的视图，并打印每次点击带来的变化。可以用它检查应用能否无错误地启动、统计一次交互引起的工作量，也可以在 CI 中使用（[测试与 trace](./testing-and-trace.md)）。Rust 应用（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）也以同样方式 trace：挂载它的根组件，没有 bundle。
 
 ```text
 ✓ bundled App.tsx (3255 B in 12.6 ms)
@@ -140,7 +149,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。
+打包应用并编译为 QuickJS 字节码，供嵌入 NSH、自行分发 bundle 的应用使用。对 Rust 应用（`nsh.json` 的 `"root"`），它构建应用的 crate，并写出 `app.json` 和这些 crate 附带的文件（`assets/`）：它的运行器挂载根组件，因此没有 bundle。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|

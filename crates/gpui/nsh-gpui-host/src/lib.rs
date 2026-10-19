@@ -8,7 +8,7 @@
 //! - `--script "wait 800; shot a.png; tap 100 200; quit"` runs steps once
 //!   the window shows: screenshots and simulated input (on Linux under
 //!   X11, which shots need).
-//! - `--size 1200x800` sets the window size.
+//! - `--window-size 1200x800` sets the window size.
 //! - `--fps` logs frame statistics once a second (`nsh::perf fps …`).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
@@ -64,7 +64,7 @@ pub fn main() -> std::process::ExitCode {
             }
             "--fps" => options.fps = true,
             "--script" => options.script = args.next(),
-            "--size" => {
+            "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));
                 }

@@ -4,7 +4,8 @@ Status: implemented (`nsh_core::ui` `class.rs`, `callback.rs`, `call.rs`, `js.rs
 `nsh-js` `classes.rs`, `components.rs`); "Implementation notes" at the end says where it differs from the
 proposal.
 
-An app's Rust crate (`nsh.json` `"rust"`) exports components, modules (`#[module]`: functions) and classes. This
+An app's Rust crate (`nsh.json` `"rust"`) exports components, modules (`#[module]`: functions) and classes
+(`examples/rust-exports`: one of each, every member kind below, used from TSX and tested headless). This
 describes classes: a Rust type that TypeScript uses as a class, with a constructor, methods, getters and setters, statics and
 instances that keep their state in Rust; synchronous functions on the same footing; and how NSH's own standard
 library shares the machinery.

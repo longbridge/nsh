@@ -193,24 +193,31 @@ filesystem data root, with per-app isolation below it; otherwise data stays in m
 have no data directory. Process execution and filesystem operations require explicit manifest grants; trace keeps
 the same checks as desktop hosts. Use a dedicated root for repeatable tests instead of everyday app data.
 
-## Rust application projects (`nsh init --rust`)
+## New apps (`nsh init --template`)
 
-`nsh init <dir> --rust` creates an independent Cargo workspace with published NSH dependencies,
-`src/main.rs` (a native desktop entry using `AppSource::Rust(Root::of::<App>())`) and `src/lib.rs`
-(the root component and its `#[native_module("app/native")]` registry). The platform dependencies
-are target-specific and disable default features, so `cargo run` mounts the Rust root directly.
-`App.tsx` imports that same component; `nsh.json` sets `"rust": "."`, so the existing Rust-component
-build / development / packaging path serves it on the selected platform. The generated app accepts
-`NSH_SCRIPT` for native desktop window checks. `examples/gallery-rs` exercises both entry points and
-has a headless test of the Rust root's input handling.
+`nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a
+menu (`ui::choose`) when stdin and stdout are a terminal (`ui::interactive`; Enter picks `ts`) and takes `ts`
+otherwise, so scripts and CI never wait for an answer.
 
-The display name becomes a normalized Cargo package name prefixed with `nsh-app-`; the main entry
-uses its Rust crate identifier. Rust creation checks for existing app and Cargo source files before
-writing any of them. The ordinary TSX initializer continues preserving existing files.
+- **`ts`**: `App.tsx`, `nsh.json`, `tsconfig.json` (`nsh_bundler::TSCONFIG`), `.gitignore` and `.nsh/types`. Files
+  that exist are kept; only a directory that has them all is refused.
+- **`rust`**: an independent Cargo workspace: `Cargo.toml`, `src/main.rs` (a native desktop entry using
+  `AppSource::Rust(Root::of::<App>())`; the platform dependencies are target-specific and disable default features,
+  so `cargo run` mounts the Rust root directly and accepts `NSH_SCRIPT` for window checks), `src/lib.rs` (the root
+  component and its `#[native_module("<slug>/native")]` registry, which exports `App` for a TSX entry added later),
+  `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README (`templates/rust/`) saying how to add
+  that entry. No TSX, so no `tsconfig.json` and no `.nsh/types`. `examples/gallery-rs` is a Rust app with a native
+  entry (`cargo run`) and headless tests of its Rust root.
+- **`mixed`**: the `ts` files with an `App.tsx` that imports from `<slug>/native`, `nsh.json` with `"rust": "native"`,
+  a README and the crate `native/` (`Cargo.toml`, `src/lib.rs`: a component, a module function and a class;
+  `templates/mixed/`), a small form of `examples/rust-exports`.
 
-`nsh init --rust` writes crates.io dependencies at the CLI's version, or with `--nsh-source <dir>` path
-dependencies on that checkout's crates; the generated host workspaces take nsh's crates from the same place, so the
-app and its hosts share the same core and registry types.
+The slug is the display name in lower case, words joined by `-` (`My App`: `my-app`); the crates' packages are
+`nsh-app-<slug>` (`rust`) and `nsh-app-<slug>-native` (`mixed`), and `src/main.rs` uses the first one's crate
+identifier. A `rust` or `mixed` app's files are checked before any is written: one existing is a conflict.
+`--nsh-source <dir>` (with `rust` or `mixed`; with `ts` it is an error) writes path dependencies on that checkout's
+crates instead of crates.io's at the CLI's version; the generated host workspaces take nsh's crates from the same
+place, so the app and its hosts share the same core and registry types.
 The app's Rust watcher excludes `target`, `.nsh` and `.git`, including generated sources under the
 app root, and the build directory itself (`CARGO_TARGET_DIR` inside a crate's directory under another name). Custom TypeScript declarations are generated when the app's command line is first built.
 
@@ -218,17 +225,19 @@ app root, and the build directory itself (`CARGO_TARGET_DIR` inside a crate's di
 
 `"rust": "<crate dir>"` names a library crate of the app with a `#[native_module("<specifier>")]` function at its
 root, which registers the crate's Rust components, modules and assets into its UI set, imported by the app's TSX by
-that specifier (`examples/gallery-rs`: `import { Gallery } from "gallery/native"`). `"rust": ["native/charts",
+that specifier (`examples/rust-exports`: `import { Account, Gauge, Ledger } from "rust-exports/native"`). `"rust": ["native/charts",
 "native/storage"]` lists several, each a UI set of its own with its own `#[native_module]` and specifier
 (`import { Chart } from "app/charts"`, `import { Store } from "app/storage"`; `docs/dev/rust-modules.md`):
 
 ```rust
 use nsh_core::ui::prelude::*;
 
-#[native_module("gallery/native")]
+#[native_module("rust-exports/native")]
 fn native(registry: &mut Registry) {
-    registry.register::<Gallery>();
-    registry.assets(assets!());
+    registry
+        .register::<Gauge>()
+        .module::<Ledger>()
+        .class::<Account>();
 }
 ```
 
@@ -300,7 +309,10 @@ toolchain cannot know the sets, so `nsh` builds the app its own (`crates/nsh-cli
   crates' assets only); `nsh run` runs the desktops' runner in debug in place (`NSH_APP_DIR`: its `nsh` directory, and
   the app's logs on stderr), Catalyst's in an app bundle (`NSH_DEVELOPMENT`), and installs a package on the simulator
   and Android; on the web a dev session without builds serves the page. A crate change ends the command with `Restart`
-  (`RustApp::watch`). The other commands refuse a Rust app's entry. `examples/gallery-rs` is one (`"root": "Gallery"`).
+  (`RustApp::watch`). The app's command line has the root too (`cli/main.rs`: `nsh_cli::main_with_root(sets,
+  app_root)`), so `nsh trace` mounts it headless (`nsh_engine::App::Rust`, no bundle), and `nsh build` writes what it
+  ships besides its runners (`app.json` and the crates' assets); neither writes `.nsh/types` for it, which has no
+  TypeScript. The other commands refuse a Rust app's entry. `examples/gallery-rs` is one (`"root": "Gallery"`).
 - The files the sets' crates ship (`Registry::assets(assets!())`: a crate's `assets/` directory, published as
   `asset:/@<package>/<path>`, so each crate's are apart) go with the app's imported assets: the dev server serves them
   (`DevServer::serve_files`), `nsh build` / `package` / `publish` copy them (`build::Built::assets`: each file's path

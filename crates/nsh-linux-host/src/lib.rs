@@ -9,7 +9,7 @@
 //!   quit"` runs steps once the window shows: screenshots rendered
 //!   offscreen and simulated input, to check the backend without touching
 //!   the screen.
-//! - `--size 390x844` sets the window size.
+//! - `--window-size 390x844` sets the window size.
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
 //!   is kept under the id its bundle carries, in the system's data
@@ -65,7 +65,7 @@ pub fn main() -> std::process::ExitCode {
             // Steps run once the window shows (`nsh_platform_linux`'s
             // `script` module): offscreen screenshots and simulated input.
             "--script" => options.script = args.next(),
-            "--size" => {
+            "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(390), h.parse().unwrap_or(844));
                 }

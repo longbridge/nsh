@@ -77,7 +77,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     decor::cg_color,
     surface::Surface,
-    view::{Container, NshView, ns_rect},
+    view::{Container, NshView, ViewObj, ns_rect},
 };
 
 /// Height of a screen's header bar, normal and with a large title (a large
@@ -478,6 +478,11 @@ struct ModalNav {
     /// Dims the window behind a sheet; clicking it asks to close.
     scrim: Option<Retained<Scrim>>,
     reported: Option<(Size, EdgeInsets)>,
+    /// The input or pressable view that had the keyboard focus when it was
+    /// presented (a popover's trigger, a field; held weakly, as the app
+    /// may remove it meanwhile): it gets the focus back when the modal
+    /// closes, as on the other desktops.
+    focus_before: Option<objc2::rc::Weak<ViewObj>>,
 }
 
 /// What leaves the screen during a pop.
@@ -709,6 +714,63 @@ fn drop_focus(surface: &Surface, view: &NSView) {
         .is_some_and(|r| r.isDescendantOf(view))
     {
         window.makeFirstResponder(Some(surface.root.ns()));
+    }
+}
+
+/// The input or pressable view that has the keyboard focus in `surface`'s
+/// window (not the root, which holds it when nothing else does). A field
+/// edits in the window's shared field editor, a subview of the field only
+/// while it edits, and a text view sits in a scroll view: the input is the
+/// responder's nearest view of ours.
+fn focused(surface: &Surface) -> Option<objc2::rc::Weak<ViewObj>> {
+    let root = surface.root.ns();
+    let responder = root.window()?.firstResponder()?;
+    let mut at = responder.downcast::<NSView>().ok()?;
+    if !at.isDescendantOf(root) {
+        return None;
+    }
+    while &*at != root {
+        if let Some(view) = NshView::from_ns(&at)
+            && (view.kind() == ViewKind::Input || crate::input::is_key_control(&view))
+        {
+            let obj: &ViewObj = &view;
+            return Some(objc2::rc::Weak::from(obj));
+        }
+        at = crate::view::superview(&at)?;
+    }
+    None
+}
+
+/// Gives the keyboard focus back to `view` (what had it before a modal
+/// opened), if the focus fell to the root or the window meanwhile and
+/// `view` can still take it inside `scope` (the newest modal still
+/// presented, else the root). A field gets the caret at the end, as
+/// `focus()` puts it (AppKit would select its whole text).
+fn restore_focus(surface: &Surface, scope: &NSView, view: Option<objc2::rc::Weak<ViewObj>>) {
+    let Some(view) = view
+        .and_then(|w| w.load())
+        .and_then(|v| NshView::from_ns(&v))
+    else {
+        return;
+    };
+    let Some(window) = surface.root.ns().window() else {
+        return;
+    };
+    // Nothing else took it meanwhile: the root, or the window itself,
+    // holds it.
+    let at_root = window.firstResponder().is_none_or(|r| {
+        r.downcast_ref::<NSView>()
+            .is_none_or(|v| v == surface.root.ns())
+    });
+    if !at_root || view.ns().window().is_none() || !view.ns().isDescendantOf(scope) {
+        return;
+    }
+    if view.kind() == ViewKind::Input {
+        if view.can_target() && !view.ns().isHiddenOrHasHiddenAncestor() {
+            crate::text_input::focus(&view);
+        }
+    } else if crate::input::is_key_control(&view) {
+        window.makeFirstResponder(Some(view.ns()));
     }
 }
 
@@ -1532,6 +1594,18 @@ impl Nav {
             .map(|c| c.view.id())
     }
 
+    /// Where the keyboard focus may go ([`focus_scope`]).
+    fn scope(&self, surface: &Surface) -> Retained<NSView> {
+        self.order
+            .iter()
+            .rev()
+            .find_map(|id| self.modals.get(id)?.view.as_ref())
+            .map_or_else(
+                || Retained::from(surface.root.ns()),
+                |v| Retained::from(v.ns()),
+            )
+    }
+
     /// Takes modal `id` away natively (it leaves as an image of its last
     /// frame), then reports `onDismiss` unless `reported` already.
     fn close_modal(&mut self, surface: &Rc<Surface>, id: NodeId, reported: bool) {
@@ -1539,12 +1613,20 @@ impl Nav {
             surface,
             |t| matches!(&t.motion, Motion::ModalIn { view, .. } if view.id() == id),
         );
+        let newer: Vec<NodeId> = self
+            .order
+            .iter()
+            .skip_while(|&&m| m != id)
+            .skip(1)
+            .copied()
+            .collect();
         self.order.retain(|&m| m != id);
         let Some(m) = self.modals.get_mut(&id) else {
             return;
         };
         let Some(view) = m.view.take() else { return };
         let scrim = m.scrim.take();
+        let focus_before = m.focus_before.take();
         let frame = view.state().frame;
         let motion = modal_motion(surface, m.config.animation);
         let shown = view.ns().window().is_some();
@@ -1556,6 +1638,19 @@ impl Nav {
         if let Some(b) = m.backdrop.take() {
             b.removeFromSuperview();
         }
+        // A newer modal still covers what had the focus: one that remembers
+        // a view of this modal (gone now) gives this one's back instead.
+        for newer in newer {
+            if let Some(n) = self.modals.get_mut(&newer)
+                && n.focus_before
+                    .as_ref()
+                    .and_then(|w| w.load())
+                    .is_some_and(|v| v.isDescendantOf(view.ns()))
+            {
+                n.focus_before = focus_before.clone();
+            }
+        }
+        restore_focus(surface, &self.scope(surface), focus_before);
         set_shift(&view, (0.0, 0.0));
         set_fade(&view, 1.0);
         match (motion, image) {
@@ -1779,18 +1874,10 @@ impl Nav {
 /// Where the keyboard focus may go: the newest presented modal (what is
 /// under it cannot be used), else the whole surface.
 pub(crate) fn focus_scope(surface: &Surface) -> Retained<NSView> {
-    surface
-        .nav
-        .try_borrow()
-        .ok()
-        .and_then(|nav| {
-            nav.order
-                .iter()
-                .rev()
-                .find_map(|id| nav.modals.get(id)?.view.as_ref())
-                .map(|v| Retained::from(v.ns()))
-        })
-        .unwrap_or_else(|| Retained::from(surface.root.ns()))
+    match surface.nav.try_borrow() {
+        Ok(nav) => nav.scope(surface),
+        Err(_) => Retained::from(surface.root.ns()),
+    }
 }
 
 /// Goes back (the newest modal, the innermost stack or the app's
@@ -1967,6 +2054,7 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     m.view = Some(view.clone());
     m.closed = false;
     m.reported = None;
+    m.focus_before = focused(surface);
     if view.has_parent() {
         view.unparent();
     }

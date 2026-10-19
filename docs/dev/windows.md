@@ -183,7 +183,7 @@ in the background or covered (and goes through NSH's hit testing to web views, a
 
 ```sh
 nsh build examples/gallery -o build
-target\debug\nsh-windows-host --bundle build\bundle.nshc --size 1200x800 --script "wait 800; shot a.png; tap 100 200; wait 300; shot b.png; quit"
+target\debug\nsh-windows-host --bundle build\bundle.nshc --window-size 1200x800 --script "wait 800; shot a.png; tap 100 200; wait 300; shot b.png; quit"
 ```
 
 Without `--bundle` the host connects to the dev server on this machine (`--dev-server ws://…/ws` names another);

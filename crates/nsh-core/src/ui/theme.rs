@@ -369,4 +369,42 @@ mod tests {
         // A null pressed color follows its base color.
         assert_eq!(theme.danger_active.dark, mix(rgb(0xff0000), 0xff, 0.12));
     }
+
+    /// Text on the status colors, at rest and pressed, reads in both
+    /// appearances: a contrast of at least 4.5:1 (WCAG AA for text the
+    /// size of a button's label).
+    #[test]
+    fn text_on_status_colors_stands_out() {
+        let theme = Theme::default();
+        // WCAG's relative luminance.
+        let luminance = |c: Color| {
+            let channel = |shift: u32| {
+                let v = f32::from(((c.0 >> shift) & 0xff) as u8) / 255.0;
+                if v <= 0.039_28 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(24) + 0.7152 * channel(16) + 0.0722 * channel(8)
+        };
+        let contrast = |a: Color, b: Color| {
+            let (a, b) = (luminance(a), luminance(b));
+            (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        };
+        for (background, text) in [
+            (theme.danger, theme.danger_foreground),
+            (theme.danger_active, theme.danger_foreground),
+            (theme.info, theme.info_foreground),
+            (theme.info_active, theme.info_foreground),
+            (theme.success, theme.success_foreground),
+            (theme.success_active, theme.success_foreground),
+            (theme.warning, theme.warning_foreground),
+            (theme.warning_active, theme.warning_foreground),
+        ] {
+            for (b, t) in [(background.light, text.light), (background.dark, text.dark)] {
+                assert!(contrast(b, t) >= 4.5, "{b:?} / {t:?}: {}", contrast(b, t));
+            }
+        }
+    }
 }

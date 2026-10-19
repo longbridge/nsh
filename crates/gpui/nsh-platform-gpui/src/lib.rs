@@ -54,6 +54,10 @@ mod text_input;
 mod transition;
 mod view;
 
+// Windows of GPUI's test platform, which `shot` turns on.
+#[cfg(all(test, feature = "shot"))]
+mod tests;
+
 pub use gpui;
 pub use nsh_core::{
     platform::Appearance,

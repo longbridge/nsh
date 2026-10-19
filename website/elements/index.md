@@ -113,6 +113,25 @@ const hovered = signal<string | null>(null);
 </View>
 ```
 
+### Keyboard focus
+
+On macOS and the web, Tab moves the keyboard focus between the views that take presses (and the inputs), Return or
+Space presses the focused view, and `focus:` classes style it. A click presses a view without focusing it, so `focus:`
+shows for keyboard focus only.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `focusable` | `boolean` | `true` | Whether a view that takes presses is a stop of Tab; `false` leaves it to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
+
+```tsx
+<View class="rounded-lg p-3 focus:bg-sky-100" onPress={open}>
+  <Text>Open</Text>
+</View>
+
+{/* An overlay's backdrop: a click closes it, Tab goes past it to the content. */}
+<View class="absolute inset-0" focusable={false} onPress={close} />
+```
+
 ### Layout and identity
 
 | Prop | Type | Description |

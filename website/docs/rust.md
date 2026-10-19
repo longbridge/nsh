@@ -17,7 +17,7 @@ own UI. What differs is the language of your own code, and with it whether the a
 | The app runs | QuickJS and the engine | the engine and your crate only, on every platform and in the browser | QuickJS and the engine, with your crate |
 | Suits | Apps and modules delivered at run time, quick iteration | Medium and large apps with demanding business logic | A Rust core with parts that change often |
 | Edits | Hot updates | Rebuild and restart | Hot updates for TSX, rebuild and restart for Rust |
-| Start | `nsh init my-app` | `nsh init my-app --rust` | `nsh init my-app --rust`, then `nsh run App.tsx` |
+| Start | `nsh init my-app --template ts` | `nsh init my-app --template rust` | `nsh init my-app --template mixed` |
 
 ## Choosing
 
@@ -36,7 +36,7 @@ runs on QuickJS, which the app then carries.
 ## An app written in Rust
 
 ```sh
-nsh init my-app --rust
+nsh init my-app --template rust
 cd my-app
 nsh run                        # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
 nsh package --target web       # or ios, ios-simulator, android, macos, linux, windows, gpui
@@ -240,9 +240,15 @@ throws (or rejects) with its message. A class's object owns its Rust value: it i
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
 updates, Rust edits rebuild and restart the app.
 
-`examples/gallery-rs` in the repository is a complete Rust app with both entries: every demo is Rust,
-`nsh run examples/gallery-rs --target web` (or `ios`, `android`, …) runs its root, `cargo run -p gallery-native`
-starts it on the desktop backend, and `nsh run examples/gallery-rs/App.tsx` runs it under its TSX entry.
+`examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
+component (props required, defaulted and optional, an event, children), one module (a function of each kind) and
+one class (a constructor, methods, a getter and a setter, a static, an `async` member, another instance as an
+argument, a callback Rust posts to, `dispose()` and `using`), each with a short doc comment, and headless tests that
+press through the app and check what each one shows.
+
+`examples/gallery-rs` in the repository is a complete Rust app: every demo is Rust, `nsh run examples/gallery-rs
+--target web` (or `ios`, `android`, …) runs its root, `nsh trace examples/gallery-rs` runs it headless, and
+`cargo run -p gallery-native` starts it on the desktop backend.
 
 ## Several crates
 
@@ -273,4 +279,4 @@ crate they depend on by path, rebuilds the app and restarts it.
 - [Project structure](./project-structure.md): every key of `nsh.json`.
 - [Web](./web.md#apps-with-rust-components): Rust apps in the browser.
 - [Networking](./networking.md#from-rust-components): `fetch` from Rust.
-- [CLI](./cli.md#nsh-init): `nsh init --rust`.
+- [CLI](./cli.md#nsh-init): `nsh init --template rust` and `--template mixed`.

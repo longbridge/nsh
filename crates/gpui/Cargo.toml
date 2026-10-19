@@ -32,6 +32,8 @@ nsh-core = { version = "0.1.1", path = "../nsh-core" }
 nsh-dev = { version = "0.1.1", path = "../nsh-dev" }
 nsh-engine = { version = "0.1.1", path = "../nsh-engine", default-features = false }
 nsh-ui-mobile = { version = "0.1.1", path = "../nsh-ui-mobile" }
+# The JSX compiler alone (tests compile their apps).
+nsh-bundler = { version = "0.1.1", path = "../nsh-bundler", default-features = false }
 nsh-platform-gpui = { version = "0.1.1", path = "nsh-platform-gpui", default-features = false }
 
 # The same versions as the main workspace's.
@@ -53,6 +55,7 @@ gpui = { package = "gpui-fast", version = "0.1.9", default-features = false, fea
 gpui_platform = { package = "gpui-fast-platform", version = "0.1.9", default-features = false, features = ["font-kit", "wayland", "x11"] }
 # Script shots on Linux: the window read from the X server.
 raw-window-handle = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSView", "NSWindow", "NSResponder"] }
 x11rb = { version = "0.13", default-features = false, features = ["dri3", "present"] }
 # The canvas rasterizer (already in GPUI's tree through resvg).
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }

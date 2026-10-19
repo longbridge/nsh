@@ -37,10 +37,10 @@ runs a built bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --size 1200x800   # in a checkout: target/debug/nsh-macos-host
+dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # in a checkout: target/debug/nsh-macos-host
 ```
 
-`--size` is the window's initial size; the window can be resized.
+`--window-size` is the window's initial size; the window can be resized.
 
 ### Performance monitor
 

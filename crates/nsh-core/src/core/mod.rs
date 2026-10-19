@@ -2198,6 +2198,13 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::Focusable(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.focusable != value {
+                    props.focusable = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::Accessibility(prop) => {
                 // A label changing on mounted props goes alone: it is
                 // the one that follows app state (a count, a value).

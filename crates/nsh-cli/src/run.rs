@@ -74,6 +74,18 @@ pub(crate) struct HostFlags {
     pub(crate) fps: bool,
 }
 
+/// The host window's own options; only the macOS host takes them, for
+/// now.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HostWindow<'a> {
+    /// The app's name in the host (the menu bar, the window title).
+    pub(crate) name: Option<&'a str>,
+    /// The window's initial size, `WxH` in points.
+    pub(crate) size: Option<&'a str>,
+    /// Script steps to run once the window shows.
+    pub(crate) script: Option<&'a str>,
+}
+
 /// Starts a dev session and runs the app in a development host, which
 /// loads bundles from the dev server and reloads on change.
 pub(crate) fn run(
@@ -83,10 +95,17 @@ pub(crate) fn run(
     flags: HostFlags,
     target: Target,
     device: Option<&str>,
+    window: HostWindow<'_>,
 ) -> anyhow::Result<()> {
     let HostFlags { trace, fps } = flags;
+    let HostWindow { name, size, script } = window;
     if fps && target != Target::Macos {
         bail!("--fps needs --target macos (the other hosts have no performance monitor yet)");
+    }
+    if (name.is_some() || size.is_some() || script.is_some()) && target != Target::Macos {
+        bail!(
+            "--name, --window-size and --script need --target macos (the other hosts do not take them yet)"
+        );
     }
     let work = dunce::canonicalize(entry)?
         .parent()
@@ -154,16 +173,28 @@ pub(crate) fn run(
         // In place too: the AppKit host makes itself a regular app (menu
         // bar, Dock icon) without an app bundle around it.
         Target::Macos => {
-            // The menu bar and the window show the app's name.
+            // The menu bar and the window show the app's name; `--name`
+            // overrides it (a host run for one of the app's windows can
+            // name itself).
             let entry = entry.canonicalize()?;
             let config = crate::package::read_config(&entry).unwrap_or_default();
-            let (name, id) = crate::package::name_and_id(&entry, &config);
+            let (app_name, id) = crate::package::name_and_id(&entry, &config);
+            let name = name.unwrap_or(&app_name);
             let mut command = Command::new(&host);
             command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
-                .args(["--name", &name, "--app-id", &id])
+                .args(["--name", name, "--app-id", &id])
                 .args(["-ApplePersistenceIgnoreState", "YES"]);
+            if let Some(size) = size {
+                // `WxH` in points; the host opens the window at this size.
+                command.args(["--window-size", size]);
+            }
+            if let Some(script) = script {
+                // Steps run once the window shows; `quit` in them closes
+                // the host, which ends this command too.
+                command.args(["--script", script]);
+            }
             run_local(&session, &mut command, "the macOS host")
         }
         Target::Windows => {

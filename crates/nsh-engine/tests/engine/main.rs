@@ -22,6 +22,7 @@ mod fetch;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fs;
 mod handle_bench;
+mod host_modules;
 mod hot;
 mod hover;
 mod js_touch;

@@ -33,10 +33,10 @@ Ctrl-C 会关闭窗口，关闭窗口也会结束 `nsh run`；无论 `nsh` 以�
 
 ```sh
 nsh build my-app --release -o build
-dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --size 390x844   # 源码仓库中：target\debug\nsh-windows-host
+dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-size 390x844   # 源码仓库中：target\debug\nsh-windows-host
 ```
 
-`--size` 是窗口的尺寸，单位为点（`<宽>x<高>`）。
+`--window-size` 是窗口的尺寸，单位为点（`<宽>x<高>`）。
 
 ## 打包
 

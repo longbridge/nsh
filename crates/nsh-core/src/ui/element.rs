@@ -1259,6 +1259,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Whether a view that takes presses is a stop of the keyboard focus
+    /// (Tab; default true): false leaves it to the pointer, as a backdrop
+    /// that closes a popover is.
+    fn focusable(mut self, focusable: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(self.node(), focusable, |focusable| {
+            Prop::Focusable(Some(focusable))
+        });
+        self
+    }
+
     /// The id inputs name an input accessory by (`nativeID`).
     fn native_id(mut self, id: &str) -> Self {
         super::host::set(self.node(), Prop::NativeId(Some(id.into())));

@@ -72,12 +72,12 @@ Choose how to write your app:
 
 | | Rust | TSX |
 |---|---|---|
-| Create | `nsh init my-app --rust` | `nsh init my-app` |
+| Create | `nsh init my-app --template rust` | `nsh init my-app --template ts` |
 | Write | Rust components, typed styles and signals | TSX components, Tailwind classes and signals |
 | Iterate | Rebuild and restart on Rust changes | Hot updates that preserve state |
 | Toolchain | `nsh` and [Rust](https://rustup.rs) | `nsh` |
 
-You can also combine them: TSX screens import your Rust components and modules. See
+You can also combine them (`nsh init my-app --template mixed`): TSX screens import your Rust components and modules. See
 [Building with Rust](https://nsh.dev/docs/rust) for Rust apps and mixed projects.
 
 Run either app on your chosen platform:
@@ -159,7 +159,8 @@ Logs and errors show in the terminal. What each platform needs:
 | [`examples/counter`](examples/counter) | The smallest app |
 | [`examples/hopper`](examples/hopper) | A dark, tabbed dashboard built only from primitives: interactive canvas charts, sliders, menus, animation |
 | [`examples/desktop`](examples/desktop) | A desktop app with a title bar and menus of its own (`nsh/desktop`) |
-| [`examples/gallery-rs`](examples/gallery-rs) | The gallery written in Rust, with a TSX entry for mixed development |
+| [`examples/gallery-rs`](examples/gallery-rs) | The gallery written in Rust: an app with no TSX and no QuickJS |
+| [`examples/rust-exports`](examples/rust-exports) | A TSX app using a component, a module and a class of its own Rust crate |
 | [`examples/embed-ios`](examples/embed-ios), [`examples/embed-android`](examples/embed-android) | NSH inside existing native apps, with a native component the app registers |
 | [`examples/bench`](examples/bench) | Rust components against the same components in TSX |
 

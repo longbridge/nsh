@@ -114,11 +114,11 @@ impl AppCrate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Nsh {
     /// crates.io, at this `nsh`'s version ([`VERSION`]): the app's crates
-    /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --rust` writes).
+    /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --template rust` writes).
     Registry,
-    /// The checkout the app's crates depend on by path (`nsh init --rust
-    /// --nsh-source <dir>`): nsh's own examples, or an app trying changes to
-    /// nsh.
+    /// The checkout the app's crates depend on by path (`nsh init
+    /// --template rust --nsh-source <dir>`): nsh's own examples, or an app
+    /// trying changes to nsh.
     Source(PathBuf),
 }
 
@@ -890,11 +890,19 @@ opt-level = 3
                 src("nsh-ui-mobile"),
             ),
         )?;
+        // A Rust app's command line has its root too (`nsh trace`).
+        let (main, root) = match &self.root {
+            Some(root) => (
+                format!("nsh_cli::main_with_root({sets}, app_root)"),
+                self.root_fn("", root),
+            ),
+            None => (format!("nsh_cli::main_with({sets})"), String::new()),
+        };
         write(
             &ws.join("cli/main.rs"),
             &format!(
                 "//! `nsh` for this app: the mobile UI and the app's Rust components.\n\n\
-                 fn main() -> std::process::ExitCode {{\n    nsh_cli::main_with({sets})\n}}\n{}",
+                 fn main() -> std::process::ExitCode {{\n    {main}\n}}\n{}{root}",
                 self.app_sets("")
             ),
         )?;
@@ -2163,8 +2171,15 @@ mod tests {
         assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_ui_mobile::registry(), set_app_app_native()], app_root());"), "{web}");
         assert!(read("rust-web/Cargo.toml").contains("default-features = false"));
         assert!(read("rust-web/build.rs").contains("-zstack-size=8388608"));
-        // The root reaches the app's command line (`current`).
+        // The root reaches the app's command line (`current`), which
+        // mounts it for `nsh trace`.
         assert!(read("app.json").contains("\"component\":\"App\""));
+        let cli = read("cli/main.rs");
+        assert!(cli.contains("nsh_cli::main_with_root(vec![nsh_ui_mobile::registry(), set_app_app_native()], app_root)"), "{cli}");
+        assert!(
+            cli.contains("nsh_core::ui::Root::of::<app_app_native::App>()"),
+            "{cli}"
+        );
         app.gpui_workspace().unwrap();
         assert!(read("gpui/Cargo.toml").contains("\"rust-gpui\""));
         assert!(read("gpui/rust-gpui/main.rs").contains("nsh_gpui_app::run_rust(app_root())"));
@@ -2177,8 +2192,15 @@ mod tests {
         let app = app(&dir, &[("app-native", dir.join("native"))], None);
         app.write_workspace().unwrap();
         let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
-        assert!(!manifest.contains("rust-"), "{manifest}");
+        // No `rust-*` members (paths may hold the word: a checkout in
+        // `yf-rust-exports`).
+        assert!(!manifest.contains("\"rust-"), "{manifest}");
         assert!(!app.workspace.join("rust-web").exists());
+        let cli = std::fs::read_to_string(app.workspace.join("cli/main.rs")).unwrap();
+        assert!(
+            cli.contains("nsh_cli::main_with(") && !cli.contains("app_root"),
+            "{cli}"
+        );
         assert!(super::is_root(Path::new("/app/nsh.json")));
         assert!(!super::is_root(Path::new("/app/App.tsx")));
         let _ = std::fs::remove_dir_all(&dir);

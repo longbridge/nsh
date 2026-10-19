@@ -569,6 +569,70 @@ pub(crate) fn debug(message: impl Display) {
     }
 }
 
+/// Whether the command line may ask the user: stdin and stdout are a
+/// terminal (not a pipe, a CI job or an editor's task).
+pub(crate) fn interactive() -> bool {
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
+/// `? question`, then the `options` (a name and what it is), numbered:
+/// the index of the one the user picks by number or name. Enter (or the
+/// end of input) picks the first; anything else asks again.
+pub(crate) fn choose(question: &str, options: &[(&str, &str)]) -> anyhow::Result<usize> {
+    let name_width = options
+        .iter()
+        .map(|(name, _)| width(name))
+        .max()
+        .unwrap_or(0);
+    print(&format!("{} {question}", cyan("?")));
+    for (i, (name, what)) in options.iter().enumerate() {
+        let pad = " ".repeat(name_width - width(name));
+        print(&format!(
+            "  {} {name}{pad}  {}",
+            dim(format!("{}.", i + 1)),
+            dim(what)
+        ));
+    }
+    let default = options.first().map_or("", |(name, _)| name);
+    let stdin = std::io::stdin();
+    loop {
+        eprint!(
+            "{} {}",
+            cyan("?"),
+            dim(format!("1-{}, or Enter for {default}: ", options.len()))
+        );
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        if stdin
+            .lock()
+            .read_line(&mut line)
+            .context("read the answer")?
+            == 0
+        {
+            eprintln!();
+            return Ok(0);
+        }
+        let answer = line.trim();
+        if answer.is_empty() {
+            return Ok(0);
+        }
+        let picked = answer
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .filter(|&i| i < options.len())
+            .or_else(|| {
+                options
+                    .iter()
+                    .position(|(name, _)| name.eq_ignore_ascii_case(answer))
+            });
+        match picked {
+            Some(i) => return Ok(i),
+            None => warn(format!("{answer:?} is none of them")),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Steps
 

@@ -32,10 +32,10 @@ nsh run my-app --target macos
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --size 1200x800   # 源码仓库中：target/debug/nsh-macos-host
+dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # 源码仓库中：target/debug/nsh-macos-host
 ```
 
-`--size` 是窗口的初始尺寸；窗口可以调整大小。
+`--window-size` 是窗口的初始尺寸；窗口可以调整大小。
 
 ### 性能监视器
 

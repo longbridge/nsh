@@ -101,6 +101,24 @@ const hovered = signal<string | null>(null);
 </View>
 ```
 
+### 键盘焦点
+
+在 macOS 和 Web 上，Tab 在可按压的视图（以及输入框）之间移动键盘焦点，按 Return 或空格会按下获得焦点的视图，`focus:` 类为它设置样式。
+点击会按下视图但不让它获得焦点，所以 `focus:` 只在键盘聚焦时生效。
+
+| 属性 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `focusable` | `boolean` | `true` | 可按压的视图是否是 Tab 的停靠点；`false` 把它留给指针（关闭浮层的背景层、用方向键切换的列表行）。 |
+
+```tsx
+<View class="rounded-lg p-3 focus:bg-sky-100" onPress={open}>
+  <Text>Open</Text>
+</View>
+
+{/* 浮层的背景层：点击关闭浮层，Tab 直接越过它进入内容。 */}
+<View class="absolute inset-0" focusable={false} onPress={close} />
+```
+
 ### 布局与标识
 
 | 属性 | 类型 | 说明 |

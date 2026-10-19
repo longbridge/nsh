@@ -15,7 +15,7 @@ use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
 use rustc_hash::FxHashMap;
 
-use super::{Core, Kind, NO_KEY};
+use super::{Core, Kind, NO_KEY, views::Anchor};
 use crate::{
     ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
     Tag, TextEngine,
@@ -100,16 +100,16 @@ struct VirtualListState {
 pub(super) enum Placement {
     /// Out of the tree (the view has no place for them).
     None,
-    /// In this node, before the view's node after its `Children` (their
-    /// anchor).
-    At(NodeId, Option<NodeId>),
+    /// In this node, before what the view puts after its `Children` (their
+    /// anchor: a node, or a region, whose nodes may come later).
+    At(NodeId, Anchor),
     /// Each in its own wrapper ([`ParentElement::children_each`]): placed
     /// by the view's region of wrappers.
     Each,
     /// Passed on as the children of the nested component hosted by this
     /// node (`<Inset>{children}</Inset>`), before the content after them
-    /// (their anchor): its view places them.
-    Nested(NodeId, Option<NodeId>),
+    /// (their anchor, as [`Self::At`]'s): its view places them.
+    Nested(NodeId, Anchor),
 }
 
 /// A component instance on its host node.
@@ -936,12 +936,16 @@ impl<M: TextEngine> Core<M> {
                 match place {
                     // Before its next JS sibling, else before what the
                     // view puts after the children.
-                    Placement::At(p, anchor) => self.apply_op(Op::Insert {
-                        parent: p,
-                        child,
-                        before: at.and(before).or(anchor),
-                    })?,
+                    Placement::At(p, anchor) => {
+                        let anchor = self.anchor_node(anchor);
+                        self.apply_op(Op::Insert {
+                            parent: p,
+                            child,
+                            before: at.and(before).or(anchor),
+                        })?
+                    }
                     Placement::Nested(nested, anchor) => {
+                        let anchor = self.anchor_node(anchor);
                         self.join_nested_at(nested, child, at.and(before).or(anchor));
                     }
                     // Its wrapper is the view's (a region of them).
@@ -2261,45 +2265,27 @@ impl<M: TextEngine> Core<M> {
         let new = new.into_iter().map(|el| (None, el)).collect();
         let (out, placeholder) = self.match_children(parent, old, new, host, inst);
         // A region's nodes go before what follows it.
-        for (i, e) in out.iter().enumerate() {
-            if let Part::Region(region) = e.part {
-                let anchor = out[i + 1..]
-                    .iter()
-                    .find_map(|n| match n.part {
-                        Part::Region(r) => Some(super::views::Anchor::Region(r)),
-                        Part::Children => inst
-                            .js_children
-                            .first()
-                            .map(|&c| super::views::Anchor::Node(c)),
-                        Part::Filled(name) => self
-                            .fill_of(inst, name)
-                            .and_then(|f| self.fill_nodes(f).first().copied())
-                            .map(super::views::Anchor::Node),
-                        _ if n.id != 0 => Some(super::views::Anchor::Node(n.id)),
-                        _ => None,
-                    })
-                    .unwrap_or(super::views::Anchor::End);
-                self.set_region_anchor(region, anchor);
-            }
-        }
+        self.set_region_anchors(&out, inst, Anchor::End);
         let nested = parent != host && self.is_host(parent);
         if nested {
             if let Some(at) = placeholder {
-                let anchor = out[at + 1..]
-                    .iter()
-                    .flat_map(|e| self.placed(e))
-                    .find(|&id| id != 0);
+                let anchor = self.anchor_after(&out[at + 1..], inst, Anchor::End);
                 inst.children_at = Placement::Nested(parent, anchor);
             }
-            self.place_filled(&out, inst, None, |anchor| Placement::Nested(parent, anchor));
+            self.place_filled(&out, inst, Anchor::End, |anchor| {
+                Placement::Nested(parent, anchor)
+            });
             self.fill_nested(parent, &out, host, inst);
             self.join_nested(parent, &out, inst);
             return out;
         }
         if let Some(at) = placeholder {
-            inst.children_at = Placement::At(parent, out.get(at + 1).map(|e| e.id));
+            let anchor = self.anchor_after(&out[at + 1..], inst, Anchor::End);
+            inst.children_at = Placement::At(parent, anchor);
         }
-        self.place_filled(&out, inst, None, |anchor| Placement::At(parent, anchor));
+        self.place_filled(&out, inst, Anchor::End, |anchor| {
+            Placement::At(parent, anchor)
+        });
         // The native children in the view's order: the JS children in the
         // placeholder's place, a region's nodes in its (moves only when the
         // order changed).
@@ -2889,35 +2875,14 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The first node among `elements` (in their order), else `end`.
-    pub(super) fn first_node(
-        &self,
-        elements: &[Expanded],
-        inst: &Instance,
-        end: Option<NodeId>,
-    ) -> Option<NodeId> {
-        elements
-            .iter()
-            .find_map(|e| match e.part {
-                Part::Children => inst.js_children.first().copied(),
-                Part::Filled(name) => self
-                    .fill_of(inst, name)
-                    .and_then(|f| self.fill_nodes(f).first().copied()),
-                Part::Region(region) => self.region_nodes(region).first().copied(),
-                Part::Fill(_) => None,
-                _ => Some(e.id).filter(|&id| id != 0),
-            })
-            .or(end)
-    }
-
     /// Where `out` (a view's children, or a region's, `end` after them)
-    /// places what fills its slots: `place` of the node after each.
+    /// places what fills its slots: `place` of what follows each.
     pub(super) fn place_filled(
         &self,
         out: &[Expanded],
         inst: &mut Instance,
-        end: Option<NodeId>,
-        place: impl Fn(Option<NodeId>) -> Placement,
+        end: Anchor,
+        place: impl Fn(Anchor) -> Placement,
     ) {
         if inst.fills.is_empty() {
             return;
@@ -2926,7 +2891,7 @@ impl<M: TextEngine> Core<M> {
             let Part::Filled(name) = e.part else {
                 continue;
             };
-            let at = place(self.first_node(&out[i + 1..], inst, end));
+            let at = place(self.anchor_after(&out[i + 1..], inst, end));
             if let Some(fill) = inst.fills.iter_mut().find(|f| f.name == name) {
                 fill.at = at;
             }
@@ -3123,7 +3088,7 @@ impl<M: TextEngine> Core<M> {
             Placement::At(parent, anchor) => {
                 let parent_key = self.key(parent).ok();
                 // An anchor that left the parent: at the end.
-                let mut before = anchor.filter(|&a| {
+                let mut before = self.anchor_node(anchor).filter(|&a| {
                     self.key(a)
                         .is_ok_and(|k| Some(self.nodes[k as usize].parent) == parent_key)
                 });
@@ -3139,7 +3104,7 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Placement::Nested(other, anchor) => {
-                let mut before = anchor;
+                let mut before = self.anchor_node(anchor);
                 for &child in nodes.iter().rev() {
                     if !self.nested_precedes(other, child, before) {
                         self.join_nested_at(other, child, before);

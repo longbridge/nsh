@@ -17,7 +17,7 @@ JavaScript 虚拟机。
 | 应用运行的内容 | QuickJS 和引擎 | 只有引擎和你的 crate，所有平台和浏览器都一样 | QuickJS 和引擎，加上你的 crate |
 | 适合 | 运行时下发的应用和模块、快速迭代 | 业务复杂度高的中大型应用 | Rust 核心加上经常变化的部分 |
 | 修改代码 | 热更新 | 重新构建并重启 | TSX 热更新，Rust 重新构建并重启 |
-| 创建 | `nsh init my-app` | `nsh init my-app --rust` | `nsh init my-app --rust`，然后 `nsh run App.tsx` |
+| 创建 | `nsh init my-app --template ts` | `nsh init my-app --template rust` | `nsh init my-app --template mixed` |
 
 ## 如何选择
 
@@ -33,7 +33,7 @@ Rust 和原生代码：在 iOS、Android、macOS、Windows、Linux、GPUI 和 We
 ## 完全用 Rust 编写的应用
 
 ```sh
-nsh init my-app --rust
+nsh init my-app --template rust
 cd my-app
 nsh run                        # 本机的后端；--target ios、android、web、macos、linux、windows 或 gpui
 nsh package --target web       # 或 ios、ios-simulator、android、macos、linux、windows、gpui
@@ -225,9 +225,13 @@ Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型
 Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `using ledger = new Ledger()`）立即释放。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
 Rust 的修改会重新构建并重启应用。
 
-仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用，两种入口都有：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
-（或 `ios`、`android` 等）运行它的根组件，`cargo run -p gallery-native` 在桌面后端上启动它，`nsh run examples/gallery-rs/App.tsx`
-通过 TSX 入口运行它。
+仓库中的 `examples/rust-exports` 是导出的参考示例：一个小型 TSX 应用，它的 crate 导出一个组件（必填、有默认值和可选的
+props，一个事件，子元素）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、
+Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简短的文档注释；它的无界面测试在应用中逐一点按，并检查每个导出显示的内容。
+
+仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
+（或 `ios`、`android` 等）运行它的根组件，`nsh trace examples/gallery-rs` 以无界面方式运行它，`cargo run -p gallery-native`
+在桌面后端上启动它。
 
 ## 多个 crate
 
@@ -257,4 +261,4 @@ crate，都会重新构建并重启应用。
 - [项目结构](./project-structure.md)：`nsh.json` 的每个键。
 - [Web](./web.md#带-rust-组件的应用)：浏览器中的 Rust 应用。
 - [网络](./networking.md#在-rust-组件中)：在 Rust 中使用 `fetch`。
-- [CLI](./cli.md#nsh-init)：`nsh init --rust`。
+- [CLI](./cli.md#nsh-init)：`nsh init --template rust` 和 `--template mixed`。

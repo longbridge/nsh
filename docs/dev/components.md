@@ -20,6 +20,10 @@ on every backend (macOS, Windows, Linux, and GPUI, a separate platform backend i
 yet: on macOS, Windows and Linux apps use `nsh/ui/mobile`, whose components render there as on phones, or their own
 layouts from the primitives.
 
+An app's crate exports components, modules and classes of its own the same way (`#[native_module("…")]`,
+`docs/dev/tooling.md`): `examples/rust-exports` exports one of each to TSX, each kind of prop, event, function and
+member once, with headless tests of its TSX entry.
+
 ## The API
 
 ```rust

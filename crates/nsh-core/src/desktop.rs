@@ -37,6 +37,11 @@ pub struct WindowFrame {
     pub height: Option<f32>,
     /// Animates the change on macOS (false by default).
     pub animated: Option<bool>,
+    /// The top edge keeps its place when `height` changes without a `y`:
+    /// the window grows and shrinks at its bottom edge (a content-sized
+    /// window's title area stays put). Elsewhere, where `y` already is the
+    /// top edge, this is the default.
+    pub anchor_top: Option<bool>,
 }
 
 /// How high a window floats (`Window.setLevel`).
@@ -602,6 +607,9 @@ pub enum DesktopCommand {
     SetFrame(WindowFrame),
     /// The window's level (a floating window stays above normal ones).
     SetLevel(WindowLevel),
+    /// Brings the window to the front of its level and focuses it (the app
+    /// activates).
+    OrderFront,
     /// Closes the window (the app ends with its last window).
     Close,
     /// The application menu (macOS's menu bar, the window's menu bar on

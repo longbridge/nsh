@@ -24,10 +24,19 @@ mod windows;
 use std::{path::PathBuf, process::ExitCode, sync::OnceLock};
 
 use clap::{Args, Parser, Subcommand};
-use nsh_core::ui::Registry;
+use nsh_core::ui::{Registry, Root};
 
 /// The UI sets of this build ([`main_with`]).
 static UI_SETS: OnceLock<Vec<Registry>> = OnceLock::new();
+
+/// The root of the Rust app this build runs for ([`main_with_root`]).
+static ROOT: OnceLock<fn() -> Root> = OnceLock::new();
+
+/// The root of the Rust app this command line was built for (`nsh.json`
+/// `"root"`), which `nsh trace` mounts.
+pub(crate) fn root() -> Option<Root> {
+    ROOT.get().map(|make| make())
+}
 
 /// The UI sets the hosts serve: what bundles import natively, what bytecode
 /// links against, what `.nsh/types` declares.
@@ -54,8 +63,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Create a TSX app, or a Cargo project with shared Rust UI (`--rust`).
-    /// Generates the app's entry points, configuration and editor declarations.
+    /// Create an app: in TSX, in Rust, or in TSX with a Rust crate of its
+    /// own (`--template`). Generates the app's entry points, configuration
+    /// and editor declarations.
     Init {
         /// Directory of the app (created if missing).
         #[arg(default_value = ".")]
@@ -63,17 +73,17 @@ enum Command {
         /// Display name (default: the directory's name).
         #[arg(long)]
         name: Option<String>,
-        /// Create a Cargo project with a native Rust entry and a TSX entry
-        /// sharing the same Rust components. Requires a Rust toolchain.
-        #[arg(long)]
-        rust: bool,
-        /// With `--rust`: depend on the nsh crates of this checkout by path,
-        /// instead of crates.io's at this CLI's version (the app's hosts
-        /// build from the same place).
-        #[arg(long, value_name = "DIR", requires = "rust")]
+        /// What the app is written in (asked on a terminal; else `ts`).
+        #[arg(long, value_enum)]
+        template: Option<init::Template>,
+        /// With `--template rust` or `mixed`: depend on the nsh crates of
+        /// this checkout by path, instead of crates.io's at this CLI's
+        /// version (the app's hosts build from the same place).
+        #[arg(long, value_name = "DIR")]
         nsh_source: Option<PathBuf>,
     },
-    /// Bundle an app and compile it to QuickJS bytecode.
+    /// Bundle an app and compile it to QuickJS bytecode; a Rust app
+    /// (`nsh.json` `"root"`): build its crates and gather the files they ship.
     Build {
         /// The entry module, or the app's directory (default: the current one),
         /// whose `App.tsx` is the entry.
@@ -90,7 +100,8 @@ enum Command {
         #[arg(long)]
         split: bool,
     },
-    /// Run an app headless and print the mount instructions and timings.
+    /// Run an app headless (a Rust app: its root) and print the mount
+    /// instructions and timings.
     Trace {
         /// The entry module, or the app's directory (default: the current one),
         /// whose `App.tsx` is the entry.
@@ -202,6 +213,20 @@ enum Command {
         /// the newest iPhone.
         #[arg(long)]
         device: Option<String>,
+        /// The app's name in the host (the menu bar, the window title;
+        /// `nsh.json`'s name by default; `--target macos` only).
+        #[arg(long)]
+        name: Option<String>,
+        /// The window's initial size, `WxH` in points (the host's default
+        /// by default; `--target macos` only).
+        #[arg(long = "window-size", value_name = "WIDTHxHEIGHT")]
+        size: Option<String>,
+        /// Script steps to run once the window shows (`wait`, `shot`,
+        /// `tap`, `quit`, ...; `--target macos` only). With `quit` the
+        /// command exits when the script does — snapshots without a
+        /// window staying open.
+        #[arg(long)]
+        script: Option<String>,
     },
     /// Create a signing key: `<name>.secret` (keep it offline for a root)
     /// and `<name>.pub` (what apps trust, for a root).
@@ -381,6 +406,14 @@ impl Command {
     }
 }
 
+/// [`main_with`] for a Rust app (`nsh.json` `"root"`): `root` makes the
+/// app's root (its component, theme, appearance and id), which `nsh trace`
+/// mounts headless.
+pub fn main_with_root(ui_sets: Vec<Registry>, root: fn() -> Root) -> ExitCode {
+    let _ = ROOT.set(root);
+    main_with(ui_sets)
+}
+
 /// Runs the command line with `ui_sets` (`nsh_ui_mobile::registry()` and
 /// the registries of an app's own crates); errors are printed.
 pub fn main_with(ui_sets: Vec<Registry>) -> ExitCode {
@@ -415,9 +448,11 @@ pub fn main_with(ui_sets: Vec<Registry>) -> ExitCode {
 }
 
 fn run(mut command: Command) -> anyhow::Result<()> {
-    let types = !matches!(command, Command::Trace { .. });
+    let mut types = !matches!(command, Command::Trace { .. });
     if let Some(entry) = command.entry_mut() {
         *entry = entry::resolve(entry)?;
+        // A Rust app has no TypeScript to declare things for.
+        types &= !rust_app::is_root(entry);
     }
     // An app with Rust components of its own runs in its own build of this.
     if let Some(status) = rust_app::reexec(command.entry_mut().map(|e| e.as_path()))? {
@@ -431,15 +466,19 @@ fn run(mut command: Command) -> anyhow::Result<()> {
     if types && let Some(entry) = command.entry_mut() {
         init::write_types_for(entry);
     }
-    // A Rust app (`nsh.json` "root") has no bundle: it is packaged and run.
-    let packaged_or_run = matches!(command, Command::Package(_) | Command::Run { .. });
+    // A Rust app (`nsh.json` "root") has no bundle: it is built, traced,
+    // run and packaged.
+    let rust_command = matches!(
+        command,
+        Command::Build { .. } | Command::Trace { .. } | Command::Package(_) | Command::Run { .. }
+    );
     if let Some(entry) = command.entry_mut()
         && rust_app::is_root(entry)
     {
-        if !packaged_or_run {
+        if !rust_command {
             anyhow::bail!(
-                "{} declares a Rust app (\"root\"): it is run with `nsh run` and packaged with `nsh package`; \
-                 pass its TSX entry (App.tsx) for the other commands",
+                "{} declares a Rust app (\"root\"): it is built with `nsh build`, traced with `nsh trace`, \
+                 run with `nsh run` and packaged with `nsh package`; the other commands take a TSX entry",
                 ui::path(entry)
             );
         }
@@ -455,9 +494,15 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
         Command::Init {
             dir,
             name,
-            rust,
+            template,
             nsh_source,
-        } => init::init(&dir, name, rust, nsh_source.as_deref()),
+        } => {
+            let template = match template {
+                Some(template) => template,
+                None => init::Template::ask()?,
+            };
+            init::init(&dir, name, template, nsh_source.as_deref())
+        }
         Command::Build {
             entry,
             out,
@@ -551,6 +596,9 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             fps,
             target,
             device,
+            name,
+            size,
+            script,
         } => run::run(
             &entry,
             port,
@@ -558,6 +606,11 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             run::HostFlags { trace, fps },
             target,
             device.as_deref(),
+            run::HostWindow {
+                name: name.as_deref(),
+                size: size.as_deref(),
+                script: script.as_deref(),
+            },
         ),
         Command::Keygen { name } => sign::keygen(&name),
         Command::Certify {

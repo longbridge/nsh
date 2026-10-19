@@ -1371,6 +1371,12 @@ pub enum Prop {
     /// a draggable view stay clickable without it.
     #[prop(desktop = "windowDrag")]
     WindowDrag(Option<bool>),
+    /// `focusable`: whether a view that takes presses is a stop of the
+    /// keyboard focus (Tab, on the platforms that move it between
+    /// pressables); `false` leaves it to the pointer (a backdrop that
+    /// closes a popover). Default true.
+    #[prop(js = "focusable")]
+    Focusable(Option<bool>),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
     AllowFontScaling(bool),

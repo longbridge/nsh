@@ -9,7 +9,7 @@
 //!   quit"` runs steps once the window shows: screenshots rendered
 //!   offscreen and simulated input, to check the backend without touching
 //!   the screen.
-//! - `--size 390x844` sets the window size in points (default 1200x800,
+//! - `--window-size 390x844` sets the window size in points (default 1200x800,
 //!   wide enough for desktop layouts such as the gallery's sidebar).
 //! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
 //!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
@@ -66,9 +66,9 @@ pub fn main() -> std::process::ExitCode {
             // Steps run once the window shows (`nsh_platform_windows`'s
             // `script` module): offscreen screenshots and simulated input.
             "--script" => options.script = args.next(),
-            "--size" => match args.next().as_deref().and_then(parse_size) {
+            "--window-size" => match args.next().as_deref().and_then(parse_size) {
                 Some(size) => options.size = size,
-                None => log::warn!("--size takes <width>x<height> in points, as 390x844"),
+                None => log::warn!("--window-size takes <width>x<height> in points, as 390x844"),
             },
             other => log::warn!("unknown argument {other}"),
         }

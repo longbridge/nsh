@@ -9,7 +9,7 @@
 pub const TSCONFIG: &str = r#"{
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "ESNext.Disposable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "preserve",

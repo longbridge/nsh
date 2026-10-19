@@ -56,6 +56,19 @@ pub(crate) fn init(cx: &mut App) {
     .detach();
 }
 
+/// Gives a headless test its own async app without installing a process-wide
+/// queue that another test's engine threads could wake on its test scheduler.
+#[cfg(test)]
+pub(crate) fn init_test_app(cx: &mut App) -> impl Drop + use<> {
+    struct Restore(Option<AsyncApp>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            APP.with(|a| *a.borrow_mut() = self.0.take());
+        }
+    }
+    Restore(APP.with(|a| a.borrow_mut().replace(cx.to_async())))
+}
+
 /// Runs `f` on the main thread, soon (in order with other calls).
 pub(crate) fn invoke(f: impl FnOnce() + Send + 'static) {
     match JOBS.get() {

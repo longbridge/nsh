@@ -509,8 +509,12 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     }
     window.makeKeyAndOrderFront(None);
     window.makeFirstResponder(Some(view.surface().root.ns()));
-    #[allow(deprecated)]
-    app.activateIgnoringOtherApps(true);
+    // A scripted run (screenshots, simulated input) keeps the process in
+    // the background: it must not steal focus from what the user is in.
+    // Presses in the script activate the app themselves when they need to.
+    if options.script.is_none() {
+        app.activate();
+    }
     if let Some(script) = &options.script {
         crate::script::run(&window, view.surface().clone(), script);
     }

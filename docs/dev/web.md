@@ -175,7 +175,7 @@ server greets it; the dev session publishes no bundles (`DevSession::rust_root`)
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
 (`nsh_core::ui::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no QuickJS, so smaller than the
-prebuilt runtime; under its TSX entry (`App.tsx`, QuickJS) 5.26 MB (1.75 / 1.27 MB).
+prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5.26 MB (1.75 / 1.27 MB).
 
 ## What WebAssembly changes in the shared crates
 
@@ -389,8 +389,8 @@ browsers' touches into what phones report:
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
-- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled or hidden,
-  so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
+- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled, hidden or
+  `focusable={false}` (a focused one that stops being a stop is blurred), so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
   draws a ring inside the view; a popped screen gives the focus back to what had it when the screen was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
   text and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest

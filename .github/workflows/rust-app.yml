@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "examples/gallery-rs/**"
+      - "examples/rust-exports/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
       - "crates/nsh-engine/**"
@@ -19,6 +20,7 @@ on:
   pull_request:
     paths:
       - "examples/gallery-rs/**"
+      - "examples/rust-exports/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
       - "crates/nsh-engine/**"
@@ -127,9 +129,11 @@ jobs:
             echo "The Rust app's web runtime unexpectedly carries JS"
             exit 1
           fi
-      - name: Publish its TSX entry for the web
+      - name: Publish a TSX app with a Rust crate for the web
         run: |
-          # The same crate under its TSX entry: QuickJS runs App.tsx.
-          ./target/debug/nsh package examples/gallery-rs/App.tsx --target web -o target/rust-app-web-tsx
-          site="target/rust-app-web-tsx/Rust Gallery"
+          # A TSX entry and the app's crate: QuickJS runs App.tsx, the
+          # crate's set is compiled into the app's runtime.
+          ./target/debug/nsh package examples/rust-exports --target web -o target/rust-exports-web
+          site="target/rust-exports-web/Rust Exports"
           ls "$site"/app.*.nshc
+          grep -q rust-exports/native "$site"/nsh.*.wasm

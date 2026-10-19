@@ -76,6 +76,8 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
 }
 
 /// What [`run_app`] runs.
+// Made once per app and moved into it: the size of a bundle is no cost.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum AppSource {
     /// A Rust app: its root component.
@@ -671,7 +673,7 @@ pub fn open_app_window(
     let handle = cx.open_window(window_options, move |window, cx| {
         let title = options.title.clone();
         let view: Entity<AppView> = cx.new(|cx| AppView::new(options, window, cx));
-        crate::chrome::set_standalone(view.read(cx).surface(), &title);
+        crate::chrome::set_standalone(view.read(cx).surface(), &title, window.window_handle());
         match source {
             AppSource::Rust(root) => view.read(cx).load(App::Rust(root)),
             AppSource::Bundle(bundle) => view.read(cx).load(App::Js(bundle)),
