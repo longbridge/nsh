@@ -16,6 +16,28 @@ use tokio_tungstenite::tungstenite::{
 };
 
 const MAX_MESSAGE: usize = 8 * 1024 * 1024;
+/// Messages one socket delivers before it lets the engine's turn end.
+const MESSAGES_PER_TURN: usize = 32;
+
+/// Pending once, waking itself: QuickJS' scheduler then ends the turn
+/// (`run_jobs` returns) and the engine's waker starts the next.
+struct YieldNow(bool);
+
+impl std::future::Future for YieldNow {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        if self.0 {
+            return std::task::Poll::Ready(());
+        }
+        self.0 = true;
+        cx.waker().wake_by_ref();
+        std::task::Poll::Pending
+    }
+}
 const QUEUE: usize = 8;
 /// A place among the VM's WebSockets (shared with the `websocket` module),
 /// or the `RangeError` saying there is none.
@@ -242,7 +264,14 @@ fn open<'js>(
             let opened = Object::new(task_ctx.clone()).map_err(|e| e.to_string())?;
             opened.set("protocol", protocol).map_err(|e| e.to_string())?;
             emit(&callback, "open", opened.into_value()).map_err(|e| e.to_string())?;
+            let mut delivered = 0;
             loop {
+                // A peer that floods frames keeps the socket ready: after a
+                // turn's share the engine runs before more are delivered.
+                if delivered >= MESSAGES_PER_TURN {
+                    delivered = 0;
+                    YieldNow(false).await;
+                }
                 tokio::select! {
                     command = rx.recv() => match command {
                         Some(Command::Send(message)) => {
@@ -265,8 +294,8 @@ fn open<'js>(
                         None => return Ok(()),
                     },
                     incoming = socket.next() => match incoming {
-                        Some(Ok(Message::Text(text))) => { emit(&callback, "message", rquickjs::String::from_str(task_ctx.clone(), text.as_str()).map_err(|e| e.to_string())?.into_value()).map_err(|e| e.to_string())?; },
-                        Some(Ok(Message::Binary(bytes))) => { let buffer = rquickjs::ArrayBuffer::new_copy(task_ctx.clone(), &bytes).map_err(|e| e.to_string())?; emit(&callback, "message", buffer.into_value()).map_err(|e| e.to_string())?; },
+                        Some(Ok(Message::Text(text))) => { delivered += 1; emit(&callback, "message", rquickjs::String::from_str(task_ctx.clone(), text.as_str()).map_err(|e| e.to_string())?.into_value()).map_err(|e| e.to_string())?; },
+                        Some(Ok(Message::Binary(bytes))) => { delivered += 1; let buffer = rquickjs::ArrayBuffer::new_copy(task_ctx.clone(), &bytes).map_err(|e| e.to_string())?; emit(&callback, "message", buffer.into_value()).map_err(|e| e.to_string())?; },
                         Some(Ok(Message::Close(frame))) => { let _ = socket.flush().await; closed(&task_ctx, &callback, frame, true).map_err(|e| e.to_string())?; return Ok(()); },
                         Some(Ok(Message::Ping(_))) => { socket.flush().await.map_err(|e| e.to_string())?; },
                         Some(Ok(_)) => {},
