@@ -175,7 +175,7 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 ```
 
 `nsh build` 把 source map 写为 `bundle.js.map`；从文件夹加载 bundle 的嵌入式应用会从 bundle 旁边读取它，
-[签名包](./signed-packages.md)中也带有它。
+[签名包](./signed-packages.md)中也带有它，除非把它放在包旁边、再用 `nsh symbolicate` 映射（[已发布包的报错](./signed-packages.md#已发布包的报错)）。
 
 ## 调试技巧
 

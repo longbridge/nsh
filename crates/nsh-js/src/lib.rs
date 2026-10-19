@@ -44,7 +44,7 @@ pub use nsh_core::{
 
 pub use crate::{
     bytecode::{
-        BUNDLE_NAME, BYTECODE_VERSION, compile_bytecode, compile_bytecode_with,
+        BUNDLE_NAME, BYTECODE_VERSION, Strip, compile_bytecode, compile_bytecode_with,
         compile_chunk_bytecode,
     },
     declarations::type_definitions,

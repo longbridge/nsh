@@ -93,6 +93,8 @@ out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets,
 | `--id <id>` | app id，例如 `com.example.app`。 |
 | `--app-version <version>` | 版本，例如 `1.2.0`。 |
 | `--build <n>` | 构建号。必填（在此处或 `nsh.json` 中指定）；每次发布都必须递增。 |
+| `--source-map <where>` | `package`（默认）：放进包里。`file`：写到包旁边的 `<package>.map`，不放进包里。`none`：不输出。见[已发布包的报错](#已发布包的报错)。 |
+| `--strip-debug` | 字节码中不保留行号和列号表：包更小，但报错调用栈里没有位置。 |
 
 凡是设备会拒绝的包，`nsh publish` 也拒绝签名：证书必须覆盖该 app id 和当前时间。
 
@@ -107,7 +109,7 @@ error the release key's certificate does not cover this package: it does not cov
 
 - 应用的 JS 源码（始终包含）；
 - 它的字节码，仅当设备上运行时的字节码版本与之相同时才会使用（否则运行源码，因此包在更新的运行时上仍然可用）；
-- 它的 source map；
+- 它的 source map（用 `--source-map file` 或 `none` 发布时除外）；
 - 它导入的资源（图片、字体）。
 
 包的标识（用于吊销）是整个文件的 SHA-256。
@@ -202,6 +204,43 @@ runOnUiThread(() -> nsh.runPackage(pkg));
 
 完整 API：[嵌入 iOS 应用](./embedding-ios.md)、
 [嵌入 Android 应用](./embedding-android.md)。
+
+## 已发布包的报错
+
+包里的字节码保留了行号和列号表，所以报错带有位置；运行时会先用包里的 source map 把它们映射到你的源码，再交给宿主应用的
+错误回调：
+
+```text
+Error: boom
+    at n (App.tsx:5:3)
+```
+
+source map 里包含应用的原始源码，往往也是包里最大的文件：gallery 示例 2.6 MB 的包里大约一半是它。如果不想把它随包分发，
+可以把它输出到包的旁边：
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --source-map file
+```
+
+```text
+✓ wrote the source map to out/com.example.counter-2.nshpkg.map (6.1 KB)
+```
+
+这时设备上报的是 bundle 中的位置（`at n (bundle.js:1:80)`）。把 source map 和对应的包一起保存好，再用 `nsh symbolicate`
+映射宿主应用上报的内容：
+
+```sh
+nsh symbolicate out/com.example.counter-2.nshpkg.map report.txt
+```
+
+```text
+Error: boom
+    at n (App.tsx:5:3)
+```
+
+`nsh symbolicate` 从文件或标准输入读取报错文本，接受 source map 文件，或带有 source map 的包。行号表会让字节码增大约
+五分之一（对带 source map 的包而言是 3–5%）；`--strip-debug` 会去掉它们，此时调用栈显示为 `at n (<null>:0:1)`，
+无法再映射。
 
 ## 在开发中试用包
 

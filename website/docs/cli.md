@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Every NSH subcommand and flag - init, build, trace, check, dev, run, package, and the signing commands keygen, certify, publish, verify and revoke.
+description: Every NSH subcommand and flag - init, build, trace, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
 order: 6
 group: start
 ---
@@ -12,18 +12,19 @@ group: start
 ```text
 nsh <COMMAND>
 
-  init     Create an app
-  build    Bundle an app and compile it to QuickJS bytecode
-  trace    Run an app headless and print the mount instructions and timings
-  check    Type check an app with TypeScript's native compiler
-  dev      Serve an app to dev hosts (simulators, devices) and push rebuilds
-  run      Like dev, and also run the app in a development host
-  package  Package an installable app from the prebuilt runtime
-  keygen   Create a signing key
-  certify  Certify a release key with a root key
-  publish  Build an app in release mode and sign it into a package (.nshpkg)
-  verify   Verify a package
-  revoke   Sign a revocation list
+  init         Create an app
+  build        Bundle an app and compile it to QuickJS bytecode
+  trace        Run an app headless and print the mount instructions and timings
+  check        Type check an app with TypeScript's native compiler
+  dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
+  run          Like dev, and also run the app in a development host
+  package      Package an installable app from the prebuilt runtime
+  keygen       Create a signing key
+  certify      Certify a release key with a root key
+  publish      Build an app in release mode and sign it into a package (.nshpkg)
+  verify       Verify a package
+  symbolicate  Map the positions in a reported error stack to the app's sources
+  revoke       Sign a revocation list
 ```
 
 `nsh <command> --help` prints the flags of a command; `nsh --version` prints the version.
@@ -245,6 +246,7 @@ Certifies a release key with a root key for some app ids and a time window; pack
 
 ```sh
 nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--app-version <V>] [--build <N>]
+            [--source-map package|file|none] [--strip-debug]
 ```
 
 Builds the app in release mode and signs it into a package. Metadata comes from `nsh.json`, overridden by the flags.
@@ -257,6 +259,8 @@ Builds the app in release mode and signs it into a package. Metadata comes from 
 | `--id <ID>` | App id. |
 | `--app-version <VERSION>` | Version. |
 | `--build <BUILD>` | Build number: must grow with every release. |
+| `--source-map <WHERE>` | Where the source map goes: `package` (default), `file` (`<package>.map` next to the package) or `none` ([Signed packages](./signed-packages.md#errors-from-published-packages)). |
+| `--strip-debug` | Leave the line and column tables out of the bytecode: smaller, but error stacks have no positions. |
 
 ### nsh verify
 
@@ -265,6 +269,16 @@ nsh verify <PACKAGE> [--root <ROOT.pub>]... [--revocations <LIST>]
 ```
 
 Verifies a package as an app trusting the given roots would. Without `--root`, only the package's own signature is checked. It prints the package's SHA-256, which `nsh revoke --package` takes.
+
+### nsh symbolicate
+
+```sh
+nsh symbolicate <MAP> [INPUT]
+```
+
+Rewrites the bundle positions (`bundle.js:LINE:COL`) of an error a package reported to your sources and prints the
+result. `MAP` is a source map (`<package>.map` from `nsh publish --source-map file`, `bundle.js.map`) or a package that
+holds one; `INPUT` is the error text (default: standard input).
 
 ### nsh revoke
 

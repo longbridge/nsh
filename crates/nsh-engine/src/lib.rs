@@ -371,6 +371,15 @@ pub fn load_package(
     })
 }
 
+/// Rewrites every `bundle.js:LINE:COL` in `text` (a reported error and its
+/// stack) to the app source position `source_map` (the bundle's) gives,
+/// as the engine does with a bundle's own map: for stacks reported by
+/// packages published without their map (`nsh symbolicate`).
+#[cfg(feature = "js")]
+pub fn symbolicate(source_map: &str, text: &str) -> String {
+    symbolicate::Symbolicator::new(Some(source_map.into())).rewrite(text)
+}
+
 /// Parses capabilities in their JSON form (`capabilities.json`, the dev
 /// protocol, an embedder's grant).
 pub fn parse_capabilities(json: &str) -> Result<Capabilities, String> {

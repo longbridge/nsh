@@ -17,6 +17,10 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   declared capabilities, bytecode version, minimum runtime, signing time, the certificate, a file table with SHA-256s)
   then the files (source, bytecode, source map, assets), then the release key's signature over everything before it.
   The source is always included; the bytecode is only used when its version is the runtime's `BYTECODE_VERSION`.
+  `nsh publish` compiles it with `nsh_js::Strip::Source`: the line tables stay (about +20% bytecode), so stacks read
+  `bundle.js:L:C` and the package's map (or `nsh symbolicate` with the map kept out of it, `--source-map file`) maps
+  them; `Strip::All` (`--strip-debug`) leaves `<null>:0:1`. The source the package carries is the same minified
+  code, so stripping it from the bytecode as well hides nothing.
   `nsh publish` refuses to sign what a device would refuse (the certificate must cover the app and the time).
 - **Verification** (`TrustStore::verify`): the certificate's root signature, the release key not revoked, the package
   signature, the app id and the signing time against the certificate, the minimum runtime, the file table tiling the

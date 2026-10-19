@@ -66,6 +66,28 @@ fn a_package_verifies_against_its_root() {
 }
 
 #[test]
+fn tools_read_the_source_map_of_a_signed_package() {
+    let k = keys(&["*"]);
+    let bytes = build(&contents("a.b", 1), &k.release, &k.cert).unwrap();
+    assert_eq!(
+        nsh_package::source_map(&bytes).unwrap().as_deref(),
+        Some("{}")
+    );
+    // Published without it.
+    let without = Contents {
+        source_map: None,
+        ..contents("a.b", 1)
+    };
+    let bytes = build(&without, &k.release, &k.cert).unwrap();
+    assert_eq!(nsh_package::source_map(&bytes).unwrap(), None);
+    // Only from a package its own key signed.
+    let mut tampered = bytes.clone();
+    let last = tampered.len() - 1;
+    tampered[last] ^= 1;
+    assert!(nsh_package::source_map(&tampered).is_err());
+}
+
+#[test]
 fn every_byte_is_covered() {
     let k = keys(&["*"]);
     let bytes = build(&contents("a.b", 1), &k.release, &k.cert).unwrap();

@@ -1,6 +1,6 @@
 ---
 title: 命令行
-description: NSH 的全部子命令与参数：init、build、trace、dev、run、package，以及签名相关的 keygen、certify、publish、verify 和 revoke。
+description: NSH 的全部子命令与参数：init、build、trace、dev、run、package，以及签名相关的 keygen、certify、publish、verify、symbolicate 和 revoke。
 order: 6
 group: start
 ---
@@ -12,17 +12,18 @@ group: start
 ```text
 nsh <COMMAND>
 
-  init     Create an app
-  build    Bundle an app and compile it to QuickJS bytecode
-  trace    Run an app headless and print the mount instructions and timings
-  dev      Serve an app to dev hosts (simulators, devices) and push rebuilds
-  run      Like dev, and also run the app in a development host
-  package  Package an installable app from the prebuilt runtime
-  keygen   Create a signing key
-  certify  Certify a release key with a root key
-  publish  Build an app in release mode and sign it into a package (.nshpkg)
-  verify   Verify a package
-  revoke   Sign a revocation list
+  init         Create an app
+  build        Bundle an app and compile it to QuickJS bytecode
+  trace        Run an app headless and print the mount instructions and timings
+  dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
+  run          Like dev, and also run the app in a development host
+  package      Package an installable app from the prebuilt runtime
+  keygen       Create a signing key
+  certify      Certify a release key with a root key
+  publish      Build an app in release mode and sign it into a package (.nshpkg)
+  verify       Verify a package
+  symbolicate  Map the positions in a reported error stack to the app's sources
+  revoke       Sign a revocation list
 ```
 
 `nsh <command> --help` 打印某个命令的参数；`nsh --version` 打印版本号。
@@ -225,6 +226,7 @@ nsh certify --root <ROOT.secret> --key <KEY.pub> --apps <PATTERN>... [--days <DA
 
 ```sh
 nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--app-version <V>] [--build <N>]
+            [--source-map package|file|none] [--strip-debug]
 ```
 
 以 release 模式构建应用并签名为一个包。元数据来自 `nsh.json`，可被参数覆盖。
@@ -237,6 +239,8 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 | `--id <ID>` | 应用 id。 |
 | `--app-version <VERSION>` | 版本号。 |
 | `--build <BUILD>` | 构建号：每次发布都必须递增。 |
+| `--source-map <WHERE>` | source map 放在哪里：`package`（默认）、`file`（包旁边的 `<package>.map`）或 `none`（[签名包](./signed-packages.md#已发布包的报错)）。 |
+| `--strip-debug` | 字节码中不保留行号和列号表：更小，但报错调用栈里没有位置。 |
 
 ### nsh verify
 
@@ -245,6 +249,16 @@ nsh verify <PACKAGE> [--root <ROOT.pub>]... [--revocations <LIST>]
 ```
 
 按信任给定根密钥的应用的方式校验一个包。不带 `--root` 时只检查包自身的签名。它会打印包的 SHA-256，`nsh revoke --package` 接受的就是这个值。
+
+### nsh symbolicate
+
+```sh
+nsh symbolicate <MAP> [INPUT]
+```
+
+把包上报的报错中的 bundle 位置（`bundle.js:LINE:COL`）改写为你的源码位置并打印结果。`MAP` 是 source map
+（`nsh publish --source-map file` 输出的 `<package>.map`，或 `bundle.js.map`），或带有 source map 的包；`INPUT`
+是报错文本（默认：标准输入）。
 
 ### nsh revoke
 

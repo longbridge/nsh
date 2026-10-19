@@ -99,6 +99,18 @@ pub(crate) fn certify_key(
     Ok(())
 }
 
+/// Where `nsh publish` puts the bundle's source map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum SourceMapOut {
+    /// In the package: devices map error stacks to the app's sources.
+    Package,
+    /// In `<package>.map`, next to the package.
+    File,
+    /// Nowhere.
+    #[value(name = "none")]
+    Omit,
+}
+
 /// Options of `nsh publish`.
 pub(crate) struct PublishOptions<'a> {
     pub(crate) entry: &'a Path,
@@ -106,6 +118,9 @@ pub(crate) struct PublishOptions<'a> {
     pub(crate) cert: &'a Path,
     pub(crate) out: Option<PathBuf>,
     pub(crate) config: crate::package::AppConfig,
+    pub(crate) source_map: SourceMapOut,
+    /// Without line tables (`nsh_js::Strip::All`).
+    pub(crate) strip_debug: bool,
 }
 
 /// `nsh publish`: a release build of the app, signed into a `.nshpkg`.
@@ -124,7 +139,16 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
         &fs::read_to_string(cert_path).with_context(|| format!("read {}", cert_path.display()))?,
     )?;
 
-    let built = crate::build::compile(&entry, true).map_err(|e| e.into_error(&entry))?;
+    // The line tables stay unless asked otherwise: the package carries the
+    // bundle's source anyway, and without them reported stacks have no
+    // positions to map.
+    let strip = if options.strip_debug {
+        nsh_js::Strip::All
+    } else {
+        nsh_js::Strip::Source
+    };
+    let mut built =
+        crate::build::compile_release(&entry, strip).map_err(|e| e.into_error(&entry))?;
     crate::ui::done(format!(
         "built {} {}",
         crate::ui::path(&entry),
@@ -135,6 +159,14 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
         assets.push((asset.path.clone(), bytes));
     }
+    let separate_map = match options.source_map {
+        SourceMapOut::Package => None,
+        SourceMapOut::File => built.source_map.take(),
+        SourceMapOut::Omit => {
+            built.source_map = None;
+            None
+        }
+    };
     let contents = Contents {
         app: App {
             id: id.clone(),
@@ -154,6 +186,15 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
         .out
         .unwrap_or_else(|| PathBuf::from("out").join(format!("{id}-{build_number}.nshpkg")));
     write(&out, &bytes)?;
+    if let Some(map) = &separate_map {
+        let path = map_path(&out);
+        write(&path, map.as_bytes())?;
+        crate::ui::done(format!(
+            "wrote the source map to {} ({})",
+            crate::ui::path(&path),
+            crate::ui::bytes(map.len())
+        ));
+    }
     println!(
         "{}: {} {} (build {}), {} assets, {} KB, signed by {}",
         out.display(),
@@ -164,6 +205,41 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
         bytes.len().div_ceil(1024),
         key.public().id()
     );
+    Ok(())
+}
+
+/// `<package>.map`: where `nsh publish --source-map file` writes the map.
+fn map_path(package: &Path) -> PathBuf {
+    let mut name = package.as_os_str().to_owned();
+    name.push(".map");
+    PathBuf::from(name)
+}
+
+/// `nsh symbolicate`: rewrites the `bundle.js:LINE:COL` positions of an
+/// error report (`input`, else standard input) to app source positions,
+/// with a source map or the one in a package (whose own signature is
+/// checked).
+pub(crate) fn symbolicate(map: &Path, input: Option<&Path>) -> anyhow::Result<()> {
+    let json = if map.extension().is_some_and(|e| e == "nshpkg") {
+        let bytes = fs::read(map).with_context(|| format!("read {}", map.display()))?;
+        nsh_package::source_map(&bytes)
+            .with_context(|| format!("{}", map.display()))?
+            .with_context(|| {
+                format!(
+                    "{} holds no source map (published with --source-map file or none)",
+                    map.display()
+                )
+            })?
+    } else {
+        fs::read_to_string(map).with_context(|| format!("read {}", map.display()))?
+    };
+    let text = match input {
+        Some(path) => {
+            fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?
+        }
+        None => std::io::read_to_string(std::io::stdin()).context("read standard input")?,
+    };
+    print!("{}", nsh_engine::symbolicate(&json, &text));
     Ok(())
 }
 
