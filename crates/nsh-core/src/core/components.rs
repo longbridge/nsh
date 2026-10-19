@@ -2039,7 +2039,7 @@ impl<M: TextEngine> Core<M> {
         for o in old.into_iter().flatten() {
             if nested {
                 for node in self.placed(&o) {
-                    self.leave_nested(parent, node);
+                    self.forget_nested(parent, node);
                 }
             }
             self.release_expanded(o);
@@ -2230,16 +2230,28 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Node `child` of this view is no longer content of the nested
-    /// component hosted by `nested`.
-    fn leave_nested(&mut self, nested: NodeId, child: NodeId) {
+    /// Node `child` of this view, about to be released, is no longer
+    /// content of the nested component hosted by `nested`: it leaves the
+    /// component's children with no native removal (deleting a view
+    /// detaches it, as a plain element's does).
+    fn forget_nested(&mut self, nested: NodeId, child: NodeId) {
         if self.components.slot_names.remove(&child).is_some() {
             self.unslot(child);
-        } else if let Ok(Some(op)) = self.intercept(Op::Remove {
-            parent: nested,
-            child,
-        }) {
-            let _ = self.apply_op(op);
+            return;
+        }
+        let Some(inst) = self.components.instances.get_mut(&nested) else {
+            return;
+        };
+        let count = inst.js_children.len();
+        inst.js_children.retain(|&c| c != child);
+        if inst.js_children.len() == count {
+            return;
+        }
+        if let Some(children) = inst.js_kids {
+            children.set(inst.js_children.clone());
+        }
+        if inst.js_children.is_empty() || inst.children_at == Placement::Each {
+            self.components.mark(nested);
         }
     }
 
@@ -2953,7 +2965,9 @@ impl<M: TextEngine> Core<M> {
                 self.release_id(e.id);
                 return;
             }
-            Part::Component(_) => self.release_instance(e.id),
+            // Its content is this view's, released below: deleting it
+            // detaches it.
+            Part::Component(_) => self.release_component(e.id, false),
             // Its nodes are the region's.
             Part::Region(region) => {
                 self.release_region(region);
@@ -2974,8 +2988,17 @@ impl<M: TextEngine> Core<M> {
         self.release_id(e.id);
     }
 
-    /// Frees what a component made (not its host nor its JS children).
+    /// Frees what a component made (not its host nor its JS children,
+    /// which leave its view).
     fn release_instance(&mut self, host: NodeId) {
+        self.release_component(host, true);
+    }
+
+    /// [`Self::release_instance`]; `detach`: its JS children leave the
+    /// view natively (they stay, JS's), else they are released right after
+    /// (a view's content of a nested component: deleting them detaches
+    /// them).
+    fn release_component(&mut self, host: NodeId, detach: bool) {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
@@ -2990,8 +3013,10 @@ impl<M: TextEngine> Core<M> {
         if let Some(owner) = inst.cell_owner.take() {
             owner.dispose();
         }
-        for &child in &inst.js_children {
-            self.detach_id(child);
+        if detach {
+            for &child in &inst.js_children {
+                self.detach_id(child);
+            }
         }
         for (_, node) in inst.slots {
             self.components.slot_hosts.remove(&node);

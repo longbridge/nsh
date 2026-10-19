@@ -58,7 +58,10 @@ reactive graph of `crate::reactive`, instantiated for Rust in `ui/reactive.rs`).
 style or a text given a closure, a signal, a memo or a `Prop` (anything `IntoReactive<T>`) is a binding, run again
 when what it read changes, and the core applies only what that one binding produced. Nothing renders again and
 nothing is diffed. Releasing the host disposes the owner: its bindings, effects, tasks, timers, back listeners and
-child components go with it. The design and its reasons: `reactive-components.md`.
+child components go with it. What leaves goes as one `Delete` per view the core made, as a plain element's does
+(every platform takes a deleted view out of its parent), with no `Remove` before it, also for content that leaves
+another component's children; only JS's children placed in a component are removed and kept. The design and its
+reasons: `reactive-components.md`.
 
 - **Names come from the type**: `Registry::register::<Button>()` registers it under `std::any::type_name`
   (`nsh_ui_mobile::button::Button`: the key the JS face sets as the host's `component` prop and the core finds it

@@ -7430,6 +7430,56 @@ mod views {
         }
     }
 
+    /// A label (a component whose root is a text).
+    #[component]
+    fn Label() -> impl IntoElement {
+        text("label")
+    }
+
+    /// Shows a label (a component), a text and a holder of a text while
+    /// open, as a holder's content; a press closes.
+    #[component]
+    fn Shutter() -> impl IntoElement {
+        let open = signal(true);
+        view().on_press(move || open.set(false)).child(
+            Holder::element(HolderProps {
+                children: Children::default(),
+            })
+            .child(If::new(open, || {
+                vec![
+                    Label::element(()).into_element(),
+                    text("plain").into_element(),
+                    Holder::element(HolderProps {
+                        children: Children::default(),
+                    })
+                    .child(text("inside"))
+                    .into_element(),
+                ]
+            })),
+        )
+    }
+
+    #[test]
+    fn content_leaving_a_nested_component_is_only_deleted() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Shutter>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        // Deleting a view detaches it natively: no `Remove` before.
+        let count = |f: fn(&MountItem) -> bool| batch.items.iter().filter(|i| f(i)).count();
+        let removes = count(|i| matches!(i, MountItem::Remove { .. }));
+        let deletes = count(|i| matches!(i, MountItem::Delete { .. }));
+        assert_eq!((removes, deletes), (0, 4), "{:?}", batch.items);
+        let holder = c
+            .components
+            .instances
+            .values()
+            .find(|i| !i.js_children.is_empty());
+        assert!(holder.is_none(), "no holder keeps what left it");
+    }
+
     /// A view passing content to nested components: a pocket's lazy
     /// children and a region in a holder's; a press opens and closes.
     #[derive(Default)]
