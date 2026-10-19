@@ -16,6 +16,7 @@ mod photos;
 mod physics;
 mod scrolling;
 mod stocks;
+mod storage;
 mod styles;
 mod system;
 mod text_demo;
@@ -218,6 +219,12 @@ pub(crate) static GROUPS: &[Group] = &[
                 detail: "Status bar, alerts, action sheets, environment, timers, HTTP",
                 icon: IconName::System,
                 content: || system::System::element(()).into_element(),
+            },
+            Demo {
+                name: "Storage",
+                detail: "Storage from Rust: a launch count, a note saved as you type, the stored keys",
+                icon: IconName::Storage,
+                content: || storage::StorageDemo::element(()).into_element(),
             },
         ],
     },

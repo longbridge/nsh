@@ -251,10 +251,21 @@ pub fn start() -> (nsh_engine::Engine, Receiver<MountBatch>) {
 /// A headless engine running the gallery in a window of `viewport`, and
 /// its batches.
 pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
+    start_with(viewport, None)
+}
+
+/// A headless engine running the gallery in a window of `viewport`,
+/// keeping its data in `data_dir` (`None`: in memory), and its batches.
+pub fn start_with(
+    viewport: Size,
+    data_dir: Option<std::path::PathBuf>,
+) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     logger();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
-        app: App::Rust(Root::of::<gallery_native::Gallery>()),
+        app: App::Rust(
+            Root::of::<gallery_native::Gallery>().app_id("com.longbridge.nsh.galleryrs"),
+        ),
         viewport,
         trace: false,
         network: None,
@@ -264,7 +275,7 @@ pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        data_dir: None,
+        data_dir,
         storage: None,
     };
     let engine = Sink::start(config, tx);

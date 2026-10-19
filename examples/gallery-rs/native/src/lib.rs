@@ -24,9 +24,11 @@ fn native(registry: &mut Registry) {
 
 /// The gallery, in the gallery's design for the system's appearance: on
 /// phones a native stack of its index and the screens pushed on it; in wide
-/// windows a sidebar of the demos and the selected one beside it.
+/// windows a sidebar of the demos and the selected one beside it; the demo
+/// open when it last ran opens again.
 #[component]
 pub fn Gallery() -> impl IntoElement {
+    shell::restore();
     view()
         .flex_1()
         .bg(colors::BACKGROUND)

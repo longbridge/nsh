@@ -17,12 +17,18 @@ fn main() -> impl std::process::Termination {
     platform::set_ui_sets(vec![nsh_ui_mobile::registry(), gallery]);
     let theme = nsh_core::ui::Theme::from_json(include_str!("../../theme.json"))
         .expect("the gallery theme is valid");
+    // nsh.json's id: the window's and where the app keeps its data.
+    let app_id = "com.longbridge.nsh.galleryrs";
     platform::run_app(
-        platform::AppSource::Rust(platform::Root::of::<gallery_native::Gallery>().theme(theme)),
+        platform::AppSource::Rust(
+            platform::Root::of::<gallery_native::Gallery>()
+                .theme(theme)
+                .app_id(app_id),
+        ),
         platform::AppOptions {
             title: "Rust Gallery".to_owned(),
             asset_base: Some(platform::AssetBase::Directory(assets)),
-            app_id: "com.longbridge.nsh.galleryrs".to_owned(),
+            app_id: app_id.to_owned(),
             size: (1200, 800),
             script: std::env::var("NSH_SCRIPT").ok(),
             ..Default::default()
