@@ -194,7 +194,7 @@ fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
         call: 0,
         run: RustCall::Op(Box::new(move |_| {
             let _ = &grenade;
-            Err(String::new())
+            Err(String::new().into())
         })),
     })]);
     assert!(js_events(&mut c).is_empty());

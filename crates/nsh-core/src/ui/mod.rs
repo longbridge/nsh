@@ -159,7 +159,10 @@ pub use self::{
         AdaptiveColor, BorderCurve, FontWeight, Length, StyleRefinement, Styled, WritingDirection,
         px, relative, rgb, rgba,
     },
-    system::{CallCx, Held, IntoThrown, JsError, Later, Local, Locals, Quotas, System},
+    system::{
+        CallCx, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals, Quotas,
+        System, io_code,
+    },
     task::{Answer, DialogAnswer, ImageSize, Task},
     theme::{Theme, ThemeColors, ThemeError},
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},

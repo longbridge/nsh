@@ -184,10 +184,6 @@ For that, two choices of the first version change:
   `Vec<u8>` is bytes: a `Uint8Array` (a `Buffer` too), copied in the call (`u8` is no `JsValue`, so it never
   overlaps the arrays); `SystemTime` is a `Date`. `#[prop(exact)]` on a `JsObject` struct refuses other own keys
   (options, where a typo must not pass).
-- **Overloads**: `#[overload(fn(path: String, encoding: Encoding) -> String)]` on a module function gives
-  TypeScript that signature instead of the function's own (one attribute per signature, Rust types as in a
-  signature; the result is a promise when the function's is), for results whose type depends on the arguments
-  (`fs/promises`' `readFile`).
 - **Interfaces**: `#[class(interface)]` on the struct makes a class whose objects come from members only: its
   module exports no value of it and TypeScript declares an `interface` (`fs/promises`' `Stats`); it has no
   constructor or statics. A result `Vec<Instance<T>>` is an array of objects.
@@ -200,8 +196,12 @@ For that, two choices of the first version change:
   returns runs as a core task: TS `Promise<T>` (`FunctionCall::Start`, `MemberCall::Start`). The system modules
   use it to keep Node's shape, a `RangeError` at the call and I/O errors as rejections (`net`, `fs/promises`).
 - **Errors of a chosen class**: `Result<T, JsError>` throws a `TypeError`, `RangeError` or `Error`
-  (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A task's `Err`
-  rejects with an `Error` as before.
+  (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A `Later`
+  task's (and an `async` function's) `Err(JsError)` rejects with the same, any other error with an `Error` of its
+  message (the reply carries a `Thrown`). `JsError::with(key, value)` / `with_code(code)` add properties
+  (`JsError::Fields`), so errors keep Node's shape: `code`, `syscall`, `path` (`error.code === "ENOENT"`);
+  `JsError::from(io::Error)` and `io_code` name an I/O error's code from its OS error or kind. The system modules
+  share it (`fs/promises`; `process` and `net` can).
 - **What a synchronous call can do beyond computing**: a parameter `cx: CallCx` (filled in by the call, never in an
   `async` one) starts a task of the core in order with the ops (`cx.start(future)`, nothing waits for it) and ties
   work to what owns the call in JS (`cx.on_cleanup(f)`: the reactive owner, else the module's run under hot
@@ -214,8 +214,10 @@ For that, two choices of the first version change:
   a global made from it (`process`) is the default export.
 - **`this` in a synchronous method**: `fn on(this: Instance<Self>, ..) -> Instance<Self>` gets the handle instead
   of a borrow, so it can return its own object (`child.on(..)` chains).
-- **Overloads**: `#[overload("…")]` (repeatable) on a member declares those TypeScript signatures instead of the
-  one its types give, for what a string argument selects (`on("exit", (result: ExitResult) => void)`).
+- **Overloads**: `#[overload(fn(event: ExitEvent, handler: Callback<ExitResult>) -> Instance<ChildProcess>)]`
+  (repeatable) on a module function or a member declares those signatures, from their Rust types, instead of
+  the one its own types give (the result is a promise when the function's is): what an argument selects
+  (`on("exit", ..)`, `readFile(path, "utf8")`).
 - **Instances of classes**, by reference: a parameter `&Other` / `&mut Other` borrows another instance for the call
   (TS: `other: Other`), `Instance<Other>` keeps a handle (to store one instance in another), and a result `Other`
   or `Instance<Other>` is a JS object (`Self` from `new` and statics; `Option<Instance<Other>>` for none). An

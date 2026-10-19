@@ -1,7 +1,8 @@
 //! What the runtime's system modules (`net`, files, processes) need of the
 //! machinery beyond values: the VM's capabilities ([`System`], a parameter
 //! the call fills in rather than JS), work that starts in the JS call and
-//! finishes as a task ([`Later`]), and errors of a chosen JS class
+//! finishes as a task ([`Later`]), and errors of a chosen JS class with
+//! Node's properties (`code`, `syscall`, `path`), thrown or rejected
 //! ([`JsError`]).
 
 use std::{
@@ -18,7 +19,10 @@ use std::{
 use rustc_hash::FxHashMap;
 
 use super::{JsHost, Ret, Thrown, call::JsResult, module::ModuleFuture};
-use crate::access::{Access, TrustedPaths};
+use crate::{
+    JsonValue,
+    access::{Access, TrustedPaths},
+};
 
 /// The VM a call comes from, as the host configured it: what the app may
 /// do and where its files are. A parameter `sys: System` of a module
@@ -236,17 +240,18 @@ impl fmt::Debug for Held {
 /// Work a function or member that is not `async` starts in the JS call
 /// and finishes as a task of the core: JS gets a promise of `T`. What the
 /// call does before returning it (checking its arguments, taking a quota)
-/// throws as a synchronous call's error does; the task's `Err` rejects.
-/// TS: `Promise<T>`.
+/// throws as a synchronous call's error does; the task's `Err` rejects
+/// (a [`JsError`] with its class and properties, any other error as an
+/// `Error` with its message). TS: `Promise<T>`.
 #[must_use = "the work runs only when the call returns it"]
-pub struct Later<T>(Pin<Box<dyn Future<Output = Result<T, String>>>>);
+pub struct Later<T>(Pin<Box<dyn Future<Output = Result<T, Thrown>>>>);
 
 impl<T: Ret + 'static> Later<T> {
-    /// The task's work: its value, or the message the promise rejects with.
-    pub fn new<E: fmt::Display>(work: impl Future<Output = Result<T, E>> + 'static) -> Self {
-        Self(Box::pin(
-            async move { work.await.map_err(|e| e.to_string()) },
-        ))
+    /// The task's work: its value, or what the promise rejects with.
+    pub fn new<E: IntoThrown>(work: impl Future<Output = Result<T, E>> + 'static) -> Self {
+        Self(Box::pin(async move {
+            work.await.map_err(IntoThrown::into_thrown)
+        }))
     }
 
     pub(crate) fn into_future(self) -> ModuleFuture {
@@ -266,8 +271,11 @@ impl<T> fmt::Debug for Later<T> {
     }
 }
 
-/// An error of a chosen JS class, for a synchronous call's `Err`: what
-/// `Result<T, JsError>` throws (any other error type throws an `Error`).
+/// An error of a chosen JS class: what `Result<T, JsError>` throws, and
+/// what a [`Later`] task's `Err(JsError)` rejects with (any other error
+/// type is an `Error` with its message). [`JsError::with_code`] and
+/// [`JsError::with`] give it properties, as Node's errors have
+/// (`error.code === "ENOENT"`; TS: `Error & { code?: string }`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JsError {
     /// A `TypeError`: the call was not allowed or its value is wrong.
@@ -276,6 +284,178 @@ pub enum JsError {
     Range(String),
     /// An `Error`.
     Error(String),
+    /// One of those with properties.
+    Fields(Box<ErrorFields>),
+}
+
+/// The JS class of an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorClass {
+    /// `TypeError`.
+    Type,
+    /// `RangeError`.
+    Range,
+    /// `Error`.
+    Error,
+}
+
+/// An error with properties beside its message ([`JsError::Fields`],
+/// [`Thrown::Fields`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorFields {
+    /// Its class.
+    pub class: ErrorClass,
+    /// Its message.
+    pub message: String,
+    /// Its properties, in order (`code`, `syscall`, `path`, `errno`, ...).
+    pub fields: Vec<(&'static str, JsonValue)>,
+}
+
+impl ErrorFields {
+    fn of(class: ErrorClass, message: String) -> Self {
+        Self {
+            class,
+            message,
+            fields: Vec::new(),
+        }
+    }
+
+    /// Property `key`, if it has one.
+    pub fn field(&self, key: &str) -> Option<&JsonValue> {
+        self.fields.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+    }
+}
+
+impl JsError {
+    /// The error with property `key` set to `value` (replacing one of the
+    /// same name).
+    pub fn with(self, key: &'static str, value: impl Into<JsonValue>) -> Self {
+        let mut fields = match self {
+            JsError::Type(m) => ErrorFields::of(ErrorClass::Type, m),
+            JsError::Range(m) => ErrorFields::of(ErrorClass::Range, m),
+            JsError::Error(m) => ErrorFields::of(ErrorClass::Error, m),
+            JsError::Fields(f) => *f,
+        };
+        fields.fields.retain(|(k, _)| *k != key);
+        fields.fields.push((key, value.into()));
+        JsError::Fields(Box::new(fields))
+    }
+
+    /// The error with Node's `code` (`"ENOENT"`).
+    pub fn with_code(self, code: &str) -> Self {
+        self.with("code", code)
+    }
+
+    /// Its message.
+    pub fn message(&self) -> &str {
+        match self {
+            JsError::Type(m) | JsError::Range(m) | JsError::Error(m) => m,
+            JsError::Fields(f) => &f.message,
+        }
+    }
+
+    /// Its `code`, if it has one.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            JsError::Fields(f) => f.field("code").and_then(JsonValue::as_str),
+            _ => None,
+        }
+    }
+}
+
+/// An I/O error as Node reports it: `Error` with the message and the
+/// `code` of its kind or OS error (`ENOENT`, `EACCES`, ...; none when it
+/// has no name).
+impl From<std::io::Error> for JsError {
+    fn from(error: std::io::Error) -> Self {
+        let message = error.to_string();
+        match io_code(&error) {
+            Some(code) => JsError::Error(message).with_code(code),
+            None => JsError::Error(message),
+        }
+    }
+}
+
+/// Node's code of I/O error `error`: its OS error's name when it has one,
+/// else its kind's.
+pub fn io_code(error: &std::io::Error) -> Option<&'static str> {
+    use std::io::ErrorKind as K;
+    #[cfg(unix)]
+    if let Some(code) = error.raw_os_error().and_then(errno_name) {
+        return Some(code);
+    }
+    Some(match error.kind() {
+        K::NotFound => "ENOENT",
+        K::PermissionDenied => "EACCES",
+        K::AlreadyExists => "EEXIST",
+        K::NotADirectory => "ENOTDIR",
+        K::IsADirectory => "EISDIR",
+        K::DirectoryNotEmpty => "ENOTEMPTY",
+        K::InvalidFilename => "ENAMETOOLONG",
+        K::ReadOnlyFilesystem => "EROFS",
+        K::CrossesDevices => "EXDEV",
+        K::StorageFull => "ENOSPC",
+        K::QuotaExceeded => "EDQUOT",
+        K::FileTooLarge => "EFBIG",
+        K::ResourceBusy => "EBUSY",
+        K::ExecutableFileBusy => "ETXTBSY",
+        K::Deadlock => "EDEADLK",
+        K::TooManyLinks => "EMLINK",
+        K::ArgumentListTooLong => "E2BIG",
+        K::Interrupted => "EINTR",
+        K::WouldBlock => "EAGAIN",
+        K::TimedOut => "ETIMEDOUT",
+        K::BrokenPipe => "EPIPE",
+        K::ConnectionRefused => "ECONNREFUSED",
+        K::ConnectionReset => "ECONNRESET",
+        K::ConnectionAborted => "ECONNABORTED",
+        K::NotConnected => "ENOTCONN",
+        K::AddrInUse => "EADDRINUSE",
+        K::AddrNotAvailable => "EADDRNOTAVAIL",
+        K::HostUnreachable => "EHOSTUNREACH",
+        K::NetworkUnreachable => "ENETUNREACH",
+        K::NetworkDown => "ENETDOWN",
+        K::InvalidInput => "EINVAL",
+        K::Unsupported => "ENOTSUP",
+        K::OutOfMemory => "ENOMEM",
+        _ => return None,
+    })
+}
+
+/// The name of Unix error number `errno`, for the ones a file, process or
+/// socket call gives that no [`std::io::ErrorKind`] names (`ELOOP`).
+#[cfg(unix)]
+fn errno_name(errno: i32) -> Option<&'static str> {
+    let names: &[(i32, &str)] = &[
+        (libc::ENOENT, "ENOENT"),
+        (libc::EACCES, "EACCES"),
+        (libc::EPERM, "EPERM"),
+        (libc::EEXIST, "EEXIST"),
+        (libc::ENOTDIR, "ENOTDIR"),
+        (libc::EISDIR, "EISDIR"),
+        (libc::ENOTEMPTY, "ENOTEMPTY"),
+        (libc::ELOOP, "ELOOP"),
+        (libc::ENAMETOOLONG, "ENAMETOOLONG"),
+        (libc::EBADF, "EBADF"),
+        (libc::EBUSY, "EBUSY"),
+        (libc::EINVAL, "EINVAL"),
+        (libc::EMFILE, "EMFILE"),
+        (libc::ENFILE, "ENFILE"),
+        (libc::ENOSPC, "ENOSPC"),
+        (libc::EROFS, "EROFS"),
+        (libc::EXDEV, "EXDEV"),
+        (libc::EAGAIN, "EAGAIN"),
+        (libc::ENXIO, "ENXIO"),
+        (libc::ETXTBSY, "ETXTBSY"),
+        (libc::EFBIG, "EFBIG"),
+        (libc::EMLINK, "EMLINK"),
+        (libc::EPIPE, "EPIPE"),
+        (libc::ENOEXEC, "ENOEXEC"),
+    ];
+    names
+        .iter()
+        .find(|(n, _)| *n == errno)
+        .map(|(_, name)| *name)
 }
 
 /// What an `Err` of a synchronous call throws: an `Error` with its message
@@ -297,6 +477,7 @@ impl IntoThrown for JsError {
             JsError::Type(m) => Thrown::Type(m),
             JsError::Range(m) => Thrown::Range(m),
             JsError::Error(m) => Thrown::Error(m),
+            JsError::Fields(f) => Thrown::Fields(f),
         }
     }
 }
@@ -421,6 +602,46 @@ mod tests {
         let typo = host.value(serde_json::json!({ "recursive": true, "typo": 1 }));
         let error = Options::from_js(crate::ui::JsIn::new(&host, typo)).unwrap_err();
         assert_eq!(error.0, "unknown field `typo`");
+    }
+
+    #[test]
+    fn errors_carry_node_s_codes_thrown_and_rejected() {
+        use super::{ErrorClass, JsError, io_code};
+        use crate::ui::{IntoThrown, Thrown};
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(io_code(&missing), Some("ENOENT"));
+        #[cfg(unix)]
+        assert_eq!(
+            io_code(&std::io::Error::from_raw_os_error(libc::ELOOP)),
+            Some("ELOOP")
+        );
+        assert_eq!(io_code(&std::io::Error::other("x")), None);
+        let error = JsError::Type("denied".into())
+            .with_code("EPERM")
+            .with_code("EACCES")
+            .with("path", "a.txt");
+        assert_eq!((error.message(), error.code()), ("denied", Some("EACCES")));
+        let Thrown::Fields(fields) = error.clone().into_thrown() else {
+            panic!("fields go with the error");
+        };
+        assert_eq!(fields.class, ErrorClass::Type);
+        assert_eq!(fields.fields.len(), 2);
+        assert_eq!(JsError::from(missing).code(), Some("ENOENT"));
+        // A task's `Err(JsError)` rejects with the same.
+        let later = super::Later::<u32>::new(async { Err::<u32, _>(error) });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let Err(Thrown::Fields(rejected)) = runtime.block_on(later.into_future()) else {
+            panic!("a rejection with fields");
+        };
+        assert_eq!(rejected.field("path"), Some(&serde_json::json!("a.txt")));
+        // Any other error rejects with its message.
+        let later = super::Later::<u32>::new(async { Err::<u32, _>("plain") });
+        assert!(matches!(
+            runtime.block_on(later.into_future()),
+            Err(Thrown::Error(m)) if m == "plain"
+        ));
     }
 
     #[test]

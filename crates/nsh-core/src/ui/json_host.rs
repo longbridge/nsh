@@ -79,7 +79,10 @@ pub(crate) fn event_data(event: &dyn super::EventToJs) -> Option<JsonValue> {
 /// `undefined`), or the rejection's message.
 pub(crate) fn result(result: JsResult) -> Result<Option<JsonValue>, String> {
     let host = JsonHost::default();
-    let value = result?.to_js_value(&host).map_err(|e| e.0)?;
+    let value = result
+        .map_err(|e| e.to_string())?
+        .to_js_value(&host)
+        .map_err(|e| e.0)?;
     Ok(host.read(value))
 }
 
