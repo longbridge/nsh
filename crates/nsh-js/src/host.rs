@@ -110,30 +110,42 @@ pub struct Host {
 /// parser and compiler, which the linker leaves out, and the VM runs
 /// bytecode only (the web runtime of published apps).
 fn new_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Context> {
+    #[cfg(test)]
+    if tests::SOURCELESS.get() {
+        return sourceless_context(rt, scheduler);
+    }
     #[cfg(not(feature = "bytecode-only"))]
     {
         Context::full(rt, scheduler)
     }
     #[cfg(feature = "bytecode-only")]
     {
-        use rquickjs::context::intrinsic::{
-            Date, Json, MapSet, Performance, Promise, Proxy, RegExp, TypedArrays, WeakRef,
-        };
-        let ctx = Context::custom::<(
-            Date,
-            RegExp,
-            Json,
-            Proxy,
-            MapSet,
-            TypedArrays,
-            Promise,
-            WeakRef,
-            Performance,
-        )>(rt, scheduler)?;
-        // SAFETY: a new, live context; rquickjs has no intrinsic for it.
-        ctx.with(|ctx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(ctx.as_raw().as_ptr()) });
-        Ok(ctx)
+        sourceless_context(rt, scheduler)
     }
+}
+
+/// The context of `bytecode-only` runtimes, without the intrinsic that
+/// compiles source; tests make one in any build, so a VM setup that needs
+/// QuickJS' parser fails them, not only the web runtime.
+#[cfg(any(feature = "bytecode-only", test))]
+fn sourceless_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Context> {
+    use rquickjs::context::intrinsic::{
+        Date, Json, MapSet, Performance, Promise, Proxy, RegExp, TypedArrays, WeakRef,
+    };
+    let ctx = Context::custom::<(
+        Date,
+        RegExp,
+        Json,
+        Proxy,
+        MapSet,
+        TypedArrays,
+        Promise,
+        WeakRef,
+        Performance,
+    )>(rt, scheduler)?;
+    // SAFETY: a new, live context; rquickjs has no intrinsic for it.
+    ctx.with(|ctx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(ctx.as_raw().as_ptr()) });
+    Ok(ctx)
 }
 
 /// How a VM is set up.
@@ -1243,6 +1255,58 @@ mod tests {
     use nsh_core::{EventKind, Op};
 
     use super::*;
+
+    thread_local! {
+        /// Makes this thread's new VMs as `bytecode-only` runtimes make
+        /// theirs ([`sourceless_context`]).
+        pub(super) static SOURCELESS: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// A published web app's VM compiles no source: hardening comes as
+    /// bytecode and the standard modules and globals are native. Its
+    /// runtime cannot compile source at all (`bytecode-only`), so a setup
+    /// step or first use that needs QuickJS' parser would stop every
+    /// published app from starting. The global `WebSocket` is left out: the
+    /// web build has none, and native hosts, which compile its facade, have
+    /// the parser.
+    #[test]
+    fn bytecode_only_vms_start_and_use_the_standard_apis_without_source() {
+        let imports: String = crate::standard::NAMES
+            .iter()
+            .enumerate()
+            .map(|(i, name)| format!("import * as m{i} from {name:?};\n"))
+            .collect();
+        let source = format!(
+            r#"{imports}
+            import {{ text }} from "nsh:rt";
+            for (const m of [{modules}]) if (typeof m !== "object") throw Error("module");
+            if (Buffer.from("nsh").toString("base64") !== "bnNo") throw Error("Buffer");
+            if (crypto.randomUUID().length !== 36 || typeof crypto.subtle !== "object") throw Error("crypto");
+            if (typeof process.platform !== "string" || typeof process.nextTick !== "function") throw Error("process");
+            if (typeof process.run !== "function" || typeof process.env !== "object") throw Error("process");
+            if (new URL("https://a.b/c").pathname !== "/c") throw Error("URL");
+            text("started");
+            "#,
+            modules = (0..crate::standard::NAMES.len())
+                .map(|i| format!("m{i}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let bytecode = crate::compile_bytecode(&source, true).unwrap();
+        let harden = crate::compile_harden().unwrap();
+        SOURCELESS.set(true);
+        let host = Host::with_options(HostOptions {
+            harden: true,
+            harden_bytecode: Some(Arc::new(harden)),
+            ..HostOptions::default()
+        });
+        SOURCELESS.set(false);
+        let host = host.unwrap();
+        let error = host.eval_source("export {};").unwrap_err();
+        assert!(error.message.contains("eval is not supported"), "{error}");
+        host.eval_bytecode(&bytecode).unwrap();
+        assert_eq!(reported(&host), ["started"]);
+    }
 
     fn ops(host: &Host) -> Vec<Op> {
         let mut out = Vec::new();

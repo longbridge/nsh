@@ -102,7 +102,7 @@ impl Context {
             scheduler,
         })
     }
-    #[cfg(feature = "bytecode-only")]
+    #[cfg(any(feature = "bytecode-only", test))]
     pub(crate) fn custom<I: rquickjs::context::Intrinsic>(
         runtime: &AsyncRuntime,
         scheduler: Rc<Scheduler>,
