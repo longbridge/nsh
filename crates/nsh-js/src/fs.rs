@@ -1,28 +1,33 @@
-//! Native, capability-checked UTF-8 files. Disk work runs off the JS thread.
+//! `fs/promises`: capability-checked files. Paths are checked against
+//! `capabilities.fs` on the JS thread; the disk work then runs off it, confined
+//! to the granted root by a cap-std `Dir`, so a symlink inside a root cannot
+//! lead a later operation outside it.
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, mpsc},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
 };
 
-use nsh_core::access::Access;
 use rquickjs::qjs;
 
-use crate::{
-    modules::{Export, Item, Ts},
-    web::js::{self, Ctx, Deferred, R, Raw, V, native},
-};
-const MAX_TEXT: usize = 16 * 1024 * 1024;
-const STANDARD_READ: usize = 64 * 1024 * 1024;
-const STANDARD_WRITE: usize = 8 * 1024 * 1024;
-#[derive(Clone)]
-struct Config {
-    dir: PathBuf,
-    access: Access,
-    paths: nsh_core::access::TrustedPaths,
-    wake: Arc<dyn Fn() + Send + Sync>,
-}
+use crate::web::js::{self, Ctx, Deferred, R, Raw, V, native};
+
+/// The largest file `readFile` returns.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_READ: usize = 64 * 1024 * 1024;
+/// The most data one `writeFile` writes.
+const MAX_WRITE: usize = 8 * 1024 * 1024;
+/// Operations one VM may have outstanding.
+const MAX_PENDING: usize = 1024;
+/// File data one VM may hold in flight: data handed to `writeFile` until it is
+/// written, and data read (contents and directory names) until JS takes it.
+const MAX_IN_FLIGHT: usize = 64 * 1024 * 1024;
+
 struct FileInfo {
     size: u64,
     modified: f64,
@@ -33,24 +38,66 @@ struct FileInfo {
     directory: bool,
     symlink: bool,
 }
+// WebAssembly has no files: its operations only ever fail.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Value {
     Bytes(Vec<u8>),
-    Entries(Vec<(String, FileInfo)>, bool),
+    Entries(Vec<(String, bool)>, bool),
     Stat(FileInfo),
     Text(String),
+    /// A symlink's target, which holds nothing of the budget.
+    Link(String),
     Bool(bool),
     Unit,
+}
+impl Value {
+    /// The bytes of the in-flight budget this result holds until JS takes it.
+    fn held(&self) -> usize {
+        match self {
+            Value::Bytes(bytes) => bytes.len(),
+            Value::Text(text) => text.len(),
+            Value::Entries(entries, _) => entries.iter().map(|(name, _)| name.len()).sum(),
+            Value::Stat(_) | Value::Link(_) | Value::Bool(_) | Value::Unit => 0,
+        }
+    }
 }
 struct Completion {
     id: u64,
     result: Result<Value, String>,
 }
+
+/// One VM's bytes of file data in flight, shared with its workers.
+#[derive(Clone, Default)]
+struct Budget(Arc<AtomicUsize>);
+impl Budget {
+    fn reserve(&self, bytes: usize) -> bool {
+        self.0
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(bytes)
+                    .filter(|&total| total <= MAX_IN_FLIGHT)
+            })
+            .is_ok()
+    }
+    fn release(&self, bytes: usize) {
+        self.0.fetch_sub(bytes, Ordering::AcqRel);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn exceeded(name: &str) -> String {
+        format!(
+            "cannot read `{name}`: the runtime already holds {MAX_IN_FLIGHT} bytes of file data in flight"
+        )
+    }
+}
+
+/// One VM's outstanding operations: each one's promise and the bytes it holds
+/// from submission (a write's data).
 #[non_exhaustive]
 pub(crate) struct FileSystem {
-    pending: RefCell<HashMap<u64, (Deferred, bool)>>,
+    pending: RefCell<HashMap<u64, (Deferred, usize)>>,
     tx: mpsc::Sender<Completion>,
     rx: mpsc::Receiver<Completion>,
-    next: std::cell::Cell<u64>,
+    next: Cell<u64>,
+    budget: Budget,
 }
 impl Default for FileSystem {
     fn default() -> Self {
@@ -59,7 +106,8 @@ impl Default for FileSystem {
             pending: RefCell::new(HashMap::new()),
             tx,
             rx,
-            next: std::cell::Cell::new(0),
+            next: Cell::new(0),
+            budget: Budget::default(),
         }
     }
 }
@@ -70,49 +118,35 @@ fn state<'a>(ctx: Ctx) -> &'a FileSystem {
 pub(crate) fn has_pending(ctx: Ctx) -> bool {
     !state(ctx).pending.borrow().is_empty()
 }
-pub(crate) fn pump(ctx: Ctx) -> bool {
-    poll(ctx)
-}
 pub(crate) fn free_all(ctx: Ctx) {
     state(ctx).pending.borrow_mut().clear();
 }
-pub(crate) fn poll(ctx: Ctx) -> bool {
+/// Settles the promises of finished operations. Returns whether any finished.
+pub(crate) fn pump(ctx: Ctx) -> bool {
     let mut completed = false;
     while let Ok(c) = state(ctx).rx.try_recv() {
         completed = true;
-        let d = state(ctx).pending.borrow_mut().remove(&c.id);
-        if let Some((d, standard)) = d {
-            match c.result {
-                Ok(v) => {
-                    let v = value_js(ctx, v);
-                    match v {
-                        Ok(v) => d.resolve(ctx, v.raw()),
-                        Err(_) => {
-                            let error = js::take_exception(ctx);
-                            d.reject(ctx, error.raw());
-                        }
-                    }
+        let held = c.result.as_ref().map_or(0, Value::held);
+        let entry = state(ctx).pending.borrow_mut().remove(&c.id);
+        let Some((d, submitted)) = entry else {
+            state(ctx).budget.release(held);
+            continue;
+        };
+        match c.result {
+            Ok(v) => match value_js(ctx, v) {
+                Ok(v) => d.resolve(ctx, v.raw()),
+                Err(_) => {
+                    let error = js::take_exception(ctx);
+                    d.reject(ctx, error.raw());
                 }
-                Err(e) => {
-                    let error = if standard {
-                        error_value(ctx, &e)
-                    } else {
-                        js::dom_exception(ctx, &e, "FileSystemError")
-                    };
-                    if let Ok(v) = error {
-                        if !standard {
-                            let code = e.split_once(':').map_or("EIO", |(code, _)| code);
-                            if let Ok(code) = js::string(ctx, code)
-                                && js::define(ctx, v.raw(), "code", code, true).is_err()
-                            {
-                                let _ = js::take_exception(ctx);
-                            }
-                        }
-                        d.reject(ctx, v.raw());
-                    }
+            },
+            Err(e) => {
+                if let Ok(v) = error_value(ctx, &e) {
+                    d.reject(ctx, v.raw());
                 }
             }
         }
+        state(ctx).budget.release(held + submitted);
     }
     completed
 }
@@ -127,9 +161,6 @@ fn error_value(ctx: Ctx, message: &str) -> R<V> {
         false,
     )?;
     Ok(error)
-}
-fn bytes_value(ctx: Ctx, bytes: &[u8]) -> R<V> {
-    js::uint8_array(ctx, bytes)
 }
 fn info_value(ctx: Ctx, info: FileInfo) -> R<V> {
     let obj = js::new_object(ctx)?;
@@ -163,16 +194,15 @@ fn info_value(ctx: Ctx, info: FileInfo) -> R<V> {
 }
 fn value_js(ctx: Ctx, value: Value) -> R<V> {
     match value {
-        Value::Bytes(b) => bytes_value(ctx, &b),
+        Value::Bytes(b) => js::uint8_array(ctx, &b),
         Value::Entries(entries, with_types) => js::new_array(
             ctx,
             entries
                 .into_iter()
-                .map(|(name, info)| {
+                .map(|(name, directory)| {
                     if with_types {
                         let obj = js::new_object(ctx)?;
                         js::define(ctx, obj.raw(), "name", js::string(ctx, &name)?, true)?;
-                        let directory = info.directory;
                         js::define(
                             ctx,
                             obj.raw(),
@@ -188,91 +218,56 @@ fn value_js(ctx: Ctx, value: Value) -> R<V> {
                 .collect::<R<Vec<_>>>()?,
         ),
         Value::Stat(info) => info_value(ctx, info),
-        Value::Text(t) => js::string(ctx, &t),
+        Value::Text(t) | Value::Link(t) => js::string(ctx, &t),
         Value::Bool(b) => Ok(V::bool(b)),
         Value::Unit => Ok(V::undefined()),
     }
 }
-fn submit(ctx: Ctx, job: impl FnOnce(Config) -> Result<Value, String> + Send + 'static) -> R<V> {
-    submit_kind(ctx, false, job)
-}
-fn standard_submit(
+/// Starts one operation off the JS thread. `held` bytes (a write's data) are
+/// taken from the VM's in-flight budget until the operation settles.
+fn submit(
     ctx: Ctx,
-    job: impl FnOnce(Config) -> Result<Value, String> + Send + 'static,
+    held: usize,
+    job: impl FnOnce(&Budget) -> Result<Value, String> + Send + 'static,
 ) -> R<V> {
-    submit_kind(ctx, true, job)
-}
-fn submit_kind(
-    ctx: Ctx,
-    standard: bool,
-    job: impl FnOnce(Config) -> Result<Value, String> + Send + 'static,
-) -> R<V> {
-    let d = Deferred::new(ctx)?;
-    let promise = d.promise.clone_ref();
-    if !available(ctx) {
-        let e = js::dom_exception(
+    let files = state(ctx);
+    if files.pending.borrow().len() >= MAX_PENDING {
+        return Err(js::range_error(
             ctx,
-            "Secure native filesystem access is unavailable on this platform",
-            "NotSupportedError",
-        )?;
-        d.reject(ctx, e.raw());
-        return Ok(promise);
+            &format!("fs exceeded the per-runtime outstanding host task limit of {MAX_PENDING}"),
+        ));
     }
-    let shared = crate::dom::shared(ctx);
-    let dir = shared.system_data_dir.borrow().clone();
-    let wake = shared.system_wake.borrow().clone();
-    let config = if standard {
-        Some(Config {
-            dir: dir.unwrap_or_default(),
-            wake: wake.unwrap_or_else(|| Arc::new(|| {})),
-            access: shared.system_access.borrow().clone(),
-            paths: shared.system_paths.borrow().clone(),
-        })
-    } else {
-        dir.zip(wake).map(|(dir, wake)| Config {
-            dir,
-            wake,
-            access: shared.system_access.borrow().clone(),
-            paths: shared.system_paths.borrow().clone(),
-        })
-    };
-    let Some(config) = config else {
-        let e = js::dom_exception(
+    if !files.budget.reserve(held) {
+        return Err(js::range_error(
             ctx,
-            "FileSystem is unavailable: this host has no native app data directory",
-            "NotSupportedError",
-        )?;
-        d.reject(ctx, e.raw());
-        return Ok(promise);
-    };
-    let limit = if standard { 1024 } else { 64 };
-    if state(ctx).pending.borrow().len() >= limit {
-        if standard {
-            return Err(js::range_error(
-                ctx,
-                "fs exceeded the per-runtime outstanding host task limit of 1024",
-            ));
+            &format!(
+                "fs exceeded the per-runtime limit of {MAX_IN_FLIGHT} bytes of file data in flight"
+            ),
+        ));
+    }
+    let d = match Deferred::new(ctx) {
+        Ok(d) => d,
+        Err(e) => {
+            files.budget.release(held);
+            return Err(e);
         }
-        let e = js::dom_exception(
-            ctx,
-            "Too many pending filesystem operations",
-            "QuotaExceededError",
-        )?;
-        d.reject(ctx, e.raw());
-        return Ok(promise);
-    }
-    let id = state(ctx).next.get();
-    state(ctx).next.set(id.wrapping_add(1));
-    state(ctx).pending.borrow_mut().insert(id, (d, standard));
-    let tx = state(ctx).tx.clone();
-    let wake = config.wake.clone();
+    };
+    let promise = d.promise.clone_ref();
+    let id = files.next.get();
+    files.next.set(id.wrapping_add(1));
+    files.pending.borrow_mut().insert(id, (d, held));
+    let tx = files.tx.clone();
+    let budget = files.budget.clone();
+    let wake = crate::dom::shared(ctx).system_wake.borrow().clone();
     let work = move || {
-        let result = job(config);
+        let result = job(&budget);
         let _ = tx.send(Completion { id, result });
-        wake();
+        if let Some(wake) = wake {
+            wake();
+        }
     };
     #[cfg(not(target_arch = "wasm32"))]
-    if standard && let Ok(handle) = tokio::runtime::Handle::try_current() {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
         drop(handle.spawn_blocking(work));
         return Ok(promise);
     }
@@ -280,43 +275,15 @@ fn submit_kind(
         .name("nsh-files".into())
         .spawn(work);
     if let Err(e) = spawned {
-        let d = state(ctx).pending.borrow_mut().remove(&id);
-        if let Some((d, _)) = d {
-            let e = js::dom_exception(ctx, &e.to_string(), "FileSystemError")?;
+        let entry = files.pending.borrow_mut().remove(&id);
+        if let Some((d, held)) = entry {
+            files.budget.release(held);
+            let e = error_value(ctx, &e.to_string())?;
             d.reject(ctx, e.raw());
         }
     }
     Ok(promise)
 }
-fn path(ctx: Ctx, raw: Raw) -> R<PathBuf> {
-    Ok(PathBuf::from(js::to_string(ctx, raw)?))
-}
-fn authorize(c: &Config, p: &std::path::Path, write: bool) -> Result<PathBuf, String> {
-    c.access
-        .authorize_file_with_paths(p, &c.dir, &c.paths, write)
-        .map_err(|e| format!("EACCES: {e}"))
-}
-fn io(e: std::io::Error) -> String {
-    format!(
-        "{}: {e}",
-        match e.kind() {
-            std::io::ErrorKind::NotFound => "ENOENT",
-            std::io::ErrorKind::PermissionDenied => "EACCES",
-            std::io::ErrorKind::AlreadyExists => "EEXIST",
-            std::io::ErrorKind::NotADirectory => "ENOTDIR",
-            std::io::ErrorKind::IsADirectory => "EISDIR",
-            std::io::ErrorKind::DirectoryNotEmpty => "ENOTEMPTY",
-            _ => "EIO",
-        }
-    )
-}
-native! {fn app_data_dir(ctx,_this,_args){ submit(ctx,|c| {let p=authorize(&c,&c.dir,false)?;Ok(Value::Text(p.to_string_lossy().into_owned()))}) }}
-native! {fn read_text(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{let p=authorize(&c,&p,false)?;let mut f=secure::open(&p,false,false)?;use std::io::Read;let mut b=Vec::new();f.by_ref().take((MAX_TEXT+1)as u64).read_to_end(&mut b).map_err(io)?;if b.len()>MAX_TEXT{return Err("EFBIG: text exceeds 16 MiB".into())}String::from_utf8(b).map(Value::Text).map_err(|_|"EILSEQ: file is not UTF-8".into())})}}
-native! {fn write_text(ctx,_this,args){let p=path(ctx,args.get(0))?;let text=js::to_string(ctx,args.get(1))?;let options=args.get(2);let exclusive=if js::is_nullish(options){false}else{js::to_bool(ctx,js::get(ctx,options,"exclusive")?.raw())};submit(ctx,move|c|{if text.len()>MAX_TEXT{return Err("EFBIG: text exceeds 16 MiB".into())}let p=authorize(&c,&p,true)?;let mut f=secure::open(&p,true,exclusive)?;use std::io::Write;f.write_all(text.as_bytes()).map_err(io)?;f.sync_all().map_err(io)?;Ok(Value::Unit)})}}
-native! {fn exists(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{let p=authorize(&c,&p,false)?;match std::fs::symlink_metadata(p){Ok(_)=>Ok(Value::Bool(true)),Err(e)if e.kind()==std::io::ErrorKind::NotFound=>Ok(Value::Bool(false)),Err(e)=>Err(io(e))}})}}
-native! {fn mkdir(ctx,_this,args){let p=path(ctx,args.get(0))?;let options=args.get(1);let recursive=if js::is_nullish(options){false}else{js::to_bool(ctx,js::get(ctx,options,"recursive")?.raw())};submit(ctx,move|c|{let p=authorize(&c,&p,true)?;secure::mkdir(&p,recursive)?;Ok(Value::Unit)})}}
-native! {fn rename(ctx,_this,args){let a=path(ctx,args.get(0))?;let b=path(ctx,args.get(1))?;submit(ctx,move|c|{let a=authorize(&c,&a,true)?;let b=authorize(&c,&b,true)?;secure::rename(&a,&b)?;Ok(Value::Unit)})}}
-native! {fn remove(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{let p=authorize(&c,&p,true)?;secure::remove(&p)?;Ok(Value::Unit)})}}
 fn is_string(value: Raw) -> bool {
     // SAFETY: inspecting the live value's tag does not execute JS.
     unsafe { qjs::JS_IsString(value) }
@@ -384,7 +351,7 @@ fn bool_option(ctx: Ctx, value: Raw, key: &str) -> R<bool> {
     }
     Ok(js::to_bool(ctx, v.raw()))
 }
-fn lexical(path: &std::path::Path) -> PathBuf {
+fn lexical(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for part in path.components() {
@@ -398,7 +365,8 @@ fn lexical(path: &std::path::Path) -> PathBuf {
     }
     out
 }
-fn resolved(path: &std::path::Path) -> Result<PathBuf, String> {
+/// The canonical form of the nearest existing ancestor, with the rest appended.
+fn resolved(path: &Path) -> Result<PathBuf, String> {
     let mut current = path.to_path_buf();
     let mut tail = Vec::new();
     loop {
@@ -416,15 +384,28 @@ fn resolved(path: &std::path::Path) -> Result<PathBuf, String> {
         tail.push(name);
     }
 }
-struct StandardGrant {
-    #[cfg(unix)]
+fn available(ctx: Ctx) -> bool {
+    // SAFETY: short projection of the live renderer state.
+    cfg!(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )) && unsafe { (*crate::state::state(ctx)).dom.os().is_desktop() }
+}
+
+/// A checked path: the granted root, opened, and the path within it.
+struct Grant {
+    #[cfg(not(target_arch = "wasm32"))]
     dir: cap_std::fs::Dir,
-    #[cfg(unix)]
+    #[cfg(not(target_arch = "wasm32"))]
     relative: PathBuf,
-    #[cfg(unix)]
     name: String,
 }
-fn prepare_grant(ctx: Ctx, value: Raw, write: bool, keep: bool) -> R<StandardGrant> {
+/// Checks a path against the `capabilities.fs` roots of a read or a write.
+/// `link` operations act on the last component itself (a symlink there is not
+/// followed: `lstat`, `readlink`, `exists`, `unlink`, `rename`, `rmdir`), so only
+/// its parent is resolved.
+fn grant(ctx: Ctx, value: Raw, write: bool, link: bool) -> R<Grant> {
     if !is_string(value) {
         return Err(js::type_error(ctx, "filesystem path must be a string"));
     }
@@ -456,7 +437,7 @@ fn prepare_grant(ctx: Ctx, value: Raw, write: bool, keep: bool) -> R<StandardGra
             continue;
         };
         let candidate = if requested.is_absolute() {
-            if keep {
+            if link {
                 match (requested.parent(), requested.file_name()) {
                     (Some(parent), Some(name)) => resolved(parent).map(|p| p.join(name)),
                     _ => resolved(&requested),
@@ -469,7 +450,7 @@ fn prepare_grant(ctx: Ctx, value: Raw, write: bool, keep: bool) -> R<StandardGra
         };
         let mut candidate = candidate.unwrap_or_else(|_| lexical(&requested));
         if !candidate.starts_with(&root) {
-            if keep && requested.is_absolute() && resolved(&requested).is_ok_and(|p| p == root) {
+            if link && requested.is_absolute() && resolved(&requested).is_ok_and(|p| p == root) {
                 candidate = root.clone();
             } else {
                 continue;
@@ -493,31 +474,33 @@ fn prepare_grant(ctx: Ctx, value: Raw, write: bool, keep: bool) -> R<StandardGra
             Some(root.clone())
         };
         let Some(root) = effective else { continue };
-        #[cfg(not(unix))]
-        let _ = root;
-        #[cfg(unix)]
+        let Ok(relative) = candidate.strip_prefix(&root) else {
+            continue;
+        };
+        let name = if relative.as_os_str().is_empty() {
+            ".".to_owned()
+        } else {
+            relative.display().to_string()
+        };
+        #[cfg(target_arch = "wasm32")]
+        return Ok(Grant { name });
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            if write && !root.exists() && secure::mkdir(&root, true).is_err() {
+            // A granted root belongs to the app: a write may create it.
+            if write && !root.exists() && std::fs::create_dir_all(&root).is_err() {
                 continue;
             }
-            let Ok(dir) = secure::dir(&root) else {
+            let Ok(dir) = confined::open_root(&root) else {
                 continue;
             };
-            let Ok(relative) = candidate.strip_prefix(&root) else {
-                continue;
-            };
-            return Ok(StandardGrant {
+            return Ok(Grant {
                 dir,
                 relative: if relative.as_os_str().is_empty() {
                     PathBuf::from(".")
                 } else {
                     relative.to_owned()
                 },
-                name: if relative.as_os_str().is_empty() {
-                    ".".into()
-                } else {
-                    relative.display().to_string()
-                },
+                name,
             });
         }
     }
@@ -530,63 +513,75 @@ fn prepare_grant(ctx: Ctx, value: Raw, write: bool, keep: bool) -> R<StandardGra
         ),
     ))
 }
-impl StandardGrant {
-    fn describe(&self) -> &str {
-        #[cfg(unix)]
-        {
-            &self.name
-        }
-        #[cfg(not(unix))]
-        {
-            "unavailable filesystem"
-        }
-    }
-    #[cfg(unix)]
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Grant {
     fn error(&self, verb: &str, error: std::io::Error) -> String {
         format!("cannot {verb} `{}`: {error}", self.name)
     }
-    #[cfg(unix)]
-    fn read(self, text: bool) -> Result<Value, String> {
+    fn read(self, budget: &Budget, text: bool) -> Result<Value, String> {
         use std::io::Read;
-        let mut file = self
-            .dir
-            .open(&self.relative)
+        let mut file = confined::open_file(&self.dir, &self.relative, false)
             .map_err(|e| self.error("read", e))?;
         let size = file.metadata().map_err(|e| self.error("read", e))?.len();
-        if size > STANDARD_READ as u64 {
-            return Err(format!(
-                "`{}` is {size} bytes, over the {STANDARD_READ}-byte limit for fs.readFile; read it in pieces or keep it out of the script",
+        let too_big = |len: u64| {
+            format!(
+                "`{}` is {len} bytes, over the {MAX_READ}-byte limit for fs.readFile; read it in pieces or keep it out of the script",
                 self.name
-            ));
+            )
+        };
+        if size > MAX_READ as u64 {
+            return Err(too_big(size));
         }
-        let mut bytes = Vec::with_capacity(size as usize);
-        file.by_ref()
-            .take((STANDARD_READ + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|e| self.error("read", e))?;
-        if bytes.len() > STANDARD_READ {
-            return Err(format!(
-                "`{}` is {} bytes, over the {STANDARD_READ}-byte limit for fs.readFile; read it in pieces or keep it out of the script",
-                self.name,
-                bytes.len()
-            ));
+        // The file may change while it is read: hold its size, then what was read.
+        let mut reserved = size as usize;
+        if !budget.reserve(reserved) {
+            return Err(Budget::exceeded(&self.name));
         }
-        if text {
+        let mut bytes = Vec::with_capacity(reserved);
+        let read = file
+            .by_ref()
+            .take((MAX_READ + 1) as u64)
+            .read_to_end(&mut bytes);
+        let fits = if bytes.len() > reserved {
+            let more = bytes.len() - reserved;
+            let fits = budget.reserve(more);
+            if fits {
+                reserved += more;
+            }
+            fits
+        } else {
+            budget.release(reserved - bytes.len());
+            reserved = bytes.len();
+            true
+        };
+        let result = if let Err(e) = read {
+            Err(self.error("read", e))
+        } else if !fits {
+            Err(Budget::exceeded(&self.name))
+        } else if bytes.len() > MAX_READ {
+            Err(too_big(bytes.len() as u64))
+        } else if text {
+            // Valid UTF-8 keeps its length, and so what it holds of the budget.
             String::from_utf8(bytes)
                 .map(Value::Text)
                 .map_err(|e| format!("cannot decode `{}` as UTF-8: {e}", self.name))
         } else {
             Ok(Value::Bytes(bytes))
+        };
+        if result.is_err() {
+            budget.release(reserved);
         }
+        result
     }
-    #[cfg(unix)]
     fn write(self, bytes: Vec<u8>) -> Result<Value, String> {
-        self.dir
-            .write(&self.relative, bytes)
+        use std::io::Write;
+        let mut file = confined::open_file(&self.dir, &self.relative, true)
             .map_err(|e| self.error("write", e))?;
+        file.set_len(0).map_err(|e| self.error("write", e))?;
+        file.write_all(&bytes).map_err(|e| self.error("write", e))?;
         Ok(Value::Unit)
     }
-    #[cfg(unix)]
     fn mkdir(self, recursive: bool) -> Result<Value, String> {
         if recursive {
             self.dir.create_dir_all(&self.relative)
@@ -596,13 +591,12 @@ impl StandardGrant {
         .map_err(|e| self.error("create", e))?;
         Ok(Value::Unit)
     }
-    #[cfg(unix)]
+    /// Whether the entry exists; a symlink exists even when its target does not.
     fn exists(self) -> Result<Value, String> {
         Ok(Value::Bool(
-            self.dir.try_exists(&self.relative).unwrap_or(false),
+            self.dir.symlink_metadata(&self.relative).is_ok(),
         ))
     }
-    #[cfg(unix)]
     fn stat(self, link: bool) -> Result<Value, String> {
         let m = if link {
             self.dir.symlink_metadata(&self.relative)
@@ -610,38 +604,33 @@ impl StandardGrant {
             self.dir.metadata(&self.relative)
         }
         .map_err(|e| self.error("stat", e))?;
-        Ok(Value::Stat(secure::info(m)))
+        Ok(Value::Stat(confined::info(m)))
     }
-    #[cfg(unix)]
     fn readlink(self) -> Result<Value, String> {
         self.dir
             .read_link_contents(&self.relative)
-            .map(|p| Value::Text(p.to_string_lossy().into_owned()))
+            .map(|p| Value::Link(p.to_string_lossy().into_owned()))
             .map_err(|e| self.error("read link", e))
     }
-    #[cfg(unix)]
     fn unlink(self) -> Result<Value, String> {
         self.dir
             .remove_file(&self.relative)
             .map_err(|e| self.error("remove", e))?;
         Ok(Value::Unit)
     }
-    #[cfg(unix)]
     fn rmdir(self) -> Result<Value, String> {
         self.dir
             .remove_dir(&self.relative)
             .map_err(|e| self.error("remove", e))?;
         Ok(Value::Unit)
     }
-    #[cfg(unix)]
     fn rename(self, to: Self) -> Result<Value, String> {
         self.dir
             .rename(&self.relative, &to.dir, &to.relative)
             .map_err(|e| self.error("rename", e))?;
         Ok(Value::Unit)
     }
-    #[cfg(unix)]
-    fn entries(self, types: bool) -> Result<Value, String> {
+    fn entries(self, budget: &Budget, types: bool) -> Result<Value, String> {
         let mut entries = Vec::new();
         let mut name_bytes = 0;
         for entry in self
@@ -658,83 +647,80 @@ impl StandardGrant {
                     self.name
                 ));
             }
-            let kind = entry.file_type().ok();
-            let info = FileInfo {
-                size: 0,
-                mode: 0,
-                modified: 0.0,
-                accessed: 0.0,
-                created: 0.0,
-                file: false,
-                directory: kind.is_some_and(|t| t.is_dir()),
-                symlink: false,
-            };
-            entries.push((name, info));
+            let directory = entry.file_type().is_ok_and(|t| t.is_dir());
+            entries.push((name, directory));
+        }
+        if !budget.reserve(name_bytes) {
+            return Err(Budget::exceeded(&self.name));
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(Value::Entries(entries, types))
     }
 }
-#[cfg(not(unix))]
-impl StandardGrant {
-    fn read(self, _: bool) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+#[cfg(target_arch = "wasm32")]
+impl Grant {
+    fn unavailable(self) -> Result<Value, String> {
+        Err(format!("cannot open `{}`: no native filesystem", self.name))
+    }
+    fn read(self, _: &Budget, _: bool) -> Result<Value, String> {
+        self.unavailable()
     }
     fn write(self, _: Vec<u8>) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn mkdir(self, _: bool) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn exists(self) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn stat(self, _: bool) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn readlink(self) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn unlink(self) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn rmdir(self) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
     fn rename(self, _: Self) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+        self.unavailable()
     }
-    fn entries(self, _: bool) -> Result<Value, String> {
-        Err("native filesystem unavailable".into())
+    fn entries(self, _: &Budget, _: bool) -> Result<Value, String> {
+        self.unavailable()
     }
 }
-native! {fn read_file(ctx,_this,args){let text=if js::is_nullish(args.get(1)){false}else{let encoding=if is_string(args.get(1)){js::to_string(ctx,args.get(1))?}else{strict_options(ctx,args.get(1),&["encoding"])?;let v=js::get(ctx,args.get(1),"encoding")?;if !is_string(v.raw()){return Err(js::type_error(ctx,"fs.readFile encoding must be utf8"))}js::to_string(ctx,v.raw())?};if !matches!(encoding.to_ascii_lowercase().as_str(),"utf8"|"utf-8"){return Err(js::type_error(ctx,"fs.readFile only supports UTF-8 text decoding"))}true};let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.read(text))}}
+native! {fn read_file(ctx,_this,args){let text=if js::is_nullish(args.get(1)){false}else{let encoding=if is_string(args.get(1)){js::to_string(ctx,args.get(1))?}else{strict_options(ctx,args.get(1),&["encoding"])?;let v=js::get(ctx,args.get(1),"encoding")?;if !is_string(v.raw()){return Err(js::type_error(ctx,"fs.readFile encoding must be utf8"))}js::to_string(ctx,v.raw())?};if !matches!(encoding.to_ascii_lowercase().as_str(),"utf8"|"utf-8"){return Err(js::type_error(ctx,"fs.readFile only supports UTF-8 text decoding"))}true};let grant=grant(ctx,args.get(0),false,false)?;submit(ctx,0,move|budget|grant.read(budget,text))}}
 native! {fn write_file(ctx,_this,args){let value=args.get(1);let bytes=if is_string(value){js::to_string(ctx,value)?.into_bytes()}else{let view=js::view(ctx,value).ok_or_else(||js::type_error(ctx,"fs.writeFile expects string or Uint8Array"))?;if view.kind!=Some(qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as i32){return Err(js::type_error(ctx,"fs.writeFile expects string or Uint8Array"))}
 // SAFETY: copy the buffer before any JS can detach it.
-unsafe{js::bytes_of(ctx,value)}.ok_or_else(||js::type_error(ctx,"detached Uint8Array"))?.to_vec()};let grant=prepare_grant(ctx,args.get(0),true,false)?;if bytes.len()>STANDARD_WRITE{return Err(js::range_error(ctx,&format!("`{}` write is {} bytes, over the {STANDARD_WRITE}-byte fs.writeFile limit",grant.describe(),bytes.len())))}standard_submit(ctx,move|_|grant.write(bytes))}}
-native! {fn standard_mkdir(ctx,_this,args){let recursive=bool_option(ctx,args.get(1),"recursive")?;let grant=prepare_grant(ctx,args.get(0),true,false)?;standard_submit(ctx,move|_|grant.mkdir(recursive))}}
-native! {fn standard_exists(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.exists())}}
-native! {fn readdir(ctx,_this,args){let types=bool_option(ctx,args.get(1),"withFileTypes")?;let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.entries(types))}}
-native! {fn stat(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.stat(false))}}
-native! {fn lstat(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,true)?;standard_submit(ctx,move|_|grant.stat(true))}}
-native! {fn readlink(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,true)?;standard_submit(ctx,move|_|grant.readlink())}}
-native! {fn standard_unlink(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),true,true)?;standard_submit(ctx,move|_|grant.unlink())}}
-native! {fn standard_rename(ctx,_this,args){let source=prepare_grant(ctx,args.get(0),true,true)?;let target=prepare_grant(ctx,args.get(1),true,true)?;standard_submit(ctx,move|_|source.rename(target))}}
-native! {fn rmdir(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),true,true)?;standard_submit(ctx,move|_|grant.rmdir())}}
-pub(crate) fn make_standard(ctx: Ctx) -> Raw {
+unsafe{js::bytes_of(ctx,value)}.ok_or_else(||js::type_error(ctx,"detached Uint8Array"))?.to_vec()};let grant=grant(ctx,args.get(0),true,false)?;if bytes.len()>MAX_WRITE{return Err(js::range_error(ctx,&format!("`{}` write is {} bytes, over the {MAX_WRITE}-byte fs.writeFile limit",grant.name,bytes.len())))}submit(ctx,bytes.len(),move|_|grant.write(bytes))}}
+native! {fn mkdir(ctx,_this,args){let recursive=bool_option(ctx,args.get(1),"recursive")?;let grant=grant(ctx,args.get(0),true,false)?;submit(ctx,0,move|_|grant.mkdir(recursive))}}
+native! {fn exists(ctx,_this,args){let grant=grant(ctx,args.get(0),false,true)?;submit(ctx,0,move|_|grant.exists())}}
+native! {fn readdir(ctx,_this,args){let types=bool_option(ctx,args.get(1),"withFileTypes")?;let grant=grant(ctx,args.get(0),false,false)?;submit(ctx,0,move|budget|grant.entries(budget,types))}}
+native! {fn stat(ctx,_this,args){let grant=grant(ctx,args.get(0),false,false)?;submit(ctx,0,move|_|grant.stat(false))}}
+native! {fn lstat(ctx,_this,args){let grant=grant(ctx,args.get(0),false,true)?;submit(ctx,0,move|_|grant.stat(true))}}
+native! {fn readlink(ctx,_this,args){let grant=grant(ctx,args.get(0),false,true)?;submit(ctx,0,move|_|grant.readlink())}}
+native! {fn unlink(ctx,_this,args){let grant=grant(ctx,args.get(0),true,true)?;submit(ctx,0,move|_|grant.unlink())}}
+native! {fn rename(ctx,_this,args){let source=grant(ctx,args.get(0),true,true)?;let target=grant(ctx,args.get(1),true,true)?;submit(ctx,0,move|_|source.rename(target))}}
+native! {fn rmdir(ctx,_this,args){let grant=grant(ctx,args.get(0),true,true)?;submit(ctx,0,move|_|grant.rmdir())}}
+/// The object `fs/promises` exports, one function per operation.
+pub(crate) fn module(ctx: Ctx) -> Raw {
     (|| -> R<V> {
         let obj = js::new_object(ctx)?;
         for (name, fun, len) in [
             ("readFile", read_file as js::Native, 2),
             ("writeFile", write_file, 2),
             ("readdir", readdir, 2),
-            ("exists", standard_exists, 1),
-            ("unlink", standard_unlink, 1),
+            ("exists", exists, 1),
+            ("unlink", unlink, 1),
             ("rmdir", rmdir, 1),
-            ("mkdir", standard_mkdir, 2),
+            ("mkdir", mkdir, 2),
             ("stat", stat, 1),
             ("lstat", lstat, 1),
-            ("rename", standard_rename, 2),
+            ("rename", rename, 2),
             ("readlink", readlink, 1),
         ] {
             let cname = std::ffi::CString::new(name).unwrap();
@@ -750,316 +736,110 @@ pub(crate) fn make_standard(ctx: Ctx) -> Raw {
     })()
     .map_or(qjs::JS_EXCEPTION, V::take)
 }
-fn make(ctx: Ctx) -> Raw {
-    (|| -> R<V> {
-        let obj = js::new_object(ctx)?;
-        for (name, fun, n) in [
-            ("appDataDir", app_data_dir as js::Native, 0),
-            ("readText", read_text, 1),
-            ("writeText", write_text, 3),
-            ("exists", exists, 1),
-            ("mkdir", mkdir, 2),
-            ("rename", rename, 2),
-            ("remove", remove, 1),
-        ] {
-            let name_c = std::ffi::CString::new(name).unwrap();
-            let f = js::function(ctx, &name_c, fun, n)?;
-            js::define(ctx, obj.raw(), name, f, true)?;
-        }
-        Ok(obj)
-    })()
-    .map_or(qjs::JS_EXCEPTION, V::take)
-}
-fn available(ctx: Ctx) -> bool {
-    // SAFETY: short projection of the live renderer state.
-    cfg!(any(target_os = "linux", target_os = "macos"))
-        && unsafe { (*crate::state::state(ctx)).dom.os().is_desktop() }
-}
-pub(crate) fn is_available(ctx: Ctx) -> Raw {
-    let shared = crate::dom::shared(ctx);
-    V::bool(
-        available(ctx)
-            && shared.system_data_dir.borrow().is_some()
-            && shared.system_wake.borrow().is_some(),
-    )
-    .take()
-}
-pub(crate) const EXPORTS: &[Item] = &[
-    (
-        "FileSystem",
-        Export::Value(make),
-        Ts::value(
-            "Capability-checked native UTF-8 files (16 MiB per file).",
-            "FileSystem",
-        ),
-    ),
-    (
-        "isAvailable",
-        Export::Value(is_available),
-        Ts::value(
-            "Whether this host supports secure native files and provides an app data directory.",
-            "boolean",
-        ),
-    ),
-];
-pub(crate) const TYPES: &str = r#"export interface FileSystem {
- /** App-specific native data directory; requires an fs read grant. */
- appDataDir(): Promise<string>;
- /** Rejects missing files with ENOENT and invalid UTF-8 with EILSEQ. */
- readText(path: string): Promise<string>;
- /** Writes and syncs UTF-8. exclusive refuses to overwrite existing files. */
- writeText(path: string, text: string, options?: { exclusive?: boolean }): Promise<void>;
- exists(path: string): Promise<boolean>;
- mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
- /** Atomically replaces the destination when the filesystem permits it. */
- rename(from: string, to: string): Promise<void>;
- /** Removes one file; directories are rejected. */
- remove(path: string): Promise<void>;
-}
-"#;
 
-#[cfg(unix)]
-mod secure {
-    use std::{
-        ffi::CString,
-        fs::File,
-        os::fd::{AsRawFd, FromRawFd},
-        path::{Component, Path},
-    };
+/// Opening granted roots and the files in them.
+#[cfg(not(target_arch = "wasm32"))]
+mod confined {
+    use std::{io, path::Path};
 
-    use super::io;
-    fn c(s: &std::ffi::OsStr) -> Result<CString, String> {
-        use std::os::unix::ffi::OsStrExt;
-        CString::new(s.as_bytes()).map_err(|_| "EINVAL: NUL in path".into())
-    }
-    fn last_error() -> String {
-        io(std::io::Error::last_os_error())
-    }
-    fn root() -> Result<File, String> {
-        File::open("/").map_err(io)
-    }
-    fn directory(parent: &File, name: &CString) -> Result<File, String> {
-        // SAFETY: parent is live and name is NUL-terminated; the returned fd is owned.
-        let fd = unsafe {
-            libc::openat(
-                parent.as_raw_fd(),
-                name.as_ptr(),
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            )
+    use cap_std::fs::{Dir, File, Metadata, OpenOptions};
+
+    /// Opens a canonical root. On Unix every component is opened with
+    /// `O_NOFOLLOW` from `/`, so a symlink swapped in after the grant check
+    /// cannot redirect the root.
+    #[cfg(unix)]
+    pub(super) fn open_root(path: &Path) -> io::Result<Dir> {
+        use std::{
+            ffi::CString,
+            os::{
+                fd::{AsRawFd, FromRawFd},
+                unix::ffi::OsStrExt,
+            },
+            path::Component,
         };
-        if fd < 0 {
-            Err(last_error())
-        } else {
-            // SAFETY: openat returned a new owned descriptor above.
-            Ok(unsafe { File::from_raw_fd(fd) })
-        }
-    }
-    fn parent(path: &Path) -> Result<(File, CString), String> {
-        if !path.is_absolute() {
-            return Err("EINVAL: expected absolute path".into());
-        }
-        let name = c(path.file_name().ok_or("EINVAL: root is not a file")?)?;
-        let mut dir = root()?;
-        for part in path.parent().unwrap().components() {
+        let mut current = std::fs::File::open("/")?;
+        for part in path.components() {
             match part {
                 Component::RootDir => (),
-                Component::Normal(s) => dir = directory(&dir, &c(s)?)?,
-                _ => return Err("EINVAL: unsafe path component".into()),
+                Component::Normal(name) => {
+                    let name = CString::new(name.as_bytes())
+                        .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+                    // SAFETY: current is a live directory and name is NUL-terminated; the
+                    // returned descriptor is owned below.
+                    let fd = unsafe {
+                        libc::openat(
+                            current.as_raw_fd(),
+                            name.as_ptr(),
+                            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                        )
+                    };
+                    if fd < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    // SAFETY: openat returned a new descriptor nothing else owns.
+                    current = unsafe { std::fs::File::from_raw_fd(fd) };
+                }
+                _ => return Err(io::Error::from(io::ErrorKind::InvalidInput)),
             }
         }
-        Ok((dir, name))
+        Ok(Dir::from_std_file(current))
     }
-    pub(super) fn info(meta: cap_std::fs::Metadata) -> super::FileInfo {
+    /// Opens a canonical root. cap-std confines every later operation to it;
+    /// the root is the path the grant check resolved, opened through the
+    /// ambient filesystem once.
+    #[cfg(not(unix))]
+    pub(super) fn open_root(path: &Path) -> io::Result<Dir> {
+        Dir::open_ambient_dir(path, cap_std::ambient_authority())
+    }
+    /// Opens a regular file to read or to write (created when missing). On Unix
+    /// it is opened non-blocking, so a FIFO or device cannot stall the worker;
+    /// anything but a regular file is refused before a byte moves.
+    pub(super) fn open_file(dir: &Dir, path: &Path, write: bool) -> io::Result<File> {
+        let mut options = OpenOptions::new();
+        if write {
+            options.write(true).create(true);
+        } else {
+            options.read(true);
+        }
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK).mode(0o644);
+        }
+        let file = dir.open_with(path, &options)?;
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::other("not a regular file"));
+        }
+        Ok(file)
+    }
+    pub(super) fn info(meta: Metadata) -> super::FileInfo {
+        let millis = |time: io::Result<cap_std::time::SystemTime>| {
+            time.ok()
+                .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0.0, |t| t.as_secs_f64() * 1000.0)
+        };
+        #[cfg(unix)]
+        let mode = {
+            use cap_std::fs::MetadataExt;
+            meta.mode()
+        };
+        // Node's modes on Windows: the type bits, and write bits unless read-only.
+        #[cfg(not(unix))]
+        let mode = if meta.is_dir() { 0o040000 } else { 0o100000 }
+            | if meta.permissions().readonly() {
+                0o444
+            } else {
+                0o666
+            };
         super::FileInfo {
             size: meta.len(),
-            mode: {
-                use cap_std::fs::MetadataExt;
-                meta.mode()
-            },
-            accessed: meta
-                .accessed()
-                .ok()
-                .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0.0, |t| t.as_secs_f64() * 1000.0),
-            created: meta
-                .created()
-                .ok()
-                .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0.0, |t| t.as_secs_f64() * 1000.0),
-            modified: meta
-                .modified()
-                .ok()
-                .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0.0, |t| t.as_secs_f64() * 1000.0),
+            mode,
+            accessed: millis(meta.accessed()),
+            created: millis(meta.created()),
+            modified: millis(meta.modified()),
             file: meta.is_file(),
             directory: meta.is_dir(),
             symlink: meta.is_symlink(),
         }
-    }
-    pub(super) fn dir(path: &Path) -> Result<cap_std::fs::Dir, String> {
-        let mut current = root()?;
-        for part in path.components() {
-            match part {
-                Component::RootDir => (),
-                Component::Normal(s) => current = directory(&current, &c(s)?)?,
-                _ => return Err("EINVAL: invalid directory component".into()),
-            }
-        }
-        Ok(cap_std::fs::Dir::from_std_file(current))
-    }
-    pub(super) fn open(p: &Path, write: bool, exclusive: bool) -> Result<File, String> {
-        let (dir, name) = parent(p)?;
-        let flags = libc::O_NOFOLLOW
-            | libc::O_CLOEXEC
-            | libc::O_NONBLOCK
-            | if write {
-                libc::O_WRONLY | libc::O_CREAT | if exclusive { libc::O_EXCL } else { 0 }
-            } else {
-                libc::O_RDONLY
-            };
-        // SAFETY: dir is live and name is NUL-terminated; mode is supplied for O_CREAT.
-        let fd = unsafe { libc::openat(dir.as_raw_fd(), name.as_ptr(), flags, 0o600) };
-        if fd < 0 {
-            return Err(last_error());
-        }
-        // SAFETY: openat returned this new owned descriptor and it is nonnegative.
-        let f = unsafe { File::from_raw_fd(fd) };
-        if !f.metadata().map_err(io)?.is_file() {
-            return Err("EINVAL: expected regular file".into());
-        }
-        if write {
-            f.set_len(0).map_err(io)?
-        }
-        Ok(f)
-    }
-    pub(super) fn mkdir(p: &Path, recursive: bool) -> Result<(), String> {
-        if !recursive {
-            let (d, n) = parent(p)?;
-            // SAFETY: d is live and n is a NUL-terminated single path component.
-            return if unsafe { libc::mkdirat(d.as_raw_fd(), n.as_ptr(), 0o700) } < 0 {
-                Err(last_error())
-            } else {
-                Ok(())
-            };
-        }
-        let mut d = root()?;
-        for part in p.components() {
-            match part {
-                Component::RootDir => (),
-                Component::Normal(s) => {
-                    let n = c(s)?;
-                    // SAFETY: d is live and n is a NUL-terminated single path component.
-                    let result = unsafe { libc::mkdirat(d.as_raw_fd(), n.as_ptr(), 0o700) };
-                    if result < 0
-                        && std::io::Error::last_os_error().kind()
-                            != std::io::ErrorKind::AlreadyExists
-                    {
-                        return Err(last_error());
-                    }
-                    d = directory(&d, &n)?
-                }
-                _ => return Err("EINVAL: unsafe path component".into()),
-            }
-        }
-        Ok(())
-    }
-    pub(super) fn rename(a: &Path, b: &Path) -> Result<(), String> {
-        let (ad, an) = parent(a)?;
-        let (bd, bn) = parent(b)?;
-        // SAFETY: both directory descriptors are live and names are NUL-terminated.
-        if unsafe { libc::renameat(ad.as_raw_fd(), an.as_ptr(), bd.as_raw_fd(), bn.as_ptr()) } < 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
-    }
-    pub(super) fn remove(p: &Path) -> Result<(), String> {
-        let (d, n) = parent(p)?;
-        // SAFETY: d is live and n is NUL-terminated; flags only permit unlinking files.
-        if unsafe { libc::unlinkat(d.as_raw_fd(), n.as_ptr(), 0) } < 0 {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
-    }
-}
-#[cfg(not(unix))]
-mod secure {
-    use std::{fs::File, path::Path};
-    fn unavailable<T>() -> Result<T, String> {
-        Err("ENOTSUP: secure native file operations are unavailable on this platform".into())
-    }
-    pub(super) fn metadata(_: &Path, _: bool) -> Result<super::FileInfo, String> {
-        unavailable()
-    }
-    pub(super) fn entries(_: &Path) -> Result<Vec<(String, super::FileInfo)>, String> {
-        unavailable()
-    }
-    pub(super) fn readlink(_: &Path) -> Result<String, String> {
-        unavailable()
-    }
-    pub(super) fn remove_dir(_: &Path) -> Result<(), String> {
-        unavailable()
-    }
-    pub(super) fn open(_: &Path, _: bool, _: bool) -> Result<File, String> {
-        unavailable()
-    }
-    pub(super) fn mkdir(_: &Path, _: bool) -> Result<(), String> {
-        unavailable()
-    }
-    pub(super) fn rename(_: &Path, _: &Path) -> Result<(), String> {
-        unavailable()
-    }
-    pub(super) fn remove(_: &Path) -> Result<(), String> {
-        unavailable()
-    }
-}
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    fn dir() -> PathBuf {
-        let p = std::env::var_os("TMPDIR")
-            .map(PathBuf::from)
-            .expect("set TMPDIR outside /tmp and the checkout")
-            .join(format!(
-                "nsh-fs-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
-    #[test]
-    fn secure_files_and_symlinks() {
-        use std::{
-            io::{Read, Write},
-            os::unix::fs::symlink,
-        };
-        let p = dir();
-        let file = p.join("history.json");
-        let mut f = secure::open(&file, true, true).unwrap();
-        f.write_all(b"hello").unwrap();
-        drop(f);
-        assert!(secure::open(&file, true, true).is_err());
-        let mut value = String::new();
-        secure::open(&file, false, false)
-            .unwrap()
-            .read_to_string(&mut value)
-            .unwrap();
-        assert_eq!(value, "hello");
-        let link = p.join("link");
-        symlink(&file, &link).unwrap();
-        assert!(secure::open(&link, false, false).is_err());
-        let sub = p.join("sub");
-        symlink(&p, &sub).unwrap();
-        assert!(secure::open(&sub.join("history.json"), false, false).is_err());
-        secure::mkdir(&p.join("nested/deeper"), true).unwrap();
-        secure::rename(&file, &p.join("renamed")).unwrap();
-        secure::remove(&p.join("renamed")).unwrap();
-        std::fs::remove_dir_all(p).unwrap();
     }
 }

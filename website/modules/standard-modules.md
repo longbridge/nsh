@@ -12,7 +12,7 @@ Native Shell provides a pinned subset of LLRT standard modules inside its existi
 | `os` | `platform()`, `arch()`, `EOL`, `homedir()`: actual host OS metadata |
 | `console` | Default export of the per-VM logger: `log`, `info`, `debug`, `warn`, `error` |
 | `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
-| `fs`, `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `access`, `readdir`, `stat`, `lstat`, `rmdir`, `constants` |
+| `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
 | `net` | `connect(host, port)` returning a promise-based client socket |
 | `websocket` | `WebSocket` constructor, also installed globally on native hosts |
 
@@ -30,9 +30,25 @@ Compatibility tests cover the exported subset and NSH integration; utility edge 
 
 `import console from "node:console"` shares the VM's global `console` object. The module has a default export only, supporting `log`, `info`, `debug`, `warn`, `error`, each with signature `(...values: unknown[]): void`. It uses NSH's logger formatting; its public surface is this five-method object.
 
-## Files and processes
+## Files
 
-`process.spawn` / `run` share the permissions and process lifecycle of [nsh/process](./nsh-process.md). Standard `fs` shares [nsh/fs](./nsh-fs.md)'s native dispatcher, checks `fs.read` / `fs.write`, and limits each data operation to 16 MiB; these entry points return promises. `readFile` returns a Buffer by default and a string when given an encoding. `rmdir` removes one empty directory.
+`fs/promises` reads and writes files on desktop hosts (macOS, Windows and Linux). Every path is checked against `capabilities.fs` before the operation starts: `read` roots for `readFile`, `readdir`, `stat`, `lstat`, `readlink` and `exists`, `write` roots for `writeFile`, `mkdir`, `rename`, `unlink` and `rmdir`. A path outside the grants throws a `TypeError` at the call; I/O failures reject the promise with an `Error`.
+
+```json
+{
+  "capabilities": {
+    "fs": { "read": ["${dataDir}"], "write": ["${dataDir}"] }
+  }
+}
+```
+
+Roots are absolute paths, `${dataDir}` (this app's data directory, chosen by the host), `${pluginDir}` (the app's directory), `${homeDir}`, or paths relative to the app's directory. A relative path in a call is resolved in each granted root in turn. An embedding host may narrow the grants further. Every operation stays inside its granted root, symlinks included. `lstat`, `readlink`, `exists`, `unlink`, `rename` and `rmdir` act on a symlink itself: `exists` is `true` for a symlink whose target is missing, and `unlink` removes the link and keeps its target.
+
+`readFile` returns a `Uint8Array`, or a string with `"utf8"`, and reads files up to 64 MiB. `writeFile` writes a string or `Uint8Array` of up to 8 MiB, creating or replacing a regular file. `readdir` lists up to 10 000 entries. `rmdir` removes one empty directory. One VM runs up to 1024 operations at a time and holds up to 64 MiB of file data in flight (data handed to `writeFile` until it is written, data read until its promise settles); a call past these limits throws a `RangeError`, a read past them rejects.
+
+## Processes
+
+`process.spawn` / `run` share the permissions and process lifecycle of [nsh/process](./nsh-process.md).
 
 ## Network permissions and boundaries
 

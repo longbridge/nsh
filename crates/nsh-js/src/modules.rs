@@ -28,7 +28,7 @@ use nsh_core::{
 use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
 use crate::{
-    animated, canvas, components, desktop, dom, env, fs, keymap, list, platform_modules, process,
+    animated, canvas, components, desktop, dom, env, keymap, list, platform_modules, process,
     reactive::{self, Native},
     touch,
 };
@@ -330,11 +330,6 @@ pub(crate) const MODULES: &[NativeModule] = &[
         name: "nsh/process",
         exports: process::EXPORTS,
         types: decl!(process::TYPES),
-    },
-    NativeModule {
-        name: "nsh/fs",
-        exports: fs::EXPORTS,
-        types: decl!(fs::TYPES),
     },
 ];
 

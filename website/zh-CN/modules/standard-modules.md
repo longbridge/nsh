@@ -12,7 +12,7 @@ Native Shell 在同一个 QuickJS VM 中提供一组固定版本的 LLRT 标准�
 | `os` | `platform()`、`arch()`、`EOL`、`homedir()`：实际宿主的系统元数据 |
 | `console` | 默认导出当前 VM 的日志对象：`log`、`info`、`debug`、`warn`、`error` |
 | `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
-| `fs`, `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `access`, `readdir`, `stat`, `lstat`, `rmdir`, `constants` |
+| `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `readdir`, `stat`, `lstat`, `readlink`, `rmdir` |
 | `net` | `connect(host, port)` returning a promise-based client socket |
 | `websocket` | `WebSocket` constructor, also installed globally on native hosts |
 
@@ -30,9 +30,25 @@ LLRT 实现固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`。工具模块�
 
 `import console from "node:console"` 与全局 `console` 是同一个 VM 日志对象。该模块仅默认导出，支持 `log`、`info`、`debug`、`warn`、`error`，每个方法的签名为 `(...values: unknown[]): void`。接口采用 NSH 的日志格式，公开接口为上述五方法对象。
 
-## 文件与进程
+## 文件
 
-`process.spawn` / `run` 与 [nsh/process](./nsh-process.md) 使用同一套权限和进程生命周期。标准 `fs` 与 [nsh/fs](./nsh-fs.md) 共用原生授权调度，分别检查 `fs.read` / `fs.write`，每次数据操作最多 16 MiB；这些接口返回 Promise。`readFile` 默认返回 Buffer，指定编码则返回字符串。`rmdir` 删除一个空目录。
+`fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。授权范围之外的路径在调用时抛出 `TypeError`；I/O 失败以 `Error` 拒绝 Promise。
+
+```json
+{
+  "capabilities": {
+    "fs": { "read": ["${dataDir}"], "write": ["${dataDir}"] }
+  }
+}
+```
+
+根目录可以是绝对路径、`${dataDir}`（宿主为此应用选定的数据目录）、`${pluginDir}`（应用目录）、`${homeDir}`，或相对于应用目录的路径。调用中的相对路径依次在每个授权根目录中解析。嵌入应用可以进一步缩小授权。每个操作都限定在其授权根目录之内，符号链接也是如此。`lstat`、`readlink`、`exists`、`unlink`、`rename` 和 `rmdir` 作用于符号链接本身：目标不存在的符号链接 `exists` 为 `true`，`unlink` 删除链接并保留其目标。
+
+`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个条目。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
+
+## 进程
+
+`process.spawn` / `run` 与 [nsh/process](./nsh-process.md) 使用同一套权限和进程生命周期。
 
 ## 网络授权与边界
 

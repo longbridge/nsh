@@ -1,4 +1,4 @@
-//! Standard filesystem entry points share the native capability-checked dispatcher.
+//! `fs/promises`'s module and declarations; the operations are in `crate::fs`.
 use rquickjs::{
     Ctx, Result, Value,
     module::{Declarations, Exports, ModuleDef},
@@ -29,12 +29,12 @@ impl ModuleDef for FsModule {
         Ok(())
     }
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
-        let raw = crate::fs::make_standard(ctx.as_raw().as_ptr());
-        // SAFETY: raw is a live tagged value returned by make_standard.
+        let raw = crate::fs::module(ctx.as_raw().as_ptr());
+        // SAFETY: raw is a live tagged value returned by module.
         if unsafe { rquickjs::qjs::JS_IsException(raw) } {
             return Err(rquickjs::Error::Exception);
         }
-        // SAFETY: make_standard returns an owned value in this live context.
+        // SAFETY: module returns an owned value in this live context.
         let value = unsafe { Value::from_raw(ctx.clone(), raw) };
         let fs = value.into_object().ok_or(rquickjs::Error::Unknown)?;
         for name in EXPORTS {
@@ -55,14 +55,16 @@ export interface Stats {
 }
 export interface Dirent { name: string; isDirectory(): boolean; }
 export interface MakeDirectoryOptions { recursive?: boolean; }
-/** Reads at most 64 MiB. Omitted encoding returns Uint8Array. */
+/** Reads at most 64 MiB. Omitted encoding returns Uint8Array. A runtime holds at most 64 MiB of file data in flight. */
 export function readFile(path: string): Promise<Uint8Array>;
 export function readFile(path: string, encoding: "utf8" | { encoding: "utf8" }): Promise<string>;
-/** Writes UTF-8 or Uint8Array bytes, replacing an existing file; at most 8 MiB. */
+/** Writes UTF-8 or Uint8Array bytes, replacing an existing regular file; at most 8 MiB. */
 export function writeFile(path: string, data: string | Uint8Array): Promise<void>;
 export function mkdir(path: string, options?: MakeDirectoryOptions): Promise<void>;
 export function rename(from: string, to: string): Promise<void>;
+/** Removes a file or a symlink itself, never its target. */
 export function unlink(path: string): Promise<void>;
+/** Whether the entry exists; a symlink exists even when its target is missing. */
 export function exists(path: string): Promise<boolean>;
 export function readdir(path: string): Promise<string[]>;
 export function readdir(path: string, options: { withFileTypes: true }): Promise<Dirent[]>;
@@ -205,7 +207,7 @@ export default class Probe extends View {
         assert!(
             host.eval_script(
                 "reference contract",
-                "result === 'true:false:5:true|true|hello|true:target.txt:true:false'"
+                "if(result !== 'true:false:5:true|true|hello|true:target.txt:true:false')throw Error(result);true"
             )
             .unwrap()
         );
@@ -299,8 +301,12 @@ export default class Probe extends View {
         std::fs::write(outside.join("secret"), "safe").unwrap();
         std::fs::write(dir.join("invalid"), [0xff]).unwrap();
         symlink(outside.join("secret"), dir.join("link")).unwrap();
-        host.eval_source(r#"
+        symlink(outside.join("secret"), dir.join("absolute")).unwrap();
+        symlink(dir.join("missing"), dir.join("dangling")).unwrap();
+        let absolute = serde_json::to_string(&dir.join("absolute")).unwrap();
+        host.eval_source(&r#"
         import fs from 'fs/promises';import * as namespace from 'fs/promises';
+        const absoluteLink=ABSOLUTE;
         globalThis.result='pending';(async()=>{
           const expected=['default','exists','lstat','mkdir','readFile','readdir','readlink','rename','rmdir','stat','unlink','writeFile'];
           if(JSON.stringify(Object.keys(namespace).sort())!==JSON.stringify(expected.sort()))throw Error('exports differ');
@@ -313,18 +319,24 @@ export default class Probe extends View {
           const link=await fs.lstat('link');const target=await fs.readlink('link');
           if(!link.isSymbolicLink()||!target.endsWith('/secret'))throw Error('link was followed');
           let denied=false;try{await fs.readFile('link')}catch(e){denied=e.constructor===Error&&!e.message.includes('capabilities.fs')}
-          if(!denied||await fs.exists('link'))throw Error('outside read allowed');
+          if(!denied)throw Error('outside read allowed');if(!(await fs.exists('link')))throw Error('link missed');
+          if(!(await fs.exists('dangling'))||!(await fs.lstat('dangling')).isSymbolicLink())throw Error('dangling link missed');
+          await fs.unlink('dangling');if(await fs.exists('dangling'))throw Error('dangling link kept');
+          await fs.unlink(absoluteLink);if(await fs.exists('absolute'))throw Error('absolute link kept');
           await fs.rename('link','moved');if(!(await fs.lstat('moved')).isSymbolicLink())throw Error('rename followed');
           await fs.unlink('moved');await fs.mkdir('empty');if(await fs.rmdir('empty')!==undefined)throw Error('rmdir return');
           await fs.mkdir('nonempty');await fs.writeFile('nonempty/file','keep');let rejected=false;try{await fs.rmdir('nonempty')}catch(e){rejected=e.constructor===Error}
           if(!rejected||!await fs.exists('nonempty/file'))throw Error('recursive removal');
           globalThis.result='ok';
         })().catch(e=>globalThis.result=String(e));
-      "#).unwrap();
+      "#.replace("ABSOLUTE", &absolute)).unwrap();
         finish(&host);
         assert!(
-            host.eval_script("parity options and links", "result==='ok'")
-                .unwrap()
+            host.eval_script(
+                "parity options and links",
+                "if(result!=='ok')throw Error(result);true"
+            )
+            .unwrap()
         );
         assert_eq!(
             std::fs::read_to_string(outside.join("secret")).unwrap(),
@@ -408,7 +420,7 @@ export default class Probe extends View {
             Some(dir.clone()),
         );
         let relative = serde_json::to_string(&plugin.join("relative/second.txt")).unwrap();
-        host.eval_source(&format!(r#"import fs from 'fs/promises';import {{FileSystem}} from 'nsh/fs';globalThis.result='pending';(async()=>{{await fs.writeFile('first.txt','first');await fs.writeFile({relative},'second');await fs.writeFile('${{homeDir}}/exports/home.txt','home');await FileSystem.writeText('${{pluginDir}}/resources/native.txt','native');const back=await FileSystem.readText('${{pluginDir}}/resources/native.txt');globalThis.result=(await fs.readFile('first.txt','utf8'))==='first'&&(await fs.readFile({relative},'utf8'))==='second'&&back==='native'?'ok':'bad';}})().catch(e=>globalThis.result=String(e));"#)).unwrap();
+        host.eval_source(&format!(r#"import fs from 'fs/promises';globalThis.result='pending';(async()=>{{await fs.writeFile('first.txt','first');await fs.writeFile({relative},'second');await fs.writeFile('${{homeDir}}/exports/home.txt','home');await fs.writeFile('${{pluginDir}}/resources/native.txt','native');const back=await fs.readFile('${{pluginDir}}/resources/native.txt','utf8');globalThis.result=(await fs.readFile('first.txt','utf8'))==='first'&&(await fs.readFile({relative},'utf8'))==='second'&&back==='native'?'ok':'bad';}})().catch(e=>globalThis.result=String(e));"#)).unwrap();
         finish(&host);
         assert!(
             host.eval_script("trusted anchors", "result==='ok'")
@@ -457,6 +469,40 @@ export default class Probe extends View {
         drop(host);
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_dir_all(outside).unwrap();
+    }
+    #[test]
+    fn data_in_flight_is_bounded_per_runtime() {
+        let (host, dir) = host(true);
+        for name in ["first", "second"] {
+            let file = std::fs::File::create(dir.join(name)).unwrap();
+            file.set_len(40 * 1024 * 1024).unwrap();
+        }
+        // Writes hold their data from the call; nothing settles within one turn.
+        host.eval_source(r#"import fs from 'fs/promises';globalThis.writes=0;const data='x'.repeat(8*1024*1024);try{for(let i=0;i<9;i++){fs.writeFile('w'+i,data);writes++}}catch(e){globalThis.refused=e instanceof RangeError&&e.message.includes('in flight')}"#).unwrap();
+        assert!(
+            host.eval_script("writes in flight", "writes===8&&refused")
+                .unwrap()
+        );
+        finish(&host);
+        // Both reads finish before JS takes either result: the second does not fit.
+        host.eval_source(r#"import fs from 'fs/promises';globalThis.reads=[];for(const name of ['first','second'])fs.readFile(name).then(b=>reads.push(b.length),e=>reads.push(e.message));const until=Date.now()+1500;while(Date.now()<until){}"#).unwrap();
+        finish(&host);
+        assert!(
+            host.eval_script(
+                "reads in flight",
+                "reads.length===2&&reads.includes(40*1024*1024)&&reads.some(r=>String(r).includes('in flight'))"
+            )
+            .unwrap()
+        );
+        // Settled data returns to the budget.
+        host.eval_source(r#"import fs from 'fs/promises';globalThis.again='pending';fs.readFile('second').then(b=>globalThis.again=b.length,e=>globalThis.again=e.message)"#).unwrap();
+        finish(&host);
+        assert!(
+            host.eval_script("budget released", "again===40*1024*1024")
+                .unwrap()
+        );
+        drop(host);
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn binary_roundtrip_and_metadata() {

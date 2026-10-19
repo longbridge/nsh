@@ -42,11 +42,15 @@ trusted: every limit and check is enforced in Rust, never in JS.
   each refusal is logged once, target `js`, saying which key to add); top-level web view navigations on the platforms
   (`WKNavigationDelegate decidePolicyForNavigationAction` / `WebViewClient.shouldOverrideUrlLoading` → `Native.allowsWebview`).
   `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
-- **Desktop system APIs**: `nsh/process` and `nsh/fs` check the intersection of the declaration and the optional host
+- **Desktop system APIs**: `nsh/process` and `fs/promises` check the intersection of the declaration and the optional host
   grant in Rust. Process commands match exactly: a grant for `codex` grants that command, while `/usr/bin/codex`
   requires its own entry. The runtime launches the executable directly with an argument array. Filesystem checks
   reject traversal and canonicalize the nearest existing ancestor before checking containment in each granted root,
-  including symlinks and paths whose final components will be created. `${dataDir}`, `${pluginDir}` and
+  including symlinks and paths whose final components will be created. The operation then runs in the granted
+  root, opened once (on Unix component by component with `O_NOFOLLOW` from `/`) as a cap-std `Dir`, so no symlink
+  leads it outside; operations on links (`lstat`, `readlink`, `exists`, `unlink`, `rename`, `rmdir`) resolve only
+  the parent. Files are opened non-blocking and must be regular files. One VM has at most 1024 operations and
+  64 MiB of file data in flight (`fs.rs`). `${dataDir}`, `${pluginDir}` and
   `${homeDir}` are resolved from trusted host configuration. Relative roots are anchored at the host plugin
   directory; an unconfigured anchor grants nothing. Read and write grants are separate. Environment visibility
   uses the default metadata-name list in `default-env`, plus explicit case-insensitive `process.env` names

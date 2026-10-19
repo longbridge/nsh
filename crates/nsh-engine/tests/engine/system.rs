@@ -20,9 +20,9 @@ fn filesystem_completion_during_initial_evaluation_is_delivered_without_timers()
     std::fs::write(
         &entry,
         r#"import { mount, signal, Text } from "nsh";
-import { FileSystem } from "nsh/fs";
+import fs from "fs/promises";
 const status = signal("waiting");
-const request = FileSystem.readText("${dataDir}/input.txt");
+const request = fs.readFile("${dataDir}/input.txt", "utf8");
 // Finish the native operation before the engine finishes evaluating this module.
 const until = Date.now() + 100;
 while (Date.now() < until) {}
@@ -104,13 +104,12 @@ fn trusted_path_anchors_reach_the_vm_without_application_metadata() {
     std::fs::write(
         &entry,
         r#"import {mount, signal, Text} from 'nsh';
-import {FileSystem} from 'nsh/fs';
 import fs from 'fs/promises';
 const status = signal('waiting');
 Promise.all([
   fs.readFile('source.txt', 'utf8'),
-  FileSystem.readText('${pluginDir}/source.txt'),
-  FileSystem.readText('${homeDir}/home.txt'),
+  fs.readFile('${pluginDir}/source.txt', 'utf8'),
+  fs.readFile('${homeDir}/home.txt', 'utf8'),
 ]).then(values => status.set(values.join('|')), error => status.set(String(error)));
 mount(() => <Text>{status()}</Text>);"#,
     )
