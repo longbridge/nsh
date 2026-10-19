@@ -3,13 +3,16 @@ name: Core
 # Lints and tests the crates every platform shares: the core, the animation
 # graph, the macros, the JS runtime, the engine, the bundler, signed packages
 # and `nsh/ui/mobile`. The platform workflows test their backends and the
-# tooling only, so these ran nowhere but on developers' machines.
+# tooling only, so these ran nowhere but on developers' machines. The
+# engine's tests also hold the API to the baselines in `api/`
+# (docs/dev/compatibility.md).
 
 on:
   push:
     branches: [main]
     paths:
       - "crates/**"
+      - "api/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
@@ -18,6 +21,7 @@ on:
   pull_request:
     paths:
       - "crates/**"
+      - "api/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
