@@ -5539,6 +5539,7 @@ dependencies = [
  "nsh-core",
  "nsh-engine",
  "nsh-ui-mobile",
+ "objc2-app-kit 0.3.2",
  "raw-window-handle",
  "rustc-hash 2.1.3",
  "serde_json",
