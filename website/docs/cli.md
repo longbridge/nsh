@@ -302,6 +302,7 @@ Signs a revocation list: release keys and packages that must not load any more.
 | Variable | Used by | Description |
 |---|---|---|
 | `ANDROID_HOME`, `ANDROID_SDK_ROOT` | Android targets | The Android SDK. Fallback: `~/Library/Android/sdk`. |
+| `CARGO_TARGET_DIR` | apps with Rust crates | Where the app's runners build. Default: the app's `target/`. |
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | The keystore password. |
 | `NSH_RUNTIME` | `run`, `package` | A runtime directory to use instead of the one next to the CLI. |
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |

@@ -282,6 +282,7 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 | 变量 | 使用者 | 说明 |
 |---|---|---|
 | `ANDROID_HOME`、`ANDROID_SDK_ROOT` | Android 目标 | Android SDK 位置。后备路径：`~/Library/Android/sdk`。 |
+| `CARGO_TARGET_DIR` | 带 Rust crate 的应用 | 应用运行器的构建目录。默认为应用的 `target/`。 |
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | keystore 密码。 |
 | `NSH_RUNTIME` | `run`、`package` | 用来替代 CLI 旁边运行时的运行时目录。 |
 | `NSH_VERBOSE` | 所有命令 | `1`：等同于 `--verbose`。 |

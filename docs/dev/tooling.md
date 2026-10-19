@@ -206,7 +206,7 @@ writing any of them. The ordinary TSX initializer continues preserving existing 
 dependencies on that checkout's crates; the generated host workspaces take nsh's crates from the same place, so the
 app and its hosts share the same core and registry types.
 The app's Rust watcher excludes `target`, `.nsh` and `.git`, including generated sources under the
-app root. Custom TypeScript declarations are generated when the app's command line is first built.
+app root, and the build directory itself (`CARGO_TARGET_DIR` inside a crate's directory under another name). Custom TypeScript declarations are generated when the app's command line is first built.
 
 ## Apps with Rust components of their own (`nsh.json` `"rust"`)
 
@@ -263,10 +263,13 @@ toolchain cannot know the sets, so `nsh` builds the app its own (`crates/nsh-cli
   examples, as `examples/gallery-rs`, through the workspace's path dependencies), which must be of that version, with
   the app's crates.io dependencies on nsh patched to it. Requirements of another version, or crates taking nsh from
   two places, stop the command with what to change, rather than a build failing later on two `nsh-core`s. They build
-  in the app's own `target/`, as a Cargo project in the app's directory does (`nsh init` ignores it), and Cargo
+  in the app's own `target/`, as a Cargo project in the app's directory does (`nsh init` ignores it), or in
+  `CARGO_TARGET_DIR` when it is set (one directory several checkouts or CI jobs share), and Cargo
   resolves and keeps the workspace's own `Cargo.lock`. Every crate those workspaces depend on is published by
   `release-crate.yml`, the hosts and runners included; the binaries are named after the app (`nsh-app-<package>-cli`; with
-  several crates all their packages, `nsh-app-charts-storage-cli`). `.nsh/rust/app.json` keeps the crates (package and
+  several crates all their packages, `nsh-app-charts-storage-cli`), and so are the libraries (the web runtime's, the
+  Android `cdylib`s: `libnsh_app_charts_android.so`, installed as `libnsh.so`), so apps sharing a target directory never
+  take each other's. `.nsh/rust/app.json` keeps the crates (package and
   directory), the watched directories and the root for the app's command line (`rust_app::current`).
 - A command on the app (`build`, `trace`, `dev`, `run`, `package`, `publish`) builds `cli` and runs again in it
   (`NSH_RUST_APP` names the workspace). Everything then knows the app's sets: the bundler keeps their imports, bytecode
