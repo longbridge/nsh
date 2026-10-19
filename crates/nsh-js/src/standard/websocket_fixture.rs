@@ -174,3 +174,65 @@ fn websocket_live_transport_is_released_with_vm() {
     ended_rx.recv_timeout(Duration::from_secs(1)).unwrap();
     server.join().unwrap();
 }
+
+#[test]
+fn a_flooding_peer_cannot_hold_one_turn() {
+    const SENT: usize = 600;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sent_tx, sent_rx) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (tcp, _) = listener.accept().unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut ws = tokio_tungstenite::tungstenite::accept(tcp).unwrap();
+        // The flood starts once the client is open and idle.
+        let _ = ws.read();
+        for i in 0..SENT {
+            ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                i.to_string().into(),
+            ))
+            .unwrap();
+        }
+        sent_tx.send(()).unwrap();
+        // Until the client closes.
+        let _ = ws.read();
+    });
+    let host = host(true);
+    host.eval_source(&format!(
+        "globalThis.count = 0; globalThis.steps = []; const ws = new WebSocket('ws://{address}/'); ws.onopen = () => {{ ws.send('go'); globalThis.wsDone = true; }}; ws.onmessage = () => {{ count++; }}; globalThis.socket = ws;"
+    ))
+    .unwrap();
+    // The handshake runs in the VM's turns.
+    finish(&host);
+    sent_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    host.eval_source("steps.push(count);").unwrap();
+    // Let every frame reach the socket's buffer before the turns run.
+    std::thread::sleep(Duration::from_millis(100));
+    let end = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < end {
+        host.run_jobs();
+        host.eval_source("steps.push(count);").unwrap();
+        if host
+            .eval_source(&format!("if (count < {SENT}) throw Error('pending');"))
+            .is_ok()
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    host.eval_source(&format!(
+        r#"if (count !== {SENT}) throw Error('received ' + count);
+        let most = 0;
+        for (let i = 1; i < steps.length; i++) most = Math.max(most, steps[i] - steps[i - 1]);
+        // A turn delivers a few of the socket's shares (QuickJS' scheduler
+        // polls a self-waking task more than once), never the whole flood.
+        if (most > {SENT} / 2) throw Error('one turn delivered ' + most);
+        socket.close();"#
+    ))
+    .unwrap();
+    for _ in 0..20 {
+        host.run_jobs();
+    }
+    drop(host);
+    server.join().unwrap();
+}
