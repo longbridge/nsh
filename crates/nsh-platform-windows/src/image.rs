@@ -1739,6 +1739,7 @@ mod tests {
         let source = ImageSource {
             uri: "asset:/logo@2x.png".into(),
             size: None,
+            scales: Default::default(),
         };
         assert_eq!(natural((200, 100), Some(&source)), (100.0, 50.0));
     }

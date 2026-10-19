@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use super::*;
 use crate::{
-    Color, EventKind, StyleValue,
+    Color, EventKind, IMAGE_SCALES, ImageScales, StyleValue,
     animation::{AnimationOp, AnimationProp},
     geometry::{point, px},
 };
@@ -966,6 +966,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                 prop: Prop::Source(Some(ImageSource {
                     uri: "asset:/logo.png".into(),
                     size: Some(size_pt(200.0, 100.0)),
+                    scales: ImageScales::NONE,
                 })),
             },
             Op::Insert {
@@ -989,6 +990,7 @@ fn image_uses_natural_size_and_aspect_ratio() {
                 prop: Prop::Source(Some(ImageSource {
                     uri: "asset:/logo.png".into(),
                     size: Some(size_pt(200.0, 100.0)),
+                    scales: ImageScales::NONE,
                 })),
             },
             Op::Insert {
@@ -3988,6 +3990,7 @@ fn refused_urls_fail_and_send_nothing() {
                 prop: Prop::Source(Some(ImageSource {
                     uri: uri.into(),
                     size: None,
+                    scales: ImageScales::NONE,
                 })),
             },
             Op::Insert {
@@ -10845,4 +10848,318 @@ mod builders {
         assert!(one_by_one[0].contains("\"row 1\""));
         assert!(one_by_one[0].contains("\"right\""));
     }
+}
+
+/// An image node `id` showing `source` (and `placeholder`), in the root.
+fn image_ops(id: NodeId, source: ImageSource, placeholder: Option<ImageSource>) -> Vec<Op> {
+    let mut ops = vec![
+        Op::Create {
+            id,
+            tag: Tag::Image,
+        },
+        Op::SetProp {
+            id,
+            prop: Prop::Source(Some(source)),
+        },
+    ];
+    if placeholder.is_some() {
+        ops.push(Op::SetProp {
+            id,
+            prop: Prop::Image(ImageProp::DefaultSource(placeholder)),
+        });
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: id,
+        before: None,
+    });
+    ops
+}
+
+fn asset(uri: &str, scales: &[f32]) -> ImageSource {
+    ImageSource {
+        uri: uri.into(),
+        size: Some(crate::geometry::size_pt(40.0, 30.0)),
+        scales: scales.iter().copied().collect(),
+    }
+}
+
+/// The source and placeholder URIs of `id`'s last image item.
+fn image_uris(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Option<String>)> {
+    batch.items.iter().rev().find_map(|i| match i {
+        MountItem::Image {
+            id: i,
+            source,
+            options,
+            ..
+        } if *i == id => Some((
+            source.as_ref().map(|s| s.uri.to_string()),
+            options.placeholder.as_ref().map(|s| s.uri.to_string()),
+        )),
+        _ => None,
+    })
+}
+
+fn at_ratio(c: &mut Core<FakeEngine>, pixel_ratio: f32) {
+    c.set_environment(crate::ui::Environment {
+        pixel_ratio,
+        ..Default::default()
+    });
+}
+
+#[test]
+fn image_scales_pick_the_smallest_at_least_the_ratio_else_the_largest() {
+    let set: ImageScales = [1.0, 2.0, 3.0].into_iter().collect();
+    let picks: Vec<_> = [1.0, 1.5, 2.0, 2.625, 3.0, 3.5]
+        .into_iter()
+        .map(|r| set.pick(r))
+        .collect();
+    assert_eq!(
+        picks,
+        [
+            Some(1.0),
+            Some(2.0),
+            Some(2.0),
+            Some(3.0),
+            Some(3.0),
+            Some(3.0)
+        ]
+    );
+    let set = |values: [f32; 2]| values.into_iter().collect::<ImageScales>();
+    assert_eq!(set([1.0, 1.5]).pick(1.2), Some(1.5));
+    assert_eq!(set([2.0, 4.0]).pick(1.0), Some(2.0));
+    assert_eq!(ImageScales::NONE.pick(2.0), None);
+    assert_eq!(
+        IMAGE_SCALES
+            .into_iter()
+            .collect::<ImageScales>()
+            .iter()
+            .collect::<Vec<_>>(),
+        IMAGE_SCALES
+    );
+}
+
+#[test]
+fn image_scales_name_the_variants_and_keep_the_1x_file() {
+    let a = asset("asset:/img/a.png", &[1.0, 1.5, 2.0, 3.0, 4.0]);
+    let uris: Vec<_> = [1.0, 1.5, 2.0, 3.0, 4.0]
+        .into_iter()
+        .map(|r| a.uri_for(r).to_string())
+        .collect();
+    assert_eq!(
+        uris,
+        [
+            "asset:/img/a.png",
+            "asset:/img/a@1.5x.png",
+            "asset:/img/a@2x.png",
+            "asset:/img/a@3x.png",
+            "asset:/img/a@4x.png"
+        ]
+    );
+    // The 1x file is the URI itself, not a copy.
+    assert!(std::sync::Arc::ptr_eq(&a.uri_for(1.0), &a.uri));
+    assert_eq!(
+        &*asset("asset:/x.y/b", &[1.0, 2.0]).uri_for(2.0),
+        "asset:/x.y/b@2x"
+    );
+    assert_eq!(
+        &*asset("asset:/.hidden", &[1.0, 2.0]).uri_for(2.0),
+        "asset:/.hidden@2x"
+    );
+    assert_eq!(
+        &*asset("asset:/c.d.webp", &[3.0]).uri_for(1.0),
+        "asset:/c.d@3x.webp"
+    );
+}
+
+#[test]
+fn image_scales_leave_remote_and_file_uris_alone() {
+    for uri in [
+        "https://x.org/a.png",
+        "http://x.org/a.png",
+        "/tmp/a.png",
+        "file:///a.png",
+    ] {
+        let source = asset(uri, &[1.0, 2.0, 3.0]);
+        assert!(
+            std::sync::Arc::ptr_eq(&source.uri_for(3.0), &source.uri),
+            "{uri}"
+        );
+    }
+}
+
+/// A query or a fragment is no part of a bundled file's name: such an
+/// asset URI loads as it is, at every ratio.
+#[test]
+fn image_scales_leave_uris_with_a_query_or_a_fragment_alone() {
+    for uri in [
+        "asset:/a.png?v=2",
+        "asset:/a.png#frame",
+        "asset:/dir?x=1/a.png",
+        "asset:/a#b.png",
+    ] {
+        let source = asset(uri, &[1.0, 2.0, 3.0]);
+        for ratio in [1.0, 2.0, 3.0] {
+            assert!(
+                std::sync::Arc::ptr_eq(&source.uri_for(ratio), &source.uri),
+                "{uri} at {ratio}"
+            );
+        }
+        let mut c = core();
+        at_ratio(&mut c, 3.0);
+        apply(&mut c, image_ops(2, source, None));
+        let batch = c.commit().unwrap();
+        assert_eq!(image_uris(&batch, 2), Some((Some(uri.into()), None)));
+    }
+}
+
+#[test]
+fn image_scales_drop_invalid_values() {
+    let set: ImageScales = [f32::NAN, -2.0, 0.0, 2.5, 5.0, f32::INFINITY, 2.0]
+        .into_iter()
+        .collect();
+    assert_eq!(set.iter().collect::<Vec<_>>(), [2.0]);
+    assert!(
+        [f32::NAN, -1.0]
+            .into_iter()
+            .collect::<ImageScales>()
+            .is_empty()
+    );
+}
+
+/// The JS shapes, through the host decoding (a JSON stand-in for JS
+/// values).
+#[test]
+fn image_scales_decode_from_js() {
+    use crate::js::host::{HostCx, HostInput, HostList, HostValue};
+
+    struct J(serde_json::Value);
+    struct L(Vec<serde_json::Value>);
+    impl HostList for L {
+        type Item = J;
+        fn len(&self) -> usize {
+            self.0.len()
+        }
+        fn item(&self, i: usize) -> Option<J> {
+            self.0.get(i).cloned().map(J)
+        }
+    }
+    impl HostInput for J {
+        type List = L;
+        fn is_nullish(&self) -> bool {
+            self.0.is_null()
+        }
+        fn is_object(&self) -> bool {
+            self.0.is_object() || self.0.is_array()
+        }
+        fn as_bool(&self) -> Option<bool> {
+            self.0.as_bool()
+        }
+        fn as_number(&self) -> Option<f64> {
+            self.0.as_f64()
+        }
+        fn as_string(&self) -> Option<String> {
+            self.0.as_str().map(str::to_owned)
+        }
+        fn field(&self, key: &str) -> Option<J> {
+            self.0.get(key).cloned().map(J)
+        }
+        fn as_list(&self) -> Option<L> {
+            self.0.as_array().cloned().map(L)
+        }
+        fn entries(&self) -> Vec<(String, J)> {
+            Vec::new()
+        }
+        fn truthy(&self) -> bool {
+            !self.0.is_null()
+        }
+    }
+    let decode = |v: serde_json::Value| ImageSource::decode(&J(v), &mut HostCx::default());
+
+    let source = decode(serde_json::json!({
+        "uri": "asset:/a.png", "width": 40, "height": 30, "scales": [1, 2, "3", -1, 2.5, 3]
+    }))
+    .unwrap();
+    assert_eq!(source.size, Some(crate::geometry::size_pt(40.0, 30.0)));
+    assert_eq!(source.scales.iter().collect::<Vec<_>>(), [1.0, 2.0, 3.0]);
+    let plain = decode(serde_json::json!({ "uri": "asset:/a.png", "width": 40, "height": 30 }));
+    assert_eq!(plain.unwrap().scales, ImageScales::NONE);
+    assert_eq!(
+        decode(serde_json::json!("https://x.org/a.png"))
+            .unwrap()
+            .scales,
+        ImageScales::NONE
+    );
+    let odd = decode(serde_json::json!({ "uri": "asset:/a.png", "scales": "2" })).unwrap();
+    assert!(odd.scales.is_empty());
+    // Only the first entries are read.
+    let long = decode(serde_json::json!({
+        "uri": "asset:/a.png", "scales": [1, 1, 1, 1, 1, 1, 1, 1, 2]
+    }));
+    assert_eq!(long.unwrap().scales.iter().collect::<Vec<_>>(), [1.0]);
+}
+
+#[test]
+fn image_scales_mount_the_variant_for_the_pixel_ratio() {
+    for (ratio, file) in [
+        (1.0, "a.png"),
+        (2.0, "a@2x.png"),
+        (2.625, "a@3x.png"),
+        (3.0, "a@3x.png"),
+    ] {
+        let mut c = core();
+        at_ratio(&mut c, ratio);
+        let mut ops = image_ops(
+            2,
+            asset("asset:/a.png", &[1.0, 2.0, 3.0]),
+            Some(asset("asset:/p.png", &[1.0, 2.0])),
+        );
+        ops.extend(image_ops(3, asset("asset:/a.png", &[1.0, 2.0, 3.0]), None));
+        ops.push(style_op(3, &[("alignSelf", StyleValue::Str("flex-start"))]));
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        let placeholder = if ratio > 1.0 { "p@2x.png" } else { "p.png" };
+        assert_eq!(
+            image_uris(&batch, 2),
+            Some((
+                Some(format!("asset:/{file}")),
+                Some(format!("asset:/{placeholder}"))
+            )),
+            "at {ratio}"
+        );
+        // The size in points does not depend on the variant.
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.size),
+            Some(crate::geometry::size_pt(40.0, 30.0)),
+            "at {ratio}"
+        );
+    }
+}
+
+#[test]
+fn image_scales_change_nothing_without_scales() {
+    let mut c = core();
+    at_ratio(&mut c, 3.0);
+    let plain = asset("asset:/a.png", &[]);
+    apply(
+        &mut c,
+        image_ops(2, plain.clone(), Some(asset("asset:/a@3x.png", &[]))),
+    );
+    let batch = c.commit().unwrap();
+    let source = batch.items.iter().find_map(|i| match i {
+        MountItem::Image { id: 2, source, .. } => source.clone(),
+        _ => None,
+    });
+    assert_eq!(source, Some(plain));
+    assert_eq!(
+        image_uris(&batch, 2),
+        Some((Some("asset:/a.png".into()), Some("asset:/a@3x.png".into())))
+    );
+    // A ratio change sends nothing for them.
+    at_ratio(&mut c, 2.0);
+    let batch = c.commit();
+    assert!(
+        batch.is_none_or(|b| !b.items.iter().any(|i| matches!(i, MountItem::Image { .. }))),
+        "nothing for images without scales"
+    );
 }

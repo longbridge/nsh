@@ -87,7 +87,9 @@ ops::Command::Seek.0                                             # time
 ops::Command::ZoomTo.scale                                       # a zoom scale factor
 ops::EventPayload::Pan.velocity_x                                # a rate or a physical constant of an animation
 ops::EventPayload::Pan.velocity_y                                # a rate or a physical constant of an animation
+ops::IMAGE_SCALES                                                # pixel densities (device pixels per point)
 ops::ImageProp::FadeDuration.0                                   # time
+ops::ImageScales::iter ->                                        # pixel densities (device pixels per point)
 ops::NativeProp::ProgressInterval.0                              # time
 ops::NativeProp::Rate.0                                          # a playback rate multiplier
 ops::NativeProp::Volume.0                                        # audio volume, 0..1

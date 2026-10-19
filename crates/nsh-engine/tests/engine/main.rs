@@ -27,6 +27,7 @@ mod handle_bench;
 mod host_modules;
 mod hot;
 mod hover;
+mod images;
 mod js_touch;
 mod keymap;
 mod list;

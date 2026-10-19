@@ -747,7 +747,11 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
         let changed = self.components.environment != environment;
+        let ratio = self.components.environment.pixel_ratio;
         self.components.environment = environment;
+        if ratio != environment.pixel_ratio {
+            self.repick_images(ratio, environment.pixel_ratio);
+        }
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);
