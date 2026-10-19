@@ -626,6 +626,7 @@ impl rquickjs::loader::Loader for Loader {
 
 /// Resolve an already-canonical native specifier through the same provider
 /// selection used by the runtime loader (also used by type discovery).
+#[cfg(not(feature = "bytecode-only"))]
 pub(crate) fn load_module<'js>(ctx: &Ctx<'js>, name: &str) -> rquickjs::Result<Module<'js>> {
     rquickjs::loader::Loader::load(&mut Loader, ctx, name, None)
 }

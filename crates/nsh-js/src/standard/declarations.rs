@@ -339,7 +339,7 @@ fn adapter(out: &mut String, name: &str, body: &str) {
 /// New standard globals derive their types from the same projected signatures
 /// as their module imports. Existing WHATWG globals remain NSH-owned.
 pub(crate) fn globals() -> String {
-    let mut out = String::from(
+    let out = String::from(
         r#"
 declare var Buffer: typeof import("buffer").Buffer;
 type Buffer = import("buffer").Buffer;
@@ -354,7 +354,7 @@ declare const SubtleCrypto: unknown;
 "#,
     );
     #[cfg(not(target_arch = "wasm32"))]
-    out.push_str(super::websocket::GLOBALS);
+    let out = out + super::websocket::GLOBALS;
     out
 }
 

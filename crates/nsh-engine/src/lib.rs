@@ -1136,10 +1136,14 @@ impl<M: TextEngine + 'static> Driver<M> {
                 let system = {
                     script::SystemConfig {
                         access: (*access).clone(),
+                        #[cfg(not(target_arch = "wasm32"))]
                         data_dir: config
                             .data_dir
                             .as_ref()
                             .map(|root| root.join(app_dir_name(config.app.app_id()))),
+                        // The web keeps no app data in files.
+                        #[cfg(target_arch = "wasm32")]
+                        data_dir: None,
                         paths: bundle_system_paths(bundle),
                         wake: Arc::new(move || {
                             let _ = system_tx.send(Message::Wake);
@@ -1960,7 +1964,10 @@ mod tests {
     fn local_bundle_anchors_its_canonical_parent_without_metadata_authority() {
         let root = std::env::var_os("TMPDIR")
             .map(std::path::PathBuf::from)
-            .expect("tests must provide TMPDIR outside /tmp");
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+                    .join(".cache/nsh-benchs-test-tmp")
+            });
         assert!(root.is_absolute() && !root.starts_with("/tmp"));
         let directory = root.join(format!("nsh-bundle-anchors-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
