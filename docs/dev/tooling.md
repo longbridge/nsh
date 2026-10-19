@@ -202,9 +202,9 @@ The display name becomes a normalized Cargo package name prefixed with `nsh-app-
 uses its Rust crate identifier. Rust creation checks for existing app and Cargo source files before
 writing any of them. The ordinary TSX initializer continues preserving existing files.
 
-Independent apps use crates.io dependencies, and so do the generated host workspaces: nsh's crates at the CLI's
-version. With `NSH_SOURCE` the workspaces take them from that checkout and patch the app's crates.io dependencies on
-NSH to it, so the app and its hosts share the same core and registry types either way.
+`nsh init --rust` writes crates.io dependencies at the CLI's version, or with `--nsh-source <dir>` path
+dependencies on that checkout's crates; the generated host workspaces take nsh's crates from the same place, so the
+app and its hosts share the same core and registry types.
 The app's Rust watcher excludes `target`, `.nsh` and `.git`, including generated sources under the
 app root. Custom TypeScript declarations are generated when the app's command line is first built.
 
@@ -257,16 +257,15 @@ toolchain cannot know the sets, so `nsh` builds the app its own (`crates/nsh-cli
   target_os = "macos", windows))`; `gpui-app` is a windowed program on Windows too) are a workspace of their own in
   `.nsh/rust/gpui` (excluded from the main one), written only when a GPUI host or runner is built
   (`RustApp::gpui_workspace`), so builds for the other targets never resolve GPUI's crates. They take nsh's crates
+  where the app's crates do (`rust_app::Nsh::of`, from each crate's dependencies through `cargo metadata --no-deps`):
   from crates.io at the version of the running `nsh` (`=0.1.1` for nsh 0.1.1: the code it generates calls their API),
-  building in a target directory every app shares (`rust-target` in nsh's cache, `NSH_CACHE` or the platform's cache
-  directory), so nsh's crates and their dependencies compile once per version; Cargo resolves and keeps the
-  workspace's own `Cargo.lock`. With `NSH_SOURCE` set to a checkout they take nsh's crates from it instead and build in
-  its `target/` (nsh's own development: `cargo run` / xtask and the CI workflows that build `examples/gallery-rs` set
-  it to the repository). Before writing the workspace, `rust_app::check_versions` reads each app crate's
-  dependencies (`cargo metadata --no-deps`): one on nsh from crates.io must accept that version, one by path must be in
-  the `NSH_SOURCE` checkout, else the command stops and says what to change (rather than failing to build later with
-  two `nsh-core`s). Every crate those workspaces depend on is published by `release-crate.yml`, the hosts and runners
-  included; the binaries are named after the app (`nsh-app-<package>-cli`; with
+  which the app's requirements must accept, or by path from the checkout the app's crates depend on (nsh's own
+  examples, as `examples/gallery-rs`, through the workspace's path dependencies), which must be of that version, with
+  the app's crates.io dependencies on nsh patched to it. Requirements of another version, or crates taking nsh from
+  two places, stop the command with what to change, rather than a build failing later on two `nsh-core`s. They build
+  in the app's own `target/`, as a Cargo project in the app's directory does (`nsh init` ignores it), and Cargo
+  resolves and keeps the workspace's own `Cargo.lock`. Every crate those workspaces depend on is published by
+  `release-crate.yml`, the hosts and runners included; the binaries are named after the app (`nsh-app-<package>-cli`; with
   several crates all their packages, `nsh-app-charts-storage-cli`). `.nsh/rust/app.json` keeps the crates (package and
   directory), the watched directories and the root for the app's command line (`rust_app::current`).
 - A command on the app (`build`, `trace`, `dev`, `run`, `package`, `publish`) builds `cli` and runs again in it

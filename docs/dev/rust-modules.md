@@ -35,8 +35,8 @@ others and registered them all under its specifier.
 - Crates may depend on each other, or on crates not listed (a shared crate of components that another crate's
   components use), through plain Cargo path dependencies; only the ones listed in `"rust"` export to TS.
 - A Rust app's `"root"` is a component of the first crate listed.
-- The generated binaries are named after all the crates' packages (`nsh-app-charts-storage-cli`): unique per set of
-  crates in the shared target directory.
+- The generated binaries are named after all the crates' packages (`nsh-app-charts-storage-cli`), so they do not
+  clash with the crates' own binaries in the app's `target/`.
 
 ## Why a list of crates
 

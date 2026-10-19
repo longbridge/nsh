@@ -67,6 +67,11 @@ enum Command {
         /// sharing the same Rust components. Requires a Rust toolchain.
         #[arg(long)]
         rust: bool,
+        /// With `--rust`: depend on the nsh crates of this checkout by path,
+        /// instead of crates.io's at this CLI's version (the app's hosts
+        /// build from the same place).
+        #[arg(long, value_name = "DIR", requires = "rust")]
+        nsh_source: Option<PathBuf>,
     },
     /// Bundle an app and compile it to QuickJS bytecode.
     Build {
@@ -421,7 +426,12 @@ fn run(mut command: Command) -> anyhow::Result<()> {
 
 fn dispatch(command: Command) -> anyhow::Result<()> {
     match command {
-        Command::Init { dir, name, rust } => init::init(&dir, name, rust),
+        Command::Init {
+            dir,
+            name,
+            rust,
+            nsh_source,
+        } => init::init(&dir, name, rust, nsh_source.as_deref()),
         Command::Build {
             entry,
             out,

@@ -147,11 +147,6 @@ fn launch(root: &Path, args: &RunArgs) -> anyhow::Result<App> {
     let nsh = format!("target/debug/nsh{}", std::env::consts::EXE_SUFFIX);
     let mut cmd = Command::new(root.join(&nsh));
     cmd.arg("run").arg(&args.entry).current_dir(root);
-    // An app with Rust crates (gallery-rs) builds against this checkout,
-    // not the crates.io release of its version.
-    if std::env::var_os("NSH_SOURCE").is_none() {
-        cmd.env("NSH_SOURCE", root);
-    }
     let default = if cfg!(target_os = "macos") {
         "macos"
     } else if cfg!(target_os = "linux") {

@@ -53,7 +53,7 @@ source, cargo's output and the hosts' own.
 ## nsh init
 
 ```sh
-nsh init [DIR] [--name <NAME>] [--rust]
+nsh init [DIR] [--name <NAME>] [--rust [--nsh-source <DIR>]]
 ```
 
 By default, creates a TSX app in `DIR` (default: the current directory, created if missing): `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already.
@@ -62,8 +62,9 @@ By default, creates a TSX app in `DIR` (default: the current directory, created 
 |---|---|
 | `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case). |
 | `--rust` | Creates a Cargo project with a native Rust entry (`cargo run`) and a TSX entry sharing its Rust components. Requires Rust and the native desktop backend's development libraries. |
+| `--nsh-source <DIR>` | With `--rust`: the project depends on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
 
-With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."` and `"root": "App"`. `nsh run` and `nsh package` then mount the Rust root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly; `nsh run App.tsx` runs the TSX entry. The `nsh` commands build the app's runners from NSH's crates on crates.io, at the CLI's version (the app's crate asks for that version; `NSH_SOURCE` points them at an NSH checkout instead). Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
+With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."` and `"root": "App"`. `nsh run` and `nsh package` then mount the Rust root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly; `nsh run App.tsx` runs the TSX entry. The project depends on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners from the same crates. Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
 
 ## nsh run
 
@@ -289,6 +290,5 @@ Signs a revocation list: release keys and packages that must not load any more.
 | `ANDROID_HOME`, `ANDROID_SDK_ROOT` | Android targets | The Android SDK. Fallback: `~/Library/Android/sdk`. |
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | The keystore password. |
 | `NSH_RUNTIME` | `run`, `package` | A runtime directory to use instead of the one next to the CLI. |
-| `NSH_SOURCE` | apps with Rust crates | An NSH checkout whose crates the app's runners build with, instead of crates.io's at the CLI's version. |
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |
 | `NO_COLOR` | every command | Set: no colors on terminals. |

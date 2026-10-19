@@ -30,13 +30,34 @@ function App() {
 mount(App);
 "##;
 
-const GITIGNORE: &str = ".nsh/\nout/\n";
+/// What an app's repository leaves out: generated types and workspaces
+/// (`.nsh`), bundles (`out`) and Cargo's builds (`target`: an app's own
+/// crate, and its hosts once `nsh.json` names a `"rust"` crate).
+const GITIGNORE: &str = ".nsh/\nout/\ntarget/\n";
 
 /// Creates an app in `dir`: `App.tsx` (the entry by convention), `nsh.json`, `tsconfig.json`,
 /// `.gitignore` and the type declarations. `rust` adds a Cargo project with
-/// shared Rust components. Existing Rust app files are reported as conflicts;
-/// ordinary TSX initialization keeps existing files.
-pub(crate) fn init(dir: &Path, name: Option<String>, rust: bool) -> anyhow::Result<()> {
+/// shared Rust components, depending on nsh's crates on crates.io at this
+/// CLI's version, or by path on the nsh checkout `nsh_source`: where the
+/// app's hosts take nsh from too (`rust_app::Nsh::of`). Existing Rust app
+/// files are reported as conflicts; ordinary TSX initialization keeps
+/// existing files.
+pub(crate) fn init(
+    dir: &Path,
+    name: Option<String>,
+    rust: bool,
+    nsh_source: Option<&Path>,
+) -> anyhow::Result<()> {
+    let nsh_source = nsh_source
+        .map(|source| {
+            let source = dunce::canonicalize(source)
+                .with_context(|| format!("--nsh-source: no {}", source.display()))?;
+            if !source.join("crates/nsh-core/Cargo.toml").is_file() {
+                bail!("--nsh-source: {} is not an nsh checkout", source.display());
+            }
+            Ok(source)
+        })
+        .transpose()?;
     fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     let run = if dir == Path::new(".") {
         "nsh run".to_owned()
@@ -74,17 +95,14 @@ pub(crate) fn init(dir: &Path, name: Option<String>, rust: bool) -> anyhow::Resu
             format!("{}\n", serde_json::to_string_pretty(&config)?),
         ),
         ("tsconfig.json", nsh_bundler::TSCONFIG.to_owned()),
-        (
-            ".gitignore",
-            if rust {
-                format!("{GITIGNORE}target/\n")
-            } else {
-                GITIGNORE.to_owned()
-            },
-        ),
+        (".gitignore", GITIGNORE.to_owned()),
     ];
     if rust {
-        files.extend(rust_files(&name, config["id"].as_str().unwrap()));
+        files.extend(rust_files(
+            &name,
+            config["id"].as_str().unwrap(),
+            nsh_source.as_deref(),
+        ));
         for file in [
             "Cargo.toml",
             "src/main.rs",
@@ -145,11 +163,22 @@ import { App } from "app/native";
 mount(App);
 "#;
 
-/// The Cargo project: published dependencies, with platform features chosen
-/// so `cargo run` runs the Rust root without linking QuickJS.
-fn rust_files(name: &str, id: &str) -> Vec<(&'static str, String)> {
+/// The Cargo project: nsh's crates on crates.io at this CLI's version (or
+/// by path in the checkout `source`), with platform features chosen so
+/// `cargo run` runs the Rust root without linking QuickJS.
+fn rust_files(name: &str, id: &str, source: Option<&Path>) -> Vec<(&'static str, String)> {
     let package = rust_package_name(name);
     let version = env!("CARGO_PKG_VERSION");
+    let dep = |name: &str, extra: &str| match source {
+        Some(source) => format!(
+            "{{ path = {:?}{extra} }}",
+            source.join("crates").join(name).to_string_lossy()
+        ),
+        None if extra.is_empty() => format!("{version:?}"),
+        None => format!("{{ version = {version:?}{extra} }}"),
+    };
+    let core = dep("nsh-core", "");
+    let mobile = dep("nsh-ui-mobile", "");
     let mut manifest = format!(
         r#"[package]
 name = {package:?}
@@ -160,8 +189,8 @@ publish = false
 [workspace]
 
 [dependencies]
-nsh-core = {version:?}
-nsh-ui-mobile = {version:?}
+nsh-core = {core}
+nsh-ui-mobile = {mobile}
 env_logger = "0.11"
 "#
     );
@@ -169,8 +198,12 @@ env_logger = "0.11"
         manifest.push_str(&format!(
             r#"
 [target.'cfg(target_os = {platform:?})'.dependencies]
-nsh-platform-{platform} = {{ version = {version:?}, default-features = false }}
-"#
+nsh-platform-{platform} = {}
+"#,
+            dep(
+                &format!("nsh-platform-{platform}"),
+                ", default-features = false"
+            )
         ));
     }
     let main = include_str!("templates/rust/main.rs")
@@ -277,7 +310,7 @@ mod tests {
     #[test]
     fn rust_projects_have_two_entries_and_preserve_existing_projects() {
         let dir = directory("rust");
-        init(&dir, Some("123 My App".into()), true).unwrap();
+        init(&dir, Some("123 My App".into()), true, None).unwrap();
         let config: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(dir.join("nsh.json")).unwrap()).unwrap();
         assert_eq!(config["rust"], ".");
@@ -299,7 +332,7 @@ mod tests {
                 .contains("app/native")
         );
         fs::write(dir.join("src/lib.rs"), "user code").unwrap();
-        assert!(init(&dir, None, true).is_err());
+        assert!(init(&dir, None, true, None).is_err());
         assert_eq!(
             fs::read_to_string(dir.join("src/lib.rs")).unwrap(),
             "user code"
@@ -308,10 +341,51 @@ mod tests {
     }
 
     #[test]
+    fn rust_projects_take_nsh_from_crates_io_or_a_checkout() {
+        let version = env!("CARGO_PKG_VERSION");
+        let manifest = |source: Option<&Path>| {
+            rust_files("App", "com.example.app", source)
+                .into_iter()
+                .find(|(name, _)| *name == "Cargo.toml")
+                .unwrap()
+                .1
+        };
+        let published = manifest(None);
+        assert!(
+            published.contains(&format!("nsh-core = {version:?}")),
+            "{published}"
+        );
+        assert!(published.contains(&format!(
+            "nsh-platform-macos = {{ version = {version:?}, default-features = false }}"
+        )));
+        let checkout =
+            dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
+        let local = manifest(Some(&checkout));
+        let core = checkout.join("crates/nsh-core");
+        assert!(
+            local.contains(&format!(
+                "nsh-core = {{ path = {:?} }}",
+                core.to_string_lossy()
+            )),
+            "{local}"
+        );
+        assert!(local.contains("default-features = false }"), "{local}");
+        assert!(!local.contains(&format!("{version:?}")), "{local}");
+        // Only a checkout.
+        let dir = directory("not-a-checkout");
+        let error = init(&dir.join("app"), None, true, Some(&dir))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not an nsh checkout"), "{error}");
+        assert!(!dir.join("app").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn rust_init_refuses_conflicts_before_writing_app_files() {
         let dir = directory("conflict");
         fs::write(dir.join("Cargo.toml"), "existing manifest").unwrap();
-        assert!(init(&dir, None, true).is_err());
+        assert!(init(&dir, None, true, None).is_err());
         assert!(!dir.join("App.tsx").exists());
         assert!(!dir.join("nsh.json").exists());
         fs::remove_dir_all(dir).unwrap();
@@ -321,7 +395,7 @@ mod tests {
     fn tsx_init_keeps_its_existing_behavior() {
         let dir = directory("tsx");
         fs::write(dir.join("App.tsx"), "user entry").unwrap();
-        init(&dir, None, false).unwrap();
+        init(&dir, None, false, None).unwrap();
         assert!(!dir.join("Cargo.toml").exists());
         assert_eq!(
             fs::read_to_string(dir.join("App.tsx")).unwrap(),
@@ -334,7 +408,7 @@ mod tests {
     fn display_names_produce_valid_cargo_names_and_escaped_rust_literals() {
         assert_eq!(rust_package_name("你好"), "nsh-app-app");
         assert_eq!(rust_package_name("123 APP / demo"), "nsh-app-123-app-demo");
-        let files = rust_files("a\"b\nc", "com.example.abc");
+        let files = rust_files("a\"b\nc", "com.example.abc", None);
         let main = &files
             .iter()
             .find(|(name, _)| *name == "src/main.rs")
