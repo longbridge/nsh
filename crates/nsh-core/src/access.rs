@@ -95,6 +95,7 @@ pub struct NetworkGrants {
 
 /// Commands an app may execute. Names are exact, without shell expansion.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct ProcessGrants {
     /// Exact executable names or absolute executable paths.
     pub execute: Vec<String>,
@@ -103,6 +104,7 @@ pub struct ProcessGrants {
 /// Filesystem roots an app may read or write. `${dataDir}` is resolved by
 /// the host to this app's own data directory, never to a JS supplied root.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct FileGrants {
     /// Roots available for read operations.
     pub read: Vec<String>,
@@ -111,7 +113,10 @@ pub struct FileGrants {
 }
 
 /// What an app may do (one declaration, or one grant).
+/// Start with [`Self::default`] and set the fields to grant; new capabilities
+/// default to denied.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct Capabilities {
     /// Explicit native subprocess grants.
     pub process: ProcessGrants,
@@ -174,8 +179,6 @@ impl Capabilities {
     pub fn all() -> Self {
         let any = vec![HostPattern("*".into())];
         Self {
-            process: ProcessGrants::default(),
-            fs: FileGrants::default(),
             network: NetworkGrants {
                 hosts: any.clone(),
                 http: Vec::new(),
@@ -183,6 +186,7 @@ impl Capabilities {
             webview: Some(any),
             status_bar: true,
             clipboard: true,
+            ..Self::default()
         }
     }
 

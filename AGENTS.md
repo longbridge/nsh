@@ -278,6 +278,12 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `nsh-engine/tests/engine/`), never a new `tests/*.rs`: each binary links its own copy of the bundler, QuickJS and
   the core (about 1 GiB of debug objects apiece).
 
+## Public Rust structs
+
+- New `pub struct` types use `#[non_exhaustive]` and implement `Default`, deriving it when possible.
+- Set only the fields needed and leave the rest at their defaults. Within the defining crate, use `..Default::default()`; callers in other crates start with `Type::default()` and assign fields, because non-exhaustive structs cannot be constructed with external struct literals.
+- New fields have sensible defaults so extending a struct does not break downstream construction.
+
 ## Commits and pull requests
 
 Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
