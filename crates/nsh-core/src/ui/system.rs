@@ -349,7 +349,7 @@ mod tests {
         }
 
         /// Itself, for chaining.
-        #[overload(fn(event: String, f: Callback) -> Instance<Handle>)]
+        #[overload(fn(event: String, #[args(index, label)] f: Callback<(u32, String)>) -> Instance<Handle>)]
         pub(crate) fn on(this: Instance<Self>, event: String, cx: CallCx<'_>) -> Instance<Self> {
             let _ = (event, cx);
             this
@@ -375,7 +375,7 @@ mod tests {
         );
         assert!(d.contains("function watch(path: string): void;"), "{d}");
         assert!(
-            d.contains("  on(event: string, f: () => void): Handle;"),
+            d.contains("  on(event: string, f: (index: number, label: string) => void): Handle;"),
             "{d}"
         );
         // A getter is no flat export.

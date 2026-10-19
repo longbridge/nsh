@@ -1301,6 +1301,25 @@ fn system_param(ty: &Type) -> bool {
     matches!(last_segment(ty), Some((id, None)) if id == "System")
 }
 
+/// The TypeScript type of a parameter of type `ty`: `#[args(text, index)]`
+/// on it names its callback's parameters (`(text: string, index: number)
+/// => void` instead of `(a: string, b: number) => void`).
+fn param_ts(ty: &Type, attrs: &[Attribute]) -> syn::Result<TokenStream2> {
+    let ui = quote!(::nsh_core::ui);
+    let Some(attr) = attrs.iter().find(|a| a.path().is_ident("args")) else {
+        return Ok(quote!(#ui::__private::arg_ts::<#ty>()));
+    };
+    let names =
+        attr.parse_args_with(syn::punctuated::Punctuated::<Ident, Token![,]>::parse_terminated)?;
+    let names = names.iter().map(|n| camel(&n.to_string()));
+    Ok(quote! {{
+        let ts: #ui::TsType = |types: &mut #ui::TsTypes| -> ::std::string::String {
+            #ui::__private::named_ts::<#ty>(types, &[#(#names),*])
+        };
+        ts
+    }})
+}
+
 /// Whether `ty` is `CallCx`: what a synchronous call can do beyond
 /// computing, filled in by the call.
 fn call_cx_param(ty: &Type) -> bool {
@@ -1548,6 +1567,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             .collect::<syn::Result<_>>()?;
         let takes_cx = typed.last().is_some_and(|t| module_cx(&t.ty));
         let mut params = Vec::new();
+        let mut params_ts = Vec::new();
         let mut names = Vec::new();
         // Where each argument of the Rust call comes from: JS's argument
         // `Js(i)`, the call's `System` or its `CallCx`.
@@ -1598,6 +1618,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             };
             names.push(camel(&name.ident.to_string()));
             sources.push(Source::Js(params.len()));
+            params_ts.push(param_ts(ty, &arg.attrs)?);
             params.push(ty);
         }
         if getter
@@ -1621,10 +1642,11 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             }
             optional[i] = true;
         }
-        let param_specs =
-            params.iter().zip(&names).zip(&optional).map(
-                |((ty, name), optional)| quote!((#name, #private::arg_ts::<#ty>(), #optional)),
-            );
+        let param_specs = params_ts
+            .iter()
+            .zip(&names)
+            .zip(&optional)
+            .map(|((ts, name), optional)| quote!((#name, #ts, #optional)));
         let (returns, fallible) = match &f.sig.output {
             ReturnType::Default => (quote!(::core::option::Option::None), false),
             ReturnType::Type(_, ty) => match result_ok(ty) {
@@ -1759,9 +1781,14 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             }
         });
     }
-    // `#[getter]` and the overloads' attributes are the macro's.
+    // `#[getter]`, `#[args]` and the overloads' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
+            for input in &mut f.sig.inputs {
+                if let FnArg::Typed(t) = input {
+                    t.attrs.retain(|a| !a.path().is_ident("args"));
+                }
+            }
             f.attrs
                 .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("overload"));
         }
@@ -1798,7 +1825,11 @@ fn overloads(f: &ImplItemFn) -> syn::Result<(Vec<TokenStream2>, Vec<TokenStream2
                     "an overload's parameters are named: `fn(path: String)`",
                 ));
             };
-            params.push((camel(&name.to_string()), &arg.ty));
+            params.push((
+                camel(&name.to_string()),
+                &arg.ty,
+                param_ts(&arg.ty, &arg.attrs)?,
+            ));
         }
         let mut optional = vec![false; params.len()];
         for i in (0..params.len()).rev() {
@@ -1810,11 +1841,11 @@ fn overloads(f: &ImplItemFn) -> syn::Result<(Vec<TokenStream2>, Vec<TokenStream2
         let specs = params
             .iter()
             .zip(&optional)
-            .map(|((name, ty), optional)| quote!((#name, #private::arg_ts::<#ty>(), #optional)));
+            .map(|((name, _, ts), optional)| quote!((#name, #ts, #optional)));
         refs.extend(
             params
                 .iter()
-                .map(|(_, ty)| quote!(#private::arg_classes::<#ty>(__out);)),
+                .map(|(_, ty, _)| quote!(#private::arg_classes::<#ty>(__out);)),
         );
         let returns = match &sig.output {
             ReturnType::Default => quote!(::core::option::Option::None),

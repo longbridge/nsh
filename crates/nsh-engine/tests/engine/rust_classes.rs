@@ -400,7 +400,7 @@ impl Emitter {
     }
 
     /// Calls `listener` with each text emitted.
-    pub(crate) fn on(&mut self, listener: Callback<String>) {
+    pub(crate) fn on(&mut self, #[args(text)] listener: Callback<String>) {
         self.listeners.push(listener);
     }
 

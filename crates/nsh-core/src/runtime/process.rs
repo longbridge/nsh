@@ -256,12 +256,12 @@ impl ChildProcess {
 
     /// Calls `handler` with each piece (or line) of output, or once with
     /// the exit after the final output (at once when the child has exited).
-    #[overload(fn(event: OutputEvent, handler: Callback<String>) -> Instance<ChildProcess>)]
-    #[overload(fn(event: ExitEvent, handler: Callback<ExitResult>) -> Instance<ChildProcess>)]
+    #[overload(fn(event: OutputEvent, #[args(text)] handler: Callback<String>) -> Instance<ChildProcess>)]
+    #[overload(fn(event: ExitEvent, #[args(result)] handler: Callback<ExitResult>) -> Instance<ChildProcess>)]
     pub(crate) fn on(
         this: Instance<Self>,
         event: ChildEvent,
-        handler: Callback<Payload>,
+        #[args(payload)] handler: Callback<Payload>,
     ) -> Result<Instance<Self>, JsError> {
         let child = this.with(|c| c.child.clone());
         let exited = child.exited.borrow().clone();
@@ -1327,8 +1327,8 @@ mod tests {
             "  readonly env: Record<string, string>;",
             "  readonly dataDir: string | null;",
             "} & { nextTick: typeof nextTick };",
-            "  on(event: ExitEvent, handler: (a: ExitResult) => void): ChildProcess;",
-            "  on(event: OutputEvent, handler: (a: string) => void): ChildProcess;",
+            "  on(event: ExitEvent, handler: (result: ExitResult) => void): ChildProcess;",
+            "  on(event: OutputEvent, handler: (text: string) => void): ChildProcess;",
             "  get pid(): number;",
         ] {
             assert!(d.contains(expected), "{expected}\n{d}");

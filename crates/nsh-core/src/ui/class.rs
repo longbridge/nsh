@@ -603,6 +603,17 @@ pub(crate) mod __private {
         }
     }
 
+    /// `T`'s TypeScript type as a parameter whose callback's parameters
+    /// are named `names` (`#[args(..)]`), or nothing in builds without
+    /// declarations.
+    pub fn named_ts<T: crate::ui::NamedArgs>(types: &mut TsTypes, names: &[&str]) -> String {
+        if crate::ui::DECLARATIONS {
+            T::ts_named(types, names)
+        } else {
+            String::new()
+        }
+    }
+
     /// `T`'s TypeScript type as a result.
     pub const fn ret_ts<T: Ret>() -> TsType {
         if crate::ui::DECLARATIONS {

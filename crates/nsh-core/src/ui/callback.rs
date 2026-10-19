@@ -201,7 +201,12 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
 /// The arguments of a [`Callback`]: one value, `()` for none, or a tuple.
 pub trait CallbackArgs {
     /// Its TypeScript parameters (`a: string, b: number`).
-    fn ts_params(types: &mut TsTypes) -> String;
+    fn ts_params(types: &mut TsTypes) -> String {
+        Self::ts_named(types, &[])
+    }
+    /// Its TypeScript parameters named `names` (`#[args(text)]`: `text:
+    /// string`); a parameter without a name is `a`, `b`, ...
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String;
     /// The arguments as JS values.
     fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>;
     /// Adds the classes the arguments name.
@@ -210,11 +215,11 @@ pub trait CallbackArgs {
 }
 
 impl<T: Ret> CallbackArgs for T {
-    fn ts_params(types: &mut TsTypes) -> String {
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
         if T::UNIT {
             String::new()
         } else {
-            format!("a: {}", T::ts_type(types))
+            format!("{}: {}", names.first().unwrap_or(&"a"), T::ts_type(types))
         }
     }
 
@@ -232,10 +237,11 @@ impl<T: Ret> CallbackArgs for T {
 }
 
 macro_rules! callback_tuple {
-    ($(($($t:ident $v:ident $n:literal),*)),*) => {$(
+    ($(($($t:ident $v:ident $n:literal $i:literal),*)),*) => {$(
         impl<$($t: Ret),*> CallbackArgs for ($($t,)*) {
-            fn ts_params(types: &mut TsTypes) -> String {
-                [$(format!("{}: {}", $n, $t::ts_type(types))),*].join(", ")
+            fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
+                [$(format!("{}: {}", names.get($i).copied().unwrap_or($n), $t::ts_type(types))),*]
+                    .join(", ")
             }
 
             fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
@@ -251,9 +257,9 @@ macro_rules! callback_tuple {
 }
 
 callback_tuple!(
-    (A a "a", B b "b"),
-    (A a "a", B b "b", C c "c"),
-    (A a "a", B b "b", C c "c", D d "d")
+    (A a "a" 0, B b "b" 1),
+    (A a "a" 0, B b "b" 1, C c "c" 2),
+    (A a "a" 0, B b "b" 1, C c "c" 2, D d "d" 3)
 );
 
 /// What a [`Callback`] returns: a [`JsValue`] type, or `()` (its result
@@ -285,14 +291,34 @@ impl CallbackRet for () {
     }
 }
 
-/// The TypeScript type of a callback: `(a: string) => void`.
-fn callback_ts<A: CallbackArgs, R: CallbackRet>(types: &mut TsTypes) -> String {
-    format!("({}) => {}", A::ts_params(types), R::ts_type(types))
+/// The TypeScript type of a callback: `(a: string) => void`, its
+/// parameters named `names` where given.
+fn callback_ts<A: CallbackArgs, R: CallbackRet>(types: &mut TsTypes, names: &[&str]) -> String {
+    format!("({}) => {}", A::ts_named(types, names), R::ts_type(types))
+}
+
+/// A parameter whose TypeScript type names a callback's parameters
+/// (`#[args(text)] handler: Callback<String>`: `(text: string) => void`).
+pub trait NamedArgs: Arg {
+    /// Its TypeScript type, the callback's parameters named `names`.
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String;
+}
+
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> NamedArgs for Callback<A, R> {
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
+        callback_ts::<A, R>(types, names)
+    }
+}
+
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> NamedArgs for Option<Callback<A, R>> {
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
+        format!("({}) | null", callback_ts::<A, R>(types, names))
+    }
 }
 
 impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R> {
     fn ts_type(types: &mut TsTypes) -> String {
-        callback_ts::<A, R>(types)
+        callback_ts::<A, R>(types, &[])
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
@@ -311,7 +337,7 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R>
 /// `null` or `undefined` is `None`.
 impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Option<Callback<A, R>> {
     fn ts_type(types: &mut TsTypes) -> String {
-        format!("({}) | null", callback_ts::<A, R>(types))
+        format!("({}) | null", callback_ts::<A, R>(types, &[]))
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {

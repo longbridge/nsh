@@ -251,6 +251,11 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     // The getters' and setters' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
+            for input in &mut f.sig.inputs {
+                if let FnArg::Typed(t) = input {
+                    t.attrs.retain(|a| !a.path().is_ident("args"));
+                }
+            }
             f.attrs.retain(|a| {
                 !a.path().is_ident("getter")
                     && !a.path().is_ident("setter")
@@ -334,6 +339,8 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     };
     let is_async = matches!(kind, Kind::AsyncMethod | Kind::AsyncStatic);
     let mut params = Vec::new();
+    // Each parameter's attributes (`#[args(..)]`).
+    let mut attrs = Vec::new();
     let mut names = Vec::new();
     for arg in f.sig.inputs.iter().skip(skip) {
         let FnArg::Typed(t) = arg else {
@@ -354,6 +361,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         };
         names.push(camel(&name.ident.to_string()));
         if system_param(&t.ty) {
+            attrs.push(&t.attrs);
             params.push(Param::System);
             continue;
         }
@@ -364,9 +372,11 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
                     "`CallCx` is a synchronous call's (it borrows the call)",
                 ));
             }
+            attrs.push(&t.attrs);
             params.push(Param::Cx);
             continue;
         }
+        attrs.push(&t.attrs);
         params.push(match &*t.ty {
             Type::Reference(_) if is_async => {
                 return Err(syn::Error::new(
@@ -401,9 +411,13 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .iter()
         .zip(&names)
         .zip(&optional)
-        .filter_map(|((p, name), optional)| {
+        .zip(&attrs)
+        .filter_map(|(((p, name), optional), attrs)| {
             let ts = match p {
-                Param::Value(ty) => quote!(#private::arg_ts::<#ty>()),
+                Param::Value(ty) => match crate::param_ts(ty, attrs) {
+                    Ok(ts) => ts,
+                    Err(e) => e.into_compile_error(),
+                },
                 Param::Borrowed { elem, .. } => quote!(#private::arg_ts::<#ui::Instance<#elem>>()),
                 Param::System | Param::Cx => return None,
             };

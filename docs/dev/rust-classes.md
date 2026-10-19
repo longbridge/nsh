@@ -228,7 +228,9 @@ For that, two choices of the first version change:
 ## Callbacks
 
 A parameter `Callback<A, R = ()>` takes a JS function: `A` is its argument (a `JsValue` type, or a tuple for
-several), `R` what it returns. TS: `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`.
+several), `R` what it returns. TS: `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`;
+`#[args(text, index)]` on the parameter (a function's, a member's or an `#[overload]`'s) names the function's
+parameters: `(text: string, index: number) => boolean`, which is what an app reading `.nsh/types` sees.
 
 ```rust
 #[class]
