@@ -384,13 +384,15 @@ mod native {
     use super::{Child, ChildEvent, ChildProcess, CommandOutput, ExitResult, Payload};
     use crate::{
         access::Access,
-        ui::{CallCx, JsError, Later, System},
+        ui::{CallCx, Held, JsError, Later, System},
     };
 
     /// Output one VM holds in flight, and what `run` captures per stream
     /// (and the longest line `lines: true` delivers).
     const QUEUE_BYTES: usize = 8 * 1024 * 1024;
     const MAX_CHILDREN: usize = 32;
+    /// The [`crate::ui::Quotas`] kind children count under.
+    const CHILDREN: &str = "process.children";
     /// How long a child has to exit after it is asked to before it is killed.
     const GRACE: Duration = Duration::from_millis(250);
     /// stdin queued for one child.
@@ -437,10 +439,10 @@ mod native {
         pub(super) fn close(&self) {
             self.stopped.store(true, Ordering::Release);
             let running = std::mem::take(&mut *self.running.borrow_mut());
-            for (_, input, _) in &running {
+            for (_, input, ..) in &running {
                 let _ = input.send(Input::Kill);
             }
-            for (_, _, worker) in running {
+            for (_, _, worker, _) in running {
                 if let Some(worker) = worker {
                     let _ = worker.join();
                 }
@@ -463,7 +465,9 @@ mod native {
         }
     }
 
-    type Running = (u64, mpsc::Sender<Input>, Option<JoinHandle<()>>);
+    /// A running child: its id, input, supervisor and place in the VM's
+    /// quota of children.
+    type Running = (u64, mpsc::Sender<Input>, Option<JoinHandle<()>>, Held);
 
     /// A started child: its id and pid, its control, its events and the
     /// VM's children it is one of.
@@ -624,9 +628,10 @@ mod native {
     /// events. The VM's quota of children is checked here.
     fn start(sys: &System, launch: Launch, stdin: bool) -> Result<Started, String> {
         let children = sys.locals.get::<super::Children>();
-        if children.inner.running.borrow().len() >= MAX_CHILDREN {
-            return Err(format!("a VM may run at most {MAX_CHILDREN} children"));
-        }
+        let place = sys
+            .quotas
+            .take(CHILDREN, MAX_CHILDREN)
+            .ok_or_else(|| format!("a VM may run at most {MAX_CHILDREN} children"))?;
         let mut cmd = Command::new(resolve_executable(&launch.command)?);
         cmd.env_clear()
             .envs(launch.env)
@@ -674,7 +679,7 @@ mod native {
             .inner
             .running
             .borrow_mut()
-            .push((id, input.clone(), Some(worker)));
+            .push((id, input.clone(), Some(worker), place));
         Ok((
             id,
             pid,
