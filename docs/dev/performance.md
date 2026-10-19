@@ -18,11 +18,14 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   fast fling 0.9–1.6ms.
 - Host startup (`Host::new`, release): ~75–155µs (clock state). The web APIs add nothing until first used, then ~90µs to
   make their classes (`bench_first_web_global`; as JS they cost ~0.8ms as source, ~0.33ms as bytecode). The standard
-  modules add `Buffer` (~30µs, made at startup: it must exist before hardening freezes `%TypedArray%.prototype`) and
-  the per-VM I/O scheduler (~12µs, plus ~12µs for the async runtime over the plain one); the `process`, `crypto`
-  and `WebSocket` globals are made on first use (`standard::LAZY`; `process` and `WebSocket` evaluate JS facades of
-  ~190µs each). On a Linux x86 desktop `bench_host_startup` (`cargo test --release -p nsh-js --test web
-  bench_host_startup -- --ignored --nocapture`) measures ~150µs before the standard modules and ~270µs with them.
+  modules add `Buffer` (~30µs warm, ~70µs in a process's first VM; made at startup: it must exist before hardening
+  freezes `%TypedArray%.prototype`) and the async runtime over the plain one (~12µs). The global `WebSocket` starts
+  the VM's tokio I/O runtime (~12µs and a worker thread) when it is first made; `process`, `crypto` and `WebSocket`
+  are made on first use (`standard::LAZY`; `WebSocket` evaluates a JS facade of ~190µs), and installing `Buffer`
+  keeps NSH's lazy web globals unmade. On a Linux x86 desktop (shared, noisy) `Host::new` is ~105µs warm and ~460µs
+  cold in a trace's first VM, close to main's; the counter's hardened release first frame (`nsh trace
+  examples/counter`, minimum of 81 interleaved runs) is ~650µs against main's ~540µs, of which `Buffer`'s cold
+  setup is ~70µs.
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
