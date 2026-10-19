@@ -269,8 +269,8 @@ pub(crate) struct ComponentEl {
     /// Its spec (made once per type and kept by the core).
     pub(crate) spec: fn() -> ComponentSpec,
     pub(crate) props: Box<dyn AnyProps>,
-    /// The handler of its events in the view that has it.
-    pub(crate) on_event: Option<Listener<dyn Any>>,
+    /// The handlers of its events in the view that has it, in order.
+    pub(crate) on_event: Vec<Listener<dyn Any>>,
 }
 
 impl Clone for ComponentEl {
@@ -1695,7 +1695,7 @@ impl<C: Component> ComponentElement<C> {
             make: super::component::make_instance::<C>,
             spec: ComponentSpec::of::<C>,
             props: Box::new(props),
-            on_event: None,
+            on_event: Vec::new(),
         });
         Self {
             node,
@@ -1739,11 +1739,12 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
-    /// Handles its events (they then do not reach the app).
+    /// Handles its events (they then do not reach the app). Given several
+    /// times, every listener hears them, in order.
     pub fn on_event<M>(mut self, listener: impl IntoListener<C::Event, M>) -> Self {
         let listener = listener.into_listener();
         if let ElKind::Component(c) = &mut self.node.kind {
-            c.on_event = Some(listener.wrap(|inner, event: &dyn Any| {
+            c.on_event.push(listener.wrap(|inner, event: &dyn Any| {
                 if let Some(event) = event.downcast_ref::<C::Event>() {
                     inner(event);
                 }

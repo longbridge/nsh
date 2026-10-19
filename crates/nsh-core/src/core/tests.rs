@@ -6552,6 +6552,13 @@ mod views {
             .unwrap_or_else(|| panic!("no text {content:?}"))
     }
 
+    /// The native parent of node `id`.
+    fn native_parent<M: TextEngine>(c: &Core<M>, id: NodeId) -> Option<NodeId> {
+        let key = c.key(id).expect("a node");
+        let parent = c.nodes[key as usize].parent;
+        (parent != NO_KEY).then(|| c.nodes[parent as usize].id)
+    }
+
     /// Counts presses: the text is a binding, nothing renders again.
     #[derive(Default)]
     struct Counter;
@@ -6606,6 +6613,65 @@ mod views {
             "no node made or freed: {:?}",
             batch.items
         );
+    }
+
+    /// Two listeners of one event on one element, and of a nested
+    /// component's events, each noting itself.
+    #[component]
+    fn Twice() -> impl IntoElement {
+        let log = signal(String::new());
+        let note = move |c: char| log.update(|l| l.push(c));
+        view()
+            .on_press(move || note('a'))
+            .on_press(move || note('b'))
+            .child(
+                Counter::element(CounterProps::default())
+                    .on_event(move |_: &CounterEvent| note('c'))
+                    .on_event(move |_: &CounterEvent| note('d')),
+            )
+            .child(text(move || format!("log {}", log.get())))
+    }
+
+    #[test]
+    fn every_listener_of_an_event_runs_in_order() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Twice>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        let counter = native_parent(&c, text_node(&batch, "Taps 0")).unwrap();
+        assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["log ab"]);
+        assert!(c.component_event(counter, EventKind::Press, &EventPayload::None));
+        assert!(texts(&c.commit().unwrap()).contains(&"log abcd".to_owned()));
+    }
+
+    /// A region made again with what it read: its pressable text is kept
+    /// (the same node), its listener the new run's.
+    #[component]
+    fn Rerun() -> impl IntoElement {
+        let log = signal(String::new());
+        let run = signal(0);
+        view()
+            .child(dynamic(move || {
+                let at = run.get();
+                text("tap").on_press(move || log.update(|l| l.push_str(&at.to_string())))
+            }))
+            .child(text("again").on_press(move || run.update(|r| *r += 1)))
+            .child(text(move || format!("log {}", log.get())))
+    }
+
+    #[test]
+    fn a_node_made_again_hears_only_its_new_listeners() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Rerun>(|| ()));
+        let batch = c.commit().unwrap();
+        let (tap, again) = (text_node(&batch, "tap"), text_node(&batch, "again"));
+        for _ in 0..3 {
+            assert!(c.component_event(again, EventKind::Press, &EventPayload::None));
+            let _ = c.commit();
+        }
+        assert!(c.component_event(tap, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["log 3"]);
     }
 
     #[test]

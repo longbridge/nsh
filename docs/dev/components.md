@@ -523,8 +523,13 @@ what changed.
 ## Events
 
 - Handlers sit on the elements; the native event of a made node, or of the host, goes to the component first
-  (`Core::component_event`, called by the engine before JS). Events of made nodes never reach JS. A listener runs in
-  the graph like any other Rust code of the view: the signals it writes run their bindings once it returns.
+  (`Core::component_event`, called by the engine before JS). Events of made nodes never reach JS. An element given
+  several listeners of one event (`.on_press(a).on_press(b)`, `.on_event(..)` twice on a nested component) calls them
+  all, in that order (touch listeners too); a listener that releases its component ends the rest. A dispatch walks
+  the instance's handlers in place (`Core::next_handler`, by index: no list per event), which stay as they are while
+  it does: regions change them when they are reconciled. A node a region makes again (kept, the same id) drops the
+  handlers, responders and `on_event` listeners its last run gave it, so it hears the new run's only. A listener runs
+  in the graph like any other Rust code of the view: the signals it writes run their bindings once it returns.
 - A slot's node (JS's holder, the app's list of an `Items` prop, or another component's content) gets the
   handlers of the component it is a slot of, then its maker's: JS's (the app's `onEndReached` on a `ListView`)
   or the view's that passed it.

@@ -1824,6 +1824,12 @@ impl<M: TextEngine> Core<M> {
         inst: &mut Instance,
     ) -> EventMask {
         let mut mask = extra;
+        // A node made again (its region ran again) hears what this run
+        // gives it, not also what the runs before gave it.
+        if old.bits() != 0 {
+            inst.handlers.retain(|(n, _, _)| *n != id);
+            inst.responders.retain(|(n, _)| *n != id);
+        }
         for (kind, handler) in &el.handlers {
             mask.set(*kind, true);
             inst.handlers.push((id, *kind, handler.clone()));
@@ -2374,6 +2380,7 @@ impl<M: TextEngine> Core<M> {
             el.children.insert(0, raw);
         }
         let old_list = prev.as_ref().map(|p| p.list).unwrap_or_default();
+        let kept = prev.is_some();
         let (id, old_attrs, old_style, old_classes, old_events, old_children, old_text) = match prev
         {
             Some(p) => (
@@ -2418,9 +2425,12 @@ impl<M: TextEngine> Core<M> {
                 let user = (!el.style.is_empty()).then(|| self.components.lowered(&el.style));
                 self.set_user(id, user);
             }
-            if let Some(listener) = c.on_event {
-                inst.event_handlers.push((id, listener));
+            // Made again, it hears this run's listeners only.
+            if kept {
+                inst.event_handlers.retain(|(n, _)| *n != id);
             }
+            inst.event_handlers
+                .extend(c.on_event.into_iter().map(|listener| (id, listener)));
             // Its `ComponentRef`.
             let element_ref = el.attrs.element_ref.take();
             if old_attrs.element_ref != element_ref
@@ -3090,8 +3100,8 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Runs `host`'s component's handler of `kind` on its node `id`; false
-    /// when it has none.
+    /// Runs `host`'s component's handlers of `kind` on its node `id`, in
+    /// the order the element was given them; false when it has none.
     fn handle(
         &mut self,
         host: NodeId,
@@ -3099,26 +3109,39 @@ impl<M: TextEngine> Core<M> {
         kind: EventKind,
         payload: &EventPayload,
     ) -> bool {
-        let Some(listener) = self.handler(host, id, kind) else {
-            return false;
-        };
-        self.run_listener(host, &listener, payload)
+        let mut handled = false;
+        let mut from = 0;
+        while let Some((at, listener)) = self.next_handler(host, id, kind, from) {
+            from = at + 1;
+            // A listener may release the component: the rest go with it.
+            if !self.run_listener(host, &listener, payload) {
+                break;
+            }
+            handled = true;
+        }
+        handled
     }
 
-    /// `host`'s component's handler of `kind` on its node `id`.
-    pub(super) fn handler(
+    /// The first of `host`'s component's handlers of `kind` on its node `id`
+    /// at or after index `from`, with its index: a dispatch walks them in
+    /// order (an element given several listeners of one event calls them
+    /// all) with no list of its own. The handlers stay as they are while it
+    /// does: a view's regions change them when they are reconciled, in the
+    /// commit, not as listeners run.
+    pub(super) fn next_handler(
         &self,
         host: NodeId,
         id: NodeId,
         kind: EventKind,
-    ) -> Option<Listener<EventPayload>> {
-        self.components
-            .instances
-            .get(&host)?
-            .handlers
+        from: usize,
+    ) -> Option<(usize, Listener<EventPayload>)> {
+        let inst = self.components.instances.get(&host)?;
+        inst.handlers
             .iter()
-            .find(|(n, k, _)| *n == id && *k == kind)
-            .map(|(_, _, l)| l.clone())
+            .enumerate()
+            .skip(from)
+            .find(|(_, (n, k, _))| *n == id && *k == kind)
+            .map(|(at, (_, _, l))| (at, l.clone()))
     }
 
     /// The part of `host`'s node `id` in the touch responder.
@@ -3583,22 +3606,27 @@ impl<M: TextEngine> Core<M> {
     ) {
         match self.components.owners.get(&host).copied() {
             Some(parent) => {
-                let Some(listener) = self
-                    .components
-                    .instances
-                    .get(&parent)
-                    .and_then(|inst| inst.event_handlers.iter().find(|(n, _)| *n == host))
-                    .map(|(_, l)| l.clone())
-                else {
+                let Some(owner) = self.state_owner(parent) else {
                     return;
                 };
-                let Some(parent) = self.state_owner(parent) else {
-                    return;
-                };
-                if let Err(message) = caught(|| listener.call(event.as_any())) {
-                    self.component_failed(parent, message);
+                // In order, found one at a time (no list per event).
+                let mut from = 0;
+                while let Some((at, listener)) =
+                    self.components.instances.get(&parent).and_then(|inst| {
+                        inst.event_handlers
+                            .iter()
+                            .enumerate()
+                            .skip(from)
+                            .find(|(_, (n, _))| *n == host)
+                            .map(|(at, (_, l))| (at, l.clone()))
+                    })
+                {
+                    from = at + 1;
+                    if let Err(message) = caught(|| listener.call(event.as_any())) {
+                        self.component_failed(owner, message);
+                    }
+                    self.apply_actions();
                 }
-                self.apply_actions();
             }
             None => self.events.push(JsEvent::Component { host, event }),
         }
