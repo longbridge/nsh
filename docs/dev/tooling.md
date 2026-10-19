@@ -12,8 +12,14 @@
   component it names and generic ones are inferred: `native-pipeline.md`), `nsh/globals.d.ts` (console, timers,
   frames, the web APIs and the control flow components `If` / `Each`), and from the bundler `nsh/assets.d.ts` (what
   image and font imports give). Each file declares its own names; the `import type` lines between them are worked out
-  from the names each uses. `nsh init` writes a `tsconfig.json` mapping `nsh` and `nsh/*` there (`jsxImportSource:
-  "nsh"`, no DOM library), so editors type-check apps without `node_modules`.
+  from the names each uses. Next to them nsh writes `.nsh/tsconfig.json` (`nsh_bundler::TSCONFIG_BASE`): the
+  compiler options mapping `nsh` and `nsh/*` there (`jsxImportSource: "nsh"`, no DOM library, `ESNext.Disposable`)
+  and the globals and assets files; the `tsconfig.json` `nsh init` writes (`nsh_bundler::TSCONFIG`) only extends it
+  and includes the app's sources, so editors type-check apps without `node_modules` and a change of nsh's settings
+  (a new `lib`, a path) reaches existing apps with the next build, without an edit of theirs. An app's
+  `tsconfig.json` that an earlier `nsh init` wrote and the app never changed (`templates/tsconfig/*.json`, compared
+  byte for byte) is replaced by the new one, with a note saying so; one the app changed is never rewritten, and
+  `nsh check` warns that it does not extend `.nsh/tsconfig.json`, saying what to change.
 - Where each declaration comes from:
   - a native module's export: the `Ts` next to it in its table (`modules::Item`; the module's own interfaces in its
     `types`);

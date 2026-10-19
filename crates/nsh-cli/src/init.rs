@@ -313,16 +313,36 @@ fn rust_package_name(name: &str) -> String {
     format!("nsh-app-{}", slug(name))
 }
 
-/// Writes `.nsh/types` in the app directory `dir` (files whose contents did
-/// not change are left alone, so editors do not reload them). Files nsh no
-/// longer generates (a module that moved) are removed.
+/// The `tsconfig.json` files earlier versions of `nsh init` wrote, oldest
+/// first: an app's that is one of them, unchanged, is nsh's to replace
+/// ([`migrate_tsconfig`]).
+const PREVIOUS_TSCONFIGS: &[&str] = &[
+    include_str!("templates/tsconfig/1.json"),
+    include_str!("templates/tsconfig/2.json"),
+    include_str!("templates/tsconfig/3.json"),
+    include_str!("templates/tsconfig/4.json"),
+    include_str!("templates/tsconfig/5.json"),
+];
+
+/// What the app's `tsconfig.json` extends: nsh's settings
+/// ([`nsh_bundler::TSCONFIG_BASE`]).
+const TSCONFIG_BASE: &str = ".nsh/tsconfig.json";
+
+/// Writes `.nsh/types` and `.nsh/tsconfig.json` in the app directory `dir`
+/// (files whose contents did not change are left alone, so editors do not
+/// reload them). Files nsh no longer generates (a module that moved) are
+/// removed. An app's `tsconfig.json` from an earlier `nsh init`, unchanged,
+/// becomes one extending `.nsh/tsconfig.json` ([`migrate_tsconfig`]).
 pub(crate) fn write_types(dir: &Path) {
     let types = dir.join(".nsh/types");
     let mut definitions = nsh_js::type_definitions(&crate::ui_sets());
     definitions.extend(nsh_bundler::type_definitions());
     remove_stale(&types, &types, &definitions);
-    for (path, contents) in definitions {
-        let path = types.join(path);
+    let files = definitions
+        .iter()
+        .map(|(path, contents)| (types.join(path), contents.as_str()))
+        .chain([(dir.join(TSCONFIG_BASE), nsh_bundler::TSCONFIG_BASE)]);
+    for (path, contents) in files {
         if fs::read(&path).is_ok_and(|old| old == contents.as_bytes()) {
             continue;
         }
@@ -335,6 +355,39 @@ pub(crate) fn write_types(dir: &Path) {
             return;
         }
     }
+    migrate_tsconfig(dir);
+}
+
+/// Replaces the app's `tsconfig.json` with [`nsh_bundler::TSCONFIG`] when
+/// it is one an earlier `nsh init` wrote ([`PREVIOUS_TSCONFIGS`]) and the
+/// app never changed, saying so: its settings are all nsh's, now kept in
+/// `.nsh/tsconfig.json`. One the app changed is left as it is
+/// (`nsh check` says what to change: [`tsconfig_extends_nsh`]).
+fn migrate_tsconfig(dir: &Path) {
+    let path = dir.join("tsconfig.json");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    let text = text.replace("\r\n", "\n");
+    if !PREVIOUS_TSCONFIGS.contains(&text.as_str()) {
+        return;
+    }
+    match fs::write(&path, nsh_bundler::TSCONFIG) {
+        Ok(()) => ui::note(format!(
+            "updated {}, nsh's unchanged template, to extend {TSCONFIG_BASE}, where nsh keeps \
+             its TypeScript settings current",
+            ui::path(&path)
+        )),
+        Err(err) => ui::warn(format!("cannot update {}: {err}", ui::path(&path))),
+    }
+}
+
+/// Whether the app's `tsconfig.json` in `dir` extends `.nsh/tsconfig.json`
+/// (or names it otherwise: a list of `extends`). Without it, nsh's
+/// settings reach the app only as they were when its `tsconfig.json` was
+/// written.
+pub(crate) fn tsconfig_extends_nsh(dir: &Path) -> bool {
+    fs::read_to_string(dir.join("tsconfig.json")).is_ok_and(|text| text.contains(TSCONFIG_BASE))
 }
 
 /// Removes the files under `dir` (inside `types`) that are not among
@@ -406,6 +459,52 @@ mod tests {
         for file in ["Cargo.toml", "src", "native", "README.md"] {
             assert!(!dir.join(file).exists(), "{file}");
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_ts_apps_tsconfig_extends_the_settings_nsh_keeps_current() {
+        let dir = directory("tsconfig");
+        init(&dir, None, Template::Ts, None).unwrap();
+        assert!(tsconfig_extends_nsh(&dir));
+        let base = read(&dir, ".nsh/tsconfig.json");
+        assert_eq!(base, nsh_bundler::TSCONFIG_BASE);
+        assert!(
+            base.contains("\"ESNext.Disposable\""),
+            "`using` type-checks"
+        );
+        assert!(base.contains("./types/nsh/globals.d.ts"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_unchanged_tsconfig_of_an_earlier_init_is_migrated() {
+        for (i, old) in PREVIOUS_TSCONFIGS.iter().enumerate() {
+            let dir = directory("migrate");
+            // As a Windows checkout might have it.
+            fs::write(dir.join("tsconfig.json"), old.replace('\n', "\r\n")).unwrap();
+            write_types(&dir);
+            assert_eq!(
+                read(&dir, "tsconfig.json"),
+                nsh_bundler::TSCONFIG,
+                "template {i}"
+            );
+            assert!(tsconfig_extends_nsh(&dir));
+            fs::remove_dir_all(dir).unwrap();
+        }
+        // Without `ESNext.Disposable`: the template of #146's time lacked it.
+        assert!(!PREVIOUS_TSCONFIGS[3].contains("ESNext.Disposable"));
+    }
+
+    #[test]
+    fn a_tsconfig_the_app_changed_is_kept_and_flagged() {
+        let dir = directory("changed");
+        let changed = PREVIOUS_TSCONFIGS[4].replace("\"strict\": true", "\"strict\": false");
+        fs::write(dir.join("tsconfig.json"), &changed).unwrap();
+        write_types(&dir);
+        assert_eq!(read(&dir, "tsconfig.json"), changed);
+        assert!(!tsconfig_extends_nsh(&dir));
+        assert!(dir.join(".nsh/tsconfig.json").is_file());
         fs::remove_dir_all(dir).unwrap();
     }
 
