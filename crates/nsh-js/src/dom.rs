@@ -1554,6 +1554,19 @@ unsafe extern "C" fn spread_run(
         let mut failed = None;
         for i in 0..len as usize {
             let atom = (*tab.add(i)).atom;
+            let name = qjs::JS_AtomToCStringLen(ctx, std::ptr::null_mut(), atom);
+            if name.is_null() {
+                failed = Some(qjs::JS_EXCEPTION);
+                break;
+            }
+            let name_str = CStr::from_ptr(name).to_string_lossy().into_owned();
+            qjs::JS_FreeCString(ctx, name);
+            // Left-out keys are never read: `children` is a getter that
+            // builds the content, which the component renders itself (and a
+            // read here would also make this effect track the content).
+            if skip.contains(&name_str) {
+                continue;
+            }
             let v = qjs::JS_GetProperty(ctx, props, atom);
             if qjs::JS_IsException(v) {
                 failed = Some(v);
@@ -1564,20 +1577,6 @@ unsafe extern "C" fn spread_run(
             } else {
                 UNDEFINED
             };
-            let name = qjs::JS_AtomToCStringLen(ctx, std::ptr::null_mut(), atom);
-            if name.is_null() {
-                qjs::JS_FreeValue(ctx, old);
-                qjs::JS_FreeValue(ctx, v);
-                failed = Some(qjs::JS_EXCEPTION);
-                break;
-            }
-            let name_str = CStr::from_ptr(name).to_string_lossy().into_owned();
-            qjs::JS_FreeCString(ctx, name);
-            if skip.contains(&name_str) {
-                qjs::JS_FreeValue(ctx, old);
-                qjs::JS_FreeValue(ctx, v);
-                continue;
-            }
             let r = if qjs::JS_IsStrictEqual(ctx, old, v) {
                 Ok(())
             } else {
