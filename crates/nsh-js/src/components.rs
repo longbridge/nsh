@@ -291,6 +291,7 @@ pub(crate) fn module_function(ctx: *mut JsContext, module: &ModuleSpec, function
         FunctionCall::Sync(f) => return crate::classes::sync_function(ctx, function, f, length),
         FunctionCall::Op(make) => (Some(call_op), make as *const ()),
         FunctionCall::Async(start) => (Some(call_task), start as *const ()),
+        FunctionCall::Start(start) => (Some(call_start), start as *const ()),
     };
     let name = CString::new(function).unwrap_or_default();
     // SAFETY: the opaque is the function's conversion (a function pointer,
@@ -352,6 +353,27 @@ unsafe extern "C" fn call_task(
     crate::classes::send(ctx, this, args, magic != 0, |host| {
         start(host).map(RustCall::Task)
     })
+}
+
+/// A function starting its task in the JS call (`Later`): what the start
+/// throws throws.
+unsafe extern "C" fn call_start(
+    ctx: *mut JsContext,
+    this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+    _magic: c_int,
+    opaque: *mut std::ffi::c_void,
+) -> JsValue {
+    // SAFETY: `module_function` made the opaque from an `AsyncCall`, and
+    // QuickJS passes `argc` live arguments.
+    let (start, args) = unsafe {
+        (
+            std::mem::transmute::<*const (), nsh_core::ui::AsyncCall>(opaque as *const ()),
+            crate::web::js::Args::new(argc, argv),
+        )
+    };
+    crate::classes::start(ctx, this, args, |host| start(host).map(RustCall::Task))
 }
 
 /// A module's object: its functions.

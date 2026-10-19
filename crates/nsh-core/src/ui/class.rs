@@ -122,12 +122,15 @@ pub enum MemberCall {
     /// As a task of the core, started in order with the UI's ops; JS gets
     /// a promise.
     Async(AsyncCall),
+    /// In the JS call, returning a task's start ([`super::Later`]): what
+    /// the call throws throws there; JS gets a promise of the task.
+    Start(AsyncCall),
 }
 
 impl MemberCall {
     /// Whether JS gets a promise.
     pub fn is_async(&self) -> bool {
-        matches!(self, MemberCall::Async(_))
+        matches!(self, MemberCall::Async(_) | MemberCall::Start(_))
     }
 }
 
@@ -136,6 +139,8 @@ impl MemberCall {
 pub enum Thrown {
     /// A `TypeError`: a wrong argument, a disposed or busy instance.
     Type(String),
+    /// A `RangeError`: a value past a limit ([`super::JsError::Range`]).
+    Range(String),
     /// An `Error`: the member's `Err`, or its panic.
     Error(String),
 }
@@ -149,7 +154,7 @@ impl From<PropError> for Thrown {
 impl fmt::Display for Thrown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Thrown::Type(m) | Thrown::Error(m) => f.write_str(m),
+            Thrown::Type(m) | Thrown::Range(m) | Thrown::Error(m) => f.write_str(m),
         }
     }
 }
@@ -623,15 +628,33 @@ pub(crate) mod __private {
             .map_err(|e| Thrown::Error(e.0))
     }
 
-    /// [`ret`] of a `Result`: an `Err` throws an `Error` with its message.
-    pub fn ret_result<T: Ret, E: fmt::Display>(
+    /// [`ret`] of a `Result`: an `Err` throws an `Error` with its message
+    /// (a [`crate::ui::JsError`] its class).
+    pub fn ret_result<T: Ret, E: crate::ui::IntoThrown>(
         host: &dyn JsHost,
         value: Result<T, E>,
     ) -> Result<JsRaw, Thrown> {
         match value {
             Ok(v) => ret(host, v),
-            Err(e) => Err(Thrown::Error(e.to_string())),
+            Err(e) => Err(e.into_thrown()),
         }
+    }
+
+    /// The task a synchronous call returned ([`crate::ui::Later`]).
+    pub fn start<T: Ret + 'static>(value: crate::ui::Later<T>) -> Result<TaskStart, Thrown> {
+        Ok(Box::new(move || value.into_future()))
+    }
+
+    /// [`start`] of a `Result`: an `Err` throws in the call.
+    pub fn start_result<T: Ret + 'static, E: crate::ui::IntoThrown>(
+        value: Result<crate::ui::Later<T>, E>,
+    ) -> Result<TaskStart, Thrown> {
+        value.map_err(E::into_thrown).and_then(start)
+    }
+
+    /// The VM the call comes from (a `sys: System` parameter).
+    pub fn system(host: &dyn JsHost) -> crate::ui::System {
+        host.system()
     }
 
     /// The object a constructor makes for `value`.
@@ -641,13 +664,13 @@ pub(crate) mod __private {
     }
 
     /// [`construct`] of a `Result`.
-    pub fn construct_result<C: Class, E: fmt::Display>(
+    pub fn construct_result<C: Class, E: crate::ui::IntoThrown>(
         host: &dyn JsHost,
         value: Result<C, E>,
     ) -> Result<JsRaw, Thrown> {
         match value {
             Ok(v) => construct(host, v),
-            Err(e) => Err(Thrown::Error(e.to_string())),
+            Err(e) => Err(e.into_thrown()),
         }
     }
 

@@ -108,6 +108,15 @@ impl JsHost for JsonHost {
         self.json_of(v)?.as_str().map(str::to_owned)
     }
 
+    /// An array of byte values stands for a `Uint8Array` here.
+    fn bytes(&self, v: JsRaw) -> Option<Vec<u8>> {
+        self.json_of(v)?
+            .as_array()?
+            .iter()
+            .map(|n| n.as_u64().and_then(|n| u8::try_from(n).ok()))
+            .collect()
+    }
+
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError> {
         Ok(self.json_of(v).and_then(|j| j.as_array().map(Vec::len)))
     }
@@ -190,6 +199,10 @@ impl JsHost for JsonHost {
 
     fn null(&self) -> JsRaw {
         self.value(JsonValue::Null)
+    }
+
+    fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
+        Ok(self.value(JsonValue::from(bytes.to_vec())))
     }
 
     fn new_bool(&self, b: bool) -> JsRaw {

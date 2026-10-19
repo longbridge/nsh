@@ -1268,6 +1268,38 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
+/// Whether `ty` is `System`: the VM a call comes from, filled in by the
+/// call rather than passed by JS.
+fn system_param(ty: &Type) -> bool {
+    matches!(last_segment(ty), Some((id, None)) if id == "System")
+}
+
+/// `Later<T>` -> `T`: work a synchronous call starts as a task.
+fn later_of(ty: &Type) -> Option<&Type> {
+    match last_segment(ty)? {
+        (id, Some(t)) if id == "Later" => Some(t),
+        _ => None,
+    }
+}
+
+/// What a function that is not `async` returns: its JS result's type, and
+/// whether it is a `Result` and a [`Later`]'s task.
+fn sync_returns(output: &ReturnType) -> (Option<&Type>, bool, bool) {
+    match output {
+        ReturnType::Default => (None, false, false),
+        ReturnType::Type(_, ty) => {
+            let (ok, fallible) = match result_ok(ty) {
+                Some(ok) => (ok, true),
+                None => (&**ty, false),
+            };
+            match later_of(ok) {
+                Some(t) => (Some(t), fallible, true),
+                None => (Some(ok), fallible, false),
+            }
+        }
+    }
+}
+
 /// Whether `ty` is `&mut ModuleCx`: a module function's context.
 fn module_cx(ty: &Type) -> bool {
     matches!(ty, Type::Reference(r) if matches!(last_segment(&r.elem), Some((id, _)) if id == "ModuleCx"))
@@ -1473,8 +1505,15 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
         let takes_cx = typed.last().is_some_and(|t| module_cx(&t.ty));
         let mut params = Vec::new();
         let mut names = Vec::new();
+        // Where each argument of the Rust call comes from: JS's argument
+        // `Some(i)`, or the call's `System` (`None`).
+        let mut sources = Vec::new();
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
+            if system_param(ty) {
+                sources.push(None);
+                continue;
+            }
             if module_cx(ty) {
                 if i + 1 != typed.len() || is_async {
                     return Err(syn::Error::new(
@@ -1498,8 +1537,11 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
                 ));
             };
             names.push(camel(&name.ident.to_string()));
+            sources.push(Some(params.len()));
             params.push(ty);
         }
+        let (sync_ret, _, starts) = sync_returns(&f.sig.output);
+        let starts = starts && !is_async && !takes_cx;
         // An `Option` parameter is optional when the ones after it are too.
         let mut optional = vec![false; params.len()];
         for i in (0..params.len()).rev() {
@@ -1525,11 +1567,19 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
                 ),
             },
         };
+        // A task's start resolves with the task's value.
+        let returns = match (starts, sync_ret) {
+            (true, Some(t)) => quote!(::core::option::Option::Some(#private::ret_ts::<#t>())),
+            _ => returns,
+        };
         // The classes the signature names, registered with the module.
         let ret_refs = match &f.sig.output {
             ReturnType::Default => None,
             ReturnType::Type(_, ty) => {
-                let ty = result_ok(ty).unwrap_or(&**ty);
+                let ty = match (starts, sync_ret) {
+                    (true, Some(t)) => t,
+                    _ => result_ok(ty).unwrap_or(&**ty),
+                };
                 Some(quote!(#private::ret_classes::<#ty>(__out);))
             }
         };
@@ -1537,16 +1587,39 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
             .iter()
             .map(|ty| quote!(#private::arg_classes::<#ty>(__out);))
             .chain(ret_refs);
-        let locals: Vec<_> = (0..params.len())
+        let locals: Vec<_> = (0..sources.len())
             .map(|i| format_ident!("__arg{}", i))
             .collect();
-        let call = if !is_async && !takes_cx {
-            // In the JS call, converting the values directly.
-            let decode = params.iter().zip(&names).zip(&locals).enumerate().map(
-                |(i, ((ty, name), local))| {
+        // Every argument of the Rust call: JS's converted, the `System`
+        // filled in.
+        let decoded: Vec<_> = sources
+            .iter()
+            .zip(&locals)
+            .map(|(source, local)| match source {
+                Some(i) => {
+                    let (ty, name) = (params[*i], &names[*i]);
                     quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
-                },
-            );
+                }
+                None => quote!(let #local = #private::system(host);),
+            })
+            .collect();
+        let call = if starts {
+            // In the JS call; the task it returns runs in the core.
+            let finish = if fallible {
+                quote!(#private::start_result(__result))
+            } else {
+                quote!(#private::start(__result))
+            };
+            quote! {
+                #ui::FunctionCall::Start(|host| {
+                    #(#decoded)*
+                    let __result = #self_ty::#ident(#(#locals),*);
+                    #finish
+                })
+            }
+        } else if !is_async && !takes_cx {
+            // In the JS call, converting the values directly.
+            let decode = decoded.iter();
             let finish = if fallible {
                 quote!(#private::ret_result(host, __result))
             } else {
@@ -1561,11 +1634,7 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
             }
         } else {
             // Converted in the JS call; the op carries them.
-            let decode = params.iter().zip(&names).zip(&locals).enumerate().map(
-                |(i, ((ty, name), local))| {
-                    quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
-                },
-            );
+            let decode = decoded.iter();
             let finish = if fallible {
                 quote!(#private::boxed_result(__result))
             } else {

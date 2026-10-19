@@ -181,6 +181,19 @@ For that, two choices of the first version change:
 - **Arguments and results** are the module functions' types (`JsValue`: numbers, `bool`, strings, `Option`, `Vec`,
   `JsonValue`, `#[derive(JsObject)]` structs, `#[derive(PropEnum)]` enums), so classes and modules share one set of
   conversions and TypeScript types (`Arg` and `Ret` over them); a trailing `Option` parameter is optional.
+  `Vec<u8>` is bytes: a `Uint8Array` (a `Buffer` too), copied in the call (`u8` is no `JsValue`, so it never
+  overlaps the arrays).
+- **The VM's `System`**: a parameter `sys: System` of a function or member (any kind) is not one JS passes: the
+  call fills it in (an `async` one when it is made) with the app's `Access`, its data directory, the host's
+  `TrustedPaths` and the VM's `Quotas` (counts of limited resources, `quotas.take(kind, max)` giving a `Held`
+  back when dropped). The host provides it (`JsHost::system`); one that configured nothing grants nothing.
+- **Work started in the call**: a function or method that is not `async` and returns `Later<T>` (or
+  `Result<Later<T>, E>`) runs in the JS call, where its checks throw as a synchronous call's do, and the work it
+  returns runs as a core task: TS `Promise<T>` (`FunctionCall::Start`, `MemberCall::Start`). The system modules
+  use it to keep Node's shape, a `RangeError` at the call and I/O errors as rejections (`net`).
+- **Errors of a chosen class**: `Result<T, JsError>` throws a `TypeError`, `RangeError` or `Error`
+  (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A task's `Err`
+  rejects with an `Error` as before.
 - **Instances of classes**, by reference: a parameter `&Other` / `&mut Other` borrows another instance for the call
   (TS: `other: Other`), `Instance<Other>` keeps a handle (to store one instance in another), and a result `Other`
   or `Instance<Other>` is a JS object (`Self` from `new` and statics; `Option<Instance<Other>>` for none). An
@@ -259,6 +272,9 @@ impl Downloader {
   (it runs in the collector's mark phase), part of its safety contract.
 - **Functions take them too:** `fn watch(path: String, on_change: Callback<String>)` (`on_change` kept and posted
   later), and `async` functions and members can `call_async`.
+- **Listeners**: an instance keeps them in a field (`listeners: Vec<Callback<String>>`, added by
+  `on(&mut self, listener: Callback<String>)`) and its tasks post to them (`Later` work cloning the field); the
+  field is traced like any other, so no event machinery is needed for `child.on("stdout", ..)`.
 
 
 ## How calls cross

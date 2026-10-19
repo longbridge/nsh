@@ -49,6 +49,9 @@ pub(crate) struct Shared {
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
+    /// The VM's counts of limited resources for Rust modules (`net`'s
+    /// sockets), handed to their calls' `System`.
+    pub(crate) system_quotas: nsh_core::ui::Quotas,
     /// Open (or connecting) `net` sockets, capped per VM.
     pub(crate) sockets: Rc<Cell<usize>>,
     /// Open (or connecting) WebSockets of both APIs, capped per VM.

@@ -443,7 +443,18 @@ pub(crate) fn send(
     returns: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(returns, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(returns, false, make)
+}
+
+/// [`send`] of a call that starts its task in the JS call (`Later`): JS
+/// gets a promise of the task, and what the start throws throws here.
+pub(crate) fn start(
+    ctx: Ctx,
+    this: Raw,
+    args: js::Args<'_>,
+    make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
+) -> Raw {
+    CallHost::new(ctx, this, UNDEFINED, args).send(true, true, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -601,7 +612,12 @@ impl<'a> CallHost<'a> {
     fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(start) => self.send(true, |host| start(host).map(RustCall::Task)),
+            MemberCall::Async(start) => {
+                self.send(true, false, |host| start(host).map(RustCall::Task))
+            }
+            MemberCall::Start(start) => {
+                self.send(true, true, |host| start(host).map(RustCall::Task))
+            }
         }
     }
 
@@ -618,10 +634,12 @@ impl<'a> CallHost<'a> {
     }
 
     /// Sends the call `make` converts this call's values into as an op
-    /// ([`send`]).
+    /// ([`send`]); with `throws`, what `make` throws throws even when the
+    /// call returns a promise (a call starting its task: [`start`]).
     fn send(
         &self,
         returns: bool,
+        throws: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
         let ctx = self.ctx;
@@ -639,7 +657,7 @@ impl<'a> CallHost<'a> {
             Err(e) => {
                 // Thrown (or rethrown) as a synchronous call's error.
                 let thrown = self.finish(Err(e));
-                return if returns {
+                return if returns && !throws {
                     rejected_with_exception(ctx)
                 } else {
                     thrown
@@ -703,6 +721,10 @@ impl<'a> CallHost<'a> {
             Err(_) if self.pending.get() => qjs::JS_EXCEPTION,
             Err(Thrown::Type(message)) => {
                 let _ = js::type_error(ctx, &message);
+                qjs::JS_EXCEPTION
+            }
+            Err(Thrown::Range(message)) => {
+                let _ = js::range_error(ctx, &message);
                 qjs::JS_EXCEPTION
             }
             Err(Thrown::Error(message)) => {
@@ -779,6 +801,16 @@ impl JsHost for CallHost<'_> {
             return None;
         }
         js::to_string(self.ctx, v).ok()
+    }
+
+    fn bytes(&self, v: JsRaw) -> Option<Vec<u8>> {
+        let v = from_raw(v);
+        let view = js::view(self.ctx, v)?;
+        if view.kind != Some(qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int) {
+            return None;
+        }
+        // SAFETY: copied at once, before any JS can detach the buffer.
+        Some(unsafe { js::bytes_of(self.ctx, v) }?.to_vec())
     }
 
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError> {
@@ -904,6 +936,10 @@ impl JsHost for CallHost<'_> {
         self.checked(js::string(self.ctx, s))
     }
 
+    fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
+        self.checked(js::uint8_array(self.ctx, bytes))
+    }
+
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError> {
         let items = items
             .into_iter()
@@ -945,6 +981,16 @@ impl JsHost for CallHost<'_> {
 
     fn this(&self) -> JsRaw {
         to_raw(self.this)
+    }
+
+    fn system(&self) -> nsh_core::ui::System {
+        let shared = crate::dom::shared(self.ctx);
+        nsh_core::ui::System::new(
+            std::sync::Arc::new(shared.system_access.borrow().clone()),
+            shared.system_data_dir.borrow().clone(),
+            shared.system_paths.borrow().clone(),
+            shared.system_quotas.clone(),
+        )
     }
 
     fn construct(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {

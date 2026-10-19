@@ -10,7 +10,7 @@ use syn::{
     spanned::Spanned,
 };
 
-use crate::{camel, decl, docs, last_segment, module_cx, result_ok};
+use crate::{camel, decl, docs, last_segment, module_cx, result_ok, sync_returns, system_param};
 
 pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     match item {
@@ -201,6 +201,8 @@ enum Param<'a> {
     Value(&'a Type),
     /// `&Other` / `&mut Other`: an instance borrowed for the call.
     Borrowed { elem: &'a Type, mutable: bool },
+    /// `System`: the VM the call comes from, not one JS passes.
+    System,
 }
 
 fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
@@ -313,6 +315,10 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             ));
         };
         names.push(camel(&name.ident.to_string()));
+        if system_param(&t.ty) {
+            params.push(Param::System);
+            continue;
+        }
         params.push(match &*t.ty {
             Type::Reference(_) if is_async => {
                 return Err(syn::Error::new(
@@ -334,6 +340,9 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         if matches!(kind, Kind::Setter { .. }) {
             break;
         }
+        if matches!(params[i], Param::System) {
+            continue;
+        }
         let is_option = matches!(&params[i], Param::Value(ty) if matches!(last_segment(ty), Some((id, _)) if id == "Option"));
         if !is_option {
             break;
@@ -344,25 +353,39 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .iter()
         .zip(&names)
         .zip(&optional)
-        .map(|((p, name), optional)| {
+        .filter_map(|((p, name), optional)| {
             let ts = match p {
                 Param::Value(ty) => quote!(#private::arg_ts::<#ty>()),
                 Param::Borrowed { elem, .. } => quote!(#private::arg_ts::<#ui::Instance<#elem>>()),
+                Param::System => return None,
             };
-            quote!((#name, #ts, #optional))
+            Some(quote!((#name, #ts, #optional)))
         })
         .collect();
     // The classes the signature names, registered with this one.
     let mut refs: Vec<TokenStream2> = params
         .iter()
-        .map(|p| match p {
-            Param::Value(ty) => quote!(#private::arg_classes::<#ty>(__out);),
+        .filter_map(|p| match p {
+            Param::Value(ty) => Some(quote!(#private::arg_classes::<#ty>(__out);)),
             Param::Borrowed { elem, .. } => {
-                quote!(#private::arg_classes::<#ui::Instance<#elem>>(__out);)
+                Some(quote!(#private::arg_classes::<#ui::Instance<#elem>>(__out);))
             }
+            Param::System => None,
         })
         .collect();
+    // A method or static returning `Later<T>` starts a task in the call.
+    let starts =
+        matches!(kind, Kind::Method { .. } | Kind::Static) && sync_returns(&f.sig.output).2;
     let (returns, ok_ty, fallible) = match &f.sig.output {
+        ReturnType::Type(_, _) if starts => {
+            let (task, fallible, _) = sync_returns(&f.sig.output);
+            let task = task.expect("a type");
+            (
+                quote!(::core::option::Option::Some(#private::ret_ts::<#task>())),
+                Some(task.clone()),
+                fallible,
+            )
+        }
         ReturnType::Default => (quote!(::core::option::Option::None), None, false),
         ReturnType::Type(_, ty) => match result_ok(ty) {
             Some(ok) => (
@@ -399,7 +422,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     let call = if is_async {
         async_call(f, kind, &params, &names, &what, fallible)
     } else {
-        sync_call(f, kind, &params, &names, &what, fallible)
+        sync_call(f, kind, &params, &names, &what, fallible, starts)
     };
     Ok(quote! {
         #(#cfgs)*
@@ -425,6 +448,7 @@ fn sync_call(
     names: &[String],
     what: &str,
     fallible: bool,
+    starts: bool,
 ) -> TokenStream2 {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
@@ -433,9 +457,19 @@ fn sync_call(
     let mut borrow = Vec::new();
     let mut release = Vec::new();
     let mut args = Vec::new();
-    for (i, (p, name)) in params.iter().zip(names).enumerate() {
-        let local = format_ident!("__arg{}", i);
+    // JS's arguments, counted without the `System`.
+    let mut js = 0usize;
+    for (p, name) in params.iter().zip(names) {
+        let local = format_ident!("__arg{}", args.len());
+        let i = js;
+        if !matches!(p, Param::System) {
+            js += 1;
+        }
         match p {
+            Param::System => {
+                decode.push(quote!(let #local = #private::system(host);));
+                args.push(quote!(#local));
+            }
             Param::Value(ty) => {
                 decode.push(quote! {
                     let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
@@ -491,6 +525,8 @@ fn sync_call(
     };
     let call_args = receiver.into_iter().chain(args);
     let finish = match (kind, fallible) {
+        _ if starts && fallible => quote!(#private::start_result(__result)),
+        _ if starts => quote!(#private::start(__result)),
         (Kind::Constructor, false) => quote!(#private::construct(host, __result)),
         (Kind::Constructor, true) => quote!(#private::construct_result(host, __result)),
         (_, false) => quote!(#private::ret(host, __result)),
@@ -504,8 +540,9 @@ fn sync_call(
     ) {
         release.push(quote!(::core::mem::drop(__value);));
     }
+    let variant = if starts { quote!(Start) } else { quote!(Sync) };
     quote! {
-        #ui::MemberCall::Sync(|host| {
+        #ui::MemberCall::#variant(|host| {
             #(#decode)*
             #this
             #(#borrow)*
@@ -529,13 +566,23 @@ fn async_call(
     let ident = &f.sig.ident;
     let mut decode = Vec::new();
     let mut args = Vec::new();
-    for (i, (p, name)) in params.iter().zip(names).enumerate() {
-        let local = format_ident!("__arg{}", i);
-        if let Param::Value(ty) = p {
-            decode.push(quote! {
-                let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
-            });
-            args.push(quote!(#local));
+    let mut js = 0usize;
+    for (p, name) in params.iter().zip(names) {
+        let local = format_ident!("__arg{}", args.len());
+        match p {
+            Param::Value(ty) => {
+                let i = js;
+                js += 1;
+                decode.push(quote! {
+                    let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
+                });
+                args.push(quote!(#local));
+            }
+            Param::System => {
+                decode.push(quote!(let #local = #private::system(host);));
+                args.push(quote!(#local));
+            }
+            Param::Borrowed { .. } => js += 1,
         }
     }
     // The instance and the arguments are taken in the JS call; the task

@@ -109,6 +109,9 @@ pub enum FunctionCall {
     /// converted in the JS call): it reaches the platform with the same free
     /// functions views use (`dialog`, `clipboard_string`, ...).
     Async(AsyncCall),
+    /// In the JS call, returning a task's start ([`super::Later`]): what
+    /// the call throws throws there; JS gets a promise of the task.
+    Start(AsyncCall),
 }
 
 impl std::fmt::Debug for FunctionCall {
@@ -123,7 +126,7 @@ impl FunctionCall {
         match self {
             FunctionCall::Sync(_) => FunctionKind::Sync,
             FunctionCall::Op(_) => FunctionKind::Op,
-            FunctionCall::Async(_) => FunctionKind::Async,
+            FunctionCall::Async(_) | FunctionCall::Start(_) => FunctionKind::Async,
         }
     }
 }

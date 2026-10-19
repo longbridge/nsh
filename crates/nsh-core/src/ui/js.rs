@@ -63,6 +63,8 @@ pub trait JsHost {
     fn number(&self, v: JsRaw) -> Option<f64>;
     /// `v` as a string (`None`: not one).
     fn string(&self, v: JsRaw) -> Option<String>;
+    /// The bytes of `Uint8Array` `v`, copied (`None`: not one).
+    fn bytes(&self, v: JsRaw) -> Option<Vec<u8>>;
     /// The length of array `v` (`None`: not an array; an error when it is
     /// more than the host reads in one call).
     fn len(&self, v: JsRaw) -> Result<Option<usize>, PropError>;
@@ -98,6 +100,8 @@ pub trait JsHost {
     fn new_number(&self, n: f64) -> JsRaw;
     /// A string.
     fn new_string(&self, s: &str) -> Result<JsRaw, PropError>;
+    /// A `Uint8Array` of `bytes` (copied).
+    fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError>;
     /// An array of `items` (taken).
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError>;
     /// An empty object.
@@ -117,6 +121,12 @@ pub trait JsHost {
     /// The object a constructor makes for `instance` (with `new.target`'s
     /// prototype).
     fn construct(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError>;
+
+    /// The VM the call comes from ([`super::System`]); one granting nothing
+    /// where the host configured none.
+    fn system(&self) -> super::System {
+        super::System::default()
+    }
 }
 
 /// A JS value borrowed for a call: read it with its methods, convert it
@@ -155,6 +165,11 @@ impl<'a> JsIn<'a> {
     /// What kind of value it is.
     pub fn kind(&self) -> JsKind {
         self.host.kind(self.raw)
+    }
+
+    /// The bytes of a `Uint8Array`, copied.
+    pub fn as_bytes(&self) -> Option<Vec<u8>> {
+        self.host.bytes(self.raw)
     }
 
     /// `undefined` or `null`.

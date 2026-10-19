@@ -294,7 +294,7 @@ macro_rules! number {
 }
 
 number!(any: f32, f64);
-number!(whole: i32, i64, u32, u64, usize);
+number!(whole: i16, i32, i64, u16, u32, u64, usize);
 
 impl JsValue for SharedString {
     fn ts_type(_types: &mut TsTypes) -> String {
@@ -410,6 +410,25 @@ impl<T: JsValue> JsValue for Option<T> {
             Some(v) => v.to_js(host),
             None => Ok(JsOwned::new(host, host.null())),
         }
+    }
+}
+
+/// Bytes are a `Uint8Array` (a `Buffer` is one too), not an array of
+/// numbers: `u8` is no [`JsValue`], so this and the arrays below never
+/// overlap.
+impl JsValue for Vec<u8> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Uint8Array".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        value
+            .as_bytes()
+            .ok_or_else(|| value.expected("a Uint8Array"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_bytes(self)?))
     }
 }
 
