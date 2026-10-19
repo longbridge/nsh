@@ -70,12 +70,24 @@ pub struct ClientLog {
     pub message: String,
 }
 
+/// What a published bundle says about its app.
+#[derive(Debug, Clone, Default)]
+pub struct AppInfo {
+    /// What the app declares it may reach (JSON), so development runs with
+    /// the same capabilities as the release.
+    pub capabilities: Option<String>,
+    /// The app's id (`nsh.json` `"id"`), which names where it keeps its
+    /// data.
+    pub id: Option<String>,
+}
+
 struct Bundle {
     version: u64,
     bytecode: axum::body::Bytes,
     source: axum::body::Bytes,
     source_map: Option<axum::body::Bytes>,
     capabilities: Option<String>,
+    app_id: Option<String>,
     /// The UI sets it imports.
     ui_sets: Arc<[String]>,
 }
@@ -241,7 +253,7 @@ impl DevServer {
         bytecode: Vec<u8>,
         source: String,
         source_map: Option<String>,
-        capabilities: Option<String>,
+        app: AppInfo,
         patch: Option<(String, Option<String>)>,
         ui_sets: Vec<String>,
     ) {
@@ -268,7 +280,8 @@ impl DevServer {
             bytecode: bytecode.into(),
             source: source.into(),
             source_map: source_map.map(Into::into),
-            capabilities,
+            capabilities: app.capabilities,
+            app_id: app.id,
             ui_sets,
         })));
     }
@@ -651,6 +664,7 @@ async fn send_event(
                     format,
                     source_map: bundle.source_map.is_some(),
                     capabilities: bundle.capabilities.clone(),
+                    app_id: bundle.app_id.clone(),
                 },
             )
             .await?;

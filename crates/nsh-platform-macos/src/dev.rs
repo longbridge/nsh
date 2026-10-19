@@ -307,6 +307,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             bytes,
             source_map,
             capabilities,
+            app_id,
         } => {
             hide_status(ui);
             let mut bundle = match format {
@@ -331,7 +332,10 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
-            bundle = match bundle.with_capabilities_json(capabilities.as_deref()) {
+            bundle = match bundle
+                .with_app_id(app_id.as_deref())
+                .with_capabilities_json(capabilities.as_deref())
+            {
                 Ok(bundle) => bundle,
                 Err(err) => return show_error(ui, "Invalid capabilities", &err, true),
             };

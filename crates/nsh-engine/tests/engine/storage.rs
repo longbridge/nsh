@@ -28,6 +28,19 @@ fn start(
     capabilities: Option<&str>,
     data: &PathBuf,
 ) -> (Engine, Receiver<MountBatch>) {
+    launch(name, app, capabilities, None, None, Some(data))
+}
+
+/// `app` with `capabilities` and the id `app_id`, the platform giving
+/// `data_dir` and `storage`.
+fn launch(
+    name: &str,
+    app: &str,
+    capabilities: Option<&str>,
+    app_id: Option<&str>,
+    data_dir: Option<&std::path::Path>,
+    storage: Option<&PathBuf>,
+) -> (Engine, Receiver<MountBatch>) {
     let dir = scratch(name);
     let entry = dir.join("App.tsx");
     std::fs::write(&entry, app).unwrap();
@@ -45,7 +58,8 @@ fn start(
         app: nsh_engine::App::Js(
             unsafe { Bundle::bytecode(bytecode) }
                 .with_capabilities_json(capabilities)
-                .unwrap(),
+                .unwrap()
+                .with_app_id(app_id),
         ),
         viewport: Size::new(390.0, 844.0),
         trace: false,
@@ -56,7 +70,8 @@ fn start(
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
-        storage: Some(FileStorage::open(data)),
+        data_dir: data_dir.map(Into::into),
+        storage: storage.map(|data| FileStorage::open(data) as _),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -152,6 +167,7 @@ fn rust_shares_the_entries_of_js() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
         storage: Some(FileStorage::open(&data)),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
@@ -235,8 +251,89 @@ fn rust_edits_the_storage() {
         ui_sets: Vec::new(),
         runtime: None,
         // In memory: the platform gave none.
+        data_dir: None,
         storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
+}
+
+#[test]
+fn each_app_keeps_its_data_under_its_id() {
+    let root = scratch("data-root");
+    for (name, id) in [
+        ("orders", Some("com.example.orders")),
+        ("notes", Some("com.example.notes")),
+    ] {
+        let (engine, rx) = launch(name, COUNTER, None, id, Some(&root), None);
+        assert_eq!(shown(&rx, "done"), "done 1 launches full null");
+        drop(engine);
+    }
+    // A second launch of one app finds its own data, not the other's.
+    let (engine, rx) = launch(
+        "orders-again",
+        COUNTER,
+        None,
+        Some("com.example.orders"),
+        Some(&root),
+        None,
+    );
+    assert_eq!(shown(&rx, "done"), "done 2 launches full null");
+    drop(engine);
+    // Without an id, or with one that is no directory name: `default`.
+    for id in [None, Some("../escape")] {
+        let (engine, rx) = launch("anonymous", COUNTER, None, id, Some(&root), None);
+        shown(&rx, "done");
+        drop(engine);
+    }
+    let kept = |dir: &str| std::fs::read_to_string(root.join(dir).join("storage.json")).unwrap();
+    assert_eq!(kept("com.example.orders"), r#"{"launches":"2"}"#);
+    assert_eq!(kept("com.example.notes"), r#"{"launches":"1"}"#);
+    assert_eq!(kept("default"), r#"{"launches":"2"}"#);
+    assert!(!root.join("../escape").exists());
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct WriterProps {}
+
+#[component]
+fn Writer(_props: WriterProps) -> impl IntoElement {
+    Storage::set_item("from", "rust").unwrap();
+    text(|| "rust wrote".to_owned())
+}
+
+#[test]
+fn a_rust_root_keeps_its_data_under_its_id() {
+    let root = scratch("rust-root");
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        app: App::Rust(Root::new::<Writer>(|| WriterProps {}).app_id("com.example.rusty")),
+        viewport: Size::new(390.0, 844.0),
+        trace: false,
+        network: None,
+        assets: None,
+        environment: Environment::default(),
+        header_heights: (44.0, 96.0),
+        limits: nsh_engine::Limits::default(),
+        ui_sets: Vec::new(),
+        runtime: None,
+        data_dir: Some(root.clone()),
+        storage: None,
+    };
+    let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    assert_eq!(shown(&rx, "rust"), "rust wrote");
+    drop(engine);
+    let file = root.join("com.example.rusty/storage.json");
+    assert_eq!(std::fs::read_to_string(file).unwrap(), r#"{"from":"rust"}"#);
+}
+
+#[test]
+fn a_built_bundle_carries_its_apps_id() {
+    let dir = scratch("built");
+    std::fs::write(dir.join("bundle.js"), "").unwrap();
+    assert_eq!(Bundle::read(&dir.join("bundle.js")).unwrap().app_id, None);
+    std::fs::write(dir.join("app.json"), r#"{ "id": "com.example.built" }"#).unwrap();
+    let bundle = Bundle::read(&dir.join("bundle.js")).unwrap();
+    assert_eq!(bundle.app_id.as_deref(), Some("com.example.built"));
+    assert_eq!(App::Js(bundle).app_id(), Some("com.example.built"));
 }

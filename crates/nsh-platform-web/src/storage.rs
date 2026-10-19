@@ -2,9 +2,10 @@
 //!
 //! `localStorage` is the origin's, shared by every app the origin serves:
 //! a published site per path, the development host and the website's
-//! demos side by side. Each entry is kept under the page's prefix
-//! ([`nsh_engine::local_storage_prefix`]), so apps at different paths keep
-//! apart and the page's other keys are left alone.
+//! demos side by side. Each entry is kept under the app's prefix
+//! ([`nsh_engine::local_storage_prefix`]): its id (`nsh.json` `"id"`), else
+//! its page's path; so apps keep apart and the page's other keys are left
+//! alone.
 //!
 //! `localStorage` throws when the browser refuses it (blocked storage,
 //! the quota): the error is logged and the app keeps its entries in
@@ -40,18 +41,19 @@ pub unsafe extern "C" fn nsh_storage_reply(ptr: *const u8, len: usize) {
     REPLY.with(|r| *r.borrow_mut() = Some(reply));
 }
 
-/// The app's entries in `localStorage`, under the page's prefix. Holds no JS
+/// The app's entries in `localStorage`, under the app's prefix. Holds no JS
 /// handle: `nsh.js` reaches `localStorage` on each call.
 pub(crate) struct LocalStorage {
     prefix: String,
 }
 
 impl LocalStorage {
-    /// The storage of the app on the page at `base_url` (`document.baseURI`;
-    /// `None`: an unknown page, whose apps share one namespace).
-    pub(crate) fn new(base_url: Option<&str>) -> Self {
+    /// The storage of app `app_id` on the page at `base_url`
+    /// (`document.baseURI`). Without an id, the page's path names it
+    /// (`None`: an unknown page, whose apps share one namespace).
+    pub(crate) fn new(app_id: Option<&str>, base_url: Option<&str>) -> Self {
         Self {
-            prefix: nsh_engine::local_storage_prefix(base_url.unwrap_or("")),
+            prefix: nsh_engine::local_storage_prefix(app_id, base_url.unwrap_or("")),
         }
     }
 }

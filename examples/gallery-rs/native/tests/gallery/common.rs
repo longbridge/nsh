@@ -264,6 +264,7 @@ pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     let engine = Sink::start(config, tx);

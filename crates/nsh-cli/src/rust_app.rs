@@ -251,6 +251,9 @@ pub(crate) struct RootConfig {
     theme: Option<PathBuf>,
     /// `"light"` / `"dark"`; `None`: the system's.
     appearance: Option<String>,
+    /// The app's id (`nsh.json` `"id"`), which names where it keeps its
+    /// data.
+    app_id: Option<String>,
 }
 
 /// Whether `entry` is a Rust app's (`entry::resolve` gives its `nsh.json`
@@ -498,6 +501,7 @@ fn root_config(
         component,
         theme,
         appearance,
+        app_id: crate::package::app_id(&dir.join("nsh.json")).ok(),
     })
 }
 
@@ -516,6 +520,10 @@ fn load(workspace: PathBuf) -> Option<RustApp> {
             component: root.get("component")?.as_str()?.to_owned(),
             theme: root.get("theme")?.as_str().map(PathBuf::from),
             appearance: root.get("appearance")?.as_str().map(str::to_owned),
+            app_id: root
+                .get("app_id")
+                .and_then(|id| id.as_str())
+                .map(str::to_owned),
         })
     });
     let paths = |key: &str| -> Option<Vec<PathBuf>> {
@@ -841,6 +849,7 @@ opt-level = 3
                 "watched": self.watched.iter().map(|d| d.to_string_lossy()).collect::<Vec<_>>(),
                 "root": self.root.as_ref().map(|root| serde_json::json!({
                     "component": root.component,
+                    "app_id": root.app_id,
                     "theme": root.theme.as_ref().map(|t| t.to_string_lossy()),
                     "appearance": root.appearance,
                 })),
@@ -1650,7 +1659,7 @@ fn set_fn(krate: &AppCrate) -> String {
 }
 
 /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-/// `"appearance"`) in the crate the generated code links as `krate`, under
+/// `"appearance"`, `"id"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!("nsh_core::ui::Root::of::<{krate}::{}>()", root.component);
@@ -1660,6 +1669,9 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
              .expect(\"nsh.json: theme\"),\n        )",
             theme.to_string_lossy()
         ));
+    }
+    if let Some(id) = &root.app_id {
+        make.push_str(&format!("\n        .app_id({id:?})"));
     }
     if let Some(appearance) = &root.appearance {
         let variant = if appearance == "dark" {
@@ -1984,6 +1996,7 @@ mod tests {
                 component: "App".into(),
                 theme: Some("/app/theme.json".into()),
                 appearance: Some("dark".into()),
+                app_id: Some("com.example.app".into()),
             },
         );
         for line in [
@@ -1991,6 +2004,7 @@ mod tests {
             "nsh_core::ui::Root::of::<app_native::App>()",
             "include_str!(\"/app/theme.json\")",
             ".appearance(nsh_core::ui::Appearance::Dark)",
+            ".app_id(\"com.example.app\")",
         ] {
             assert!(code.contains(line), "no {line:?} in\n{code}");
         }
@@ -2007,6 +2021,7 @@ mod tests {
                 component: "App".into(),
                 theme: None,
                 appearance: None,
+                app_id: None,
             }),
         );
         app.write_workspace().unwrap();
@@ -2260,6 +2275,7 @@ mod tests {
                 component: "shell::Home".into(),
                 theme: None,
                 appearance: None,
+                app_id: None,
             }),
         );
         app.write_workspace().unwrap();

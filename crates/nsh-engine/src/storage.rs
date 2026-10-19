@@ -15,8 +15,8 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::storage::{StorageBackend, StorageChange};
 
-/// An app's storage kept in `storage.json` of a directory: the app's data
-/// directory ([`app_data_dir`]), or one the embedding app chooses.
+/// An app's storage kept in `storage.json` of a directory: the app's in
+/// [`crate::EngineConfig::data_dir`], or one the embedding app chooses.
 pub struct FileStorage {
     path: PathBuf,
     /// The entries as changed so far, once read.
@@ -58,36 +58,38 @@ impl FileStorage {
     }
 }
 
-/// The directory an app keeps its data in, by its id (`com.example.app`):
-/// Application Support on Apple platforms, `%APPDATA%` on Windows,
-/// `$XDG_DATA_HOME` (`~/.local/share`) elsewhere. `None` on Android, whose
-/// files directory only the platform knows, without a home directory, and
-/// for an id that is no directory name ([`is_app_dir_name`]).
-pub fn app_data_dir(app_id: &str) -> Option<PathBuf> {
-    let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
-    data_dir_in(std::env::consts::OS, env, app_id)
+/// The system's directory for apps' data: Application Support on Apple
+/// platforms, `%APPDATA%` on Windows, `$XDG_DATA_HOME` (`~/.local/share`)
+/// elsewhere. `None` on Android, whose files directory only the platform
+/// knows, and without a home directory. An app of its own keeps its data in
+/// `<data_dir>/<app id>` ([`crate::EngineConfig::data_dir`]).
+pub fn data_dir() -> Option<PathBuf> {
+    data_dir_in(std::env::consts::OS, |name| {
+        std::env::var_os(name).map(PathBuf::from)
+    })
 }
 
-/// [`app_data_dir`] on `os` (`std::env::consts::OS`) with the environment
-/// `env`.
-fn data_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>, app_id: &str) -> Option<PathBuf> {
-    if !is_app_dir_name(app_id) {
-        return None;
-    }
+/// [`data_dir`] on `os` (`std::env::consts::OS`) with the environment `env`.
+fn data_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     let env = |name| env(name).filter(|v| !v.as_os_str().is_empty());
-    let base = match os {
+    match os {
         "android" => None,
         "macos" | "ios" => env("HOME").map(|home| home.join("Library/Application Support")),
         "windows" => env("APPDATA"),
         _ => env("XDG_DATA_HOME").or_else(|| env("HOME").map(|home| home.join(".local/share"))),
-    }?;
-    Some(base.join(app_id))
+    }
+}
+
+/// The directory of app `id` in a data directory: the id, or `default` for
+/// an app without one, or one that is no directory name.
+pub fn app_dir_name(id: Option<&str>) -> &str {
+    id.filter(|id| is_app_dir_name(id)).unwrap_or("default")
 }
 
 /// Whether app id `id` names a directory of its own: not empty, no path
 /// separator, not `.` or `..`, so an app's storage stays in the directory
 /// its id names.
-pub fn is_app_dir_name(id: &str) -> bool {
+fn is_app_dir_name(id: &str) -> bool {
     !id.is_empty() && !id.contains(['/', '\\', '\0']) && id != "." && id != ".."
 }
 
@@ -271,49 +273,43 @@ mod tests {
             ("HOME", "/home/a"),
             ("APPDATA", r"C:\Users\a\AppData\Roaming"),
         ]);
-        let at = |os, env| data_dir_in(os, env, "com.example.app");
         assert_eq!(
-            at("linux", home),
-            Some(PathBuf::from("/home/a/.local/share/com.example.app"))
+            data_dir_in("linux", home),
+            Some(PathBuf::from("/home/a/.local/share"))
         );
         assert_eq!(
-            at(
+            data_dir_in(
                 "linux",
                 env(&[("XDG_DATA_HOME", "/data"), ("HOME", "/home/a")])
             ),
-            Some(PathBuf::from("/data/com.example.app"))
+            Some(PathBuf::from("/data"))
         );
         // An empty variable counts as unset.
         assert_eq!(
-            at("linux", env(&[("XDG_DATA_HOME", ""), ("HOME", "/home/a")])),
-            Some(PathBuf::from("/home/a/.local/share/com.example.app"))
+            data_dir_in("linux", env(&[("XDG_DATA_HOME", ""), ("HOME", "/home/a")])),
+            Some(PathBuf::from("/home/a/.local/share"))
         );
+        let support = Some(PathBuf::from("/home/a/Library/Application Support"));
+        assert_eq!(data_dir_in("macos", home), support);
+        assert_eq!(data_dir_in("ios", home), support);
         assert_eq!(
-            at("macos", home),
-            Some(PathBuf::from(
-                "/home/a/Library/Application Support/com.example.app"
-            ))
-        );
-        assert_eq!(
-            at("ios", home),
-            Some(PathBuf::from(
-                "/home/a/Library/Application Support/com.example.app"
-            ))
-        );
-        assert_eq!(
-            at("windows", home),
-            Some(PathBuf::from(r"C:\Users\a\AppData\Roaming").join("com.example.app"))
+            data_dir_in("windows", home),
+            Some(PathBuf::from(r"C:\Users\a\AppData\Roaming"))
         );
         // Android's files directory is the platform's to give.
-        assert_eq!(at("android", home), None);
-        assert_eq!(at("linux", env(&[])), None);
-        // An id that is no directory name has no directory.
+        assert_eq!(data_dir_in("android", home), None);
+        assert_eq!(data_dir_in("linux", env(&[])), None);
+    }
+
+    #[test]
+    fn apps_get_directories_of_their_own() {
+        assert_eq!(app_dir_name(Some("com.example.app")), "com.example.app");
+        assert_eq!(app_dir_name(Some("..app")), "..app");
+        assert_eq!(app_dir_name(None), "default");
+        // An id that is no directory name cannot reach another directory.
         for id in ["", ".", "..", "../etc", "a/b", r"a\b", "a\0b"] {
-            assert!(!is_app_dir_name(id), "{id:?}");
-            assert_eq!(data_dir_in("linux", home, id), None, "{id:?}");
+            assert_eq!(app_dir_name(Some(id)), "default", "{id:?}");
         }
-        assert!(is_app_dir_name("com.example.app"));
-        assert!(is_app_dir_name("..app"));
     }
 
     #[test]

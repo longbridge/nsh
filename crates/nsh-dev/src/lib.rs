@@ -23,6 +23,6 @@ mod site;
 pub use crate::client::{DevClient, DevEvent, HostInfo};
 #[cfg(feature = "server")]
 pub use crate::{
-    server::{ClientEvent, ClientLog, DevServer},
+    server::{AppInfo, ClientEvent, ClientLog, DevServer},
     site::SiteServer,
 };

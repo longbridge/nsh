@@ -51,9 +51,11 @@ pub(crate) struct Host {
     granted: Mutex<Option<nsh_engine::Capabilities>>,
     /// The VM limits of loaded apps (`NshView.setLimits`).
     limits: Mutex<nsh_engine::Limits>,
-    /// The directory loaded apps keep their storage in
-    /// (`NshView.setStorageDirectory`, or the app's own under the files
-    /// directory); `None`: in memory.
+    /// Where loaded apps keep their data, each in a directory named by its
+    /// id ([`EngineConfig::data_dir`]): `nsh` in the files directory.
+    data_dir: Option<std::path::PathBuf>,
+    /// The directory loaded apps keep their storage in, overriding their own
+    /// (`NshView.setStorageDirectory`); `None`: theirs.
     storage: Mutex<Option<std::path::PathBuf>>,
     /// What the running app may reach (web view navigations check it).
     access: Mutex<Arc<nsh_engine::Access>>,
@@ -101,6 +103,7 @@ impl Host {
             limits: *self.limits.lock().expect("limits"),
             ui_sets: crate::ui_sets(),
             runtime: None,
+            data_dir: self.data_dir.clone(),
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
@@ -314,15 +317,20 @@ pub(crate) unsafe fn host<'a>(handle: jlong) -> &'a Arc<Host> {
 
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_create(
-    env: JNIEnv<'_>,
+    mut env: JNIEnv<'_>,
     _: JClass<'_>,
     view: JObject<'_>,
     density: jfloat,
     trace: jboolean,
+    data_dir: JString<'_>,
 ) -> jlong {
     let Ok(view) = env.new_global_ref(view) else {
         return 0;
     };
+    let data_dir = env
+        .get_string(&data_dir)
+        .ok()
+        .map(|dir| std::path::PathBuf::from(String::from(dir)));
     let host = Arc::new(Host {
         view,
         density,
@@ -337,6 +345,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         epoch: Instant::now(),
         granted: Mutex::new(None),
         limits: Mutex::new(nsh_engine::Limits::default()),
+        data_dir,
         storage: Mutex::new(None),
         access: Mutex::new(Arc::default()),
         #[cfg(feature = "dev")]
@@ -411,8 +420,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_setLimits(
     *host.limits.lock().expect("limits") = limits;
 }
 
-/// The directory the storage of the apps loaded next is kept in (null: in
-/// memory); Java picks the app's own under the files directory.
+/// The directory the storage of the apps loaded next is kept in (null: each
+/// app's own in the data directory).
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_setStorage(
     mut env: JNIEnv<'_>,
@@ -499,6 +508,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     bytecode: jboolean,
     source_map: JString<'_>,
     capabilities: JString<'_>,
+    app: JString<'_>,
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
@@ -522,6 +532,14 @@ extern "system" fn Java_com_longbridge_nsh_Native_load(
     } else {
         env.get_string(&capabilities).ok().map(String::from)
     };
+    // `app.json` next to the bundle (`nsh package`): the app's id.
+    if !app.is_null()
+        && let Ok(app) = env.get_string(&app)
+    {
+        let app = serde_json::from_str::<serde_json::Value>(&String::from(app)).ok();
+        let id = app.as_ref().and_then(|app| app.get("id")?.as_str());
+        bundle = bundle.with_app_id(id);
+    }
     match bundle.with_capabilities_json(declared.as_deref()) {
         Ok(bundle) => host.load(bundle),
         Err(err) => log::error!("cannot load the bundle: {err}"),

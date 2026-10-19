@@ -388,6 +388,7 @@ pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<Moun
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     (

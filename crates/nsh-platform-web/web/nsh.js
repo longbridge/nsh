@@ -690,7 +690,8 @@ class Player {
    * `release` (hardened, as packaged apps run; default: development
    * settings), `harden` (with bytecode: the hardening's bytecode the CLI
    * ships, `harden.nshc`), `capabilities` (the app's `capabilities.json`),
-   * `sourceMap` (JSON), and where a split bundle's chunks are: `chunks[id]`
+   * `sourceMap` (JSON), `appId` (`nsh.json` `"id"`: the app's storage is
+   * kept under it; without one, under the page's path), and where a split bundle's chunks are: `chunks[id]`
    * (a URL), else `id` relative to `chunkBase` (default: the page); the
    * chunks of a bytecode bundle are bytecode too.
    */
@@ -699,6 +700,7 @@ class Player {
     harden = null,
     capabilities = "",
     sourceMap = "",
+    appId = "",
     chunks = this.options.chunks,
     chunkBase = this.options.chunkBase,
   } = {}) {
@@ -706,8 +708,8 @@ class Player {
     const bytecode = typeof code !== "string";
     const [width, height] = this.reset();
     this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
-    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
-      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
+    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? "", appId ?? ""], (cp, cl, mp, ml, ip, il) =>
+      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml, ip, il)));
     if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
     this.begin(width, (environment) => {
       this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));

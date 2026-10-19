@@ -148,6 +148,15 @@ pub(crate) fn name_and_id(entry: &Path, config: &AppConfig) -> (String, String) 
     (name, id)
 }
 
+/// The app's id (`nsh.json` `"id"`, else made up from its name as
+/// [`name_and_id`] does): it travels with the bundle (`app.json`, the dev
+/// server's messages) and names where the app keeps its data.
+pub(crate) fn app_id(entry: &Path) -> anyhow::Result<String> {
+    let entry = dunce::canonicalize(entry)?;
+    let config = read_config(&entry).unwrap_or_default();
+    Ok(name_and_id(&entry, &config).1)
+}
+
 /// [`name_and_id`] for a release (`nsh package`, `nsh publish`): the id
 /// must be the app's own, written in `nsh.json`, since it also names where
 /// the app keeps its data (`nsh/storage`) and two apps with one id share it.
@@ -255,6 +264,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
+    // The app's id, which names where it keeps its data (`Bundle::read`).
+    fs::write(
+        resources.join("app.json"),
+        serde_json::json!({ "id": id }).to_string(),
+    )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(dir) = dest.parent() {
@@ -357,6 +371,11 @@ fn package_android(
     if let Some(json) = built.capabilities_json() {
         assets.push(("nsh/capabilities.json".to_owned(), json.into_bytes()));
     }
+    // The app's id, which names where it keeps its data.
+    assets.push((
+        "nsh/app.json".to_owned(),
+        serde_json::json!({ "id": id }).to_string().into_bytes(),
+    ));
     for asset in &built.assets {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
         assets.push((format!("nsh/assets/{}", asset.path), bytes));

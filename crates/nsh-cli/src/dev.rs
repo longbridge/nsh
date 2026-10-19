@@ -191,7 +191,10 @@ impl DevSession {
                         built.bytecode,
                         built.code,
                         built.source_map,
-                        capabilities,
+                        nsh_dev::AppInfo {
+                            capabilities,
+                            id: crate::package::app_id(&self.entry).ok(),
+                        },
                         None,
                         built.ui_sets,
                     );
@@ -224,7 +227,10 @@ impl DevSession {
                     built.bytecode,
                     built.code,
                     built.source_map,
-                    capabilities,
+                    nsh_dev::AppInfo {
+                        capabilities,
+                        id: crate::package::app_id(&self.entry).ok(),
+                    },
                     patch,
                     built.ui_sets,
                 );

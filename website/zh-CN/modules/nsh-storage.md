@@ -27,16 +27,16 @@ const Storage: {
 
 | 平台 | 数据保存位置 |
 |---|---|
-| iOS | 应用容器内的 `Library/Application Support/<app id>/storage.json`；嵌入在其他应用中时为 `…/nsh/<app id>/` |
-| Android | 应用私有目录内的 `files/nsh/…/storage.json` |
+| iOS | 应用容器内的 `Library/Application Support/nsh/<app id>/storage.json` |
+| Android | 应用私有目录内的 `files/nsh/<app id>/storage.json` |
 | macOS | `~/Library/Application Support/<app id>/storage.json` |
 | Windows | `%APPDATA%\<app id>\storage.json` |
 | Linux | `$XDG_DATA_HOME/<app id>/storage.json`（`~/.local/share/…`） |
-| Web | 浏览器的 `localStorage`，键以页面所在目录命名（`nsh:/apps/todo/:…`） |
+| Web | 浏览器的 `localStorage`，键以 app id 命名（`nsh:com.example.todo:…`） |
 
 损坏的 `storage.json` 会被保留为同目录下的 `storage.json.corrupt`，应用从空存储开始；读不了的文件则让应用的改动只留在内存中，文件本身永远不会被覆盖。
 
-app id 是 `nsh.json` 中的 `id`。嵌入在其他应用中的应用，可以由宿主应用指定专属目录（见[在 iOS 中嵌入](../docs/embedding-ios.md)和[在 Android 中嵌入](../docs/embedding-android.md)）。
+app id 是 `nsh.json` 中的 `id`，它随应用一起传递：`nsh build` 和 `nsh package` 把它写在 bundle 旁边，开发服务器会发送它，签名包则带有经发布密钥证书担保的 id。因此无论应用在哪里运行，都无需任何设置就各自保存自己的数据；没有 id 的应用保存在 `default` 下。宿主应用可以另选位置（见[在 iOS 中嵌入](../docs/embedding-ios.md)和[在 Android 中嵌入](../docs/embedding-android.md)）。
 
 ## Storage.getItem
 

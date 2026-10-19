@@ -144,7 +144,9 @@ pub(crate) fn run(
         // bundle around it.
         Target::Linux => {
             let mut command = Command::new(&host);
-            command.args(&args).args(["--app-id", &app_id(entry)?]);
+            command
+                .args(&args)
+                .args(["--app-id", &crate::package::app_id(entry)?]);
             run_local(&session, &mut command, "the Linux host")
         }
         // In place too: the AppKit host makes itself a regular app (menu
@@ -163,14 +165,18 @@ pub(crate) fn run(
         }
         Target::Windows => {
             let mut command = Command::new(&host);
-            command.args(&args).args(["--app-id", &app_id(entry)?]);
+            command
+                .args(&args)
+                .args(["--app-id", &crate::package::app_id(entry)?]);
             run_local(&session, &mut command, "the Windows host")
         }
         // In place on every OS: GPUI makes the process a regular app (on
         // macOS too) without an app bundle around it.
         Target::Gpui => {
             let mut command = Command::new(&host);
-            command.args(&args).args(["--app-id", &app_id(entry)?]);
+            command
+                .args(&args)
+                .args(["--app-id", &crate::package::app_id(entry)?]);
             run_local(&session, &mut command, "the GPUI host")
         }
         Target::Ios => {
@@ -195,14 +201,6 @@ pub(crate) fn run(
         }
         Target::Android | Target::Web => unreachable!("handled above"),
     }
-}
-
-/// The app's id (`nsh.json` `"id"`) for the desktop hosts, which keep the
-/// app's data under it: each app its own.
-fn app_id(entry: &Path) -> anyhow::Result<String> {
-    let entry = entry.canonicalize()?;
-    let config = crate::package::read_config(&entry).unwrap_or_default();
-    Ok(crate::package::name_and_id(&entry, &config).1)
 }
 
 /// Starts a dev session that serves the web host and prints its address;
@@ -828,11 +826,11 @@ mod tests {
         }
         std::fs::write(named.join("nsh.json"), r#"{ "id": "com.acme.orders" }"#).unwrap();
         assert_eq!(
-            super::app_id(&named.join("App.tsx")).unwrap(),
+            crate::package::app_id(&named.join("App.tsx")).unwrap(),
             "com.acme.orders"
         );
         assert_eq!(
-            super::app_id(&unnamed.join("App.tsx")).unwrap(),
+            crate::package::app_id(&unnamed.join("App.tsx")).unwrap(),
             "com.example.notes"
         );
         std::fs::remove_dir_all(&dir).unwrap();

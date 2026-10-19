@@ -154,7 +154,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 | `onError: ((String) -> Void)?` | Receives fatal app errors (a bundle that fails to load, uncaught JS exceptions, a VM stopped by a limit) on the main thread. Errors are always logged; development builds also show them over the app. |
 | `limits: NshLimits` | The VM limits of the apps loaded from now on. |
 | `grantCapabilities(_ json: String?) throws` | The most the apps loaded from now on may do, as JSON in the form of `nsh.json`'s `capabilities`; `nil` grants what each app declares. Throws `NshError` for invalid JSON. |
-| `storageDirectory: URL?` | Where the apps loaded from now on keep their [storage](../modules/nsh-storage.md); `nil`: `Library/Application Support/nsh/<app id>`, by the id of the signed package (`default` for bundles and dev servers). |
+| `storageDirectory: URL?` | Where the apps loaded from now on keep their [storage](../modules/nsh-storage.md); `nil`: `Library/Application Support/nsh/<app id>`, by the app's own id. |
 | `loadBundle(at url: URL) throws` | Runs a bundle written by `nsh build`. Assets come from `assets/` next to it; `bundle.js.map` and `capabilities.json` next to it are read too. |
 | `run(_ package: NshPackage)` | Runs a verified signed package (see below). A package runs once. |
 | `loadPackage(at:trust:) async throws -> NshPackage.Info` | Verifies the package at a URL off the main thread, then runs it. Throws why it was refused; the running app stays. |
@@ -169,7 +169,7 @@ The complete sample, a UIKit app that shows an NSH app below its own native head
 
 `limits`, `grantCapabilities` and `storageDirectory` apply from the next load: set them before `loadBundle` / `run`.
 
-Each signed package keeps its storage under its own app id, which its release key's certificate vouches for. Bundles carry no verified id, so every bundle a host loads keeps its storage in `nsh/default`; a host that loads several bundles gives each view a directory of its own:
+Each app keeps its storage under its own id with no setting: a signed package under the id its release key's certificate vouches for, a bundle under the `id` of its `nsh.json` (`app.json` next to it, written by `nsh build`). Set `storageDirectory` to keep an app's data somewhere of the host's choosing:
 
 ```swift
 app.storageDirectory = FileManager.default

@@ -410,6 +410,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
             bytes,
             source_map,
             capabilities,
+            app_id,
         } => {
             // A bundle reached through a hot update keeps its "Updated".
             if dev.running != Some((session, version)) {
@@ -437,7 +438,10 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
-            bundle = match bundle.with_capabilities_json(capabilities.as_deref()) {
+            bundle = match bundle
+                .with_app_id(app_id.as_deref())
+                .with_capabilities_json(capabilities.as_deref())
+            {
                 Ok(bundle) => bundle,
                 Err(err) => {
                     dev.show_error("Invalid capabilities", &err, true);

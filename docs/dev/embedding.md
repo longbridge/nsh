@@ -126,11 +126,13 @@ in a resizable split.
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
   in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
-- **Storage.** Where apps keep `nsh/storage` (`storage.json`, `nsh_engine::FileStorage::open`): on the desktops
-  `AppOptions::storage` (a `StorageBackend`), else `app_data_dir(AppOptions::app_id)`; on iOS `NshAppView.storageDirectory`
-  (`nsh_app_set_storage_directory`), else `Application Support/nsh/<package app id | default>` (the standalone runner and
-  host: `app_data_dir(bundle id)`); on Android `NshView.setStorageDirectory`, else `filesDir/nsh/<package app id | default>`;
-  all from the next load.
+- **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
+  (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
+  (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
+  package's id; `Root::app_id` in Rust apps' generated code). Platforms only give the data dir: the system's
+  (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
+  `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
+  override one app's place; all from the next load.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload

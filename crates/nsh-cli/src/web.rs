@@ -148,6 +148,7 @@ pub(crate) fn package(
         manifest(name, id, appearance, &icons),
     )?;
     let app = serde_json::json!({
+        "id": id,
         "wasm": wasm,
         "code": code,
         "harden": harden,

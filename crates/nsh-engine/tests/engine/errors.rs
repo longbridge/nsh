@@ -65,6 +65,7 @@ fn uncaught_errors_point_at_app_sources() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();

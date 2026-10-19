@@ -68,8 +68,6 @@ public class NshView extends FrameLayout {
     private volatile String assetHttp;
     private volatile File assetDir;
     private volatile String assetApk;
-    /** The storage directory the embedding app chose; null: one per app id. */
-    private File storageDirectory;
     private TextView status;
     private View errorView;
 
@@ -108,7 +106,8 @@ public class NshView extends FrameLayout {
         // sets no soft input mode, this makes the system resize (and report
         // the keyboard as insets) instead of panning the window.
         setScrollContainer(true);
-        handle = Native.create(this, density, trace);
+        // Apps keep their data in nsh/<app id> in the files directory.
+        handle = Native.create(this, density, trace, new File(context.getFilesDir(), "nsh").getPath());
     }
 
     /**
@@ -151,25 +150,28 @@ public class NshView extends FrameLayout {
     /**
      * The directory the storage ({@code nsh/storage}) of the apps this view
      * loads from now on is kept in ({@code storage.json} in it). {@code null}
-     * (the default): {@code nsh/<app id>} in the Context's files directory,
-     * by the package's id ({@code nsh/default} for bundles, Rust apps and dev
-     * servers), so each signed app keeps its own.
+     * (the default): each app's own, {@code nsh/<app id>} in the Context's
+     * files directory (the id of {@code nsh.json}, {@code nsh/default}
+     * without one).
      *
      * @param dir the directory, or null
      */
     public void setStorageDirectory(File dir) {
-        storageDirectory = dir;
+        Native.setStorage(handle, dir == null ? null : dir.getPath());
     }
 
-    /** Points the next load's storage at the chosen directory or the app's own. */
-    private void useStorage(String appId) {
-        File dir = storageDirectory;
-        if (dir == null) {
-            boolean named = appId != null && !appId.isEmpty() && appId.indexOf('/') < 0
-                    && !appId.equals(".") && !appId.equals("..");
-            dir = new File(getContext().getFilesDir(), "nsh/" + (named ? appId : "default"));
+    /** The contents of {@code file}, or null when it does not exist. */
+    private static String readText(File file) throws java.io.IOException {
+        return file.exists() ? new String(Net.readAll(new FileInputStream(file)), StandardCharsets.UTF_8) : null;
+    }
+
+    /** The contents of asset {@code path}, or null when the APK has none. */
+    private String readAssetText(String path) {
+        try {
+            return new String(Net.readAll(getContext().getAssets().open(path)), StandardCharsets.UTF_8);
+        } catch (java.io.IOException none) {
+            return null;
         }
-        Native.setStorage(handle, dir.getPath());
     }
 
     /**
@@ -191,14 +193,12 @@ public class NshView extends FrameLayout {
             String map = null;
             File mapFile = new File(file.getParentFile(), "bundle.js.map");
             if (mapFile.exists()) map = new String(Net.readAll(new FileInputStream(mapFile)), StandardCharsets.UTF_8);
-            File declared = new File(file.getParentFile(), "capabilities.json");
-            String capabilities = declared.exists()
-                    ? new String(Net.readAll(new FileInputStream(declared)), StandardCharsets.UTF_8) : null;
+            String capabilities = readText(new File(file.getParentFile(), "capabilities.json"));
+            String app = readText(new File(file.getParentFile(), "app.json"));
             assetHttp = null;
             assetApk = null;
             assetDir = new File(file.getParentFile(), "assets");
-            useStorage(null);
-            Native.load(handle, code, false, map, capabilities);
+            Native.load(handle, code, false, map, capabilities, app);
             return true;
         } catch (Exception e) {
             reportError("cannot read bundle " + file + ": " + e);
@@ -216,18 +216,13 @@ public class NshView extends FrameLayout {
     public boolean loadAssetBundle(String dir) {
         try {
             byte[] code = Net.readAll(getContext().getAssets().open(dir + "/bundle.nshc"));
-            String capabilities = null;
-            try {
-                capabilities = new String(Net.readAll(getContext().getAssets().open(dir + "/capabilities.json")),
-                        StandardCharsets.UTF_8);
-            } catch (java.io.IOException none) {
-                // The app declares no capabilities.
-            }
+            // Null when the app declares no capabilities / has no id.
+            String capabilities = readAssetText(dir + "/capabilities.json");
+            String app = readAssetText(dir + "/app.json");
             assetHttp = null;
             assetDir = null;
             assetApk = dir + "/assets/";
-            useStorage(null);
-            Native.load(handle, code, true, null, capabilities);
+            Native.load(handle, code, true, null, capabilities, app);
             return true;
         } catch (Exception e) {
             reportError("cannot read the app bundle: " + e);
@@ -246,7 +241,6 @@ public class NshView extends FrameLayout {
         assetHttp = null;
         assetDir = null;
         assetApk = dir + "/assets/";
-        useStorage(null);
         Native.runRust(handle);
     }
 
@@ -258,7 +252,6 @@ public class NshView extends FrameLayout {
      */
     public void runPackage(NshPackage pkg) {
         long taken = pkg.take();
-        useStorage(pkg.appId);
         Native.runPackage(handle, taken);
     }
 
@@ -295,7 +288,6 @@ public class NshView extends FrameLayout {
         }
         assetDir = null;
         assetApk = null;
-        useStorage(null);
         return Native.connectDevServer(handle, url);
     }
 

@@ -59,7 +59,8 @@ build to the same file) and takes `nsh.js` from the crate.
   bytes: the engine reads fonts synchronously, `Assets::read`, to measure text with them). Fonts the entry or the UI
   sets register are fetched before the app starts; one only chunks register (`font("asset:/…")` in their code) comes
   with the first of them, through `createPlayer`'s `prepareChunk(id)`, which `nsh.js` awaits with the chunk's download
-  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, chunks })`; an app whose capabilities restrict `network`
+  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })` (`appId`: the
+  `nsh.json` id, the page's `app.id`; a Rust app's root carries its own); an app whose capabilities restrict `network`
   gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as bytecode
@@ -72,14 +73,14 @@ build to the same file) and takes `nsh.js` from the crate.
   `nsh.wasm` next to it, all `no-cache`), from `crates/nsh-cli/src/web/dev.html`. `nsh dev` serves it whenever a web
   runtime exists (`runtime::web(false)`), `nsh run --target web` builds one first and prints the page's address (the user opens it). The page
   speaks the dev protocol over the same port's WebSocket: its hello has platform `web` and an empty
-  `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it applies
-  patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
+  `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it runs
+  each bundle with its message's `app_id` (the app's storage), applies patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
   follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
   reads fonts with a synchronous `XMLHttpRequest` from `/assets/`.
 
 `nsh_bundle_options` sets how the next `nsh_start` / `nsh_start_bytecode` runs: development settings by default (the
-player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities and
-a source map; `nsh_bundle_harden` the hardening's bytecode.
+player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities,
+a source map and the app's id (for its storage); `nsh_bundle_harden` the hardening's bytecode.
 
 ### What a published app downloads
 
@@ -462,9 +463,11 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
 
 ## Platform services
 
-- **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<page directory>:<key>` (the
-  directory of `document.baseURI`), so sites at different paths of one origin keep theirs apart, while apps run one after
-  another on one page (the demo player, the dev host) share theirs. `nsh.js` wraps every call in try / catch (blocked
+- **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<app id>:<key>`
+  (`nsh_engine::local_storage_prefix`; the id `nsh.json` gives, which published sites, the dev host and Rust apps
+  carry), so an app keeps its data wherever its page is and apps of one origin keep theirs apart. An app without an id
+  (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
+  `document.baseURI`): apps run one after another on one such page share theirs. `nsh.js` wraps every call in try / catch (blocked
   storage, private mode, quota) and hands failures back as messages.
 - **Dialogs** (`Alert`, `ActionSheet`) are drawn in the root: with the `desktop` idiom as the Linux and macOS
   backends' cards (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert and

@@ -27,16 +27,16 @@ Each app has a storage of its own, up to 5 MB of keys and values. Calls run in t
 
 | Platform | Where the data is kept |
 |---|---|
-| iOS | `Library/Application Support/<app id>/storage.json` in the app's container; `…/nsh/<app id>/` for an app embedded in another app |
-| Android | `files/nsh/…/storage.json` in the app's private directory |
+| iOS | `Library/Application Support/nsh/<app id>/storage.json` in the app's container |
+| Android | `files/nsh/<app id>/storage.json` in the app's private directory |
 | macOS | `~/Library/Application Support/<app id>/storage.json` |
 | Windows | `%APPDATA%\<app id>\storage.json` |
 | Linux | `$XDG_DATA_HOME/<app id>/storage.json` (`~/.local/share/…`) |
-| Web | The browser's `localStorage`, under keys named after the page's directory (`nsh:/apps/todo/:…`) |
+| Web | The browser's `localStorage`, under keys named after the app id (`nsh:com.example.todo:…`) |
 
 A `storage.json` that is damaged is kept as `storage.json.corrupt` next to it, and the app starts with an empty storage; one that cannot be read leaves the app's changes in memory, so the file is never replaced.
 
-The app id is the `id` in `nsh.json`. An app embedded in another app can be given a directory of its own by the embedding app (see [Embedding on iOS](../docs/embedding-ios.md) and [Embedding on Android](../docs/embedding-android.md)).
+The app id is the `id` in `nsh.json`, and it travels with the app: `nsh build` and `nsh package` write it next to the bundle, the dev server sends it, and a signed package carries the one its release key's certificate vouches for. So every app keeps its own data with no setting, wherever it runs; an app without an id keeps it under `default`. An embedding app can choose another place (see [Embedding on iOS](../docs/embedding-ios.md) and [Embedding on Android](../docs/embedding-android.md)).
 
 ## Storage.getItem
 

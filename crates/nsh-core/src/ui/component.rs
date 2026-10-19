@@ -466,6 +466,7 @@ pub struct Root {
     theme: Option<Arc<super::Theme>>,
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
+    app_id: Option<String>,
 }
 
 impl Root {
@@ -476,7 +477,20 @@ impl Root {
             theme: None,
             fonts: Vec::new(),
             appearance: None,
+            app_id: None,
         }
+    }
+
+    /// The app's id (`nsh.json` `"id"`, which nsh's generated code sets):
+    /// it names where the app keeps its data (`nsh/storage`).
+    pub fn app_id(mut self, id: impl Into<String>) -> Self {
+        self.app_id = Some(id.into());
+        self
+    }
+
+    /// The app's id ([`Root::app_id`]).
+    pub fn app_id_ref(&self) -> Option<&str> {
+        self.app_id.as_deref()
     }
 
     /// Renders with `theme` (by default the default one).

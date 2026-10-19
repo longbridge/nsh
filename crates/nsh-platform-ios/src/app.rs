@@ -189,7 +189,6 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
             } else {
                 nsh_engine::Limits::standalone_mobile()
             },
-            storage: standalone_storage(),
             ..SurfaceOptions::default()
         },
     );
@@ -206,17 +205,6 @@ fn connect(mtm: MainThreadMarker, scene: &UIWindowScene) {
             _view: view,
         })
     });
-}
-
-/// Where a standalone app keeps its storage: Application Support of its
-/// container, in a directory named by its bundle id (on a Mac, outside the
-/// sandbox, Application Support is the user's, shared by every app).
-fn standalone_storage() -> Option<std::path::PathBuf> {
-    let id = objc2_foundation::NSBundle::mainBundle()
-        .bundleIdentifier()
-        .map(|id| id.to_string())
-        .filter(|id| nsh_engine::is_app_dir_name(id));
-    nsh_engine::app_data_dir(id.as_deref().unwrap_or("nsh"))
 }
 
 /// Mac Catalyst: hides the window's title and toolbar, so the title bar is

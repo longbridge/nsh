@@ -3,7 +3,7 @@
 use std::{sync::mpsc, time::Duration};
 
 use nsh_dev::{
-    ClientEvent, DevClient, DevEvent, DevServer, HostInfo,
+    AppInfo, ClientEvent, DevClient, DevEvent, DevServer, HostInfo,
     protocol::{BundleFormat, HostPlatform, LogLevel, WS_PATH},
 };
 
@@ -39,7 +39,10 @@ fn bundles_errors_and_logs_round_trip() {
         vec![1, 2, 3],
         "source v1".into(),
         Some("{\"version\":3}".into()),
-        Some("{\"statusBar\":true}".into()),
+        AppInfo {
+            capabilities: Some("{\"statusBar\":true}".into()),
+            id: Some("com.example.roundtrip".into()),
+        },
         None,
         vec!["nsh/ui/mobile".into()],
     );
@@ -60,8 +63,10 @@ fn bundles_errors_and_logs_round_trip() {
             bytes,
             source_map,
             capabilities,
+            app_id,
         } => {
             assert_ne!(session, 0, "the server names its run");
+            assert_eq!(app_id.as_deref(), Some("com.example.roundtrip"));
             assert_eq!(bytes, [1, 2, 3]);
             assert_eq!(source_map.as_deref(), Some("{\"version\":3}"));
             assert_eq!(capabilities.as_deref(), Some("{\"statusBar\":true}"));
@@ -86,7 +91,7 @@ fn bundles_errors_and_logs_round_trip() {
         vec![4],
         "source v2".into(),
         None,
-        None,
+        AppInfo::default(),
         Some(("patch v2".into(), Some("{}".into()))),
         Vec::new(),
     );
@@ -149,7 +154,14 @@ fn each_run_of_the_server_has_its_own_session() {
     let session_of = || {
         let server =
             DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
-        server.publish(vec![1], "v1".into(), None, None, None, Vec::new());
+        server.publish(
+            vec![1],
+            "v1".into(),
+            None,
+            AppInfo::default(),
+            None,
+            Vec::new(),
+        );
         let url = format!("ws://{}{WS_PATH}", server.local_addr());
         let (tx, rx) = mpsc::channel();
         let _client = DevClient::start(url, host("test-device", "bc-1"), move |e| {
@@ -183,7 +195,14 @@ fn a_host_without_the_apps_ui_set_is_told_it_cannot_run_it() {
         "nsh run examples/gallery-rs --target android".to_owned(),
     )]);
     let needs = || vec!["gallery/native".to_owned(), "nsh/ui/mobile".to_owned()];
-    server.publish(vec![1], "v1".into(), None, None, None, needs());
+    server.publish(
+        vec![1],
+        "v1".into(),
+        None,
+        AppInfo::default(),
+        None,
+        needs(),
+    );
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
 
     let (tx, rx) = mpsc::channel();
@@ -231,7 +250,7 @@ fn a_host_without_the_apps_ui_set_is_told_it_cannot_run_it() {
         vec![2],
         "v2".into(),
         None,
-        None,
+        AppInfo::default(),
         Some(("patch v2".into(), None)),
         needs(),
     );
@@ -241,7 +260,7 @@ fn a_host_without_the_apps_ui_set_is_told_it_cannot_run_it() {
         vec![3],
         "v3".into(),
         None,
-        None,
+        AppInfo::default(),
         None,
         vec!["nsh/ui/mobile".into()],
     );
@@ -257,7 +276,7 @@ fn a_host_without_the_apps_ui_set_is_told_it_cannot_run_it() {
     );
 
     // Needed again: reported again.
-    server.publish(vec![4], "v4".into(), None, None, None, needs());
+    server.publish(vec![4], "v4".into(), None, AppInfo::default(), None, needs());
     assert!(matches!(next_non_status(&rx), DevEvent::CannotRun { .. }));
     assert!(matches!(
         client_rx.recv_timeout(TIMEOUT).unwrap(),

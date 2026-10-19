@@ -28,6 +28,7 @@ fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     (
@@ -317,6 +318,7 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_ui_mobile::registry()],
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     (

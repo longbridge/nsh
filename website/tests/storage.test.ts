@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 
@@ -156,4 +156,88 @@ describe.skipIf(!!missing)('nsh/storage in the browser', () => {
     expect(counter(await dumpDom(url, profile('blocked')))).toBe('Opened 1 times');
     expect(counter(await dumpDom(url, profile('blocked')))).toBe('Opened 1 times');
   }, 60_000);
+});
+
+// A packaged app (`nsh package --target web`) keeps its entries under its
+// `nsh.json` id, wherever its site is served. Needs the CLI built
+// (`cargo build -p nsh-cli`; `NSH` names another) and Chrome; packaging
+// builds the release web runtime first if it is not built yet.
+const NSH = process.env.NSH ?? join(import.meta.dir, '..', '..', 'target', 'debug', 'nsh');
+const packageMissing = !existsSync(NSH)
+  ? `no nsh CLI at ${NSH} (run \`cargo build -p nsh-cli\`, or set NSH)`
+  : !chrome
+    ? 'no Chrome or Chromium found (set CHROME, or put google-chrome / chromium on PATH)'
+    : null;
+if (packageMissing) console.warn(`[storage.test] packaged app skipped: ${packageMissing}`);
+
+const KEPT_APP = `import { mount, signal, Text } from "nsh";
+import { Storage } from "nsh/storage";
+
+function App() {
+  const opened = signal<number | null>(null);
+  (async () => {
+    const count = Number((await Storage.getItem("opened")) ?? "0") + 1;
+    await Storage.setItem("opened", String(count));
+    opened.set(count);
+  })();
+  return <Text>{opened() === null ? "Reading" : \`Opened \${opened()} times\`}</Text>;
+}
+
+mount(App);
+`;
+
+// Beside the site's page: runs it in a frame and writes the localStorage
+// keys into its DOM once the app counted its launch.
+const KEPT_CHECK = `<!doctype html>
+<meta charset="utf-8">
+<pre id="result">pending</pre>
+<iframe id="app" src="index.html" style="width:390px;height:700px;border:0"></iframe>
+<script>
+  const frame = document.getElementById("app");
+  const text = () => frame.contentDocument?.body?.innerText ?? "";
+  const until = Date.now() + 6000;
+  (function poll() {
+    if (text().includes("Opened") || Date.now() > until) {
+      document.getElementById("result").textContent = JSON.stringify({ keys: Object.keys(localStorage).sort(), text: text() });
+    } else setTimeout(poll, 50);
+  })();
+</script>`;
+
+describe.skipIf(!!packageMissing)('nsh/storage in a packaged web app', () => {
+  let work: string;
+
+  beforeAll(() => {
+    work = mkdtempSync(join(tmpdir(), 'nsh-storage-package-'));
+  });
+  afterAll(() => {
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  test("entries are kept under the app's id", async () => {
+    const app = join(work, 'app');
+    mkdirSync(app);
+    writeFileSync(join(app, 'App.tsx'), KEPT_APP);
+    writeFileSync(join(app, 'nsh.json'), JSON.stringify({ name: 'Kept', id: 'com.nsh.kept' }));
+    const proc = Bun.spawn([NSH, 'package', app, '--target', 'web', '-o', join(work, 'out')], { stdout: 'pipe', stderr: 'pipe' });
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    if (code !== 0) throw new Error(`nsh package exited with ${code}: ${out}${err}`);
+    const site = join(work, 'out', 'Kept');
+    using server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch(req) {
+        const path = decodeURIComponent(new URL(req.url).pathname);
+        // Served under a path of its own: the id, not the path, names the entries.
+        if (path === '/apps/kept/check.html') return new Response(KEPT_CHECK, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+        const file = normalize(join(site, path.replace(/^\/apps\/kept\//, '/')));
+        if (!file.startsWith(site) || !existsSync(file) || statSync(file).isDirectory()) return new Response('not found', { status: 404 });
+        return new Response(Bun.file(file));
+      },
+    });
+    const dom = await dumpDom(`http://127.0.0.1:${server.port}/apps/kept/check.html`, join(work, 'profile'));
+    const json = dom.match(/<pre id="result">([\s\S]*?)<\/pre>/)?.[1] ?? '';
+    const result = JSON.parse(json.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+    expect(result.text).toContain('Opened 1 times');
+    expect(result.keys).toEqual(['nsh:com.nsh.kept:opened']);
+  }, 600_000);
 });

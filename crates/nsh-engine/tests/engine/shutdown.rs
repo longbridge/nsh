@@ -35,6 +35,7 @@ fn stop_spinning(code: &str) -> (Duration, Vec<String>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     let errors = Arc::new(Mutex::new(Vec::new()));

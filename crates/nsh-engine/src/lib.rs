@@ -42,7 +42,7 @@ pub use nsh_js::BYTECODE_VERSION;
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
-pub use storage::{FileStorage, app_data_dir, is_app_dir_name};
+pub use storage::{FileStorage, app_dir_name, data_dir};
 
 use crate::script::{NetworkQueue, RequestId, Script};
 
@@ -69,6 +69,16 @@ pub enum App {
 impl From<Bundle> for App {
     fn from(bundle: Bundle) -> Self {
         App::Js(bundle)
+    }
+}
+
+impl App {
+    /// The app's id (`nsh.json` `"id"`), when it carries one.
+    pub fn app_id(&self) -> Option<&str> {
+        match self {
+            App::Rust(root) => root.app_id_ref(),
+            App::Js(bundle) => bundle.app_id.as_deref(),
+        }
     }
 }
 
@@ -99,6 +109,9 @@ pub struct Bundle {
     /// apps); `None`: compiled when the policy hardens. Set it with
     /// [`Bundle::with_harden_bytecode`].
     pub harden_bytecode: Option<Arc<Vec<u8>>>,
+    /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
+    /// it names where the app keeps its data (`nsh/storage`).
+    pub app_id: Option<String>,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -215,6 +228,7 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             harden_bytecode: None,
+            app_id: None,
         }
     }
 
@@ -227,7 +241,15 @@ impl Bundle {
             base_url: None,
             chunks: Arc::default(),
             harden_bytecode: None,
+            app_id: None,
         }
+    }
+
+    /// The app's id ([`Bundle::app_id`]), as `nsh.json` or the dev server
+    /// gives it.
+    pub fn with_app_id(mut self, id: Option<&str>) -> Self {
+        self.app_id = id.map(str::to_owned);
+        self
     }
 
     /// Attaches a source map.
@@ -266,8 +288,8 @@ impl Bundle {
     }
 
     /// Reads a JS source bundle written by `nsh build` (`bundle.js`), plus
-    /// `bundle.js.map` and the app's `capabilities.json` next to it if
-    /// present. Bytecode (`bundle.nshc`) is refused: files can be replaced, and
+    /// `bundle.js.map`, the app's `capabilities.json` and its id
+    /// (`app.json` `"id"`) next to it if present. Bytecode (`bundle.nshc`) is refused: files can be replaced, and
     /// only [`Bundle::read_trusted`] (the app's own resources) or a verified
     /// package may load bytecode.
     pub fn read(path: &std::path::Path) -> io::Result<Bundle> {
@@ -301,6 +323,7 @@ impl Bundle {
         if let Ok(json) = std::fs::read_to_string(path.with_file_name("capabilities.json")) {
             bundle.policy.declared = Some(parse_capabilities(&json).map_err(io::Error::other)?);
         }
+        bundle.app_id = read_app_id(&path.with_file_name("app.json"));
         Ok(bundle)
     }
 }
@@ -326,8 +349,16 @@ impl Bundle {
             .as_ref()
             .map(Capabilities::from_json)
             .transpose()?;
+        bundle.app_id = Some(package.app.id.clone());
         Ok(bundle)
     }
+}
+
+/// The `"id"` of an `app.json` (`nsh build`'s, a packaged app's).
+fn read_app_id(path: &std::path::Path) -> Option<String> {
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    json.get("id")?.as_str().map(str::to_owned)
 }
 
 /// A verified package, unpacked ([`load_package`]).
@@ -493,10 +524,30 @@ pub struct EngineConfig {
     /// The tokio runtime the components' async tasks use (timers, IO,
     /// background work); `None`: one shared by the engines of the process.
     pub runtime: Option<tokio::runtime::Handle>,
-    /// Where the app's storage (`nsh/storage`) is kept: the platform's
-    /// ([`FileStorage`] in the app's data directory, the browser's
-    /// `localStorage`); `None`: in memory, for the engine's life.
+    /// Where apps keep their data: each app in `<data_dir>/<app id>`
+    /// ([`App::app_id`]; `default` without one), its storage
+    /// (`nsh/storage`) in `storage.json` there. The platform's: the
+    /// system's data directory ([`data_dir`]) for apps of their own,
+    /// `…/nsh` in an embedding app's. `None`: nothing is kept.
+    pub data_dir: Option<std::path::PathBuf>,
+    /// The app's storage, overriding the one [`EngineConfig::data_dir`]
+    /// names (the browser's `localStorage`, an embedder's own); `None`
+    /// with no data directory either: in memory, for the engine's life.
     pub storage: Option<Arc<dyn nsh_core::storage::StorageBackend>>,
+}
+
+/// The storage of the app `config` runs: [`EngineConfig::storage`], or a
+/// file in its directory of [`EngineConfig::data_dir`].
+fn app_storage(config: &EngineConfig) -> Option<Arc<dyn nsh_core::storage::StorageBackend>> {
+    if let Some(storage) = &config.storage {
+        return Some(storage.clone());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(root) = &config.data_dir {
+        let dir = root.join(app_dir_name(config.app.app_id()));
+        return Some(FileStorage::open(dir));
+    }
+    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -916,7 +967,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
-        core.set_storage(config.storage.clone());
+        core.set_storage(app_storage(&config));
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);

@@ -137,6 +137,10 @@ pub enum ServerMessage {
         /// with the same capabilities as the release.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capabilities: Option<String>,
+        /// The app's id (`nsh.json` `"id"`), which names where it keeps its
+        /// data.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
     },
 }
 
@@ -189,6 +193,7 @@ mod tests {
             format: BundleFormat::Bytecode,
             source_map: true,
             capabilities: None,
+            app_id: None,
         };
         // No declaration: the field is left out (older hosts read the same).
         assert_eq!(

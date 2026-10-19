@@ -52,9 +52,9 @@ void nsh_app_set_limits(NshApp *app, uint32_t memory_mb, uint32_t stack_kb, uint
                         uint32_t call_ms, uint32_t max_nodes);
 
 /// The directory the storage (`nsh/storage`) of the apps `app` loads is kept
-/// in (`storage.json` in it); NULL: `nsh/<app id>` in the embedding app's
-/// Application Support, by the package's id (`nsh/default` for bundles and
-/// dev servers). Applies from the next load. Returns why the path is invalid,
+/// in (`storage.json` in it); NULL: each app's own, `nsh/<app id>` in the
+/// embedding app's Application Support (the id of `nsh.json`, `nsh/default`
+/// without one). Applies from the next load. Returns why the path is invalid,
 /// or NULL.
 char *_Nullable nsh_app_set_storage_directory(NshApp *app, const char *_Nullable path);
 

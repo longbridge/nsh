@@ -154,6 +154,9 @@ struct BundleOptions {
     source_map: Option<String>,
     /// The hardening as bytecode ([`nsh_bundle_harden`]).
     harden: Option<Vec<u8>>,
+    /// The app's id (`nsh.json` `"id"`): it names where the app keeps its
+    /// data ([`storage::LocalStorage`]).
+    app_id: Option<String>,
 }
 
 struct Running {
@@ -472,11 +475,14 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
         }
     };
     bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
+    let bundle = bundle.with_app_id(options.app_id.as_deref());
     run(App::Js(bundle), width, height, environment)
 }
 
 /// Starts `app` in the page's surface.
 fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
+    let storage =
+        BASE_URL.with(|b| storage::LocalStorage::new(app.app_id(), b.borrow().as_deref()));
     let config = EngineConfig {
         app,
         viewport: Size::new(width, height),
@@ -494,9 +500,8 @@ fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
         limits: Limits::default(),
         ui_sets: ui_sets(),
         runtime: None,
-        storage: Some(std::sync::Arc::new(
-            BASE_URL.with(|b| storage::LocalStorage::new(b.borrow().as_deref())),
-        )),
+        data_dir: None,
+        storage: Some(std::sync::Arc::new(storage)),
     };
     let text = Rc::new(WebTextEngine::default());
     let Some(engine) = LocalEngine::start(config, text.clone(), Sink) else {
@@ -532,12 +537,13 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
 /// Sets how the next [`nsh_start`] runs its bundle: as a release
 /// (`release` 1: hardened, as `nsh package --target web` ships apps) or
 /// with development settings (0, the default), under the capabilities the
-/// app declares (`capabilities.json`; empty: no declaration) and with the
-/// bundle's source map (empty: none).
+/// app declares (`capabilities.json`; empty: no declaration), with the
+/// bundle's source map (empty: none) and the app's id (`nsh.json` `"id"`,
+/// which names where it keeps its data; empty: none, its page's path does).
 ///
 /// # Safety
 ///
-/// Both ranges are memory from [`nsh_alloc`].
+/// The three ranges are memory from [`nsh_alloc`].
 #[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_bundle_options(
@@ -546,16 +552,24 @@ pub unsafe extern "C" fn nsh_bundle_options(
     capabilities_len: usize,
     map: *const u8,
     map_len: usize,
+    app_id: *const u8,
+    app_id_len: usize,
 ) {
     // SAFETY: guaranteed by the caller.
-    let (capabilities, map) =
-        unsafe { (string(capabilities, capabilities_len), string(map, map_len)) };
+    let (capabilities, map, app_id) = unsafe {
+        (
+            string(capabilities, capabilities_len),
+            string(map, map_len),
+            string(app_id, app_id_len),
+        )
+    };
     OPTIONS.with(|o| {
         *o.borrow_mut() = BundleOptions {
             release: release != 0,
             capabilities: (!capabilities.is_empty()).then_some(capabilities),
             source_map: (!map.is_empty()).then_some(map),
             harden: None,
+            app_id: (!app_id.is_empty()).then_some(app_id),
         }
     });
 }

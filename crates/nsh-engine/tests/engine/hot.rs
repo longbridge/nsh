@@ -167,6 +167,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
         storage: None,
     };
     let engine = Engine::start(
@@ -311,6 +312,7 @@ fn entry_edits_keep_navigation_and_state() {
             limits: nsh_engine::Limits::default(),
             ui_sets: sets.to_vec(),
             runtime: None,
+            data_dir: None,
             storage: None,
         };
         let engine = Engine::start(

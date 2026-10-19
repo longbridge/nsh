@@ -10,9 +10,10 @@
 //!   offscreen and simulated input, to check the backend without touching
 //!   the screen.
 //! - `--size 390x844` sets the window size.
-//! - `--app-id <id>` sets the application id (`com.example.app`), which
-//!   the app's data (`nsh/storage`) is kept under; `nsh run` passes the
-//!   app's (`nsh.json` `"id"`), so each app keeps its own.
+//! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
+//!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
+//!   is kept under the id its bundle carries, in the system's data
+//!   directory.
 //!
 //! Without arguments it connects to the dev server on this machine.
 //!
