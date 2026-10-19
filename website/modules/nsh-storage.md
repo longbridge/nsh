@@ -2,6 +2,7 @@
 title: nsh/storage
 description: "Storage: keep strings by key on the device, across launches."
 order: 8.6
+demo: mod-storage
 ---
 
 # nsh/storage
@@ -32,6 +33,8 @@ Each app has a storage of its own, up to 5 MB of keys and values. Calls run in t
 | Windows | `%APPDATA%\<app id>\storage.json` |
 | Linux | `$XDG_DATA_HOME/<app id>/storage.json` (`~/.local/share/…`) |
 | Web | The browser's `localStorage`, under keys named after the page's directory (`nsh:/apps/todo/:…`) |
+
+A `storage.json` that is damaged is kept as `storage.json.corrupt` next to it, and the app starts with an empty storage; one that cannot be read leaves the app's changes in memory, so the file is never replaced.
 
 The app id is the `id` in `nsh.json`. An app embedded in another app can be given a directory of its own by the embedding app (see [Embedding on iOS](../docs/embedding-ios.md) and [Embedding on Android](../docs/embedding-android.md)).
 
@@ -110,19 +113,19 @@ mount(() => (
 
 ## From Rust
 
-Rust components read and write the same storage with functions of `nsh_core::ui::prelude`, so an app with a TSX entry and a Rust entry sees one set of data. They are synchronous: the entries are in memory.
+Rust components read and write the same storage with `nsh_core::storage::Storage`, whose functions mirror the TS ones, so an app with a TSX entry and a Rust entry sees one set of data. They are synchronous: the entries are in memory.
 
 ```rust
-use nsh_core::ui::prelude::*;
+use nsh_core::storage::Storage;
 
-let count: u32 = storage_item("count").and_then(|n| n.parse().ok()).unwrap_or(0);
-set_storage_item("count", (count + 1).to_string())?;
+let count: u32 = Storage::get_item("count").and_then(|n| n.parse().ok()).unwrap_or(0);
+Storage::set_item("count", (count + 1).to_string())?;
 ```
 
 | TS | Rust |
 |---|---|
-| `await Storage.getItem(key)` | `storage_item(key) -> Option<String>` |
-| `await Storage.setItem(key, value)` | `set_storage_item(key, value) -> Result<(), String>` |
-| `await Storage.removeItem(key)` | `remove_storage_item(key)` |
-| `await Storage.getAllKeys()` | `storage_keys() -> Vec<String>` |
-| `await Storage.clear()` | `clear_storage()` |
+| `await Storage.getItem(key)` | `Storage::get_item(key) -> Option<String>` |
+| `await Storage.setItem(key, value)` | `Storage::set_item(key, value) -> Result<(), StorageFull>` |
+| `await Storage.removeItem(key)` | `Storage::remove_item(key)` |
+| `await Storage.getAllKeys()` | `Storage::get_all_keys() -> Vec<String>` |
+| `await Storage.clear()` | `Storage::clear()` |
