@@ -4051,6 +4051,165 @@ mod components {
         );
     }
 
+    /// Children and a footer slot in one region, above a node of the view.
+    #[component]
+    fn Ledger(props: PanelProps) -> impl IntoElement {
+        view()
+            .child(dynamic(move || {
+                vec![props.children.into_element(), props.footer.place(|f| f)]
+            }))
+            .child(view())
+    }
+
+    /// The ids of `parent`'s children in the core's tree, in order.
+    fn child_ids(c: &Core<FakeEngine>, parent: NodeId) -> Vec<NodeId> {
+        let key = c.key(parent).unwrap();
+        c.nodes[key as usize]
+            .children
+            .iter()
+            .map(|&k| c.nodes[k as usize].id)
+            .collect()
+    }
+
+    /// A host of component `C` at node 2, in the root.
+    fn mount_host<C: Component>() -> Core<FakeEngine> {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<C>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<C>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        c
+    }
+
+    /// JS child `id` of host 2, before its JS sibling `before`.
+    fn js_child(id: NodeId, before: Option<NodeId>) -> Vec<Op> {
+        vec![
+            Op::Create { id, tag: Tag::View },
+            Op::Insert {
+                parent: 2,
+                child: id,
+                before,
+            },
+        ]
+    }
+
+    /// Fills host 2's footer slot with node 4 (holding node 6).
+    fn fill_footer() -> Vec<Op> {
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::ComponentSlot("footer".into()),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+        ]
+    }
+
+    /// A region inside a region resolves to what follows the outer one:
+    /// the JS children before it go before the view's node after both,
+    /// while the inner region (the footer) is empty and once it fills.
+    #[test]
+    fn children_in_a_region_go_before_the_node_after_it() {
+        let mut c = mount_host::<Ledger>();
+        let ids = child_ids(&c, 2);
+        assert_eq!(ids.len(), 1, "{ids:?}");
+        let tail = ids[0];
+        apply(&mut c, js_child(8, None));
+        c.commit().expect("a child before an empty region");
+        assert_eq!(child_ids(&c, 2), [8, tail]);
+        apply(&mut c, fill_footer());
+        c.commit().expect("the footer filled");
+        assert_eq!(child_ids(&c, 2), [8, 4, tail]);
+        apply(&mut c, js_child(10, None));
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [8, 10, 4, tail]);
+    }
+
+    /// A region that fills and empties again leaves the children before it
+    /// in place, and later ones go where they would have.
+    #[test]
+    fn children_stay_in_place_as_a_region_fills_and_empties() {
+        let mut c = mount_host::<Ledger>();
+        let tail = child_ids(&c, 2)[0];
+        apply(&mut c, js_child(8, None));
+        apply(&mut c, fill_footer());
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [8, 4, tail]);
+        apply(
+            &mut c,
+            vec![Op::Remove {
+                parent: 2,
+                child: 4,
+            }],
+        );
+        c.commit().expect("the footer emptied");
+        assert_eq!(child_ids(&c, 2), [8, tail]);
+        apply(&mut c, js_child(10, None));
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [8, 10, tail]);
+        apply(
+            &mut c,
+            vec![Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            }],
+        );
+        c.commit().expect("the footer filled again");
+        assert_eq!(child_ids(&c, 2), [8, 10, 4, tail]);
+    }
+
+    /// A child inserted before a JS sibling goes before it, wherever the
+    /// region after them is.
+    #[test]
+    fn children_go_before_the_sibling_js_names() {
+        let mut c = mount_host::<Panel>();
+        apply(&mut c, js_child(8, None));
+        apply(&mut c, fill_footer());
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [8, 4]);
+        apply(&mut c, js_child(10, Some(8)));
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [10, 8, 4]);
+        apply(&mut c, js_child(12, None));
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [10, 8, 12, 4]);
+    }
+
     #[test]
     fn slots_are_the_glues_nodes_placed_by_the_render() {
         let mut c = core();
