@@ -107,7 +107,8 @@ crates/
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
                        `web` (the WebAssembly runtime and the website's demos), `api` (records `api/current`; `--freeze`: a release's baseline)
 api/                  What apps depend on, held by the engine's `compat` tests: `current/` (this checkout's module exports, globals and
-                      declarations), `v<version>/` (each release's, frozen, with example apps it built and scripts of their use)
+                      declarations), `v<major>.<minor>/` (one per minor line, frozen by its releases, with the example apps its first built
+                      and scripts of their use)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
@@ -200,7 +201,7 @@ cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64
 cargo xtask ios-embed                                                           # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
 cargo xtask api                                                                 # record the API apps use in api/current (after an additive change)
-cargo xtask api --freeze                                                        # a release's baseline in api/v<version> (with the version bump)
+cargo xtask api --freeze                                                        # freeze a release's API in api/v<major>.<minor> (with the version bump)
 cargo test -p nsh-engine --test engine compat::                                 # the API against every release's baseline, and the apps they built
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler   # the web backend (empty off WebAssembly)
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets      # the Linux backend (on Linux; empty elsewhere)
@@ -240,8 +241,8 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   props, events and payload keys, style keys and values, Tailwind utilities. A rename or move keeps the old name as a
   `@deprecated` alias of the same implementation, for good. Types only widen; inputs gain optional members only;
   behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. Every API
-  change, additive ones included, is recorded in `api/current` (`cargo xtask api`); `api/v*` is never edited
-  (`docs/dev/compatibility.md`).
+  change, additive ones included, is recorded in `api/current` (`cargo xtask api`); `api/v*` only changes when a
+  release freezes it (`docs/dev/compatibility.md`).
 - **Primitives only.** The runtime adds capabilities, not widgets: components are drawn with the primitives in a UI
   set and look the same on every platform; no platform-styled widgets. React Native is a reference for which
   capabilities exist, not an API to be compatible with.

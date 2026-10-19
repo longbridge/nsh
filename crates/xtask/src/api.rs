@@ -1,9 +1,11 @@
 //! `cargo xtask api`: records the API this checkout offers apps in
 //! `api/current/` (the engine's `compat` tests compare it with what the
-//! runtime makes). `--freeze [<version>]` also makes the baseline of a
-//! release (the workspace's version by default) in `api/v<version>/`: the
-//! same surface and the apps of [`APPS`] as this checkout's `nsh build
-//! --release` writes them, each with the script of the previous baseline
+//! runtime makes). `--freeze [<version>]` also freezes it for a release
+//! (the workspace's version by default), in the baseline of its minor
+//! line, `api/v<major>.<minor>/`: once the release offers all the
+//! baselines do, its surface replaces the line's, and the first release of
+//! a line adds the apps of [`APPS`] as this checkout's `nsh build
+//! --release` writes them, each with the script of the previous line
 //! (docs/dev/compatibility.md).
 
 use std::{path::Path, process::Command};
@@ -18,14 +20,39 @@ const APPS: &[&str] = &["counter", "desktop", "gallery", "hopper"];
 pub(crate) fn api(freeze: Option<Option<String>>) -> anyhow::Result<()> {
     let root = root();
     let freeze = freeze.map(|v| v.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned()));
+    let baseline = match &freeze {
+        Some(version) => {
+            let mut parts = version.split('.');
+            let (Some(major), Some(minor)) = (parts.next(), parts.next()) else {
+                bail!("{version}: not a version");
+            };
+            Some(root.join("api").join(format!("v{major}.{minor}")))
+        }
+        None => None,
+    };
+    if baseline.is_some() {
+        // A baseline only grows: the release must offer all the baselines do.
+        term::cargo(
+            Command::new("cargo")
+                .current_dir(&root)
+                .args([
+                    "test",
+                    "-p",
+                    "nsh-engine",
+                    "--test",
+                    "engine",
+                    "compat::",
+                    "--",
+                ])
+                .args(["--skip", "compat::current_surface_is_recorded"]),
+            "and checking the API against the baselines",
+        )?;
+    }
     let mut test = Command::new("cargo");
     test.current_dir(&root)
         .args(["test", "-p", "nsh-engine", "--test", "engine", "--"])
         .args(["--exact", "compat::current_surface_is_recorded"])
         .env("NSH_API_UPDATE", "1");
-    let baseline = freeze
-        .as_ref()
-        .map(|v| root.join("api").join(format!("v{v}")));
     if let Some(dir) = &baseline {
         test.env("NSH_API_FREEZE", dir);
     }
@@ -34,6 +61,16 @@ pub(crate) fn api(freeze: Option<Option<String>>) -> anyhow::Result<()> {
     let Some(dir) = baseline else {
         return Ok(());
     };
+    let shown = dir
+        .strip_prefix(&root)
+        .unwrap_or(&dir)
+        .display()
+        .to_string();
+    if dir.join("apps").exists() {
+        // Apps are the line's first release's: what apps built then call.
+        term::done(format!("froze the API in {shown}"));
+        return Ok(());
+    }
     term::cargo(
         Command::new("cargo")
             .current_dir(&root)
@@ -77,10 +114,7 @@ pub(crate) fn api(freeze: Option<Option<String>>) -> anyhow::Result<()> {
             }
         }
     }
-    term::done(format!(
-        "froze {}",
-        dir.strip_prefix(&root).unwrap_or(&dir).display()
-    ));
+    term::done(format!("froze the API and the apps in {shown}"));
     Ok(())
 }
 

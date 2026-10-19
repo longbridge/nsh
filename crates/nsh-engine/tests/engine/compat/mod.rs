@@ -1,7 +1,8 @@
-//! Backward compatibility (docs/dev/compatibility.md): what each release
-//! offered apps is kept in `api/v<version>/`, and every later checkout
-//! still offers it and still runs the apps it built. `api/current/` is this
-//! checkout's own surface, so every change to it shows in review.
+//! Backward compatibility (docs/dev/compatibility.md): what the releases of
+//! each minor line offered apps is kept in `api/v<major>.<minor>/` (the
+//! surface of its latest release, the apps of its first), and every later
+//! checkout still offers it and still runs those apps. `api/current/` is
+//! this checkout's own surface, so every change to it shows in review.
 //!
 //! `NSH_API_UPDATE=1` rewrites `api/current/` and `NSH_API_FREEZE=<dir>`
 //! writes the surface into `<dir>`: `cargo xtask api` and
@@ -16,16 +17,29 @@ use std::path::{Path, PathBuf};
 /// The first release kept: versions before it make no promises.
 const FIRST: (u32, u32, u32) = (0, 1, 2);
 
+/// The minor line of a version (`0.1.2` → `v0.1`): its baseline's name.
+fn line(version: (u32, u32, u32)) -> String {
+    format!("v{}.{}", version.0, version.1)
+}
+
 fn api_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../api")
 }
 
+/// `major.minor.patch`, or `vmajor.minor` (a baseline: patch 0).
 fn version(text: &str) -> Option<(u32, u32, u32)> {
-    let mut parts = text.strip_prefix('v')?.split('.').map(|p| p.parse().ok());
-    Some((parts.next()??, parts.next()??, parts.next()??))
+    let mut parts = text
+        .trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse().ok());
+    let (major, minor) = (parts.next()??, parts.next()??);
+    match parts.next() {
+        Some(patch) => Some((major, minor, patch?)),
+        None => text.starts_with('v').then_some((major, minor, 0)),
+    }
 }
 
-/// The baselines of releases, oldest first.
+/// The baselines of minor lines, oldest first.
 fn baselines() -> Vec<(String, PathBuf)> {
     let mut out: Vec<_> = std::fs::read_dir(api_dir())
         .unwrap()
@@ -152,16 +166,18 @@ fn apps_of_releases_still_run() {
     assert!(failed.is_empty(), "{}", failed.join("\n\n"));
 }
 
-/// A release has its baseline: bumping the version freezes the API.
+/// The version's minor line has its baseline (the release workflow also
+/// checks that it is the release's surface).
 #[test]
 fn the_version_has_a_baseline() {
-    let first = baselines().first().and_then(|(n, _)| version(n));
-    assert_eq!(first, Some(FIRST), "the first baseline");
-    let current = format!("v{}", env!("CARGO_PKG_VERSION"));
-    if version(&current).unwrap() >= FIRST {
+    let first = baselines().first().map(|(n, _)| n.clone());
+    assert_eq!(first, Some(line(FIRST)), "the first baseline");
+    let current = version(env!("CARGO_PKG_VERSION")).unwrap();
+    if current >= FIRST {
+        let line = line(current);
         assert!(
-            api_dir().join(&current).join("runtime.txt").exists(),
-            "{current} has no baseline: cargo xtask api --freeze"
+            api_dir().join(&line).join("runtime.txt").exists(),
+            "{line} has no baseline: cargo xtask api --freeze"
         );
     }
 }

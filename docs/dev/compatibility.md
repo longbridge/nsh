@@ -41,7 +41,7 @@ earlier versions made no promises.
    format an earlier release wrote. New fields are optional.
 7. **The only exception is security**: a capability that cannot be kept safe may be closed. That change edits the
    frozen baseline in the same pull request, says why in its description and the release notes, and is the only
-   reason a file under `api/v*/` is ever edited by hand.
+   reason a baseline under `api/v*/` is ever changed other than by `cargo xtask api --freeze`.
 
 ## How it is enforced
 
@@ -52,12 +52,17 @@ api/
   current/              this checkout's surface (must match the code exactly)
     runtime.txt         every module's exports and the globals as the runtime makes them, with their members and kinds
     types/              the declarations of `.nsh/types`
-  v0.1.2/               the baseline of a release, frozen when it is made
-    runtime.txt
+  v0.1/                 the baseline of a minor line (0.1.x), frozen by each of its releases
+    runtime.txt         the surface of the line's latest release
     types/
-    apps/<app>/         what that release's `nsh build --release` wrote for an example app (bundle.js, assets/)
+    apps/<app>/         what the line's first release's `nsh build --release` wrote for an example app (bundle.js, assets/)
       script.txt        what a user does and sees in it
 ```
+
+There is one baseline per minor line, so `api/` grows by one directory per minor release, not per release. A patch
+release replaces its line's surface with its own, which only ever adds (the line's earlier surface is a subset by the
+rules); the apps stay those of the line's first release, which is where a new compiler output first ships. Files that
+do not change between lines (assets, most declarations) are stored once by git.
 
 The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pull request (the Core workflow):
 
@@ -69,8 +74,9 @@ The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pu
 - `apps_of_releases_still_run`: each kept app, as its release built it, starts on this runtime without an error and
   does what its script says. This is what catches what names cannot: `nsh:rt`'s calling conventions, props and
   styles that still parse, behavior.
-- `the_version_has_a_baseline`: once the workspace version is a release's, `api/v<version>/` exists. The release
-  workflow checks it too, so a release cannot be tagged without its baseline.
+- `the_version_has_a_baseline`: the workspace version's minor line has its baseline. The release workflow also checks
+  that the baseline is the tagged release's surface (`api/current/`, apps aside), so no release ships without being
+  frozen.
 
 ### Changing the API
 
@@ -81,11 +87,11 @@ The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pu
 
 ### Making a release
 
-Bump the workspace version, then run `cargo xtask api --freeze`: it records `api/current/` and writes
-`api/v<version>/` with the surface and the example apps (`APPS` in `crates/xtask/src/api.rs`) built by this checkout,
-each with the script of the previous baseline. Check that the scripts still pass (`compat::apps_of_releases_still_run`),
-extend them to what the release added, and commit the baseline with the version bump. From then on it is never edited
-(rule 7 aside).
+Bump the workspace version, then run `cargo xtask api --freeze`. It checks the API against every baseline, records
+`api/current/` and writes the surface into the line's baseline `api/v<major>.<minor>/`. On the first release of a line
+it also adds the example apps (`APPS` in `crates/xtask/src/api.rs`) built by this checkout, each with the script of the
+previous line: check that the scripts pass (`compat::apps_of_releases_still_run`), extend them to what the line added,
+and commit the baseline with the version bump. Nothing else changes a baseline (rule 7 aside).
 
 ### Scripts
 
