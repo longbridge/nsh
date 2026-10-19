@@ -86,6 +86,9 @@
 //! - `keyboard <height> <duration>`: the software keyboard shows at
 //!   `<height>` points over the bottom of the surface, animated over
 //!   `<duration>` seconds (`0 0`: it hides);
+//! - `pixelratio <ratio>`: the surface moves to a screen of `<ratio>`
+//!   device pixels per point (1 at the start), as a window moved to
+//!   another screen does;
 //! - `statusbar <key>=<value>...`: the status bar the platform was last
 //!   told to show reads `<value>` for each `<key>` given (`foreground`:
 //!   `auto`, `light` or `dark`; `hidden`, `animated`: `true` or `false`;
@@ -896,6 +899,13 @@ pub(crate) fn run(code: String, script: &str, dir: &Path) -> Result<(), Failure>
                     .ok_or_else(|| format!("`{line}`: keyboard <height> <duration>"))?;
                 environment.keyboard_height = px(height);
                 environment.keyboard_duration = duration;
+                run.control.set_environment(environment);
+            }
+            "pixelratio" => {
+                let [ratio] = numbers::<1>(arg)
+                    .filter(|[r]| *r > 0.0)
+                    .ok_or_else(|| format!("`{line}`: pixelratio <ratio>"))?;
+                environment.pixel_ratio = ratio;
                 run.control.set_environment(environment);
             }
             "statusbar" => {

@@ -243,7 +243,7 @@ function Input(props: InputProps): YNode;
 | `ViewStyle`、`TextStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
 | `GestureResponderEvent`、`LayoutEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
-| `ImageAsset` | 导入图片文件得到的对象（`{ uri, width, height }`） |
+| `ImageAsset` | 导入图片文件得到的对象（`{ uri, width, height, scales? }`；`scales` 列出它的[像素密度变体](../docs/images-and-assets.md#像素密度)） |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`、`AccessibilityState` | 无障碍属性 |
 

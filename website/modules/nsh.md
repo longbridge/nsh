@@ -248,7 +248,7 @@ The other elements come from their own modules: `Image` from [`nsh/image`](./nsh
 | `ViewStyle`, `TextStyle`, `ImageStyle`, `LayoutStyle`, `StyleProp<T>` | Style objects; see the [style reference](./style-reference.md) |
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
 | `GestureResponderEvent`, `LayoutEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
-| `ImageAsset` | What importing an image file gives (`{ uri, width, height }`) |
+| `ImageAsset` | What importing an image file gives (`{ uri, width, height, scales? }`; `scales` lists its [pixel-density variants](../docs/images-and-assets.md#pixel-densities)) |
 | `OS` | `"ios" \| "android" \| "macos" \| "windows" \| "linux" \| "web"` |
 | `AccessibilityRole`, `AccessibilityState` | Accessibility props |
 

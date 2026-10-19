@@ -21,7 +21,7 @@ The element's props are listed on [image](../elements/image.md).
 
 ## Images in the app
 
-Import an image file like a module. The import gives an `ImageAsset`, `{ uri, width, height }`, and the bundler ships the file with the app:
+Import an image file like a module. The import gives an `ImageAsset`, `{ uri, width, height, scales? }`, and the bundler ships the file with the app:
 
 ```tsx
 import logo from "./assets/logo@2x.png";
@@ -31,7 +31,7 @@ logo; // { uri: "asset:/assets/logo@2x.png", width: 64, height: 64 }
 
 Supported files: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic`.
 
-**Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point. There is no automatic choice between `logo@2x.png` and `logo@3x.png`: the file you import is the one that ships. Export at the highest density you need (`@3x` for the sharpest result on every phone); images are downsampled to the screen when decoded.
+**Sizes are in points.** An `@2x` or `@3x` suffix in the file name says the file has 2 or 3 pixels per point, so `logo@2x.png` at 128×128 pixels is a 64×64 point asset. Without a suffix, one pixel is one point.
 
 **Natural size.** An image from an asset lays out at its natural size when its style leaves the width or height open, so `<Image src={logo} />` needs no style. Set one dimension and `aspectRatio`, or both, to size it differently.
 
@@ -39,6 +39,31 @@ Assets are resolved relative to the importing module, and their `uri` is relativ
 
 > [!TIP]
 > `src` also accepts `asset:/path` strings, but only imported files are guaranteed to ship. A path that is never imported works with the dev server, which serves the whole app directory, and is missing from packaged apps. Import every image you use.
+
+### Pixel densities
+
+Import the file without a suffix and put its denser versions next to it, and the app loads the one that fits the screen:
+
+```text
+assets/
+├── logo.png       64×64 pixels
+├── logo@2x.png    128×128
+└── logo@3x.png    192×192
+```
+
+```tsx
+import logo from "./assets/logo.png";
+
+logo; // { uri: "asset:/assets/logo.png", width: 64, height: 64, scales: [1, 2, 3] }
+```
+
+- The bundler looks for `@1.5x`, `@2x`, `@3x` and `@4x` siblings of every imported image without a suffix, and ships the ones it finds. `scales` lists them, with 1 for the imported file; an image without siblings imports as `{ uri, width, height }`.
+- The image loads the smallest scale at least the screen's pixel ratio, otherwise the largest, as React Native picks: `logo.png` on a 1× screen, `logo@2x.png` on a 2× one, `logo@3x.png` on a 3× phone (and at 2.625). On the web only that file is downloaded.
+- When the pixel ratio changes (a window moved to another screen, browser zoom), the images whose choice changes load again, with their [load events](#load-events). Their size stays the imported file's size, in points.
+- The build warns when a variant's pixels are not the imported file's size times its scale.
+- Importing a file with a density suffix (`./logo@3x.png`) ships that file alone.
+
+One file is fine too: export it at the highest density you need (`@3x` for the sharpest result on every phone) and import it with its suffix; images are downsampled to the screen when decoded. Variants let each screen download, decode and keep the file that fits it.
 
 ## Remote images
 
@@ -131,6 +156,8 @@ const status = signal("loading…");
 
 `onLoad` reports the source image's size, not the size it was decoded at.
 
+An image with [pixel-density variants](#pixel-densities) loads one of its files, and `onLoad` reports that file's pixels: 192×192 for `logo@3x.png` on a 3× screen, where `Image.getSize(logo)` resolves with the imported file's 64×64. When the pixel ratio changes and the image loads another variant, that load reports its events too: `onLoadStart`, then `onLoad` with the new file's size (or `onError`), then `onLoadEnd`.
+
 ## Image.getSize and Image.prefetch
 
 The same `Image` that renders the element also works with images that are not on screen:
@@ -147,7 +174,7 @@ const ok = await Image.prefetch("https://example.com/next.jpg");      // true on
 | `Image.getSize(source)` | The image's size in pixels. Rejects when it cannot be loaded |
 | `Image.prefetch(source)` | `true` once the image's bytes are loaded |
 
-`source` is a URL string or `{ uri }`. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
+`source` is a URL string, `{ uri }` or an imported image. For an imported image with [variants](#pixel-densities), both load the variant the views load on this screen, and `getSize` gives the imported file's size. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
 
 A common use is sizing a remote image by its aspect ratio:
 

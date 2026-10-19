@@ -32,7 +32,7 @@ import logo from "./assets/logo.png";
 
 | 值 | 示例 | 说明 |
 |---|---|---|
-| 导入的资源 | `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height }`，以点为单位：`@2x` 文件按像素的一半计算。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`。 |
+| 导入的资源 | `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height, scales? }`，以点为单位：`@2x` 文件按像素的一半计算。当 `logo.png` 旁边有 `logo@2x.png` / `logo@3x.png` 时，会加载适合屏幕像素比的变体（[像素密度](../docs/images-and-assets.md#像素密度)）。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
 | `{ uri }` | `{ uri: "https://…" }` | 与字符串形式相同。 |
@@ -55,7 +55,7 @@ import logo from "./assets/logo.png";
 | `fadeDuration` | `number` | iOS `0`，Android `300` | 图片加载完成后淡入的时长，单位毫秒。 |
 | `onLoadStart` | `() => void` | | 开始加载。 |
 | `onProgress` | `(e: { loaded: number; total: number }) => void` | | 以字节计的下载进度（未知时 `total` 为 0），最多每 100 ms 一次。 |
-| `onLoad` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸）。 |
+| `onLoad` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸）；带有变体的图片给出所加载变体的尺寸。 |
 | `onError` | `(e: { message: string }) => void` | | 加载失败。 |
 | `onLoadEnd` | `() => void` | | 在 `onLoad` 或 `onError` 之后。 |
 
@@ -85,7 +85,9 @@ const state = signal("加载中");
 />;
 ```
 
-如果需要在显示前获取图片尺寸或预先加载，请调用 `Image.getSize(uri)` 和 `Image.prefetch(uri)`：它们就挂在渲染这个元素的、来自 [`nsh/image`](../modules/nsh-image.md) 的同一个 `Image` 上。
+带有[像素密度变体](../docs/images-and-assets.md#像素密度)的导入图片会加载其中一个文件，`onLoad` 报告的是该文件的像素尺寸：对于 64×64 点的 `logo.png`，在 3× 屏幕上报告 `logo@3x.png` 的 192×192。像素比变化、图片加载另一个变体时，这次加载同样会触发事件：先是 `onLoadStart`，然后是带有新文件尺寸的 `onLoad`（或 `onError`），最后是 `onLoadEnd`。
+
+如果需要在显示前获取图片尺寸或预先加载，请调用 `Image.getSize(uri)` 和 `Image.prefetch(uri)`：它们就挂在渲染这个元素的、来自 [`nsh/image`](../modules/nsh-image.md) 的同一个 `Image` 上。传入带有变体的导入图片时，它们加载当前屏幕显示的那个变体，`getSize` resolve 为导入文件的尺寸（`logo.png` 为 64×64）。
 
 ## ref 方法
 

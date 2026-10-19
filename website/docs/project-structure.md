@@ -208,7 +208,7 @@ declare module "node-polyfill";
 
 ## Assets
 
-Images and fonts are imported like modules. The bundler records each imported file and ships it with the app: `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
+Images and fonts are imported like modules. The bundler records each imported file (and an image's pixel-density variants) and ships it with the app: `nsh build` copies them to `out/assets/`, `nsh package` puts them in the app, and during development the dev server serves them.
 
 ```tsx
 import { Text } from "nsh";
@@ -222,7 +222,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 
 | Extension | Import gives |
 |---|---|
-| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. |
+| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height, scales? }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. A file without a suffix also ships its `@1.5x`–`@4x` siblings, listed in `scales`, and the screen's variant is loaded ([pixel densities](./images-and-assets.md#pixel-densities)). |
 | `.ttf`, `.otf` | The font's family name, a string. The font is registered before the first frame. |
 | `.json` | The parsed JSON |
 

@@ -10,6 +10,7 @@ import PropsListEvents from "./props-list-events";
 import PropsListFollow from "./props-list-follow";
 import PropsListLayout from "./props-list-layout";
 import PropsMediaImage from "./props-media-image";
+import PropsMediaImageVariants from "./props-media-image-variants";
 import PropsMediaVideo from "./props-media-video";
 import PropsMediaWebview from "./props-media-webview";
 import PropsScrollBehavior from "./props-scroll-behavior";
@@ -26,6 +27,7 @@ const cases: Record<string, () => JSX.Element> = {
   "props-list-follow": PropsListFollow,
   "props-list-layout": PropsListLayout,
   "props-media-image": PropsMediaImage,
+  "props-media-image-variants": PropsMediaImageVariants,
   "props-media-video": PropsMediaVideo,
   "props-media-webview": PropsMediaWebview,
   "props-scroll-behavior": PropsScrollBehavior,

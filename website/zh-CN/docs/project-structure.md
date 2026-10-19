@@ -207,7 +207,7 @@ declare module "node-polyfill";
 
 ## 资源
 
-图片和字体像模块一样导入。打包器会记录每个被导入的文件并随应用一起发布：`nsh build` 把它们复制到 `out/assets/`，`nsh package` 把它们放进应用，开发期间则由开发服务器提供。
+图片和字体像模块一样导入。打包器会记录每个被导入的文件（以及图片的像素密度变体）并随应用一起发布：`nsh build` 把它们复制到 `out/assets/`，`nsh package` 把它们放进应用，开发期间则由开发服务器提供。
 
 ```tsx
 import { Text } from "nsh";
@@ -221,7 +221,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 
 | 扩展名 | 导入得到 |
 |---|---|
-| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | 一个 `ImageAsset`：`{ uri, width, height }`，单位为点。文件名带 `@2x` / `@3x` 后缀时，像素尺寸除以 2 / 3。 |
+| `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | 一个 `ImageAsset`：`{ uri, width, height, scales? }`，单位为点。文件名带 `@2x` / `@3x` 后缀时，像素尺寸除以 2 / 3。不带后缀的文件还会发布它的 `@1.5x`–`@4x` 同名文件（列在 `scales` 中），并加载适合屏幕的变体（[像素密度](./images-and-assets.md#像素密度)）。 |
 | `.ttf`, `.otf` | 字体的族名，一个字符串。字体会在第一帧之前注册。 |
 | `.json` | 解析后的 JSON |
 

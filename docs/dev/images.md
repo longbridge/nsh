@@ -27,3 +27,10 @@
   The backends load a re-sent image as a new source, with its events: `onLoadStart`, `onLoad` (the variant's pixels, as
   for any source) or `onError`, then `onLoadEnd`. `Image.getSize` / `Image.prefetch` pick the same way, so a prefetch
   warms the bytes the views load; `getSize` divides the variant's pixels by its scale, the imported file's size.
+  The bundler finds the variants: its image `load` hook (`plugin.rs`) stats the fixed names `<stem>@<s>x.<ext>` for the
+  scales of `IMAGE_SCALES` above 1 (no directory listing), only for imports without a density suffix (`logo@3x.png`
+  probes nothing and ships alone). The ones found join `Bundle::assets`, so the dev server, `out/assets`, every package,
+  `.nshpkg` and the web package's asset map carry them, and the module gains `scales` (1 first) only when there is one:
+  an app without variants bundles byte for byte as before. Width and height still come from the imported file; a variant
+  that cannot be read fails the build as the imported file does, and one whose pixels are off that size times its scale
+  by a pixel or more is warned about on `nsh::build`.

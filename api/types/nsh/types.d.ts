@@ -73,6 +73,11 @@ export interface ImageAsset {
   uri: string;
   width: number;
   height: number;
+  /** The pixel densities it ships in, 1 being the imported file:
+   * `[1, 2, 3]` when `logo@2x.png` and `logo@3x.png` sit next to
+   * `logo.png`. The image loads the one for the screen's pixel ratio.
+   * Absent when the imported file is the only one. */
+  scales?: number[];
 }
 
 /** `<Image>` */

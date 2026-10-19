@@ -34,7 +34,7 @@ interface ImageSize {
 }
 ```
 
-Loads the image and resolves with its size in pixels (of the source image, not a downsampled copy). The loaded bytes stay in memory, so the `<Image>` that shows it next does not download it again. The promise rejects if the image cannot be loaded.
+Loads the image and resolves with its size in pixels (of the source image, not a downsampled copy). An imported image with [pixel-density variants](../docs/images-and-assets.md#pixel-densities) loads the variant the views load on this screen and resolves with the imported file's size, whichever variant it loaded (an `<Image>` showing it reports the loaded variant's pixels in `onLoad`). The loaded bytes stay in memory, so the `<Image>` that shows it next does not download it again. The promise rejects if the image cannot be loaded.
 
 ```tsx
 import { signal } from "nsh";
@@ -54,7 +54,7 @@ Image.getSize(url).then(({ width, height }) => ratio.set(width / height));
 prefetch(source: string | { uri: string }): Promise<boolean>;
 ```
 
-Loads an image ahead of showing it. Resolves with `true` once its bytes are in memory (`false` when it could not be loaded). Use it for the next page of a gallery or the image behind a tap.
+Loads an image ahead of showing it. Resolves with `true` once its bytes are in memory (`false` when it could not be loaded). For an imported image with pixel-density variants, it loads the variant the views load on this screen. Use it for the next page of a gallery or the image behind a tap.
 
 ```ts
 const next = photos.slice(index + 1, index + 4);
@@ -64,7 +64,7 @@ next.forEach((p) => Image.prefetch(p.url));
 ## Related
 
 - [`<Image>`](../elements/image.md): `src`, `resizeMode`, `defaultSource`, `onLoad`, `onProgress`, `onError` and the other props.
-- Importing an image file (`import logo from "./logo.png"`) gives an `ImageAsset` (`{ uri, width, height }`, sized in points) that `<Image src>` and canvas `drawImage` accept.
+- Importing an image file (`import logo from "./logo.png"`) gives an `ImageAsset` (`{ uri, width, height, scales? }`, sized in points) that `<Image src>` and canvas `drawImage` accept.
 
 > [!NOTE]
 > When your app declares `capabilities` in `nsh.json`, `getSize` and `prefetch` of remote URLs must be allowed under `network`, like `fetch`. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).

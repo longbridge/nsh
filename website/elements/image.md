@@ -35,7 +35,7 @@ follows the asset's aspect ratio. A URL has no known size before it loads, so gi
 
 | Value | Example | Description |
 |---|---|---|
-| An imported asset | `import logo from "./logo.png"` | An `ImageAsset` `{ uri, width, height }`, sized in points: a `@2x` file counts half its pixels. `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported. |
+| An imported asset | `import logo from "./logo.png"` | An `ImageAsset` `{ uri, width, height, scales? }`, sized in points: a `@2x` file counts half its pixels. With `logo@2x.png` / `logo@3x.png` next to `logo.png`, the variant for the screen's pixel ratio is loaded ([pixel densities](../docs/images-and-assets.md#pixel-densities)). `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported. |
 | A URL | `"https://example.com/a.jpg"` | Downloaded and cached. Downloads of the same URL are shared between views. |
 | An asset path | `"asset:/images/a.png"` | A file of the app's assets. |
 | `{ uri }` | `{ uri: "https://…" }` | The same as the string. |
@@ -60,7 +60,7 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Imag
 | `fadeDuration` | `number` | iOS `0`, Android `300` | How long a loaded image fades in, in milliseconds. |
 | `onLoadStart` | `() => void` | | Loading began. |
 | `onProgress` | `(e: { loaded: number; total: number }) => void` | | Download progress in bytes (`total` is 0 when unknown), at most every 100 ms. |
-| `onLoad` | `(e: { width: number; height: number }) => void` | | Loaded; the source image's size in pixels (not the decoded, downsampled one). |
+| `onLoad` | `(e: { width: number; height: number }) => void` | | Loaded; the source image's size in pixels (not the decoded, downsampled one); for an image with variants, the loaded variant's. |
 | `onError` | `(e: { message: string }) => void` | | Loading failed. |
 | `onLoadEnd` | `() => void` | | After `onLoad` or `onError`. |
 
@@ -90,8 +90,15 @@ const state = signal("loading");
 />;
 ```
 
+An imported image with [pixel-density variants](../docs/images-and-assets.md#pixel-densities) loads one of its files,
+and `onLoad` reports that file's pixels: 192×192 for `logo@3x.png` on a 3× screen, for a 64×64 point `logo.png`. When
+the pixel ratio changes and the image loads another variant, it reports that load too: `onLoadStart`, then `onLoad` with
+the new file's size (or `onError`), then `onLoadEnd`.
+
 To know an image's size or load it before showing it, call `Image.getSize(uri)` and `Image.prefetch(uri)`: the same
-`Image` from [`nsh/image`](../modules/nsh-image.md) that renders the element carries them.
+`Image` from [`nsh/image`](../modules/nsh-image.md) that renders the element carries them. Given an imported image with
+variants, they load the variant this screen shows, and `getSize` resolves with the imported file's size (64×64 for
+`logo.png`).
 
 ## Ref methods
 

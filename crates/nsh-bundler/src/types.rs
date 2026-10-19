@@ -56,7 +56,7 @@ fn assets() -> String {
     for ext in crate::plugin::IMAGE_EXTENSIONS {
         let _ = write!(
             out,
-            "\ndeclare module \"*.{ext}\" {{\n  /** The image, sized in points (`@2x` files at half their pixels). */\n  const asset: import(\"./types\").ImageAsset;\n  export default asset;\n}}\n"
+            "\ndeclare module \"*.{ext}\" {{\n  /** The image, sized in points (`@2x` files at half their pixels). Imported without a density suffix, its `@1.5x`–`@4x` siblings ship too (in `scales`) and the one for the screen loads. */\n  const asset: import(\"./types\").ImageAsset;\n  export default asset;\n}}\n"
         );
     }
     for ext in crate::plugin::FONT_EXTENSIONS {
@@ -75,5 +75,20 @@ mod tests {
         let assets = super::assets();
         assert!(assets.contains("declare module \"*.png\""));
         assert!(assets.contains("declare module \"*.ttf\""));
+    }
+
+    #[test]
+    fn variant_types_image_modules_describe_variants() {
+        let assets = super::assets();
+        for ext in crate::plugin::IMAGE_EXTENSIONS {
+            let module = format!("declare module \"*.{ext}\" {{");
+            let at = assets.find(&module).expect(ext);
+            let block = &assets[at..at + assets[at..].find("\n}\n").unwrap()];
+            assert!(
+                block.contains("its `@1.5x`–`@4x` siblings ship too (in `scales`)"),
+                "{block}"
+            );
+            assert!(block.contains("import(\"./types\").ImageAsset"), "{block}");
+        }
     }
 }
