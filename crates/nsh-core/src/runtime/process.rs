@@ -669,6 +669,10 @@ mod native {
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
+            // The resolved file runs, under the name the app gave: a link's
+            // name picks its behavior (`clang++`, busybox applets, a venv's
+            // `python`).
+            cmd.arg0(&launch.command);
         }
         #[cfg(target_os = "windows")]
         {

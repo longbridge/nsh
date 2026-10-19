@@ -460,3 +460,15 @@ fn past_the_children_limit_spawn_throws_and_run_rejects_a_range_error() {
     );
     assert_eq!(app.shown("done"), "done RangeError RangeError");
 }
+
+#[test]
+fn a_child_runs_under_the_name_it_was_given() {
+    // `/bin/sh` is often a link: the link's name, not its target's, is
+    // the child's `argv[0]`.
+    let app = App::start(
+        r#"process.run("/bin/sh", ["-c", "tr '\\0' '\\n' < /proc/$$/cmdline | head -n 1"])
+  .then((r) => report(r.stdout.trim()), (e) => report(String(e)));"#,
+        shell(),
+    );
+    assert_eq!(app.shown("done"), "done /bin/sh");
+}
