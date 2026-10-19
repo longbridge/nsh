@@ -915,6 +915,8 @@ pub unsafe extern "C" fn nsh_event(
                             "left" => "left",
                             "text" => "text",
                             "has" => "has",
+                            "uri" => "uri",
+                            "files" => "files",
                             "error" => "error",
                             "url" => "url",
                             "title" => "title",

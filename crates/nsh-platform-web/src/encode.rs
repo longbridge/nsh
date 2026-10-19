@@ -1318,6 +1318,30 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .bool(*has_only)
                 .end();
         }
+        Command::SetClipboardImage(uri) => out
+            .item("cmd")
+            .num(id)
+            .str("setClipboardImage")
+            .str(uri)
+            .end(),
+        Command::ReadClipboardImage {
+            id: request,
+            has_only,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("readClipboardImage")
+                .num(*request)
+                .bool(*has_only)
+                .end();
+        }
+        Command::ReadClipboardFiles { id: request } => {
+            out.item("cmd")
+                .num(id)
+                .str("readClipboardFiles")
+                .num(*request)
+                .end();
+        }
         Command::ImageInfo { id: request, uri } => {
             out.item("cmd")
                 .num(id)

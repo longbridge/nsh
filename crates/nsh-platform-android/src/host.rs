@@ -36,6 +36,9 @@ pub(crate) struct Host {
     density: f32,
     trace: bool,
     engine: Mutex<Option<Engine>>,
+    /// The running engine's control, for answers the sink gives itself
+    /// (never locked while an engine stops, unlike `engine`).
+    answers: Mutex<Option<EngineControl>>,
     /// The app, waiting for the first non-empty size.
     pending: Mutex<Option<App>>,
     viewport: Mutex<Size>,
@@ -88,6 +91,7 @@ impl Host {
             return;
         }
         // Stop the old engine first: its batches must not reach the new app.
+        *self.answers.lock().expect("answers") = None;
         drop(self.engine.lock().expect("engine").take());
         *self.animation_queue.lock().expect("queue") = VecDeque::new();
         *self.ui.lock().expect("ui") = UiAnimation::default();
@@ -111,7 +115,10 @@ impl Host {
         let density = self.density;
         let sink = Sink(self.clone());
         match Engine::start(config, move || AndroidTextEngine { density }, sink) {
-            Ok(engine) => *self.engine.lock().expect("engine") = Some(engine),
+            Ok(engine) => {
+                *self.answers.lock().expect("answers") = Some(engine.control());
+                *self.engine.lock().expect("engine") = Some(engine);
+            }
             Err(err) => log::error!("failed to start the engine: {err}"),
         }
     }
@@ -196,6 +203,34 @@ impl Host {
     }
 }
 
+/// Answers the clipboard's image and file reads, which Android's
+/// clipboard holds as content URIs NSH does not read yet: no image, no
+/// files.
+fn answer_clipboard_reads(host: &Host, batch: &MountBatch) {
+    use nsh_core::{Command, platform::clipboard};
+    let reads = batch.items.iter().filter_map(|item| match item {
+        MountItem::Command {
+            command: Command::ReadClipboardImage { id, .. },
+            ..
+        } => Some(clipboard::image_answer(*id, false, None)),
+        MountItem::Command {
+            command: Command::ReadClipboardFiles { id },
+            ..
+        } => Some(clipboard::files_answer(*id, &[])),
+        _ => None,
+    });
+    let mut reads = reads.peekable();
+    if reads.peek().is_none() {
+        return;
+    }
+    let Some(control) = host.answers.lock().ok().and_then(|c| c.clone()) else {
+        return;
+    };
+    for payload in reads {
+        control.dispatch_event(nsh_core::ROOT_ID, EventKind::Clipboard, payload);
+    }
+}
+
 /// Hands commits to the UI thread: one `NshView.submit(bytes, objects, seq)`
 /// call per batch.
 struct Sink(Arc<Host>);
@@ -203,6 +238,7 @@ struct Sink(Arc<Host>);
 impl MountSink for Sink {
     fn submit(&self, batch: MountBatch) {
         let host = &self.0;
+        answer_clipboard_reads(host, &batch);
         let encoded = encode::encode(batch);
         let seq = host.seq.fetch_add(1, Ordering::Relaxed) + 1;
         if !encoded.animation.is_empty() {
@@ -336,6 +372,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_create(
         density,
         trace: trace != 0,
         engine: Mutex::new(None),
+        answers: Mutex::new(None),
         pending: Mutex::new(None),
         viewport: Mutex::new(Size::new(0.0, 0.0)),
         environment: Mutex::new(Environment::default()),
@@ -496,6 +533,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_destroy(
     let host = unsafe { Box::from_raw(handle as *mut Arc<Host>) };
     #[cfg(feature = "dev")]
     drop(host.dev.lock().expect("dev").take());
+    *host.answers.lock().expect("answers") = None;
     drop(host.engine.lock().expect("engine").take());
 }
 

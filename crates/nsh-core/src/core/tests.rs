@@ -5925,6 +5925,122 @@ mod components {
         assert_eq!(shown.last().unwrap(), "pasted hello");
     }
 
+    /// Pastes the clipboard's image and files when pressed.
+    #[component]
+    fn ImagePaster() -> impl IntoElement {
+        let pasted = signal(String::new());
+        view()
+            .child(text(move || format!("pasted {}", pasted.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let (has, image, files) =
+                    (clipboard_has_image(), clipboard_image(), clipboard_files());
+                spawn(async move {
+                    let has = has.await;
+                    let image = image
+                        .await
+                        .map(|i| format!("{}x{} {}", i.width, i.height, i.uri));
+                    let files = files.await.join(",");
+                    pasted.set(format!("{has} {image:?} {files}"));
+                });
+            }))
+    }
+
+    #[test]
+    fn components_read_images_and_files_from_the_clipboard() {
+        let mut c = core();
+        c.mount_root(&crate::ui::Root::new::<ImagePaster>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let reads: Vec<_> = c
+            .commit()
+            .unwrap()
+            .items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command:
+                        command @ (Command::ReadClipboardImage { .. }
+                        | Command::ReadClipboardFiles { .. }),
+                } => Some(command),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reads,
+            [
+                Command::ReadClipboardImage {
+                    id: 1,
+                    has_only: true
+                },
+                Command::ReadClipboardImage {
+                    id: 2,
+                    has_only: false
+                },
+                Command::ReadClipboardFiles { id: 3 },
+            ]
+        );
+        use crate::PayloadValue::{Bool, Number, Str};
+        let answers = [
+            vec![("id", Number(1.0)), ("has", Bool(true))],
+            vec![
+                ("id", Number(2.0)),
+                ("has", Bool(true)),
+                ("uri", Str("data:image/png;base64,AA==".into())),
+                ("width", Number(4.0)),
+                ("height", Number(3.0)),
+            ],
+            vec![
+                ("id", Number(3.0)),
+                ("has", Bool(true)),
+                ("files", Str("file:///tmp/a%20b.png\nfile:///tmp/c/".into())),
+            ],
+        ];
+        for payload in answers {
+            assert!(c.component_event(ROOT_ID, EventKind::Clipboard, &EventPayload::Map(payload)));
+        }
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted t")));
+        assert_eq!(
+            shown.last().unwrap(),
+            "pasted true Some(\"4x3 data:image/png;base64,AA==\") file:///tmp/a%20b.png,file:///tmp/c/"
+        );
+    }
+
+    #[test]
+    fn clipboard_images_need_the_capability() {
+        let mut c = core();
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        c.mount_root(&crate::ui::Root::new::<ImagePaster>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        assert!(
+            !items.iter().any(|i| matches!(i, MountItem::Command { .. })),
+            "nothing reaches the platform"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted f")));
+        assert_eq!(shown.last().unwrap(), "pasted false None ");
+    }
+
     /// Shows a fallback while a component below it failed; a press tries
     /// again.
     #[component]

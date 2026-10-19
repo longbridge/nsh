@@ -1116,6 +1116,17 @@ impl Mounter {
                     EventPayload::Map(fields),
                 );
             }
+            (Command::SetClipboardImage(uri), _) => crate::system::set_clipboard_image(&uri),
+            (Command::ReadClipboardImage { id, has_only }, _) => self.control.dispatch_event(
+                nsh_core::ROOT_ID,
+                EventKind::Clipboard,
+                crate::system::read_clipboard_image(id, has_only),
+            ),
+            (Command::ReadClipboardFiles { id }, _) => self.control.dispatch_event(
+                nsh_core::ROOT_ID,
+                EventKind::Clipboard,
+                crate::system::read_clipboard_files(id),
+            ),
             (Command::AccessibilityFocus, native) => {
                 crate::system::accessibility_focus(native.view())
             }

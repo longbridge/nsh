@@ -254,6 +254,13 @@ impl ModuleCx {
             .push(super::services::set_clipboard(text.into()));
     }
 
+    /// Puts the image of a `data:` URI on the system clipboard (TS:
+    /// `Clipboard.setImage`).
+    pub fn set_clipboard_image(&mut self, uri: impl Into<String>) {
+        self.actions
+            .push(super::services::set_clipboard_image(uri.into()));
+    }
+
     /// Shows `message` at the bottom of the screen (Android's toasts);
     /// nothing happens elsewhere.
     pub fn toast(&mut self, message: impl Into<String>, duration: super::ToastDuration) {

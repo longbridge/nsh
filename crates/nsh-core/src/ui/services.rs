@@ -12,7 +12,7 @@ use std::{
 
 use super::{
     Answer, ImageSize, PropEnum,
-    task::{Action, AnswerSlot, ClipboardRead},
+    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead},
 };
 use crate::{
     Command, ROOT_ID,
@@ -141,6 +141,29 @@ pub(crate) fn clipboard_string() -> (Answer<String>, Action) {
 pub(crate) fn clipboard_has_string() -> (Answer<bool>, Action) {
     let (answer, slot) = Answer::new();
     (answer, Action::ReadClipboard(ClipboardRead::Has(slot)))
+}
+
+/// Puts the image of the `data:` URI `uri` on the system clipboard.
+pub(crate) fn set_clipboard_image(uri: String) -> Action {
+    Action::Command(ROOT_ID, Command::SetClipboardImage(uri))
+}
+
+/// The image on the system clipboard (`None` when it holds none).
+pub(crate) fn clipboard_image() -> (Answer<Option<ClipboardImage>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::ReadClipboard(ClipboardRead::Image(slot)))
+}
+
+/// Whether the system clipboard holds an image (without reading it).
+pub(crate) fn clipboard_has_image() -> (Answer<bool>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::ReadClipboard(ClipboardRead::HasImage(slot)))
+}
+
+/// The `file:` URLs of the local files on the system clipboard.
+pub(crate) fn clipboard_files() -> (Answer<Vec<String>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::ReadClipboard(ClipboardRead::Files(slot)))
 }
 
 /// The size of the image at `uri`, its bytes loaded.

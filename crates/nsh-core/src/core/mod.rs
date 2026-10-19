@@ -1229,11 +1229,18 @@ impl<M: TextEngine> Core<M> {
                     self.deny(message);
                     continue;
                 }
-                Command::SetClipboard(_) | Command::ReadClipboard { .. }
+                Command::SetClipboard(_)
+                | Command::ReadClipboard { .. }
+                | Command::SetClipboardImage(_)
+                | Command::ReadClipboardImage { .. }
+                | Command::ReadClipboardFiles { .. }
                     if !self.access.allows_clipboard() =>
                 {
-                    if let Command::ReadClipboard { id: request, .. } = &command {
-                        self.answer_clipboard(*request, None, false);
+                    if let Command::ReadClipboard { id: request, .. }
+                    | Command::ReadClipboardImage { id: request, .. }
+                    | Command::ReadClipboardFiles { id: request } = &command
+                    {
+                        self.answer_clipboard(*request, components::ClipboardAnswer::default());
                     }
                     self.deny("the clipboard is not granted: add `\"clipboard\": true` to capabilities in nsh.json".into());
                     continue;

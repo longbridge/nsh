@@ -44,7 +44,7 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchTime};
 use nsh_core::{
     Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
-    Rect,
+    Rect, platform::clipboard,
 };
 use nsh_engine::{ColorScheme, Environment, Idiom, Insets, Locale, Os};
 use objc2::{
@@ -54,14 +54,15 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAccessibilityPriorityLevel, NSAlert, NSAlertFirstButtonReturn, NSAlertStyle, NSAppearance,
-    NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSColor, NSFont,
-    NSModalResponse, NSPasteboard, NSPasteboardTypeString, NSResponder, NSScreen, NSTextAlignment,
-    NSTextField, NSView, NSWorkspace, NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
+    NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+    NSBitmapImageFileType, NSBitmapImageRep, NSColor, NSFont, NSModalResponse, NSPasteboard,
+    NSPasteboardTypeString, NSResponder, NSScreen, NSTextAlignment, NSTextField, NSView,
+    NSWorkspace, NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification,
 };
 use objc2_core_foundation::{CGPoint, CGSize};
 use objc2_foundation::{
-    NSCurrentLocaleDidChangeNotification, NSKeyValueObservingOptions, NSLocale,
-    NSLocaleLanguageDirection, NSNotification, NSNotificationCenter, NSObject,
+    NSCurrentLocaleDidChangeNotification, NSData, NSDictionary, NSKeyValueObservingOptions,
+    NSLocale, NSLocaleLanguageDirection, NSNotification, NSNotificationCenter, NSObject,
     NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSOperationQueue, NSPoint,
     NSProcessInfo, NSString, ns_string,
 };
@@ -374,6 +375,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
+        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::ReadClipboardImage { id, has_only } => {
+            read_clipboard_image(surface, *id, *has_only)
+        }
+        Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             if let Some(window) = surface.root.ns().window() {
@@ -743,6 +749,116 @@ fn fade(
         }
         false
     });
+}
+
+/// The pasteboard types of images NSH reads and writes, by MIME type, in
+/// the order they are read: the first one the pasteboard holds wins.
+const IMAGE_TYPES: [(&str, &str); 6] = [
+    ("image/png", "public.png"),
+    ("image/jpeg", "public.jpeg"),
+    ("image/gif", "com.compuserve.gif"),
+    ("image/webp", "org.webmproject.webp"),
+    ("image/bmp", "com.microsoft.bmp"),
+    ("image/tiff", "public.tiff"),
+];
+
+/// `Clipboard.setImage`: the image of a `data:` URI on the pasteboard,
+/// under its own type (and TIFF too, which every AppKit app reads, unless
+/// it is TIFF already).
+fn set_clipboard_image(uri: &str) {
+    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
+        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        return;
+    };
+    let Some((_, kind)) = IMAGE_TYPES.iter().find(|(m, _)| *m == mime) else {
+        log::warn!("Clipboard.setImage: unsupported image type {mime}");
+        return;
+    };
+    let pasteboard = NSPasteboard::generalPasteboard();
+    pasteboard.clearContents();
+    let data = NSData::with_bytes(&bytes);
+    pasteboard.setData_forType(Some(&data), &NSString::from_str(kind));
+    if *kind != "public.tiff"
+        && let Some(tiff) =
+            NSBitmapImageRep::imageRepWithData(&data).and_then(|r| r.TIFFRepresentation())
+    {
+        pasteboard.setData_forType(Some(&tiff), &NSString::from_str("public.tiff"));
+    }
+}
+
+/// `Clipboard.getImage` / `hasImage`: answers read `id` with the
+/// pasteboard's first image of [`IMAGE_TYPES`]; a TIFF becomes PNG (an
+/// image source of any platform), off the main thread.
+fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    // The types on offer: reading them is no paste (no privacy notice).
+    let kind = pasteboard.types().and_then(|types| {
+        IMAGE_TYPES
+            .iter()
+            .map(|(_, kind)| NSString::from_str(kind))
+            .find(|kind| types.containsObject(kind))
+    });
+    let data = kind
+        .as_ref()
+        .filter(|_| !has_only)
+        .and_then(|kind| pasteboard.dataForType(kind));
+    let Some(data) = data else {
+        let payload = clipboard::image_answer(id, kind.is_some(), None);
+        surface.event(ROOT_ID, EventKind::Clipboard, payload);
+        return;
+    };
+    let bytes = data.to_vec();
+    let key = surface.key();
+    DispatchQueue::global_queue(dispatch2::GlobalQueueIdentifier::Priority(
+        dispatch2::DispatchQueueGlobalPriority::Default,
+    ))
+    .exec_async(move || {
+        let png = clipboard::Image::sniff(&bytes)
+            .filter(|i| i.mime != "image/tiff")
+            .is_none()
+            .then(|| to_png(&bytes))
+            .flatten();
+        let bytes = png.as_deref().unwrap_or(&bytes);
+        let payload = clipboard::image_answer(id, true, clipboard::Image::sniff(bytes));
+        DispatchQueue::main().exec_async(move || {
+            if let Some(surface) = Surface::with_key(key) {
+                surface.event(ROOT_ID, EventKind::Clipboard, payload);
+            }
+        });
+    });
+}
+
+/// Encoded image `bytes` (a TIFF) encoded again as PNG.
+fn to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let rep = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(bytes))?;
+    // SAFETY: an empty dictionary of properties is valid for every type.
+    let png = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+    }?;
+    Some(png.to_vec())
+}
+
+/// `Clipboard.getFiles`: the local files' `file:` URLs on the pasteboard
+/// (one item each, as Finder copies them).
+fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
+    let pasteboard = NSPasteboard::generalPasteboard();
+    let kind = NSString::from_str("public.file-url");
+    let files: Vec<String> = pasteboard
+        .pasteboardItems()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.stringForType(&kind))
+                .filter(|uri| crate::file_drop::is_local_uri(uri))
+                .map(|uri| uri.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    surface.event(
+        ROOT_ID,
+        EventKind::Clipboard,
+        clipboard::files_answer(id, &files),
+    );
 }
 
 /// `Clipboard.getString` / `hasString`: answers read `id` with whether the
