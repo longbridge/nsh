@@ -138,6 +138,9 @@ for (const options of [42, { protocols: ["chat"] }, { headers: 42 }, { headers: 
   try { Client.connect("ws://127.0.0.1:9/", options); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError); }
 }
 try { Client.connect("https://127.0.0.1/"); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError); }
+for (const url of ["ws://user:secret@127.0.0.1:9/", "ws://127.0.0.1:9/#part"]) {
+  try { Client.connect(url); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError && /credentials/.test(e.message)); }
+}
 try { Client.connect("ws://example.com/"); threw.push("connected"); } catch (e) {
   threw.push(e instanceof TypeError && /capabilities.network.http/.test(e.message));
 }
@@ -146,7 +149,7 @@ report(threw.join(" "));"#,
     );
     assert_eq!(
         shown(&rx, "done"),
-        "done true true true true true true true true true"
+        "done true true true true true true true true true true true"
     );
 }
 

@@ -55,6 +55,15 @@ impl WebSocket {
                 "WebSocket.connect(url) expects a ws:// or wss:// URL".into(),
             ));
         }
+        // As the global `WebSocket`: the handshake would drop them silently.
+        if parsed.fragment().is_some()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(JsError::Type(
+                "WebSocket.connect(url) expects a URL without credentials or fragment".into(),
+            ));
+        }
         let host = parsed
             .host_str()
             .ok_or_else(|| JsError::Type("WebSocket URL has no host".into()))?
