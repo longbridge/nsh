@@ -25,17 +25,11 @@ impl ModuleDef for ConsoleModule {
     }
 }
 
-/// Generated declarations of the exact console facade served above.
+/// The module's declaration: the global `console`'s type
+/// (`crate::host::GLOBALS`), its one source, so the two never differ.
 pub(crate) const TYPES: &str = r#"
-/** Per-VM logging through the host's logger, using NSH console formatting. */
-export interface NshConsole {
-  log(...values: unknown[]): void;
-  info(...values: unknown[]): void;
-  debug(...values: unknown[]): void;
-  warn(...values: unknown[]): void;
-  error(...values: unknown[]): void;
-}
-declare const console: NshConsole;
+/** Per-VM logging through the host's logger: the global `console`. */
+declare const console: typeof globalThis.console;
 export default console;
 "#;
 
@@ -81,6 +75,34 @@ mod tests {
             out,
             r#"[true,true,["default"],["debug","error","info","log","warn"],true,"undefined"]"#
         );
+    }
+
+    /// The module's type is the global's, and the global's declaration
+    /// lists exactly the methods the runtime's console has.
+    #[test]
+    fn the_module_and_the_global_share_one_declaration() {
+        assert!(super::TYPES.contains("declare const console: typeof globalThis.console;"));
+        assert!(
+            !super::TYPES.contains("void"),
+            "no second copy of the signatures"
+        );
+        let global = crate::host::GLOBALS
+            .split("declare var console: {")
+            .nth(1)
+            .and_then(|rest| rest.split("};").next())
+            .expect("the global console's declaration");
+        let mut declared: Vec<&str> = global
+            .lines()
+            .filter_map(|line| line.trim().split('(').next())
+            .filter(|name| !name.is_empty())
+            .collect();
+        declared.sort_unstable();
+        let host = Host::new().unwrap();
+        let out = run(
+            &host,
+            "import {text} from 'nsh:rt'; text(Object.keys(console).sort().join(','));",
+        );
+        assert_eq!(declared.join(","), out);
     }
 
     #[test]
