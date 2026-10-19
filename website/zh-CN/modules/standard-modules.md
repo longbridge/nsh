@@ -9,6 +9,8 @@ Native Shell 在同一个 QuickJS VM 中提供一组固定版本的 LLRT 标准�
 | Module | Surface |
 |---|---|
 | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder` | LLRT native utility modules |
+| `os` | `platform()`、`arch()`、`EOL`、`homedir()`：实际宿主的系统元数据 |
+| `console` | 默认导出当前 VM 的日志对象：`log`、`info`、`debug`、`warn`、`error` |
 | `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
 | `fs`, `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `access`, `readdir`, `stat`, `lstat`, `rmdir`, `constants` |
 | `net` | `connect(host, port)` returning a promise-based client socket |
@@ -21,6 +23,12 @@ Native Shell 在同一个 QuickJS VM 中提供一组固定版本的 LLRT 标准�
 LLRT 实现固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`。工具模块的声明从同一版本的上游源码资产生成，并按运行时实际导出筛选；文件、进程和网络适配器的声明与实现一起维护。`Buffer` 和 `crypto` 是全局对象；NSH 原有的 URL、Blob、流和事件构造器保留其对象身份。
 
 兼容性测试覆盖已导出的子集及其与 NSH 的集成；工具函数的边界行为遵循固定版本的 LLRT 实现。
+
+## 系统元数据与日志
+
+`os.platform(): string` 和 `os.arch(): string` 返回实际原生宿主的系统与架构；`os.EOL: string` 是系统换行符。`os.homedir(): string` 返回配置为绝对路径的宿主主目录，在缺少此配置时抛出错误。返回目录路径只是元数据，文件操作仍需要 `fs.read` / `fs.write` 授权。
+
+`import console from "node:console"` 与全局 `console` 是同一个 VM 日志对象。该模块仅默认导出，支持 `log`、`info`、`debug`、`warn`、`error`，每个方法的签名为 `(...values: unknown[]): void`。接口采用 NSH 的日志格式，公开接口为上述五方法对象。
 
 ## 文件与进程
 

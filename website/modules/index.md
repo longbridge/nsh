@@ -48,7 +48,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/webview` | `WebView` | [nsh/webview](./nsh-webview.md) |
 | `nsh/video` | `Video` | [nsh/video](./nsh-video.md) |
 | `nsh/ui/mobile` | Navigation (`createNavigator`, `Stack`, `Screen`, `Modal`), `SafeAreaView`, `StatusBar`, `Alert`, `ActionSheet`, `Keyboard`, `Button`, `TextField`, ... | [Components](../components/index.md) |
-| Standard modules | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder`, `process`, `fs`, `fs/promises`, `net`, `websocket` | [Standard modules](./standard-modules.md) |
+| Standard modules | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder`, `os`, `console`, `process`, `fs`, `fs/promises`, `net`, `websocket` | [Standard modules](./standard-modules.md) |
 | Globals | `fetch`, `URL`, `TextEncoder`, `Blob`, `FormData`, `AbortController`, `Intl`, timers, `console`, `requestAnimationFrame`, ... (no import) | [Global APIs](./globals.md) |
 
 Reference pages that are not modules:

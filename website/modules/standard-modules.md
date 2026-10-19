@@ -9,6 +9,8 @@ Native Shell provides a pinned subset of LLRT standard modules inside its existi
 | Module | Surface |
 |---|---|
 | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder` | LLRT native utility modules |
+| `os` | `platform()`, `arch()`, `EOL`, `homedir()`: actual host OS metadata |
+| `console` | Default export of the per-VM logger: `log`, `info`, `debug`, `warn`, `error` |
 | `process` | `spawn`, `run`, `platform`, `arch`, `nextTick`; global `process.dataDir` |
 | `fs`, `fs/promises` | Promise-based `readFile`, `writeFile`, `mkdir`, `rename`, `unlink`, `exists`, `access`, `readdir`, `stat`, `lstat`, `rmdir`, `constants` |
 | `net` | `connect(host, port)` returning a promise-based client socket |
@@ -21,6 +23,12 @@ Bare names and one `node:` prefix identify the same implementation, for example 
 LLRT implementations are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`. Utility declarations are generated from upstream source assets at that revision and projected onto actual runtime exports; file, process and network adapters carry declarations beside their implementations. `Buffer` and `crypto` are globals. NSH retains the identity of its existing URL, Blob, stream and event constructors.
 
 Compatibility tests cover the exported subset and NSH integration; utility edge cases follow the pinned LLRT implementation.
+
+## OS metadata and logging
+
+`os.platform(): string` and `os.arch(): string` report the actual native host OS and architecture; `os.EOL: string` is its line separator. `os.homedir(): string` returns a configured absolute host home path and throws when none is configured. Directory paths are metadata: file operations still require `fs.read` / `fs.write` grants.
+
+`import console from "node:console"` shares the VM's global `console` object. The module has a default export only, supporting `log`, `info`, `debug`, `warn`, `error`, each with signature `(...values: unknown[]): void`. It uses NSH's logger formatting; its public surface is this five-method object.
 
 ## Files and processes
 

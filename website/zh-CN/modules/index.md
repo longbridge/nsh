@@ -48,7 +48,7 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 | `nsh/webview` | `WebView` | [nsh/webview](./nsh-webview.md) |
 | `nsh/video` | `Video` | [nsh/video](./nsh-video.md) |
 | `nsh/ui/mobile` | 导航（`createNavigator`、`Stack`、`Screen`、`Modal`）、`SafeAreaView`、`StatusBar`、`Alert`、`ActionSheet`、`Keyboard`、`Button`、`TextField` 等 | [组件](../components/index.md) |
-| Standard modules | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder`, `process`, `fs`, `fs/promises`, `net`, `websocket` | [标准模块](./standard-modules.md) |
+| Standard modules | `buffer`, `crypto`, `path`, `url`, `zlib`, `events`, `assert`, `util`, `string_decoder`, `os`, `console`, `process`, `fs`, `fs/promises`, `net`, `websocket` | [标准模块](./standard-modules.md) |
 | 全局对象 | `fetch`、`URL`、`TextEncoder`、`Blob`、`FormData`、`AbortController`、`Intl`、定时器、`console`、`requestAnimationFrame` 等（无需导入） | [全局 API](./globals.md) |
 
 以下参考页面不对应模块：
