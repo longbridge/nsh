@@ -53,4 +53,7 @@ tokio-tungstenite.workspace = true
 getrandom04 = { workspace = true, features = ["wasm_js"] }
 
 [dev-dependencies]
+brotli.workspace = true
+flate2.workspace = true
+zstd.workspace = true
 nsh-ui-mobile.workspace = true

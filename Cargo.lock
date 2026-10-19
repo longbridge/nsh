@@ -3137,7 +3137,9 @@ dependencies = [
 name = "nsh-js"
 version = "0.1.1"
 dependencies = [
+ "brotli",
  "cap-std",
+ "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "libc",
@@ -3162,6 +3164,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "url",
+ "zstd",
 ]
 
 [[package]]

@@ -77,7 +77,7 @@ fn reference_zlib(script: &str) -> String {
 }
 
 #[test]
-fn compression_matches_direct_llrt_without_implicit_output_cap() {
+fn compression_matches_direct_llrt_under_the_output_ceiling() {
     const SCRIPT: &str = r#"
         import zlib, { gzipSync, gunzipSync, gunzip } from 'zlib';
         import { Buffer } from 'buffer';

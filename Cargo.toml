@@ -65,6 +65,9 @@ syn = { version = "2", features = ["full"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast", "zeroize"] }
 sha2 = "0.10"
 flate2 = "1"
+# Test payloads for the zlib module, at the versions LLRT's compression uses.
+brotli = { version = "9", default-features = false, features = ["std"] }
+zstd = { version = "0.14", default-features = false }
 tar = { version = "0.4", default-features = false }
 base64 = "0.22"
 getrandom = "0.3"

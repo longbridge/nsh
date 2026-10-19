@@ -81,6 +81,8 @@ to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (`S
 `net.connect` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
 bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
 declaration) has none. Sockets are capped at 32 per VM (`Shared::sockets`) and 4 MiB of pending writes each;
-`close()` ends pending reads and writes. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
+`close()` ends pending reads and writes. `zlib` decompression output is capped at 64 MiB or the heap limit if
+smaller (`standard/zlib.rs` wraps LLRT's module and clamps `maxOutputLength`), as it is native memory until it
+becomes a buffer. Standard `fs/promises` and `process` share NSH's native authorization boundary. The
 standard catalog is eleven canonical bare modules; its connection and file APIs follow their generated
 signatures. See `website/modules/standard-modules.md` for the public surface.

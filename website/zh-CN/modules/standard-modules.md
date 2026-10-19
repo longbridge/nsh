@@ -30,6 +30,10 @@ LLRT 实现固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`。工具模块�
 
 `import console from "node:console"` 与全局 `console` 是同一个 VM 日志对象。该模块仅默认导出，支持 `log`、`info`、`debug`、`warn`、`error`，每个方法的签名为 `(...values: unknown[]): void`。接口采用 NSH 的日志格式，公开接口为上述五方法对象。
 
+## 压缩
+
+`zlib` 采用 LLRT 的实现，NSH 为其加上一个上限：每次解压（`inflate`、`inflateRaw`、`gunzip`、`brotliDecompress`、`zstdDecompress` 及其 `Sync` 形式）最多输出 64 MiB；VM 的堆上限更小时以堆上限为准。超出时抛出 `RangeError`，与 Node.js 对 `maxOutputLength` 的处理一致；应用自己的 `maxOutputLength` 可以为单次调用设置更低的上限。
+
 ## 文件
 
 `fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。授权范围之外的路径在调用时抛出 `TypeError`；I/O 失败以 `Error` 拒绝 Promise。

@@ -30,6 +30,10 @@ Compatibility tests cover the exported subset and NSH integration; utility edge 
 
 `import console from "node:console"` shares the VM's global `console` object. The module has a default export only, supporting `log`, `info`, `debug`, `warn`, `error`, each with signature `(...values: unknown[]): void`. It uses NSH's logger formatting; its public surface is this five-method object.
 
+## Compression
+
+`zlib` is LLRT's, with one bound NSH adds: each decompression (`inflate`, `inflateRaw`, `gunzip`, `brotliDecompress`, `zstdDecompress` and their `Sync` forms) produces at most 64 MiB, or the VM's heap limit when that is smaller. Longer output throws a `RangeError`, as Node.js does for `maxOutputLength`; an app's own `maxOutputLength` sets a lower bound for one call.
+
 ## Files
 
 `fs/promises` reads and writes files on desktop hosts (macOS, Windows and Linux). Every path is checked against `capabilities.fs` before the operation starts: `read` roots for `readFile`, `readdir`, `stat`, `lstat`, `readlink` and `exists`, `write` roots for `writeFile`, `mkdir`, `rename`, `unlink` and `rmdir`. A path outside the grants throws a `TypeError` at the call; I/O failures reject the promise with an `Error`.
