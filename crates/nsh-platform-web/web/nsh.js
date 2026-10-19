@@ -1401,10 +1401,11 @@ class Player {
   }
 
   /** Pressables take the keyboard focus (Tab; Enter and Space press them),
-   * unless disabled or hidden from assistive technologies. */
+   * unless disabled, hidden from assistive technologies or `focusable`
+   * false. */
   updateFocusable(el) {
     const p = el._props;
-    const focusable = el._pressable && !p?.disabled && !p?.hidden;
+    const focusable = el._pressable && !p?.disabled && !p?.hidden && p?.focusable !== false;
     if (focusable) el.tabIndex = 0;
     else if (el.hasAttribute("tabindex") && !el._a11yFocus) el.removeAttribute("tabindex");
     if (focusable && !el._focusListeners) {

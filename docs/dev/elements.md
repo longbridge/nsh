@@ -95,6 +95,12 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   picked again after every batch (on macOS also after every scroll), so a view removed or moved from under a still mouse hears `onHoverOut` and one
   that arrives there `onHoverIn`; on Linux that waits for the next mouse move. Touches never hover. Other platforms do
   not raise them yet (iOS, Android, Windows and the web track `hover:` styles only).
+- **Keyboard focus**: on macOS and the web, views that take presses are stops of Tab (the keyboard focus) and Return /
+  Space press the focused one; a click presses without focusing, so a pressable's `FOCUSED` state (`focus:` classes,
+  `.focus(..)`) is keyboard focus, and `focus-visible:` is the same variant. `focusable={false}` (`Prop::Focusable`,
+  `ViewProps::focusable`; Rust `.focusable(false)`) keeps a pressable out of the stops: a backdrop that closes a
+  popover, rows a list moves between with the arrow keys. Windows, Linux and GPUI move the focus between fields and
+  native components only so far.
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` and `scrollTo({ x, y, animated })` (use `ref`); lists also

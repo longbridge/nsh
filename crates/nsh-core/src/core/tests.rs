@@ -6502,6 +6502,34 @@ fn window_drag_is_a_view_prop() {
     ));
 }
 
+/// `focusable={false}` reaches the platform in the view's props.
+#[test]
+fn focusable_is_a_view_prop() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Focusable(Some(false)),
+            },
+            Op::Insert {
+                parent: crate::ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(batch.items.iter().any(
+        |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.focusable == Some(false))
+    ));
+}
+
 /// Components that run once: their views mounted with bindings.
 mod views {
     use std::{cell::Cell, rc::Rc};

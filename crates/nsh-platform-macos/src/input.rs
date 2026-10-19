@@ -739,6 +739,7 @@ pub(crate) fn is_key_control(view: &NshView) -> bool {
     let state = view.state();
     state.kind != ViewKind::Input
         && state.events.contains(EventKind::Press)
+        && state.props.focusable != Some(false)
         && !state.props.accessibility.state.disabled
         && view.can_target()
         && !view.ns().isHiddenOrHasHiddenAncestor()
