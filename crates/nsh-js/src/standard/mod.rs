@@ -1,5 +1,5 @@
 //! Standard modules share NSH's VM, event loop and native permission boundary.
-use rquickjs::{Ctx, Error, Module, Result, Value, object::Accessor};
+use rquickjs::{Ctx, Error, Module, Result, Value, object::Accessor, qjs};
 
 mod console;
 pub(crate) mod declarations;
@@ -114,36 +114,98 @@ pub(crate) fn take_lazy(ctx: &Ctx<'_>, name: &str) -> Result<bool> {
 /// needs. LLRT's initialization also defines its own `Blob`, `File`, `URL`
 /// and `URLSearchParams`; NSH's WHATWG globals stay the objects they were.
 fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
-    let globals = ctx.globals();
-    let preserved = [
-        "Blob",
-        "File",
-        "URL",
-        "URLSearchParams",
-        "TextEncoder",
-        "TextDecoder",
-        "atob",
-        "btoa",
-        "Event",
-        "CustomEvent",
-        "EventTarget",
-        "ReadableStream",
-        "WritableStream",
-        "TransformStream",
-        "AbortController",
-        "AbortSignal",
-    ]
-    .into_iter()
-    .map(|name| Ok((name, globals.get::<_, Value>(name)?)))
-    .collect::<Result<Vec<_>>>()?;
+    // The globals LLRT's initialization defines over NSH's. Their own
+    // properties are kept as they are, not read: NSH's web globals are
+    // accessors that make every web class on first read (~60 µs).
+    let saved: Vec<_> = ["Blob", "File", "URL", "URLSearchParams"]
+        .into_iter()
+        .map(|name| own_property(ctx, name))
+        .collect::<Result<_>>()?;
     llrt_buffer::init(ctx)?;
     // LLRT URL helper classes are registered once; public constructors remain NSH's.
     #[cfg(not(target_arch = "wasm32"))]
     llrt_url::init(ctx)?;
-    for (name, value) in preserved {
-        globals.set(name, value)?;
+    for property in saved {
+        property.restore(ctx)?;
     }
     Ok(())
+}
+
+/// A global's own property as it was: its descriptor (or none).
+struct OwnProperty {
+    atom: qjs::JSAtom,
+    descriptor: Option<qjs::JSPropertyDescriptor>,
+}
+
+/// Global `name`'s own property, without calling its getter.
+fn own_property(ctx: &Ctx<'_>, name: &'static str) -> Result<OwnProperty> {
+    let raw = ctx.as_raw().as_ptr();
+    let name = std::ffi::CString::new(name).expect("no NUL in a global's name");
+    // SAFETY: a live context; the global and the descriptor's values are
+    // owned here (freed by `restore`).
+    unsafe {
+        let global = qjs::JS_GetGlobalObject(raw);
+        let atom = qjs::JS_NewAtom(raw, name.as_ptr());
+        let mut descriptor = std::mem::zeroed::<qjs::JSPropertyDescriptor>();
+        let found = qjs::JS_GetOwnProperty(raw, &mut descriptor, global, atom);
+        qjs::JS_FreeValue(raw, global);
+        if found < 0 {
+            qjs::JS_FreeAtom(raw, atom);
+            return Err(Error::Exception);
+        }
+        Ok(OwnProperty {
+            atom,
+            descriptor: (found == 1).then_some(descriptor),
+        })
+    }
+}
+
+impl OwnProperty {
+    /// Puts the property back as it was (deleting it when there was none).
+    fn restore(self, ctx: &Ctx<'_>) -> Result<()> {
+        let raw = ctx.as_raw().as_ptr();
+        // SAFETY: a live context; the descriptor's values and the atom are
+        // owned by `self` and freed here, after the definition took its own
+        // references.
+        unsafe {
+            let global = qjs::JS_GetGlobalObject(raw);
+            let result = match self.descriptor {
+                Some(d) => {
+                    let has = (qjs::JS_PROP_HAS_CONFIGURABLE | qjs::JS_PROP_HAS_ENUMERABLE) as i32;
+                    let kind = if d.flags & qjs::JS_PROP_GETSET as i32 != 0 {
+                        (qjs::JS_PROP_HAS_GET | qjs::JS_PROP_HAS_SET) as i32
+                    } else {
+                        (qjs::JS_PROP_HAS_VALUE | qjs::JS_PROP_HAS_WRITABLE) as i32
+                    };
+                    let flags = d.flags
+                        & (qjs::JS_PROP_CONFIGURABLE
+                            | qjs::JS_PROP_ENUMERABLE
+                            | qjs::JS_PROP_WRITABLE) as i32;
+                    let r = qjs::JS_DefineProperty(
+                        raw,
+                        global,
+                        self.atom,
+                        d.value,
+                        d.getter,
+                        d.setter,
+                        flags | has | kind,
+                    );
+                    qjs::JS_FreeValue(raw, d.value);
+                    qjs::JS_FreeValue(raw, d.getter);
+                    qjs::JS_FreeValue(raw, d.setter);
+                    r
+                }
+                None => qjs::JS_DeleteProperty(raw, global, self.atom, 0),
+            };
+            qjs::JS_FreeAtom(raw, self.atom);
+            qjs::JS_FreeValue(raw, global);
+            if result < 0 {
+                Err(Error::Exception)
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 /// The global `process` (`standard/process.rs`).
