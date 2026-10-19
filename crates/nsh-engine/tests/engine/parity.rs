@@ -61,10 +61,7 @@ impl App {
         located: bool,
     ) -> Self {
         static APPS: AtomicUsize = AtomicUsize::new(0);
-        let tmp = std::env::var_os("TMPDIR")
-            .map(PathBuf::from)
-            .expect("tests must provide TMPDIR outside /tmp");
-        assert!(!tmp.starts_with("/tmp"));
+        let tmp = crate::temporary_root();
         let root = tmp.join(format!(
             "nsh-parity-{}-{}",
             std::process::id(),

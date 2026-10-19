@@ -89,13 +89,7 @@ mount(() => <Text>{status()}</Text>);
 
 #[test]
 fn trusted_path_anchors_reach_the_vm_without_application_metadata() {
-    let temporary = std::env::var_os("TMPDIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
-                .join(".cache/nsh-benchs-test-tmp")
-        });
-    assert!(temporary.is_absolute() && !temporary.starts_with("/tmp"));
+    let temporary = crate::temporary_root();
     let root = temporary.join(format!("nsh-engine-trusted-paths-{}", std::process::id()));
     let plugin = root.join("plugin");
     let home = root.join("home");

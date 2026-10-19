@@ -38,12 +38,11 @@ impl App {
         capabilities: serde_json::Value,
         paths: impl FnOnce(&Path) -> nsh_core::access::TrustedPaths,
     ) -> Self {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::temporary_root().join(format!(
             "nsh-process-{}-{}",
             std::process::id(),
             APPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
-        assert!(!root.starts_with("/tmp"), "tests take TMPDIR outside /tmp");
         std::fs::create_dir_all(&root).unwrap();
         let entry = root.join("App.tsx");
         std::fs::write(

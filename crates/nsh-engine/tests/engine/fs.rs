@@ -16,10 +16,7 @@ const APP_ID: &str = "com.example.fs";
 /// A directory of its own for one test, outside /tmp.
 fn scratch(name: &str) -> PathBuf {
     static DIRS: AtomicUsize = AtomicUsize::new(0);
-    let root = std::env::var_os("TMPDIR")
-        .map(PathBuf::from)
-        .expect("tests must provide TMPDIR outside /tmp");
-    assert!(!root.starts_with("/tmp"));
+    let root = crate::temporary_root();
     let dir = root.join(format!(
         "nsh-fs-{name}-{}-{}",
         std::process::id(),

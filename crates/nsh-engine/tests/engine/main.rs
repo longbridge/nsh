@@ -58,3 +58,16 @@ impl MountSink for ChannelSink {
         let _ = self.0.send(batch);
     }
 }
+
+/// Where tests make their files: `TMPDIR`, or `~/.cache/nsh-benchs-test-tmp`
+/// where none is set (CI's runners), never `/tmp`.
+fn temporary_root() -> std::path::PathBuf {
+    let root = std::env::var_os("TMPDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").expect("HOME"))
+                .join(".cache/nsh-benchs-test-tmp")
+        });
+    assert!(root.is_absolute() && !root.starts_with("/tmp"));
+    root
+}
