@@ -382,6 +382,8 @@ import fs from "fs/promises";
   try { await fs.readFile("over-read-limit"); } catch (e) { read = e.constructor === Error && e.message.includes("67108864"); }
   let write = false;
   try { fs.writeFile("not-created", "x".repeat(8 * 1024 * 1024 + 1)); } catch (e) { write = e instanceof RangeError && e.message.includes("8388608-byte"); }
+  // A buffer past the limit is refused by its length, before it is copied.
+  try { fs.writeFile("not-created", new Uint8Array(64 * 1024 * 1024)); write = false; } catch (e) { write = write && e instanceof RangeError && e.message.includes("67108864 bytes"); }
   const bytes = await fs.readFile("above-native-text-limit");
   report(read && write && Object.getPrototypeOf(bytes) === Uint8Array.prototype && bytes.length === 16 * 1024 * 1024 + 1 ? "ok" : "bad");
 })().catch((e) => report(String(e)));

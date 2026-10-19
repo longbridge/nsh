@@ -74,16 +74,19 @@ impl Fs {
         sys: System,
     ) -> Result<Later<()>, JsError> {
         let grant = grant(&sys, &path, true)?;
+        let too_long = |len: usize| {
+            JsError::Range(format!(
+                "`{}` write is {len} bytes, over the {MAX_WRITE}-byte fs.writeFile limit",
+                grant.name()
+            ))
+        };
         let bytes = match data {
             FileData::Text(text) => text.into_bytes(),
             FileData::Bytes(bytes) => bytes,
+            FileData::TooLong(len) => return Err(too_long(len)),
         };
         if bytes.len() > MAX_WRITE {
-            return Err(JsError::Range(format!(
-                "`{}` write is {} bytes, over the {MAX_WRITE}-byte fs.writeFile limit",
-                grant.name(),
-                bytes.len()
-            )));
+            return Err(too_long(bytes.len()));
         }
         let pending = pending(&sys)?;
         let held = sys
@@ -234,6 +237,8 @@ impl JsValue for Encoding {
 pub(crate) enum FileData {
     Text(String),
     Bytes(Vec<u8>),
+    /// Bytes past what one `writeFile` writes, left uncopied: their length.
+    TooLong(usize),
 }
 
 impl JsValue for FileData {
@@ -245,6 +250,14 @@ impl JsValue for FileData {
         if let Some(text) = value.as_string() {
             return Ok(FileData::Text(text));
         }
+        // Measured before the copy: a buffer far past the limit is refused
+        // without one.
+        if value.kind() == JsKind::Object
+            && let Some(len) = value.field("byteLength")?.get().as_number()
+            && len > MAX_WRITE as f64
+        {
+            return Ok(FileData::TooLong(len as usize));
+        }
         value
             .as_bytes()
             .map(FileData::Bytes)
@@ -255,6 +268,7 @@ impl JsValue for FileData {
         match self {
             FileData::Text(text) => text.to_js(host),
             FileData::Bytes(bytes) => bytes.to_js(host),
+            FileData::TooLong(_) => Err(PropError("file data past the write limit".into())),
         }
     }
 }
@@ -831,6 +845,7 @@ impl Grant {
         let len = match &value {
             FileData::Text(text) => text.len(),
             FileData::Bytes(bytes) => bytes.len(),
+            FileData::TooLong(len) => *len,
         };
         drop(held);
         // At most what was held a moment ago: it fits.
