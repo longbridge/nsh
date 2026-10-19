@@ -2213,8 +2213,14 @@ mod tests {
         let app = super::target_dir(ws, None).unwrap();
         assert_eq!(app, Path::new("/apps/charts/target"));
         assert_eq!(super::target_dir(ws, Some("".into())).unwrap(), app);
-        let shared = super::target_dir(ws, Some("/cache/target".into())).unwrap();
-        assert_eq!(shared, Path::new("/cache/target"));
+        // Absolute on this system: `/cache/target` has no drive on Windows.
+        let absolute = if cfg!(windows) {
+            r"C:\cache\target"
+        } else {
+            "/cache/target"
+        };
+        let shared = super::target_dir(ws, Some(absolute.into())).unwrap();
+        assert_eq!(shared, Path::new(absolute));
         let relative = super::target_dir(ws, Some("build".into())).unwrap();
         assert_eq!(relative, std::env::current_dir().unwrap().join("build"));
     }
