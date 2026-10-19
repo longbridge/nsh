@@ -55,6 +55,8 @@ pub const STANDARD_MODULES: &[&str] = &[
     "fs/promises",
     "net",
     "websocket",
+    "os",
+    "console",
 ];
 
 /// Whether a module is a standard builtin with an accepted canonical spelling.
