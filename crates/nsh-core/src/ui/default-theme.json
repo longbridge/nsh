@@ -22,7 +22,7 @@
         "group_box.foreground": "#171717",
         "info.active.background": "cyan-600",
         "info.background": "cyan-500",
-        "info.foreground": "neutral-50",
+        "info.foreground": "neutral-950",
         "input.border": "neutral-200",
         "link": "#0a0a0a",
         "link.active": "#0a0a0a",
@@ -50,7 +50,7 @@
         "slider.thumb.background": "white",
         "success.active.background": "green-600",
         "success.background": "green-500",
-        "success.foreground": "neutral-50",
+        "success.foreground": "neutral-950",
         "switch.background": "#d4d4d4",
         "switch.thumb.background": "white",
         "tab.active.background": "white",
@@ -61,7 +61,7 @@
         "tab_bar.segmented.background": "#f5f5f5",
         "warning.active.background": "yellow-600",
         "warning.background": "yellow-500",
-        "warning.foreground": "neutral-50"
+        "warning.foreground": "neutral-950"
       }
     },
     {
@@ -78,13 +78,13 @@
         "caret": "#fafafa",
         "danger.active.background": "red-500",
         "danger.background": "red-400",
-        "danger.foreground": "red-600",
+        "danger.foreground": "neutral-950",
         "foreground": "neutral-50",
         "group_box.background": "neutral-950",
         "group_box.foreground": "neutral-50",
         "info.active.background": "cyan-500",
         "info.background": "cyan-400",
-        "info.foreground": "cyan-600",
+        "info.foreground": "neutral-950",
         "input.border": "#2f2f2f",
         "link": "#fafafa",
         "link.active": "#d4d4d4",
@@ -112,7 +112,7 @@
         "slider.thumb.background": "#0a0a0a",
         "success.active.background": "green-500",
         "success.background": "green-400",
-        "success.foreground": "green-600",
+        "success.foreground": "neutral-950",
         "switch.background": "#404040",
         "switch.thumb.background": "white",
         "tab.active.background": "#0a0a0a",
@@ -123,7 +123,7 @@
         "tab_bar.segmented.background": "#171717",
         "warning.active.background": "yellow-500",
         "warning.background": "yellow-400",
-        "warning.foreground": "yellow-600"
+        "warning.foreground": "neutral-950"
       }
     }
   ]

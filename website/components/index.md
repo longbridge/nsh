@@ -75,8 +75,8 @@ All components use colors from one theme and never use fixed color values. Each 
 When the system switches between light and dark appearance, the components change color natively, with no render and
 no JS.
 
-The default theme is gpui-kit's default theme, a neutral black-and-white palette, with mobile corner radii. To use
-your own theme, set `"theme"` in `nsh.json`. Its value is the path of a theme file, relative to `nsh.json`:
+The default theme is gpui-kit's default theme, a neutral black-and-white palette, with mobile corner radii and text on
+the status colors (`danger`, `info`, `success`, `warning`) that reads in both appearances. To use your own theme, set `"theme"` in `nsh.json`. Its value is the path of a theme file, relative to `nsh.json`:
 
 ```json
 {
