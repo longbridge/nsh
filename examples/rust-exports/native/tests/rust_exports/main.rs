@@ -69,7 +69,7 @@ fn a_disposed_account_throws() {
     // Using it as an argument throws too, and the other account is left
     // as it was.
     app.press("Deposit $25", "Deposited: $145.00");
-    app.press("Move $30", "Account is disposed");
+    app.press("Move $30", "Account.transfer: `to`: Account is disposed");
     assert!(app.shows("Savings: $145.00"));
 }
 

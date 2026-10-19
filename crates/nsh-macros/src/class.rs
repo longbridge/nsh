@@ -473,11 +473,16 @@ fn sync_call(
                     let #held: #ui::Instance<#elem> =
                         #private::arg::<#ui::Instance<#elem>>(host, #i, #what, #name)?;
                 });
+                // A disposed or busy instance's error names the argument.
                 if *mutable {
-                    borrow.push(quote!(let mut #local = #private::borrow_mut::<#elem>(&#held)?;));
+                    borrow.push(quote!(
+                        let mut #local = #private::borrow_arg_mut::<#elem>(&#held, #what, #name)?;
+                    ));
                     args.push(quote!(&mut *#local));
                 } else {
-                    borrow.push(quote!(let #local = #private::borrow::<#elem>(&#held)?;));
+                    borrow.push(quote!(
+                        let #local = #private::borrow_arg::<#elem>(&#held, #what, #name)?;
+                    ));
                     args.push(quote!(&*#local));
                 }
                 release.push(quote!(::core::mem::drop(#local);));

@@ -1949,7 +1949,7 @@ pub(crate) mod tests {
             shown,
             [
                 "5",
-                "TypeError: Tally used re-entrantly",
+                "TypeError: Tally.absorb: `other`: Tally used re-entrantly",
                 "true 7",
                 "8 8",
                 "TypeError: Tally.absorb: `other`: expected a Tally, got a Token",

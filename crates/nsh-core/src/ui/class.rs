@@ -629,6 +629,34 @@ pub(crate) mod __private {
         instance.borrow_mut()
     }
 
+    /// The value of `instance`, argument `name` of `what` (`Account.transfer`,
+    /// `to`), borrowed for the call: its error names them, as a wrong
+    /// argument's does (``Account.transfer: `to`: Account is disposed``).
+    pub fn borrow_arg<'a, C: Class>(
+        instance: &'a Instance<C>,
+        what: &str,
+        name: &str,
+    ) -> Result<Ref<'a, C>, Thrown> {
+        instance.borrow().map_err(|e| arg_error(e, what, name))
+    }
+
+    /// [`borrow_arg`], mutably.
+    pub fn borrow_arg_mut<'a, C: Class>(
+        instance: &'a Instance<C>,
+        what: &str,
+        name: &str,
+    ) -> Result<RefMut<'a, C>, Thrown> {
+        instance.borrow_mut().map_err(|e| arg_error(e, what, name))
+    }
+
+    /// `e`, an argument's error, after `what` and the argument's `name`.
+    fn arg_error(e: Thrown, what: &str, name: &str) -> Thrown {
+        match e {
+            Thrown::Type(m) => Thrown::Type(format!("{what}: `{name}`: {m}")),
+            Thrown::Error(m) => Thrown::Error(format!("{what}: `{name}`: {m}")),
+        }
+    }
+
     /// The result of a synchronous call as a JS value.
     pub fn ret<T: Ret>(host: &dyn JsHost, value: T) -> Result<JsRaw, Thrown> {
         value

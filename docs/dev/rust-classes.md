@@ -121,7 +121,8 @@ so a class's methods can run directly inside the JS call, as the web classes nsh
 - **One object per instance.** While both live, an instance has one JS object (`nsh-js` remembers it by the `Rc`'s
   address): a member returning an instance Rust keeps gives the object it has, so `a.badge === a.badge`.
 - **Errors.** `Result<T, E: Display>` throws (`Error` with the message) or rejects; a wrong argument throws a
-  `TypeError` naming the member and the parameter (``Tally.add: `by`: expected a number, got "x"``); a panic in
+  `TypeError` naming the member and the parameter (``Tally.add: `by`: expected a number, got "x"``), and so does a
+disposed or busy instance passed for a borrowed parameter (``Account.transfer: `to`: Account is disposed``); a panic in
   Rust is caught and thrown as an `Error`, or rejects (the engine stays up) where Rust unwinds: the web runtime is
   built with `panic = "abort"` (`[profile.web]`), so there a panic ends the page's engine. Integer parameters take
   whole numbers in their range (a fraction, `NaN` or a value out of range is a `TypeError`, not rounded or
