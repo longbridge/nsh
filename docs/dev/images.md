@@ -34,3 +34,8 @@
   an app without variants bundles byte for byte as before. Width and height still come from the imported file; a variant
   that cannot be read fails the build as the imported file does, and one whose pixels are off that size times its scale
   by a pixel or more is warned about on `nsh::build`.
+  Rust's `asset!` does the same for a crate image (`nsh-macros` `assets.rs`): `ImageAsset::scales` lists the siblings it
+  finds (`assets!()` already ships the whole directory) and `include_bytes!`s them, so a changed variant rebuilds the
+  crate. It reads each variant's size: one that cannot be read, or whose pixels are off, fails the build (a proc macro
+  has errors only, where the bundler warns about the size). A proc macro cannot read nsh-core, so its `VARIANT_SCALES`
+  repeats `IMAGE_SCALES` above 1: change them together.

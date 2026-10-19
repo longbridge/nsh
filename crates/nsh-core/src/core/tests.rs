@@ -11163,3 +11163,91 @@ fn image_scales_change_nothing_without_scales() {
         "nothing for images without scales"
     );
 }
+
+/// Rust components: an `asset!` image with variants (`ImageAsset::scales`)
+/// is picked as an imported one.
+mod asset_variants {
+    use super::*;
+    use crate::ui::{ImageAsset, prelude::*};
+
+    const FLAG: ImageAsset = ImageAsset {
+        uri: "asset:/@demo/flag.png",
+        size: crate::geometry::size_pt(17.0, 12.0),
+        scales: &[1.0, 2.0, 3.0],
+    };
+    const PLAIN: ImageAsset = ImageAsset {
+        uri: "asset:/@demo/plain.png",
+        size: crate::geometry::size_pt(10.0, 10.0),
+        scales: &[],
+    };
+
+    #[component]
+    fn Flags() -> impl IntoElement {
+        view()
+            .child(image(FLAG))
+            .child(image(PLAIN).placeholder(FLAG))
+    }
+
+    /// The image items' source and placeholder URIs, in mount order.
+    fn shown(pixel_ratio: f32) -> Vec<(Option<String>, Option<String>)> {
+        let mut c = core();
+        at_ratio(&mut c, pixel_ratio);
+        c.mount_root(&crate::ui::Root::new::<Flags>(|| ()));
+        let batch = c.commit().unwrap();
+        batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Image { id, .. } => image_uris(&batch, *id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn some(uri: &str) -> Option<String> {
+        Some(uri.to_owned())
+    }
+
+    #[test]
+    fn asset_variants_pick_for_the_pixel_ratio() {
+        assert_eq!(
+            shown(3.0),
+            [
+                (some("asset:/@demo/flag@3x.png"), None),
+                (
+                    some("asset:/@demo/plain.png"),
+                    some("asset:/@demo/flag@3x.png")
+                )
+            ]
+        );
+        assert_eq!(
+            shown(2.0),
+            [
+                (some("asset:/@demo/flag@2x.png"), None),
+                (
+                    some("asset:/@demo/plain.png"),
+                    some("asset:/@demo/flag@2x.png")
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn asset_variants_none_keep_the_file() {
+        assert_eq!(
+            shown(1.0),
+            [
+                (some("asset:/@demo/flag.png"), None),
+                (
+                    some("asset:/@demo/plain.png"),
+                    some("asset:/@demo/flag.png")
+                )
+            ]
+        );
+        let src: crate::ui::ImageSrc = PLAIN.into();
+        assert!(src.scales.is_empty());
+        let src: crate::ui::ImageSrc = FLAG.into();
+        assert_eq!(src.scales.iter().collect::<Vec<_>>(), [1.0, 2.0, 3.0]);
+        assert_eq!(src.size, Some((17.0, 12.0)));
+    }
+}

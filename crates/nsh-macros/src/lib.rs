@@ -937,10 +937,13 @@ const STEPS: &[(&str, f32)] = &[
 /// A file of the crate's `assets/` directory (`asset!("logo@2x.png")`, the
 /// path relative to it), as TS imports one: an image is an `ImageAsset`
 /// with its natural size in points (`@2x` / `@3x` in the name divide its
-/// pixels), a font (`.ttf`, `.otf`) a `FontAsset` with its family name,
-/// anything else a `FileAsset`. Read at compile time: a missing or broken
-/// file fails the build, and a changed one builds the crate again. The
-/// registry ships the files (`Registry::assets(assets!())`).
+/// pixels; an image named without a density lists the scales of its
+/// `@1.5x`–`@4x` siblings, and images load the one for the screen), a font
+/// (`.ttf`, `.otf`) a `FontAsset` with its family name, anything else a
+/// `FileAsset`. Read at compile time: a missing or broken file fails the
+/// build (a variant too, and one whose pixels are not the file's size times
+/// its scale), and a changed one builds the crate again. The registry ships
+/// the files (`Registry::assets(assets!())`).
 #[proc_macro]
 pub fn asset(input: TokenStream) -> TokenStream {
     let lit = parse_macro_input!(input as LitStr);

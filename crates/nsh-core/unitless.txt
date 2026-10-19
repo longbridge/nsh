@@ -200,6 +200,7 @@ ui::animated::sample_spring ->                                   # an animated v
 ui::animated::sample_spring(fps)                                 # time
 ui::animated::sample_spring(from)                                # an animated value (any quantity)
 ui::animated::sample_spring(to)                                  # an animated value (any quantity)
+ui::asset::ImageAsset.scales                                     # pixel densities (device pixels per point)
 ui::element::Image::fade_duration(ms)                            # time
 ui::element::Interactive::long_press_delay(ms)                   # time
 ui::element::Text::max_font_size_multiplier(multiplier)          # a font scale factor
