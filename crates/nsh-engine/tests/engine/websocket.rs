@@ -282,3 +282,74 @@ fn messages_that_came_before_the_peer_closed_are_still_read() {
     assert_eq!(shown(&rx, "done"), "done one|two|WebSocket closed by peer");
     server.join().unwrap();
 }
+
+#[test]
+fn pending_writes_are_capped_in_the_call() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (tcp, _) = listener.accept().unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut socket = tungstenite::accept(tcp).unwrap();
+        while socket.read().is_ok() {}
+    });
+    let (_engine, rx) = start(
+        &format!(
+            r#"(async () => {{
+  const socket = await Client.connect("ws://{address}/");
+  const chunk = "x".repeat(5 * 1024 * 1024);
+  const first = socket.write(chunk);
+  let capped = false;
+  try {{ socket.write(chunk); }} catch (e) {{ capped = e instanceof RangeError && e.message.includes("8388608 byte limit"); }}
+  await first;
+  // Sent: its bytes no longer count.
+  await socket.write(chunk);
+  await socket.close();
+  report(`${{capped}}`);
+}})().catch((e) => report(String(e)));"#
+        ),
+        LOOPBACK,
+    );
+    assert_eq!(shown(&rx, "done"), "done true");
+    server.join().unwrap();
+}
+
+#[test]
+fn too_much_unread_data_closes_the_connection_and_keeps_what_fit() {
+    for (count, size) in [(9usize, 1usize), (2, 5 * 1024 * 1024)] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (tcp, _) = listener.accept().unwrap();
+            tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut socket = tungstenite::accept(tcp).unwrap();
+            for _ in 0..count {
+                socket
+                    .send(tungstenite::Message::binary(vec![7u8; size]))
+                    .unwrap();
+            }
+            while socket.read().is_ok() {}
+        });
+        let (_engine, rx) = start(
+            &format!(
+                r#"(async () => {{
+  const socket = await Client.connect("ws://{address}/");
+  await new Promise((r) => setTimeout(r, 300));
+  let read = 0;
+  let ended = "";
+  try {{ for (;;) {{ await socket.read(); read++; }} }} catch (e) {{ ended = e.message; }}
+  report(`${{read}} ${{ended}}`);
+}})().catch((e) => report(String(e)));"#
+            ),
+            LOOPBACK,
+        );
+        assert_eq!(
+            shown(&rx, "done"),
+            format!(
+                "done {} WebSocket closed: more than 8 messages or 8388608 bytes arrived unread",
+                count - 1
+            )
+        );
+        server.join().unwrap();
+    }
+}
