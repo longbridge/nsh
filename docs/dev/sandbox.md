@@ -24,7 +24,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   exceeded; the VM goes on. Running out of memory or going over a quota **stops the VM** (`Host::fatal`), also when the
   app catches the error: the heap's allocator (`HeapAllocator`) enforces the limit and records reaching it, since QuickJS
   reports running out in several ways (an `InternalError`, a `null` exception). It is reported
-  once (`MountSink::report_error`, the embedder's error callback), no JS runs after that and the views stay as they were.
+  once (`MountSink::report` with `AppErrorKind::Stopped`, the embedder's error callback), no JS runs after that and the views stay as they were.
 - **Hardening** (`Policy::harden`, on unless the bundle came from a dev server): `eval` is deleted, the `Function`,
   `AsyncFunction` and generator constructors throw, and the shared prototypes (`Object`, `Array`, `Function`, `String`,
   `Number`, `Promise`, `Map`, typed arrays, ...) are frozen so one module cannot change them for the others.

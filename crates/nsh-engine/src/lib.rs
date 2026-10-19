@@ -9,6 +9,7 @@
 //! the engine.
 
 mod access;
+mod error;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 pub mod headless;
 mod local_storage;
@@ -46,6 +47,7 @@ use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::{FileStorage, app_dir_name, data_dir};
 
+pub use crate::error::{AppError, AppErrorKind, PackageInfo};
 use crate::script::{NetworkQueue, RequestId, Script};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -119,6 +121,9 @@ pub struct Bundle {
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
+    /// The signed package the bundle came from ([`Bundle::from_package`]),
+    /// named in the app's errors ([`AppError::package`]).
+    pub package: Option<Arc<PackageInfo>>,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -236,6 +241,7 @@ impl Bundle {
             chunks: Arc::default(),
             harden_bytecode: None,
             app_id: None,
+            package: None,
         }
     }
 
@@ -249,6 +255,7 @@ impl Bundle {
             chunks: Arc::default(),
             harden_bytecode: None,
             app_id: None,
+            package: None,
         }
     }
 
@@ -364,6 +371,13 @@ impl Bundle {
             bundle.policy.declared = Some(declared);
         }
         bundle.app_id = Some(package.app.id.clone());
+        bundle.package = Some(Arc::new(PackageInfo {
+            id: package.app.id.clone(),
+            name: package.app.name.clone(),
+            version: package.app.version.clone(),
+            build: package.app.build,
+            sha256: package.sha256.clone(),
+        }));
         Ok(bundle)
     }
 }
@@ -488,10 +502,19 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
-    /// A fatal app error: the bundle failed to load, or an exception escaped
-    /// a JS callback. Errors are always logged; development hosts also show
-    /// them on screen.
+    /// An error of the app, as text (the message and the stack): the
+    /// bundle failed to load, an exception escaped a JS callback, the VM
+    /// was stopped. Errors are always logged; development hosts also show
+    /// them on screen. What [`MountSink::report`] calls unless it is
+    /// implemented.
     fn report_error(&self, _message: &str) {}
+
+    /// An error of the app, with its parts: what went wrong (whether the
+    /// app can go on), the message, the stack and the package it came
+    /// from. By default, [`MountSink::report_error`] with its text.
+    fn report(&self, error: &AppError) {
+        self.report_error(&error.to_string());
+    }
 
     /// JS or a component's task asked for a display frame
     /// (`requestAnimationFrame`, `ui::ambient::next_frame`): call
@@ -1071,7 +1094,10 @@ impl<M: TextEngine + 'static> Driver<M> {
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");
-                    sink.report_error(&format!("font failed: {err}"));
+                    sink.report(&AppError::new(
+                        AppErrorKind::Asset,
+                        &format!("font failed: {err}"),
+                    ));
                 }
             }
         }
@@ -1089,7 +1115,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             .and_then(|data| core.register_font(&data));
             if let Err(err) = result {
                 log::error!("font failed: {}: {err}", font.uri);
-                sink.report_error(&format!("font failed: {}: {err}", font.uri));
+                let message = format!("font failed: {}: {err}", font.uri);
+                let package = match &config.app {
+                    App::Js(bundle) => bundle.package.clone(),
+                    App::Rust(_) => None,
+                };
+                sink.report(&AppError::new(AppErrorKind::Asset, &message).with_package(package));
             }
         }
         // A task woken on any thread wakes the loop, and so does a JS call
@@ -1292,7 +1323,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             && let Some(reason) = script.fatal()
         {
             self.stopped = true;
-            script.report(&*self.sink, "stopped", &reason);
+            script.report(&*self.sink, AppErrorKind::Stopped, "stopped", &reason);
         }
     }
 }
@@ -1654,7 +1685,12 @@ impl<M: TextEngine> State<M> {
             }
             .and_then(|data| self.core.register_font(&data));
             if let Err(err) = result {
-                script.report(sink, "font failed", &format!("{uri}: {err}"));
+                script.report(
+                    sink,
+                    AppErrorKind::Asset,
+                    "font failed",
+                    &format!("{uri}: {err}"),
+                );
             }
         }
     }

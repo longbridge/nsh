@@ -87,6 +87,10 @@ fn a_verified_package_runs_and_older_builds_are_refused() {
     let v2 = build(&counter(2, nsh_js::BYTECODE_VERSION), &release, &cert).unwrap();
     let loaded = nsh_engine::load_package(&mut trust, &v2, &dir.join("packages")).unwrap();
     assert_eq!(loaded.app.build, 2);
+    // Its errors name it.
+    let info = loaded.bundle.package.clone().expect("the package");
+    assert_eq!((info.id.as_str(), info.build), ("com.example.counter", 2));
+    assert_eq!(info.sha256.len(), 64);
     let (bundle, assets) = (loaded.bundle, loaded.assets);
     assert!(matches!(bundle.code, nsh_engine::BundleCode::Bytecode(_)));
     let access = bundle.policy.access();

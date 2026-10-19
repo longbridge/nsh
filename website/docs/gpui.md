@@ -120,6 +120,10 @@ so only load it from your own app's files.
   256 MB heap); the development host and the release runner run apps on their own, with `Limits::standalone()`.
 - `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
   with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
+- `AppView::on_app_error(|error| …)` hears the app's errors: `error.kind` (the app failed to load, an uncaught
+  exception, the VM stopped), `error.is_fatal()` when no JS of the app runs again, `error.message`, `error.stack`
+  and `error.package` (the id and build of the signed package it came from). `AppView::on_error` gets the same
+  errors as text.
 - `AppView::set_locale(locale, cx)` and `AppView::set_font_scale(scale, cx)` give the app your app's language and
   text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
   follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
