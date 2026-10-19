@@ -12,8 +12,8 @@
 //! the promise. A Rust component's props cross the same way: decoded in
 //! the JS call into an [`AnyValue`], set by the core.
 //!
-//! Platform native components (Java, Swift, GPUI components of the
-//! embedder) keep JSON (`Prop::ComponentProp`, `EventPayload::Native`,
+//! Platform native components (the components an embedder registers in
+//! its own language) keep JSON (`Prop::ComponentProp`, `EventPayload::Native`,
 //! `Command::Native`): their values cross into another language.
 
 use std::{

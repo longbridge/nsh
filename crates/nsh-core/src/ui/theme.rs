@@ -1,8 +1,8 @@
 //! The theme of Rust components: semantic colors with a light and a dark
-//! value, corner radii and the base font size. Field names and the JSON
-//! format follow gpui-kit's themes (`primary.background`,
-//! `primary.active.background`, ...), so a gpui-kit theme file styles the
-//! mobile components too; keys only desktop components use are ignored.
+//! value, corner radii and the base font size. A theme file names the
+//! colors by role and state (`primary.background`,
+//! `primary.active.background`, ...); keys only desktop components use are
+//! ignored.
 //!
 //! The app's theme is `nsh.json`'s `"theme"`: a theme file's path or its
 //! content, `{ "themes": [{ "mode": "light", "colors": { … } }, { "mode":
@@ -16,7 +16,7 @@ use crate::{JsonValue, style::Color, tailwind};
 
 macro_rules! theme_colors {
     ($( $(#[doc = $doc:literal])* $field:ident = $key:literal $(| $alias:literal)* ),* $(,)?) => {
-        /// The theme's semantic colors (gpui-kit's names).
+        /// The theme's semantic colors.
         #[derive(Debug, Clone, Copy, PartialEq, Default)]
         pub struct ThemeColors {
             $( $(#[doc = $doc])* pub $field: AdaptiveColor, )*
@@ -240,8 +240,7 @@ fn mix(c: Color, level: u8, amount: f32) -> Color {
 static PALETTE: LazyLock<tailwind::Theme> = LazyLock::new(tailwind::Theme::default);
 
 impl Theme {
-    /// The default theme with `json` (a gpui-kit theme file's content)
-    /// over it.
+    /// The default theme with `json` (a theme file's content) over it.
     pub fn from_json(json: &str) -> Result<Self, ThemeError> {
         let mut theme = Self::default();
         theme.apply(json)?;
@@ -297,7 +296,7 @@ impl Theme {
                 let Some(field) = self.colors.by_key(key) else {
                     continue;
                 };
-                // gpui-kit writes the colors a theme leaves unset as null.
+                // A theme file may write the colors it leaves unset as null.
                 if value.is_null() {
                     continue;
                 }
@@ -352,8 +351,8 @@ mod tests {
     }
 
     #[test]
-    fn colors_a_gpui_kit_theme_leaves_unset_keep_their_value() {
-        // gpui-kit serializes unset colors (and numbers) as null.
+    fn colors_a_theme_leaves_unset_keep_their_value() {
+        // A theme file may write unset colors (and numbers) as null.
         let theme = Theme::from_json(
             r##"{ "themes": [{ "mode": "dark", "radius": null, "colors": {
                 "primary.background": null, "primary.active.background": null,

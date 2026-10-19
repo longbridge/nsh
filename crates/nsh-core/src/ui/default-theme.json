@@ -1,7 +1,6 @@
 {
   "name": "Default",
   "author": "Native Shell",
-  "_ref": "gpui-kit's default theme (crates/component/src/theme/default-theme.json), mobile subset; radius and font size for touch",
   "themes": [
     {
       "name": "Default Light",

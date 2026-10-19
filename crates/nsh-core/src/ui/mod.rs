@@ -23,7 +23,7 @@
 //! declarations ([`declarations`]) are made from them. In JS a component is one host node:
 //! the root of its expansion. The app's `class` is appended to the root's
 //! styles and its `style` stays the root's inline style. Colors come from
-//! the [`Theme`] (gpui-kit's fields), with a light and a dark value each.
+//! the [`Theme`], with a light and a dark value each.
 //!
 //! Node ids: JS allocates even ids, the core odd ones for the nodes it
 //! expands, so both stay dense. How the core runs components:

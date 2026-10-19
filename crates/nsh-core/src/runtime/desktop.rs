@@ -60,7 +60,8 @@ impl Window {
     /// corner in macOS screen coordinates and the top left on Windows.
     /// `animated` enables macOS's resize animation (false by default).
     /// Sizing is supported on macOS, Windows and Linux; positioning and levels
-    /// on macOS and Windows. GPUI's host chooses its bounds and level.
+    /// on macOS and Windows. A view embedded in another app's window leaves
+    /// its bounds and level to that app.
     pub(crate) fn set_frame(frame: WindowFrame, cx: &mut ModuleCx) {
         let frame = WindowFrame {
             x: frame.x.filter(|v| v.is_finite()),
@@ -76,7 +77,7 @@ impl Window {
     /// normal level; `"floating"` stays above normal windows. `"desktopIcon"`
     /// selects macOS's desktop icon level or moves a Windows window to the
     /// bottom of the current z-order, where later activation can raise it.
-    /// GTK and GPUI leave the level to the host and window manager.
+    /// Elsewhere the level is left to the host and the window manager.
     pub(crate) fn set_level(level: WindowLevel, cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::SetLevel(level));
     }

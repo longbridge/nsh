@@ -505,7 +505,7 @@ impl IntoElement for String {
     }
 }
 
-/// Conditional building, as in GPUI.
+/// Conditional building.
 pub trait FluentBuilder: Sized {
     /// `then(self)` when `condition` holds.
     fn when(self, condition: bool, then: impl FnOnce(Self) -> Self) -> Self {
