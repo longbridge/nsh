@@ -87,6 +87,9 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                     .bg(move || theme().overlay)
                     .bind_opacity(&offset.interpolate(&[0.0, height], &[1.0, 0.0]))
                     .label("Close")
+                    // For the pointer: Escape and the back button close it
+                    // from the keyboard, which goes straight to the panel.
+                    .focusable(false)
                     .on_press(move |_: &()| close()),
             )
             .child(

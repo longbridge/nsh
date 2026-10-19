@@ -111,9 +111,12 @@ const hovered = signal<string | null>(null);
 | `focusable` | `boolean` | `true` | 可按压的视图是否是 Tab 的停靠点；`false` 把它留给指针（关闭浮层的背景层、用方向键切换的列表行）。 |
 
 ```tsx
-<View class="rounded-lg p-3 focus:ring-2 focus:ring-sky-500" onPress={open}>
+<View class="rounded-lg p-3 focus:bg-sky-100" onPress={open}>
   <Text>Open</Text>
 </View>
+
+{/* 浮层的背景层：点击关闭浮层，Tab 直接越过它进入内容。 */}
+<View class="absolute inset-0" focusable={false} onPress={close} />
 ```
 
 ### 布局与标识

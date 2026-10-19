@@ -389,8 +389,8 @@ browsers' touches into what phones report:
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
-- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled or hidden,
-  so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
+- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled, hidden or
+  `focusable={false}` (a focused one that stops being a stop is blurred), so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
   draws a ring inside the view; a popped screen gives the focus back to what had it when the screen was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
   text and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest

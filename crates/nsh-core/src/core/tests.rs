@@ -6528,6 +6528,20 @@ fn focusable_is_a_view_prop() {
     assert!(batch.items.iter().any(
         |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.focusable == Some(false))
     ));
+    // Cleared (JS's `undefined`): the default, sent again.
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Focusable(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch.items.iter().any(
+            |i| matches!(i, MountItem::ViewProps { id: 2, props } if props.focusable.is_none())
+        )
+    );
 }
 
 /// Components that run once: their views mounted with bindings.

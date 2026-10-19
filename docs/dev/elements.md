@@ -99,7 +99,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   Space press the focused one; a click presses without focusing, so a pressable's `FOCUSED` state (`focus:` classes,
   `.focus(..)`) is keyboard focus, and `focus-visible:` is the same variant. `focusable={false}` (`Prop::Focusable`,
   `ViewProps::focusable`; Rust `.focusable(false)`) keeps a pressable out of the stops: a backdrop that closes a
-  popover, rows a list moves between with the arrow keys. Windows, Linux and GPUI move the focus between fields and
+  popover, rows a list moves between with the arrow keys. Inputs are always stops; `focusable` changes only views
+  that take presses (unlike React Native's, `true` makes nothing focusable that is not). Windows, Linux and GPUI move the focus between fields and
   native components only so far.
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.

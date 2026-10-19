@@ -124,9 +124,12 @@ shows for keyboard focus only.
 | `focusable` | `boolean` | `true` | Whether a view that takes presses is a stop of Tab; `false` leaves it to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
 
 ```tsx
-<View class="rounded-lg p-3 focus:ring-2 focus:ring-sky-500" onPress={open}>
+<View class="rounded-lg p-3 focus:bg-sky-100" onPress={open}>
   <Text>Open</Text>
 </View>
+
+{/* An overlay's backdrop: a click closes it, Tab goes past it to the content. */}
+<View class="absolute inset-0" focusable={false} onPress={close} />
 ```
 
 ### Layout and identity

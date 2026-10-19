@@ -1407,7 +1407,12 @@ class Player {
     const p = el._props;
     const focusable = el._pressable && !p?.disabled && !p?.hidden && p?.focusable !== false;
     if (focusable) el.tabIndex = 0;
-    else if (el.hasAttribute("tabindex") && !el._a11yFocus) el.removeAttribute("tabindex");
+    // Programmatic focus only for what screen-reader focus moved to.
+    else if (el._a11yFocus) el.tabIndex = -1;
+    else if (el.hasAttribute("tabindex")) el.removeAttribute("tabindex");
+    // No longer a stop with the focus on it: it leaves, as on macOS (browsers
+    // move it without a `blur`, which would leave `focus:` on).
+    if (!focusable && !el._a11yFocus && document.activeElement === el) el.blur();
     if (focusable && !el._focusListeners) {
       el._focusListeners = true;
       // `focus:` classes follow the keyboard focus (the browser draws a

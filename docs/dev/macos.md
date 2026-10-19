@@ -283,7 +283,9 @@ and CI compilation alone do not prove those runtime behaviors.
 
 A mounted non-input view listening to `onPress` participates in AppKit's key
 view loop alongside native text inputs. Disabled accessibility state, removed
-press listeners, hidden views and views leaving the tree exclude a control.
+press listeners, `focusable={false}` (a backdrop that closes an overlay),
+hidden views and views leaving the tree exclude a control (a focused one gives
+the focus to the root).
 Tab/Shift+Tab stay within the newest modal and advance from the currently
 focused control. The root and passive layout views stay outside that loop.
 
