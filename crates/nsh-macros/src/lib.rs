@@ -1274,6 +1274,12 @@ fn system_param(ty: &Type) -> bool {
     matches!(last_segment(ty), Some((id, None)) if id == "System")
 }
 
+/// Whether `ty` is `CallCx`: what a synchronous call can do beyond
+/// computing, filled in by the call.
+fn call_cx_param(ty: &Type) -> bool {
+    matches!(last_segment(ty), Some((id, None)) if id == "CallCx")
+}
+
 /// `Later<T>` -> `T`: work a synchronous call starts as a task.
 fn later_of(ty: &Type) -> Option<&Type> {
     match last_segment(ty)? {
@@ -1444,7 +1450,7 @@ fn module_constant_variant(ty: &Type) -> syn::Result<&'static str> {
     ))
 }
 
-fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenStream2> {
+fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
     let self_ty = &item.self_ty;
@@ -1483,6 +1489,7 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
+        let getter = f.attrs.iter().any(|a| a.path().is_ident("getter"));
         let what = if flat {
             js.clone()
         } else {
@@ -1506,12 +1513,28 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
         let mut params = Vec::new();
         let mut names = Vec::new();
         // Where each argument of the Rust call comes from: JS's argument
-        // `Some(i)`, or the call's `System` (`None`).
+        // `Js(i)`, the call's `System` or its `CallCx`.
+        enum Source {
+            Js(usize),
+            System,
+            Cx,
+        }
         let mut sources = Vec::new();
         for (i, arg) in typed.iter().enumerate() {
             let ty = &arg.ty;
             if system_param(ty) {
-                sources.push(None);
+                sources.push(Source::System);
+                continue;
+            }
+            if call_cx_param(ty) {
+                if is_async || takes_cx {
+                    return Err(syn::Error::new(
+                        arg.span(),
+                        "`CallCx` is a synchronous call's (it borrows the call); an `async` \
+                         function starts no other task",
+                    ));
+                }
+                sources.push(Source::Cx);
                 continue;
             }
             if module_cx(ty) {
@@ -1537,8 +1560,19 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
                 ));
             };
             names.push(camel(&name.ident.to_string()));
-            sources.push(Some(params.len()));
+            sources.push(Source::Js(params.len()));
             params.push(ty);
+        }
+        if getter
+            && (is_async
+                || takes_cx
+                || !params.is_empty()
+                || matches!(f.sig.output, ReturnType::Default))
+        {
+            return Err(syn::Error::new(
+                f.sig.span(),
+                "a module's getter takes no JS parameters, is not `async` and returns its value",
+            ));
         }
         let (sync_ret, _, starts) = sync_returns(&f.sig.output);
         let starts = starts && !is_async && !takes_cx;
@@ -1596,11 +1630,12 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
             .iter()
             .zip(&locals)
             .map(|(source, local)| match source {
-                Some(i) => {
+                Source::Js(i) => {
                     let (ty, name) = (params[*i], &names[*i]);
                     quote!(let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;)
                 }
-                None => quote!(let #local = #private::system(host);),
+                Source::System => quote!(let #local = #private::system(host);),
+                Source::Cx => quote!(let #local = #private::call_cx(host);),
             })
             .collect();
         let call = if starts {
@@ -1680,8 +1715,15 @@ fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenSt
                     #(#refs)*
                 },
                 call: #call,
+                getter: #getter,
             }
         });
+    }
+    // `#[getter]` is the macro's.
+    for member in &mut item.items {
+        if let ImplItem::Fn(f) = member {
+            f.attrs.retain(|a| !a.path().is_ident("getter"));
+        }
     }
     Ok(quote! {
         #item

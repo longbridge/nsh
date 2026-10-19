@@ -389,6 +389,22 @@ fn add_functions(ctx: *mut JsContext, obj: JsValue, module: &ModuleSpec) {
     for f in &module.functions {
         let func = module_function(ctx, module, f.name);
         let name = CString::new(f.name).unwrap_or_default();
+        if f.getter {
+            // SAFETY: an accessor of the object, which takes the getter.
+            unsafe {
+                let atom = qjs::JS_NewAtom(ctx, name.as_ptr());
+                qjs::JS_DefinePropertyGetSet(
+                    ctx,
+                    obj,
+                    atom,
+                    func,
+                    UNDEFINED,
+                    (qjs::JS_PROP_ENUMERABLE | qjs::JS_PROP_CONFIGURABLE) as c_int,
+                );
+                qjs::JS_FreeAtom(ctx, atom);
+            }
+            continue;
+        }
         // SAFETY: the object takes the function.
         unsafe { qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func) };
     }

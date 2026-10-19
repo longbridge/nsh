@@ -52,6 +52,9 @@ pub(crate) struct Shared {
     /// The VM's counts of limited resources for Rust modules (`net`'s
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::ui::Quotas,
+    /// The VM's state of the runtime's Rust modules (`process`'s
+    /// children), closed when the VM goes.
+    pub(crate) system_locals: nsh_core::ui::Locals,
     /// Open (or connecting) WebSockets of both APIs, capped per VM.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) websockets: Rc<Cell<usize>>,

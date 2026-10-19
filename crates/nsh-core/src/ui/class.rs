@@ -101,6 +101,10 @@ pub struct Member {
     pub refs: ClassRefs,
     /// How it runs.
     pub call: MemberCall,
+    /// Its TypeScript overloads (`#[overload("…")]`), declared instead of
+    /// the signature its types give: what string literal arguments select
+    /// (`on("exit", ..)`) is not in the Rust types.
+    pub overloads: &'static [&'static str],
 }
 
 /// Adds the classes a signature names (its parameters' and result's
@@ -497,6 +501,8 @@ pub struct MemberSpec {
     pub returns: Option<String>,
     /// JS gets a promise.
     pub is_async: bool,
+    /// Its TypeScript overloads ([`Member::overloads`]).
+    pub overloads: Vec<&'static str>,
 }
 
 /// What a class is to JS and its declarations.
@@ -531,6 +537,7 @@ impl ClassSpec {
                     .collect(),
                 returns: m.returns.map(|ts| ts(&mut types)),
                 is_async: m.call.is_async(),
+                overloads: m.overloads.to_vec(),
             })
             .collect();
         Self {
@@ -650,6 +657,11 @@ pub(crate) mod __private {
         value: Result<crate::ui::Later<T>, E>,
     ) -> Result<TaskStart, Thrown> {
         value.map_err(E::into_thrown).and_then(start)
+    }
+
+    /// What the call can do beyond computing (a `cx: CallCx` parameter).
+    pub fn call_cx(host: &dyn JsHost) -> crate::ui::CallCx<'_> {
+        crate::ui::CallCx::new(host)
     }
 
     /// The VM the call comes from (a `sys: System` parameter).

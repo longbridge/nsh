@@ -432,6 +432,37 @@ impl JsValue for Vec<u8> {
     }
 }
 
+/// An object of strings by name (`process.env`): `Record<string, string>`.
+impl JsValue for std::collections::BTreeMap<String, String> {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Record<string, string>".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        if value.kind() != JsKind::Object {
+            return Err(value.expected("an object of strings"));
+        }
+        let JsonValue::Object(fields) = value.to_json()? else {
+            return Err(value.expected("an object of strings"));
+        };
+        fields
+            .into_iter()
+            .map(|(key, v)| match v {
+                JsonValue::String(s) => Ok((key, s)),
+                other => Err(PropError::expected("a string", &other)),
+            })
+            .collect()
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let object = JsOwned::new(host, host.new_object()?);
+        for (key, value) in self {
+            host.set_field(object.get().raw(), key, host.new_string(value)?)?;
+        }
+        Ok(object)
+    }
+}
+
 impl<T: JsValue> JsValue for Vec<T> {
     fn ts_type(types: &mut TsTypes) -> String {
         format!("({})[]", T::ts_type(types))

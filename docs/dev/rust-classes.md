@@ -194,6 +194,20 @@ For that, two choices of the first version change:
 - **Errors of a chosen class**: `Result<T, JsError>` throws a `TypeError`, `RangeError` or `Error`
   (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A task's `Err`
   rejects with an `Error` as before.
+- **What a synchronous call can do beyond computing**: a parameter `cx: CallCx` (filled in by the call, never in an
+  `async` one) starts a task of the core in order with the ops (`cx.start(future)`, nothing waits for it) and ties
+  work to what owns the call in JS (`cx.on_cleanup(f)`: the reactive owner, else the module's run under hot
+  reload). `process.spawn` returns its child at once and delivers the child's events from such a task.
+- **The VM's own state**: `sys.locals.get::<T: Local>()` is one `T` per VM, made on first use and closed
+  (`Local::close`) when the VM goes, before its callbacks are released (`process`'s children).
+- **Getters of a module**: `#[getter]` on a function without JS parameters makes it a property of the module's
+  object (`process.env`), declared `readonly`, never a named export. A flat default module's object also carries
+  the registry's native values (`Registry::native_values`: `process.nextTick`), and stays one object per VM, so
+  a global made from it (`process`) is the default export.
+- **`this` in a synchronous method**: `fn on(this: Instance<Self>, ..) -> Instance<Self>` gets the handle instead
+  of a borrow, so it can return its own object (`child.on(..)` chains).
+- **Overloads**: `#[overload("…")]` (repeatable) on a member declares those TypeScript signatures instead of the
+  one its types give, for what a string argument selects (`on("exit", (result: ExitResult) => void)`).
 - **Instances of classes**, by reference: a parameter `&Other` / `&mut Other` borrows another instance for the call
   (TS: `other: Other`), `Instance<Other>` keeps a handle (to store one instance in another), and a result `Other`
   or `Instance<Other>` is a JS object (`Self` from `new` and statics; `Option<Instance<Other>>` for none). An

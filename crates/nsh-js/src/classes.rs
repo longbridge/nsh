@@ -991,6 +991,47 @@ impl JsHost for CallHost<'_> {
             shared.system_paths.borrow().clone(),
             shared.system_quotas.clone(),
         )
+        .with_locals(shared.system_locals.clone())
+        .with_exit(shared.system_exit_handler.borrow().clone())
+        // SAFETY: a short read of the live renderer state.
+        .with_os(unsafe { (*crate::state::state(self.ctx)).dom.os() })
+    }
+
+    fn start_task(&self, task: nsh_core::ui::TaskStart) {
+        // Past the op limit the app is stopped: the task goes with it.
+        let op = nsh_core::Op::Rust(RustOp {
+            call: 0,
+            run: RustCall::Task(task),
+        });
+        if crate::dom::push_op(self.ctx, op).is_err() {
+            let _ = js::take_exception(self.ctx);
+        }
+    }
+
+    fn on_cleanup(&self, f: Box<dyn FnOnce()>) {
+        let ctx = self.ctx;
+        let f = RefCell::new(Some(f));
+        let cleanup = js::closure(ctx, Vec::new(), move |_, _, _| {
+            if let Some(f) = f.borrow_mut().take() {
+                f();
+            }
+            Ok(V::undefined())
+        });
+        let Ok(cleanup) = cleanup else {
+            let _ = js::take_exception(ctx);
+            return;
+        };
+        // The reactive owner the call runs under, or the module's run
+        // (hot reload); otherwise the VM's end runs the module's teardown.
+        if crate::reactive::has_owner(ctx) {
+            let mut callback = cleanup.raw();
+            // SAFETY: one borrowed callback; the owner duplicates it.
+            let result = unsafe { crate::reactive::on_cleanup(ctx, UNDEFINED, 1, &mut callback) };
+            // SAFETY: on_cleanup's owned result.
+            unsafe { qjs::JS_FreeValue(ctx, result) };
+        } else {
+            crate::hot::undo_on_rerun(ctx, cleanup);
+        }
     }
 
     fn construct(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {

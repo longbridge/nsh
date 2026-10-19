@@ -368,6 +368,10 @@ enum Made {
 pub(crate) struct ModuleTable {
     registries: Vec<Registry>,
     pub(crate) chunks: RefCell<ChunkCodes>,
+    /// The objects of typed modules made so far, by specifier and module:
+    /// one per VM, so a module's default export, its flat exports and a
+    /// global made from it (`process`) are the same values.
+    objects: RefCell<HashMap<(String, &'static str), crate::web::js::V>>,
 }
 
 /// The code of a chunk.
@@ -401,7 +405,59 @@ impl ModuleTable {
         ModuleTable {
             registries,
             chunks: RefCell::default(),
+            objects: RefCell::default(),
         }
+    }
+
+    /// Frees the module objects (the VM is going).
+    pub(crate) fn free_objects(&self) {
+        let objects = std::mem::take(&mut *self.objects.borrow_mut());
+        drop(objects);
+    }
+
+    /// The values `nsh-js` makes for the registries of module `name`.
+    fn natives(&self, name: &str) -> Vec<&'static str> {
+        self.registries
+            .iter()
+            .filter(|r| r.specifier() == Some(name))
+            .flat_map(|r| r.native_value_names().iter().copied())
+            .collect()
+    }
+
+    /// Module `spec`'s object (owned), made once per VM: its functions,
+    /// getters and constants, and on a flat default module the registry's
+    /// native values too.
+    fn object(&self, ctx: *mut JsContext, name: &str, spec: &ModuleSpec) -> JsValue {
+        let key = (name.to_owned(), spec.name);
+        if let Some(object) = self.objects.borrow().get(&key) {
+            // SAFETY: a live value the table holds.
+            return unsafe { qjs::JS_DupValue(ctx, object.raw()) };
+        }
+        let object = components::module(ctx, spec);
+        // SAFETY: inline tag check.
+        if unsafe { qjs::JS_IsException(object) } {
+            return object;
+        }
+        if spec.flat && spec.default {
+            for native in self.natives(name) {
+                let value = env::reexport(ctx, native);
+                // SAFETY: inline tag check.
+                if unsafe { qjs::JS_IsException(value) } {
+                    // SAFETY: ours.
+                    unsafe { qjs::JS_FreeValue(ctx, object) };
+                    return value;
+                }
+                let cname = CString::new(native).unwrap_or_default();
+                // SAFETY: the object takes the value.
+                unsafe { qjs::JS_SetPropertyStr(ctx, object, cname.as_ptr(), value) };
+            }
+        }
+        // SAFETY: the table keeps one reference, the caller gets another.
+        let kept = unsafe { qjs::JS_DupValue(ctx, object) };
+        self.objects
+            .borrow_mut()
+            .insert(key, crate::web::js::V::own(ctx, kept));
+        object
     }
 
     /// The exports of module `name`, if it is one.
@@ -437,7 +493,8 @@ impl ModuleTable {
                     continue;
                 }
                 if m.flat {
-                    for f in &m.functions {
+                    // A getter reads the object's property; it is no export.
+                    for f in m.functions.iter().filter(|f| !f.getter) {
                         out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
                     }
                     for constant in &m.constants {
@@ -687,17 +744,20 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
             return -1;
         }
         let state = crate::state::state(ctx);
-        let exports = CStr::from_ptr(name)
-            .to_str()
-            .ok()
-            .and_then(|n| (*state).modules.exports(n));
+        let module_name = CStr::from_ptr(name).to_string_lossy().into_owned();
         qjs::JS_FreeCString(ctx, name);
-        let Some(exports) = exports else {
+        let Some(exports) = (*state).modules.exports(&module_name) else {
             return -1;
         };
-        // One object per typed module in this ES namespace: default and
-        // flat named exports must share the exact same functions and values.
-        let mut module_objects: HashMap<usize, crate::web::js::V> = HashMap::new();
+        let name = module_name;
+        // One object per typed module in the VM: default and flat named
+        // exports share its functions and values, as a global made from it
+        // does.
+        let table = &(*state).modules;
+        let default_spec = exports.iter().find_map(|(_, made)| match made {
+            Made::Default(spec) if spec.flat => Some(spec.clone()),
+            _ => None,
+        });
         for (export, made) in exports {
             let value = match made {
                 Made::Own(Export::Function(f, length)) => {
@@ -706,21 +766,12 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
                 }
                 Made::Own(Export::Value(make)) => make(ctx),
                 Made::Component(spec, module) => components::component(ctx, spec, module),
-                Made::Module(spec) | Made::Default(spec) => {
-                    let key = Arc::as_ptr(&spec) as usize;
-                    let object = module_objects.entry(key).or_insert_with(|| {
-                        crate::web::js::V::own(ctx, components::module(ctx, &spec))
-                    });
-                    qjs::JS_DupValue(ctx, object.raw())
-                }
+                Made::Module(spec) | Made::Default(spec) => table.object(ctx, &name, &spec),
                 Made::Function(spec, member) if !spec.default => {
                     components::module_function(ctx, &spec, member)
                 }
                 Made::Function(spec, member) | Made::Constant(spec, member) => {
-                    let key = Arc::as_ptr(&spec) as usize;
-                    let object = module_objects.entry(key).or_insert_with(|| {
-                        crate::web::js::V::own(ctx, components::module(ctx, &spec))
-                    });
+                    let object = crate::web::js::V::own(ctx, table.object(ctx, &name, &spec));
                     if qjs::JS_IsException(object.raw()) {
                         return -1;
                     }
@@ -731,7 +782,18 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
                     Ok(ctor) => ctor.take(),
                     Err(_) => qjs::JS_EXCEPTION,
                 },
-                Made::Reexport(value) => env::reexport(ctx, value),
+                // A value the default object carries is that object's.
+                Made::Reexport(value) => match &default_spec {
+                    Some(spec) => {
+                        let object = crate::web::js::V::own(ctx, table.object(ctx, &name, spec));
+                        if qjs::JS_IsException(object.raw()) {
+                            return -1;
+                        }
+                        let member = CString::new(value).unwrap_or_default();
+                        qjs::JS_GetPropertyStr(ctx, object.raw(), member.as_ptr())
+                    }
+                    None => env::reexport(ctx, value),
+                },
             };
             if qjs::JS_IsException(value) {
                 return -1;

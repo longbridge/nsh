@@ -120,6 +120,8 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         STATES.with(|m| m.borrow_mut().remove(&(rt as usize)));
         qjs::JS_SetContextOpaque(raw, ptr::null_mut());
         let mut state = Box::from_raw(p);
+        // The typed modules' objects (the global `process` among them).
+        state.modules.free_objects();
         // First: what the frees below finalize finds Rust's callbacks
         // released and their calls refused.
         state.classes.free_all();
@@ -141,6 +143,7 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
 
 /// Cancels native work while the context state is still reachable.
 fn state_system_cleanup(raw: *mut qjs::JSContext) {
+    crate::dom::shared(raw).system_locals.close_all();
     crate::process::free_all(raw);
     crate::fs::free_all(raw);
 }

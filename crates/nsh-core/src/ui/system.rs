@@ -4,11 +4,20 @@
 //! finishes as a task ([`Later`]), and errors of a chosen JS class
 //! ([`JsError`]).
 
-use std::{cell::RefCell, fmt, future::Future, path::PathBuf, pin::Pin, rc::Rc, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    cell::RefCell,
+    fmt,
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+};
 
 use rustc_hash::FxHashMap;
 
-use super::{Ret, Thrown, call::JsResult, module::ModuleFuture};
+use super::{JsHost, Ret, Thrown, call::JsResult, module::ModuleFuture};
 use crate::access::{Access, TrustedPaths};
 
 /// The VM a call comes from, as the host configured it: what the app may
@@ -27,6 +36,13 @@ pub struct System {
     pub paths: TrustedPaths,
     /// The VM's counts of limited resources.
     pub quotas: Quotas,
+    /// The VM's own state of the runtime's modules (`process`'s children).
+    pub locals: Locals,
+    /// What the host does when the app asks to exit (`process.exit`);
+    /// `None`: it installed nothing.
+    pub exit: Option<Rc<dyn Fn(i32)>>,
+    /// The operating system the app runs on, as the host says.
+    pub os: crate::platform::Os,
 }
 
 impl System {
@@ -42,7 +58,107 @@ impl System {
             data_dir,
             paths,
             quotas,
+            locals: Locals::default(),
+            exit: None,
+            os: crate::platform::Os::default(),
         }
+    }
+
+    /// The operating system the app runs on.
+    pub fn with_os(mut self, os: crate::platform::Os) -> Self {
+        self.os = os;
+        self
+    }
+
+    /// The VM's state of the runtime modules, kept with it.
+    pub fn with_locals(mut self, locals: Locals) -> Self {
+        self.locals = locals;
+        self
+    }
+
+    /// What the host does with an exit request.
+    pub fn with_exit(mut self, exit: Option<Rc<dyn Fn(i32)>>) -> Self {
+        self.exit = exit;
+        self
+    }
+}
+
+/// One VM's state of a runtime module (a [`Locals`] entry): made on first
+/// use, closed when the VM goes.
+pub trait Local: Default + 'static {
+    /// Ends what the state owns, before the VM's callbacks go (children
+    /// killed, connections closed). Runs once.
+    fn close(&self) {}
+}
+
+type Entry = (TypeId, Rc<dyn Any>, fn(&dyn Any));
+
+/// One VM's states of the runtime modules ([`Local`]), one per type: the
+/// host keeps one per VM, hands it to every [`System`] and closes it when
+/// the VM goes.
+#[derive(Clone, Default)]
+pub struct Locals(Rc<RefCell<Vec<Entry>>>);
+
+impl Locals {
+    /// The VM's `T`, made the first time.
+    pub fn get<T: Local>(&self) -> Rc<T> {
+        let id = TypeId::of::<T>();
+        if let Some((_, local, _)) = self.0.borrow().iter().find(|(t, ..)| *t == id) {
+            return local
+                .clone()
+                .downcast()
+                .expect("the type it is filed under");
+        }
+        let local = Rc::new(T::default());
+        let close: fn(&dyn Any) = |local| {
+            if let Some(local) = local.downcast_ref::<T>() {
+                local.close();
+            }
+        };
+        self.0.borrow_mut().push((id, local.clone(), close));
+        local
+    }
+
+    /// Closes every state, in the order they were made, and forgets them
+    /// (the host, when its VM goes).
+    pub fn close_all(&self) {
+        let locals = std::mem::take(&mut *self.0.borrow_mut());
+        for (_, local, close) in &locals {
+            close(&**local);
+        }
+    }
+}
+
+/// What a call that is not `async` can do beyond computing (a parameter
+/// `cx: CallCx`, filled in by the call): start a task of the core, and tie
+/// work to what owns the call in JS. Only in the call: it borrows it.
+#[derive(Clone, Copy)]
+pub struct CallCx<'a> {
+    host: &'a dyn JsHost,
+}
+
+impl<'a> CallCx<'a> {
+    #[doc(hidden)]
+    pub fn new(host: &'a dyn JsHost) -> Self {
+        Self { host }
+    }
+
+    /// Runs `work` as a task of the core, started in order with what JS
+    /// sent before this call (nothing waits for it).
+    pub fn start(&self, work: impl Future<Output = ()> + 'static) {
+        self.host.start_task(Box::new(move || {
+            Box::pin(async move {
+                work.await;
+                Ok(Box::new(()) as Box<dyn super::ToJs>)
+            })
+        }));
+    }
+
+    /// Runs `f` when what owns the call in JS goes: the reactive owner it
+    /// runs under, or the module's run under hot reload (otherwise when the
+    /// VM goes, as everything else does).
+    pub fn on_cleanup(&self, f: impl FnOnce() + 'static) {
+        self.host.on_cleanup(Box::new(f));
     }
 }
 
@@ -190,6 +306,18 @@ mod tests {
             let _ = sys;
             bytes.len() as u32
         }
+
+        /// Starts a task, tied to the call's owner.
+        pub(crate) fn watch(path: String, cx: CallCx<'_>) {
+            cx.on_cleanup(move || drop(path));
+            cx.start(async {});
+        }
+
+        /// Where the files are.
+        #[getter]
+        pub(crate) fn root(sys: System) -> Option<String> {
+            sys.data_dir.map(|d| d.display().to_string())
+        }
     }
 
     #[class]
@@ -201,6 +329,13 @@ mod tests {
         pub(crate) fn next(&self, sys: System, size: Option<u32>) -> Later<Option<Vec<u8>>> {
             let _ = (sys, size);
             Later::new(async { Ok::<_, String>(None) })
+        }
+
+        /// Itself, for chaining.
+        #[overload(r#"on(event: "a", f: () => void): Handle"#)]
+        pub(crate) fn on(this: Instance<Self>, event: String, cx: CallCx<'_>) -> Instance<Self> {
+            let _ = (event, cx);
+            this
         }
     }
 
@@ -221,6 +356,13 @@ mod tests {
             d.contains("next(size?: number | null): Promise<Uint8Array | null>;"),
             "{d}"
         );
+        assert!(d.contains("function watch(path: string): void;"), "{d}");
+        assert!(
+            d.contains(r#"  on(event: "a", f: () => void): Handle;"#),
+            "{d}"
+        );
+        // A getter is no flat export.
+        assert!(!d.contains("function root"), "{d}");
     }
 
     #[test]

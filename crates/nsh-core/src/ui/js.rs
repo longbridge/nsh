@@ -127,6 +127,18 @@ pub trait JsHost {
     fn system(&self) -> super::System {
         super::System::default()
     }
+
+    /// Starts `task` as a task of the core, in order with the ops JS sent
+    /// before the call (`CallCx::start`); a host without a core drops it.
+    fn start_task(&self, task: super::TaskStart) {
+        drop(task);
+    }
+
+    /// Runs `f` when what owns the call in JS goes (`CallCx::on_cleanup`);
+    /// a host without owners keeps it until it goes itself.
+    fn on_cleanup(&self, f: Box<dyn FnOnce()>) {
+        drop(f);
+    }
 }
 
 /// A JS value borrowed for a call: read it with its methods, convert it

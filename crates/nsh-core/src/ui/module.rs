@@ -157,6 +157,9 @@ pub struct Function {
     pub refs: super::ClassRefs,
     /// How it runs.
     pub call: FunctionCall,
+    /// A getter of the module's object (`#[getter]`: `process.env`), read
+    /// as a property and never a named export of a flat module.
+    pub getter: bool,
 }
 
 /// One function, for the glue and its declarations.
@@ -174,6 +177,8 @@ pub struct FunctionSpec {
     pub kind: FunctionKind,
     /// The call.
     pub call: FunctionCall,
+    /// A getter of the module's object ([`Function::getter`]).
+    pub getter: bool,
 }
 
 /// What a module is to JS.
@@ -212,6 +217,7 @@ impl ModuleSpec {
                 returns: f.returns.map(|ts| ts(&mut types)),
                 kind: f.call.kind(),
                 call: f.call,
+                getter: f.getter,
             })
             .collect();
         Self {

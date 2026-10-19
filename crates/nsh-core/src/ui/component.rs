@@ -979,7 +979,11 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         for f in &m.functions {
             doc(out, "  ", f.doc);
             let (params, returns) = signature(f);
-            let _ = writeln!(out, "  {}({params}): {returns};", f.name);
+            if f.getter {
+                let _ = writeln!(out, "  readonly {}: {returns};", f.name);
+            } else {
+                let _ = writeln!(out, "  {}({params}): {returns};", f.name);
+            }
         }
         for constant in &m.constants {
             doc(out, "  ", constant.doc);
@@ -1073,7 +1077,11 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             continue;
         }
         if m.flat {
-            for f in m.functions.iter().filter(|f| !omit.contains(&f.name)) {
+            for f in m
+                .functions
+                .iter()
+                .filter(|f| !f.getter && !omit.contains(&f.name))
+            {
                 doc(&mut out, "", f.doc);
                 let (params, returns) = signature(f);
                 let _ = write!(
@@ -1096,6 +1104,10 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             if m.default && !omit.contains(&"default") {
                 let _ = write!(out, "declare const defaultExport: ");
                 module_object(&mut out, m);
+                // The registry's values `nsh-js` makes are on the object too.
+                for native in registry.native_value_names() {
+                    let _ = write!(out, " & {{ {native}: typeof {native} }}");
+                }
                 out.push_str(";\nexport default defaultExport;\n\n");
             }
             continue;
@@ -1137,6 +1149,12 @@ fn class_declaration(out: &mut String, c: &ClassSpec) {
     }
     for m in &c.members {
         doc(out, "  ", m.doc);
+        if !m.overloads.is_empty() {
+            for overload in &m.overloads {
+                let _ = writeln!(out, "  {overload};");
+            }
+            continue;
+        }
         let params = m
             .params
             .iter()

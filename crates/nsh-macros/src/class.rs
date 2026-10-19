@@ -10,7 +10,10 @@ use syn::{
     spanned::Spanned,
 };
 
-use crate::{camel, decl, docs, last_segment, module_cx, result_ok, sync_returns, system_param};
+use crate::{
+    call_cx_param, camel, decl, docs, last_segment, module_cx, result_ok, sync_returns,
+    system_param,
+};
 
 pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     match item {
@@ -106,12 +109,19 @@ fn has_attr(attrs: &[Attribute], name: &str) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Constructor,
-    Method { mutable: bool },
+    Method {
+        mutable: bool,
+    },
     Getter,
-    Setter { mutable: bool },
+    Setter {
+        mutable: bool,
+    },
     Static,
     AsyncMethod,
     AsyncStatic,
+    /// Not `async`, taking `this: Instance<Self>`: the handle, not a
+    /// borrow (a method returning its own object, `child.on(..)`).
+    ThisMethod,
 }
 
 /// The `&self` / `&mut self` receiver of `f`: `Some(mutable)`.
@@ -189,6 +199,7 @@ fn kind_of(f: &ImplItemFn) -> syn::Result<Kind> {
     Ok(match receiver {
         Some(mutable) => Kind::Method { mutable },
         None if f.sig.ident == "new" => Kind::Constructor,
+        None if f.sig.inputs.first().is_some_and(is_this) => Kind::ThisMethod,
         None => Kind::Static,
     })
 }
@@ -201,6 +212,8 @@ enum Param<'a> {
     Borrowed { elem: &'a Type, mutable: bool },
     /// `System`: the VM the call comes from, not one JS passes.
     System,
+    /// `CallCx`: what a synchronous call can do beyond computing.
+    Cx,
 }
 
 fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
@@ -227,8 +240,11 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     // The getters' and setters' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
-            f.attrs
-                .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("setter"));
+            f.attrs.retain(|a| {
+                !a.path().is_ident("getter")
+                    && !a.path().is_ident("setter")
+                    && !a.path().is_ident("overload")
+            });
         }
     }
     Ok(quote! {
@@ -281,6 +297,13 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         ));
     }
     let doc = decl(&docs(&f.attrs));
+    // `#[overload("…")]`: TypeScript signatures declared instead.
+    let overloads = f
+        .attrs
+        .iter()
+        .filter(|a| a.path().is_ident("overload"))
+        .map(|a| a.parse_args::<syn::LitStr>().map(|s| decl(&s.value())))
+        .collect::<syn::Result<Vec<_>>>()?;
     // `#[cfg]` of the function applies to its entry too.
     let cfgs: Vec<_> = f
         .attrs
@@ -289,7 +312,11 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .collect();
     // The parameters JS passes (not the receiver nor `this`).
     let skip = match kind {
-        Kind::Method { .. } | Kind::Getter | Kind::Setter { .. } | Kind::AsyncMethod => 1,
+        Kind::Method { .. }
+        | Kind::Getter
+        | Kind::Setter { .. }
+        | Kind::AsyncMethod
+        | Kind::ThisMethod => 1,
         _ => 0,
     };
     let is_async = matches!(kind, Kind::AsyncMethod | Kind::AsyncStatic);
@@ -317,6 +344,16 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             params.push(Param::System);
             continue;
         }
+        if call_cx_param(&t.ty) {
+            if is_async {
+                return Err(syn::Error::new(
+                    t.span(),
+                    "`CallCx` is a synchronous call's (it borrows the call)",
+                ));
+            }
+            params.push(Param::Cx);
+            continue;
+        }
         params.push(match &*t.ty {
             Type::Reference(_) if is_async => {
                 return Err(syn::Error::new(
@@ -338,7 +375,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         if matches!(kind, Kind::Setter { .. }) {
             break;
         }
-        if matches!(params[i], Param::System) {
+        if matches!(params[i], Param::System | Param::Cx) {
             continue;
         }
         let is_option = matches!(&params[i], Param::Value(ty) if matches!(last_segment(ty), Some((id, _)) if id == "Option"));
@@ -355,7 +392,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             let ts = match p {
                 Param::Value(ty) => quote!(#private::arg_ts::<#ty>()),
                 Param::Borrowed { elem, .. } => quote!(#private::arg_ts::<#ui::Instance<#elem>>()),
-                Param::System => return None,
+                Param::System | Param::Cx => return None,
             };
             Some(quote!((#name, #ts, #optional)))
         })
@@ -368,12 +405,12 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             Param::Borrowed { elem, .. } => {
                 Some(quote!(#private::arg_classes::<#ui::Instance<#elem>>(__out);))
             }
-            Param::System => None,
+            Param::System | Param::Cx => None,
         })
         .collect();
     // A method or static returning `Later<T>` starts a task in the call.
-    let starts =
-        matches!(kind, Kind::Method { .. } | Kind::Static) && sync_returns(&f.sig.output).2;
+    let starts = matches!(kind, Kind::Method { .. } | Kind::Static | Kind::ThisMethod)
+        && sync_returns(&f.sig.output).2;
     let (returns, ok_ty, fallible) = match &f.sig.output {
         ReturnType::Type(_, _) if starts => {
             let (task, fallible, _) = sync_returns(&f.sig.output);
@@ -400,7 +437,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     };
     let member_kind = match kind {
         Kind::Constructor => quote!(Constructor),
-        Kind::Method { .. } | Kind::AsyncMethod => quote!(Method),
+        Kind::Method { .. } | Kind::AsyncMethod | Kind::ThisMethod => quote!(Method),
         Kind::Getter => quote!(Getter),
         Kind::Setter { .. } => quote!(Setter),
         Kind::Static | Kind::AsyncStatic => quote!(Static),
@@ -435,6 +472,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
                 #(#refs)*
             },
             call: #call,
+            overloads: &[#(#overloads),*],
         }
     })
 }
@@ -460,12 +498,16 @@ fn sync_call(
     for (p, name) in params.iter().zip(names) {
         let local = format_ident!("__arg{}", args.len());
         let i = js;
-        if !matches!(p, Param::System) {
+        if !matches!(p, Param::System | Param::Cx) {
             js += 1;
         }
         match p {
             Param::System => {
                 decode.push(quote!(let #local = #private::system(host);));
+                args.push(quote!(#local));
+            }
+            Param::Cx => {
+                decode.push(quote!(let #local = #private::call_cx(host);));
                 args.push(quote!(#local));
             }
             Param::Value(ty) => {
@@ -518,6 +560,10 @@ fn sync_call(
                 let __value = #private::borrow::<Self>(&__this)?;
             },
             Some(quote!(&*__value)),
+        ),
+        Kind::ThisMethod => (
+            quote!(let __this = #private::this::<Self>(host, #what)?;),
+            Some(quote!(__this)),
         ),
         _ => (quote!(), None),
     };
@@ -580,6 +626,7 @@ fn async_call(
                 decode.push(quote!(let #local = #private::system(host);));
                 args.push(quote!(#local));
             }
+            Param::Cx => {}
             Param::Borrowed { .. } => js += 1,
         }
     }

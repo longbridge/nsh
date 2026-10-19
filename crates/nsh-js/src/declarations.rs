@@ -425,10 +425,13 @@ fn references(body: &str) -> (Vec<String>, Vec<String>) {
             .rsplit(|c: char| !is_ident(c))
             .next()
             .unwrap_or_default();
+        let after = &code[before.len() + word.len()..];
         if DECLARING.contains(&prev_word) && prev.ends_with(prev_word) {
             local.push(word.to_owned());
         } else if prev.ends_with('.') {
             // A member (`JSX.Element`, `Symbol.iterator`).
+        } else if after.starts_with(':') || after.starts_with("?:") {
+            // A field's or parameter's name (`signal?: string`), not a type.
         } else {
             used.push(word.to_owned());
         }
