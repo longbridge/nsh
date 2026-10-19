@@ -286,6 +286,19 @@ impl AppView {
         self.surface.start(config);
     }
 
+    /// Runs a verified signed package ([`crate::verify_package`] or
+    /// [`crate::load_package`], off the main thread: they hash the package
+    /// and write its assets), its assets from where they were unpacked,
+    /// replacing what ran. A package from [`crate::verify_package`] is
+    /// accepted with [`crate::accept_package`] once the embedding app
+    /// decided it is healthy; until then the build it ran before still
+    /// verifies, to go back to.
+    #[cfg(feature = "js")]
+    pub fn run_package(&self, package: &nsh_engine::LoadedPackage) {
+        self.set_asset_base(Some(AssetBase::Directory(package.assets.clone())));
+        self.load(App::Js(package.bundle.clone()));
+    }
+
     /// Where `asset:/` URIs resolve: at once for the images, videos and
     /// web views the running app loads from now on, and for every app
     /// loaded later. Fonts the running app already registered stay; a

@@ -281,6 +281,31 @@ impl VerifiedPackage {
     pub fn bytecode(&self) -> Option<&[u8]> {
         self.bytecode.as_deref()
     }
+
+    /// What accepting it later records ([`crate::TrustStore::accept_receipt`]),
+    /// without keeping its files.
+    pub fn receipt(&self) -> PackageReceipt {
+        PackageReceipt {
+            app: self.app.clone(),
+            sha256: self.sha256.clone(),
+            key_id: self.key_id.clone(),
+        }
+    }
+}
+
+/// A verified package's identity: what [`crate::TrustStore::accept_receipt`]
+/// records once the embedding app decided to keep the package. Only
+/// [`VerifiedPackage::receipt`] makes one (`non_exhaustive`), so a receipt
+/// always stands for a package that was verified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PackageReceipt {
+    /// The app.
+    pub app: App,
+    /// SHA-256 of the whole package (hex).
+    pub sha256: String,
+    /// The release key's id.
+    pub key_id: String,
 }
 
 /// Reads the header of `bytes` (unverified), where the files start and the

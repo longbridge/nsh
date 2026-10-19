@@ -217,7 +217,8 @@ replayed to un-revoke something. Publish the newest list where your apps fetch i
 
 When a host app accepts a package, its trust store records the build number for that app id and from then on refuses
 older builds. An attacker who obtained an older, signed package with a known vulnerability cannot make the app run it.
-The record persists in the store's state directory (`nsh-trust.json`), so it survives restarts.
+The record persists in the store's state directory (`nsh-trust.json`), so it survives restarts. On GPUI a host app may
+record it later, once the new package proved healthy (`verify_package`, then `accept_package`; see below).
 
 ## Loading packages in a host app
 
@@ -244,6 +245,26 @@ trust.updateRevocations(latestListJson);
 NshPackage pkg = trust.openPackage(downloaded);   // off the UI thread; throws NshPackage.RefusedException
 runOnUiThread(() -> nsh.runPackage(pkg));
 ```
+
+**GPUI (Rust)**, where the host app can also accept a package only once it proved healthy:
+
+```rust
+use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
+
+let mut trust = TrustStore::open(state_dir)?;
+trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
+
+// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
+let package = verify_package(&trust, &bytes, &packages_dir)?;
+view.read(cx).run_package(&package);
+// Later, once its first frame showed and no fatal error came for a while:
+accept_package(&mut trust, &package)?;
+```
+
+Until a package is accepted, the build accepted before still verifies, so a host app whose new package fails can go
+back to the one it ran (`AppView::on_app_error`'s fatal errors, or a crash before accepting, are the signals). Builds
+older than the accepted one stay refused, and a package revoked in between is not accepted. `load_package` verifies and
+accepts at once, as `openPackage` does on iOS and Android.
 
 The package's declared [capabilities](./sandbox-and-capabilities.md) travel with it: a package can do only what it
 declares, and only what the host app grants on top.

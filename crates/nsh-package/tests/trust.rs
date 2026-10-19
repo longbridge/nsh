@@ -257,6 +257,85 @@ fn older_builds_are_refused_once_a_newer_one_was_accepted() {
 }
 
 #[test]
+fn a_verified_build_is_not_accepted_until_its_receipt_is() {
+    let k = keys(&["*"]);
+    let v1 = build(&contents("a.b", 1), &k.release, &k.cert).unwrap();
+    let v2 = build(&contents("a.b", 2), &k.release, &k.cert).unwrap();
+    let v0 = build(&contents("a.b", 0), &k.release, &k.cert).unwrap();
+    let mut store = store(&[k.root.public()]);
+    store.accept(&store.verify(&v1, BYTECODE).unwrap()).unwrap();
+
+    // Build 2 verifies (and would run); build 1 still verifies: the app
+    // can go back to it. Below what was accepted stays refused.
+    let receipt = store.verify(&v2, BYTECODE).unwrap().receipt();
+    assert_eq!(store.accepted_build("a.b"), Some(1));
+    assert!(store.verify(&v1, BYTECODE).is_ok());
+    assert!(matches!(
+        store.verify(&v0, BYTECODE),
+        Err(Error::Rollback { accepted: 1, .. })
+    ));
+
+    // Accepted: build 1 is refused from now on. Accepting again, or an
+    // older receipt, changes nothing.
+    store.accept_receipt(&receipt).unwrap();
+    assert_eq!(store.accepted_build("a.b"), Some(2));
+    assert!(matches!(
+        store.verify(&v1, BYTECODE),
+        Err(Error::Rollback { accepted: 2, .. })
+    ));
+    store.accept_receipt(&receipt).unwrap();
+    let mut other = TrustStore::new();
+    other.add_root(k.root.public());
+    let older = other.verify(&v1, BYTECODE).unwrap().receipt();
+    store.accept_receipt(&older).unwrap();
+    assert_eq!(store.accepted_build("a.b"), Some(2));
+    other.accept_receipt(&receipt).unwrap();
+    assert_eq!(other.accepted_build("a.b"), Some(2));
+}
+
+#[test]
+fn a_package_revoked_after_it_was_verified_is_not_accepted() {
+    let k = keys(&["*"]);
+    let v1 = build(&contents("a.b", 1), &k.release, &k.cert).unwrap();
+    let v2 = build(&contents("a.b", 2), &k.release, &k.cert).unwrap();
+    let mut store = store(&[k.root.public()]);
+    store.accept(&store.verify(&v1, BYTECODE).unwrap()).unwrap();
+    let receipt = store.verify(&v2, BYTECODE).unwrap().receipt();
+    store
+        .update_revocations(revoke(
+            &k.root,
+            1,
+            &[],
+            std::slice::from_ref(&receipt.sha256),
+        ))
+        .unwrap();
+    assert!(matches!(
+        store.accept_receipt(&receipt),
+        Err(Error::Revoked(_))
+    ));
+    // The app can still go back to build 1.
+    assert_eq!(store.accepted_build("a.b"), Some(1));
+    assert!(store.verify(&v1, BYTECODE).is_ok());
+
+    // Its release key revoked: refused too.
+    let v3 = build(&contents("a.b", 3), &k.release, &k.cert).unwrap();
+    let receipt = store.verify(&v3, BYTECODE).unwrap().receipt();
+    store
+        .update_revocations(revoke(
+            &k.root,
+            2,
+            std::slice::from_ref(&receipt.key_id),
+            &[],
+        ))
+        .unwrap();
+    assert!(matches!(
+        store.accept_receipt(&receipt),
+        Err(Error::Revoked(_))
+    ));
+    assert_eq!(store.accepted_build("a.b"), Some(1));
+}
+
+#[test]
 fn state_persists() {
     let dir = std::env::temp_dir().join(format!("nsh-trust-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

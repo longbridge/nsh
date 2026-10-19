@@ -158,6 +158,51 @@ fn capabilities_of_newer_runtimes_are_not_granted() {
 }
 
 #[test]
+fn a_package_accepted_once_healthy_lets_the_app_go_back_before() {
+    let dir = std::env::temp_dir().join(format!("nsh-package-accept-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let root = SecretKey::generate().unwrap();
+    let release = SecretKey::generate().unwrap();
+    let cert = certify(
+        &root,
+        &release.public(),
+        &["com.example.*".into()],
+        0,
+        u64::MAX,
+    );
+    let open = || {
+        let mut trust = TrustStore::open(dir.join("trust")).unwrap();
+        trust.add_root(root.public());
+        trust
+    };
+    let packages = dir.join("packages");
+    let v1 = build(&counter(1, nsh_js::BYTECODE_VERSION), &release, &cert).unwrap();
+    let v2 = build(&counter(2, nsh_js::BYTECODE_VERSION), &release, &cert).unwrap();
+    let mut trust = open();
+    nsh_engine::load_package(&mut trust, &v1, &packages).unwrap();
+
+    // Build 2 runs before it is accepted.
+    let v2_loaded = nsh_engine::verify_package(&trust, &v2, &packages).unwrap();
+    assert_eq!(v2_loaded.receipt.app.build, 2);
+    assert!(first_texts(v2_loaded.bundle.clone()).contains(&"0".to_owned()));
+    // It failed (or the app quit) before it was accepted: build 1 still
+    // loads, also after a restart.
+    drop(trust);
+    let mut trust = open();
+    assert_eq!(trust.accepted_build("com.example.counter"), Some(1));
+    assert!(nsh_engine::verify_package(&trust, &v1, &packages).is_ok());
+
+    // Healthy: accepted, and build 1 is refused from now on.
+    nsh_engine::accept_package(&mut trust, &v2_loaded).unwrap();
+    let err = nsh_engine::verify_package(&trust, &v1, &packages).unwrap_err();
+    assert!(err.contains("older"), "{err}");
+    drop(trust);
+    let trust = open();
+    assert!(nsh_engine::verify_package(&trust, &v1, &packages).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn bytecode_files_are_refused_by_read() {
     let dir = std::env::temp_dir().join(format!("nsh-read-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
