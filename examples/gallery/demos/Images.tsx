@@ -2,12 +2,16 @@ import { type JSX, signal, Text, View } from "nsh";
 import { Image } from "nsh/image";
 import bounce from "../bounce.gif";
 import logo from "../logo@2x.png";
+import mark from "../mark.svg";
 import spinner from "../spinner.webp";
+import star from "../star.svg";
 import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, Meter, mono, radius } from "../ui";
 
 // Fixed photos (in color), large enough to stay sharp at 3x.
 const wide = "https://picsum.photos/id/1015/1200/600";
 const photo = (id: number, w: number, h: number) => `https://picsum.photos/id/${id}/${w}/${h}`;
+// A remote SVG (Wikimedia Commons' SVG logo).
+const remoteSvg = "https://upload.wikimedia.org/wikipedia/commons/0/02/SVG_logo.svg";
 
 /** Every photo's frame: rounded, a hairline border, a raised fill while it loads. */
 const frame = () => ({ borderRadius: radius.control, borderCurve: "continuous", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.raised }) as const;
@@ -112,6 +116,43 @@ function Assets() {
             </Tile>
           )}
         </Each>
+      </View>
+    </Card>
+  );
+}
+
+/** SVG images: a one-color star tinted at three sizes and as drawn, a
+ * two-color logo in two resize modes, and an SVG from a URL. */
+function Svg() {
+  const sizes = [18, 36, 72];
+  const modes = ["contain", "cover"] as const;
+  return (
+    <Card icon="star" title="SVG images" subtitle="star.svg, mark.svg and a remote SVG, sharp at every size">
+      <View style={{ flexDirection: "row", gap: 12 }}>
+        <Each of={sizes}>
+          {(size) => (
+            <Tile note={`${size()} pt`} height={96}>
+              <Image testID={`svg-star-${size()}`} src={star} style={{ width: size(), height: size(), tintColor: colors.accent }} />
+            </Tile>
+          )}
+        </Each>
+        <Tile note="As drawn" height={96}>
+          <Image testID="svg-star-plain" src={star} style={{ width: 36, height: 36 }} />
+        </Tile>
+      </View>
+      <View style={{ flexDirection: "row", gap: 12 }}>
+        <Each of={modes}>
+          {(mode) => (
+            <View style={{ flex: 1, gap: 8 }}>
+              <Image testID={`svg-mark-${mode()}`} src={mark} resizeMode={mode()} style={{ ...frame(), height: 96 }} />
+              <Note code>{mode()}</Note>
+            </View>
+          )}
+        </Each>
+        <View style={{ flex: 1, gap: 8 }}>
+          <Image testID="svg-remote" src={remoteSvg} resizeMode="contain" style={{ ...frame(), height: 96 }} />
+          <Note>Remote</Note>
+        </View>
       </View>
     </Card>
   );
@@ -297,6 +338,6 @@ function Events() {
 }
 
 export function Images() {
-  const cards = [ResizeModes, Corners, Assets, Animated, Placeholders, Blur, Info, Events];
+  const cards = [ResizeModes, Corners, Assets, Svg, Animated, Placeholders, Blur, Info, Events];
   return <DemoPage cards={cards} columns={3} />;
 }

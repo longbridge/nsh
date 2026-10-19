@@ -222,6 +222,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 | 扩展名 | 导入得到 |
 |---|---|
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | 一个 `ImageAsset`：`{ uri, width, height }`，单位为点。文件名带 `@2x` / `@3x` 后缀时，像素尺寸除以 2 / 3。 |
+| `.svg` | 一个 `ImageAsset`，尺寸取自 SVG 的 `width` 和 `height`（或 `viewBox`），单位为点。 |
 | `.ttf`, `.otf` | 字体的族名，一个字符串。字体会在第一帧之前注册。 |
 | `.json` | 解析后的 JSON |
 

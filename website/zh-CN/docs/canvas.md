@@ -101,7 +101,7 @@ const values = signal([12, 30, 22, 48, 36, 60]);
 
 `cx.canvas.width` 和 `cx.canvas.height` 给出画布以点为单位的尺寸。
 
-**不支持**：`getImageData` / `putImageData` 等像素访问、`filter`、`isPointInPath`、在 `drawImage` 中使用 SVG 图片。与 HTML Canvas 一样，无效的颜色或字体只会让那一个操作被丢弃。
+**不支持**：`getImageData` / `putImageData` 等像素访问、`filter`、`isPointInPath`。与 HTML Canvas 一样，无效的颜色或字体只会让那一个操作被丢弃。
 
 ## 路径与 Path2D
 
@@ -172,6 +172,8 @@ cx.fillText(label, 32 - 6 - cx.measureText(label).width, 16);
 ## 图片
 
 `drawImage` 接受 URL、导入的资源（`import logo from "./logo.png"`）或 `{ uri }`。图片在原生端加载，加载完成后画布会重新绘制，你不需要自己跟踪加载状态。远程 URL 受应用的[网络能力声明](./sandbox-and-capabilities.md)约束。
+
+iOS、macOS、Android、Windows、Linux 和 GPUI 上的画布绘制位图（PNG、JPEG、GIF、WebP 等）：在这些平台上，SVG 来源按加载失败的图片处理，日志会指出它。SVG 图片请用 [`<Image>`](./images-and-assets.md#svg-图片) 显示，或把它们的形状作为 `Path2D` 路径绘制。在 Web 上，画布绘制浏览器能绘制的内容，包括 SVG。
 
 ```tsx
 import { Canvas } from "nsh/canvas";

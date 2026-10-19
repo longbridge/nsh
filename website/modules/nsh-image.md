@@ -29,12 +29,12 @@ See [Images and assets](../docs/images-and-assets.md) for the guide.
 getSize(source: string | { uri: string }): Promise<ImageSize>;
 
 interface ImageSize {
-  width: number;   // pixels
+  width: number;   // pixels (an SVG's: points)
   height: number;
 }
 ```
 
-Loads the image and resolves with its size in pixels (of the source image, not a downsampled copy). The loaded bytes stay in memory, so the `<Image>` that shows it next does not download it again. The promise rejects if the image cannot be loaded.
+Loads the image and resolves with its size in pixels (of the source image, not a downsampled copy; an SVG's intrinsic size in points, [on the web as the browser measures it](../docs/images-and-assets.md#svg-images)). The loaded bytes stay in memory, so the `<Image>` that shows it next does not download it again. The promise rejects if the image cannot be loaded.
 
 ```tsx
 import { signal } from "nsh";

@@ -488,9 +488,10 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
   root for 2 or 3.5 s, also read out through the live region `Command::Announce` writes into.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
   `hasString`, since browsers cannot tell without reading) needs a secure context and may ask the user.
-- **Images**: `<img>` with `object-fit` (`center` is `scale-down`), `defaultSource` as a second image until the load
-  (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden (`Image.getSize` / `prefetch`:
-  under Networking). `onProgress` is not reported.
+- **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
+  runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `defaultSource` as a second
+  image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden
+  (`Image.getSize` / `prefetch`: under Networking). `onProgress` is not reported.
 - **Web views** are `<iframe>`s. HTML loads as `srcdoc` in a sandbox without `allow-same-origin` (an origin of its
   own: it cannot reach the player's page), after a bridge script (`webBridge`): the first message from the player
   carrying a random token hands it a `MessageChannel` port, over which `ReactNativeWebView.postMessage` reaches

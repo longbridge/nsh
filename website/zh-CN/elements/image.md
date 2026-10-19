@@ -32,7 +32,7 @@ import logo from "./assets/logo.png";
 
 | 值 | 示例 | 说明 |
 |---|---|---|
-| 导入的资源 | `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height }`，以点为单位：`@2x` 文件按像素的一半计算。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`。 |
+| 导入的资源 | `import logo from "./logo.png"` | 一个 `ImageAsset` `{ uri, width, height }`，以点为单位：`@2x` 文件按像素的一半计算。可以导入 `.png`、`.jpg`、`.jpeg`、`.gif`、`.webp` 和 `.heic`，以及按 `width` 和 `height` 或 `viewBox` 确定尺寸的 `.svg`（[SVG 图片](../docs/images-and-assets.md#svg-图片)）。 |
 | URL | `"https://example.com/a.jpg"` | 下载并缓存。同一 URL 的下载在多个视图之间共享。 |
 | 资源路径 | `"asset:/images/a.png"` | 应用资源中的文件。 |
 | `{ uri }` | `{ uri: "https://…" }` | 与字符串形式相同。 |
@@ -55,7 +55,7 @@ import logo from "./assets/logo.png";
 | `fadeDuration` | `number` | iOS `0`，Android `300` | 图片加载完成后淡入的时长，单位毫秒。 |
 | `onLoadStart` | `() => void` | | 开始加载。 |
 | `onProgress` | `(e: { loaded: number; total: number }) => void` | | 以字节计的下载进度（未知时 `total` 为 0），最多每 100 ms 一次。 |
-| `onLoad` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸）。 |
+| `onLoad` | `(e: { width: number; height: number }) => void` | | 加载完成；给出源图片的像素尺寸（不是解码、降采样后的尺寸；SVG 为它的点尺寸，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。 |
 | `onError` | `(e: { message: string }) => void` | | 加载失败。 |
 | `onLoadEnd` | `() => void` | | 在 `onLoad` 或 `onError` 之后。 |
 
@@ -71,7 +71,7 @@ import logo from "./assets/logo.png";
 |---|---|---|
 | `onLoadStart` | 无 | 开始加载。 |
 | `onProgress` | `{ loaded, total }` | 收到数据（最多每 100 ms 一次）。 |
-| `onLoad` | `{ width, height }` | 图片已显示；给出源图片的像素尺寸。 |
+| `onLoad` | `{ width, height }` | 图片已显示；给出源图片的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](../docs/images-and-assets.md#svg-图片)）。 |
 | `onError` | `{ message }` | 加载或解码失败，或主机不被允许。 |
 | `onLoadEnd` | 无 | 在 `onLoad` 或 `onError` 之后。 |
 

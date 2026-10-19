@@ -2781,6 +2781,7 @@ dependencies = [
  "nsh-js",
  "oxc",
  "oxc_sourcemap",
+ "resvg",
  "rolldown",
  "rolldown_common",
  "rolldown_error",

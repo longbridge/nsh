@@ -35,7 +35,7 @@ follows the asset's aspect ratio. A URL has no known size before it loads, so gi
 
 | Value | Example | Description |
 |---|---|---|
-| An imported asset | `import logo from "./logo.png"` | An `ImageAsset` `{ uri, width, height }`, sized in points: a `@2x` file counts half its pixels. `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported. |
+| An imported asset | `import logo from "./logo.png"` | An `ImageAsset` `{ uri, width, height }`, sized in points: a `@2x` file counts half its pixels. `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` and `.heic` can be imported, and `.svg`, sized by its `width` and `height` or `viewBox` ([SVG images](../docs/images-and-assets.md#svg-images)). |
 | A URL | `"https://example.com/a.jpg"` | Downloaded and cached. Downloads of the same URL are shared between views. |
 | An asset path | `"asset:/images/a.png"` | A file of the app's assets. |
 | `{ uri }` | `{ uri: "https://…" }` | The same as the string. |
@@ -60,7 +60,7 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Imag
 | `fadeDuration` | `number` | iOS `0`, Android `300` | How long a loaded image fades in, in milliseconds. |
 | `onLoadStart` | `() => void` | | Loading began. |
 | `onProgress` | `(e: { loaded: number; total: number }) => void` | | Download progress in bytes (`total` is 0 when unknown), at most every 100 ms. |
-| `onLoad` | `(e: { width: number; height: number }) => void` | | Loaded; the source image's size in pixels (not the decoded, downsampled one). |
+| `onLoad` | `(e: { width: number; height: number }) => void` | | Loaded; the source image's size in pixels (not the decoded, downsampled one; an SVG's size in points, [on the web as the browser measures it](../docs/images-and-assets.md#svg-images)). |
 | `onError` | `(e: { message: string }) => void` | | Loading failed. |
 | `onLoadEnd` | `() => void` | | After `onLoad` or `onError`. |
 
@@ -76,7 +76,7 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `Imag
 |---|---|---|
 | `onLoadStart` | none | Loading began. |
 | `onProgress` | `{ loaded, total }` | Bytes arrived (at most every 100 ms). |
-| `onLoad` | `{ width, height }` | The image is shown; its source size in pixels. |
+| `onLoad` | `{ width, height }` | The image is shown; its source size in pixels (an SVG's in points, [on the web as the browser measures it](../docs/images-and-assets.md#svg-images)). |
 | `onError` | `{ message }` | Loading or decoding failed, or the host is not allowed. |
 | `onLoadEnd` | none | After `onLoad` or `onError`. |
 

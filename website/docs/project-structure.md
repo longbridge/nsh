@@ -223,6 +223,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 | Extension | Import gives |
 |---|---|
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ uri, width, height }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. |
+| `.svg` | An `ImageAsset` sized in points by the SVG's `width` and `height` (or `viewBox`). |
 | `.ttf`, `.otf` | The font's family name, a string. The font is registered before the first frame. |
 | `.json` | The parsed JSON |
 

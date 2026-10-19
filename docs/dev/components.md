@@ -474,7 +474,9 @@ A crate ships files in its `assets/` directory, as TS imports them: `asset!("log
 relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, size }` (the natural size
 in points, `Size<Points>`: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the
 font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
-crate again (`include_bytes!`). The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
+crate again (`include_bytes!`). An `.svg` is a `FileAsset`, where TS's import gives an `ImageAsset` (the macro reads
+no SVG: sizing one takes usvg): `image(ICON.uri)` shows it, laid out by its style.
+The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
 built, kind), which `nsh` (`rust_app.rs`, from the description of the set: each file's path and source) serves in development and
 copies into packages next to the imported assets, and whose fonts the engine registers before the first view
