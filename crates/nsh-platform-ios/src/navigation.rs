@@ -779,10 +779,20 @@ impl ModalHost {
             return;
         }
         let block = block2::RcBlock::new(done);
-        self.controller.dismissViewControllerAnimated_completion(
-            self.config.animation != ModalAnimation::None,
-            Some(&block),
-        );
+        let animated = self.config.animation != ModalAnimation::None;
+        // Through the presenter: a modal that presents another one (a sheet
+        // over it) would otherwise only dismiss that one, and stay on
+        // screen with its content already gone (closing a sheet and its
+        // modal together). The presenter dismisses this modal and every
+        // controller above it.
+        match self.controller.presentingViewController() {
+            Some(presenter) => {
+                presenter.dismissViewControllerAnimated_completion(animated, Some(&block))
+            }
+            None => self
+                .controller
+                .dismissViewControllerAnimated_completion(animated, Some(&block)),
+        }
     }
 }
 

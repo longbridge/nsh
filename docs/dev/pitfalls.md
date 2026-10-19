@@ -133,6 +133,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **iOS clamps shared corner radii itself** (`rounded-full` is 9999): Core Animation does not reliably clamp a `cornerRadius`
   over half the short side, so `decor.rs` clamps it and clamps again when the size changes.
 
+- **iOS, dismissing a modal that presents another**: `dismissViewControllerAnimated` called on a controller that is
+  itself presenting one (a `Sheet` is a transparent modal over the modal it is in) dismisses only that one, and the outer
+  modal stays on screen with its content already gone: a blank screen when a sheet and its modal close together.
+  `ModalHost::dismiss` dismisses through `presentingViewController`, which takes the modal and everything above it.
+
 ## Android
 
 - **Android, JNI**: cache classes and method ids in `JNI_OnLoad`; wrap every call from the (permanently attached) engine thread in
