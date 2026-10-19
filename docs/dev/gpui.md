@@ -124,7 +124,10 @@ import -window root -display :170 whole.png        # the display, if the window'
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle
-  is in the focus path. Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
+  is in the focus path. They are installed before the tree is drawn: a key listener belongs to the dispatch node
+  active when it is added, and painting a native component's element leaves that element's node active (GPUI enters
+  each element's node on paint and never leaves it), so listeners added after the tree heard keys only while focus
+  was inside the component. Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
   system, gestures) as on Windows. Keys become Windows virtual key codes (`keys.rs`), which the shared input,
   scrolling, keymap and editing code reads.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,

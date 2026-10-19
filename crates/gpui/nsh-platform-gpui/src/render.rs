@@ -761,6 +761,19 @@ impl Element for SurfaceElement {
         if background.0 & 0xff != 0 {
             window.paint_quad(gpui::fill(bounds, hsla(background)));
         }
+        // Before the tree: painting a native component's element leaves its
+        // dispatch node active (GPUI enters each element's node and never
+        // leaves it), and key listeners go to the active node, where they
+        // would hear keys only while focus is inside the component.
+        crate::events::install(
+            &surface,
+            &self.focus,
+            &self.view,
+            hitbox,
+            bounds,
+            window,
+            cx,
+        );
         let drawn = {
             crate::canvas::begin_pass(surface.key());
             let mut dcx = DrawCx::new(window, cx, bounds, dark);
@@ -777,15 +790,6 @@ impl Element for SurfaceElement {
             std::mem::take(&mut dcx.drawn)
         };
         surface.items_placed(drawn);
-        crate::events::install(
-            &surface,
-            &self.focus,
-            &self.view,
-            hitbox,
-            bounds,
-            window,
-            cx,
-        );
         // Animations tick on the window's frames while they run (and stop
         // asking when idle); a change made while painting (a frame client
         // added, an item placed) is drawn in the next frame, as no entry
