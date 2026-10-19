@@ -329,8 +329,50 @@ mod tests {
         );
     }
 
-    /// Text on the status colors reads in both appearances: a contrast of
-    /// at least 3:1 (WCAG's for controls and bold text).
+    #[test]
+    fn a_theme_overrides_the_default_and_derives_pressed_colors() {
+        let theme = Theme::from_json(
+            r##"{ "themes": [
+                { "mode": "light", "radius": 8, "colors": {
+                    "primary.background": "#7c3aed", "border": "red-500", "sidebar.background": "#000" } },
+                { "mode": "dark", "colors": { "primary.background": "#a78bfa", "primary.active.background": "#ffffff" } }
+            ] }"##,
+        )
+        .unwrap();
+        assert_eq!(theme.primary.light, rgb(0x7c3aed));
+        // Left out: darker in light appearance; set: as given.
+        assert_eq!(theme.primary_active.light, mix(rgb(0x7c3aed), 0, 0.12));
+        assert_eq!(theme.primary_active.dark, rgb(0xffffff));
+        // Palette names; keys only desktop components use are ignored.
+        assert_eq!(theme.border.light, PALETTE.colors["red-500"]);
+        assert_eq!(theme.radius, 8.0);
+        assert_eq!(theme.secondary, Theme::default().secondary);
+        assert!(Theme::from_json(r#"{ "themes": [{ "colors": { "ring": 3 } }] }"#).is_err());
+    }
+
+    #[test]
+    fn colors_a_theme_leaves_unset_keep_their_value() {
+        // A theme file may write unset colors (and numbers) as null.
+        let theme = Theme::from_json(
+            r##"{ "themes": [{ "mode": "dark", "radius": null, "colors": {
+                "primary.background": null, "primary.active.background": null,
+                "danger.background": "#ff0000", "danger.active.background": null,
+                "ring": "#ff0000", "sidebar.background": null } }] }"##,
+        )
+        .unwrap();
+        let default = Theme::default();
+        assert_eq!(theme.primary, default.primary);
+        assert_eq!(theme.primary_active, default.primary_active);
+        assert_eq!(theme.radius, default.radius);
+        assert_eq!(theme.ring.dark, rgb(0xff0000));
+        assert_eq!(theme.ring.light, default.ring.light);
+        // A null pressed color follows its base color.
+        assert_eq!(theme.danger_active.dark, mix(rgb(0xff0000), 0xff, 0.12));
+    }
+
+    /// Text on the status colors, at rest and pressed, reads in both
+    /// appearances: a contrast of at least 4.5:1 (WCAG AA for text the
+    /// size of a button's label).
     #[test]
     fn text_on_status_colors_stands_out() {
         let theme = Theme::default();
@@ -352,12 +394,16 @@ mod tests {
         };
         for (background, text) in [
             (theme.danger, theme.danger_foreground),
+            (theme.danger_active, theme.danger_foreground),
             (theme.info, theme.info_foreground),
+            (theme.info_active, theme.info_foreground),
             (theme.success, theme.success_foreground),
+            (theme.success_active, theme.success_foreground),
             (theme.warning, theme.warning_foreground),
+            (theme.warning_active, theme.warning_foreground),
         ] {
             for (b, t) in [(background.light, text.light), (background.dark, text.dark)] {
-                assert!(contrast(b, t) >= 3.0, "{b:?} / {t:?}: {}", contrast(b, t));
+                assert!(contrast(b, t) >= 4.5, "{b:?} / {t:?}: {}", contrast(b, t));
             }
         }
     }
