@@ -3,12 +3,17 @@
 //! app's data directory, the browser's `localStorage`).
 //!
 //! The core keeps the entries in memory, loaded from the backend on first
-//! use, so reads never touch the disk; every change is handed to the
+//! use. Cores using the same backend share entries and quota accounting,
+//! with each operation serialized; reads after loading never touch the
+//! disk. Every change is handed to the
 //! backend, which writes it where it may block (the file backend on a
 //! thread of its own). Every app has its storage: what the host decides is
 //! where it is kept. The quota is checked here, in Rust.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, Weak},
+};
 
 /// The most an app may keep, in UTF-8 bytes of its keys and values.
 pub const QUOTA: usize = 5 * 1024 * 1024;
@@ -42,17 +47,94 @@ impl std::fmt::Debug for dyn StorageBackend {
     }
 }
 
-/// An app's entries: the engine's, shared with the module functions.
+/// An app's entries, shared by cores using the same backend.
 pub(crate) struct Storage {
+    state: Arc<Mutex<Entries>>,
+}
+
+/// Weak references let the last core release its state and backend.
+struct Shared {
+    backend: Weak<dyn StorageBackend>,
+    state: Weak<Mutex<Entries>>,
+}
+
+impl Storage {
+    /// Shares the state of `backend`; `None` creates independent in-memory
+    /// storage for this core.
+    pub(crate) fn new(backend: Option<Arc<dyn StorageBackend>>) -> Self {
+        // Index by backend identity, never by an engine or app id: the
+        // host decides which views share storage by sharing the backend.
+        static SHARED: Mutex<Vec<Shared>> = Mutex::new(Vec::new());
+        let Some(backend) = backend else {
+            return Self {
+                state: Arc::new(Mutex::new(Entries::new(None))),
+            };
+        };
+        let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        shared.retain(|s| s.state.strong_count() > 0);
+        let identity = Arc::downgrade(&backend);
+        if let Some(state) = shared
+            .iter()
+            .find(|s| s.backend.ptr_eq(&identity))
+            .and_then(|s| s.state.upgrade())
+        {
+            return Self { state };
+        }
+        let state = Arc::new(Mutex::new(Entries::new(Some(backend))));
+        shared.push(Shared {
+            backend: identity,
+            state: Arc::downgrade(&state),
+        });
+        Self { state }
+    }
+
+    /// The value of `key`.
+    pub(crate) fn get(&mut self, key: &str) -> Result<Option<String>, String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+    }
+
+    /// Sets `key` to `value`; fails past [`QUOTA`].
+    pub(crate) fn set(&mut self, key: String, value: String) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set(key, value)
+    }
+
+    /// Removes `key`.
+    pub(crate) fn remove(&mut self, key: &str) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(key)
+    }
+
+    /// Every key, in order.
+    pub(crate) fn keys(&mut self) -> Result<Vec<String>, String> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).keys()
+    }
+
+    /// Removes every entry.
+    pub(crate) fn clear(&mut self) -> Result<(), String> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).clear()
+    }
+}
+
+/// The authoritative entries and quota, locked through backend dispatch
+/// so concurrent cores hand their changes to the backend in the same order.
+struct Entries {
     backend: Option<Arc<dyn StorageBackend>>,
     entries: Option<BTreeMap<String, String>>,
     bytes: usize,
 }
 
-impl Storage {
+impl Entries {
     /// Entries kept by `backend` (`None`: in memory, for the engine's
     /// life).
-    pub(crate) fn new(backend: Option<Arc<dyn StorageBackend>>) -> Self {
+    fn new(backend: Option<Arc<dyn StorageBackend>>) -> Self {
         Self {
             backend,
             entries: None,
@@ -84,12 +166,12 @@ impl Storage {
     }
 
     /// The value of `key`.
-    pub(crate) fn get(&mut self, key: &str) -> Result<Option<String>, String> {
+    fn get(&mut self, key: &str) -> Result<Option<String>, String> {
         Ok(self.entries()?.get(key).cloned())
     }
 
     /// Sets `key` to `value`; fails past [`QUOTA`].
-    pub(crate) fn set(&mut self, key: String, value: String) -> Result<(), String> {
+    fn set(&mut self, key: String, value: String) -> Result<(), String> {
         // Loaded first: what the device kept counts too.
         self.entries()?;
         let bytes = self.bytes;
@@ -111,7 +193,7 @@ impl Storage {
     }
 
     /// Removes `key`.
-    pub(crate) fn remove(&mut self, key: &str) -> Result<(), String> {
+    fn remove(&mut self, key: &str) -> Result<(), String> {
         let Some(value) = self.entries()?.remove(key) else {
             return Ok(());
         };
@@ -121,12 +203,12 @@ impl Storage {
     }
 
     /// Every key, in order.
-    pub(crate) fn keys(&mut self) -> Result<Vec<String>, String> {
+    fn keys(&mut self) -> Result<Vec<String>, String> {
         Ok(self.entries()?.keys().cloned().collect())
     }
 
     /// Removes every entry.
-    pub(crate) fn clear(&mut self) -> Result<(), String> {
+    fn clear(&mut self) -> Result<(), String> {
         let entries = self.entries()?;
         if entries.is_empty() {
             return Ok(());
@@ -182,6 +264,62 @@ mod tests {
                 StorageChange::Clear,
             ]
         );
+    }
+
+    #[test]
+    fn views_share_reads_removals_and_clear() {
+        let backend = Arc::new(Recorder::default());
+        let mut first = Storage::new(Some(backend.clone()));
+        let mut second = Storage::new(Some(backend));
+        assert_eq!(second.get("draft").unwrap(), None);
+        first.set("draft".into(), "saved".into()).unwrap();
+        assert_eq!(second.get("draft").unwrap().as_deref(), Some("saved"));
+        assert_eq!(second.keys().unwrap(), ["draft"]);
+        second.remove("draft").unwrap();
+        assert_eq!(first.get("draft").unwrap(), None);
+        first.set("draft".into(), "new".into()).unwrap();
+        second.clear().unwrap();
+        assert!(first.keys().unwrap().is_empty());
+    }
+
+    #[test]
+    fn concurrent_views_share_the_quota() {
+        let backend = Arc::new(Recorder::default());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let views: Vec<_> = (0..2)
+            .map(|id| {
+                let mut storage = Storage::new(Some(backend.clone()));
+                // Both views load before either writes.
+                assert!(storage.keys().unwrap().is_empty());
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    storage.set(id.to_string(), "x".repeat(QUOTA - 1))
+                })
+            })
+            .collect();
+        let results: Vec<_> = views.into_iter().map(|v| v.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+        assert_eq!(backend.changes.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn independent_backends_and_in_memory_views_keep_apart() {
+        for backends in [
+            [None, None],
+            [
+                Some(Arc::new(Recorder::default()) as Arc<dyn StorageBackend>),
+                Some(Arc::new(Recorder::default()) as Arc<dyn StorageBackend>),
+            ],
+        ] {
+            let [first, second] = backends;
+            let mut first = Storage::new(first);
+            let mut second = Storage::new(second);
+            first.set("draft".into(), "saved".into()).unwrap();
+            assert_eq!(second.get("draft").unwrap(), None);
+            second.clear().unwrap();
+            assert_eq!(first.get("draft").unwrap().as_deref(), Some("saved"));
+        }
     }
 
     #[test]
