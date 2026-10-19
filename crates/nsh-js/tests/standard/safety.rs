@@ -58,14 +58,14 @@ fn reference_zlib(script: &str) -> String {
                         .with_module("buffer")
                         .with_module("zlib"),
                     ModuleLoader::default()
-                        .with_module("buffer", llrt_buffer::BufferModule)
-                        .with_module("zlib", llrt_zlib::ZlibModule),
+                        .with_module("buffer", quickjs_jit_stdlib::buffer::BufferModule)
+                        .with_module("zlib", quickjs_jit_stdlib::zlib::ZlibModule),
                 )
                 .await;
             let context = AsyncContext::full(&runtime).await.unwrap();
             context
                 .async_with(async |ctx| {
-                    llrt_buffer::init(&ctx).unwrap();
+                    quickjs_jit_stdlib::buffer::init(&ctx).unwrap();
                     let module =
                         Module::declare(ctx.clone(), "reference-compression.mjs", script).unwrap();
                     let (_, done) = module.eval().unwrap();

@@ -146,7 +146,7 @@ jobs:
           cc="$llvm_bin/clang$suffix"
           ar="$llvm_bin/llvm-ar$suffix"
           if [[ "$RUNNER_OS" == Windows ]]; then
-            # rquickjs-sys canonicalizes its vendored WASI include directory
+            # quickjs-jit-sys canonicalizes its vendored WASI include directory
             # to a verbatim Windows path. Give clang ordinary drive paths
             # so nested includes such as bits/alltypes.h resolve correctly.
             cat > "$RUNNER_TEMP/nsh-wasm-clang.py" <<'PYTHON'
@@ -188,7 +188,7 @@ jobs:
             ${{ runner.os }}-release-cargo-
 
       # Compile the actual WASI headers before the native runtimes: a bare
-      # clang probe does not exercise rquickjs-sys's vendored include path.
+      # clang probe does not exercise quickjs-jit-sys's vendored include path.
       - name: Check the Windows web runtime
         if: runner.os == 'Windows'
         run: |
@@ -198,7 +198,7 @@ jobs:
           import pathlib
           import sys
           packages = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["packages"]
-          package = next(p for p in packages if p["name"] == "rquickjs-sys")
+          package = next(p for p in packages if p["name"] == "quickjs-jit-sys")
           include = pathlib.Path(package["manifest_path"]).parent / "vendor/wasi-libc/include"
           for name in ("stdlib.h", "bits/alltypes.h"):
               header = include / name

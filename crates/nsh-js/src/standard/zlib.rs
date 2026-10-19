@@ -112,9 +112,11 @@ impl ModuleDef for ZlibModule {
     }
 
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
-        let (inner, done) =
-            Module::declare_def::<llrt_zlib::ZlibModule, _>(ctx.clone(), "nsh:zlib-llrt")?
-                .eval()?;
+        let (inner, done) = Module::declare_def::<quickjs_jit_stdlib::zlib::ZlibModule, _>(
+            ctx.clone(),
+            "nsh:zlib-llrt",
+        )?
+        .eval()?;
         done.finish::<()>()?;
         let inner: Object = inner.namespace()?.get("default")?;
         let default = Object::new(ctx.clone())?;

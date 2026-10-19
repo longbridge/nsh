@@ -146,13 +146,15 @@ pub(crate) struct CryptoModule;
 
 impl ModuleDef for CryptoModule {
     fn declare(declare: &Declarations) -> Result<()> {
-        llrt_crypto::CryptoModule::declare(declare)
+        quickjs_jit_stdlib::crypto::CryptoModule::declare(declare)
     }
 
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
-        let (inner, done) =
-            Module::declare_def::<llrt_crypto::CryptoModule, _>(ctx.clone(), "nsh:crypto-llrt")?
-                .eval()?;
+        let (inner, done) = Module::declare_def::<quickjs_jit_stdlib::crypto::CryptoModule, _>(
+            ctx.clone(),
+            "nsh:crypto-llrt",
+        )?
+        .eval()?;
         done.finish::<()>()?;
         let default: Object = inner.namespace()?.get("default")?;
         guard_random_bytes(ctx, &default)?;

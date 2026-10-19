@@ -140,19 +140,14 @@ taffy = { version = "0.15", default-features = false, features = ["std", "taffy_
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
 
+# QuickJS through quickjs-jit (rquickjs 0.14's API under its own name, imported as `rquickjs`).
 # `full` is avoided on purpose: it enables `dyn-load` (dlopen2), which does not build for iOS / Catalyst.
-rquickjs = { version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "array-buffer", "macro"] }
+# Local checkouts until quickjs-jit 0.14.0 is published (then `version = "=0.14.0"` alone).
+rquickjs = { package = "quickjs-jit", version = "=0.14.0", path = "/home/jason/work/quickjs-jit.worktrees/stdlib-0.14", default-features = false, features = ["std", "futures", "loader", "macro"] }
 
-# Standard library modules share NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
-llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_crypto = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_path = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_url = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_events = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_assert = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_util = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_string_decoder = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d" }
-llrt_zlib = { git = "https://github.com/awslabs/llrt", rev = "d9fd873e793c6551c5d92b2e31480f3279e3cd8d", default-features = false, features = ["compression-rust"] }
+# The standard modules `buffer`, `crypto`, `path`, `url` and `zlib`: LLRT d9fd873e, vendored by
+# quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
+quickjs-jit-stdlib = { version = "=0.14.0", path = "/home/jason/work/quickjs-jit.worktrees/stdlib-0.14/stdlib", default-features = false, features = ["buffer", "crypto", "path", "zlib", "zlib-zstd"] }
 cap-std = "4.0.3"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
@@ -422,7 +417,7 @@ lto = "fat"
 codegen-units = 1
 
 # Keep the interpreter and layout fast even in debug builds; they dominate runtime cost.
-[profile.dev.package.rquickjs-sys]
+[profile.dev.package.quickjs-jit-sys]
 opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3
@@ -435,9 +430,5 @@ inherits = "release"
 opt-level = "z"
 strip = true
 panic = "abort"
-[profile.web.package.rquickjs-sys]
+[profile.web.package.quickjs-jit-sys]
 opt-level = 3
-
-# Pinned LLRT utilities need a non-native signal fallback for WebAssembly.
-[patch."https://github.com/awslabs/llrt"]
-llrt_utils = { path = "third_party/llrt-utils" }

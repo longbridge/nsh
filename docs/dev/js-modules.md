@@ -97,7 +97,7 @@ The loader asks the module table first (typed registries own their names), then 
 | `net` | `nsh_core::runtime::net` | `connect`, `Socket`, default |
 | `console` | `nsh-js` `standard/console.rs` | default: the VM's `console` (`log`, `info`, `debug`, `warn`, `error`) |
 | `websocket` | `nsh_core::runtime::websocket`, `nsh-js` `standard/websocket.rs` (the global) | `WebSocket` (`connect`), `WebSocketConnection`; the global `WebSocket` constructor |
-| `buffer`, `crypto`, `path`, `url`, `zlib` | LLRT, pinned (`standard/mod.rs`) | their LLRT exports, projected by `standard/declarations.rs`; `Buffer` and `crypto` are globals |
+| `buffer`, `crypto`, `path`, `url`, `zlib` | LLRT, vendored by `quickjs-jit-stdlib` (`standard/mod.rs`) | their LLRT exports, projected by `standard/declarations.rs`; `Buffer` and `crypto` are globals |
 
 The typed modules' JS face and `.nsh/types` come from their specs (`#[module]`, `#[class]`; `docs/dev/rust-classes.md`):
 grants and limits throw in the call (`Later`, `JsError`: a `TypeError` or `RangeError`), I/O failures reject, and
@@ -112,9 +112,12 @@ messages); connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`,
 (`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
 and grant no file access.
 
-LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs`
-projects their actual exports from checksummed upstream assets in `third_party/llrt-types`. `zlib` bounds each
-decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
+QuickJS comes through `quickjs-jit` (rquickjs 0.14's API, imported as `rquickjs`) and the LLRT modules through
+`quickjs-jit-stdlib`, which vendors LLRT `d9fd873e793c6551c5d92b2e31480f3279e3cd8d` with one feature per module:
+NSH turns on `buffer`, `crypto`, `path`, `zlib` and `zlib-zstd`, and `url` on native targets. The two crates are
+published together at one version (path dependencies on local checkouts until 0.14.0 is out), with no git
+dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
+`third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
 they differ (a symlink `exists`, listeners get the payload only, `Stats`' methods are on its prototype, the child

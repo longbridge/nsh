@@ -32,9 +32,9 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
         };
     }
     match name {
-        "buffer" => declare!(llrt_buffer::BufferModule),
+        "buffer" => declare!(quickjs_jit_stdlib::buffer::BufferModule),
         "crypto" => declare!(bounds::CryptoModule),
-        "path" => declare!(llrt_path::PathModule),
+        "path" => declare!(quickjs_jit_stdlib::path::PathModule),
         "url" => declare!(url::UrlModule),
         "zlib" => declare!(zlib::ZlibModule),
         "console" => declare!(console::ConsoleModule),
@@ -119,11 +119,11 @@ fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
         .into_iter()
         .map(|name| own_property(ctx, name))
         .collect::<Result<_>>()?;
-    llrt_buffer::init(ctx)?;
+    quickjs_jit_stdlib::buffer::init(ctx)?;
     bounds::guard_buffer(ctx)?;
     // LLRT URL helper classes are registered once; public constructors remain NSH's.
     #[cfg(not(target_arch = "wasm32"))]
-    llrt_url::init(ctx)?;
+    quickjs_jit_stdlib::url::init(ctx)?;
     for property in saved {
         property.restore(ctx)?;
     }
@@ -218,7 +218,7 @@ fn init_process(ctx: &Ctx<'_>) -> Result<()> {
 /// `crypto` and its classes.
 fn init_crypto(ctx: &Ctx<'_>) -> Result<()> {
     if take_lazy(ctx, "crypto")? {
-        llrt_crypto::init(ctx)?;
+        quickjs_jit_stdlib::crypto::init(ctx)?;
         bounds::guard_crypto(ctx)?;
     }
     Ok(())

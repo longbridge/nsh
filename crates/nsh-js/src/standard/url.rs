@@ -13,7 +13,7 @@ use url::Url;
 fn domain_to_ascii(domain: &str) -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        llrt_url::domain_to_ascii(domain)
+        quickjs_jit_stdlib::url::domain_to_ascii(domain)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -23,7 +23,7 @@ fn domain_to_ascii(domain: &str) -> String {
 fn domain_to_unicode(domain: &str) -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        llrt_url::domain_to_unicode(domain)
+        quickjs_jit_stdlib::url::domain_to_unicode(domain)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -84,7 +84,7 @@ fn path_to_file_url<'js>(
     path: String,
 ) -> Result<Object<'js>> {
     #[cfg(not(target_arch = "wasm32"))]
-    let href = llrt_url::path_to_file_url(ctx.clone(), path, Opt(None))?.href();
+    let href = quickjs_jit_stdlib::url::path_to_file_url(ctx.clone(), path, Opt(None))?.href();
     #[cfg(target_arch = "wasm32")]
     let href = {
         if !path.starts_with('/') {
@@ -101,7 +101,7 @@ fn file_url_to_path<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<String
     #[cfg(not(target_arch = "wasm32"))]
     {
         use rquickjs::IntoJs;
-        llrt_url::file_url_to_path(ctx.clone(), input.0.into_js(&ctx)?)
+        quickjs_jit_stdlib::url::file_url_to_path(ctx.clone(), input.0.into_js(&ctx)?)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -115,17 +115,17 @@ fn file_url_to_path<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<String
 fn native_url<'js>(
     ctx: &Ctx<'js>,
     input: &str,
-) -> Result<Class<'js, llrt_url::url_class::URL<'js>>> {
+) -> Result<Class<'js, quickjs_jit_stdlib::url::url_class::URL<'js>>> {
     Class::instance(
         ctx.clone(),
-        llrt_url::url_class::URL::from_str(ctx.clone(), input)?,
+        quickjs_jit_stdlib::url::url_class::URL::from_str(ctx.clone(), input)?,
     )
 }
 
 fn format<'js>(ctx: Ctx<'js>, input: Coerced<String>, options: Opt<Value<'js>>) -> Result<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        llrt_url::url_format(native_url(&ctx, &input.0)?, options)
+        quickjs_jit_stdlib::url::url_format(native_url(&ctx, &input.0)?, options)
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -167,7 +167,10 @@ fn format<'js>(ctx: Ctx<'js>, input: Coerced<String>, options: Opt<Value<'js>>) 
 fn url_to_http_options<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<Object<'js>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        llrt_url::url_class::url_to_http_options(ctx.clone(), native_url(&ctx, &input.0)?)
+        quickjs_jit_stdlib::url::url_class::url_to_http_options(
+            ctx.clone(),
+            native_url(&ctx, &input.0)?,
+        )
     }
     #[cfg(target_arch = "wasm32")]
     {

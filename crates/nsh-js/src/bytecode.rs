@@ -8,8 +8,8 @@ use crate::error::JsError;
 
 /// Identifies the bytecode format produced by [`compile_bytecode`] and
 /// accepted by [`crate::Host::eval_bytecode`]: QuickJS bytecode is only
-/// valid for the exact engine build. Bump together with the `rquickjs` pin.
-pub const BYTECODE_VERSION: &str = "rquickjs-0.14.0/quickjs-ng-0.16.2/le64";
+/// valid for the exact engine build. Bump together with the `quickjs-jit` pin.
+pub const BYTECODE_VERSION: &str = "quickjs-jit-0.14.0/quickjs-ng-0.16.2/le64";
 
 /// Module name every bundle is evaluated under; JS stack frames reference
 /// it as `bundle.js:LINE:COL`.

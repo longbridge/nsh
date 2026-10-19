@@ -26,20 +26,14 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 percent-encoding.workspace = true
 url.workspace = true
-llrt_buffer.workspace = true
-llrt_crypto.workspace = true
-llrt_path.workspace = true
-llrt_events.workspace = true
-llrt_assert.workspace = true
-llrt_util.workspace = true
-llrt_string_decoder.workspace = true
-llrt_zlib.workspace = true
+quickjs-jit-stdlib.workspace = true
 
 
 # Bindings are generated for the Apple and Android targets; WebAssembly uses
 # rquickjs' pregenerated ones (its bindgen run misses `JS_ToCStringLen2` there).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-llrt_url.workspace = true
+# LLRT's `url` helpers need file paths, which WebAssembly lacks.
+quickjs-jit-stdlib = { workspace = true, features = ["url"] }
 rquickjs = { workspace = true, features = ["bindgen"] }
 # The heap's allocator: the system's `malloc` (as QuickJS's own).
 libc.workspace = true
