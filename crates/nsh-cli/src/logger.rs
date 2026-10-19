@@ -36,6 +36,15 @@ pub(crate) struct Device<'a> {
     pub(crate) several: bool,
 }
 
+/// Shows a log line of a process run for this command (an app's headless
+/// runner), as this process's own would be.
+pub(crate) fn forward(level: Level, target: &str, message: &str) {
+    let metadata = Metadata::builder().level(level).target(target).build();
+    if level <= log::max_level() && Logger.enabled(&metadata) {
+        show(level, target, message, None);
+    }
+}
+
 /// Shows a log line of a device.
 pub(crate) fn device(device: &Device<'_>, level: LogLevel, target: &str, message: &str) {
     let level = match level {
@@ -86,12 +95,10 @@ fn show(level: Level, target: &str, message: &str, device: Option<&Device<'_>>) 
 }
 
 /// A target as verbose lines show it: the command line's own modules as
-/// `nsh::build`, other crates without `nsh_` (`bundler::...`).
+/// they are (`nsh::build`, the binary's name), other crates without `nsh_`
+/// (`bundler::...`).
 fn source(target: &str) -> String {
-    match target.strip_prefix("nsh_cli") {
-        Some(rest) => format!("nsh{rest}"),
-        None => target.strip_prefix("nsh_").unwrap_or(target).to_owned(),
-    }
+    target.strip_prefix("nsh_").unwrap_or(target).to_owned()
 }
 
 impl Log for Logger {

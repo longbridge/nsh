@@ -25,7 +25,7 @@ A module is what a host app loads: one or more `.tsx` files with an entry. `nsh 
 |---|---|
 | `App.tsx` | The entry module: renders the app with `mount` |
 | `nsh.json` | The app's name, id, version and build number ([Project structure](./project-structure.md#nshjson)) |
-| `tsconfig.json` | TypeScript settings that resolve `nsh` to the declarations in `.nsh/types` |
+| `tsconfig.json` | Extends `.nsh/tsconfig.json`, NSH's TypeScript settings, which resolve `nsh` to the declarations in `.nsh/types` |
 | `.gitignore` | Ignores `.nsh/` and `out/` |
 | `.nsh/types/` | Generated declarations of every NSH module, for your editor |
 

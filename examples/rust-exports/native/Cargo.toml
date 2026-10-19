@@ -12,12 +12,9 @@ workspace = true
 [dependencies]
 nsh-core.workspace = true
 
-# The headless test runs `App.tsx` against this crate's set: the bundler
-# compiles it, the engine runs it on QuickJS.
+# The headless test runs `App.tsx` against this crate's set: `nsh-testing`
+# builds it (with the bundler and QuickJS) and runs it.
 [dev-dependencies]
-crossbeam-channel.workspace = true
-log.workspace = true
-nsh-bundler = { workspace = true, features = ["bundle"] }
-nsh-engine = { workspace = true, features = ["js"] }
-nsh-js.workspace = true
+nsh-engine.workspace = true
+nsh-testing.workspace = true
 nsh-ui-mobile.workspace = true

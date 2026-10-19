@@ -6,10 +6,11 @@ use std::time::Duration;
 use nsh_core::ui::prelude::*;
 
 /// Money helpers.
+#[module]
 pub struct Ledger;
 
-// The block's doc comment is the module's in TS.
-/// Money helpers.
+// `#[module]` on the struct and on this block: the struct's doc comment
+// is the module's in TS.
 #[module]
 impl Ledger {
     /// `amount` as money: `$1,234.50`, `-$3.00`.
@@ -21,8 +22,12 @@ impl Ledger {
 
     /// Puts `text` on the clipboard; resolves with the number of
     /// characters copied.
-    // Taking `cx` makes it an op, run in order with the UI changes TS made
-    // before the call (the platform's services are on `cx`): a Promise.
+    ///
+    /// # Rust
+    ///
+    /// Taking `cx` makes it an op, run in order with the UI changes TS made
+    /// before the call (the platform's services are on `cx`): a Promise.
+    /// What follows a heading stays in Rust's docs, out of TS's.
     pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
         let count = text.chars().count() as u32;
         cx.set_clipboard(text);

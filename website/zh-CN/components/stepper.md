@@ -86,7 +86,7 @@ mount(App);
 
 | 成员 | 说明 |
 |---|---|
-| `setValue(value: number): void` | 设置数值（四舍五入到步长的小数位数，并限制在范围内），并像按下按钮一样通过 `onChange` 报告。对受控的 Stepper，数字要等你更新 `value` 后才会变化。 |
+| `setValue(value: number): Promise<void>` | 设置数值（四舍五入到步长的小数位数，并限制在范围内），并像按下按钮一样通过 `onChange` 报告。对受控的 Stepper，数字要等你更新 `value` 后才会变化。 |
 | `value(): Promise<number>` | 当前显示的数值。返回 Promise，因为数值保存在核心中，而不在 JS 里。 |
 | `node: YNode` | Stepper 的宿主节点。 |
 

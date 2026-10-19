@@ -23,7 +23,7 @@ use std::{
 
 use nsh_core::{
     decl,
-    ui::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry},
+    ui::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry, description::SetDescription},
 };
 use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
@@ -370,6 +370,9 @@ pub(crate) struct ModuleTable {
     /// Where the host's UI sets start in `registries` (after the
     /// runtime's).
     host: usize,
+    /// UI sets known by their exports' names only (the bytecode compiler's:
+    /// it links imports by name and never runs the modules).
+    declared: Vec<SetDescription>,
     pub(crate) chunks: RefCell<ChunkCodes>,
     /// The objects of typed modules made so far, by specifier and module:
     /// one per VM, so a module's default export, its flat exports and a
@@ -409,6 +412,7 @@ impl ModuleTable {
         ModuleTable {
             registries,
             host,
+            declared: Vec::new(),
             chunks: RefCell::default(),
             objects: RefCell::default(),
         }
@@ -475,6 +479,38 @@ impl ModuleTable {
             .borrow_mut()
             .insert(key, crate::web::js::V::own(ctx, kept));
         object
+    }
+
+    /// The table the bytecode compiler links against: nsh's own modules,
+    /// the runtime's registries and `ui_sets` by their exports' names.
+    pub(crate) fn compiling(ui_sets: &[SetDescription]) -> ModuleTable {
+        let registries = nsh_core::runtime::registries().to_vec();
+        ModuleTable {
+            // No host sets: `nativeModule` is a run-time call, never an
+            // import the compiler links.
+            host: registries.len(),
+            registries,
+            declared: ui_sets.to_vec(),
+            chunks: RefCell::default(),
+            objects: RefCell::default(),
+        }
+    }
+
+    /// The names module `name` exports, if it is one: what the loader
+    /// declares (the values are made when it is evaluated, [`init`]).
+    fn export_names(&self, name: &str) -> Option<Vec<String>> {
+        let own = self.exports(name);
+        let mut found = own.is_some();
+        let mut names: Vec<String> = own.into_iter().flatten().map(|(name, _)| name).collect();
+        for set in self.declared.iter().filter(|s| s.specifier == name) {
+            found = true;
+            for export in &set.exports {
+                if !names.contains(&export.name) {
+                    names.push(export.name.clone());
+                }
+            }
+        }
+        found.then_some(names)
     }
 
     /// The exports of module `name`, if it is one.
@@ -691,7 +727,7 @@ unsafe extern "C" fn load(
     // SAFETY: QuickJS passes a NUL-terminated module name; the table is the
     // one `install` registered for this context.
     let (cname, table) = unsafe { (CStr::from_ptr(name), &*(opaque as *const ModuleTable)) };
-    let exports = cname.to_str().ok().and_then(|n| table.exports(n));
+    let exports = cname.to_str().ok().and_then(|n| table.export_names(n));
     // Taken first: compiling it loads its imports, here again.
     let chunk = match (&exports, cname.to_str()) {
         (None, Ok(id)) => table.chunks.borrow_mut().code.remove(id).map(|c| (id, c)),
@@ -724,7 +760,7 @@ unsafe extern "C" fn load(
         if m.is_null() {
             return m;
         }
-        for (export, _) in &exports {
+        for export in &exports {
             let export = CString::new(export.as_str()).unwrap_or_default();
             qjs::JS_AddModuleExport(ctx, m, export.as_ptr());
         }
@@ -899,6 +935,31 @@ mod tests {
     fn nshs_own_modules_are_the_ones_the_bundler_knows() {
         let names: Vec<&str> = super::MODULES.iter().map(|m| m.name).collect();
         assert_eq!(names, nsh_core::js::NATIVE_MODULES);
+    }
+
+    /// The bytecode compiler, which knows a UI set by its description,
+    /// links against the names a VM serving the set exports.
+    #[test]
+    fn a_described_set_exports_what_its_registry_does() {
+        for registry in [nsh_ui_mobile::registry(), crate::classes::tests::registry()] {
+            let specifier = registry.specifier().unwrap();
+            let served = super::ModuleTable::new(std::slice::from_ref(&registry));
+            let compiled = super::ModuleTable::compiling(&[(&registry).into()]);
+            let mut served: Vec<String> = served
+                .exports(specifier)
+                .unwrap()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            let mut compiled = compiled.export_names(specifier).unwrap();
+            assert!(!served.is_empty(), "{specifier}");
+            served.sort();
+            compiled.sort();
+            assert_eq!(compiled, served, "{specifier}");
+        }
+        let compiling = super::ModuleTable::compiling(&[]);
+        assert!(compiling.export_names("nsh/ui/mobile").is_none());
+        assert!(compiling.export_names("nsh").is_some());
     }
 }
 

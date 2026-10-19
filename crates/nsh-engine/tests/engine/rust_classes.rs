@@ -119,7 +119,13 @@ mod other {
     }
 }
 
+thread_local! {
+    /// What `Tools.mark` recorded (on the engine's thread).
+    static MARKS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Functions of the three kinds.
+#[module]
 pub(crate) struct Tools;
 
 #[module]
@@ -163,6 +169,17 @@ impl Tools {
         heard.post("task".to_owned());
     }
 
+    /// Records `word` as an op, returning nothing.
+    pub(crate) fn mark(word: String, cx: &mut ModuleCx) {
+        let _ = cx;
+        MARKS.with_borrow_mut(|marks| marks.push(word));
+    }
+
+    /// The words recorded so far, at once.
+    pub(crate) fn marks() -> Vec<String> {
+        MARKS.with_borrow(Clone::clone)
+    }
+
     /// An op that panics.
     pub(crate) fn explode(cx: &mut ModuleCx) -> i64 {
         let _ = cx;
@@ -178,6 +195,7 @@ impl Tools {
 }
 
 /// Takes a `u32` in every kind of call.
+#[module]
 pub(crate) struct Ints;
 
 #[module]
@@ -309,6 +327,7 @@ impl Twin {
 }
 
 /// Makes `Lonely`s.
+#[module]
 pub(crate) struct Maker;
 
 #[module]
@@ -339,6 +358,7 @@ impl Component for Framed {
 }
 
 /// Bytes, the VM's `System` and tasks started in the call.
+#[module]
 pub(crate) struct Sys;
 
 #[module]
@@ -466,10 +486,11 @@ pub(crate) fn start_with(
         entry,
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &ui_sets).unwrap();
+    let described: Vec<_> = ui_sets.iter().map(Into::into).collect();
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &described).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -662,6 +683,38 @@ setTimeout(() => shown.set(`done ${heard.join(",")}`), 200);
 
 mount(() => <Text>{shown()}</Text>);
 "#;
+
+const VOID: &str = r#"import { mount, signal, Text } from "nsh";
+import { Tools } from "test/classes";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const lines = [];
+  // An op returning nothing is a promise too: settled once it ran, in
+  // order with the ops before it.
+  const first = Tools.mark("a");
+  const second = Tools.mark("b");
+  lines.push(`${first instanceof Promise} ${Tools.marks().join(",") || "none"}`);
+  lines.push(`${await second} ${Tools.marks().join(",")}`);
+  // A task returning nothing, likewise.
+  const heard = [];
+  const later = Tools.postLater((w) => heard.push(w), 5);
+  lines.push(`${later instanceof Promise} ${await later} ${heard.join(",") || "none"}`);
+  shown.set(`done ${lines.join("|")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn ops_and_tasks_returning_nothing_resolve_once_they_ran() {
+    let (_engine, rx) = start(VOID, vec![registry()]);
+    // A task's posts reach JS before its result.
+    assert_eq!(
+        shown(&rx, "done"),
+        "done true none|undefined a,b|true undefined task"
+    );
+}
 
 #[test]
 fn a_post_in_a_synchronous_call_keeps_its_place_before_later_ones() {

@@ -3,12 +3,12 @@ use std::path::PathBuf;
 
 use crate::ui::module;
 
-/// Native OS metadata, independent of a surface or application context.
+/// Native OS metadata. Returned paths confer no filesystem access.
+#[module]
 #[derive(Default)]
 #[non_exhaustive]
 pub(crate) struct Os;
 
-/// Native OS metadata. Returned paths confer no filesystem access.
 #[module(flat, default)]
 impl Os {
     /// The native platform's line ending.

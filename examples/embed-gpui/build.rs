@@ -30,7 +30,10 @@ fn main() {
 }
 
 fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
-    let ui_sets = vec![nsh_ui_mobile::registry()];
+    // The mobile UI as the toolchain takes it: data (`SetDescription`).
+    let ui_sets = vec![nsh_core::ui::description::SetDescription::from(
+        nsh_ui_mobile::registry(),
+    )];
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: release,
@@ -85,8 +88,8 @@ fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
     });
     let shipped = ui_sets
         .iter()
-        .flat_map(nsh_core::ui::Registry::asset_files)
-        .map(|file| (file.path().to_owned(), PathBuf::from(file.source)));
+        .flat_map(|set| &set.assets)
+        .map(|file| (file.path.clone(), PathBuf::from(&file.source)));
     for (path, source) in imported.chain(shipped) {
         let bytes = fs::read(&source).map_err(|e| format!("read {}: {e}", source.display()))?;
         write(&format!("assets/{path}"), &bytes)?;

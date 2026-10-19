@@ -77,7 +77,11 @@ reasons: `reactive-components.md`.
   too (`#[module] impl Alert`: `Alert`).
 - **Props** are a struct, **events** an enum; the derives produce a decoder per prop (`PropSpec::decode`: the JS
   value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
-  defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. Value types
+  defaults, and the TypeScript types (doc comments included: the fields' and variants', while the component's is
+  its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's, and so does
+  any part of a doc comment from its first heading on, `# Rust` for notes meant for Rust callers). Field and variant names become camel case in JS. An
+  event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
+  variant names it (`onSelect?: (index: number) => void`). Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
@@ -264,16 +268,17 @@ write: `#[methods] impl StepperApi { pub fn set_value(&self, v: f64) {..} pub fn
 implements `Api`, the view registers it with `cx.methods(StepperApi { .. })` for as long as it lives, and
 `#[component(methods = StepperApi)]` (`Component::METHODS = Methods::of::<StepperApi>()`) names it in the spec, so the
 JS face builds the ref (`StepperRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
-written. A call converts its arguments in the JS call (a wrong one throws, or rejects the promise of a method that
-returns a value) into a closure an op carries (`RustCall::Method`), so it runs in order with the props JS set
-before it, with the API the view registered. A method returning nothing is called and forgotten; one returning a
-value gives JS a `Promise`, settled from the core's events (`JsEvent::Reply`, the boxed value converted then) in
-the same frame's commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
+written. A call converts its arguments in the JS call (a wrong one rejects its promise) into a closure an op
+carries (`RustCall::Method`), so it runs in order with the props JS set before it, with the API the view
+registered. Every method gives JS a `Promise` of its value (`Promise<void>` for one returning nothing, settled once
+it ran), settled from the core's events (`JsEvent::Reply`, the boxed value converted then) in the same frame's
+commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
 
 ## Modules
 
 Functions a UI set exports without a component (`Alert.alert`, `Keyboard.dismiss`, `StatusBar.setHidden`) are a
-`#[module]` `impl` block of a unit struct: `pub fn`s are the functions, typed from their signatures (`Option`
+unit struct and its `impl` block, both `#[module]` (the struct's doc comment documents the module; a component of the
+same name stands for the struct, `StatusBar`): `pub fn`s are the functions, typed from their signatures (`Option`
 parameters at the end may be left out). The signature decides how a call runs (`FunctionCall`):
 
 - **No context, not `async`** (`Sync`): it runs inside the JS call, as a class's method does (below), converting
@@ -281,8 +286,8 @@ parameters at the end may be left out). The signature decides how a call runs (`
   (signals, `dialog`, `theme()`) are not there (the reactive graph is not entered).
 - **A last `cx: &mut ModuleCx`** (`Op`): the platform's services, applied in order right after the call (a dialog,
   the status bar, focus). Its arguments are converted in the JS call into a closure an op carries
-  (`RustCall::Op`, in order with the ops before it); one returning a value gives JS a `Promise`, settled like a
-  method's, and a conversion error rejects it.
+  (`RustCall::Op`, in order with the ops before it); JS gets a `Promise` of its value, settled like a method's
+  (`Promise<void>` for `()`, once the op ran), and a conversion error rejects it.
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions
   views use (`Alert.alert` awaits `dialog(..)`), sent as the op above; a `Promise` of its value, rejected with an
   `Err`'s message or a panic's.
@@ -395,7 +400,7 @@ in points: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.tt
 font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
 crate again (`include_bytes!`). The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
-built, kind), which the app's command line (`rust_app.rs`, the registry is in-process) serves in development and
+built, kind), which `nsh` (`rust_app.rs`, from the description of the set: each file's path and source) serves in development and
 copies into packages next to the imported assets, and whose fonts the engine registers before the first view
 (`EngineConfig::ui_sets`, read through `EngineConfig::assets`).
 

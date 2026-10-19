@@ -687,7 +687,11 @@ pub unsafe extern "C" fn nsh_compile(
 ) -> u32 {
     // SAFETY: guaranteed by the caller.
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
-    let result = nsh_bundler::compile_module(&name, &source, &ui_sets());
+    let sets: Vec<nsh_core::ui::description::SetDescription> = ui_sets()
+        .iter()
+        .filter_map(nsh_core::ui::description::SetDescription::of)
+        .collect();
+    let result = nsh_bundler::compile_module(&name, &source, &sets);
     let ok = result.is_ok();
     COMPILED.with(|c| *c.borrow_mut() = result.unwrap_or_else(|e| e));
     ok as u32

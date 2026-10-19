@@ -71,7 +71,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 | `--template <TEMPLATE>` | `ts`, `rust` or `mixed` (above). `rust` and `mixed` need Rust; `cargo run` also needs the native desktop backend's development libraries. |
 | `--nsh-source <DIR>` | With `rust` or `mixed`: the crates depend on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
 
-The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
+The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Before each command on such an app, `nsh` builds a small program of the app's crates and NSH's core that describes their components, modules and classes, and runs it when the crates changed; with that description the CLI itself bundles, compiles, type-checks, serves and packages the app. A Rust app's builds compile its crates and NSH's core alone. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
 
 ## nsh run
 
@@ -92,8 +92,8 @@ A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no d
 | `--trace` | | The host logs the timing of every commit (JS, layout, mount items) to the terminal. |
 | `--fps` | | Shows the performance monitor over the app: frame rate, what frames and commits cost, CPU, GPU and memory ([macOS](./macos.md#performance-monitor); `--target macos` only for now). |
 | `--name <NAME>` | `nsh.json` name | Application display name in the menu bar and initial window title (`--target macos`, TSX entries). |
-| `--window-size <WIDTHxHEIGHT>` | Host default | Initial window size in points, such as `800x600` (`--target macos`, TSX entries). |
-| `--script <STEPS>` | | Runs semicolon-separated automation steps, such as `"wait 800; shot a.png; quit"` (`--target macos`, TSX entries). Screenshot-only scripts start in the background; scripted presses activate the app when needed. |
+| `--window-size <WIDTHxHEIGHT>` | Host default | Initial window size in points, such as `800x600` (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
+| `--script <STEPS>` | | Runs semicolon-separated automation steps, such as `"wait 800; shot a.png; quit"` (`--target macos`, `linux`, `windows` and `gpui`; an app written in Rust: `macos`, `linux` and `windows`). With `quit` the command ends with the script: screenshots of an app with a Rust crate of its own need no host started by hand. On macOS, screenshot-only scripts start in the background; scripted presses activate the app when needed. |
 
 With `--target android`, the first device `adb devices` lists is used; the dev server's port is forwarded to it with `adb reverse`. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
 
@@ -122,7 +122,7 @@ nsh trace [ENTRY] [--tap <SELECTOR>]... [--taps <N>] [--idle-ms <MS>] [--wait <M
           [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>] [--data-dir <DIR>] [--os <OS>]
 ```
 
-Runs the app headless, in the CLI's own process with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)). A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) is traced the same way, with its root mounted and no bundle.
+Runs the app headless, with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)). A TSX app runs in the CLI's own process. An app with Rust crates runs in a headless runner built with them, which the CLI hands the bytecode it compiled; a Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs in one with its root mounted, no bundle and no QuickJS. The output is the same either way.
 
 ```text
 ✓ bundled App.tsx (3255 B in 12.6 ms)
@@ -156,7 +156,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh check [ENTRY] [--tsc <TSC>] [-- <TSC ARGS>...]
 ```
 
-Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum NSH records, and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code.
+Type checks the app: refreshes `.nsh/types` and `.nsh/tsconfig.json`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum NSH records, and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code. It warns when `tsconfig.json` does not extend `./.nsh/tsconfig.json`, where NSH keeps its TypeScript settings ([Project structure](./project-structure.md#tsconfigjson-and-nshtypes)).
 
 | Flag | Description |
 |---|---|
@@ -169,7 +169,7 @@ Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> -
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves. For a Rust app (`nsh.json` `"root"`), it builds the app's crates and writes `app.json` and the files they ship (`assets/`): its runners mount the root, so there is no bundle.
+Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves. For a Rust app (`nsh.json` `"root"`), it builds and describes the app's crates and writes `app.json` and the files they ship (`assets/`): its runners mount the root, so there is no bundle.
 
 | Flag | Default | Description |
 |---|---|---|

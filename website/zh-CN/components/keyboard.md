@@ -15,7 +15,7 @@ import { Keyboard, keyboard } from "nsh/ui/mobile";
 ## Keyboard.dismiss
 
 ```ts
-Keyboard.dismiss(): void
+Keyboard.dismiss(): Promise<void>
 ```
 
 让当前获得焦点的输入框失去焦点，从而收起键盘。没有输入框获得焦点时不做任何事。

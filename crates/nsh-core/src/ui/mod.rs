@@ -37,6 +37,7 @@ pub(crate) mod call;
 mod callback;
 pub(crate) mod class;
 mod component;
+pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;
@@ -109,9 +110,7 @@ pub use self::{
         AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,
         RustOp, TaskStart, ToJs,
     },
-    callback::{
-        Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, NamedArgs, Trace, Tracer,
-    },
+    callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
     class::{
         Arg, AsyncCall, Class, ClassDef, ClassInstance, ClassRefs, ClassSpec, Instance, Member,
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,
@@ -365,7 +364,7 @@ pub mod prelude {
 pub mod __private {
     pub use serde_json::Map as JsonMap;
 
-    pub use super::class::__private::*;
+    pub use super::{callback::NamedArgs, class::__private::*};
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`

@@ -100,6 +100,10 @@ pub fn App() -> impl IntoElement {
 | Android | 带有你的 crate 的应用 `libnsh.so`，由运行时的 Activity 启动 |
 | Web | 包含引擎和你的 crate 的 `nsh.wasm`（整个 Rust gallery 为 3.3 MB，brotli 压缩后 0.75 MB）；页面直接挂载根组件 |
 
+`nsh` 只构建你的 crate 需要的东西：一个由你的 crate 和 NSH 核心组成的小程序，它向 CLI 描述 crate 的组件和模块，其余工作由
+CLI 自己完成；再加上你运行或打包的每个目标的运行器。新 Rust 应用的第一次构建只编译你的 crate 和 NSH 的核心，大约 60 个
+crate。`nsh trace` 在同样构建的、包含你的 crate 的运行器中以无界面方式挂载根组件。
+
 `nsh run` 期间，修改 crate 的 Rust 代码会重新构建运行器并重启应用；在浏览器中，已打开的页面会自动加载新的运行时。
 `cargo run` 在桌面后端上直接启动同一个根组件（`src/main.rs`）；嵌入 NSH 的原生应用在 macOS、Windows、Linux、GPUI 和
 iOS 的 `AppView` 上用 `AppSource::Rust` 挂载 Rust 根组件。
@@ -144,8 +148,10 @@ fn TitleBar() -> impl IntoElement {
 ## 用 TSX 扩展 Rust 应用
 
 crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内容：组件（`registry.register::<Chart>()`）、函数模块
-（`registry.module::<Portfolio>()`，一个 `#[module]` `impl`）、类（`registry.class::<Ledger>()`，在结构体及其 `impl` 上标注
-`#[class]`）和资源。它们的 TypeScript 声明（包括文档注释）由 Rust 类型生成到 `.nsh/types`，所以 `nsh check` 和编辑器会据此检查
+（`registry.module::<Portfolio>()`，在单元结构体及其 `impl` 上标注 `#[module]`）、类（`registry.class::<Ledger>()`，在结构体及其 `impl` 上标注
+`#[class]`）和资源；这个属性还会在 crate 根部生成 `pub fn registry()`，给测试和其他 Rust 代码使用同一个集合
+（`my_app_native::registry()`，与 `nsh_ui_mobile::registry()` 并列）。在 `#[module]` 或 `#[class]` 的 `impl` 中，`pub fn`（包括 `pub(crate)`）会被导出；没有可见性修饰的函数是
+辅助函数，只留在 Rust 中。它们的 TypeScript 声明（包括文档注释）由 Rust 类型生成到 `.nsh/types`，所以 `nsh check` 和编辑器会据此检查
 TSX：
 
 ```rust
@@ -181,6 +187,8 @@ impl Ledger {
     }
 }
 
+/// 应用的持仓。
+#[module]
 pub struct Portfolio;
 
 #[module]
@@ -213,17 +221,42 @@ function Overview() {
 mount(() => <Overview />);
 ```
 
+每个导出在 TypeScript 中的文档来自给它命名的那个 Rust 项的文档注释：组件来自 `#[component] fn`（`Chart`），模块和类来自它们的
+结构体（`Portfolio`、`Ledger`），props、事件、函数和成员来自它们自己的文档注释（有 getter 的 setter 不需要）。`Props` 结构体和
+事件枚举本身的文档注释，以及 `impl` 块上的文档注释，只留在 Rust 中；在 `#[module]` 或 `#[class]` 的 `impl` 块上写文档注释是编译
+错误，因为 TypeScript 不会显示它。每个写入 `.nsh/types` 的命令都会对 TSX 看到的、没有文档注释的导出给出警告，并写出它的名字
+（`Ledger.add`、`Chart.range`）。
+
+TypeScript 只显示文档注释中第一个标题之前的部分。写给 Rust 调用者的说明，例如 `&self` 借用了什么、函数为什么接收 `cx`，放在标题
+`# Rust`（或 rustdoc 的 `# Panics`、`# Examples`）下面，只留在 Rust 文档中：
+
+```rust
+/// 把 `text` 放到剪贴板；resolve 为复制的字符数。
+///
+/// # Rust
+///
+/// 接收 `cx` 让它成为一个 op，与 TS 在它之前做的 UI 改动按顺序执行。
+pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
+    let count = text.chars().count() as u32;
+    cx.set_clipboard(text);
+    count
+}
+```
+
 props 是组件 `Props` 结构体的字段，事件是 `Event` 枚举的变体（`onSelect`），都用驼峰命名。Rust 组件自己的内容、事件和状态留在
 Rust 中；TSX 传入 props、接收事件。类型不对的 prop（`u32` 类型的 prop 传 `level={1.5}`）和内置元素上一样给出警告：这个 prop 保持原值，组件的其余部分照常渲染。
 
 函数和成员按 Rust 签名运行。不是 `async` 的在 TSX 调用中直接运行并返回值（`Portfolio.total()` 是数字，`ledger.balance` 是属性）：
 它们计算并保存状态。`async fn` 返回 Promise，作为任务运行，可以使用 NSH 的服务（`fetch`、`timer`、对话框）；带
-`cx: &mut ModuleCx` 参数的模块函数与 UI 按顺序作用于平台（toast、状态栏），返回其值的 Promise。参数和返回值的类型来自签名：数字、
+`cx: &mut ModuleCx` 参数的模块函数与 UI 按顺序作用于平台（toast、状态栏），返回其值的 Promise（返回 `()` 时是 `Promise<void>`，在它运行后完成，所以可以 `await` 它）。参数和返回值的类型来自签名：数字、
 字符串、`Option`、`Vec`、你的 `#[derive(JsObject)]` 结构体和 `#[derive(PropEnum)]` 枚举、你的类的实例，以及 TSX 函数
-（`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用）。类型不对的参数在调用中抛出 `TypeError`，
+（`Callback<A, R>`：Rust 在调用中立即调用它，或之后用 `post` 和 `call_async` 调用；`Callback<f64>` 在 TS 中是
+`(value: number) => void`，`#[args(balance)] listener: Callback<f64>` 给参数命名，得到 `(balance: number) => void`）。事件处理函数的参数
+也叫 `value`，在事件的变体上写 `#[args(index)]` 可以给它命名。类型不对的参数在调用中抛出 `TypeError`，
 返回 Promise 的调用则以它 reject；`Err` 以其消息抛出（或 reject）。类的对象拥有它的
 Rust 值：对象被回收时释放，或调用 `ledger.dispose()`（也可以 `using ledger = new Ledger()`）立即释放。指定 TSX 入口来运行它：`nsh run App.tsx` 或 `nsh package App.tsx --target …`。TSX 的修改是热更新，
-Rust 的修改会重新构建并重启应用。
+Rust 的修改会重新构建并重启应用。CLI 根据 crate 的描述知道它导出了什么，自己打包和编译 TSX；开发宿主和 `nsh trace` 的
+无界面运行器则与你的 crate 和 QuickJS 一起构建。
 
 仓库中的 `examples/rust-exports` 是导出的参考示例：一个小型 TSX 应用，它的 crate 导出一个组件（必填、有默认值和可选的
 props，一个事件，子元素）、一个模块（每种函数各一个）和一个类（构造函数、方法、getter 和 setter、静态成员、`async` 成员、以另一个实例为参数、
@@ -232,6 +265,51 @@ Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简�
 仓库中的 `examples/gallery-rs` 是一个完整的 Rust 应用：每个 demo 都是 Rust，`nsh run examples/gallery-rs --target web`
 （或 `ios`、`android` 等）运行它的根组件，`nsh trace examples/gallery-rs` 以无界面方式运行它，`cargo run -p gallery-native`
 在桌面后端上启动它。
+
+## 测试
+
+测试在 `cargo test` 中无界面地运行应用：运行在真实的引擎上，没有窗口，以 60 Hz 提供显示帧，所以定时器、任务和动画都像在屏幕上一样运行。
+`nsh_engine::headless::Headless`（nsh-engine 的特性 `headless`）启动应用，维护一份它所显示视图的模型（`app.screen()`：它们的文本、
+应用发送的命令），并像点击一样按下视图，视图的写法与 `nsh trace --tap` 相同（文本、无障碍标签或 test id；`text:`、`label:`、`id:`）。
+Rust 应用运行它的根组件；`EngineConfig::new` 是一个手机尺寸、其余都未设置的引擎：
+
+```toml
+[dev-dependencies]
+nsh-engine = { version = "0.1", features = ["headless"] }
+```
+
+```rust
+use nsh_engine::{EngineConfig, headless::Headless};
+
+#[test]
+fn a_tap_counts() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+    app.wait_for("Count: 0");
+    app.press("Tap");
+    app.wait_for("Count: 1");
+}
+```
+
+TSX 入口用 `nsh-testing` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由 `#[native_module]` 生成的
+`registry()`：
+
+```toml
+[dev-dependencies]
+nsh-testing = "0.1"
+nsh-ui-mobile = "0.1"
+```
+
+```rust
+#[test]
+fn the_module_formats_money() {
+    let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+    let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
+    app.wait_for("Formatted at once: $1,234.50");
+}
+```
+
+`nsh_testing::compile_tsx` 只构建一次入口供多个测试使用，`nsh_engine::headless::start` 把批次交给自己维护屏幕模型的测试。
+`examples/rust-exports` 用这种方式测试它的 TSX 入口，`examples/gallery-rs` 测试它的 Rust 根组件。
 
 ## 多个 crate
 

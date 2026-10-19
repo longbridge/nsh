@@ -10,8 +10,8 @@ nsh check                    # type checks App.tsx against the declarations gene
 nsh package --target web     # or ios, android, macos, linux, windows, gpui
 ```
 
-`nsh` builds the app its own command line and hosts with the crate linked in. TSX edits are hot updates; Rust edits
-rebuild and restart the app. The first build writes the crate's TypeScript declarations into
+`nsh` describes the crate's exports with a small program of the crate and builds the app's hosts with it linked in.
+TSX edits are hot updates; Rust edits rebuild and restart the app. The first build writes the crate's TypeScript declarations into
 `.nsh/types/__SPECIFIER__.d.ts`, doc comments included.
 
 A function or a member runs the way its Rust signature says: one that is not `async` runs inside the TSX call and

@@ -1,3 +1,4 @@
+use nsh_core::ui::description::SetDescription;
 use rquickjs::{
     CatchResultExt, Context, Module, Runtime,
     module::{WriteOptions, WriteOptionsEndianness},
@@ -48,16 +49,18 @@ pub fn compile_bytecode(source: &str, strip: impl Into<Strip>) -> Result<Vec<u8>
 }
 
 /// [`compile_bytecode`] for a bundle that may import the native modules of
-/// `ui_sets` (as [`crate::HostOptions::ui_sets`]).
+/// `ui_sets`, the sets the hosts that run it serve
+/// ([`crate::HostOptions::ui_sets`]): imports link by name, so their
+/// descriptions are all it takes.
 pub fn compile_bytecode_with(
     source: &str,
     strip: impl Into<Strip>,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[SetDescription],
 ) -> Result<Vec<u8>, JsError> {
     compile(
         BUNDLE_NAME,
         source,
-        crate::modules::ModuleTable::new(ui_sets),
+        crate::modules::ModuleTable::compiling(ui_sets),
         strip.into(),
     )
 }
@@ -71,13 +74,13 @@ pub fn compile_chunk_bytecode(
     entry: &str,
     chunks: &[(&str, &str)],
     strip: impl Into<Strip>,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[SetDescription],
 ) -> Result<Vec<Vec<u8>>, JsError> {
     let strip = strip.into();
     chunks
         .iter()
         .map(|&(id, source)| {
-            let table = crate::modules::ModuleTable::new(ui_sets);
+            let table = crate::modules::ModuleTable::compiling(ui_sets);
             {
                 let mut code = table.chunks.borrow_mut();
                 let others = chunks.iter().filter(|(other, _)| *other != id);

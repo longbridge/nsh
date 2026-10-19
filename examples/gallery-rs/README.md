@@ -22,7 +22,7 @@ cargo build -p nsh-cli
 `nsh.json` names the root (`"root": "Gallery"`), so `nsh run` and `nsh package` of the directory mount `Gallery`
 with no QuickJS on every target: the app is Rust and native code from start to end (`website/docs/rust.md`).
 
-`nsh` builds the app its own command line and hosts with the crate linked in (`docs/dev/tooling.md`, "Apps with Rust
+`nsh` describes the crate with a small program of it and builds the app's runners with it linked in (`docs/dev/tooling.md`, "Apps with Rust
 components of their own"); editing the Rust code builds them again and restarts the app. On the web the crate is
 compiled into the app's `nsh.wasm` (`docs/dev/web.md`, "Apps with Rust components"): the demos use the engine's
 services (`fetch`, timers, `nsh_core::time`) rather than threads and the standard clock, so the same code runs in the

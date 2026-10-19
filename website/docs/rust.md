@@ -106,6 +106,11 @@ and no QuickJS linked in:
 | Android | The app's `libnsh.so` with your crate, started by the runtime's activity |
 | Web | `nsh.wasm` with the engine and your crate (3.3 MB for the whole Rust gallery, 0.75 MB with brotli); the page mounts the root |
 
+`nsh` builds what your crate needs and nothing more: a small program of your crate and NSH's core that describes its
+components and modules to the CLI, which then does the rest itself, and the runner of each target you run or
+package. The first build of a new Rust app compiles your crate and NSH's core, about 60 crates. `nsh trace` mounts
+the root headless in a runner of your crate built the same way.
+
 During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app; in the browser,
 the open page loads the new runtime by itself. `cargo run` starts the same root directly on the desktop backend
 (`src/main.rs`), and native apps that embed NSH mount a Rust root with `AppSource::Rust` on the `AppView` of macOS,
@@ -153,8 +158,12 @@ fn TitleBar() -> impl IntoElement {
 ## Extending a Rust app with TSX
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components
-(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, a `#[module]` `impl`),
-classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. Their TypeScript
+(`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, `#[module]` on a unit struct and its `impl`),
+classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets; the attribute also makes
+`pub fn registry()` at the crate's root, the same set for your tests and other Rust code (`my_app_native::registry()`,
+next to `nsh_ui_mobile::registry()`). In a `#[module]` or
+`#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too); functions without a visibility are helpers that
+stay in Rust. Their TypeScript
 declarations, doc comments included, are generated from the Rust types into `.nsh/types`, so TSX is checked against
 them by `nsh check` and your editor:
 
@@ -191,6 +200,8 @@ impl Ledger {
     }
 }
 
+/// The app's holdings.
+#[module]
 pub struct Portfolio;
 
 #[module]
@@ -223,6 +234,30 @@ function Overview() {
 mount(() => <Overview />);
 ```
 
+Each export is documented in TypeScript by the doc comment of the Rust item that names it: a component by its
+`#[component] fn` (`Chart`), a module and a class by their struct (`Portfolio`, `Ledger`), and props, events,
+functions and members by their own (a setter needs none beside its getter). The `Props` struct's and the event
+enum's own doc comments, and those of `impl` blocks, stay in Rust; a doc comment on a `#[module]` or `#[class]`
+`impl` block is a compile error, since TypeScript would not show it. Each command that writes `.nsh/types` warns
+about an export TSX sees without a doc comment, naming it (`Ledger.add`, `Chart.range`).
+
+TypeScript shows a doc comment up to its first heading. Notes for Rust callers, such as what `&self` borrows or
+why a function takes `cx`, go under a heading, `# Rust` (or rustdoc's `# Panics`, `# Examples`), and stay in the
+Rust docs:
+
+```rust
+/// Puts `text` on the clipboard; resolves with the number of characters copied.
+///
+/// # Rust
+///
+/// Taking `cx` makes it an op, run in order with the UI changes TS made before it.
+pub fn copy(text: String, cx: &mut ModuleCx) -> u32 {
+    let count = text.chars().count() as u32;
+    cx.set_clipboard(text);
+    count
+}
+```
+
 Props are the fields of the component's `Props` struct and events the variants of its `Event` enum (`onSelect`),
 both in camel case. A Rust component's own content, events and state stay in Rust; TSX passes props in and hears
 events. A prop of the wrong type (`level={1.5}` for a `u32` prop) is a warning, as on a built-in element: the
@@ -232,13 +267,18 @@ A function or a member runs the way its Rust signature says. One that is not `as
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
 `async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs); a module function
 taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and returns a Promise
-of its value. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
+of its value (`Promise<void>` for `()`, settled once it ran, so `await` waits for it). Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
-(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`). An argument of
+(`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`; TS sees
+`(value: number) => void` for a `Callback<f64>`, and `#[args(balance)] listener: Callback<f64>` names the argument,
+`(balance: number) => void`). An event's handler argument is `value` too, and `#[args(index)]` on the event's
+variant names it. An argument of
 the wrong type throws a `TypeError` in the call, or rejects the Promise of one that returns a Promise; an `Err`
 throws (or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
-updates, Rust edits rebuild and restart the app.
+updates, Rust edits rebuild and restart the app. The CLI bundles and compiles the TSX itself, knowing your crate's
+exports from its description; the development hosts and `nsh trace`'s headless runner are built with your crate and
+QuickJS.
 
 `examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
 component (props required, defaulted and optional, an event, children), one module (a function of each kind) and
@@ -249,6 +289,53 @@ press through the app and check what each one shows.
 `examples/gallery-rs` in the repository is a complete Rust app: every demo is Rust, `nsh run examples/gallery-rs
 --target web` (or `ios`, `android`, …) runs its root, `nsh trace examples/gallery-rs` runs it headless, and
 `cargo run -p gallery-native` starts it on the desktop backend.
+
+## Testing
+
+Tests run the app headless in `cargo test`: on the real engine, without a window, with display frames at 60 Hz, so
+timers, tasks and animations run as on screen. `nsh_engine::headless::Headless` (nsh-engine's feature `headless`)
+starts the app, keeps a model of the views it shows (`app.screen()`: their texts, the commands it sent) and presses
+views as a tap does, named as `nsh trace --tap` names them (a text, an accessibility label or a test id; `text:`,
+`label:`, `id:`). A Rust app runs its root; `EngineConfig::new` is a phone-sized engine with nothing else set:
+
+```toml
+[dev-dependencies]
+nsh-engine = { version = "0.1", features = ["headless"] }
+```
+
+```rust
+use nsh_engine::{EngineConfig, headless::Headless};
+
+#[test]
+fn a_tap_counts() {
+    let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
+    app.wait_for("Count: 0");
+    app.press("Tap");
+    app.wait_for("Count: 1");
+}
+```
+
+A TSX entry is built with `nsh-testing` as `nsh run` builds it, against the UI sets its hosts serve: NSH's, and each
+crate's `registry()`, which `#[native_module]` makes:
+
+```toml
+[dev-dependencies]
+nsh-testing = "0.1"
+nsh-ui-mobile = "0.1"
+```
+
+```rust
+#[test]
+fn the_module_formats_money() {
+    let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
+    let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
+    app.wait_for("Formatted at once: $1,234.50");
+}
+```
+
+`nsh_testing::compile_tsx` builds the entry once for several tests, and `nsh_engine::headless::start` hands the
+batches to a test that keeps its own model of the screen. `examples/rust-exports` tests its TSX entry this way,
+`examples/gallery-rs` its Rust root.
 
 ## Several crates
 

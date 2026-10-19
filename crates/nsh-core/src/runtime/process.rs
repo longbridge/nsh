@@ -20,10 +20,10 @@ use crate::ui::{
     System, TsTypes, class, module,
 };
 
-/// The process metadata and subprocesses of the VM.
+/// Subprocesses owned by this app's VM, and its process metadata.
+#[module]
 pub(crate) struct Process;
 
-/// Subprocesses owned by this app's VM, and its process metadata.
 #[module(flat, default)]
 impl Process {
     /// The native operating system name.

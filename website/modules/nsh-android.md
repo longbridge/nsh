@@ -26,7 +26,7 @@ const isAvailable: boolean;
 
 ```ts
 const Toast: {
-  show(message: string, duration?: "short" | "long" | null): void;
+  show(message: string, duration?: "short" | "long" | null): Promise<void>;
 };
 ```
 
@@ -46,7 +46,7 @@ const notify = (message: string) =>
 ```ts
 const BackHandler: {
   addEventListener(event: "hardwareBackPress", listener: () => boolean | void): { remove(): void };
-  exitApp(): void;
+  exitApp(): Promise<void>;
 };
 ```
 
@@ -82,7 +82,7 @@ function Editor() {
 ## setStatusBarBackgroundColor
 
 ```ts
-function setStatusBarBackgroundColor(backgroundColor: string, animated?: boolean | null): void;
+function setStatusBarBackgroundColor(backgroundColor: string, animated?: boolean | null): Promise<void>;
 ```
 
 Sets the status bar's color, below what rendered `<StatusBar android={{ backgroundColor }}>` components set (the last mounted `StatusBar` wins over this base value). It has an effect on Android versions before edge-to-edge became mandatory (API 35); from API 35 the status bar is transparent and your content draws behind it.

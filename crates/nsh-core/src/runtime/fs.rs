@@ -33,12 +33,12 @@ const MAX_ENTRIES: usize = 10_000;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_NAME_BYTES: usize = 1024 * 1024;
 
-/// Capability-checked files.
-pub(crate) struct Fs;
-
 /// Promise-based files under the roots `capabilities.fs` grants. Failures
 /// carry Node's `code` (`ENOENT`, `EEXIST`, ...), `syscall` and `path`; a
 /// path no grant covers throws a `TypeError` with `code` `EACCES`.
+#[module]
+pub(crate) struct Fs;
+
 #[module(flat, default)]
 impl Fs {
     /// Reads at most 64 MiB. Omitted encoding returns Uint8Array. A runtime

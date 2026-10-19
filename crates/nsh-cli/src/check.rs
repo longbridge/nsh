@@ -67,7 +67,9 @@ const TSC: &str = if cfg!(windows) {
 };
 
 /// Type checks the app of `entry` (its directory's `tsconfig.json`, with
-/// the `.nsh/types` the command line wrote before) and fails on errors.
+/// the `.nsh/types` and `.nsh/tsconfig.json` the command line wrote
+/// before) and fails on errors; warns when the `tsconfig.json` does not
+/// extend `.nsh/tsconfig.json` (one the app changed, from before it did).
 pub(crate) fn check(entry: &Path, tsc: Option<&Path>, args: &[String]) -> anyhow::Result<()> {
     let dir = dunce::canonicalize(entry)?
         .parent()
@@ -79,6 +81,15 @@ pub(crate) fn check(entry: &Path, tsc: Option<&Path>, args: &[String]) -> anyhow
             dir.display(),
             dir.display()
         );
+    }
+    if !crate::init::tsconfig_extends_nsh(&dir) {
+        crate::ui::warn(format!(
+            "{} does not extend ./.nsh/tsconfig.json, where nsh keeps its TypeScript settings \
+             (`lib`, the paths of `nsh` and the app's crates, the globals) current: add \
+             `\"extends\": \"./.nsh/tsconfig.json\"` and drop the options it sets, as the \
+             tsconfig.json of `nsh init` does",
+            crate::ui::path(&dir.join("tsconfig.json"))
+        ));
     }
     let tsc = match tsc {
         Some(tsc) => tsc.to_path_buf(),

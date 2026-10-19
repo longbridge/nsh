@@ -2,10 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A scrolling list of the app's rows, padded and divided: only the rows
-/// near the screen exist, cells are reused. The app passes the data and
-/// renders a row (`each` and children, like `List`); the look is the
-/// list's.
+/// The props of [`ListView`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct ListViewProps {
     /// The rows.
@@ -29,7 +26,10 @@ pub enum ListViewVariant {
     Inset,
 }
 
-/// A scrolling list of rows ([`ListViewProps`]).
+/// A scrolling list of the app's rows, padded and divided: only the rows
+/// near the screen exist, cells are reused. The app passes the data and
+/// renders a row (`each` and children, like `List`); the look is the
+/// list's.
 #[component]
 pub fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let inset = computed(move || props.variant.get() == ListViewVariant::Inset);

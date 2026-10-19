@@ -15,10 +15,10 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
     ));
 }
 
-/// The app's window.
+/// The app's window (desktops; its functions do nothing elsewhere).
+#[module]
 pub(crate) struct Window;
 
-/// The app's window (desktops; its functions do nothing elsewhere).
 #[module]
 impl Window {
     /// Sets the window's title (the title bar, the taskbar / Dock, the

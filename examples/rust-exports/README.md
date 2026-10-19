@@ -15,7 +15,7 @@ Their TypeScript declarations, doc comments included, are generated from the Rus
 |---|---|---|
 | A component | `#[component] fn Gauge` with `#[derive(Props)] GaugeProps` (a required `value`, a defaulted `max` and `step`, an optional `label`, `children`) and `#[derive(Event)] GaugeEvent::Change(f64)` (`native/src/gauge.rs`) | `<Gauge value={spent()} step={25} label="Groceries" onChange={(v) => spent.set(v)}>…</Gauge>` |
 | A module | `#[module] impl Ledger` (`native/src/ledger.rs`): `format` (a plain `fn`), `copy` (taking `cx: &mut ModuleCx`), `fetch_rate` (an `async fn`) | `Ledger.format(1234.5)` returns a string at once; `await Ledger.copy(text)` and `await Ledger.fetchRate()` are Promises |
-| A class | `#[class] struct Account` and its `#[class] impl` (`native/src/account.rs`) | `new Account("Savings", 120)`, `Account.parse("Checking: 40")` (a static), `account.balance` (a getter), `account.name = "…"` (a setter), `deposit` (`&mut self`), `statement` (`&self`), `transfer(other, 30)` (another instance), `await account.accrue(rate)` (an `async` member), `onChange(listener)` (a `Callback` Rust posts to, also from `accrue`'s task), `dispose()` and `using` |
+| A class | `#[class] struct Account` and its `#[class] impl` (`native/src/account.rs`) | `new Account("Savings", 120)`, `Account.parse("Checking: 40")` (a static), `account.balance` (a getter), `account.name = "…"` (a setter), `deposit` (`&mut self`), `statement` (`&self`), `transfer(other, 30)` (another instance), `await account.accrue(rate)` (an `async` member), `onChange(listener)` (a `Callback` Rust posts to, also from `accrue`'s task), `dispose()` and `using`; `book`, a `fn` without `pub`, is a helper TS does not see |
 
 ```sh
 cargo build -p nsh-cli
@@ -24,10 +24,11 @@ cargo build -p nsh-cli
 cargo test -p rust-exports-native                         # the headless tests
 ```
 
-`nsh` builds the app its own command line and hosts with the crate linked in (`docs/dev/tooling.md`, "Apps with Rust
+`nsh` describes the crate with a small program of it and builds the app's hosts with it linked in (`docs/dev/tooling.md`, "Apps with Rust
 components of their own"): TSX edits are hot updates, Rust edits rebuild and restart the app. The tests
-(`native/tests/rust_exports/`) bundle `App.tsx` against the crate's set, run it on a headless engine, press through
-its UI and check what each export shows.
+(`native/tests/rust_exports/`) build `App.tsx` against the crate's set (`rust_exports_native::registry()`) and run it
+headless with `nsh-testing`, press through its UI, check what each export shows, and check the declarations TSX
+reads.
 
 How each kind of export runs, crosses and is typed: [Building with Rust](../../website/docs/rust.md) and, for
 NSH's developers, `docs/dev/rust-classes.md` (classes, module functions, callbacks) and `docs/dev/components.md`

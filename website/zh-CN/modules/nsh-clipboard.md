@@ -14,7 +14,7 @@ import { Clipboard } from "nsh/clipboard";
 
 ```ts
 const Clipboard: {
-  setString(text: string): void;
+  setString(text: string): Promise<void>;
   getString(): Promise<string>;
   hasString(): Promise<boolean>;
 };
@@ -25,7 +25,7 @@ const Clipboard: {
 ## Clipboard.setString
 
 ```ts
-setString(text: string): void;
+setString(text: string): Promise<void>;
 ```
 
 把 `text` 放到剪贴板上，替换原有内容。

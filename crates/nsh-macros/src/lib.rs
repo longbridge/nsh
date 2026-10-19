@@ -22,6 +22,10 @@
 //! - `#[native_module("gallery/native")]` on a function of an app's crate:
 //!   the UI set it registers, which nsh's generated workspace links.
 //!
+//! Doc comments become the TypeScript declarations' up to their first
+//! heading: a `# Rust` section (or `# Panics`, `# Examples`) is for Rust
+//! callers only.
+//!
 //! The code they generate names `::nsh_core::ui`. `style_helpers!` is
 //! internal to `nsh-core`: the spacing and sizing methods of `Styled`.
 
@@ -46,9 +50,13 @@ fn decl(text: &str) -> TokenStream2 {
     quote!(::nsh_core::decl!(#text))
 }
 
-/// The doc comment of an item, lines joined.
+/// The doc comment of an item as TypeScript shows it, lines joined: the
+/// part before its first heading. The sections under headings (`# Rust`,
+/// `# Panics`, `# Examples`, as rustdoc has them) are Rust's: notes about
+/// `&self`, `cx` or how the call crosses stay out of the declarations.
 fn docs(attrs: &[Attribute]) -> String {
     let mut lines = Vec::new();
+    let mut fenced = false;
     for attr in attrs {
         if !attr.path().is_ident("doc") {
             continue;
@@ -57,9 +65,29 @@ fn docs(attrs: &[Attribute]) -> String {
             && let Expr::Lit(lit) = &nv.value
             && let syn::Lit::Str(s) = &lit.lit
         {
-            lines.push(s.value().trim().to_owned());
+            for line in s.value().lines() {
+                let line = line.trim();
+                if line.starts_with("```") {
+                    fenced = !fenced;
+                } else if !fenced && is_heading(line) {
+                    // A heading (`# Rust`): the rest is Rust's.
+                    return finish_docs(lines);
+                }
+                lines.push(line.to_owned());
+            }
         }
     }
+    finish_docs(lines)
+}
+
+/// Whether `line` is a Markdown heading: one to six `#` and a space.
+fn is_heading(line: &str) -> bool {
+    let hashes = line.bytes().take_while(|b| *b == b'#').count();
+    (1..=6).contains(&hashes) && line[hashes..].starts_with(' ')
+}
+
+/// The TS doc of `lines`: one line, rustdoc links as code spans.
+fn finish_docs(lines: Vec<String>) -> String {
     // Rustdoc links (`[`Button`]`) read as code spans in TypeScript.
     lines.join(" ").trim().replace("[`", "`").replace("`]", "`")
 }
@@ -105,6 +133,17 @@ fn ts_doc(attrs: &[Attribute]) -> String {
     }
 }
 
+/// Whether a function of a `#[class]`, `#[module]` or `#[methods]` block
+/// is exported: it has a visibility (`pub`, `pub(crate)`, ...). A private
+/// one (none, or `pub(self)`) is the block's helper, Rust's only.
+fn exported(vis: &syn::Visibility) -> bool {
+    match vis {
+        syn::Visibility::Inherited => false,
+        syn::Visibility::Restricted(r) => !r.path.is_ident("self"),
+        syn::Visibility::Public(_) => true,
+    }
+}
+
 /// `accessibility_label` / `AccessibilityLabel` -> `accessibilityLabel`.
 fn camel(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
@@ -122,6 +161,68 @@ fn camel(name: &str) -> String {
         }
     }
     out
+}
+
+/// The names `#[args(name, amount)]` among `attrs` gives a JS function's
+/// arguments (a callback parameter's, an event handler's), in camel case.
+fn args_attr(attrs: &[Attribute]) -> syn::Result<Option<(Vec<String>, Span)>> {
+    let mut out = None;
+    for attr in attrs {
+        if !attr.path().is_ident("args") {
+            continue;
+        }
+        if out.is_some() {
+            return Err(syn::Error::new(attr.span(), "one `#[args(..)]`"));
+        }
+        let names = attr.parse_args_with(Punctuated::<Ident, Token![,]>::parse_terminated)?;
+        if names.is_empty() {
+            return Err(syn::Error::new(
+                attr.span(),
+                "`#[args(..)]` names the arguments: `#[args(name, amount)]`",
+            ));
+        }
+        out = Some((
+            names.iter().map(|n| camel(&n.to_string())).collect(),
+            attr.span(),
+        ));
+    }
+    Ok(out)
+}
+
+/// Removes the macros' `#[args(..)]` from the parameters of `sig` (the
+/// compiler has no such attribute).
+fn strip_args(sig: &mut syn::Signature) {
+    for input in &mut sig.inputs {
+        if let FnArg::Typed(t) = input {
+            t.attrs.retain(|a| !a.path().is_ident("args"));
+        }
+    }
+}
+
+/// The TypeScript type of a parameter of type `ty`: a callback's with its
+/// arguments named when `#[args(..)]` names them (`attrs`), checked at
+/// compile time to name each.
+fn param_ts(ty: &Type, attrs: &[Attribute]) -> syn::Result<TokenStream2> {
+    let ui = quote!(::nsh_core::ui);
+    let private = quote!(#ui::__private);
+    Ok(match args_attr(attrs)? {
+        None => quote!(#private::arg_ts::<#ty>()),
+        Some((names, span)) => {
+            let n = names.len();
+            let check = quote::quote_spanned! {span=>
+                const {
+                    ::core::assert!(
+                        <#ty as #private::NamedArgs>::ARITY == #n,
+                        "`#[args(..)]` names each argument of the callback, as many names as it has"
+                    )
+                }
+            };
+            quote!({
+                #check;
+                |types: &mut #ui::TsTypes| #private::named_arg_ts::<#ty>(types, &[#(#names),*])
+            })
+        }
+    })
 }
 
 /// The options of `#[prop(...)]`.
@@ -215,8 +316,9 @@ enum Kind {
 /// - `Items`: virtualized rows (in JS `each`, a row renderer and `List`'s
 ///   data props), at most one, and not with `Children`.
 ///
-/// `#[prop(rename = "…")]` sets the JS name. The struct's doc comment
-/// documents the component in TypeScript, the fields' its props. The props
+/// `#[prop(rename = "…")]` sets the JS name. The fields' doc comments
+/// document the props in TypeScript (the component's own is its
+/// `#[component] fn`'s; the struct's stays Rust's). The props
 /// also get `Default` (every field at its default), for Rust views:
 /// `ButtonProps { title: "+1".into(), ..Default::default() }`.
 #[proc_macro_derive(Props, attributes(prop))]
@@ -238,7 +340,6 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
     let Fields::Named(fields) = &data.fields else {
         return Err(syn::Error::new(input.span(), "`Props` needs named fields"));
     };
-    let doc = decl(&docs(&input.attrs));
     let ui = quote!(::nsh_core::ui);
     let mut specs = Vec::new();
     let mut initial = Vec::new();
@@ -449,10 +550,6 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
             const ITEMS: ::core::option::Option<&'static str> = #items_const;
             const LAZY_CHILDREN: bool = #lazy_children;
 
-            fn doc() -> &'static str {
-                #doc
-            }
-
             fn spec(types: &mut #ui::TsTypes) -> ::std::vec::Vec<#ui::PropSpec> {
                 let _ = &types;
                 ::std::vec![#(#specs),*]
@@ -643,8 +740,10 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
 /// camel case (`Press` is `onPress` in JS): a unit variant carries no
 /// data, a variant with named fields an object of them (camel case), a
 /// variant with one unnamed field that value. Doc comments document the
-/// handlers.
-#[proc_macro_derive(Event)]
+/// handlers. The handler's argument is `value` (one field) or `event`
+/// (named fields) in TypeScript; `#[args(index)]` on the variant names it
+/// (`onSelect?: (index: number) => void`).
+#[proc_macro_derive(Event, attributes(args))]
 pub fn derive_event(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     event(input)
@@ -668,10 +767,29 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
         let ident = &v.ident;
         let js = camel(&ident.to_string());
         let doc = decl(&docs(&v.attrs));
+        let named = match args_attr(&v.attrs)? {
+            None => None,
+            Some((names, _)) if names.len() == 1 && !matches!(v.fields, Fields::Unit) => {
+                Some(names[0].clone())
+            }
+            Some((_, span)) => {
+                return Err(syn::Error::new(
+                    span,
+                    "`#[args(name)]` names the data of an event that has some: one name",
+                ));
+            }
+        };
+        let arg = named.unwrap_or_else(|| {
+            match &v.fields {
+                Fields::Named(_) => "event",
+                _ => "value",
+            }
+            .to_owned()
+        });
         match &v.fields {
             Fields::Unit => {
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, data: ::std::string::String::from("void"), doc: #doc }
+                    #ui::EventSpec { name: #js, arg: #arg, data: ::std::string::String::from("void"), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident => #js));
                 data_arms.push(quote!(Self::#ident => ::core::result::Result::Ok(#ui::JsOwned::new(host, host.undefined()))));
@@ -679,7 +797,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             Fields::Unnamed(f) if f.unnamed.len() == 1 => {
                 let ty = &f.unnamed[0].ty;
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, data: #ui::ts_of::<#ty>()(types), doc: #doc }
+                    #ui::EventSpec { name: #js, arg: #arg, data: #ui::ts_of::<#ty>()(types), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
                 data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_js(v, host)));
@@ -695,6 +813,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                 specs.push(quote! {
                     #ui::EventSpec {
                         name: #js,
+                        arg: #arg,
                         data: if #ui::DECLARATIONS {
                             let fields: ::std::vec::Vec<::std::string::String> = ::std::vec![
                                 #(::std::format!("{}: {}", #keys, <#tys as #ui::JsValue>::ts_type(types))),*
@@ -861,7 +980,10 @@ pub fn assets(input: TokenStream) -> TokenStream {
 ///
 /// makes `pub struct Stepper;` and its `Component` impl; the body is its
 /// view, run once. Without a `Scope` parameter it emits no
-/// events (`NoEvent`); without props it has none (`()`).
+/// events (`NoEvent`); without props it has none (`()`). The function's
+/// doc comment documents the component in TypeScript (`Component::DOC`),
+/// and a `#[module] impl` of the same name (its functions on the
+/// component: `StatusBar.setHidden(..)`).
 /// `#[component(methods = StepperApi)]` gives its ref in JS the methods of
 /// that [`methods`] API, which the view registers with `cx.methods(..)`.
 #[proc_macro_attribute]
@@ -943,14 +1065,21 @@ fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenSt
     };
     let methods =
         methods.map(|api| quote!(const METHODS: #ui::Methods = #ui::Methods::of::<#api>();));
+    let doc = decl(&docs(attrs));
     Ok(quote! {
         #(#attrs)*
         #[derive(::core::fmt::Debug, ::core::default::Default, ::core::clone::Clone, ::core::marker::Copy)]
         #vis struct #name;
 
+        // A `#[module] impl` of the component's name is documented by it.
+        impl #ui::__private::ModuleDoc for #name {
+            const DOC: &'static str = #doc;
+        }
+
         impl #ui::Component for #name {
             type Props = #props_ty;
             type Event = #event;
+            const DOC: &'static str = #doc;
             #methods
 
             #[allow(unused_variables)]
@@ -973,6 +1102,11 @@ fn component_fn(item: ItemFn, methods: Option<syn::Path>) -> syn::Result<TokenSt
 ///     registry.assets(assets!());
 /// }
 /// ```
+///
+/// It also makes `pub fn registry() -> Registry` at the crate's root: the
+/// set, for tests and other Rust code (`my_app_native::registry()`, next to
+/// `nsh_ui_mobile::registry()`), so the crate's root has no other item
+/// named `registry`.
 ///
 /// The specifier is checked at compile time: a bare import specifier
 /// (`my-app/native`, `@acme/ui`), not a path, and not nsh's own (`nsh`,
@@ -1038,12 +1172,14 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
 
 /// `#[methods]` on an `impl` block of a component's API (`Api`: a handle
 /// its view makes, holding the signals the methods read and write): each
-/// function becomes a method of the component's ref in JS, named in camel
-/// case (`set_value` is `setValue`), documented by its doc comment. A
-/// function takes `&self`, then [`JsValue`] parameters; it returns nothing
-/// (JS calls it and moves on; the call is ordered with the props set before
-/// it) or a [`JsValue`] (JS gets a `Promise`). The block's functions are
-/// JS's: keep helpers in another `impl`. The view registers the API with
+/// function with a visibility (`pub fn`, `pub(crate) fn`) becomes a method
+/// of the component's ref in JS, named in camel case (`set_value` is
+/// `setValue`), documented by its doc comment; a function without one is a
+/// helper, Rust's only. A
+/// function takes `&self`, then [`JsValue`] parameters, and returns
+/// nothing or a [`JsValue`]: JS gets a `Promise` of it (`Promise<void>`
+/// for nothing, settled once the method ran), the call ordered with the
+/// props set before it. The view registers the API with
 /// `cx.methods(api)`, and the component names it in its spec with
 /// `#[component(methods = StepperApi)]`.
 #[proc_macro_attribute]
@@ -1059,14 +1195,18 @@ pub fn methods(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
+fn methods_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
-    let self_ty = &item.self_ty;
-    let (impl_generics, _, where_clause) = item.generics.split_for_impl();
+    let self_ty = item.self_ty.clone();
+    let generics = item.generics.clone();
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
+        if !exported(&f.vis) {
+            continue;
+        }
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
         // The method's name: the host puts its component's before it (an
@@ -1103,7 +1243,8 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
             };
             let name = camel(&name.ident.to_string());
             let local = format_ident!("__arg{}", i);
-            params.push(quote!((#name, #private::arg_ts::<#ty>())));
+            let ts = param_ts(ty, &arg.attrs)?;
+            params.push(quote!((#name, #ts)));
             refs.push(quote!(#private::arg_classes::<#ty>(__out);));
             decode.push(quote! {
                 let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
@@ -1153,6 +1294,11 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
                 },
             }
         });
+    }
+    for member in &mut item.items {
+        if let ImplItem::Fn(f) = member {
+            strip_args(&mut f.sig);
+        }
     }
     Ok(quote! {
         #item
@@ -1322,25 +1468,6 @@ fn system_param(ty: &Type) -> bool {
     matches!(last_segment(ty), Some((id, None)) if id == "System")
 }
 
-/// The TypeScript type of a parameter of type `ty`: `#[args(text, index)]`
-/// on it names its callback's parameters (`(text: string, index: number)
-/// => void` instead of `(a: string, b: number) => void`).
-fn param_ts(ty: &Type, attrs: &[Attribute]) -> syn::Result<TokenStream2> {
-    let ui = quote!(::nsh_core::ui);
-    let Some(attr) = attrs.iter().find(|a| a.path().is_ident("args")) else {
-        return Ok(quote!(#ui::__private::arg_ts::<#ty>()));
-    };
-    let names =
-        attr.parse_args_with(syn::punctuated::Punctuated::<Ident, Token![,]>::parse_terminated)?;
-    let names = names.iter().map(|n| camel(&n.to_string()));
-    Ok(quote! {{
-        let ts: #ui::TsType = |types: &mut #ui::TsTypes| -> ::std::string::String {
-            #ui::__private::named_ts::<#ty>(types, &[#(#names),*])
-        };
-        ts
-    }})
-}
-
 /// Whether `ty` is `CallCx`: what a synchronous call can do beyond
 /// computing, filled in by the call.
 fn call_cx_param(ty: &Type) -> bool {
@@ -1378,18 +1505,25 @@ fn module_cx(ty: &Type) -> bool {
     matches!(ty, Type::Reference(r) if matches!(last_segment(&r.elem), Some((id, _)) if id == "ModuleCx"))
 }
 
-/// `#[module]` on an `impl` block of a unit struct: its functions (no
-/// receiver) become functions of a JS object named after the struct
-/// (`Alert.alert(...)`), documented by their doc comments (the block's doc
-/// comment documents the object). The signature decides how a call runs:
+/// `#[module]` on an `impl` block of a unit struct: its functions with a
+/// visibility (`pub fn`, `pub(crate) fn`; no receiver) become functions of
+/// a JS object named after the struct
+/// (`Alert.alert(...)`), documented by their doc comments. The struct
+/// takes `#[module]` too, and its doc comment documents the object (a doc
+/// comment on the block is an error: TS shows the struct's); a
+/// component's struct (`#[component]`) needs none. The signature decides
+/// how a call runs:
 /// a function without a context runs in the JS call and returns its value
 /// (`checksum(bytes)`), as a class's method does; one whose last parameter
 /// is `cx: &mut ModuleCx` is an op, run in order with what JS set before it
-/// (a dialog, the status bar, focus), a `Promise` when it returns a value;
+/// (a dialog, the status bar, focus), a `Promise` (`Promise<void>` when it
+/// returns nothing: settled once the op ran);
 /// an `async fn` runs as a task of the core with the free functions views
 /// use (`dialog(..)`, `clipboard_string()`, ...), a `Promise`. Parameters
 /// are [`JsValue`] types (a trailing `Option` is optional), instances
-/// (`Instance<T>`) and JS functions (`Callback<A, R>`); a function returns
+/// (`Instance<T>`) and JS functions (`Callback<A, R>`; `#[args(name,
+/// amount)]` on the parameter names the function's arguments in TS); a
+/// function returns
 /// nothing, a [`JsValue`], an instance, or a `Result` of one (an `Err`
 /// throws or rejects with its message). A UI set registers the module
 /// (`Registry::module::<Alert>()`); a component exported under the same
@@ -1405,21 +1539,70 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(options) => options,
         Err(error) => return error.into_compile_error().into(),
     };
-    let item = parse_macro_input!(item as ItemImpl);
-    module_impl(item, flat, default)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
+    let item = parse_macro_input!(item as syn::Item);
+    match item {
+        syn::Item::Struct(s) if !flat && !default => module_struct(s),
+        syn::Item::Impl(i) => module_impl(i, flat, default),
+        syn::Item::Struct(s) => Err(syn::Error::new(
+            s.ident.span(),
+            "`flat` and `default` go on the `#[module(..)] impl` block; the struct takes `#[module]`",
+        )),
+        other => Err(syn::Error::new(
+            other.span(),
+            "`#[module]` goes on a unit struct and on its `impl` block",
+        )),
+    }
+    .unwrap_or_else(syn::Error::into_compile_error)
+    .into()
+}
+
+/// `#[module]` on the struct: its doc comment documents the module in TS.
+fn module_struct(item: syn::ItemStruct) -> syn::Result<TokenStream2> {
+    if !item.generics.params.is_empty() {
+        return Err(syn::Error::new(
+            item.generics.span(),
+            "a module has no generic parameters",
+        ));
+    }
+    let ui = quote!(::nsh_core::ui);
+    let name = &item.ident;
+    let doc = decl(&docs(&item.attrs));
+    Ok(quote! {
+        #item
+
+        impl #ui::__private::ModuleDoc for #name {
+            const DOC: &'static str = #doc;
+        }
+    })
+}
+
+/// Refuses a doc comment on an export's `impl` block (`what`: `#[module]`):
+/// TS shows the struct's, so one here would be lost.
+fn no_block_doc(item: &ItemImpl, what: &str) -> syn::Result<()> {
+    match item.attrs.iter().find(|a| a.path().is_ident("doc")) {
+        Some(doc) => Err(syn::Error::new(
+            doc.span(),
+            format!(
+                "document the export on its struct, not on the `{what} impl` block: the struct's \
+                 doc comment is the one TS shows (a `//` comment here stays in Rust)"
+            ),
+        )),
+        None => Ok(()),
+    }
 }
 
 /// `#[class]` on a struct and on its `impl` block: a JS class (the
-/// struct's name) whose objects hold the Rust value. In the block, `new` is
+/// struct's name) whose objects hold the Rust value. The block's functions
+/// with a visibility (`pub fn`, `pub(crate) fn`) are the class's members;
+/// those without one are helpers, Rust's only. In the block, `new` is
 /// the constructor (a class without one is made by its members only);
 /// `&self` / `&mut self` functions are methods, `#[getter]` / `#[setter]`
 /// ones (`count`, `set_count`) the property `count`; functions without a
 /// receiver are statics. They run in the JS call: their parameters are
 /// [`JsValue`] types (a trailing `Option` is optional), instances
 /// (`&Other` / `&mut Other` borrowed for the call, `Instance<Other>` kept)
-/// and JS functions (`Callback<A, R>`);
+/// and JS functions (`Callback<A, R>`; `#[args(name, amount)]` on the
+/// parameter names the function's arguments in TS);
 /// they return nothing, a value, `Self` or another class's value (a new JS
 /// object), an `Instance` (its JS object), or a `Result` of one (an `Err`
 /// throws). An `async fn` (`this: Instance<Self>` first, for a method)
@@ -1530,7 +1713,7 @@ fn module_constant_variant(ty: &Type) -> syn::Result<&'static str> {
 fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
-    let self_ty = &item.self_ty;
+    let self_ty = &item.self_ty.clone();
     let Some((type_name, _)) = last_segment(self_ty) else {
         return Err(syn::Error::new(
             self_ty.span(),
@@ -1538,7 +1721,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
         ));
     };
     let module_name = type_name.to_string();
-    let module_doc = decl(&docs(&item.attrs));
+    no_block_doc(&item, "#[module]")?;
     let mut entries = Vec::new();
     let mut constants = Vec::new();
     for member in &item.items {
@@ -1564,6 +1747,9 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             continue;
         }
         let ImplItem::Fn(f) = member else { continue };
+        if !exported(&f.vis) {
+            continue;
+        }
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
         let getter = f.attrs.iter().any(|a| a.path().is_ident("getter"));
@@ -1805,11 +1991,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
     // `#[getter]`, `#[args]` and the overloads' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
-            for input in &mut f.sig.inputs {
-                if let FnArg::Typed(t) = input {
-                    t.attrs.retain(|a| !a.path().is_ident("args"));
-                }
-            }
+            strip_args(&mut f.sig);
             f.attrs
                 .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("overload"));
         }
@@ -1819,7 +2001,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
 
         impl #ui::Module for #self_ty {
             const NAME: &'static str = #module_name;
-            const DOC: &'static str = #module_doc;
+            const DOC: &'static str = <Self as #ui::__private::ModuleDoc>::DOC;
             const FUNCTIONS: &'static [#ui::Function] = &[#(#entries),*];
             const FLAT: bool = #flat;
             const DEFAULT: bool = #default;
@@ -1955,6 +2137,47 @@ mod module_tests {
                 .unwrap_err()
                 .to_string()
                 .contains("module constants support only")
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The TS doc of a doc comment of `lines`.
+    fn ts(lines: &[&str]) -> String {
+        let attrs: Vec<syn::Attribute> = lines
+            .iter()
+            .map(|l| syn::parse_quote!(#[doc = #l]))
+            .collect();
+        super::docs(&attrs)
+    }
+
+    #[test]
+    fn sections_under_a_heading_stay_rusts() {
+        assert_eq!(
+            ts(&[
+                " Copies `text`; resolves with its length.",
+                "",
+                " # Rust",
+                "",
+                " Taking `cx` makes it an op.",
+            ]),
+            "Copies `text`; resolves with its length."
+        );
+        assert_eq!(
+            ts(&[" Sorts [`Item`]s.", " ## Panics", " Never."]),
+            "Sorts `Item`s."
+        );
+        // Not headings: a `#` in a code block, an attribute, a `#` word.
+        assert_eq!(
+            ts(&[
+                " A list:",
+                " ```",
+                " # use x;",
+                " ```",
+                " #[ignore] and #1."
+            ]),
+            "A list: ``` # use x; ``` #[ignore] and #1."
         );
     }
 }

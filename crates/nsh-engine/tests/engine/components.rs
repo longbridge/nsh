@@ -47,11 +47,12 @@ fn start_with(
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry()]).unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry().into()])
+            .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -519,8 +520,10 @@ const shown = signal("waiting");
 let stepper!: StepperRef;
 setTimeout(async () => {
   let refused = "";
-  try { (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
-  stepper.setValue(42.4);
+  // A method returning nothing is a promise too: a wrong argument rejects it.
+  try { await (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
+  const set = stepper.setValue(42.4);
+  if (!(set instanceof Promise)) refused = "not a promise";
   const value = await stepper.value();
   shown.set(`got ${value} | ${refused}`);
 }, 0);

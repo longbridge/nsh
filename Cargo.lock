@@ -3123,6 +3123,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.28.0",
+ "ureq",
 ]
 
 [[package]]
@@ -3369,6 +3370,16 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+]
+
+[[package]]
+name = "nsh-testing"
+version = "0.1.1"
+dependencies = [
+ "nsh-bundler",
+ "nsh-core",
+ "nsh-engine",
+ "nsh-js",
 ]
 
 [[package]]
@@ -5244,12 +5255,9 @@ dependencies = [
 name = "rust-exports-native"
 version = "0.1.1"
 dependencies = [
- "crossbeam-channel",
- "log",
- "nsh-bundler",
  "nsh-core",
  "nsh-engine",
- "nsh-js",
+ "nsh-testing",
  "nsh-ui-mobile",
 ]
 

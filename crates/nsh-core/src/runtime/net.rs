@@ -19,10 +19,10 @@ const SOCKETS: &str = "net.sockets";
 #[cfg(not(target_arch = "wasm32"))]
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// TCP client sockets.
+/// TCP client sockets to granted `host:port` pairs.
+#[module]
 pub(crate) struct Net;
 
-/// TCP client sockets to granted `host:port` pairs.
 #[module(flat, default)]
 impl Net {
     /// Connects only to `host:port` pairs granted by

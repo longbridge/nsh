@@ -153,7 +153,7 @@ the crate's `build.rs` passes the 8 MiB stack as a link argument of its own (nsh
 where the app builds, and target-wide `rustflags` would rebuild every dependency instead of sharing nsh's builds).
 Both kinds build to `target/wasm32-unknown-unknown/web/nsh_app_<package>_web.wasm` and are copied to
 `.nsh/rust/web-runtime/nsh.wasm` / `nsh-dev.wasm`; `nsh.js` is nsh's. Everything else (bundling, bytecode, the
-crate's assets, the dev server) already knows the set, as the app's command line does.
+crate's assets, the dev server) already knows the set, from its description (`docs/dev/tooling.md`).
 
 `web::ui_sets` (the sets the runtime serves, which `package` checks the app's imports against and the dev page sends
 in its hello) are the command line's own (`crate::ui_sets`). The dev host's files include `nsh.version` (a digest of

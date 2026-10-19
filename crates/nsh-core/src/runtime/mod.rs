@@ -83,3 +83,19 @@ pub fn registries() -> &'static [Registry] {
         ]
     })
 }
+
+#[cfg(test)]
+mod tests {
+    /// Every export TS sees has a doc comment (the declarations show it).
+    #[test]
+    fn every_export_is_documented() {
+        for registry in super::registries() {
+            assert_eq!(
+                registry.undocumented(),
+                Vec::<String>::new(),
+                "{:?}",
+                registry.namespace()
+            );
+        }
+    }
+}

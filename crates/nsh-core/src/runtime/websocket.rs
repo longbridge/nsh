@@ -35,10 +35,10 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 /// Messages received while no read waits; one more closes the connection.
 const UNREAD: usize = 8;
 
-/// WebSocket client connections.
+/// WebSocket client connections to the hosts the HTTP grants allow.
+#[module]
 pub(crate) struct WebSocket;
 
-/// WebSocket client connections to the hosts the HTTP grants allow.
 #[module]
 impl WebSocket {
     /// Connects to a `ws://` or `wss://` URL that capabilities.network allows

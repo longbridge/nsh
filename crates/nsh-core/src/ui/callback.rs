@@ -112,7 +112,10 @@ impl fmt::Debug for JsCall {
 }
 
 /// A JS function a class's member or a function takes (TS:
-/// `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`):
+/// `Callback<f64>` is `(value: number) => void`, `Callback<(String, f64),
+/// bool>` is `(a: string, b: number) => boolean`; `#[args(name, amount)]`
+/// on the parameter names them, `(name: string, amount: number) =>
+/// boolean`):
 /// `A` is its argument (a [`JsValue`] type, an instance, a tuple of them
 /// for several, `()` for none), `R` what it returns. Cheap to clone; the JS
 /// function is released when the last clone goes. Kept in an instance's
@@ -200,13 +203,13 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
 
 /// The arguments of a [`Callback`]: one value, `()` for none, or a tuple.
 pub trait CallbackArgs {
-    /// Its TypeScript parameters (`a: string, b: number`).
-    fn ts_params(types: &mut TsTypes) -> String {
-        Self::ts_named(types, &[])
-    }
-    /// Its TypeScript parameters named `names` (`#[args(text)]`: `text:
-    /// string`); a parameter without a name is `a`, `b`, ...
-    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String;
+    /// How many there are.
+    const ARITY: usize;
+
+    /// Its TypeScript parameters, named `names` (`name: string, amount:
+    /// number`), or without names `value` for one and `a`, `b`, ... for
+    /// several.
+    fn ts_params(types: &mut TsTypes, names: &[&str]) -> String;
     /// The arguments as JS values.
     fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>;
     /// Adds the classes the arguments name.
@@ -215,11 +218,17 @@ pub trait CallbackArgs {
 }
 
 impl<T: Ret> CallbackArgs for T {
-    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
+    const ARITY: usize = if T::UNIT { 0 } else { 1 };
+
+    fn ts_params(types: &mut TsTypes, names: &[&str]) -> String {
         if T::UNIT {
             String::new()
         } else {
-            format!("{}: {}", names.first().unwrap_or(&"a"), T::ts_type(types))
+            format!(
+                "{}: {}",
+                names.first().copied().unwrap_or("value"),
+                T::ts_type(types)
+            )
         }
     }
 
@@ -239,8 +248,15 @@ impl<T: Ret> CallbackArgs for T {
 macro_rules! callback_tuple {
     ($(($($t:ident $v:ident $n:literal $i:literal),*)),*) => {$(
         impl<$($t: Ret),*> CallbackArgs for ($($t,)*) {
-            fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
-                [$(format!("{}: {}", names.get($i).copied().unwrap_or($n), $t::ts_type(types))),*]
+            const ARITY: usize = [$($n),*].len();
+
+            fn ts_params(types: &mut TsTypes, names: &[&str]) -> String {
+                let defaults = [$($n),*];
+                [$($t::ts_type(types)),*]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ts)| format!("{}: {ts}", names.get(i).copied().unwrap_or(defaults[i])))
+                    .collect::<Vec<_>>()
                     .join(", ")
             }
 
@@ -291,26 +307,38 @@ impl CallbackRet for () {
     }
 }
 
-/// The TypeScript type of a callback: `(a: string) => void`, its
-/// parameters named `names` where given.
+/// The TypeScript type of a callback whose arguments are named `names`
+/// (none: the defaults): `(value: string) => void`.
 fn callback_ts<A: CallbackArgs, R: CallbackRet>(types: &mut TsTypes, names: &[&str]) -> String {
-    format!("({}) => {}", A::ts_named(types, names), R::ts_type(types))
+    format!("({}) => {}", A::ts_params(types, names), R::ts_type(types))
 }
 
-/// A parameter whose TypeScript type names a callback's parameters
-/// (`#[args(text)] handler: Callback<String>`: `(text: string) => void`).
-pub trait NamedArgs: Arg {
-    /// Its TypeScript type, the callback's parameters named `names`.
+/// A parameter whose JS function's arguments `#[args(..)]` names: a
+/// [`Callback`], or an `Option` of one.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`#[args(..)]` names the arguments of a `Callback`: `{Self}` is not one",
+    label = "`#[args(..)]` is for a `Callback<A, R>` parameter (or an `Option` of one)"
+)]
+pub trait NamedArgs {
+    /// How many arguments the function takes.
+    const ARITY: usize;
+    /// The parameter's TypeScript type, its function's arguments named
+    /// `names`.
     fn ts_named(types: &mut TsTypes, names: &[&str]) -> String;
 }
 
 impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> NamedArgs for Callback<A, R> {
+    const ARITY: usize = A::ARITY;
+
     fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
         callback_ts::<A, R>(types, names)
     }
 }
 
 impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> NamedArgs for Option<Callback<A, R>> {
+    const ARITY: usize = A::ARITY;
+
     fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
         format!("({}) | null", callback_ts::<A, R>(types, names))
     }

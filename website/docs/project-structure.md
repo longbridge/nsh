@@ -109,30 +109,16 @@ Without a `capabilities` key, an app may use the network, web views and the stat
 
 ## tsconfig.json and .nsh/types
 
-NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `trace`, `dev`, `run`, `package`, `publish`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and `tsconfig.json` points the `nsh` imports there:
+NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `trace`, `dev`, `run`, `package`, `publish`, `check`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and NSH's TypeScript settings into `.nsh/tsconfig.json`. The app's `tsconfig.json` extends them:
 
 ```json
 {
-  "compilerOptions": {
-    "target": "ES2023",
-    "lib": ["ES2023", "ESNext.Disposable"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "nsh",
-    "strict": true,
-    "noEmit": true,
-    "isolatedModules": true,
-    "skipLibCheck": true,
-    "types": [],
-    "paths": {
-      "nsh": ["./.nsh/types/nsh/index.d.ts"],
-      "nsh/*": ["./.nsh/types/nsh/*.d.ts"]
-    }
-  },
-  "include": ["**/*.ts", "**/*.tsx", ".nsh/types/nsh/globals.d.ts", ".nsh/types/nsh/assets.d.ts"]
+  "extends": "./.nsh/tsconfig.json",
+  "include": ["**/*.ts", "**/*.tsx"]
 }
 ```
+
+`.nsh/tsconfig.json` points the `nsh` imports and your app's crates to `.nsh/types`, includes the globals and asset declarations, and sets the compiler options NSH apps use (`lib`, `jsx`, `strict`, ...). NSH keeps it current: when a new version adds a library or a path, your app has it with the next build, and your `tsconfig.json` stays as you wrote it. Options you add to `tsconfig.json` apply over NSH's.
 
 | File in `.nsh/types/nsh/` | Declares |
 |---|---|
@@ -144,9 +130,11 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | `list.d.ts`, `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/list`, `nsh/animated`, `nsh/device`, ...) |
 | `ui/mobile.d.ts` | `nsh/ui/mobile` |
 
-`lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh trace App.tsx`.
+`lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files in `.nsh` are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh trace App.tsx`.
 
-`"ESNext.Disposable"` declares `using` declarations and `Symbol.dispose`, which the runtime has: `using account = new Account()` frees a [Rust class](./rust.md)'s value at the end of the block. `jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
+`.nsh/tsconfig.json` adds `"ESNext.Disposable"`, which declares `using` declarations and `Symbol.dispose`, which the runtime has: `using account = new Account()` frees a [Rust class](./rust.md)'s value at the end of the block. Its `jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
+
+An app made by an earlier `nsh init` gets the new `tsconfig.json` with its next build when its own is NSH's template, unchanged; NSH prints a line saying so. A `tsconfig.json` you changed is yours: `nsh check` points out when it does not extend `./.nsh/tsconfig.json`, and you add the `extends` line and remove the options it sets.
 
 ## Modules
 

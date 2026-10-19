@@ -489,6 +489,7 @@ mod tests {
         ui::{JsValue, Registry, declarations, json_host, prelude::*},
     };
 
+    #[module]
     struct Files;
 
     #[module(flat)]

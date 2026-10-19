@@ -2,7 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A press target with a label, the same on iOS and Android.
+/// The props of [`Button`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct ButtonProps {
     /// The label.
@@ -59,7 +59,7 @@ fn colors(variant: ButtonVariant) -> (AdaptiveColor, AdaptiveColor, AdaptiveColo
     }
 }
 
-/// A press target with a label ([`ButtonProps`]).
+/// A press target with a label, the same on iOS and Android.
 #[component]
 pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
     let colors = computed(move || colors(props.variant.get()));

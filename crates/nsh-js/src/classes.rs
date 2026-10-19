@@ -433,17 +433,16 @@ unsafe extern "C" fn call_sync(
 
 /// Sends a call into Rust that runs as an op, with the call's `this` and
 /// `args`: `make` converts them in this call into what the op runs (the
-/// instances and callbacks among them ride in it). With `returns`, a
-/// promise of its result, rejected when they do not convert; else
-/// `undefined`, and a conversion error throws.
+/// instances and callbacks among them ride in it). Returns a promise of
+/// its result (`undefined` for `()`: settled once the op ran, in order
+/// with the UI), rejected when they do not convert.
 pub(crate) fn send(
     ctx: Ctx,
     this: Raw,
     args: js::Args<'_>,
-    returns: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(returns, false, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(false, make)
 }
 
 /// [`send`] of a call that starts its task in the JS call (`Later`): JS
@@ -454,7 +453,7 @@ pub(crate) fn start(
     args: js::Args<'_>,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(true, true, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(true, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -635,12 +634,8 @@ impl<'a> CallHost<'a> {
     fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(start) => {
-                self.send(true, false, |host| start(host).map(RustCall::Task))
-            }
-            MemberCall::Start(start) => {
-                self.send(true, true, |host| start(host).map(RustCall::Task))
-            }
+            MemberCall::Async(start) => self.send(false, |host| start(host).map(RustCall::Task)),
+            MemberCall::Start(start) => self.send(true, |host| start(host).map(RustCall::Task)),
         }
     }
 
@@ -657,11 +652,10 @@ impl<'a> CallHost<'a> {
     }
 
     /// Sends the call `make` converts this call's values into as an op
-    /// ([`send`]); with `throws`, what `make` throws throws even when the
-    /// call returns a promise (a call starting its task: [`start`]).
+    /// ([`send`]); with `throws`, what `make` throws throws instead of
+    /// rejecting the promise (a call starting its task: [`start`]).
     fn send(
         &self,
-        returns: bool,
         throws: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
@@ -678,30 +672,23 @@ impl<'a> CallHost<'a> {
                 run
             }
             Err(e) => {
-                // Thrown (or rethrown) as a synchronous call's error.
+                // Thrown (or rethrown) as a synchronous call's error, then
+                // taken as the promise's unless the call throws.
                 let thrown = self.finish(Err(e));
-                return if returns && !throws {
-                    rejected_with_exception(ctx)
-                } else {
+                return if throws {
                     thrown
+                } else {
+                    rejected_with_exception(ctx)
                 };
             }
         };
-        let call = if returns {
-            crate::components::next_call(ctx)
-        } else {
-            0
-        };
+        let call = crate::components::next_call(ctx);
         // Not queued (over the op limit): the call and what it holds go
         // here, before any promise is made.
         if let Err(e) = crate::dom::push_op(ctx, nsh_core::Op::Rust(RustOp { call, run })) {
             return e;
         }
-        if returns {
-            crate::components::promise(ctx, call)
-        } else {
-            UNDEFINED
-        }
+        crate::components::promise(ctx, call)
     }
 
     /// Whether an operation threw (its exception is pending).
@@ -1705,6 +1692,7 @@ pub(crate) mod tests {
     }
 
     /// Functions JS calls.
+    #[module]
     pub(crate) struct Tools;
 
     #[module]
@@ -2152,7 +2140,7 @@ pub(crate) mod tests {
             shown,
             [
                 "5",
-                "TypeError: Tally used re-entrantly",
+                "TypeError: Tally.absorb: `other`: Tally used re-entrantly",
                 "true 7",
                 "8 8",
                 "TypeError: Tally.absorb: `other`: expected a Tally, got a Token",

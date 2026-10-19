@@ -19,6 +19,7 @@ static NOTE: LazyLock<watch::Sender<String>> =
     LazyLock::new(|| watch::Sender::new("first".to_owned()));
 
 /// The embedding app's functions.
+#[module]
 pub(crate) struct Host;
 
 #[module]

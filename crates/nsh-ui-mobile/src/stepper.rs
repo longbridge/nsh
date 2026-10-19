@@ -4,10 +4,7 @@ use std::{rc::Rc, time::Duration};
 
 use nsh_core::ui::prelude::*;
 
-/// A number with − and + buttons, within `min`–`max`; holding a button
-/// keeps stepping. With `value` the app controls it (it updates `value`
-/// from `onChange`); without, the stepper keeps its own, starting at
-/// `defaultValue`.
+/// The props of [`Stepper`].
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
 pub struct StepperProps {
     /// The value, when the app controls it.
@@ -95,7 +92,10 @@ impl StepperApi {
     }
 }
 
-/// A number with − and + buttons ([`StepperProps`]).
+/// A number with − and + buttons, within `min`–`max`; holding a button
+/// keeps stepping. With `value` the app controls it (it updates `value`
+/// from `onChange`); without, the stepper keeps its own, starting at
+/// `defaultValue`.
 #[component(methods = StepperApi)]
 pub fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement {
     let range = computed(move || Range::of(&props));

@@ -25,7 +25,7 @@ nsh init my-app
 |---|---|
 | `App.tsx` | 入口模块：用 `mount` 渲染应用 |
 | `nsh.json` | 应用的名称、id、版本和构建号（[项目结构](./project-structure.md#nshjson)） |
-| `tsconfig.json` | TypeScript 设置，把 `nsh` 解析到 `.nsh/types` 中的声明 |
+| `tsconfig.json` | 继承 `.nsh/tsconfig.json`，即 NSH 的 TypeScript 设置，它把 `nsh` 解析到 `.nsh/types` 中的声明 |
 | `.gitignore` | 忽略 `.nsh/` 和 `out/` |
 | `.nsh/types/` | 生成的所有 NSH 模块的声明，供编辑器使用 |
 

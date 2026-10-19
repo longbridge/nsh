@@ -3592,13 +3592,13 @@ mod components {
     #[crate::ui::methods]
     impl KnobApi {
         /// Turns it by `by`; where it is.
-        fn turn(&self, by: i32) -> i32 {
+        pub(crate) fn turn(&self, by: i32) -> i32 {
             self.at.update(|at| *at += by);
             self.at.get_untracked()
         }
 
         /// Fails.
-        fn stuck(&self) -> Result<(), String> {
+        pub(crate) fn stuck(&self) -> Result<(), String> {
             Err(format!("stuck at {}", self.at.get_untracked()))
         }
     }
@@ -8778,7 +8778,7 @@ mod views {
     #[crate::ui::methods]
     impl DialApi {
         /// Where it is.
-        fn at(&self) -> i32 {
+        pub(crate) fn at(&self) -> i32 {
             self.at.get_untracked()
         }
     }

@@ -10,8 +10,9 @@
 //! the JS call (`classes.rs`); one with a context or `async`, and a
 //! component's method, converts its arguments in the JS call and sends
 //! what it runs to the core as an op, in order with the ops before it
-//! (`classes::send`); one with a result returns a promise, settled when
-//! the core's events bring the result ([`deliver`]).
+//! (`classes::send`), and returns a promise, settled when the core's
+//! events bring the result ([`deliver`]; `undefined` for `()`, once it
+//! ran).
 
 use std::{
     cell::{Cell, RefCell},
@@ -291,7 +292,7 @@ pub(crate) fn module_function(ctx: *mut JsContext, module: &ModuleSpec, function
     let name = CString::new(function).unwrap_or_default();
     // SAFETY: the opaque is the function's conversion (a function pointer,
     // as large as a data pointer on every target), which needs no
-    // finalizer; the magic says whether it returns a promise.
+    // finalizer.
     unsafe {
         qjs::JS_NewCClosure(
             ctx,
@@ -299,7 +300,7 @@ pub(crate) fn module_function(ctx: *mut JsContext, module: &ModuleSpec, function
             name.as_ptr(),
             None,
             length as c_int,
-            c_int::from(spec.returns.is_some()),
+            0,
             opaque as *mut std::ffi::c_void,
         )
     }
@@ -313,7 +314,7 @@ unsafe extern "C" fn call_op(
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
-    magic: c_int,
+    _magic: c_int,
     opaque: *mut std::ffi::c_void,
 ) -> JsValue {
     // SAFETY: `module_function` made the opaque from a `MakeOp`, and
@@ -324,9 +325,7 @@ unsafe extern "C" fn call_op(
             crate::web::js::Args::new(argc, argv),
         )
     };
-    crate::classes::send(ctx, this, args, magic != 0, |host| {
-        make(host).map(RustCall::Op)
-    })
+    crate::classes::send(ctx, this, args, |host| make(host).map(RustCall::Op))
 }
 
 unsafe extern "C" fn call_task(
@@ -334,7 +333,7 @@ unsafe extern "C" fn call_task(
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
-    magic: c_int,
+    _magic: c_int,
     opaque: *mut std::ffi::c_void,
 ) -> JsValue {
     // SAFETY: `module_function` made the opaque from an `AsyncCall`, and
@@ -345,9 +344,7 @@ unsafe extern "C" fn call_task(
             crate::web::js::Args::new(argc, argv),
         )
     };
-    crate::classes::send(ctx, this, args, magic != 0, |host| {
-        start(host).map(RustCall::Task)
-    })
+    crate::classes::send(ctx, this, args, |host| start(host).map(RustCall::Task))
 }
 
 /// A function starting its task in the JS call (`Later`): what the start
@@ -892,7 +889,7 @@ unsafe extern "C" fn call_method(
     let args = unsafe { crate::web::js::Args::new(argc, argv) };
     let make = method.call;
     // A wrong argument's error names the component (`Stepper.setValue`).
-    crate::classes::send(ctx, this, args, method.returns.is_some(), |host| {
+    crate::classes::send(ctx, this, args, |host| {
         make(host)
             .map(|call| RustCall::Method(id, call))
             .map_err(|e| match e {
