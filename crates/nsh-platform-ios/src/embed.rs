@@ -41,7 +41,7 @@ impl NshApp {
     /// servers) in the embedding app's Application Support.
     fn use_storage(&self, app_id: Option<&str>) {
         let dir = self.storage.borrow().clone().or_else(|| {
-            let id = app_id.filter(|id| crate::view::is_dir_name(id));
+            let id = app_id.filter(|id| nsh_engine::is_app_dir_name(id));
             nsh_engine::app_data_dir("nsh").map(|dir| dir.join(id.unwrap_or("default")))
         });
         self.view.set_storage_directory(dir);

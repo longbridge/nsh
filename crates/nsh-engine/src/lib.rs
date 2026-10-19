@@ -9,6 +9,7 @@
 //! the engine.
 
 mod access;
+mod local_storage;
 pub mod perf;
 mod script;
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,6 +20,7 @@ mod symbolicate;
 use std::{io, rc::Rc, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};
+pub use local_storage::local_storage_prefix;
 use nsh_core::{
     ApplyError, Core, EdgeInsets, EventKind, EventPayload, ListBind, MountBatch, NodeId, Op,
     PayloadValue, Size, TextEngine, time::Instant, ui::JsEvent,
@@ -40,7 +42,7 @@ pub use nsh_js::BYTECODE_VERSION;
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
-pub use storage::{FileStorage, app_data_dir};
+pub use storage::{FileStorage, app_data_dir, is_app_dir_name};
 
 use crate::script::{NetworkQueue, RequestId, Script};
 

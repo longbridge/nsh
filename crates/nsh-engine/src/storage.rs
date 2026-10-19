@@ -21,6 +21,9 @@ pub struct FileStorage {
     path: PathBuf,
     /// The entries as changed so far, once read.
     entries: Mutex<Option<BTreeMap<String, String>>>,
+    /// The file could not be read: changes stay in memory, never replacing
+    /// what it holds.
+    in_memory: std::sync::atomic::AtomicBool,
     writer: Mutex<Option<(Sender<StorageChange>, JoinHandle<()>)>>,
 }
 
@@ -42,6 +45,7 @@ impl FileStorage {
         let storage = Arc::new(Self {
             path,
             entries: Mutex::new(None),
+            in_memory: std::sync::atomic::AtomicBool::new(false),
             writer: Mutex::new(None),
         });
         open.push(Arc::downgrade(&storage));
@@ -57,23 +61,34 @@ impl FileStorage {
 /// The directory an app keeps its data in, by its id (`com.example.app`):
 /// Application Support on Apple platforms, `%APPDATA%` on Windows,
 /// `$XDG_DATA_HOME` (`~/.local/share`) elsewhere. `None` on Android, whose
-/// files directory only the platform knows, and without a home directory.
+/// files directory only the platform knows, without a home directory, and
+/// for an id that is no directory name ([`is_app_dir_name`]).
 pub fn app_data_dir(app_id: &str) -> Option<PathBuf> {
-    let env = |name| {
-        std::env::var_os(name)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    let base = if cfg!(target_os = "android") {
-        None
-    } else if cfg!(any(target_os = "macos", target_os = "ios")) {
-        env("HOME").map(|home| home.join("Library/Application Support"))
-    } else if cfg!(windows) {
-        env("APPDATA")
-    } else {
-        env("XDG_DATA_HOME").or_else(|| env("HOME").map(|home| home.join(".local/share")))
+    let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    data_dir_in(std::env::consts::OS, env, app_id)
+}
+
+/// [`app_data_dir`] on `os` (`std::env::consts::OS`) with the environment
+/// `env`.
+fn data_dir_in(os: &str, env: impl Fn(&str) -> Option<PathBuf>, app_id: &str) -> Option<PathBuf> {
+    if !is_app_dir_name(app_id) {
+        return None;
+    }
+    let env = |name| env(name).filter(|v| !v.as_os_str().is_empty());
+    let base = match os {
+        "android" => None,
+        "macos" | "ios" => env("HOME").map(|home| home.join("Library/Application Support")),
+        "windows" => env("APPDATA"),
+        _ => env("XDG_DATA_HOME").or_else(|| env("HOME").map(|home| home.join(".local/share"))),
     }?;
     Some(base.join(app_id))
+}
+
+/// Whether app id `id` names a directory of its own: not empty, no path
+/// separator, not `.` or `..`, so an app's storage stays in the directory
+/// its id names.
+pub fn is_app_dir_name(id: &str) -> bool {
+    !id.is_empty() && !id.contains(['/', '\\', '\0']) && id != "." && id != ".."
 }
 
 fn read(path: &Path) -> Result<BTreeMap<String, String>, String> {
@@ -82,6 +97,30 @@ fn read(path: &Path) -> Result<BTreeMap<String, String>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
         Err(e) => Err(format!("{}: {e}", path.display())),
     }
+}
+
+/// [`read`], setting a file that is no storage aside (`storage.json.corrupt`)
+/// rather than letting the next write replace what it held. The error says
+/// whether the file may be written: not when it is still there, unread.
+fn read_or_set_aside(path: &Path) -> Result<BTreeMap<String, String>, (String, bool)> {
+    read(path).map_err(|e| {
+        // Only a file that reads but does not parse is set aside: one that
+        // cannot be read now may hold the app's data.
+        if std::fs::read(path).is_err() {
+            return (format!("{e}; it is kept in memory"), false);
+        }
+        let aside = path.with_extension("json.corrupt");
+        match std::fs::rename(path, &aside) {
+            Ok(()) => (
+                format!("{e}; it was set aside as {}", aside.display()),
+                true,
+            ),
+            Err(rename) => (
+                format!("{e}; it could not be set aside ({rename}), so it is kept in memory"),
+                false,
+            ),
+        }
+    })
 }
 
 fn write(path: &Path, entries: &BTreeMap<String, String>) -> std::io::Result<()> {
@@ -129,14 +168,28 @@ impl StorageBackend for FileStorage {
         if let Some(entries) = &*entries {
             return Ok(entries.clone());
         }
-        let read = read(&self.path)?;
-        *entries = Some(read.clone());
-        Ok(read)
+        match read_or_set_aside(&self.path) {
+            Ok(read) => {
+                *entries = Some(read.clone());
+                Ok(read)
+            }
+            Err((e, writable)) => {
+                *entries = Some(BTreeMap::new());
+                if !writable {
+                    self.in_memory
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(e)
+            }
+        }
     }
 
     fn write(&self, change: StorageChange) {
         if let Some(entries) = &mut *self.entries.lock().unwrap_or_else(|e| e.into_inner()) {
             apply(entries, change.clone());
+        }
+        if self.in_memory.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
         }
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         let (changes, _) = writer.get_or_insert_with(|| {
@@ -172,13 +225,18 @@ impl Drop for FileStorage {
 mod tests {
     use super::*;
 
+    /// An empty directory of its own under the test's temporary directory.
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("nsh-file-storage-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn keeps_entries_across_instances() {
-        let dir = std::env::current_dir()
-            .unwrap()
-            .join("../../target/agents/storage-test")
-            .join(std::process::id().to_string());
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = scratch("instances");
         let storage = FileStorage::open(&dir);
         assert!(storage.load().unwrap().is_empty());
         storage.write(StorageChange::Set("a".into(), "1".into()));
@@ -198,5 +256,122 @@ mod tests {
         drop(again);
         assert!(FileStorage::open(&dir).load().unwrap().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn data_directories_follow_each_platform() {
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| PathBuf::from(v))
+            }
+        };
+        let home = env(&[
+            ("HOME", "/home/a"),
+            ("APPDATA", r"C:\Users\a\AppData\Roaming"),
+        ]);
+        let at = |os, env| data_dir_in(os, env, "com.example.app");
+        assert_eq!(
+            at("linux", home),
+            Some(PathBuf::from("/home/a/.local/share/com.example.app"))
+        );
+        assert_eq!(
+            at(
+                "linux",
+                env(&[("XDG_DATA_HOME", "/data"), ("HOME", "/home/a")])
+            ),
+            Some(PathBuf::from("/data/com.example.app"))
+        );
+        // An empty variable counts as unset.
+        assert_eq!(
+            at("linux", env(&[("XDG_DATA_HOME", ""), ("HOME", "/home/a")])),
+            Some(PathBuf::from("/home/a/.local/share/com.example.app"))
+        );
+        assert_eq!(
+            at("macos", home),
+            Some(PathBuf::from(
+                "/home/a/Library/Application Support/com.example.app"
+            ))
+        );
+        assert_eq!(
+            at("ios", home),
+            Some(PathBuf::from(
+                "/home/a/Library/Application Support/com.example.app"
+            ))
+        );
+        assert_eq!(
+            at("windows", home),
+            Some(PathBuf::from(r"C:\Users\a\AppData\Roaming").join("com.example.app"))
+        );
+        // Android's files directory is the platform's to give.
+        assert_eq!(at("android", home), None);
+        assert_eq!(at("linux", env(&[])), None);
+        // An id that is no directory name has no directory.
+        for id in ["", ".", "..", "../etc", "a/b", r"a\b", "a\0b"] {
+            assert!(!is_app_dir_name(id), "{id:?}");
+            assert_eq!(data_dir_in("linux", home, id), None, "{id:?}");
+        }
+        assert!(is_app_dir_name("com.example.app"));
+        assert!(is_app_dir_name("..app"));
+    }
+
+    #[test]
+    fn a_damaged_file_is_set_aside_not_replaced() {
+        let dir = scratch("damaged");
+        let file = dir.join("storage.json");
+        std::fs::write(&file, b"{ not json").unwrap();
+        let storage = FileStorage::open(&dir);
+        let error = storage.load().unwrap_err();
+        assert!(error.contains("set aside"), "{error}");
+        let aside = dir.join("storage.json.corrupt");
+        assert_eq!(std::fs::read(&aside).unwrap(), b"{ not json");
+        // The app goes on with new entries, and the old file is still there.
+        storage.write(StorageChange::Set("a".into(), "1".into()));
+        drop(storage);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"a":"1"}"#);
+        assert_eq!(std::fs::read(&aside).unwrap(), b"{ not json");
+        // Values that are not strings are no storage either.
+        let typed = scratch("typed");
+        std::fs::write(typed.join("storage.json"), br#"{"n": 1}"#).unwrap();
+        assert!(FileStorage::open(&typed).load().is_err());
+        assert!(typed.join("storage.json.corrupt").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_unreadable_file_is_never_replaced() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("unreadable");
+        let file = dir.join("storage.json");
+        std::fs::write(&file, br#"{"kept":"yes"}"#).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o200)).unwrap();
+        if std::fs::read(&file).is_ok() {
+            // Root reads it anyway: nothing to check.
+            return;
+        }
+        let storage = FileStorage::open(&dir);
+        assert!(storage.load().is_err());
+        storage.write(StorageChange::Set("a".into(), "1".into()));
+        drop(storage);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), r#"{"kept":"yes"}"#);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_the_entries_in_memory() {
+        // A file where the directory should be: nothing can be written.
+        let dir = scratch("unwritable");
+        let blocked = dir.join("file");
+        std::fs::write(&blocked, b"").unwrap();
+        let storage = FileStorage::open(blocked.join("app"));
+        assert!(storage.load().unwrap_err().contains("kept in memory"));
+        storage.write(StorageChange::Set("a".into(), "1".into()));
+        assert_eq!(
+            storage.load().unwrap().get("a").map(String::as_str),
+            Some("1")
+        );
+        drop(storage);
+        assert!(!blocked.join("app").exists());
     }
 }

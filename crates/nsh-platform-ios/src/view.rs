@@ -222,9 +222,3 @@ impl Inner {
         }
     }
 }
-
-/// Whether `name` (an app id) names one directory: not empty, no separator,
-/// not `.` or `..`.
-pub(crate) fn is_dir_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != ".."
-}

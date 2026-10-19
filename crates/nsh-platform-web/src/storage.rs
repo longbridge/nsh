@@ -2,10 +2,9 @@
 //!
 //! `localStorage` is the origin's, shared by every app the origin serves:
 //! a published site per path, the development host and the website's
-//! demos side by side. Each entry is kept under `nsh:<path>:<key>`, where
-//! `<path>` is the directory of the page's URL (`/apps/todo/` for
-//! `/apps/todo/index.html?x`), so apps at different paths keep apart and
-//! the page's other keys are left alone.
+//! demos side by side. Each entry is kept under the page's prefix
+//! ([`nsh_engine::local_storage_prefix`]), so apps at different paths keep
+//! apart and the page's other keys are left alone.
 //!
 //! `localStorage` throws when the browser refuses it (blocked storage,
 //! the quota): the error is logged and the app keeps its entries in
@@ -41,7 +40,7 @@ pub unsafe extern "C" fn nsh_storage_reply(ptr: *const u8, len: usize) {
     REPLY.with(|r| *r.borrow_mut() = Some(reply));
 }
 
-/// The app's entries in `localStorage`, under [`prefix`]. Holds no JS
+/// The app's entries in `localStorage`, under the page's prefix. Holds no JS
 /// handle: `nsh.js` reaches `localStorage` on each call.
 pub(crate) struct LocalStorage {
     prefix: String,
@@ -52,7 +51,7 @@ impl LocalStorage {
     /// `None`: an unknown page, whose apps share one namespace).
     pub(crate) fn new(base_url: Option<&str>) -> Self {
         Self {
-            prefix: prefix(base_url.unwrap_or("")),
+            prefix: nsh_engine::local_storage_prefix(base_url.unwrap_or("")),
         }
     }
 }
@@ -73,18 +72,4 @@ impl StorageBackend for LocalStorage {
             log::error!(target: "js", "the app's storage could not be written: {e}");
         }
     }
-}
-
-/// `nsh:<the directory of the URL's path>:`.
-fn prefix(url: &str) -> String {
-    let url = url.split(['?', '#']).next().unwrap_or("");
-    let path = match url.find("://") {
-        Some(scheme) => {
-            let rest = &url[scheme + 3..];
-            rest.find('/').map_or("/", |host| &rest[host..])
-        }
-        None => url,
-    };
-    let dir = path.rfind('/').map_or("/", |slash| &path[..=slash]);
-    format!("nsh:{dir}:")
 }

@@ -90,6 +90,8 @@ impl Storage {
 
     /// Sets `key` to `value`; fails past [`QUOTA`].
     pub(crate) fn set(&mut self, key: String, value: String) -> Result<(), String> {
+        // Loaded first: what the device kept counts too.
+        self.entries()?;
         let bytes = self.bytes;
         let entries = self.entries()?;
         let old = entries.get(&key).map_or(0, |v| key.len() + v.len());
@@ -189,5 +191,51 @@ mod tests {
         assert!(storage.set("j".into(), "y".into()).is_err());
         // Replacing a value counts the new one only.
         storage.set("k".into(), "z".repeat(QUOTA - 1)).unwrap();
+    }
+
+    #[test]
+    fn the_quota_counts_utf8_bytes_and_frees_on_removal() {
+        let mut storage = Storage::new(None);
+        // "键" is three bytes, "😀" four.
+        storage
+            .set("键".into(), "😀".repeat((QUOTA - 3) / 4))
+            .unwrap();
+        let used = 3 + (QUOTA - 3) / 4 * 4;
+        assert!(storage.set("x".into(), "y".repeat(QUOTA - used)).is_err());
+        // A refused value leaves the entries as they were.
+        assert_eq!(storage.keys().unwrap(), ["键"]);
+        storage.remove("键").unwrap();
+        storage.set("x".into(), "y".repeat(QUOTA - 1)).unwrap();
+        storage.clear().unwrap();
+        assert!(storage.keys().unwrap().is_empty());
+        storage.set("x".into(), "y".repeat(QUOTA - 1)).unwrap();
+    }
+
+    #[test]
+    fn the_quota_counts_what_was_loaded() {
+        let backend = Arc::new(Recorder {
+            kept: BTreeMap::from([("k".into(), "v".repeat(QUOTA - 1))]),
+            ..Recorder::default()
+        });
+        let mut storage = Storage::new(Some(backend));
+        assert!(storage.set("a".into(), "b".into()).is_err());
+        storage.set("k".into(), "small".into()).unwrap();
+        storage.set("a".into(), "b".into()).unwrap();
+    }
+
+    #[test]
+    fn a_failed_load_starts_empty() {
+        struct Broken;
+        impl StorageBackend for Broken {
+            fn load(&self) -> Result<BTreeMap<String, String>, String> {
+                Err("unreadable".into())
+            }
+
+            fn write(&self, _: StorageChange) {}
+        }
+        let mut storage = Storage::new(Some(Arc::new(Broken)));
+        assert_eq!(storage.get("a").unwrap(), None);
+        storage.set("a".into(), "1".into()).unwrap();
+        assert_eq!(storage.get("a").unwrap().as_deref(), Some("1"));
     }
 }

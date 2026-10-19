@@ -160,3 +160,82 @@ fn rust_shares_the_entries_of_js() {
     let (_engine, rx) = start("shared-again", COUNTER, None, &data);
     assert_eq!(shown(&rx, "done"), "done 3 from_rust,launches full null");
 }
+
+const EDGES: &str = r#"import { mount, signal, Text } from "nsh";
+import { Storage } from "nsh/storage";
+
+const shown = signal("waiting");
+const outcomes: string[] = [];
+async function attempt(name: string, f: () => Promise<unknown>) {
+  try {
+    await f();
+    outcomes.push(`${name}:ok`);
+  } catch {
+    outcomes.push(`${name}:refused`);
+  }
+}
+setTimeout(async () => {
+  await attempt("number", () => Storage.setItem("n", 1 as unknown as string));
+  await attempt("nokey", () => (Storage.getItem as () => Promise<unknown>)());
+  Storage.setItem("a", "1");
+  Storage.setItem("b", "2");
+  await Storage.clear();
+  const cleared = (await Storage.getAllKeys()).length;
+  await Storage.setItem("ключ", "值😀");
+  shown.set(`done ${outcomes.join(" ")} ${cleared} ${await Storage.getItem("ключ")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn js_arguments_are_checked_and_clear_empties() {
+    let data = scratch("edges");
+    let (engine, rx) = start("edges", EDGES, None, &data);
+    assert_eq!(
+        shown(&rx, "done"),
+        "done number:refused nokey:refused 0 值😀"
+    );
+    drop(engine);
+    let file = std::fs::read_to_string(data.join("storage.json")).unwrap();
+    assert_eq!(file, r#"{"ключ":"值😀"}"#);
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct EditorProps {}
+
+/// Every function Rust has for the app's storage.
+#[component]
+fn Editor(_props: EditorProps) -> impl IntoElement {
+    set_storage_item("a", "1").unwrap();
+    set_storage_item("b", "2").unwrap();
+    remove_storage_item("a");
+    remove_storage_item("missing");
+    let after_remove = storage_keys().join(",");
+    let full = set_storage_item("big", "x".repeat(nsh_core::storage::QUOTA)).is_err();
+    clear_storage();
+    let after_clear = storage_keys().len();
+    let missing = storage_item("b").is_none();
+    text(move || format!("rust {after_remove} {full} {after_clear} {missing}"))
+}
+
+#[test]
+fn rust_edits_the_storage() {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let config = EngineConfig {
+        app: App::Rust(Root::new::<Editor>(|| EditorProps {})),
+        viewport: Size::new(390.0, 844.0),
+        trace: false,
+        network: None,
+        assets: None,
+        environment: Environment::default(),
+        header_heights: (44.0, 96.0),
+        limits: nsh_engine::Limits::default(),
+        ui_sets: Vec::new(),
+        runtime: None,
+        // In memory: the platform gave none.
+        storage: None,
+    };
+    let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
+    assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
+}

@@ -915,6 +915,36 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_release_needs_the_apps_own_id() {
+        let entry = Path::new("apps/Orders/App.tsx");
+        let config = |id: Option<&str>| AppConfig {
+            id: id.map(str::to_owned),
+            ..AppConfig::default()
+        };
+        // Development makes one up from the name.
+        assert_eq!(
+            name_and_id(entry, &config(None)),
+            ("Orders".to_owned(), "com.example.orders".to_owned())
+        );
+        // A release asks for it.
+        let error = release_name_and_id(entry, &config(None))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("nsh.json needs an `id`"), "{error}");
+        // The placeholder is only warned about.
+        assert_eq!(
+            release_name_and_id(entry, &config(Some("com.example.orders")))
+                .unwrap()
+                .1,
+            "com.example.orders"
+        );
+        assert_eq!(
+            release_name_and_id(entry, &config(Some("com.acme.orders"))).unwrap(),
+            ("Orders".to_owned(), "com.acme.orders".to_owned())
+        );
+    }
+
     /// App icons are drawn at 1024 pixels, which `sips` alone cannot
     /// convert.
     #[cfg(target_os = "macos")]

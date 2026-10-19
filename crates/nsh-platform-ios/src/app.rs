@@ -215,7 +215,7 @@ fn standalone_storage() -> Option<std::path::PathBuf> {
     let id = objc2_foundation::NSBundle::mainBundle()
         .bundleIdentifier()
         .map(|id| id.to_string())
-        .filter(|id| crate::view::is_dir_name(id));
+        .filter(|id| nsh_engine::is_app_dir_name(id));
     nsh_engine::app_data_dir(id.as_deref().unwrap_or("nsh"))
 }
 

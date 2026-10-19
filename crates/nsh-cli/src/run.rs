@@ -817,6 +817,27 @@ mod tests {
 
     use super::Target;
 
+    /// The desktop hosts get each app's own id, so each keeps its own data.
+    #[test]
+    fn hosts_get_the_apps_id() {
+        let dir = std::env::temp_dir().join(format!("nsh-run-app-id-{}", std::process::id()));
+        let (named, unnamed) = (dir.join("named"), dir.join("Notes"));
+        for app in [&named, &unnamed] {
+            std::fs::create_dir_all(app).unwrap();
+            std::fs::write(app.join("App.tsx"), "").unwrap();
+        }
+        std::fs::write(named.join("nsh.json"), r#"{ "id": "com.acme.orders" }"#).unwrap();
+        assert_eq!(
+            super::app_id(&named.join("App.tsx")).unwrap(),
+            "com.acme.orders"
+        );
+        assert_eq!(
+            super::app_id(&unnamed.join("App.tsx")).unwrap(),
+            "com.example.notes"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn gpui_is_a_target_with_its_own_host() {
         let target = Target::from_str("gpui", false).unwrap();
