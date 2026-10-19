@@ -126,14 +126,11 @@ impl Account {
             account.balance
         })
     }
-}
 
-// Every `fn` of the `#[class]` block is exported to TS; helpers go in a
-// block of their own.
-impl Account {
     /// Books `amount` and tells the listeners. `post` queues each call for
     /// JS's next turn, so it works from `accrue`'s task too, where JS is not
     /// running (`call` runs a callback at once, only inside a TS call).
+    // No `pub`: a helper of the block, Rust's only (TS has no `book`).
     fn book(&mut self, amount: f64) {
         self.balance = ((self.balance + amount) * 100.0).round() / 100.0;
         self.entries += 1;

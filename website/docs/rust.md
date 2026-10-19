@@ -159,7 +159,9 @@ fn TitleBar() -> impl IntoElement {
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components
 (`registry.register::<Chart>()`), modules of functions (`registry.module::<Portfolio>()`, a `#[module]` `impl`),
-classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. Their TypeScript
+classes (`registry.class::<Ledger>()`, `#[class]` on a struct and its `impl`) and assets. In a `#[module]` or
+`#[class]` `impl`, the `pub fn`s are exported (`pub(crate)` too); functions without a visibility are helpers that
+stay in Rust. Their TypeScript
 declarations, doc comments included, are generated from the Rust types into `.nsh/types`, so TSX is checked against
 them by `nsh check` and your editor:
 

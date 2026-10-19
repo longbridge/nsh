@@ -1182,12 +1182,18 @@ mod tests {
     #[methods]
     impl StepperApi {
         /// Jumps to `value`.
-        fn jump_to(&self, value: f64) {
+        pub(crate) fn jump_to(&self, value: f64) {
             let _ = value;
         }
 
-        fn value(&self) -> f64 {
+        pub(crate) fn value(&self) -> f64 {
             0.0
+        }
+
+        /// A helper without `pub`: not a method of the ref.
+        #[allow(dead_code)]
+        fn clamp(&self, value: f64) -> f64 {
+            value
         }
     }
 
@@ -1225,6 +1231,8 @@ mod tests {
         ] {
             assert!(ts.contains(line), "missing {line:?} in\n{ts}");
         }
+        assert!(!ts.contains("clamp"), "a helper is not a method:\n{ts}");
+        assert_eq!(StepperApi::METHODS.len(), 2);
         let mut props = StepperProps::initial();
         let size = |json| {
             let specs = StepperProps::spec(&mut TsTypes::default());
@@ -1265,7 +1273,7 @@ mod tests {
 
     #[crate::ui::class]
     impl Lonely {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Lonely
         }
     }
@@ -1275,7 +1283,7 @@ mod tests {
 
     #[crate::ui::module]
     impl Maker {
-        fn make() -> Instance<Lonely> {
+        pub(crate) fn make() -> Instance<Lonely> {
             Instance::new(Lonely)
         }
     }

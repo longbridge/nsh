@@ -131,7 +131,8 @@ so a class's methods can run directly inside the JS call, as the web classes nsh
 
 Rust exports functions through `#[module]` (an object, `Alert.alert(..)`, or `#[module(flat)]`, top-level
 functions). Every call used to be an op ordered with the UI's, so every result was a promise. The class's split
-applies to functions too, decided by the signature (`FunctionCall::Sync` / `Op` / `Async`):
+applies to functions too, decided by the signature (`FunctionCall::Sync` / `Op` / `Async`) of each function with
+a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
 
 - **`fn` without a context:** synchronous, called directly in the JS call like a class's method (`parse(text)`,
   `checksum(bytes)`): TS gets the value, not a promise.
@@ -302,7 +303,10 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
 
 ## The pieces
 
-- **`nsh-macros`:** `#[class]` on the struct (a marker; the type's name is the JS name) and on its `impl`: `new`
+- **`nsh-macros`:** `#[class]` on the struct (a marker; the type's name is the JS name) and on its `impl`. The
+  block's functions with a visibility (`pub fn`, `pub(crate) fn`) are exported; those without one are helpers,
+  Rust's only, as in `#[module]` and `#[methods]` blocks (a `#[getter]` / `#[setter]` without one is a compile
+  error: it can only be TS's). `new`
   is the constructor (a class without one cannot be made from JS, only returned); `&self` / `&mut self` methods,
   `#[getter]` / `#[setter]` (one name: `count` and `set_count` are the property `count`), functions without `self`
   are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations'.

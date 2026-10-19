@@ -105,6 +105,17 @@ fn ts_doc(attrs: &[Attribute]) -> String {
     }
 }
 
+/// Whether a function of a `#[class]`, `#[module]` or `#[methods]` block
+/// is exported: it has a visibility (`pub`, `pub(crate)`, ...). A private
+/// one (none, or `pub(self)`) is the block's helper, Rust's only.
+fn exported(vis: &syn::Visibility) -> bool {
+    match vis {
+        syn::Visibility::Inherited => false,
+        syn::Visibility::Restricted(r) => !r.path.is_ident("self"),
+        syn::Visibility::Public(_) => true,
+    }
+}
+
 /// `accessibility_label` / `AccessibilityLabel` -> `accessibilityLabel`.
 fn camel(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
@@ -1033,12 +1044,13 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
 
 /// `#[methods]` on an `impl` block of a component's API (`Api`: a handle
 /// its view makes, holding the signals the methods read and write): each
-/// function becomes a method of the component's ref in JS, named in camel
-/// case (`set_value` is `setValue`), documented by its doc comment. A
+/// function with a visibility (`pub fn`, `pub(crate) fn`) becomes a method
+/// of the component's ref in JS, named in camel case (`set_value` is
+/// `setValue`), documented by its doc comment; a function without one is a
+/// helper, Rust's only. A
 /// function takes `&self`, then [`JsValue`] parameters; it returns nothing
 /// (JS calls it and moves on; the call is ordered with the props set before
-/// it) or a [`JsValue`] (JS gets a `Promise`). The block's functions are
-/// JS's: keep helpers in another `impl`. The view registers the API with
+/// it) or a [`JsValue`] (JS gets a `Promise`). The view registers the API with
 /// `cx.methods(api)`, and the component names it in its spec with
 /// `#[component(methods = StepperApi)]`.
 #[proc_macro_attribute]
@@ -1062,6 +1074,9 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
+        if !exported(&f.vis) {
+            continue;
+        }
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
         // The method's name: the host puts its component's before it (an
@@ -1273,8 +1288,9 @@ fn module_cx(ty: &Type) -> bool {
     matches!(ty, Type::Reference(r) if matches!(last_segment(&r.elem), Some((id, _)) if id == "ModuleCx"))
 }
 
-/// `#[module]` on an `impl` block of a unit struct: its functions (no
-/// receiver) become functions of a JS object named after the struct
+/// `#[module]` on an `impl` block of a unit struct: its functions with a
+/// visibility (`pub fn`, `pub(crate) fn`; no receiver) become functions of
+/// a JS object named after the struct
 /// (`Alert.alert(...)`), documented by their doc comments (the block's doc
 /// comment documents the object). The signature decides how a call runs:
 /// a function without a context runs in the JS call and returns its value
@@ -1309,7 +1325,9 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// `#[class]` on a struct and on its `impl` block: a JS class (the
-/// struct's name) whose objects hold the Rust value. In the block, `new` is
+/// struct's name) whose objects hold the Rust value. The block's functions
+/// with a visibility (`pub fn`, `pub(crate) fn`) are the class's members;
+/// those without one are helpers, Rust's only. In the block, `new` is
 /// the constructor (a class without one is made by its members only);
 /// `&self` / `&mut self` functions are methods, `#[getter]` / `#[setter]`
 /// ones (`count`, `set_count`) the property `count`; functions without a
@@ -1361,6 +1379,9 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
     let mut entries = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
+        if !exported(&f.vis) {
+            continue;
+        }
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
         let what = if flat {

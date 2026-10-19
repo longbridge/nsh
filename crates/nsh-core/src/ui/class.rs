@@ -731,7 +731,7 @@ mod tests {
     #[class]
     impl Tally {
         /// Starts at `start` (0 when left out).
-        fn new(start: Option<i64>) -> Self {
+        pub(crate) fn new(start: Option<i64>) -> Self {
             Tally {
                 count: start.unwrap_or(0),
                 label: None,
@@ -739,7 +739,7 @@ mod tests {
         }
 
         /// Adds `by`; the new count.
-        fn add(&mut self, by: i64, label: Option<String>) -> i64 {
+        pub(crate) fn add(&mut self, by: i64, label: Option<String>) -> i64 {
             let _ = label;
             self.count += by;
             self.count
@@ -747,55 +747,59 @@ mod tests {
 
         /// The count.
         #[getter]
-        fn count(&self) -> i64 {
+        pub(crate) fn count(&self) -> i64 {
             self.count
         }
 
         #[setter]
-        fn set_count(&mut self, count: i64) {
+        pub(crate) fn set_count(&mut self, count: i64) {
             self.count = count;
         }
 
         #[getter]
-        fn label(&self) -> Option<String> {
+        pub(crate) fn label(&self) -> Option<String> {
             self.label.clone()
         }
 
         /// A setter's value is required, even an `Option`.
         #[setter]
-        fn set_label(&mut self, label: Option<String>) {
+        pub(crate) fn set_label(&mut self, label: Option<String>) {
             self.label = label;
         }
 
         /// Only where it is compiled.
         #[cfg(any())]
-        fn nowhere(&self) -> i64 {
+        pub(crate) fn nowhere(&self) -> i64 {
             0
         }
 
         /// A tally from `"12"`; throws on anything else.
-        fn parse(text: String) -> Result<Tally, String> {
+        pub(crate) fn parse(text: String) -> Result<Tally, String> {
             text.parse()
                 .map(|count| Tally { count, label: None })
                 .map_err(|_| text)
         }
 
-        fn reset(&mut self, to: Option<i64>, by: i64) {
+        pub(crate) fn reset(&mut self, to: Option<i64>, by: i64) {
             self.count = to.unwrap_or(0) + by;
         }
 
-        fn absorb(&mut self, other: &Tally, token: Option<Instance<Token>>) -> Instance<Token> {
+        pub(crate) fn absorb(
+            &mut self,
+            other: &Tally,
+            token: Option<Instance<Token>>,
+        ) -> Instance<Token> {
             self.count += other.count;
             token.unwrap_or_else(|| Instance::new(Token))
         }
 
         /// Saves the count; resolves when it is written.
-        async fn save(this: Instance<Self>, path: String) -> Result<(), String> {
+        pub(crate) async fn save(this: Instance<Self>, path: String) -> Result<(), String> {
             let _ = (this, path);
             Ok(())
         }
 
-        async fn later(start: i64) -> Tally {
+        pub(crate) async fn later(start: i64) -> Tally {
             Tally {
                 count: start,
                 label: None,
@@ -803,12 +807,24 @@ mod tests {
         }
 
         /// Sorts with the app's comparison.
-        fn sort_by(&mut self, compare: Callback<(String, String), f64>) {
+        pub(crate) fn sort_by(&mut self, compare: Callback<(String, String), f64>) {
             let _ = compare;
         }
 
-        fn on(&mut self, listener: Option<Callback<i64>>, done: Option<Callback>) {
+        pub(crate) fn on(&mut self, listener: Option<Callback<i64>>, done: Option<Callback>) {
             let _ = (listener, done);
+        }
+
+        /// A helper without `pub`: Rust's only, not in TS.
+        #[allow(dead_code)]
+        fn bump(&mut self) {
+            self.count += 1;
+        }
+
+        /// A private associated function: not a static in TS either.
+        #[allow(dead_code)]
+        async fn private_later() -> i64 {
+            0
         }
     }
 
@@ -818,7 +834,7 @@ mod tests {
 
     #[class]
     impl Token {
-        fn mint() -> Token {
+        pub(crate) fn mint() -> Token {
             Token
         }
     }
@@ -827,6 +843,13 @@ mod tests {
     fn classes_are_declared_from_their_definitions() {
         let mut registry = Registry::ui_set("test/ui");
         registry.class::<Tally>().class::<Token>();
+        // Helpers without `pub` stay Rust's: neither declared nor members.
+        assert!(
+            !<Tally as crate::ui::Class>::DEF
+                .members
+                .iter()
+                .any(|m| m.name == "bump" || m.name == "privateLater")
+        );
         assert_eq!(
             declarations(&registry, &[]),
             r#"/** A tally kept in Rust. */
@@ -876,33 +899,44 @@ export declare class Token {
     #[module]
     impl Tools {
         /// The sum, at once.
-        fn sum(values: Vec<f64>) -> f64 {
+        pub(crate) fn sum(values: Vec<f64>) -> f64 {
             values.iter().sum()
         }
 
-        fn shout(text: String) {
+        pub(crate) fn shout(text: String) {
             let _ = text;
         }
 
         /// A promise of the length.
-        fn measure(text: String, cx: &mut ModuleCx) -> usize {
+        pub(crate) fn measure(text: String, cx: &mut ModuleCx) -> usize {
             let _ = cx;
             text.len()
         }
 
-        async fn later(listener: Callback<i64, String>) -> Result<String, String> {
+        pub(crate) async fn later(listener: Callback<i64, String>) -> Result<String, String> {
             listener.call_async(1).await
         }
 
         /// Only where it is compiled.
         #[cfg(any())]
-        fn nowhere() {}
+        pub(crate) fn nowhere() {}
+
+        /// A helper without `pub`: not exported.
+        #[allow(dead_code)]
+        fn helper(text: String) -> String {
+            text
+        }
     }
 
     #[test]
     fn functions_without_a_context_return_their_values() {
         let mut registry = Registry::ui_set("test/ui");
         registry.module::<Tools>();
+        assert!(
+            !<Tools as crate::ui::Module>::FUNCTIONS
+                .iter()
+                .any(|f| f.name == "helper")
+        );
         assert_eq!(
             declarations(&registry, &[]),
             r#"export interface ToolsModule {

@@ -149,7 +149,8 @@ fn TitleBar() -> impl IntoElement {
 
 crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内容：组件（`registry.register::<Chart>()`）、函数模块
 （`registry.module::<Portfolio>()`，一个 `#[module]` `impl`）、类（`registry.class::<Ledger>()`，在结构体及其 `impl` 上标注
-`#[class]`）和资源。它们的 TypeScript 声明（包括文档注释）由 Rust 类型生成到 `.nsh/types`，所以 `nsh check` 和编辑器会据此检查
+`#[class]`）和资源。在 `#[module]` 或 `#[class]` 的 `impl` 中，`pub fn`（包括 `pub(crate)`）会被导出；没有可见性修饰的函数是
+辅助函数，只留在 Rust 中。它们的 TypeScript 声明（包括文档注释）由 Rust 类型生成到 `.nsh/types`，所以 `nsh check` 和编辑器会据此检查
 TSX：
 
 ```rust

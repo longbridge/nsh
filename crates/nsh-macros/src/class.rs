@@ -10,7 +10,7 @@ use syn::{
     spanned::Spanned,
 };
 
-use crate::{camel, decl, docs, last_segment, module_cx, result_ok};
+use crate::{camel, decl, docs, exported, last_segment, module_cx, result_ok};
 
 pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     match item {
@@ -222,6 +222,22 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     let mut members = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
+        if !exported(&f.vis) {
+            // A helper: Rust's only. A getter or setter is TS's, so one
+            // without a visibility is a mistake, not a helper.
+            if let Some(attr) = f
+                .attrs
+                .iter()
+                .find(|a| a.path().is_ident("getter") || a.path().is_ident("setter"))
+            {
+                return Err(syn::Error::new(
+                    attr.span(),
+                    "a getter or setter is exported: make it `pub fn` (functions without a \
+                     visibility are the block's helpers, Rust's only)",
+                ));
+            }
+            continue;
+        }
         members.push(member_def(f, &class_name)?);
     }
     // The getters' and setters' attributes are the macro's.
@@ -580,25 +596,44 @@ mod tests {
     #[test]
     fn names_the_object_has_are_refused() {
         assert!(
-            error(quote!(impl T { fn dispose(&self) {} }))
+            error(quote!(impl T { pub fn dispose(&self) {} }))
                 .contains("`dispose` is every class's own")
         );
-        assert!(error(quote!(impl T { fn constructor(&self) {} })).contains("`constructor`"));
+        assert!(error(quote!(impl T { pub fn constructor(&self) {} })).contains("`constructor`"));
         for name in ["prototype", "name", "length"] {
             let ident = quote::format_ident!("{name}");
             assert!(
-                error(quote!(impl T { fn #ident() -> u32 { 0 } })).contains("a static named"),
+                error(quote!(impl T { pub fn #ident() -> u32 { 0 } })).contains("a static named"),
                 "{name}"
             );
             assert!(
-                error(quote!(impl T { async fn #ident() -> u32 { 0 } })).contains("a static named"),
+                error(quote!(impl T { pub async fn #ident() -> u32 { 0 } }))
+                    .contains("a static named"),
                 "async {name}"
             );
         }
         // A method may be called `name` (it is on the prototype).
         assert_eq!(
-            error(quote!(impl T { fn name(&self) -> u32 { 0 } })),
+            error(quote!(impl T { pub fn name(&self) -> u32 { 0 } })),
             "no error"
+        );
+    }
+
+    #[test]
+    fn functions_without_a_visibility_are_helpers() {
+        // Not exported, so not checked against the object's names.
+        assert_eq!(
+            error(quote!(impl T { fn dispose(&self) {} fn constructor() {} })),
+            "no error"
+        );
+        assert_eq!(
+            error(quote!(impl T { pub(self) fn dispose(&self) {} })),
+            "no error"
+        );
+        // A getter or setter is TS's: one without `pub` is refused.
+        assert!(
+            error(quote!(impl T { #[getter] fn count(&self) -> u32 { 0 } }))
+                .contains("make it `pub fn`")
         );
     }
 }
