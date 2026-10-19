@@ -764,3 +764,32 @@ fs.readFile({file}, "utf8").then(report, (e) => report(String(e)));
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(shown, "done through");
 }
+
+#[test]
+fn a_root_named_through_a_link_is_reached_by_either_name() {
+    // As `/var` and `/private/var` on macOS: the grant names the link.
+    let dir = scratch("linked-root").canonicalize().unwrap();
+    std::fs::create_dir(dir.join("real")).unwrap();
+    std::fs::write(dir.join("real/note.txt"), "either").unwrap();
+    symlink(dir.join("real"), dir.join("alias")).unwrap();
+    let grant = serde_json::json!({ "fs": { "read": [dir.join("alias")] } }).to_string();
+    let (by_link, by_target) = (
+        serde_json::to_string(&dir.join("alias/note.txt")).unwrap(),
+        serde_json::to_string(&dir.join("real/note.txt")).unwrap(),
+    );
+    let (_engine, rx) = start(
+        &format!(
+            r#"
+import fs from "fs/promises";
+(async () => {{
+  report([await fs.readFile({by_link}, "utf8"), await fs.readFile({by_target}, "utf8")].join("|"));
+}})().catch((e) => report(String(e)));
+"#
+        ),
+        &grant,
+        None,
+        Default::default(),
+    );
+    assert_eq!(shown(&rx, "done"), "done either|either");
+    let _ = std::fs::remove_dir_all(dir);
+}
