@@ -111,6 +111,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_windows::AppOptions) {
         Some("dark") => options.appearance = Appearance::Dark,
         _ => {}
     }
+    // `--script` steps (screenshots, simulated input) for checks
+    // (`nsh run --script`).
+    options.script = std::env::var("NSH_SCRIPT").ok();
     (dir, options)
 }
 

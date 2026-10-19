@@ -228,13 +228,15 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
         /// The window's initial size, `WxH` in points (the host's default
-        /// by default; `--target macos` only).
+        /// by default; the desktop hosts: `--target macos`, `linux`,
+        /// `windows`, `gpui`).
         #[arg(long = "window-size", value_name = "WIDTHxHEIGHT")]
         size: Option<String>,
         /// Script steps to run once the window shows (`wait`, `shot`,
-        /// `tap`, `quit`, ...; `--target macos` only). With `quit` the
-        /// command exits when the script does — snapshots without a
-        /// window staying open.
+        /// `tap`, `quit`, ...; the desktop hosts: `--target macos`,
+        /// `linux`, `windows`, `gpui`; an app of Rust only: `macos`,
+        /// `linux`, `windows`). With `quit` the command exits when the
+        /// script does — snapshots without a window staying open.
         #[arg(long)]
         script: Option<String>,
     },
