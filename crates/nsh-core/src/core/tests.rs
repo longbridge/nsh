@@ -8059,3 +8059,113 @@ fn file_drop_callbacks_keep_urls_and_disabled_targets_unmount_their_events() {
         assert!(!events.contains(event));
     }
 }
+
+/// What builders take: listeners without arguments, children in an
+/// `Option`, a `Vec`, an array or an iterator.
+mod builders {
+    use super::*;
+    use crate::ui::{Listener, Root, prelude::*};
+
+    /// The mount items of `C`'s first frame and of the frames after a press
+    /// on each text of `taps`, in order.
+    fn run<C: Component>(
+        props: impl Fn() -> C::Props + Send + Sync + 'static,
+        taps: &[&str],
+    ) -> Vec<String> {
+        let mut c = core();
+        c.mount_root(&Root::new::<C>(props));
+        let mut nodes = std::collections::HashMap::new();
+        let mut out = Vec::new();
+        let mut batch = c.commit().unwrap();
+        for tap in taps.iter().map(Some).chain([None]) {
+            for item in &batch.items {
+                if let MountItem::Text { id, text, .. } = item {
+                    nodes.insert(text.text.clone(), *id);
+                }
+            }
+            out.push(format!("{:?}", batch.items));
+            let Some(tap) = tap else { break };
+            let node = *nodes
+                .get(*tap)
+                .unwrap_or_else(|| panic!("no text {tap:?} in {nodes:?}"));
+            assert!(c.component_event(node, EventKind::Press, &EventPayload::None));
+            batch = c.commit().unwrap_or_default();
+        }
+        out
+    }
+
+    /// A pressable text, through a helper that passes a listener on.
+    fn tap<M>(label: &'static str, on_press: impl IntoListener<(), M>) -> Text {
+        text(label).on_press(on_press)
+    }
+
+    #[component]
+    fn ListenersOfEvents() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .child(text("one").on_press(move |_: &()| n.update(|n| *n += 1)))
+            .child(tap("ten", move |_: &()| n.update(|n| *n += 10)))
+            .child(tap(
+                "hundred",
+                Listener::from(move |_: &()| n.update(|n| *n += 100)),
+            ))
+            .child(input().on_focus(move |_: &()| n.set(0)))
+            .child(text(move || format!("n {}", n.get())))
+    }
+
+    #[component]
+    fn ListenersWithout() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .child(text("one").on_press(move || n.update(|n| *n += 1)))
+            .child(tap("ten", move || n.update(|n| *n += 10)))
+            .child(tap(
+                "hundred",
+                Listener::from(move |_: &()| n.update(|n| *n += 100)),
+            ))
+            .child(input().on_focus(move || n.set(0)))
+            .child(text(move || format!("n {}", n.get())))
+    }
+
+    #[test]
+    fn listeners_of_events_without_data_take_closures_without_arguments() {
+        let taps = ["one", "ten", "hundred", "one"];
+        let of_events = run::<ListenersOfEvents>(|| (), &taps);
+        assert_eq!(run::<ListenersWithout>(|| (), &taps), of_events);
+        assert!(of_events[4].contains("\"n 112\""), "{}", of_events[4]);
+    }
+
+    #[component]
+    fn ChildrenOneByOne() -> impl IntoElement {
+        view()
+            .child(text("a"))
+            .child(text("c"))
+            .child(text("d"))
+            .child(text("e"))
+            .child(text("f"))
+            .child(text("row 0"))
+            .child(text("row 1"))
+            .child(text("x").child("y").child("z"))
+            .child(dynamic(|| vec![text("left"), text("right")]))
+    }
+
+    #[component]
+    fn ChildrenTogether() -> impl IntoElement {
+        view()
+            .child(Some(text("a")))
+            .child(None::<Text>)
+            .child(vec![text("c"), text("d")])
+            .child(["e", "f"].map(text))
+            .child((0..2).map(|i| text(format!("row {i}"))))
+            .child(text("x").child(["y", "z"]))
+            .child(dynamic(|| [text("left"), text("right")]))
+    }
+
+    #[test]
+    fn options_vecs_arrays_and_iterators_are_children() {
+        let one_by_one = run::<ChildrenOneByOne>(|| (), &[]);
+        assert_eq!(run::<ChildrenTogether>(|| (), &[]), one_by_one);
+        assert!(one_by_one[0].contains("\"row 1\""));
+        assert!(one_by_one[0].contains("\"right\""));
+    }
+}

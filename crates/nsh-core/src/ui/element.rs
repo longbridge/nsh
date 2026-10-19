@@ -73,6 +73,49 @@ impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
     }
 }
 
+/// What a listener method takes (`on_press`, `on_change_text`,
+/// `on_event`, ...): a closure of the event, `move |text: &str| ..`; for an
+/// event without data also one without arguments, `move || ..` (or
+/// `move |_: &()| ..`); or a [`Listener`]. `M` tells them apart: it is
+/// inferred, never written. (One conversion could not take both closures:
+/// a type may implement `Fn()` and `Fn(&())`.)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a listener of `{E}`",
+    label = "not a listener of `{E}`",
+    note = "a listener is a closure `move |event: &{E}| ..` (`move || ..` for an event without data) or a `Listener<{E}>`"
+)]
+pub trait IntoListener<E: ?Sized, M> {
+    /// As the listener.
+    fn into_listener(self) -> Listener<E>;
+}
+
+/// How a closure of the event is a listener ([`IntoListener`]).
+#[doc(hidden)]
+pub struct OfEvent(());
+
+/// How a closure without arguments is a listener of an event without data
+/// ([`IntoListener`]).
+#[doc(hidden)]
+pub struct WithoutEvent(());
+
+impl<E: ?Sized> IntoListener<E, ()> for Listener<E> {
+    fn into_listener(self) -> Listener<E> {
+        self
+    }
+}
+
+impl<E: ?Sized + 'static, F: Fn(&E) + 'static> IntoListener<E, OfEvent> for F {
+    fn into_listener(self) -> Listener<E> {
+        Listener::new(Rc::new(self))
+    }
+}
+
+impl<F: Fn() + 'static> IntoListener<(), WithoutEvent> for F {
+    fn into_listener(self) -> Listener<()> {
+        Listener::new(Rc::new(move |_: &()| self()))
+    }
+}
+
 impl<E: ?Sized> Clone for Listener<E> {
     fn clone(&self) -> Self {
         Self {
@@ -536,6 +579,45 @@ impl IntoElement for String {
     }
 }
 
+/// What `.child(..)` takes ([`ParentElement::child`]): an element, or
+/// what holds elements (an `Option`, a `Vec`, an array or an iterator of
+/// them: `rows.iter().map(|r| row(r))`). `M` tells the two apart: it is
+/// inferred, never written. (One blanket conversion could not take both: a
+/// type may be an element and hold elements.)
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not an element",
+    label = "not an element",
+    note = "elements are host elements (`view()`, `text(..)`, ...), components' elements, strings, and an `Option`, a `Vec`, an array or an iterator of elements"
+)]
+pub trait IntoChild<M> {
+    /// Adds what it is to `out`.
+    #[doc(hidden)]
+    fn __push_into(self, out: &mut Vec<ElNode>);
+}
+
+/// How an element is a child ([`IntoChild`]).
+#[doc(hidden)]
+pub struct OneChild(());
+
+/// How what holds elements is children ([`IntoChild`]).
+#[doc(hidden)]
+pub struct ManyChildren(());
+
+impl<T: IntoElement> IntoChild<OneChild> for T {
+    fn __push_into(self, out: &mut Vec<ElNode>) {
+        out.push(self.into_element().0);
+    }
+}
+
+impl<I: IntoIterator> IntoChild<ManyChildren> for I
+where
+    I::Item: IntoElement,
+{
+    fn __push_into(self, out: &mut Vec<ElNode>) {
+        out.extend(self.into_iter().map(|c| c.into_element().0));
+    }
+}
+
 /// Conditional building.
 pub trait FluentBuilder: Sized {
     /// `then(self)` when `condition` holds.
@@ -750,9 +832,10 @@ impl<T: Element> Styled for T {
 
 /// Elements with children.
 pub trait ParentElement: Element {
-    /// Adds a child.
-    fn child(mut self, child: impl IntoElement) -> Self {
-        self.node().children.push(child.into_element().0);
+    /// Adds a child: an element, or the elements an `Option`, a `Vec`, an
+    /// array or an iterator holds.
+    fn child<M>(mut self, child: impl IntoChild<M>) -> Self {
+        child.__push_into(&mut self.node().children);
         self
     }
 
@@ -855,76 +938,76 @@ pub trait Accessible: Element {
 /// Elements that take touches.
 pub trait Interactive: Element {
     /// A local file drag entered this desktop drop destination.
-    fn on_file_drag_enter(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_file_drag_enter<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::FileDragEnter,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// A local file drag left this desktop drop destination.
-    fn on_file_drag_leave(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_file_drag_leave<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::FileDragLeave,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Local files or directories were dropped on this desktop destination.
-    fn on_file_drop(self, listener: impl Into<Listener<events::FileDropEvent>>) -> Self {
+    fn on_file_drop<M>(self, listener: impl IntoListener<events::FileDropEvent, M>) -> Self {
         self.on(
             EventKind::FileDrop,
-            events::typed(listener.into(), events::file_drop),
+            events::typed(listener.into_listener(), events::file_drop),
         )
     }
 
     /// Handles presses.
-    fn on_press(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::Press,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Handles presses held for about half a second.
-    fn on_long_press(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_long_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::LongPress,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// A finger went down on the element.
-    fn on_press_in(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_press_in<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::PressIn,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// The press ended, inside or outside the element.
-    fn on_press_out(self, listener: impl Into<Listener<()>>) -> Self {
+    fn on_press_out<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::PressOut,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Its frame changed (relative to its parent).
-    fn on_layout(self, listener: impl Into<Listener<Rect>>) -> Self {
+    fn on_layout<M>(self, listener: impl IntoListener<Rect, M>) -> Self {
         self.on(
             EventKind::Layout,
-            events::typed(listener.into(), events::layout),
+            events::typed(listener.into_listener(), events::layout),
         )
     }
 
     /// Touches on it or inside it, every phase (custom gestures): the
     /// elements around the finger hear them from it outwards. To have them
     /// alone, claim them ([`Interactive::claim_touches`]).
-    fn on_touch(self, listener: impl Into<Listener<TouchEvent>>) -> Self {
+    fn on_touch<M>(self, listener: impl IntoListener<TouchEvent, M>) -> Self {
         self.on(
             EventKind::Touch,
-            events::typed(listener.into(), events::touch),
+            events::typed(listener.into_listener(), events::touch),
         )
     }
 
@@ -950,54 +1033,69 @@ pub trait Interactive: Element {
     }
 
     /// It became the responder (TS: `onResponderGrant`).
-    fn on_responder_grant(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).grant = Some(listener.into());
+    fn on_responder_grant<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).grant = Some(listener.into_listener());
         self
     }
 
     /// It claimed the touches, but the responder kept them (TS:
     /// `onResponderReject`).
-    fn on_responder_reject(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).reject = Some(listener.into());
+    fn on_responder_reject<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).reject = Some(listener.into_listener());
         self
     }
 
     /// As the responder, a finger went down (the first one too, after the
     /// grant; TS: `onResponderStart`).
-    fn on_responder_start(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).start = Some(listener.into());
+    fn on_responder_start<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).start = Some(listener.into_listener());
         self
     }
 
     /// As the responder, the fingers moved (TS: `onResponderMove`).
-    fn on_responder_move(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).moved = Some(listener.into());
+    fn on_responder_move<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).moved = Some(listener.into_listener());
         self
     }
 
     /// As the responder, a finger lifted (TS: `onResponderEnd`).
-    fn on_responder_end(mut self, listener: impl Into<Listener<super::ResponderEvent>>) -> Self {
-        super::responder::of(self.node()).end = Some(listener.into());
+    fn on_responder_end<M>(
+        mut self,
+        listener: impl IntoListener<super::ResponderEvent, M>,
+    ) -> Self {
+        super::responder::of(self.node()).end = Some(listener.into_listener());
         self
     }
 
     /// The last finger lifted: it is no longer the responder (TS:
     /// `onResponderRelease`).
-    fn on_responder_release(
+    fn on_responder_release<M>(
         mut self,
-        listener: impl Into<Listener<super::ResponderEvent>>,
+        listener: impl IntoListener<super::ResponderEvent, M>,
     ) -> Self {
-        super::responder::of(self.node()).release = Some(listener.into());
+        super::responder::of(self.node()).release = Some(listener.into_listener());
         self
     }
 
     /// Another element or a native gesture took the touches over, or the
     /// system cancelled them (TS: `onResponderTerminate`).
-    fn on_responder_terminate(
+    fn on_responder_terminate<M>(
         mut self,
-        listener: impl Into<Listener<super::ResponderEvent>>,
+        listener: impl IntoListener<super::ResponderEvent, M>,
     ) -> Self {
-        super::responder::of(self.node()).terminate = Some(listener.into());
+        super::responder::of(self.node()).terminate = Some(listener.into_listener());
         self
     }
 
@@ -1044,65 +1142,65 @@ pub trait Interactive: Element {
     }
 
     /// A drag started on it (the platform recognizes it).
-    fn on_pan_start(self, listener: impl Into<Listener<PanEvent>>) -> Self {
+    fn on_pan_start<M>(self, listener: impl IntoListener<PanEvent, M>) -> Self {
         self.on(
             EventKind::PanStart,
-            events::typed(listener.into(), events::pan),
+            events::typed(listener.into_listener(), events::pan),
         )
     }
 
     /// The drag ended, with its velocity.
-    fn on_pan_end(self, listener: impl Into<Listener<PanEvent>>) -> Self {
+    fn on_pan_end<M>(self, listener: impl IntoListener<PanEvent, M>) -> Self {
         self.on(
             EventKind::PanEnd,
-            events::typed(listener.into(), events::pan),
+            events::typed(listener.into_listener(), events::pan),
         )
     }
 
     /// A pinch started (its scale).
-    fn on_pinch_start(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_pinch_start<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::PinchStart,
-            events::typed(listener.into(), events::pinch),
+            events::typed(listener.into_listener(), events::pinch),
         )
     }
 
     /// The pinch ended.
-    fn on_pinch_end(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_pinch_end<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::PinchEnd,
-            events::typed(listener.into(), events::pinch),
+            events::typed(listener.into_listener(), events::pinch),
         )
     }
 
     /// A two-finger rotation started (radians).
-    fn on_rotation_start(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_rotation_start<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::RotationStart,
-            events::typed(listener.into(), events::rotation),
+            events::typed(listener.into_listener(), events::rotation),
         )
     }
 
     /// The rotation ended.
-    fn on_rotation_end(self, listener: impl Into<Listener<GestureEvent>>) -> Self {
+    fn on_rotation_end<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
         self.on(
             EventKind::RotationEnd,
-            events::typed(listener.into(), events::rotation),
+            events::typed(listener.into_listener(), events::rotation),
         )
     }
 
     /// An assistive technology performed an action (its name).
-    fn on_accessibility_action(self, listener: impl Into<Listener<str>>) -> Self {
+    fn on_accessibility_action<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.on(
             EventKind::AccessibilityAction,
-            events::typed(listener.into(), events::action),
+            events::typed(listener.into_listener(), events::action),
         )
     }
 
     /// Handles native event `kind` with its raw payload (the element
     /// listens to it).
-    fn on(mut self, kind: EventKind, listener: impl Into<Listener<EventPayload>>) -> Self {
-        self.node().handlers.push((kind, listener.into()));
+    fn on<M>(mut self, kind: EventKind, listener: impl IntoListener<EventPayload, M>) -> Self {
+        self.node().handlers.push((kind, listener.into_listener()));
         self
     }
 
@@ -1271,8 +1369,12 @@ impl Interactive for Image {}
 /// and views and images placed inline, wrapping with the words. The core
 /// merges them into one paragraph.
 impl ParentElement for Text {
-    fn child(mut self, child: impl IntoElement) -> Self {
-        self.0.children.push(span(child.into_element().0));
+    fn child<M>(mut self, child: impl IntoChild<M>) -> Self {
+        let at = self.0.children.len();
+        child.__push_into(&mut self.0.children);
+        for el in &mut self.0.children[at..] {
+            *el = span(std::mem::replace(el, ElNode::new(Tag::View)));
+        }
         self
     }
 
@@ -1395,43 +1497,43 @@ impl Image {
     }
 
     /// It loaded: its size in pixels.
-    pub fn on_load(self, listener: impl Into<Listener<Size>>) -> Self {
+    pub fn on_load<M>(self, listener: impl IntoListener<Size, M>) -> Self {
         self.on(
             EventKind::Load,
-            events::typed(listener.into(), events::size),
+            events::typed(listener.into_listener(), events::size),
         )
     }
 
     /// It failed to load (the message).
-    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
+    pub fn on_error<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.on(
             EventKind::Error,
-            events::typed(listener.into(), events::message),
+            events::typed(listener.into_listener(), events::message),
         )
     }
 
     /// It started loading.
-    pub fn on_load_start(self, listener: impl Into<Listener<()>>) -> Self {
+    pub fn on_load_start<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::LoadStart,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// It finished loading, or failed.
-    pub fn on_load_end(self, listener: impl Into<Listener<()>>) -> Self {
+    pub fn on_load_end<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::LoadEnd,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 
     /// Its download went on: bytes so far and in all (at most every 100
     /// ms; none for images already in memory).
-    pub fn on_progress(self, listener: impl Into<Listener<events::ImageProgress>>) -> Self {
+    pub fn on_progress<M>(self, listener: impl IntoListener<events::ImageProgress, M>) -> Self {
         self.on(
             EventKind::Progress,
-            events::typed(listener.into(), events::image_progress),
+            events::typed(listener.into_listener(), events::image_progress),
         )
     }
 }
@@ -1638,8 +1740,8 @@ impl<C: Component> ComponentElement<C> {
     }
 
     /// Handles its events (they then do not reach the app).
-    pub fn on_event(mut self, listener: impl Into<Listener<C::Event>>) -> Self {
-        let listener = listener.into();
+    pub fn on_event<M>(mut self, listener: impl IntoListener<C::Event, M>) -> Self {
+        let listener = listener.into_listener();
         if let ElKind::Component(c) = &mut self.node.kind {
             c.on_event = Some(listener.wrap(|inner, event: &dyn Any| {
                 if let Some(event) = event.downcast_ref::<C::Event>() {

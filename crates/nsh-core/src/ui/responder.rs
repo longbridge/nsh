@@ -10,7 +10,7 @@
 
 use std::cell::Cell;
 
-use super::Listener;
+use super::{IntoListener, Listener};
 use crate::{PanActivation, TouchEvent, TouchPhase, TouchPoint};
 
 /// A pan gesture followed through touch events (TS: `PanResponder`'s
@@ -235,8 +235,8 @@ impl TouchClaim {
     /// Claims only when `listener` does ([`ClaimRequest::claim`]), deciding
     /// with the component's state and the gesture so far (a horizontal
     /// swipe: `request.event.gesture.dx.abs() > 10.0`).
-    pub fn ask(mut self, listener: impl Into<Listener<ClaimRequest>>) -> Self {
-        self.ask = Some(listener.into());
+    pub fn ask<M>(mut self, listener: impl IntoListener<ClaimRequest, M>) -> Self {
+        self.ask = Some(listener.into_listener());
         self
     }
 

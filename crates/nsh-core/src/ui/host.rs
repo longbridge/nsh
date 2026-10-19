@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
-    element::{ElNode, Element, IntoElement, Listener, ParentElement},
+    element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{self, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
 };
 use crate::{
@@ -204,9 +204,9 @@ impl ParentElement for Modal {}
 
 /// Android has no input accessories: there the bar keeps no content.
 impl ParentElement for InputAccessoryView {
-    fn child(mut self, child: impl IntoElement) -> Self {
+    fn child<M>(mut self, child: impl super::IntoChild<M>) -> Self {
         if !cfg!(target_os = "android") {
-            self.0.children.push(child.into_element().0);
+            child.__push_into(&mut self.0.children);
         }
         self
     }
@@ -435,42 +435,54 @@ impl Input {
     }
 
     /// The text changed (the new text).
-    pub fn on_change_text(self, listener: impl Into<Listener<str>>) -> Self {
-        self.listen(EventKind::ChangeText, listener.into(), events::text)
+    pub fn on_change_text<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(
+            EventKind::ChangeText,
+            listener.into_listener(),
+            events::text,
+        )
     }
 
     /// The return key was pressed (the text).
-    pub fn on_submit_editing(self, listener: impl Into<Listener<str>>) -> Self {
-        self.listen(EventKind::SubmitEditing, listener.into(), events::text)
+    pub fn on_submit_editing<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(
+            EventKind::SubmitEditing,
+            listener.into_listener(),
+            events::text,
+        )
     }
 
     /// It became focused.
-    pub fn on_focus(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::Focus, listener.into(), events::unit)
+    pub fn on_focus<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Focus, listener.into_listener(), events::unit)
     }
 
     /// It lost focus.
-    pub fn on_blur(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::Blur, listener.into(), events::unit)
+    pub fn on_blur<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Blur, listener.into_listener(), events::unit)
     }
 
     /// The selection or caret moved.
-    pub fn on_selection_change(self, listener: impl Into<Listener<Selection>>) -> Self {
+    pub fn on_selection_change<M>(self, listener: impl IntoListener<Selection, M>) -> Self {
         self.listen(
             EventKind::SelectionChange,
-            listener.into(),
+            listener.into_listener(),
             events::selection,
         )
     }
 
     /// A key was pressed: the character, `Backspace` or `Enter`.
-    pub fn on_key_press(self, listener: impl Into<Listener<str>>) -> Self {
-        self.listen(EventKind::KeyPress, listener.into(), events::key)
+    pub fn on_key_press<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(EventKind::KeyPress, listener.into_listener(), events::key)
     }
 
     /// The text's size changed (multiline inputs growing).
-    pub fn on_content_size_change(self, listener: impl Into<Listener<Size>>) -> Self {
-        self.listen(EventKind::ContentSizeChange, listener.into(), events::size)
+    pub fn on_content_size_change<M>(self, listener: impl IntoListener<Size, M>) -> Self {
+        self.listen(
+            EventKind::ContentSizeChange,
+            listener.into_listener(),
+            events::size,
+        )
     }
 }
 
@@ -623,13 +635,17 @@ impl Screen {
 
     /// The user popped the screen natively (back button, swipe): leave it
     /// out of the view (its region).
-    pub fn on_dismiss(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::Dismiss, listener.into(), events::unit)
+    pub fn on_dismiss<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
     }
 
     /// The user tried to leave a screen that [`Self::prevent_back`]s.
-    pub fn on_back_request(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::BackRequest, listener.into(), events::unit)
+    pub fn on_back_request<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(
+            EventKind::BackRequest,
+            listener.into_listener(),
+            events::unit,
+        )
     }
 }
 
@@ -683,18 +699,22 @@ impl Modal {
 
     /// The user asked to close it (back button, swipe down): leave it out
     /// of the view (its region) to close it.
-    pub fn on_request_close(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::RequestClose, listener.into(), events::unit)
+    pub fn on_request_close<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(
+            EventKind::RequestClose,
+            listener.into_listener(),
+            events::unit,
+        )
     }
 
     /// It finished appearing.
-    pub fn on_show(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::Show, listener.into(), events::unit)
+    pub fn on_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Show, listener.into_listener(), events::unit)
     }
 
     /// The user or the system dismissed it.
-    pub fn on_dismiss(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::Dismiss, listener.into(), events::unit)
+    pub fn on_dismiss<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
     }
 }
 
@@ -782,30 +802,41 @@ impl WebView {
     }
 
     /// A page started loading.
-    pub fn on_load_start(self, listener: impl Into<Listener<WebNavigation>>) -> Self {
-        self.listen(EventKind::LoadStart, listener.into(), events::navigation)
+    pub fn on_load_start<M>(self, listener: impl IntoListener<WebNavigation, M>) -> Self {
+        self.listen(
+            EventKind::LoadStart,
+            listener.into_listener(),
+            events::navigation,
+        )
     }
 
     /// A page loaded.
-    pub fn on_load(self, listener: impl Into<Listener<WebNavigation>>) -> Self {
-        self.listen(EventKind::Load, listener.into(), events::navigation)
+    pub fn on_load<M>(self, listener: impl IntoListener<WebNavigation, M>) -> Self {
+        self.listen(
+            EventKind::Load,
+            listener.into_listener(),
+            events::navigation,
+        )
     }
 
     /// A page failed to load (the message).
-    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
-        self.listen(EventKind::Error, listener.into(), events::message)
+    pub fn on_error<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(EventKind::Error, listener.into_listener(), events::message)
     }
 
     /// The page called `window.ReactNativeWebView.postMessage(data)`.
-    pub fn on_message(self, listener: impl Into<Listener<str>>) -> Self {
-        self.listen(EventKind::Message, listener.into(), events::data)
+    pub fn on_message<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(EventKind::Message, listener.into_listener(), events::data)
     }
 
     /// It navigated.
-    pub fn on_navigation_state_change(self, listener: impl Into<Listener<WebNavigation>>) -> Self {
+    pub fn on_navigation_state_change<M>(
+        self,
+        listener: impl IntoListener<WebNavigation, M>,
+    ) -> Self {
         self.listen(
             EventKind::NavigationStateChange,
-            listener.into(),
+            listener.into_listener(),
             events::navigation,
         )
     }
@@ -863,33 +894,41 @@ impl Video {
     }
 
     /// It started loading.
-    pub fn on_load_start(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::LoadStart, listener.into(), events::unit)
+    pub fn on_load_start<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::LoadStart, listener.into_listener(), events::unit)
     }
 
     /// It loaded: length and size.
-    pub fn on_load(self, listener: impl Into<Listener<VideoInfo>>) -> Self {
-        self.listen(EventKind::Load, listener.into(), events::video)
+    pub fn on_load<M>(self, listener: impl IntoListener<VideoInfo, M>) -> Self {
+        self.listen(EventKind::Load, listener.into_listener(), events::video)
     }
 
     /// It played on.
-    pub fn on_progress(self, listener: impl Into<Listener<VideoProgress>>) -> Self {
-        self.listen(EventKind::Progress, listener.into(), events::progress)
+    pub fn on_progress<M>(self, listener: impl IntoListener<VideoProgress, M>) -> Self {
+        self.listen(
+            EventKind::Progress,
+            listener.into_listener(),
+            events::progress,
+        )
     }
 
     /// It played to its end.
-    pub fn on_end(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen(EventKind::End, listener.into(), events::unit)
+    pub fn on_end<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen(EventKind::End, listener.into_listener(), events::unit)
     }
 
     /// It started (`true`) or stopped buffering.
-    pub fn on_buffer(self, listener: impl Into<Listener<bool>>) -> Self {
-        self.listen(EventKind::Buffer, listener.into(), events::buffering)
+    pub fn on_buffer<M>(self, listener: impl IntoListener<bool, M>) -> Self {
+        self.listen(
+            EventKind::Buffer,
+            listener.into_listener(),
+            events::buffering,
+        )
     }
 
     /// It failed (the message).
-    pub fn on_error(self, listener: impl Into<Listener<str>>) -> Self {
-        self.listen(EventKind::Error, listener.into(), events::message)
+    pub fn on_error<M>(self, listener: impl IntoListener<str, M>) -> Self {
+        self.listen(EventKind::Error, listener.into_listener(), events::message)
     }
 }
 
@@ -900,8 +939,12 @@ impl NativeView {
     }
 
     /// It emitted an event.
-    pub fn on_native_event(self, listener: impl Into<Listener<NativeEvent>>) -> Self {
-        self.listen(EventKind::NativeEvent, listener.into(), events::native)
+    pub fn on_native_event<M>(self, listener: impl IntoListener<NativeEvent, M>) -> Self {
+        self.listen(
+            EventKind::NativeEvent,
+            listener.into_listener(),
+            events::native,
+        )
     }
 }
 

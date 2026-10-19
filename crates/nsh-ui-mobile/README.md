@@ -40,7 +40,7 @@ state) stays native. JS only gets the events the component emits.
   `ListView::element(props).items(virtual_list(n, row).header(..))` for the rows.
 - **State is signals** made in the body: `signal(v)` (equal writes are skipped), `signal_with(v, SignalEquals::Never)`,
   `computed(..)` for what derives from them, `stored(v)` for what nothing displays (a running task). Listeners are
-  closures (`.on_press(move |_: &()| count.update(|c| *c += 1))`) and emit with `cx.emit(ButtonEvent::Press)`. An
+  closures (`.on_press(move || count.update(|c| *c += 1))`) and emit with `cx.emit(ButtonEvent::Press)`. An
   `effect(..)` reacts to a prop. Timers and async work are tasks owned by the component (`set_interval(..)`,
   `spawn(async move { timer(d).await; value.set(..) })`, tokio inside); they end with it. `Stepper` is the example,
   also of methods: `#[methods] impl StepperApi { pub fn set_value(&self, ..), pub fn value(&self) -> f64 }`,

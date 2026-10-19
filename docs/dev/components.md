@@ -47,7 +47,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         .rounded(move || px(theme().radius))
         .bg(move || theme().primary)
         .active(|s| s.bg(move || theme().primary_active))
-        .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
+        .on_press(move || cx.emit(ButtonEvent::Press))
         .child(text(props.title).text_color(move || theme().primary_foreground))
 }
 ```
@@ -107,7 +107,9 @@ child components go with it. The design and its reasons: `reactive-components.md
   `canvas(painter)`, `web_view(url)` / `web_view_html(html, base_url)`, `video(url)`,
   `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty on Android), `native(name)` for the
   embedder's components; `ui/host.rs`), strings (as texts) and other components (`Button::element(props)`, whose
-  `.on_event(move |e: &ButtonEvent| ..)` handles their typed events instead of the app; `.child(..)` / `.children(..)`
+  `.on_event(move |e: &ButtonEvent| ..)` handles their typed events instead of the app; `.child(..)` (an element, or
+  an `Option`, a `Vec`, an array or an iterator of them: `IntoChild<M>`, its marker telling an element from what holds
+  elements) / `.children(..)`
   pass it content and `.fill("header", ..)` fills a slot, as JSX children and slot props do: the content is nodes of
   this view, placed where the nested component's view places the app's; regions in it join its children in place).
   Their abilities are traits: `Styled`, `Accessible`, `Interactive` (`active` / `hover` / `focus` styles, `disabled`,
@@ -119,7 +121,11 @@ child components go with it. The design and its reasons: `reactive-components.md
   `virtual_list(..)` and a placed `ListElement`: snapping, `scroll_enabled`, `keyboard_dismiss_mode`,
   `scroll_value(&v)`, refresh, the scroll events); `on(kind, listener)` takes any native event with its raw
   payload. Host props are the core's `Prop`s, kept one per property and diffed by kind against what the binding
-  applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured. It runs
+  applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured; listener
+  methods take `impl IntoListener<E, M>`: a closure of the event, for an event without data also one without
+  arguments (`move || ..`), or a `Listener` (a type may implement `Fn()` and `Fn(&())`, so one `From` could not take
+  both: the marker `M`, inferred, tells them apart; a helper passing a listener on takes `impl IntoListener<E, M>`
+  too). It runs
   under the owner current when it was made (the component, region or row whose view made it: `Owner::scope`, no
   batch, so writes notify as they happen), so the signals, animated values, refs and tasks it makes are that owner's
   and go with it rather than living as long as the surface. Once that owner is disposed the listener no longer runs
@@ -130,7 +136,7 @@ child components go with it. The design and its reasons: `reactive-components.md
   nothing. An owner put back after a nested run that was disposed meanwhile is `DISPOSED` too
   (`Graph::enter_owner` / `leave_owner` keep its generation).
 - **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
-  the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option` or a `Vec`) is made
+  the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
   again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
   `Each::new(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
   `index` signals updated, while the key stays; `catch_error(|| view, |error,
