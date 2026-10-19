@@ -1158,15 +1158,20 @@ mod confined {
             use cap_std::fs::MetadataExt;
             meta.mode()
         };
-        // Node's modes on Windows: the type bits, and write bits unless
-        // read-only.
+        // Node's modes on Windows: the type bits (a link's own, from
+        // `lstat`), and write bits unless read-only.
         #[cfg(not(unix))]
-        let mode = if meta.is_dir() { 0o040000 } else { 0o100000 }
-            | if meta.permissions().readonly() {
-                0o444
-            } else {
-                0o666
-            };
+        let mode = if meta.is_symlink() {
+            0o120000
+        } else if meta.is_dir() {
+            0o040000
+        } else {
+            0o100000
+        } | if meta.permissions().readonly() {
+            0o444
+        } else {
+            0o666
+        };
         super::Stats {
             size: meta.len() as f64,
             mode,
