@@ -43,7 +43,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 ## 压缩
 
-`zlib` 采用 LLRT 的实现，NSH 为其加上一个上限：每次解压（`inflate`、`inflateRaw`、`gunzip`、`brotliDecompress`、`zstdDecompress` 及其 `Sync` 形式）最多输出 64 MiB；VM 的堆上限更小时以堆上限为准。超出时抛出 `RangeError`，与 Node.js 对 `maxOutputLength` 的处理一致；应用自己的 `maxOutputLength` 可以为单次调用设置更低的上限。
+`zlib` 采用 LLRT 的实现，NSH 为其加上一个上限：每次解压（`inflate`、`inflateRaw`、`gunzip`、`brotliDecompress`、`zstdDecompress` 及其 `Sync` 形式）最多输出 64 MiB；VM 的堆上限更小时以堆上限为准。超出时抛出 `RangeError`，与 Node.js 对 `maxOutputLength` 的处理一致；应用自己的 `maxOutputLength` 可以为单次调用设置更低的上限。`Buffer.alloc`、`Buffer.allocUnsafe`、`Buffer.allocUnsafeSlow` 和 `crypto.randomBytes` 在大小超过 VM 的堆上限（没有堆上限时为 1 GiB）时抛出 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）；`allocUnsafe` 返回清零的内存。
 
 ## 文件
 

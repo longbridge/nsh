@@ -85,8 +85,10 @@ to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (th
 bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
 declaration) has none. Sockets are capped at 32 per VM (the call's `System` quotas) and 4 MiB of pending writes each;
 `close()` ends pending reads and writes. `zlib` decompression output is capped at 64 MiB or the heap limit if
-smaller (`standard/zlib.rs` wraps LLRT's module and clamps `maxOutputLength`), as it is native memory until it
-becomes a buffer. `fs/promises`, `process` and `net` check the call's `System` (the VM's `Access`, data directory,
+smaller (`standard/zlib.rs` wraps LLRT's module and clamps `maxOutputLength`), and `Buffer.alloc`,
+`allocUnsafe`, `allocUnsafeSlow` and `crypto.randomBytes` refuse a size past the heap limit (1 GiB without one) with a
+`RangeError` (`standard/bounds.rs`; Rust's allocator would abort the process); `allocUnsafe` memory is zeroed. LLRT's
+buffers are native memory the heap limit does not count, so these bound one call, not a VM's total. `fs/promises`, `process` and `net` check the call's `System` (the VM's `Access`, data directory,
 `TrustedPaths`) in Rust before any work starts, and count their limits in its quotas. The standard catalog is
 eleven bare specifiers and nothing else: `node:` prefixes and other Node modules (`fs`, `child_process`,
 `events`, ...) do not import, so no module reaches files, processes or sockets around these checks. See

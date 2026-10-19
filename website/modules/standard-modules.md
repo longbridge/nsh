@@ -43,7 +43,7 @@ The modules follow Node's names and shapes for the subset they export, and gpui-
 
 ## Compression
 
-`zlib` is LLRT's, with one bound NSH adds: each decompression (`inflate`, `inflateRaw`, `gunzip`, `brotliDecompress`, `zstdDecompress` and their `Sync` forms) produces at most 64 MiB, or the VM's heap limit when that is smaller. Longer output throws a `RangeError`, as Node.js does for `maxOutputLength`; an app's own `maxOutputLength` sets a lower bound for one call.
+`zlib` is LLRT's, with one bound NSH adds: each decompression (`inflate`, `inflateRaw`, `gunzip`, `brotliDecompress`, `zstdDecompress` and their `Sync` forms) produces at most 64 MiB, or the VM's heap limit when that is smaller. Longer output throws a `RangeError`, as Node.js does for `maxOutputLength`; an app's own `maxOutputLength` sets a lower bound for one call. `Buffer.alloc`, `Buffer.allocUnsafe`, `Buffer.allocUnsafeSlow` and `crypto.randomBytes` throw a `RangeError` (`code` `ERR_OUT_OF_RANGE`) for a size past the VM's heap limit, or 1 GiB without one; `allocUnsafe` returns zeroed memory.
 
 ## Files
 
