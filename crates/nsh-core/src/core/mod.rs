@@ -799,10 +799,11 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
-    /// memory, for the core's life. Checked against the access set before.
+    /// memory, for the core's life.
     pub fn set_storage(&mut self, backend: Option<Arc<dyn crate::storage::StorageBackend>>) {
-        let storage = crate::storage::Storage::new(backend, self.access.allows_storage());
-        self.components.runtime.set_storage(storage);
+        self.components
+            .runtime
+            .set_storage(crate::storage::Storage::new(backend));
     }
 
     /// Logs (once) that the app was refused `what`.

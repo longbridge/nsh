@@ -1,5 +1,5 @@
 //! `nsh/storage`: an app's entries kept in a file across launches, its
-//! quota and its capability.
+//! quota.
 
 use std::{path::PathBuf, time::Duration};
 
@@ -103,7 +103,8 @@ mount(() => <Text>{shown()}</Text>);
 fn entries_last_across_launches() {
     let data = scratch("data");
     for launch in 1..=2 {
-        let (engine, rx) = start("counter", COUNTER, None, &data);
+        // Capabilities do not cover storage: the app's own data.
+        let (engine, rx) = start("counter", COUNTER, Some("{}"), &data);
         assert_eq!(
             shown(&rx, "done"),
             format!("done {launch} launches full null")
@@ -113,14 +114,4 @@ fn entries_last_across_launches() {
     }
     let file = std::fs::read_to_string(data.join("storage.json")).unwrap();
     assert_eq!(file, r#"{"launches":"2"}"#);
-}
-
-#[test]
-fn storage_needs_its_capability() {
-    let data = scratch("denied");
-    let (_engine, rx) = start("denied", COUNTER, Some("{}"), &data);
-    let text = shown(&rx, "done");
-    assert!(text.contains("\"storage\": true"), "{text}");
-    let (_engine, rx) = start("granted", COUNTER, Some(r#"{ "storage": true }"#), &data);
-    assert_eq!(shown(&rx, "done"), "done 1 launches full null");
 }

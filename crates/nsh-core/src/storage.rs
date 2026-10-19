@@ -5,8 +5,8 @@
 //! The core keeps the entries in memory, loaded from the backend on first
 //! use, so reads never touch the disk; every change is handed to the
 //! backend, which writes it where it may block (the file backend on a
-//! thread of its own). The quota and the `storage` capability are checked
-//! here, in Rust.
+//! thread of its own). Every app has its storage: what the host decides is
+//! where it is kept. The quota is checked here, in Rust.
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -45,30 +45,22 @@ impl std::fmt::Debug for dyn StorageBackend {
 /// An app's entries: the engine's, shared with the module functions.
 pub(crate) struct Storage {
     backend: Option<Arc<dyn StorageBackend>>,
-    allowed: bool,
     entries: Option<BTreeMap<String, String>>,
     bytes: usize,
 }
 
 impl Storage {
     /// Entries kept by `backend` (`None`: in memory, for the engine's
-    /// life), when `allowed` (the `storage` capability).
-    pub(crate) fn new(backend: Option<Arc<dyn StorageBackend>>, allowed: bool) -> Self {
+    /// life).
+    pub(crate) fn new(backend: Option<Arc<dyn StorageBackend>>) -> Self {
         Self {
             backend,
-            allowed,
             entries: None,
             bytes: 0,
         }
     }
 
     fn entries(&mut self) -> Result<&mut BTreeMap<String, String>, String> {
-        if !self.allowed {
-            return Err(
-                "storage is not granted: add `\"storage\": true` to capabilities in nsh.json"
-                    .into(),
-            );
-        }
         let backend = &self.backend;
         let bytes = &mut self.bytes;
         Ok(self.entries.get_or_insert_with(|| {
@@ -172,7 +164,7 @@ mod tests {
             kept: BTreeMap::from([("a".into(), "1".into())]),
             ..Recorder::default()
         });
-        let mut storage = Storage::new(Some(backend.clone()), true);
+        let mut storage = Storage::new(Some(backend.clone()));
         assert_eq!(storage.get("a").unwrap().as_deref(), Some("1"));
         storage.set("b".into(), "2".into()).unwrap();
         storage.set("b".into(), "2".into()).unwrap();
@@ -191,13 +183,11 @@ mod tests {
     }
 
     #[test]
-    fn checks_the_quota_and_the_capability() {
-        let mut storage = Storage::new(None, true);
+    fn checks_the_quota() {
+        let mut storage = Storage::new(None);
         storage.set("k".into(), "x".repeat(QUOTA - 1)).unwrap();
         assert!(storage.set("j".into(), "y".into()).is_err());
         // Replacing a value counts the new one only.
         storage.set("k".into(), "z".repeat(QUOTA - 1)).unwrap();
-        let mut denied = Storage::new(None, false);
-        assert!(denied.get("k").unwrap_err().contains("\"storage\": true"));
     }
 }

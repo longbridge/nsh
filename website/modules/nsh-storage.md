@@ -107,6 +107,3 @@ mount(() => (
   </View>
 ));
 ```
-
-> [!NOTE]
-> When your app declares `capabilities` in `nsh.json`, storage must be granted with `"storage": true`. Without it every call rejects with an error saying which key to add. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).

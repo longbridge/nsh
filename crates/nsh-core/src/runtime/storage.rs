@@ -1,6 +1,5 @@
 //! `nsh/storage`: the app's key-value storage, strings by string key kept
-//! on the device (`crate::storage`). Needs the `storage` capability when
-//! the app declares capabilities.
+//! on the device (`crate::storage`).
 
 use crate::ui::{ambient::with_storage, module};
 

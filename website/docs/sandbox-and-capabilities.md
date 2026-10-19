@@ -102,8 +102,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
-    "clipboard": true,
-    "storage": true
+    "clipboard": true
   }
 }
 ```
@@ -153,9 +152,9 @@ allows them without allowing any remote page.
 
 `"clipboard": true` lets the app read and write the system clipboard ([`nsh/clipboard`](../modules/nsh-clipboard.md)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
 
-### `storage`
+### Storage
 
-`"storage": true` lets the app keep data on the device ([`nsh/storage`](../modules/nsh-storage.md)), in a storage of its own of up to 5 MB.
+Every app may keep its own data on the device with [`nsh/storage`](../modules/nsh-storage.md), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
 
 ### What a refusal looks like
 
@@ -165,7 +164,6 @@ allows them without allowing any remote page.
 | Remote image | The image fails with `onError`. |
 | Video source, web view source, status bar change | Nothing is shown or changed. |
 | Clipboard | `setString` does nothing; `getString` resolves `""` and `hasString` `false`. |
-| Storage | Every call rejects with an error saying which key to add. |
 
 Each refusal is logged once, saying which key to add:
 

@@ -95,8 +95,7 @@ release 构建（所有并非从开发服务器加载的代码）在加载时会
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
-    "clipboard": true,
-    "storage": true
+    "clipboard": true
   }
 }
 ```
@@ -142,9 +141,9 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 
 `"clipboard": true` 允许应用读写系统剪贴板（[`nsh/clipboard`](../modules/nsh-clipboard.md)）。从可选文本的编辑菜单复制是用户自己的操作，不需要这项能力。
 
-### `storage`
+### 存储
 
-`"storage": true` 允许应用在设备上保存数据（[`nsh/storage`](../modules/nsh-storage.md)），每个应用有自己最多 5 MB 的存储。
+每个应用都可以用 [`nsh/storage`](../modules/nsh-storage.md) 在设备上保存自己的数据，无需任何能力：存储里只有该应用自己的数据，保存位置由宿主应用决定。
 
 ### 被拒绝时的表现
 
@@ -154,7 +153,6 @@ web view 内的顶层导航也会在加载前由平台的导航代理检查。�
 | 远程图片 | 图片加载失败，触发 `onError`。 |
 | 视频源、web view 源、状态栏修改 | 不显示也不修改任何东西。 |
 | 剪贴板 | `setString` 不做任何事；`getString` 返回 `""`，`hasString` 返回 `false`。 |
-| 存储 | 每次调用都被拒绝，错误信息说明需要添加哪个键。 |
 
 每种拒绝只记录一次日志，并说明需要添加哪个键：
 

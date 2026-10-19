@@ -107,6 +107,3 @@ mount(() => (
   </View>
 ));
 ```
-
-> [!NOTE]
-> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"storage": true` 授予存储。否则每次调用都会被拒绝，错误信息会说明要添加哪个键。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
