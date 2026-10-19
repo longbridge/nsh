@@ -64,6 +64,25 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   they were: the same ops and mount items in every commit (Animations: 2029 items on the page's first frame, then
   4 / 10 / 9 / 9 / 3 / 3 / 17 for Release, Stagger, Sequence, Loop, Stop, Reset and a curve; Gestures: 815, then
   4 / 14 / 3 / 10 / 4 / 2), the commits' times within their run-to-run spread.
+- Rust components' structure (`origin/main` against these changes: `Copy` handles, listeners and tasks under their
+  owner, every listener of an event walked in place, Delete with no Remove for what leaves a nested component,
+  children passed on to a nested component, a component rooted in another made on its host, slots filled with no
+  holder and passed on, what a view gives a component's element on its root; release, minimum / median):
+  `component_bench` GridRust first frame JS 392–395µs / core 0.97–0.98ms before, 408–415µs / 1.01–1.02ms after,
+  200 titles JS 135µs / core 412–422µs before, 145–146µs / 428µs after, RowsRust first frame core 209–211µs before,
+  232µs after, scrolling 5.75µs / 6.07–6.11µs per rebinding frame core, JS 1.43µs / 1.51–1.54µs; the same ops and
+  mount items (1015 / 2217, 200 / 400, 500 / 617). The renaming commit alone, the same code as before, measured right
+  after gives the later numbers (GridRust core 1.01ms, RowsRust 229µs and 6.0–6.1µs), so the difference is the
+  machine's drift between the runs, not the changes. `handle_bench` (two runs each): `set` 8.0–8.4ns before,
+  8.8–9.6ns after; `timing` 11.9–14.8 / 15.2–15.8ns; `interpolate` of a node made before 18.8–24.6 / 29.5–29.9ns;
+  `ElementRef::node` 0.2 / 1.2ns; `focus` 8.0–8.1 / 9.5–9.7ns. Release `nsh trace` (nine interleaved runs):
+  `Bench.tsx --scroll 3000` the same 1205 ops / 1008 items first and 1064 ops / 914 items over 39 commits (first
+  commit 1.33 / 1.65ms before, 1.35 / 1.64ms after; the scrolling 14.8 / 15.9ms against 15.4 / 16.2ms). The Rust
+  gallery (its app's command line built release, five interleaved runs, the index and each demo page opened with
+  `--wait 1500`): the same mount items in every commit of every page (index 1012, Stocks 1102, AI Chat 793, Lists
+  900, Animations 2029, Form 1293, ...), but for the Stocks page's ticks after it opens, which follow a generator
+  seeded by the clock; a page's first commit 1.0–5.0ms either way, inside the run-to-run spread (index 1.16 / 1.86ms
+  before, 1.46 / 2.03ms after).
 - Calls into Rust from JS (`class_bench`: `cargo test --release -p nsh-engine --test engine bench_calls -- --ignored
   --nocapture --test-threads=1`, min / median of 20 runs, per call, the JS loop included). A member or function that
   is not `async` runs in the call and converts its values directly (`docs/dev/rust-classes.md`); one awaited
