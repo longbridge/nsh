@@ -795,3 +795,35 @@ import fs from "fs/promises";
     assert_eq!(shown(&rx, "done"), "done either|either");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_directory_past_the_readdir_limit_is_refused_with_a_code() {
+    let (root, app) = data_dir("many");
+    std::fs::create_dir(app.join("many")).unwrap();
+    for i in 0..10_001 {
+        std::fs::write(app.join(format!("many/{i:05}")), "").unwrap();
+    }
+    std::fs::create_dir(app.join("some")).unwrap();
+    for i in 0..3_000 {
+        std::fs::write(app.join(format!("some/{i:05}-{}", "n".repeat(40))), "").unwrap();
+    }
+    let (_engine, rx) = start(
+        r#"
+import fs from "fs/promises";
+(async () => {
+  const many = await fs.readdir("many").then(() => "listed", (e) => `${e.constructor.name}:${e.code}`);
+  // About 140 KB of names: listed in batches held ahead.
+  const some = await fs.readdir("some");
+  report(`${many} ${some.length} ${some[0].startsWith("00000-")}`);
+})().catch((e) => report(String(e)));
+"#,
+        DATA_GRANT,
+        Some(root.clone()),
+        Default::default(),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done RangeError:ERR_OUT_OF_RANGE 3000 true"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

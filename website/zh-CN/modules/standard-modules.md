@@ -61,7 +61,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 失败时的错误带有 Node 的错误属性：`code`（`ENOENT`、`EEXIST`、`ENOTDIR`、`EISDIR`、`ENOTEMPTY`、`ELOOP`、`EACCES`、`EPERM` 等；文本不是 UTF-8 时为 `EILSEQ`，超出读取上限时为 `ERR_FS_FILE_TOO_LARGE`）、`syscall` 和 `path`，因此可以用 `error.code === "ENOENT"` 判断文件不存在。授权范围之外的路径抛出 `code` 为 `EACCES` 的 `TypeError`，宿主没有原生文件系统时 `code` 为 `ENOSYS`。
 
-`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名，传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
+`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名（名称合计最多 1 MiB；更大的目录以 `code` 为 `ERR_OUT_OF_RANGE` 的 `RangeError` 拒绝），传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
 
 ## 进程
 

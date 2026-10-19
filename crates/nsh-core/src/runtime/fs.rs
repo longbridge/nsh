@@ -37,6 +37,9 @@ const GROWTH: usize = 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_NAME_BYTES: usize = 1024 * 1024;
+/// The name bytes a `readdir` holds of the budget ahead of listing them.
+#[cfg(not(target_arch = "wasm32"))]
+const NAME_BATCH: usize = 64 * 1024;
 
 /// Capability-checked files.
 pub(crate) struct Fs;
@@ -955,33 +958,61 @@ impl Grant {
 
     async fn entries(self, quotas: &Quotas, types: bool) -> Result<Holding<Entries>, JsError> {
         let name = self.name.clone();
-        let (entries, name_bytes) = blocking(move || {
-            let mut entries = Vec::new();
-            let mut name_bytes = 0;
-            for entry in self
+        let (grant, mut listing) = blocking(move || {
+            let listing = self
                 .open()
                 .and_then(|(dir, relative)| dir.read_dir(relative))
-                .map_err(|e| self.error("list", "scandir", e))?
-            {
-                let entry = entry.map_err(|e| self.error("list", "scandir", e))?;
-                let name = entry.file_name().to_string_lossy().into_owned();
-                name_bytes += name.len();
-                if entries.len() == MAX_ENTRIES || name_bytes > MAX_NAME_BYTES {
-                    return Err(JsError::Error(format!(
-                        "cannot list `{}`: directory exceeded the {MAX_ENTRIES}-entry or {MAX_NAME_BYTES}-name-byte fs.readdir limit",
-                        self.name
-                    )));
-                }
-                let directory = entry.file_type().is_ok_and(|t| t.is_dir());
-                entries.push((name, directory));
-            }
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            Ok((entries, name_bytes))
+                .map_err(|e| self.error("list", "scandir", e))?;
+            Ok((self, listing))
         })
         .await?;
-        let held = quotas
-            .reserve(IN_FLIGHT, name_bytes, MAX_IN_FLIGHT)
-            .ok_or_else(|| exceeded(&name))?;
+        let grant = std::sync::Arc::new(grant);
+        let mut entries = Vec::new();
+        let mut name_bytes = 0;
+        // The names are held a batch ahead of reading them.
+        let mut held = Vec::new();
+        let mut holding = 0;
+        loop {
+            held.push(
+                quotas
+                    .reserve(IN_FLIGHT, NAME_BATCH, MAX_IN_FLIGHT)
+                    .ok_or_else(|| exceeded(&name))?,
+            );
+            holding += NAME_BATCH;
+            let lister = grant.clone();
+            let done;
+            (listing, entries, name_bytes, done) = blocking(move || {
+                let mut entries = entries;
+                let mut name_bytes = name_bytes;
+                while name_bytes < holding {
+                    let Some(entry) = listing.next() else {
+                        entries.sort_by(|a: &(String, bool), b| a.0.cmp(&b.0));
+                        return Ok((listing, entries, name_bytes, true));
+                    };
+                    let entry = entry.map_err(|e| lister.error("list", "scandir", e))?;
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    name_bytes += name.len();
+                    if entries.len() == MAX_ENTRIES || name_bytes > MAX_NAME_BYTES {
+                        return Err(JsError::Range(format!(
+                            "cannot list `{}`: directory exceeded the {MAX_ENTRIES}-entry or {MAX_NAME_BYTES}-name-byte fs.readdir limit",
+                            lister.name
+                        ))
+                        .with_code("ERR_OUT_OF_RANGE")
+                        .with("path", lister.path.as_str()));
+                    }
+                    let directory = entry.file_type().is_ok_and(|t| t.is_dir());
+                    entries.push((name, directory));
+                }
+                Ok((listing, entries, name_bytes, false))
+            })
+            .await?;
+            if done {
+                break;
+            }
+        }
+        drop(held);
+        // At most what was held a moment ago: it fits.
+        let held = quotas.reserve(IN_FLIGHT, name_bytes, MAX_IN_FLIGHT);
         let value = if types {
             Entries::Typed(
                 entries
@@ -994,7 +1025,7 @@ impl Grant {
         };
         Ok(Holding {
             value,
-            _held: vec![held],
+            _held: held.into_iter().collect(),
         })
     }
 }
