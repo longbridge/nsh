@@ -43,7 +43,6 @@ use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
 
 use crate::view::NshView;
 
-
 /// What was last given to AppKit for one view.
 #[derive(Debug, Default)]
 pub(crate) struct Applied {
@@ -715,7 +714,10 @@ mod tests {
     fn a_checkbox_value_compared_by_kind_not_contents() {
         let text_value = ValueKind::Text("1".into());
         let checked = ValueKind::Checked(1);
-        assert_ne!(text_value, checked, "a checkbox's number must replace the string");
+        assert_ne!(
+            text_value, checked,
+            "a checkbox's number must replace the string"
+        );
 
         // The same contents on the same kind is unchanged.
         assert_eq!(ValueKind::Text("1".into()), ValueKind::Text("1".into()));
@@ -737,9 +739,11 @@ mod tests {
             hidden: false,
             ..hidden.clone()
         };
-        assert_eq!(hidden.element, shown.element, "an accessible=false container is never an element");
+        assert_eq!(
+            hidden.element, shown.element,
+            "an accessible=false container is never an element"
+        );
         assert_eq!(hidden.role, shown.role, "and its role does not change");
         assert_ne!(hidden, shown, "so hidden itself must differ");
     }
-
 }
