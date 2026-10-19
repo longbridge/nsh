@@ -65,14 +65,16 @@ impl NativeModules {
 
 /// TSX -> JS with nsh's JSX compiler ([`crate::jsx`]), TypeScript removed
 /// in the same pass; `prologue` runs first; with `hot_key` the module's
-/// components are hot ([`crate::hot`]). Errors are rendered with a code
-/// frame.
+/// components are hot ([`crate::hot`]); with `meta_path` (the module's
+/// path in the app) its `import.meta.url` is its own. Errors are rendered
+/// with a code frame.
 pub(crate) fn compile_native(
     path: &Path,
     source_type: SourceType,
     source: &str,
     prologue: Option<&str>,
     hot_key: Option<&str>,
+    meta_path: Option<&str>,
     modules: &NativeModules,
 ) -> Result<(String, SourceMap<'static>), String> {
     let allocator = Allocator::default();
@@ -110,6 +112,7 @@ pub(crate) fn compile_native(
         &ret.scoping,
         source,
         prologue,
+        meta_path,
         modules,
     )?;
     elide_unused_imports(&mut program);

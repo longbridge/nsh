@@ -29,8 +29,8 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 这些模块在其导出的子集内沿用 Node 的名称和形态，在 gpui-shell 定义了行为之处沿用 gpui-shell 的行为。NSH 自己的选择：
 
 - `fs/promises` 的 `exists` 对目标不存在的符号链接返回 `true`；`unlink`、`rename`、`rmdir`、`lstat` 和 `readlink` 作用于符号链接本身。
-- `Stats` 和 `Dirent` 的字段（`size`、`mtimeMs`、`name` 等）是 getter，并带有 `isFile()`、`isDirectory()` 和 `isSymbolicLink()` 方法。
-- `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal, error }`。`on` 返回子进程本身。
+- `Stats` 和 `Dirent` 的字段（`size`、`mtimeMs`、`name` 等）与 Node 一样是对象自身的属性，`isFile()`、`isDirectory()` 和 `isSymbolicLink()` 在其原型上。
+- `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal }`（由运行时结束子进程时还带有 `error`）。`on` 返回子进程本身。
 - 子进程的环境是宿主的一小组变量加上应用获授权的变量名；它在应用的数据目录中运行，或在 `fs.write` 根目录内的 `cwd` 中运行（见[进程](#进程)）。
 - 宿主没有数据目录时 `process.dataDir` 为 `null`；`process.exit` 请求宿主退出。
 - 限制是每个接口的一部分：大小、数量和超时在下面各模块中列出。
@@ -61,7 +61,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 失败时的错误带有 Node 的错误属性：`code`（`ENOENT`、`EEXIST`、`ENOTDIR`、`EISDIR`、`ENOTEMPTY`、`ELOOP`、`EACCES`、`EPERM` 等；文本不是 UTF-8 时为 `EILSEQ`，超出读取上限时为 `ERR_FS_FILE_TOO_LARGE`）、`syscall` 和 `path`，因此可以用 `error.code === "ENOENT"` 判断文件不存在。授权范围之外的路径抛出 `code` 为 `EACCES` 的 `TypeError`，宿主没有原生文件系统时 `code` 为 `ENOSYS`。
 
-`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名，传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`（其字段是 getter），包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
+`readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名，传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
 
 ## 进程
 
@@ -87,7 +87,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal, error }`（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。未授权的命令或授权范围之外的 `cwd` 抛出带 `code` `EACCES` 的 `TypeError`；启动失败的错误带有 `code`（可执行文件不存在时为 `ENOENT`，无法执行时为 `EACCES`）、`syscall`（`spawn <命令>`）和 `path`：`spawn` 抛出该错误，`run` 以它拒绝。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
+`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal }`（由运行时结束子进程时，例如超时或行过长，还带有 `error`）（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。未授权的命令或授权范围之外的 `cwd` 抛出带 `code` `EACCES` 的 `TypeError`；启动失败的错误带有 `code`（可执行文件不存在时为 `ENOENT`，无法执行时为 `EACCES`）、`syscall`（`spawn <命令>`）和 `path`：`spawn` 抛出该错误，`run` 以它拒绝。超过子进程数量上限时，`spawn` 抛出、`run` 以 `RangeError` 拒绝。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
 
 | 限制 | 值 |
 |---|---|

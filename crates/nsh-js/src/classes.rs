@@ -753,6 +753,7 @@ impl<'a> CallHost<'a> {
     fn new_object(&self, proto: Raw, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
         let wrappers = classes(self.ctx).wrappers.clone();
         let k = key(&instance);
+        let def = instance.def();
         let obj = web::instance_of_proto(
             self.ctx,
             proto,
@@ -763,7 +764,34 @@ impl<'a> CallHost<'a> {
         )
         .map_err(|Throw| self.threw())?;
         wrappers.borrow_mut().insert(k, obj.raw());
+        if def.interface {
+            self.own_fields(def, &obj)?;
+        }
         Ok(to_raw(obj.take()))
+    }
+
+    /// An interface's getters, read once as its object's own enumerable
+    /// data properties (Node's `Stats`: `Object.keys`, spread and
+    /// `JSON.stringify` see them); its methods stay on the prototype.
+    fn own_fields(&self, def: &'static ClassDef, obj: &V) -> Result<(), PropError> {
+        for member in def.members.iter().filter(|m| m.kind == MemberKind::Getter) {
+            let MemberCall::Sync(get) = member.call else {
+                continue;
+            };
+            // SAFETY: no arguments.
+            let args = unsafe { js::Args::new(0, std::ptr::null_mut()) };
+            let host = CallHost::new(self.ctx, obj.raw(), UNDEFINED, args);
+            let value = get(&host).map_err(|thrown| PropError(thrown.to_string()))?;
+            js::define(
+                self.ctx,
+                obj.raw(),
+                member.name,
+                V::own(self.ctx, from_raw(value)),
+                true,
+            )
+            .map_err(|Throw| self.threw())?;
+        }
+        Ok(())
     }
 }
 

@@ -134,6 +134,8 @@ struct PropAttr {
     aliases: Vec<String>,
     /// `Children` made only while the view places them.
     lazy: bool,
+    /// A `JsObject`'s `Option` field left out of the object when `None`.
+    skip_none: bool,
 }
 
 fn prop_attr(attrs: &[Attribute]) -> syn::Result<PropAttr> {
@@ -159,9 +161,12 @@ fn prop_attr(attrs: &[Attribute]) -> syn::Result<PropAttr> {
             } else if meta.path.is_ident("lazy") {
                 out.lazy = true;
                 Ok(())
+            } else if meta.path.is_ident("skip_none") {
+                out.skip_none = true;
+                Ok(())
             } else {
                 Err(meta.error(
-                    "expected `default`, `default = …`, `rename = \"…\"`, `alias = \"…\"` or `lazy`",
+                    "expected `default`, `default = …`, `rename = \"…\"`, `alias = \"…\"`, `lazy` or `skip_none`",
                 ))
             }
         })?;
@@ -1163,7 +1168,9 @@ fn methods_impl(item: ItemImpl) -> syn::Result<TokenStream2> {
 /// an `Option` or has `#[prop(default)]` / `#[prop(default = expr)]`;
 /// missing, it takes its default. Doc comments document the fields.
 /// `#[prop(exact)]` on the struct refuses an object with other own
-/// enumerable keys (options where a typo must not pass unnoticed).
+/// enumerable keys (options where a typo must not pass unnoticed);
+/// `#[prop(skip_none)]` on an `Option` field leaves it out of the object
+/// when it is `None` (`"error" in exit` is false), instead of `null`.
 #[proc_macro_derive(JsObject, attributes(prop))]
 pub fn derive_js_object(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -1242,8 +1249,22 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 }
             }
         });
-        to_js.push(quote! {
-            host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
+        if attr.skip_none && !is_option {
+            return Err(syn::Error::new(
+                field.span(),
+                "`skip_none` is for an `Option` field",
+            ));
+        }
+        to_js.push(if attr.skip_none {
+            quote! {
+                if let ::core::option::Option::Some(value) = &self.#ident {
+                    host.set_field(object, #js, #ui::JsValue::to_js(value, host)?.into_raw())?;
+                }
+            }
+        } else {
+            quote! {
+                host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
+            }
         });
     }
     let check = exact.then(|| {

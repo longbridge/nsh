@@ -1131,6 +1131,13 @@ declare var performance: {
   now(): number;
 };
 
+interface ImportMeta {
+  /** The module's own URL: `file:` in the app's directory on desktop hosts,
+   * the page's on the web, `asset:/` in packaged mobile apps, so
+   * `new URL("./data.json", import.meta.url)` names a file beside it. */
+  readonly url: string;
+}
+
 declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;
 declare function setInterval(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;
 declare function clearTimeout(id: number | undefined): void;

@@ -100,6 +100,7 @@ const HELPERS: &[&str] = &[
     "each",
     "merge",
     "setup",
+    "metaUrl",
 ];
 
 /// Prefix of generated names; apps do not use it.
@@ -146,9 +147,11 @@ pub(crate) fn transform<'a>(
     scoping: &Scoping,
     source: &str,
     prologue: Option<&str>,
+    meta_path: Option<&str>,
     modules: &crate::compile::NativeModules,
 ) -> Result<(), String> {
     let mut compiler = Compiler {
+        meta_path,
         allocator,
         scoping,
         scopes: Vec::new(),
@@ -431,6 +434,16 @@ struct Compiler<'a, 's> {
     components: &'s [(String, String)],
     /// The primitives the module imports, by local name.
     primitives: HashMap<String, Compiled>,
+    /// The module's path in the app: `import.meta.url` becomes its URL.
+    meta_path: Option<&'s str>,
+}
+
+/// Whether `e` is `import.meta.url`.
+fn is_import_meta_url(e: &Expression<'_>) -> bool {
+    let Expression::StaticMemberExpression(m) = e else {
+        return false;
+    };
+    m.property.name == "url" && matches!(&m.object, Expression::ImportMeta(_))
 }
 
 impl<'a> VisitMut<'a> for Compiler<'a, '_> {
@@ -446,7 +459,18 @@ impl<'a> VisitMut<'a> for Compiler<'a, '_> {
     }
 
     fn visit_expression(&mut self, e: &mut Expression<'a>) {
-        if matches!(e, Expression::JSXElement(_) | Expression::JSXFragment(_)) {
+        if let Some(path) = self.meta_path
+            && is_import_meta_url(e)
+        {
+            // The module's own URL, which the runtime knows: the bundle
+            // shares one `import.meta`.
+            let call = format!(
+                "{}({})",
+                self.use_helper("metaUrl"),
+                serde_json::to_string(path).expect("a path is JSON")
+            );
+            *e = self.parse(&call, Vec::new(), e.span());
+        } else if matches!(e, Expression::JSXElement(_) | Expression::JSXFragment(_)) {
             let span = e.span();
             let jsx = e.take_in(&AstBuilder::new(self.allocator));
             let mut g = Gen { holes: Vec::new() };
@@ -1163,6 +1187,7 @@ mod tests {
             source,
             None,
             None,
+            Some("App.tsx"),
             &crate::compile::NativeModules::new(&[nsh_ui_mobile::registry()]),
         )
         .map(|(code, _)| code)
@@ -1184,6 +1209,22 @@ mod tests {
     /// The code with whitespace collapsed, for comparisons.
     fn flat(code: &str) -> String {
         code.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn import_meta_url_is_the_module_s_own() {
+        let code =
+            compile("const here = new URL(\".\", import.meta.url); const meta = import.meta;")
+                .unwrap();
+        assert!(
+            code.starts_with(r#"import { metaUrl as _$metaUrl } from "nsh:rt";"#),
+            "{code}"
+        );
+        assert!(
+            code.contains(r#"new URL(".", _$metaUrl("App.tsx"))"#),
+            "{code}"
+        );
+        assert!(code.contains("const meta = import.meta;"), "{code}");
     }
 
     #[test]
