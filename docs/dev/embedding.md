@@ -71,9 +71,15 @@
   (`rust_eh_personality`), the standard library and QuickJS (`JS_*`) become local, so apps that link another Rust
   static library (each defines `rust_eh_personality`) or QuickJS link NativeShell without duplicate symbols (with
   `-dead_strip` the linker only warns and keeps one of them, which the other runtime then unwinds with).
-  `cargo xtask ios-embed` options: `--x86-64-simulator` adds the x86_64 simulator architecture (merged with arm64 by
-  `lipo`: apps whose simulator builds run under Rosetta; `rustup target add x86_64-apple-ios`), `--no-catalyst` and
-  `--no-dev` leave out the Catalyst slice and `NativeShellDev`. The C functions return errors as strings
+  Hiding the symbols is not always enough: an image's compact unwind table encodes at most three personality routines,
+  and an app that already has the Objective-C and C++ ones plus another Rust library's (`rust_eh_personality`, which
+  NSH's local copy then adds to) fails to link with "Too many personality routines for compact unwind". `--dynamic`
+  builds dynamic frameworks instead (the Swift module and the runtime object linked with `swiftc -emit-library`,
+  `-dead_strip`, installed at `@rpath/NativeShell.framework/NativeShell`), which the app embeds: the runtime gets an
+  image, and an unwind table, of its own.
+  `cargo xtask ios-embed` options: `--dynamic`; `--x86-64-simulator` adds the x86_64 simulator architecture (merged
+  with arm64 by `lipo`: apps whose simulator builds run under Rosetta; `rustup target add x86_64-apple-ios`);
+  `--no-catalyst` and `--no-dev` leave out the Catalyst slice and `NativeShellDev`. The C functions return errors as strings
   (`nsh_string_free`) that Swift throws as `NshError`; the error handler's context is released by a callback.
 
 ## GPUI and GPUI Kit apps

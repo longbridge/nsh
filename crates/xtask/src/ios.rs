@@ -1,7 +1,8 @@
 //! The iOS embedding SDK: `NativeShell.xcframework` (and `NativeShellDev`
 //! with development support).
 //!
-//! Each platform slice is a static `NativeShell.framework` whose binary
+//! Each platform slice is a `NativeShell.framework` (static, or dynamic with
+//! `--dynamic`) whose binary
 //! holds the Rust runtime (`nsh-platform-ios` with feature `embed`, built as
 //! a static library) and the `NativeShell` Swift module
 //! (`crates/nsh-platform-ios/swift`), compiled with library evolution so apps
@@ -45,6 +46,13 @@ pub(crate) struct Options {
     /// Build only `NativeShell.xcframework`, not `NativeShellDev`.
     #[arg(long)]
     pub(crate) no_dev: bool,
+    /// Build dynamic frameworks (embedded in the app) instead of static
+    /// ones: the runtime gets an image of its own, with its own compact
+    /// unwind table (an image can encode three personality routines; an app
+    /// with the Objective-C and C++ ones and another Rust library's has no
+    /// room for NSH's).
+    #[arg(long)]
+    pub(crate) dynamic: bool,
 }
 
 /// One architecture of a platform.
@@ -166,15 +174,19 @@ pub(crate) fn xcframeworks(out: &Path, work: &Path, options: Options) -> anyhow:
                 let runtime = dir.join("nsh-runtime.o");
                 hide_symbols(platform, arch, &rust_lib, &runtime)?;
                 let binary = dir.join("NativeShell");
-                run(Command::new("xcrun")
-                    .args(["libtool", "-static", "-no_warning_for_no_symbols", "-o"])
-                    .arg(&binary)
-                    .arg(&runtime)
-                    .arg(
-                        work.join("swift")
-                            .join(arch.rust)
-                            .join("libNativeShellSwift.a"),
-                    ))?;
+                if options.dynamic {
+                    link_dynamic(platform, arch, &crate_dir, &runtime, &binary)?;
+                } else {
+                    run(Command::new("xcrun")
+                        .args(["libtool", "-static", "-no_warning_for_no_symbols", "-o"])
+                        .arg(&binary)
+                        .arg(&runtime)
+                        .arg(
+                            work.join("swift")
+                                .join(arch.rust)
+                                .join("libNativeShellSwift.a"),
+                        ))?;
+                }
                 binaries.push(binary);
             }
             let first = platform.archs[0].rust;
@@ -248,6 +260,21 @@ fn compile_swift(
     let target = arch.target();
     let module = dir.join(format!("{arch_os}{env}"));
     let sdk = sdk_path(platform.sdk)?;
+    run(swiftc(platform, &target, &sdk)
+        .args(["-emit-library", "-static"])
+        .arg("-emit-module-path")
+        .arg(module.with_extension("swiftmodule"))
+        .arg("-emit-module-interface-path")
+        .arg(module.with_extension("swiftinterface"))
+        .arg("-I")
+        .arg(crate_dir.join("include"))
+        .arg(crate_dir.join("swift/NativeShell.swift"))
+        .arg("-o")
+        .arg(dir.join("libNativeShellSwift.a")))
+}
+
+/// `swiftc` set up to compile the `NativeShell` module for `target`.
+fn swiftc(platform: &Platform, target: &str, sdk: &str) -> Command {
     let mut swiftc = Command::new("xcrun");
     swiftc.arg("swiftc");
     if platform.versioned {
@@ -260,30 +287,46 @@ fn compile_swift(
             .arg("-I")
             .arg(format!("{support}/usr/lib/swift"));
     }
-    run(swiftc
+    swiftc
         .args(["-parse-as-library", "-module-name", "NativeShell"])
-        .args(["-target", &target, "-sdk", &sdk])
+        .args(["-target", target, "-sdk", sdk])
         .args(["-swift-version", "5", "-enable-library-evolution"])
-        .args([
-            "-O",
-            "-whole-module-optimization",
-            "-emit-library",
-            "-static",
-        ])
-        .arg("-emit-module-path")
-        .arg(module.with_extension("swiftmodule"))
-        .arg("-emit-module-interface-path")
-        .arg(module.with_extension("swiftinterface"))
+        .args(["-O", "-whole-module-optimization"]);
+    swiftc
+}
+
+/// A dynamic library: the Swift module linked with the Rust runtime
+/// (`runtime`, which exports only the C ABI), installed at
+/// `@rpath/NativeShell.framework/...`. The module files are the static
+/// build's (`compile_swift`): the same source and flags.
+fn link_dynamic(
+    platform: &Platform,
+    arch: &Arch,
+    crate_dir: &Path,
+    runtime: &Path,
+    out: &Path,
+) -> anyhow::Result<()> {
+    let sdk = sdk_path(platform.sdk)?;
+    let install_name = if platform.versioned {
+        "@rpath/NativeShell.framework/Versions/A/NativeShell"
+    } else {
+        "@rpath/NativeShell.framework/NativeShell"
+    };
+    run(swiftc(platform, &arch.target(), &sdk)
+        .arg("-emit-library")
         .arg("-I")
         .arg(crate_dir.join("include"))
         .arg(crate_dir.join("swift/NativeShell.swift"))
+        .arg(runtime)
+        .args(["-Xlinker", "-install_name", "-Xlinker", install_name])
+        .args(["-Xlinker", "-dead_strip"])
         .arg("-o")
-        .arg(dir.join("libNativeShellSwift.a")))
+        .arg(out))
 }
 
-/// A static framework: the binaries of the platform's architectures (each
-/// the Rust runtime and the Swift library) merged into one, the Swift
-/// module of every architecture and an Info.plist.
+/// A framework: the binaries of the platform's architectures (each the Rust
+/// runtime and the Swift library, as a static library or a dylib) merged
+/// into one, the Swift module of every architecture and an Info.plist.
 fn make_framework(
     platform: &Platform,
     binaries: &[PathBuf],
