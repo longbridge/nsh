@@ -36,11 +36,15 @@ const MAX_NAME_BYTES: usize = 1024 * 1024;
 /// Capability-checked files.
 pub(crate) struct Fs;
 
-/// Promise-based files under the roots `capabilities.fs` grants.
+/// Promise-based files under the roots `capabilities.fs` grants. Failures
+/// carry Node's `code` (`ENOENT`, `EEXIST`, ...), `syscall` and `path`; a
+/// path no grant covers throws a `TypeError` with `code` `EACCES`.
 #[module(flat, default)]
 impl Fs {
     /// Reads at most 64 MiB. Omitted encoding returns Uint8Array. A runtime
-    /// holds at most 64 MiB of file data in flight.
+    /// holds at most 64 MiB of file data in flight. Like every function
+    /// here, it fails with an `Error & { code?: string; syscall?: string;
+    /// path?: string }` (`error.code === "ENOENT"`).
     #[overload(fn(path: String) -> Vec<u8>)]
     #[overload(fn(path: String, encoding: Encoding) -> String)]
     pub(crate) fn read_file(
@@ -178,7 +182,7 @@ fn pending(sys: &System) -> Result<Held, JsError> {
 /// `work` as an outstanding operation.
 fn start<T: Ret + 'static>(
     sys: &System,
-    work: impl Future<Output = Result<T, String>> + 'static,
+    work: impl Future<Output = Result<T, JsError>> + 'static,
 ) -> Result<Later<T>, JsError> {
     let pending = pending(sys)?;
     Ok(Later::new(async move {
@@ -492,6 +496,8 @@ pub(crate) struct Grant {
     dir: cap_std::fs::Dir,
     relative: PathBuf,
     name: String,
+    /// The path as the call gave it (an error's `path`).
+    path: String,
 }
 
 /// WebAssembly has no files: no path is ever granted.
@@ -515,12 +521,14 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
         target_os = "windows"
     )) && sys.os.is_desktop();
     if !roots.is_empty() && !available {
-        return Err(JsError::Type(
-            "native filesystem unavailable on this platform".into(),
-        ));
+        return Err(
+            JsError::Type("native filesystem unavailable on this platform".into())
+                .with_code("ENOSYS"),
+        );
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let given = path;
         let data = sys.data_dir.clone().unwrap_or_default();
         let paths = &sys.paths;
         let path = PathBuf::from(path);
@@ -593,36 +601,39 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
                 dir,
                 relative,
                 name,
+                path: given.to_owned(),
             });
         }
     }
     #[cfg(target_arch = "wasm32")]
-    let _ = (path, link);
+    let _ = link;
     let what = if write { "write" } else { "read" };
     Err(JsError::Type(format!(
         "filesystem {what} is not granted by capabilities.fs.{what}"
-    )))
+    ))
+    .with_code("EACCES")
+    .with("path", path))
 }
 
 /// "cannot read `name`: the runtime already holds ... in flight".
 #[cfg(not(target_arch = "wasm32"))]
-fn exceeded(name: &str) -> String {
-    format!(
+fn exceeded(name: &str) -> JsError {
+    JsError::Error(format!(
         "cannot read `{name}`: the runtime already holds {MAX_IN_FLIGHT} bytes of file data in flight"
-    )
+    ))
 }
 
 /// Runs `work` off the engine thread (on the tasks' runtime's blocking
 /// threads, else a thread of its own).
 #[cfg(not(target_arch = "wasm32"))]
 async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
+    work: impl FnOnce() -> Result<T, JsError> + Send + 'static,
+) -> Result<T, JsError> {
     if let Ok(runtime) = tokio::runtime::Handle::try_current() {
         return runtime
             .spawn_blocking(work)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| JsError::Error(e.to_string()))?;
     }
     let (tx, rx) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
@@ -630,8 +641,8 @@ async fn blocking<T: Send + 'static>(
         .spawn(move || {
             let _ = tx.send(work());
         })
-        .map_err(|e| e.to_string())?;
-    rx.await.map_err(|e| e.to_string())?
+        .map_err(|e| JsError::Error(e.to_string()))?;
+    rx.await.map_err(|e| JsError::Error(e.to_string()))?
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -640,21 +651,34 @@ impl Grant {
         &self.name
     }
 
-    fn error(&self, verb: &str, error: std::io::Error) -> String {
-        format!("cannot {verb} `{}`: {error}", self.name)
+    /// I/O error `error` of `syscall` as Node's: the message names the
+    /// entry, `code`, `syscall` and `path` tell it apart.
+    fn error(&self, verb: &str, syscall: &'static str, error: std::io::Error) -> JsError {
+        let code = crate::ui::io_code(&error);
+        let thrown = JsError::Error(format!("cannot {verb} `{}`: {error}", self.name));
+        match code {
+            Some(code) => thrown.with_code(code),
+            None => thrown,
+        }
+        .with("syscall", syscall)
+        .with("path", self.path.as_str())
     }
 
-    async fn read(self, quotas: &Quotas, text: bool) -> Result<Holding<FileData>, String> {
+    async fn read(self, quotas: &Quotas, text: bool) -> Result<Holding<FileData>, JsError> {
         let name = self.name.clone();
         let too_big = move |len: usize| {
-            format!(
+            JsError::Error(format!(
                 "`{name}` is {len} bytes, over the {MAX_READ}-byte limit for fs.readFile; read it in pieces or keep it out of the script"
-            )
+            ))
+            .with_code("ERR_FS_FILE_TOO_LARGE")
         };
         let (grant, file, size) = blocking(move || {
             let file = confined::open_file(&self.dir, &self.relative, false)
-                .map_err(|e| self.error("read", e))?;
-            let size = file.metadata().map_err(|e| self.error("read", e))?.len();
+                .map_err(|e| self.error("read", "open", e))?;
+            let size = file
+                .metadata()
+                .map_err(|e| self.error("read", "fstat", e))?
+                .len();
             Ok((self, file, size))
         })
         .await?;
@@ -676,7 +700,7 @@ impl Grant {
             file.by_ref()
                 .take((MAX_READ + 1) as u64)
                 .read_to_end(&mut bytes)
-                .map_err(|e| grant.error("read", e))?;
+                .map_err(|e| grant.error("read", "read", e))?;
             if bytes.len() > MAX_READ {
                 return Err(too_big_read(bytes.len()));
             }
@@ -685,9 +709,11 @@ impl Grant {
             }
             // Valid UTF-8 keeps its length, and so what it holds of the
             // budget.
-            String::from_utf8(bytes)
-                .map(FileData::Text)
-                .map_err(|e| format!("cannot decode `{}` as UTF-8: {e}", grant.name))
+            String::from_utf8(bytes).map(FileData::Text).map_err(|e| {
+                JsError::Error(format!("cannot decode `{}` as UTF-8: {e}", grant.name))
+                    .with_code("EILSEQ")
+                    .with("path", grant.path.as_str())
+            })
         })
         .await?;
         let len = match &value {
@@ -708,36 +734,38 @@ impl Grant {
         Ok(Holding { value, _held: held })
     }
 
-    async fn write(self, bytes: Vec<u8>) -> Result<(), String> {
+    async fn write(self, bytes: Vec<u8>) -> Result<(), JsError> {
         blocking(move || {
             use std::io::Write;
             let mut file = confined::open_file(&self.dir, &self.relative, true)
-                .map_err(|e| self.error("write", e))?;
-            file.set_len(0).map_err(|e| self.error("write", e))?;
-            file.write_all(&bytes).map_err(|e| self.error("write", e))
+                .map_err(|e| self.error("write", "open", e))?;
+            file.set_len(0)
+                .map_err(|e| self.error("write", "ftruncate", e))?;
+            file.write_all(&bytes)
+                .map_err(|e| self.error("write", "write", e))
         })
         .await
     }
 
-    async fn mkdir(self, recursive: bool) -> Result<(), String> {
+    async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
         blocking(move || {
             if recursive {
                 self.dir.create_dir_all(&self.relative)
             } else {
                 self.dir.create_dir(&self.relative)
             }
-            .map_err(|e| self.error("create", e))
+            .map_err(|e| self.error("create", "mkdir", e))
         })
         .await
     }
 
     /// Whether the entry exists; a symlink exists even when its target does
     /// not.
-    async fn exists(self) -> Result<bool, String> {
+    async fn exists(self) -> Result<bool, JsError> {
         blocking(move || Ok(self.dir.symlink_metadata(&self.relative).is_ok())).await
     }
 
-    async fn stat(self, link: bool) -> Result<Stats, String> {
+    async fn stat(self, link: bool) -> Result<Stats, JsError> {
         blocking(move || {
             if link {
                 self.dir.symlink_metadata(&self.relative)
@@ -745,49 +773,49 @@ impl Grant {
                 self.dir.metadata(&self.relative)
             }
             .map(confined::stats)
-            .map_err(|e| self.error("stat", e))
+            .map_err(|e| self.error("stat", if link { "lstat" } else { "stat" }, e))
         })
         .await
     }
 
-    async fn readlink(self) -> Result<String, String> {
+    async fn readlink(self) -> Result<String, JsError> {
         blocking(move || {
             self.dir
                 .read_link_contents(&self.relative)
                 .map(|p| p.to_string_lossy().into_owned())
-                .map_err(|e| self.error("read link", e))
+                .map_err(|e| self.error("read link", "readlink", e))
         })
         .await
     }
 
-    async fn unlink(self) -> Result<(), String> {
+    async fn unlink(self) -> Result<(), JsError> {
         blocking(move || {
             self.dir
                 .remove_file(&self.relative)
-                .map_err(|e| self.error("remove", e))
+                .map_err(|e| self.error("remove", "unlink", e))
         })
         .await
     }
 
-    async fn rmdir(self) -> Result<(), String> {
+    async fn rmdir(self) -> Result<(), JsError> {
         blocking(move || {
             self.dir
                 .remove_dir(&self.relative)
-                .map_err(|e| self.error("remove", e))
+                .map_err(|e| self.error("remove", "rmdir", e))
         })
         .await
     }
 
-    async fn rename(self, to: Self) -> Result<(), String> {
+    async fn rename(self, to: Self) -> Result<(), JsError> {
         blocking(move || {
             self.dir
                 .rename(&self.relative, &to.dir, &to.relative)
-                .map_err(|e| self.error("rename", e))
+                .map_err(|e| self.error("rename", "rename", e))
         })
         .await
     }
 
-    async fn entries(self, quotas: &Quotas, types: bool) -> Result<Holding<Entries>, String> {
+    async fn entries(self, quotas: &Quotas, types: bool) -> Result<Holding<Entries>, JsError> {
         let name = self.name.clone();
         let (entries, name_bytes) = blocking(move || {
             let mut entries = Vec::new();
@@ -795,16 +823,16 @@ impl Grant {
             for entry in self
                 .dir
                 .read_dir(&self.relative)
-                .map_err(|e| self.error("list", e))?
+                .map_err(|e| self.error("list", "scandir", e))?
             {
-                let entry = entry.map_err(|e| self.error("list", e))?;
+                let entry = entry.map_err(|e| self.error("list", "scandir", e))?;
                 let name = entry.file_name().to_string_lossy().into_owned();
                 name_bytes += name.len();
                 if entries.len() == MAX_ENTRIES || name_bytes > MAX_NAME_BYTES {
-                    return Err(format!(
+                    return Err(JsError::Error(format!(
                         "cannot list `{}`: directory exceeded the {MAX_ENTRIES}-entry or {MAX_NAME_BYTES}-name-byte fs.readdir limit",
                         self.name
-                    ));
+                    )));
                 }
                 let directory = entry.file_type().is_ok_and(|t| t.is_dir());
                 entries.push((name, directory));
@@ -839,43 +867,43 @@ impl Grant {
         match *self {}
     }
 
-    async fn read(self, _: &Quotas, _: bool) -> Result<Holding<FileData>, String> {
+    async fn read(self, _: &Quotas, _: bool) -> Result<Holding<FileData>, JsError> {
         match self {}
     }
 
-    async fn write(self, _: Vec<u8>) -> Result<(), String> {
+    async fn write(self, _: Vec<u8>) -> Result<(), JsError> {
         match self {}
     }
 
-    async fn mkdir(self, _: bool) -> Result<(), String> {
+    async fn mkdir(self, _: bool) -> Result<(), JsError> {
         match self {}
     }
 
-    async fn exists(self) -> Result<bool, String> {
+    async fn exists(self) -> Result<bool, JsError> {
         match self {}
     }
 
-    async fn stat(self, _: bool) -> Result<Stats, String> {
+    async fn stat(self, _: bool) -> Result<Stats, JsError> {
         match self {}
     }
 
-    async fn readlink(self) -> Result<String, String> {
+    async fn readlink(self) -> Result<String, JsError> {
         match self {}
     }
 
-    async fn unlink(self) -> Result<(), String> {
+    async fn unlink(self) -> Result<(), JsError> {
         match self {}
     }
 
-    async fn rmdir(self) -> Result<(), String> {
+    async fn rmdir(self) -> Result<(), JsError> {
         match self {}
     }
 
-    async fn rename(self, _: Self) -> Result<(), String> {
+    async fn rename(self, _: Self) -> Result<(), JsError> {
         match self {}
     }
 
-    async fn entries(self, _: &Quotas, _: bool) -> Result<Holding<Entries>, String> {
+    async fn entries(self, _: &Quotas, _: bool) -> Result<Holding<Entries>, JsError> {
         match self {}
     }
 }
@@ -953,8 +981,15 @@ mod confined {
             options.custom_flags(libc::O_NONBLOCK).mode(0o644);
         }
         let file = dir.open_with(path, &options)?;
-        if !file.metadata()?.is_file() {
-            return Err(io::Error::other("not a regular file"));
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            // Node's codes: a directory is EISDIR, a FIFO or device EINVAL.
+            let kind = if meta.is_dir() {
+                io::ErrorKind::IsADirectory
+            } else {
+                io::ErrorKind::InvalidInput
+            };
+            return Err(io::Error::new(kind, "not a regular file"));
         }
         Ok(file)
     }

@@ -509,6 +509,29 @@ unsafe extern "C" fn dispose(
 }
 
 /// Throws an `Error` with `message`.
+/// The JS error `thrown` is: its class, its message and its properties
+/// (Node's `code`, `syscall`, `path`, ...), as an own enumerable field each.
+pub(crate) fn error_value(ctx: Ctx, thrown: &Thrown) -> V {
+    use nsh_core::ui::ErrorClass;
+    let (class, message, fields) = match thrown {
+        Thrown::Type(m) => (ErrorClass::Type, m, &[][..]),
+        Thrown::Range(m) => (ErrorClass::Range, m, &[][..]),
+        Thrown::Error(m) => (ErrorClass::Error, m, &[][..]),
+        Thrown::Fields(f) => (f.class, &f.message, &f.fields[..]),
+    };
+    let _ = match class {
+        ErrorClass::Type => js::type_error(ctx, message),
+        ErrorClass::Range => js::range_error(ctx, message),
+        ErrorClass::Error => throw_error(ctx, message),
+    };
+    let error = js::take_exception(ctx);
+    for (key, value) in fields {
+        let value = V::own(ctx, crate::host::json_to_js(ctx, value));
+        let _ = js::define(ctx, error.raw(), key, value, true);
+    }
+    error
+}
+
 pub(crate) fn throw_error(ctx: Ctx, message: &str) -> Throw {
     // SAFETY: a new error the exception takes.
     unsafe {
@@ -719,16 +742,8 @@ impl<'a> CallHost<'a> {
                 from_raw(v)
             }
             Err(_) if self.pending.get() => qjs::JS_EXCEPTION,
-            Err(Thrown::Type(message)) => {
-                let _ = js::type_error(ctx, &message);
-                qjs::JS_EXCEPTION
-            }
-            Err(Thrown::Range(message)) => {
-                let _ = js::range_error(ctx, &message);
-                qjs::JS_EXCEPTION
-            }
-            Err(Thrown::Error(message)) => {
-                let _ = throw_error(ctx, &message);
+            Err(thrown) => {
+                let _ = js::throw(ctx, error_value(ctx, &thrown));
                 qjs::JS_EXCEPTION
             }
         }

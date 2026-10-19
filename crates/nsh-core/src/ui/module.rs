@@ -272,7 +272,7 @@ pub(crate) async fn catching(future: ModuleFuture) -> JsResult {
             let future = &mut self.0;
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| future.as_mut().poll(cx)))
                 .unwrap_or_else(|payload| {
-                    std::task::Poll::Ready(Err(super::component::panic_message(payload)))
+                    std::task::Poll::Ready(Err(super::component::panic_message(payload).into()))
                 })
         }
     }

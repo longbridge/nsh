@@ -200,8 +200,12 @@ For that, two choices of the first version change:
   returns runs as a core task: TS `Promise<T>` (`FunctionCall::Start`, `MemberCall::Start`). The system modules
   use it to keep Node's shape, a `RangeError` at the call and I/O errors as rejections (`net`, `fs/promises`).
 - **Errors of a chosen class**: `Result<T, JsError>` throws a `TypeError`, `RangeError` or `Error`
-  (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A task's `Err`
-  rejects with an `Error` as before.
+  (`JsError::Type` / `Range` / `Error`); any other `E: Display` throws an `Error` with its message. A `Later`
+  task's (and an `async` function's) `Err(JsError)` rejects with the same, any other error with an `Error` of its
+  message (the reply carries a `Thrown`). `JsError::with(key, value)` / `with_code(code)` add properties
+  (`JsError::Fields`), so errors keep Node's shape: `code`, `syscall`, `path` (`error.code === "ENOENT"`);
+  `JsError::from(io::Error)` and `io_code` name an I/O error's code from its OS error or kind. The system modules
+  share it (`fs/promises`; `process` and `net` can).
 - **Instances of classes**, by reference: a parameter `&Other` / `&mut Other` borrows another instance for the call
   (TS: `other: Other`), `Instance<Other>` keeps a handle (to store one instance in another), and a result `Other`
   or `Instance<Other>` is a JS object (`Self` from `new` and statics; `Option<Instance<Other>>` for none). An

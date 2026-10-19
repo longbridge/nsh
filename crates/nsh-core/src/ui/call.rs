@@ -77,7 +77,7 @@ impl<T: super::Ret + 'static> ToJs for T {
 
 /// The result of a call JS waits for: the value, or the message its
 /// promise rejects with.
-pub type JsResult = Result<Box<dyn ToJs>, String>;
+pub type JsResult = Result<Box<dyn ToJs>, super::Thrown>;
 
 /// A module function with a context, its arguments decoded: run by the
 /// core in order with the UI's ops.

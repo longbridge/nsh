@@ -647,3 +647,49 @@ mount(() => <Text>{shown}</Text>);
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn failures_carry_node_s_codes() {
+    let (root, app) = data_dir("codes");
+    std::fs::create_dir_all(app.join("full/inner")).unwrap();
+    std::fs::write(app.join("invalid"), [0xff]).unwrap();
+    symlink("loop", app.join("loop")).unwrap();
+    let (_engine, rx) = start(
+        r#"
+import fs from "fs/promises";
+const failure = (p) => p.then(() => "none", (e) => `${e.constructor.name}:${e.code}:${e.syscall}:${e.path}`);
+(async () => {
+  let denied = "";
+  try { fs.readFile("/outside-every-root"); } catch (e) { denied = `${e.constructor.name}:${e.code}:${e.path}`; }
+  const codes = [
+    denied,
+    await failure(fs.stat("nowhere")),
+    await failure(fs.readFile("nowhere")),
+    await failure(fs.mkdir("full")),
+    await failure(fs.rmdir("full")),
+    await failure(fs.readFile("full")),
+    await failure(fs.readdir("invalid")),
+    await failure(fs.readFile("invalid", "utf8")),
+    await failure(fs.stat("loop")),
+  ];
+  report(codes.join("|"));
+})().catch((e) => report(String(e)));
+"#,
+        DATA_GRANT,
+        Some(root.clone()),
+        Default::default(),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done TypeError:EACCES:/outside-every-root\
+         |Error:ENOENT:stat:nowhere\
+         |Error:ENOENT:open:nowhere\
+         |Error:EEXIST:mkdir:full\
+         |Error:ENOTEMPTY:rmdir:full\
+         |Error:EISDIR:open:full\
+         |Error:ENOTDIR:scandir:invalid\
+         |Error:EILSEQ:undefined:invalid\
+         |Error:ELOOP:stat:loop"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

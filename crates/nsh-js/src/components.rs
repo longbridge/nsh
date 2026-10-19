@@ -231,8 +231,9 @@ fn component_event(
 }
 
 /// Settles call `call` with `result`: resolved with the value (converted
-/// now), or rejected with an `Error` of the message (also when the value
-/// does not convert, or its conversion panics).
+/// now), or rejected with its error (a [`nsh_core::ui::JsError`]'s class
+/// and properties; an `Error` of the message when the value does not
+/// convert, or its conversion panics).
 fn settle(ctx: *mut JsContext, call: u32, result: JsResult) -> Result<(), JsValue> {
     let pending = components(ctx).pending.borrow_mut().remove(&call);
     // Nobody waits (the promise's VM state was reset): the value drops,
@@ -255,21 +256,15 @@ fn settle(ctx: *mut JsContext, call: u32, result: JsResult) -> Result<(), JsValu
             value
                 .to_js_value(&host)
                 .map(|v| V::own(ctx, crate::classes::from_raw(v.into_raw())))
-                .map_err(|e| e.0)
+                .map_err(|e| nsh_core::ui::Thrown::Error(e.0))
         })
     }))
-    .unwrap_or_else(|payload| Err(crate::classes::panic_message(payload)));
+    .unwrap_or_else(|payload| Err(crate::classes::panic_message(payload).into()));
     let (f, value) = match converted {
         Ok(value) => (resolve, value),
-        Err(message) => {
+        Err(thrown) => {
             host.clear_pending();
-            // SAFETY: a new error taking its message.
-            let error = unsafe {
-                let error = qjs::JS_NewError(ctx);
-                qjs::JS_SetPropertyStr(ctx, error, c"message".as_ptr(), new_string(ctx, &message));
-                V::own(ctx, error)
-            };
-            (reject, error)
+            (reject, crate::classes::error_value(ctx, &thrown))
         }
     };
     match crate::web::js::call(ctx, f.raw(), UNDEFINED, &[value.raw()]) {

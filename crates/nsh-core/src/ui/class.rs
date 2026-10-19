@@ -147,6 +147,18 @@ pub enum Thrown {
     Range(String),
     /// An `Error`: the member's `Err`, or its panic.
     Error(String),
+    /// One of those with properties (`code`, ...: [`super::JsError::with`]).
+    Fields(Box<super::ErrorFields>),
+}
+
+impl Thrown {
+    /// Its message.
+    pub fn message(&self) -> &str {
+        match self {
+            Thrown::Type(m) | Thrown::Range(m) | Thrown::Error(m) => m,
+            Thrown::Fields(f) => &f.message,
+        }
+    }
 }
 
 impl From<PropError> for Thrown {
@@ -155,11 +167,21 @@ impl From<PropError> for Thrown {
     }
 }
 
+impl From<String> for Thrown {
+    fn from(message: String) -> Self {
+        Thrown::Error(message)
+    }
+}
+
+impl From<&str> for Thrown {
+    fn from(message: &str) -> Self {
+        Thrown::Error(message.to_owned())
+    }
+}
+
 impl fmt::Display for Thrown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Thrown::Type(m) | Thrown::Range(m) | Thrown::Error(m) => f.write_str(m),
-        }
+        f.write_str(self.message())
     }
 }
 
@@ -704,11 +726,14 @@ pub(crate) mod __private {
         Ok(Box::new(value))
     }
 
-    /// [`boxed`] of a `Result`: an `Err` rejects with its message.
-    pub fn boxed_result<T: Ret + 'static, E: fmt::Display>(value: Result<T, E>) -> JsResult {
+    /// [`boxed`] of a `Result`: an `Err` rejects (a [`crate::ui::JsError`]
+    /// with its class and properties, any other error with its message).
+    pub fn boxed_result<T: Ret + 'static, E: crate::ui::IntoThrown>(
+        value: Result<T, E>,
+    ) -> JsResult {
         match value {
             Ok(v) => Ok(Box::new(v)),
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(e.into_thrown()),
         }
     }
 
