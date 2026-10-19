@@ -5139,6 +5139,7 @@ version = "0.1.1"
 name = "nsh-core"
 version = "0.1.1"
 dependencies = [
+ "cap-std",
  "libc",
  "log",
  "nsh-animation",
@@ -5201,7 +5202,6 @@ dependencies = [
 name = "nsh-js"
 version = "0.1.1"
 dependencies = [
- "cap-std",
  "futures-util",
  "getrandom 0.4.3",
  "libc",

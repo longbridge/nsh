@@ -318,12 +318,7 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
         }
         public.push_str("}\n");
     }
-    for (name, body) in [
-        ("fs/promises", super::fs::TYPES),
-        ("console", super::console::TYPES),
-    ] {
-        adapter(&mut public, name, body);
-    }
+    adapter(&mut public, "console", super::console::TYPES);
     #[cfg(not(target_arch = "wasm32"))]
     adapter(&mut public, "websocket", super::websocket::TYPES);
     vec![

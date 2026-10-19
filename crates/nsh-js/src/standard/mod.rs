@@ -3,7 +3,6 @@ use rquickjs::{Ctx, Error, Module, Result, Value};
 
 mod console;
 pub(crate) mod declarations;
-pub(crate) mod fs;
 mod os;
 pub(crate) mod process;
 pub(crate) mod scheduler;
@@ -53,7 +52,6 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
         "path" => declare!(llrt_path::PathModule),
         "url" => declare!(url::UrlModule),
         "zlib" => declare!(zlib::ZlibModule),
-        "fs/promises" => declare!(fs::FsModule),
         "console" => declare!(console::ConsoleModule),
         #[cfg(not(target_arch = "wasm32"))]
         "websocket" => declare!(websocket::WebSocketModule),

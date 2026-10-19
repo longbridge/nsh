@@ -160,7 +160,25 @@ pub struct Function {
     /// A getter of the module's object (`#[getter]`: `process.env`), read
     /// as a property and never a named export of a flat module.
     pub getter: bool,
+    /// The signatures TypeScript sees instead of the one above, when the
+    /// result's type depends on the arguments (`#[overload(..)]`).
+    pub overloads: &'static [Overload],
 }
+
+/// One TypeScript signature of a function with several
+/// (`#[overload(fn(path: String) -> Vec<u8>)]`): its parameters and the
+/// type of its result (a promise of it when the function's is one).
+#[derive(Debug, Clone, Copy)]
+pub struct Overload {
+    /// Its parameters.
+    pub params: &'static [ModuleParam],
+    /// The TypeScript type of its result.
+    pub returns: Option<TsType>,
+}
+
+/// A signature of [`FunctionSpec::overloads`]: its parameters (JS name,
+/// TypeScript type, optional) and its result's type.
+pub type OverloadSpec = (Vec<(&'static str, String, bool)>, Option<String>);
 
 /// One function, for the glue and its declarations.
 #[derive(Debug, Clone)]
@@ -179,6 +197,8 @@ pub struct FunctionSpec {
     pub call: FunctionCall,
     /// A getter of the module's object ([`Function::getter`]).
     pub getter: bool,
+    /// The signatures TypeScript sees instead ([`Function::overloads`]).
+    pub overloads: Vec<OverloadSpec>,
 }
 
 /// What a module is to JS.
@@ -218,6 +238,18 @@ impl ModuleSpec {
                 kind: f.call.kind(),
                 call: f.call,
                 getter: f.getter,
+                overloads: f
+                    .overloads
+                    .iter()
+                    .map(|o| {
+                        let params = o
+                            .params
+                            .iter()
+                            .map(|(n, ts, optional)| (*n, ts(&mut types), *optional))
+                            .collect();
+                        (params, o.returns.map(|ts| ts(&mut types)))
+                    })
+                    .collect(),
             })
             .collect();
         Self {

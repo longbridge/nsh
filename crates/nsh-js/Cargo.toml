@@ -43,7 +43,6 @@ llrt_url.workspace = true
 rquickjs = { workspace = true, features = ["bindgen"] }
 # The heap's allocator: the system's `malloc` (as QuickJS's own).
 libc.workspace = true
-cap-std.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "sync", "io-util", "macros"] }
 futures-util.workspace = true
 tokio-tungstenite.workspace = true

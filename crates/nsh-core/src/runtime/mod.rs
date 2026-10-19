@@ -1,8 +1,8 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `Toast`,
 //! `nsh/accessibility`'s commands, all of `nsh/image`, `nsh/clipboard` and
 //! `nsh/storage`,
-//! `nsh/desktop`'s `Window`, the surface-independent `os` metadata and
-//! `net`'s sockets. Their JS face is made
+//! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
+//! `net`'s sockets and `fs/promises`' files. Their JS face is made
 //! from their specs like a UI set's (`nsh-js` `components.rs`), and so are
 //! their declarations ([`crate::ui::declarations`]); `nsh-js` adds what has
 //! to run in JS (the app's listeners, reactive accessors).
@@ -15,6 +15,7 @@ mod accessibility;
 mod android;
 mod clipboard;
 mod desktop;
+mod fs;
 mod image;
 mod net;
 mod os;
@@ -49,6 +50,8 @@ pub fn registries() -> &'static [Registry] {
             .native_values(&["nextTick"]);
         let mut net = Registry::runtime("net");
         net.module::<net::Net>();
+        let mut fs = Registry::runtime("fs/promises");
+        fs.module::<fs::Fs>();
         vec![
             android,
             accessibility,
@@ -59,6 +62,7 @@ pub fn registries() -> &'static [Registry] {
             os,
             net,
             process,
+            fs,
         ]
     })
 }

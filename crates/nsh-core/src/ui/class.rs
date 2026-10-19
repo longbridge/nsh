@@ -51,6 +51,10 @@ pub struct ClassDef {
     pub type_name: fn() -> &'static str,
     /// Its members: the constructor, methods, accessors and statics.
     pub members: &'static [Member],
+    /// Its objects come from members only and its module exports no value
+    /// of it: declared as an `interface` (`#[class(interface)]`: `fs`'s
+    /// `Stats`).
+    pub interface: bool,
 }
 
 impl ClassDef {
@@ -101,10 +105,10 @@ pub struct Member {
     pub refs: ClassRefs,
     /// How it runs.
     pub call: MemberCall,
-    /// Its TypeScript overloads (`#[overload("…")]`), declared instead of
-    /// the signature its types give: what string literal arguments select
-    /// (`on("exit", ..)`) is not in the Rust types.
-    pub overloads: &'static [&'static str],
+    /// The signatures TypeScript sees instead of the one its types give
+    /// (`#[overload(fn(..) -> ..)]`), as a module function's: what an
+    /// argument selects (`on("exit", ..)`).
+    pub overloads: &'static [super::Overload],
 }
 
 /// Adds the classes a signature names (its parameters' and result's
@@ -467,6 +471,27 @@ impl<C: Class> Ret for Instance<C> {
     }
 }
 
+/// An array of instances' objects.
+impl<C: Class> Ret for Vec<Instance<C>> {
+    fn ts_type(types: &mut TsTypes) -> String {
+        format!("{}[]", types.class(C::DEF))
+    }
+
+    fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        // Owned until the array takes them, as `Vec<T>`'s items are.
+        let mut items = Vec::with_capacity(self.len());
+        for instance in self {
+            items.push(instance.into_js(host)?);
+        }
+        let raws = items.into_iter().map(JsOwned::into_raw).collect();
+        Ok(JsOwned::new(host, host.new_array(raws)?))
+    }
+
+    fn classes(out: &mut Vec<&'static ClassDef>) {
+        out.push(C::DEF);
+    }
+}
+
 impl<C: Class> Ret for Option<Instance<C>> {
     fn ts_type(types: &mut TsTypes) -> String {
         format!("{} | null", <Instance<C> as Ret>::ts_type(types))
@@ -501,8 +526,8 @@ pub struct MemberSpec {
     pub returns: Option<String>,
     /// JS gets a promise.
     pub is_async: bool,
-    /// Its TypeScript overloads ([`Member::overloads`]).
-    pub overloads: Vec<&'static str>,
+    /// The signatures TypeScript sees instead ([`Member::overloads`]).
+    pub overloads: Vec<super::OverloadSpec>,
 }
 
 /// What a class is to JS and its declarations.
@@ -537,7 +562,18 @@ impl ClassSpec {
                     .collect(),
                 returns: m.returns.map(|ts| ts(&mut types)),
                 is_async: m.call.is_async(),
-                overloads: m.overloads.to_vec(),
+                overloads: m
+                    .overloads
+                    .iter()
+                    .map(|o| {
+                        let params = o
+                            .params
+                            .iter()
+                            .map(|(n, ts, optional)| (*n, ts(&mut types), *optional))
+                            .collect();
+                        (params, o.returns.map(|ts| ts(&mut types)))
+                    })
+                    .collect(),
             })
             .collect();
         Self {
@@ -707,6 +743,8 @@ pub(crate) mod __private {
     pub trait ClassDoc {
         /// The struct's doc comment.
         const DOC: &'static str;
+        /// `#[class(interface)]`: [`super::ClassDef::interface`].
+        const INTERFACE: bool;
     }
 
     /// A field of a class's struct, traced when its type implements

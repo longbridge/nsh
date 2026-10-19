@@ -198,6 +198,19 @@ pub(crate) enum ChildEvent {
     Exit,
 }
 
+/// The output events (`on`'s first overload).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum OutputEvent {
+    Stdout,
+    Stderr,
+}
+
+/// The exit event (`on`'s second overload).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub(crate) enum ExitEvent {
+    Exit,
+}
+
 /// What a listener gets: output text, or the exit.
 #[derive(Debug, Clone)]
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -243,8 +256,8 @@ impl ChildProcess {
 
     /// Calls `handler` with each piece (or line) of output, or once with
     /// the exit after the final output (at once when the child has exited).
-    #[overload(r#"on(event: "stdout" | "stderr", handler: (text: string) => void): ChildProcess"#)]
-    #[overload(r#"on(event: "exit", handler: (result: ExitResult) => void): ChildProcess"#)]
+    #[overload(fn(event: OutputEvent, handler: Callback<String>) -> Instance<ChildProcess>)]
+    #[overload(fn(event: ExitEvent, handler: Callback<ExitResult>) -> Instance<ChildProcess>)]
     pub(crate) fn on(
         this: Instance<Self>,
         event: ChildEvent,
@@ -1314,7 +1327,8 @@ mod tests {
             "  readonly env: Record<string, string>;",
             "  readonly dataDir: string | null;",
             "} & { nextTick: typeof nextTick };",
-            r#"  on(event: "exit", handler: (result: ExitResult) => void): ChildProcess;"#,
+            "  on(event: ExitEvent, handler: (a: ExitResult) => void): ChildProcess;",
+            "  on(event: OutputEvent, handler: (a: string) => void): ChildProcess;",
             "  get pid(): number;",
         ] {
             assert!(d.contains(expected), "{expected}\n{d}");

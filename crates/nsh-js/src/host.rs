@@ -667,7 +667,7 @@ impl Host {
         *self.shared.system_exit_handler.borrow_mut() = Some(handler);
     }
 
-    /// Wakes this host's engine when a process or filesystem worker produces an event.
+    /// Wakes this host's engine when a process worker produces an event.
     pub fn set_system_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) {
         if self.fatal().is_some() {
             return;
@@ -676,20 +676,15 @@ impl Host {
         *self.shared.system_wake.borrow_mut() = Some(wake);
     }
 
-    /// Delivers queued native file events, then drains resulting promise jobs.
+    /// Drains pending promise jobs (the runtime modules' work runs as core
+    /// tasks, whose results arrive through the core).
     pub fn run_system(&self) {
-        self.guarded(Phase::Call, || {
-            self.ctx.with(|ctx| {
-                let raw = ctx.as_raw().as_ptr();
-                crate::fs::pump(raw);
-            });
-            self.run_jobs();
-        });
+        self.guarded(Phase::Call, || self.run_jobs());
     }
 
-    /// Whether native filesystem work is still owned by this VM (a
-    /// process's events are core tasks).
-    /// Workers wake the engine; this predicate does not schedule polling.
+    /// Whether JS work is still pending in this VM: evaluations, timers or
+    /// jobs. Workers wake the engine; this predicate does not schedule
+    /// polling.
     pub fn has_system_tasks(&self) -> bool {
         if self.fatal().is_some() {
             return false;
@@ -698,10 +693,6 @@ impl Host {
             || self
                 .scheduler
                 .ready(self.rt.borrow().as_ref().expect("live VM").is_job_pending())
-            || self.ctx.with(|ctx| {
-                let raw = ctx.as_raw().as_ptr();
-                crate::fs::has_pending(raw)
-            })
     }
 
     /// Earliest timer deadline, if any timer is pending.

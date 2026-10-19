@@ -93,14 +93,17 @@ their TypeScript declarations from one native spec. Returned paths are metadata 
 `console` default-exports the VM's existing five-method logger. `net` is one too (`nsh_core::runtime::net`: the
 `Net` module's `connect`, flat and default, and its `Socket` class): its JS face and declarations come from the
 spec, its limits throw in the call (`Later`, `JsError`), its capability check reads the call's `System`, and its
-connections, reads and writes are core tasks on the engine's tokio runtime. `process` too
+connections, reads and writes are core tasks on the engine's tokio runtime. So is `fs/promises`
+(`nsh_core::runtime::fs`: the `Fs` module, flat and default, with `#[overload]`s for `readFile` and `readdir`;
+`Stats` and `Dirent` are `#[class(interface)]`, declared as interfaces and exported as no value): grants and
+limits throw in the call, and the disk work runs on the tokio runtime's blocking threads. `process` too
 (`nsh_core::runtime::process`): `run`, `spawn` (a `ChildProcess` whose `on(..)` keeps `Callback`s that a core
 task posts the child's output to), `exit`, `platform`, `arch` and the `env` / `dataDir` getters; `nsh-js` makes
 its default object the global `process` and adds `nextTick`, a JS job (`standard/process.rs`). The VM's children
 are a `Local`, closed (killed at once, joined together) when the VM goes.
 
 LLRT utility crates are pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`; `standard/declarations.rs` projects
-actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `fs/promises`
-and `websocket` adapters share the owning VM and NSH capability checks. Their declared interfaces, rather
+actual exports from checksummed upstream assets in `third_party/llrt-types`. Privileged `websocket` adapters
+share the owning VM and NSH capability checks. Their declared interfaces, rather
 than complete Node.js or browser compatibility, define the app API. Existing WHATWG constructor identities stay
 intact. Standard `websocket` is an explicit connection API, distinct from the browser WebSocket interface.

@@ -522,7 +522,12 @@ impl ModuleTable {
                     out.push(("default".to_owned(), Made::Default(m.clone())));
                 }
             }
-            for class in registry.class_specs() {
+            // An interface's objects come from members only: no value.
+            for class in registry
+                .class_specs()
+                .into_iter()
+                .filter(|c| !c.def.interface)
+            {
                 out.push((class.name.to_owned(), Made::Class(class.def)));
             }
             for &value in registry

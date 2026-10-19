@@ -847,6 +847,57 @@ impl JsHost for CallHost<'_> {
         self.checked(js::get(self.ctx, v, key))
     }
 
+    fn keys(&self, v: JsRaw) -> Result<Vec<String>, PropError> {
+        let v = from_raw(v);
+        if !js::is_object(v) {
+            return Ok(Vec::new());
+        }
+        let mut table = std::ptr::null_mut();
+        let mut len = 0;
+        // SAFETY: v is a live object; QuickJS returns a table owned until
+        // JS_FreePropertyEnum (a proxy's trap may run JS meanwhile).
+        if unsafe {
+            qjs::JS_GetOwnPropertyNames(
+                self.ctx,
+                &mut table,
+                &mut len,
+                v,
+                (qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY) as c_int,
+            )
+        } < 0
+        {
+            return Err(self.threw());
+        }
+        let keys = (|| {
+            self.read(len as usize)?;
+            let mut keys = Vec::with_capacity(len as usize);
+            for i in 0..len as usize {
+                // SAFETY: the table has `len` entries; JS_AtomToString
+                // returns an owned string.
+                let key = V::checked(self.ctx, unsafe {
+                    qjs::JS_AtomToString(self.ctx, (*table.add(i)).atom)
+                });
+                let key = self.checked(key)?;
+                let text = js::to_string(self.ctx, from_raw(key));
+                self.free(key);
+                keys.push(text.map_err(|Throw| self.threw())?);
+            }
+            Ok(keys)
+        })();
+        // SAFETY: the table and length QuickJS returned above.
+        unsafe { qjs::JS_FreePropertyEnum(self.ctx, table, len) };
+        keys
+    }
+
+    fn date(&self, v: JsRaw) -> Option<f64> {
+        let v = from_raw(v);
+        // SAFETY: a class check of a live value.
+        if !unsafe { qjs::JS_IsDate(v) } {
+            return None;
+        }
+        js::to_number(self.ctx, v).ok()
+    }
+
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError> {
         // SAFETY: a context reference and a dup for the converter.
         let cx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(self.ctx)) };
@@ -938,6 +989,13 @@ impl JsHost for CallHost<'_> {
 
     fn new_bytes(&self, bytes: &[u8]) -> Result<JsRaw, PropError> {
         self.checked(js::uint8_array(self.ctx, bytes))
+    }
+
+    fn new_date(&self, millis: f64) -> Result<JsRaw, PropError> {
+        // SAFETY: JS_NewDate returns an owned Date of this live context.
+        self.checked(V::checked(self.ctx, unsafe {
+            qjs::JS_NewDate(self.ctx, millis)
+        }))
     }
 
     fn new_array(&self, items: Vec<JsRaw>) -> Result<JsRaw, PropError> {
