@@ -159,6 +159,11 @@ pub(super) struct Instance {
     /// In a view: the owner where it places its JS children (a region's),
     /// which the components JS made among them are under.
     children_owner: Option<crate::ui::Owner>,
+    /// The component its view's root is, made on this host (its alias,
+    /// [`Core::alias`]): its view makes the host's node.
+    rooted: Option<NodeId>,
+    /// On such a component: the host (or alias) whose view's root it is.
+    pub(super) above: Option<NodeId>,
 }
 
 impl Instance {
@@ -191,6 +196,8 @@ impl Instance {
             row_index: None,
             lazy_wanted: None,
             children_owner: None,
+            rooted: None,
+            above: None,
         }
     }
 }
@@ -291,6 +298,9 @@ pub(super) struct Components {
     /// Slot nodes in a host -> the host.
     slot_hosts: FxHashMap<NodeId, NodeId>,
     styles: FxHashMap<StyleRefinement, Arc<ClassList>>,
+    /// The styles a component on another's host gets from each above it,
+    /// merged (by the lists', which the entry keeps).
+    merges: FxHashMap<(usize, usize), [Arc<ClassList>; 3]>,
     /// The lists components place (the glue's, of `Items` props) -> the
     /// row function the component's view gave last, and the number of rows
     /// its wrappers last saw.
@@ -374,6 +384,7 @@ impl Default for Components {
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             styles: FxHashMap::default(),
+            merges: FxHashMap::default(),
             lists: FxHashMap::default(),
             environment: Environment::default(),
             executor: Rc::new(Executor::default()),
@@ -668,11 +679,13 @@ impl<M: TextEngine> Core<M> {
             Op::SetStyle { id, patch, .. } if self.is_host(id) => {
                 let inst = self.components.instances.get_mut(&id).expect("host");
                 inst.app_style = (!patch.is_empty()).then_some(patch);
-                let (inline, animated) = match &inst.root {
+                let app = inst.app_style.clone();
+                // The node's own style is the view's that makes it.
+                let base = self.base_of(id);
+                let (inline, animated) = match &self.components.instances[&base].root {
                     Some(root) => (root.attrs.inline.clone(), root.attrs.animated.clone()),
                     None => (None, Vec::new()),
                 };
-                let app = inst.app_style.clone();
                 Ok(Some(inline_style(
                     id,
                     inline.as_deref(),
@@ -914,7 +927,11 @@ impl<M: TextEngine> Core<M> {
             Op::Listen { id, event, enabled } if self.is_host(id) => {
                 let inst = self.components.instances.get_mut(&id).expect("host");
                 inst.js_events.set(event, enabled);
-                let own = inst.root.as_ref().is_some_and(|r| r.events.contains(event));
+                let base = self.base_of(id);
+                let own = self.components.instances[&base]
+                    .root
+                    .as_ref()
+                    .is_some_and(|r| r.events.contains(event));
                 Ok(Some(Op::Listen {
                     id,
                     event,
@@ -1282,7 +1299,12 @@ impl<M: TextEngine> Core<M> {
     /// Applies the root styles of the view on `host` again over the app's
     /// (or its parent's) styles, which may have changed.
     fn restyle_view(&mut self, host: NodeId, inst: &mut Instance) {
-        let user = inst.user.clone();
+        // The component its root is applies them to the node.
+        if let Some(rooted) = inst.rooted {
+            self.components.mark(rooted);
+            return;
+        }
+        let (user, ..) = self.above_context(inst.above, inst.user.clone());
         if let Some(node) = inst.bound.get_mut(&host) {
             let (style, classes) = (node.style.clone(), node.classes.clone());
             let classes = self.apply_styles(host, &style, &style, classes, user);
@@ -1602,8 +1624,18 @@ impl<M: TextEngine> Core<M> {
     /// Applies a view's root `el` to `host` itself (over a list cell's
     /// previous row) and expands its children. A view's root can be any
     /// element: the host becomes its node (a screen, a modal, a text, a
-    /// list), or holds it (a region, a component).
+    /// list), holds it (a region), or is the host of a component as the
+    /// root ([`Self::expand_rooted`]).
     fn expand_root(&mut self, host: NodeId, inst: &mut Instance, mut el: ElNode) {
+        if matches!(el.kind, ElKind::Component(_))
+            && matches!(inst.inner, Inner::Component(_))
+            && inst
+                .root
+                .as_ref()
+                .is_none_or(|r| matches!(r.part, Part::Component(_)))
+        {
+            return self.expand_rooted(host, inst, el);
+        }
         let node = matches!(el.kind, ElKind::Plain | ElKind::VirtualList(_));
         if !node || (el.tag != Tag::View && !self.retag(host, el.tag)) {
             if node {
@@ -1647,8 +1679,13 @@ impl<M: TextEngine> Core<M> {
                     ListConfig::default(),
                 ),
             };
-        self.apply_attrs_over(host, &el.attrs, &old_attrs, inst.app_style.as_ref());
-        let user = inst.user.clone();
+        // On another component's host: what they give it, outer last.
+        let (user, top_app, top_js) = self.above_context(inst.above, inst.user.clone());
+        let app = match inst.above {
+            Some(_) => top_app.as_ref(),
+            None => inst.app_style.as_ref(),
+        };
+        self.apply_attrs_over(host, &el.attrs, &old_attrs, app);
         let classes = self.apply_styles(host, &el.style, &old_style, old_classes, user);
         let text = self.reconcile_text(host, host, el.text.take(), old_text);
         if bound.is_some() {
@@ -1662,7 +1699,7 @@ impl<M: TextEngine> Core<M> {
             );
         }
         // The host listens to its component's events and to JS's.
-        let js = inst.js_events;
+        let js = top_js.unwrap_or(inst.js_events);
         self.apply_handlers(host, &el, old_events | js, js, inst);
         let mut events = EventMask::default();
         for (kind, _) in &el.handlers {
@@ -1677,7 +1714,7 @@ impl<M: TextEngine> Core<M> {
         let (list, part) = match std::mem::replace(&mut el.kind, ElKind::Plain) {
             ElKind::VirtualList(list) => {
                 let config = list.config;
-                self.update_virtual_list(host, host, *list, &old_list);
+                self.update_virtual_list(self.native_id(host), host, *list, &old_list);
                 (config, Part::VirtualList)
             }
             _ => (ListConfig::default(), Part::Node),
@@ -1696,6 +1733,109 @@ impl<M: TextEngine> Core<M> {
             children,
         });
         self.children_placed(host, inst, old_place);
+    }
+
+    /// [`Self::expand_root`] of a view whose root is component element
+    /// `el`: that component is made on `host` itself, under an alias of its
+    /// node ([`Core::alias`]), and its view makes the node, with what this
+    /// view gives it (props, styles, listeners, ref, content) and what the
+    /// app gives this one (styles, events): no node of its own.
+    fn expand_rooted(&mut self, host: NodeId, inst: &mut Instance, el: ElNode) {
+        let ElKind::Component(c) = &el.kind else {
+            return;
+        };
+        let part = Part::Component(c.name);
+        inst.handlers.clear();
+        inst.event_handlers.clear();
+        inst.responders.clear();
+        let old_place = std::mem::replace(&mut inst.children_at, Placement::None);
+        let prev = match inst.root.take() {
+            Some(old) if old.part == part => old,
+            old => {
+                if let Some(old) = old {
+                    self.release_expanded(old);
+                }
+                let id = self.components.alloc();
+                if let Err(e) = self.alias(id, host) {
+                    log::error!(target: "js", "a view's root component is not made: {e:?}");
+                    return;
+                }
+                self.components.owners.insert(id, host);
+                self.create_instance_of(id, c.name, c.make, c.spec);
+                if let Some(rooted) = self.components.instances.get_mut(&id) {
+                    // The app's style is the top host's.
+                    rooted.app_style = None;
+                    rooted.above = Some(host);
+                }
+                Expanded::js(id, part)
+            }
+        };
+        inst.rooted = Some(prev.id);
+        let root = self.reconcile_node(Some(prev), el, part, host, inst);
+        inst.root = Some(root);
+        self.children_placed(host, inst, old_place);
+    }
+
+    /// The component whose view makes host `id`'s node: its own, or the
+    /// one its view's root is (as deep as roots are components).
+    pub(super) fn base_of(&self, id: NodeId) -> NodeId {
+        let mut at = id;
+        while let Some(next) = self.components.instances.get(&at).and_then(|i| i.rooted) {
+            at = next;
+        }
+        at
+    }
+
+    /// For a component on the host of those `above` it (whose views' roots
+    /// it and they are): its styles `user` with theirs after (the outer
+    /// last), and the top host's app style and JS's events there; `user`
+    /// alone on a host of its own.
+    pub(super) fn above_context(
+        &mut self,
+        above: Option<NodeId>,
+        mut user: Option<Arc<ClassList>>,
+    ) -> (
+        Option<Arc<ClassList>>,
+        Option<crate::StylePatch>,
+        Option<EventMask>,
+    ) {
+        let (mut app, mut js) = (None, None);
+        let mut at = above;
+        while let Some(id) = at {
+            let Some(inst) = self.components.instances.get(&id) else {
+                break;
+            };
+            let outer = inst.user.clone();
+            app = inst.app_style.clone();
+            js = Some(inst.js_events);
+            at = inst.above;
+            user = self.merge_user(user, outer);
+        }
+        (user, app, js)
+    }
+
+    /// `inner`'s rules, then `outer`'s (one list per pair, kept).
+    fn merge_user(
+        &mut self,
+        inner: Option<Arc<ClassList>>,
+        outer: Option<Arc<ClassList>>,
+    ) -> Option<Arc<ClassList>> {
+        match (inner, outer) {
+            (Some(a), Some(b)) => {
+                let key = (Arc::as_ptr(&a) as usize, Arc::as_ptr(&b) as usize);
+                if let Some([_, _, merged]) = self.components.merges.get(&key) {
+                    return Some(merged.clone());
+                }
+                if self.components.merges.len() >= STYLE_CACHE {
+                    self.components.merges.clear();
+                }
+                let merged = Arc::new(a.merged(&b));
+                self.components.merges.insert(key, [a, b, merged.clone()]);
+                Some(merged)
+            }
+            (a, None) => a,
+            (None, b) => b,
+        }
     }
 
     /// Where the JS children of `host` go changed from `old_place`: they
@@ -1778,13 +1918,15 @@ impl<M: TextEngine> Core<M> {
         old: &Attrs,
         app: Option<&crate::StylePatch>,
     ) {
+        // An element's ref names its node by its own id.
+        let node = self.native_id(id);
         if old.element_ref != new.element_ref
             && let Some(r) = &old.element_ref
         {
-            r.detach(id);
+            r.detach(node);
         }
         if let Some(r) = &new.element_ref {
-            r.attach(id);
+            r.attach(node);
         }
         let mut props = std::mem::take(&mut self.components.props);
         new.changes(old, &mut props);
@@ -2988,6 +3130,11 @@ impl<M: TextEngine> Core<M> {
 
     fn release_id(&mut self, id: NodeId) {
         self.components.owners.remove(&id);
+        // A root component's host is its view's: only the name goes.
+        if self.is_alias(id) {
+            self.unalias(id);
+            return;
+        }
         let _ = self.apply_op(Op::Release { id });
     }
 
@@ -3073,11 +3220,17 @@ impl<M: TextEngine> Core<M> {
             }
         }
         if let Some(root) = inst.root {
+            // The component its root is, with its alias.
+            if matches!(root.part, Part::Component(_)) {
+                self.release_expanded(root);
+                return;
+            }
+            let node = self.native_id(host);
             if let Some(r) = &root.attrs.element_ref {
-                r.detach(host);
+                r.detach(node);
             }
             if root.part == Part::VirtualList {
-                self.release_virtual_list(host);
+                self.release_virtual_list(node);
             }
             if let Some((_, raw)) = root.text {
                 self.release_id(raw);
@@ -3138,7 +3291,9 @@ impl<M: TextEngine> Core<M> {
             return true;
         }
         if self.is_host(id) {
-            return self.handle(id, id, kind, payload);
+            // The component whose view makes the host's node handles them.
+            let base = self.base_of(id);
+            return self.handle(base, base, kind, payload);
         }
         // A component's own list reports its viewable rows as they settle.
         if kind == EventKind::ViewableItemsChanged
@@ -3165,11 +3320,12 @@ impl<M: TextEngine> Core<M> {
         (slot_of.is_some() || owner.is_some()) && id % 2 == 1
     }
 
-    /// The host of the component whose view has node `id` (itself for a
-    /// host).
+    /// The host of the component whose view has node `id` (for a host, the
+    /// component whose view makes its node: itself, or its root
+    /// component's).
     pub(super) fn host_of(&self, id: NodeId) -> Option<NodeId> {
         if self.is_host(id) {
-            Some(id)
+            Some(self.base_of(id))
         } else {
             self.components.owners.get(&id).copied()
         }
@@ -3210,6 +3366,7 @@ impl<M: TextEngine> Core<M> {
         kind: EventKind,
         from: usize,
     ) -> Option<(usize, Listener<EventPayload>)> {
+        let id = self.base_of(id);
         let inst = self.components.instances.get(&host)?;
         inst.handlers
             .iter()
@@ -3221,6 +3378,7 @@ impl<M: TextEngine> Core<M> {
 
     /// The part of `host`'s node `id` in the touch responder.
     pub(super) fn responder_el(&self, host: NodeId, id: NodeId) -> Option<Rc<ResponderEl>> {
+        let id = self.base_of(id);
         self.components
             .instances
             .get(&host)?

@@ -7833,6 +7833,296 @@ mod views {
         assert_eq!(dead, 0, "no released child");
     }
 
+    thread_local! {
+        static PLAQUE_TAPS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// A counter as its view's root, dimmed, hearing its taps.
+    #[derive(Default)]
+    struct Plaque;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct PlaqueProps {}
+
+    impl Component for Plaque {
+        type Props = PlaqueProps;
+        type Event = NoEvent;
+
+        fn view(_: PlaqueProps, _: Scope<NoEvent>) -> impl IntoElement {
+            Counter::element(CounterProps {
+                label: "Plaque".into(),
+            })
+            .opacity(0.5)
+            .on_event(|e: &CounterEvent| {
+                let CounterEvent::Tap(n) = e;
+                PLAQUE_TAPS.with(|t| t.set(*n));
+            })
+        }
+    }
+
+    /// A plaque as its view's root: two components deep.
+    #[derive(Default)]
+    struct Shelf;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct ShelfProps {}
+
+    impl Component for Shelf {
+        type Props = ShelfProps;
+        type Event = NoEvent;
+
+        fn view(_: ShelfProps, _: Scope<NoEvent>) -> impl IntoElement {
+            Plaque::element(PlaqueProps {}).bg(rgb(0xff0000))
+        }
+    }
+
+    #[test]
+    fn a_component_rooted_in_another_shares_its_host() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Counter>(|| CounterProps {
+            label: "Plaque".into(),
+        }));
+        let alone = creates(&c.commit().unwrap());
+        for deep in [false, true] {
+            let mut c = core();
+            if deep {
+                c.mount_root(&Root::new::<Shelf>(|| ShelfProps {}));
+            } else {
+                c.mount_root(&Root::new::<Plaque>(|| PlaqueProps {}));
+            }
+            let batch = c.commit().unwrap();
+            // The counter's view makes the host: no view of its own.
+            assert_eq!(creates(&batch), alone, "{:?}", batch.items);
+            let host = root_host(&batch);
+            let style = view_style_of(&batch, host).expect("styled");
+            assert_eq!(style.opacity, 0.5, "the styles the view gives it");
+            if deep {
+                assert_ne!(style.background_color, crate::Color::TRANSPARENT);
+            }
+            assert_eq!(texts(&batch), ["Plaque 0", "static"]);
+            let text = text_node(&batch, "Plaque 0");
+            assert_eq!(native_parent(&c, text), Some(host));
+            // Its listener runs on the host, its events reach the view.
+            assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+            let batch = c.commit().unwrap();
+            assert_eq!(texts(&batch), ["Plaque 1"]);
+            assert_eq!(PLAQUE_TAPS.with(Cell::get), 1);
+            PLAQUE_TAPS.with(|t| t.set(0));
+            assert!(
+                batch.items.iter().all(|i| match i {
+                    MountItem::Insert { parent, child, .. } =>
+                        c.key(*parent).is_ok() && c.key(*child).is_ok(),
+                    _ => true,
+                }),
+                "only nodes' own ids"
+            );
+        }
+    }
+
+    /// A holder of its children as its view's root.
+    #[derive(Default)]
+    struct Tray;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct TrayProps {
+        children: Children,
+    }
+
+    impl Component for Tray {
+        type Props = TrayProps;
+        type Event = NoEvent;
+
+        fn view(props: TrayProps, _: Scope<NoEvent>) -> impl IntoElement {
+            Holder::element(HolderProps {
+                children: Children::default(),
+            })
+            .opacity(0.5)
+            .child(props.children)
+        }
+    }
+
+    #[test]
+    fn a_js_host_of_a_rooted_component_takes_the_apps_styles_events_and_children() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Tray>();
+        registry.register::<Plaque>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Plaque>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Class("opacity-25".into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        // The app's class goes after what the view gives the counter.
+        assert_eq!(view_style_of(&batch, 2).map(|s| s.opacity), Some(0.25));
+        // JS stops listening to presses: the counter's view still does.
+        apply(
+            &mut c,
+            vec![
+                Op::Listen {
+                    id: 2,
+                    event: EventKind::Press,
+                    enabled: true,
+                },
+                Op::Listen {
+                    id: 2,
+                    event: EventKind::Press,
+                    enabled: false,
+                },
+            ],
+        );
+        c.commit();
+        let key = c.key(2).unwrap();
+        assert!(c.nodes[key as usize].events.contains(EventKind::Press));
+        // The app's classes change: the node follows.
+        c.apply(Op::SetProp {
+            id: 2,
+            prop: Prop::Class("opacity-75".into()),
+        })
+        .unwrap();
+        let batch = c.commit().unwrap();
+        assert_eq!(view_style_of(&batch, 2).map(|s| s.opacity), Some(0.75));
+        // A tray: JS's children go into the host itself.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::Component(std::any::type_name::<Tray>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 4,
+                    before: None,
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(native_parent(&c, 6), Some(4));
+        assert_eq!(creates(&batch), 2, "{:?}", batch.items);
+        // Released: its nodes go, JS's child stays.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 4,
+                },
+                Op::Release { id: 4 },
+                Op::Release { id: 2 },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        assert!(c.key(6).is_ok());
+        assert_eq!(native_parent(&c, 6), None);
+        assert!(c.components.instances.is_empty());
+        let deleted: Vec<NodeId> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Delete { id } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert!(deleted.contains(&2) && deleted.contains(&4), "{deleted:?}");
+        assert_eq!(c.nodes.len(), 2, "the root and JS's child are left");
+    }
+
+    /// A count its API reads.
+    #[derive(Default)]
+    struct Dial;
+
+    #[derive(Clone, Copy)]
+    struct DialApi {
+        at: crate::ui::Signal<i32>,
+    }
+
+    #[crate::ui::methods]
+    impl DialApi {
+        /// Where it is.
+        fn at(&self) -> i32 {
+            self.at.get_untracked()
+        }
+    }
+
+    impl Component for Dial {
+        type Props = ();
+        type Event = NoEvent;
+        const METHODS: crate::ui::Methods = crate::ui::Methods::of::<DialApi>();
+
+        fn view(_: (), cx: Scope<NoEvent>) -> impl IntoElement {
+            let at = signal(7);
+            cx.methods(DialApi { at });
+            text(move || format!("at {}", at.get()))
+        }
+    }
+
+    thread_local! {
+        static DIAL: Cell<Option<crate::ui::ComponentRef<Dial>>> = const { Cell::new(None) };
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct DialPanelProps {
+        rooted: bool,
+    }
+
+    /// A dial with a ref, as its view's root or inside a view.
+    #[component]
+    fn DialPanel(props: DialPanelProps) -> impl IntoElement {
+        let dial = component_ref::<Dial>();
+        DIAL.with(|d| d.set(Some(dial)));
+        let el = Dial::element(()).component_ref(&dial);
+        if props.rooted {
+            el.into_element()
+        } else {
+            view().child(el).into_element()
+        }
+    }
+
+    #[test]
+    fn the_api_of_a_component_rooted_in_another_is_its_refs() {
+        for rooted in [false, true] {
+            let mut c = core();
+            c.mount_root(&Root::new::<DialPanel>(move || DialPanelProps { rooted }));
+            let _ = c.commit().unwrap();
+            let dial = DIAL.with(Cell::get).unwrap();
+            let _entered = c.components.runtime.enter();
+            let at = dial.api::<DialApi>().map(|api| api.at());
+            assert_eq!(at, Some(7), "rooted: {rooted}");
+        }
+    }
+
     /// A view passing content to nested components: a pocket's lazy
     /// children and a region in a holder's; a press opens and closes.
     #[derive(Default)]

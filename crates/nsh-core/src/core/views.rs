@@ -427,7 +427,17 @@ impl<M: TextEngine> Core<M> {
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
                 };
-                let app = (id == host).then(|| inst.app_style.clone()).flatten();
+                let (own, above) = (inst.app_style.clone(), inst.above);
+                // On another component's host, the app's style is the top
+                // host's.
+                let app = match above {
+                    Some(_) if id == host => self.above_context(above, None).1,
+                    _ if id == host => own,
+                    _ => None,
+                };
+                let Some(inst) = self.components.instances.get_mut(&host) else {
+                    return;
+                };
                 let Some(node) = inst.bound.get_mut(&id) else {
                     return;
                 };
@@ -439,7 +449,15 @@ impl<M: TextEngine> Core<M> {
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
                 };
-                let user = if id == host { inst.user.clone() } else { None };
+                let (own, above) = (inst.user.clone(), inst.above);
+                let user = if id == host {
+                    self.above_context(above, own).0
+                } else {
+                    None
+                };
+                let Some(inst) = self.components.instances.get_mut(&host) else {
+                    return;
+                };
                 let Some(node) = inst.bound.get_mut(&id) else {
                     return;
                 };

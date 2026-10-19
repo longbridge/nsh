@@ -147,8 +147,8 @@ reasons: `reactive-components.md`.
   component's view: the failed part is disposed; `reset.reset()` makes the view again; unhandled errors are logged,
   `js` target). A modal is presented while it is in the view (an `If` of it), a screen pushed while it is in its
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
-  can be any element: the host becomes it (a screen, a modal, a text, a list); a region or a component as the root
-  goes in the host view.
+  can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
+  the host itself (no view of its own); a region as the root goes in the host view.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
   colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
@@ -450,7 +450,18 @@ intercepts the ops on the host (`intercept`): the host is the root of the compon
 root become nodes the core creates itself. Apps without components pay one check per op. The root can be any
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
-region or a component goes in the host view.
+region goes in the host view.
+
+A root that is a component (a view that is `Press::element(..)`) is made on the same host, as a TSX function component returning
+another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
+same node, no node of its own; what the core sends names the node by its own id, `native_id`), and its view makes
+the node (`expand_rooted`; `Instance::rooted` / `above` link the two, as deep as roots are components). The node gets
+the innermost view's root, then the styles each component above gives the one below (the outer last, then the app's
+`class` on the top host and its `style`); it listens to that root's events and to JS's on the host; the host's
+native events, touches and responder go to the innermost component (`base_of`), whose events reach the view above as
+a nested component's do. The props, listener, ref and content the outer view gives it are a nested component's;
+the JS children it passes on are placed by the inner view. Releasing the host releases them all, the aliases only
+forgotten.
 
 A view JS made (`<Button>` in TSX) is made when its host is first in the root's tree, so it is under the view that
 placed it: it adopts the owner of the nearest component above it (where that one places its JS children, else its
