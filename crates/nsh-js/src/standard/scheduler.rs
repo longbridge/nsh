@@ -1,5 +1,6 @@
 //! Engine-thread bridge for LLRT futures. I/O wakes the engine; idle VMs never poll.
 use std::{
+    cell::RefCell,
     future::Future,
     pin::pin,
     rc::Rc,
@@ -89,13 +90,16 @@ impl Drop for Scheduler {
 /// Synchronous NSH entry surface backed by the async runtime's local context.
 /// The JS values and their futures remain on the owning engine thread.
 pub(crate) struct Context {
-    inner: AsyncContext,
+    inner: RefCell<Option<AsyncContext>>,
     scheduler: Rc<Scheduler>,
 }
 impl Context {
     pub(crate) fn full(runtime: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Self> {
         let inner = scheduler.ready(AsyncContext::full(runtime))?;
-        Ok(Self { inner, scheduler })
+        Ok(Self {
+            inner: RefCell::new(Some(inner)),
+            scheduler,
+        })
     }
     #[cfg(feature = "bytecode-only")]
     pub(crate) fn custom<I: rquickjs::context::Intrinsic>(
@@ -103,12 +107,23 @@ impl Context {
         scheduler: Rc<Scheduler>,
     ) -> rquickjs::Result<Self> {
         let inner = scheduler.ready(AsyncContext::custom::<I>(runtime))?;
-        Ok(Self { inner, scheduler })
+        Ok(Self {
+            inner: RefCell::new(Some(inner)),
+            scheduler,
+        })
+    }
+    pub(crate) fn is_live(&self) -> bool {
+        self.inner.borrow().is_some()
+    }
+    pub(crate) fn retire(&self) {
+        self.inner.borrow_mut().take();
     }
     pub(crate) fn with<F, R>(&self, f: F) -> R
     where
         F: for<'js> FnOnce(Ctx<'js>) -> R,
     {
-        self.scheduler.ready(self.inner.with(f))
+        let inner = self.inner.borrow();
+        self.scheduler
+            .ready(inner.as_ref().expect("live JS context").with(f))
     }
 }

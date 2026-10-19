@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::Rc,
     sync::{
         Arc,
@@ -81,7 +81,7 @@ pub type TextMeasurer = Box<dyn Fn(&nsh_core::canvas::CanvasFont, &str) -> f32>;
 pub struct Host {
     // Field order matters: the context must drop before the runtime.
     ctx: Context,
-    rt: AsyncRuntime,
+    rt: RefCell<Option<AsyncRuntime>>,
     scheduler: Rc<Scheduler>,
     /// Set by the heap's allocator when it refuses an allocation.
     exhausted: Arc<AtomicBool>,
@@ -89,6 +89,7 @@ pub struct Host {
     on_error: Option<ErrorHandler>,
     budget: Budget,
     evaluations: RefCell<Vec<Persistent<Promise<'static>>>>,
+    entry_depth: Cell<usize>,
 }
 
 /// A context with `JS_NewContext`'s intrinsics. With feature
@@ -202,23 +203,24 @@ impl Host {
         .map_err(|e| ctx.with(|ctx| JsError::from_engine(&ctx, e)))?;
         Ok(Host {
             ctx,
-            rt,
+            rt: RefCell::new(Some(rt)),
             scheduler,
             exhausted,
             shared,
             on_error: None,
             budget,
             evaluations: RefCell::new(Vec::new()),
+            entry_depth: Cell::new(0),
         })
     }
 
     /// Aborts running JS (with an uncatchable exception) once `stop` is
     /// set: an engine shutting down never waits for a long-running script.
     pub fn set_stop_flag(&self, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) {
-        self.scheduler.ready(
-            self.rt
-                .set_interrupt_handler(Some(self.budget.interrupt_handler(Some(stop)))),
-        );
+        if let Some(rt) = self.rt.borrow().as_ref() {
+            self.scheduler
+                .ready(rt.set_interrupt_handler(Some(self.budget.interrupt_handler(Some(stop)))));
+        }
     }
 
     /// Why the VM was stopped, if it was: it ran out of memory, or the app
@@ -230,7 +232,9 @@ impl Host {
     /// Stops the VM (e.g. the core refused an op over a quota).
     pub fn stop(&self, reason: String) {
         self.shared.stop(reason);
-        self.scheduler.disable();
+        if self.entry_depth.get() == 0 {
+            self.stop_work();
+        }
     }
 
     /// The VM's limits.
@@ -242,8 +246,12 @@ impl Host {
     /// the VM was stopped.
     fn guarded<R>(&self, phase: Phase, f: impl FnOnce() -> R) -> Option<R> {
         if self.shared.fatal.borrow().is_some() {
+            if self.entry_depth.get() == 0 {
+                self.stop_work();
+            }
             return None;
         }
+        self.entry_depth.set(self.entry_depth.get() + 1);
         let running = self.budget.run(phase);
         let result = f();
         drop(running);
@@ -252,7 +260,26 @@ impl Host {
         if self.exhausted.load(Ordering::Relaxed) && self.shared.fatal.borrow().is_none() {
             self.uncaught(&JsError::new("out of memory".to_owned()));
         }
+        self.entry_depth.set(self.entry_depth.get() - 1);
+        if self.entry_depth.get() == 0 && self.fatal().is_some() {
+            self.stop_work();
+        }
         Some(result)
+    }
+
+    /// Retire native work and JS together while retaining the core's rendered
+    /// snapshot and already queued operations. Never called under a JS entry.
+    fn stop_work(&self) {
+        self.scheduler.disable();
+        self.shared.system_wake.borrow_mut().take();
+        self.evaluations.borrow_mut().clear();
+        self.shared.timers.borrow_mut().clear();
+        self.shared.frames.borrow_mut().clear();
+        if self.ctx.is_live() {
+            self.ctx.with(|ctx| crate::state::uninstall(&ctx));
+            self.ctx.retire();
+        }
+        self.rt.borrow_mut().take();
     }
 
     /// What an error from a call means: an overrun budget or exhausted
@@ -474,6 +501,9 @@ impl Host {
     /// (since the last call) into `out`: the host loads each and hands it
     /// over with [`Host::add_chunk_source`] or [`Host::chunk_failed`].
     pub fn take_chunk_requests(&self, out: &mut Vec<String>) {
+        if !self.ctx.is_live() {
+            return;
+        }
         self.ctx.with(|ctx| {
             // SAFETY: the context's state, for this call.
             unsafe { &(*crate::state::state(ctx.as_raw().as_ptr())).chunks }.take_requests(out)
@@ -610,6 +640,9 @@ impl Host {
 
     /// Wakes this host's engine when a process or filesystem worker produces an event.
     pub fn set_system_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        if self.fatal().is_some() {
+            return;
+        }
         self.scheduler.set_wake(wake.clone());
         *self.shared.system_wake.borrow_mut() = Some(wake);
     }
@@ -633,7 +666,9 @@ impl Host {
             return false;
         }
         !self.evaluations.borrow().is_empty()
-            || self.scheduler.ready(self.rt.is_job_pending())
+            || self
+                .scheduler
+                .ready(self.rt.borrow().as_ref().expect("live VM").is_job_pending())
             || self.ctx.with(|ctx| {
                 let raw = ctx.as_raw().as_ptr();
                 crate::process::has_pending(raw) || crate::fs::has_pending(raw)
@@ -670,7 +705,10 @@ impl Host {
     pub fn run_jobs(&self) {
         self.guarded(Phase::Call, || {
             loop {
-                match self.scheduler.poll_job(&self.rt) {
+                match self
+                    .scheduler
+                    .poll_job(self.rt.borrow().as_ref().expect("live VM"))
+                {
                     std::task::Poll::Ready(Ok(true)) => {}
                     std::task::Poll::Ready(Ok(false)) | std::task::Poll::Pending => break,
                     std::task::Poll::Ready(Err(err)) => {
@@ -708,6 +746,9 @@ impl Host {
     /// Whether an exception is pending outside any call (none should be).
     #[cfg(test)]
     pub(crate) fn has_exception(&self) -> bool {
+        if !self.ctx.is_live() {
+            return false;
+        }
         // SAFETY: a check on the live context.
         self.ctx
             .with(|ctx| unsafe { qjs::JS_HasException(ctx.as_raw().as_ptr()) })
@@ -719,8 +760,10 @@ impl Host {
     pub fn run_posted(&self) {
         if self.fatal().is_some() {
             // Stopped for good: what waits for these calls is told so.
-            self.ctx
-                .with(|ctx| crate::classes::close(ctx.as_raw().as_ptr()));
+            if self.ctx.is_live() {
+                self.ctx
+                    .with(|ctx| crate::classes::close(ctx.as_raw().as_ptr()));
+            }
             return;
         }
         self.guarded(Phase::Call, || {
@@ -759,6 +802,9 @@ impl Host {
 
     /// Whether calls Rust queued wait for [`Host::run_posted`].
     pub fn has_posted(&self) -> bool {
+        if !self.ctx.is_live() {
+            return false;
+        }
         self.ctx
             .with(|ctx| crate::classes::has_posted(ctx.as_raw().as_ptr()))
     }
@@ -766,7 +812,7 @@ impl Host {
     /// Moves the network requests and cancellations made since the last
     /// call into `out`.
     pub fn take_network(&self, out: &mut NetworkQueue) {
-        if !self.shared.dropped_fetches.borrow().is_empty() {
+        if self.ctx.is_live() && !self.shared.dropped_fetches.borrow().is_empty() {
             self.ctx
                 .with(|ctx| crate::web::forget_dropped_fetches(ctx.as_raw().as_ptr()));
         }
@@ -844,14 +890,18 @@ impl Host {
 
     /// The number of live JS objects (diagnostics: leak checks).
     pub fn object_count(&self) -> i64 {
-        self.scheduler.ready(self.rt.memory_usage()).obj_count
+        self.rt
+            .borrow()
+            .as_ref()
+            .map_or(0, |rt| self.scheduler.ready(rt.memory_usage()).obj_count)
     }
 
     /// Runs the cycle collector. Call when idle so released nodes are
     /// reported promptly.
     pub fn collect_garbage(&self) {
         self.guarded(Phase::Call, || {
-            self.scheduler.ready(self.rt.run_gc());
+            self.scheduler
+                .ready(self.rt.borrow().as_ref().expect("live VM").run_gc());
             self.run_jobs();
         });
     }
@@ -875,12 +925,7 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
-        self.scheduler.disable();
-        self.evaluations.borrow_mut().clear();
-        // Persistent JS values must be freed before the runtime.
-        self.shared.timers.borrow_mut().clear();
-        self.shared.frames.borrow_mut().clear();
-        self.ctx.with(|ctx| crate::state::uninstall(&ctx));
+        self.stop_work();
     }
 }
 
@@ -1269,6 +1314,62 @@ const report = (v) => text(String(v));
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn stopping_host_cancels_native_work_without_dropping_snapshot() {
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let callback_dropped = Arc::new(AtomicBool::new(false));
+        let host = Host::new().unwrap();
+        let callback_guard = Dropped(callback_dropped.clone());
+        host.set_system_wake(Arc::new(move || {
+            let _ = &callback_guard;
+        }));
+        let guard = Dropped(dropped.clone());
+        host.ctx.with(|ctx| {
+            let owned = ctx.clone();
+            ctx.spawn(async move {
+                let (_guard, _owned) = (guard, owned);
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            });
+        });
+        host.run_jobs();
+        assert!(host.has_system_tasks());
+        host.eval_source(&format!("{REPORT}report('frozen UI');"))
+            .unwrap();
+        host.stop("test stop".into());
+        assert!(!host.ctx.is_live());
+        assert!(host.rt.borrow().is_none());
+        assert_eq!(reported(&host), ["frozen UI"]);
+        assert!(!host.has_system_tasks());
+        assert!(!host.has_posted());
+        assert!(!host.wants_frame());
+        assert!(host.next_timer().is_none());
+        assert_eq!(host.object_count(), 0);
+        host.run_jobs();
+        host.run_system();
+        host.run_posted();
+        host.run_frame();
+        host.collect_garbage();
+        host.set_stop_flag(Arc::new(AtomicBool::new(false)));
+        host.take_chunk_requests(&mut Vec::new());
+        assert!(host.eval_source("throw 1").is_err());
+        host.stop("repeated stop".into());
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "pending future must be destroyed with VM"
+        );
+        assert!(
+            callback_dropped.load(Ordering::SeqCst),
+            "engine callback must not retain old generation"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn top_level_await_resumes_and_reports_rejection_on_native_wake() {
         let mut host = Host::new().unwrap();
         let errors = Rc::new(RefCell::new(Vec::new()));
@@ -1300,6 +1401,38 @@ const report = (v) => text(String(v));
                 .iter()
                 .any(|error| error.contains("native TLA rejected"))
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn oom_retires_pending_native_future_without_dropping_host() {
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let host = sandboxed(Limits {
+            memory_bytes: 16 << 20,
+            ..Limits::default()
+        });
+        let guard = Dropped(dropped.clone());
+        host.ctx.with(|ctx| {
+            ctx.spawn(async move {
+                let _guard = guard;
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            })
+        });
+        host.run_jobs();
+        let _ = host.eval_source(
+            "try { const keep=[]; for (;;) keep.push(new Array(100000).fill(1)); } catch (_) {}",
+        );
+        assert!(host.fatal().is_some());
+        assert!(!host.ctx.is_live());
+        assert!(host.rt.borrow().is_none());
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(!host.has_system_tasks());
     }
 
     #[test]
