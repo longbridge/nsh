@@ -1083,17 +1083,50 @@ mod tests {
         };
         assert!(access.allows_env("NSH_SECRET"));
         assert!(!access.allows_env("OTHER"));
-        assert!(access.allows_env("http_proxy"));
         assert!(!access.allows_exit());
         assert!(!Access::all().allows_exit());
         assert!(!Access::all().allows_env("NSH_SECRET"));
-        assert!(Access::all().allows_env("PATH"));
+        assert!(Access::all().allows_env("lang"));
+        assert!(Access::all().allows_env("TZ"));
+        // Identity, paths and proxy credentials need an explicit grant.
+        for name in [
+            "HOME",
+            "USER",
+            "USERNAME",
+            "HOSTNAME",
+            "COMPUTERNAME",
+            "PATH",
+            "TMPDIR",
+            "XDG_RUNTIME_DIR",
+            "APPDATA",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "DISPLAY",
+        ] {
+            assert!(!Access::all().allows_env(name), "{name}");
+        }
         assert!(!Access::all().allows_env("SSH_AUTH_SOCK"));
         assert!(!Access::all().allows_env("DBUS_SESSION_BUS_ADDRESS"));
         assert!(Capabilities::from_json(&serde_json::json!({"process":{"exit":"true"}})).is_err());
         assert!(
             Capabilities::from_json(&serde_json::json!({"process":{"env":["BAD=NAME"]}})).is_err()
         );
+    }
+
+    #[test]
+    fn default_environment_entries_are_upper_case_names() {
+        for line in include_str!("default-env").lines() {
+            let name = line.split('#').next().unwrap_or_default().trim();
+            assert!(
+                name.is_empty()
+                    || name
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'),
+                "{line}"
+            );
+        }
     }
 
     #[cfg(unix)]
