@@ -160,9 +160,30 @@ impl<'a> CallCx<'a> {
 
     /// Runs `f` when what owns the call in JS goes: the reactive owner it
     /// runs under, or the module's run under hot reload (otherwise when the
-    /// VM goes, as everything else does).
-    pub fn on_cleanup(&self, f: impl FnOnce() + 'static) {
-        self.host.on_cleanup(Box::new(f));
+    /// VM goes, as everything else does). [`Cleanup::release`] unregisters
+    /// it once what it undoes ended by itself, so an owner that lives long
+    /// does not collect them.
+    pub fn on_cleanup(&self, f: impl FnOnce() + 'static) -> Cleanup {
+        Cleanup(Some(self.host.on_cleanup(Box::new(f))))
+    }
+}
+
+/// A cleanup [`CallCx::on_cleanup`] registered. Dropping it keeps the
+/// cleanup registered.
+pub struct Cleanup(Option<Box<dyn FnOnce()>>);
+
+impl Cleanup {
+    /// Unregisters the cleanup without running it (a no-op once it ran).
+    pub fn release(mut self) {
+        if let Some(release) = self.0.take() {
+            release();
+        }
+    }
+}
+
+impl fmt::Debug for Cleanup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Cleanup")
     }
 }
 

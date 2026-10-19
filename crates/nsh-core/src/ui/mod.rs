@@ -160,8 +160,8 @@ pub use self::{
         px, relative, rgb, rgba,
     },
     system::{
-        CallCx, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals, Quotas,
-        System, io_code,
+        CallCx, Cleanup, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals,
+        Quotas, System, io_code,
     },
     task::{Answer, DialogAnswer, ImageSize, Task},
     theme::{Theme, ThemeColors, ThemeError},

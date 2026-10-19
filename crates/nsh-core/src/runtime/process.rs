@@ -709,10 +709,30 @@ mod native {
         let queued_input = Arc::new(AtomicUsize::new(0));
         let worker_input = queued_input.clone();
         let timeout = launch.timeout;
+        // The leader goes to the supervisor once it runs: a child whose
+        // supervisor cannot start is killed here, not left running.
+        let (hand, handed) = mpsc::channel::<Leader>();
         let worker = thread::Builder::new()
             .name("nsh-process".into())
-            .spawn(move || supervise(leader, inputs, mailbox, timeout, worker_input))
-            .map_err(|e| JsError::Error(format!("could not supervise the process: {e}")))?;
+            .spawn(move || {
+                if let Ok(leader) = handed.recv() {
+                    supervise(leader, inputs, mailbox, timeout, worker_input);
+                }
+            });
+        let worker = match worker {
+            Ok(worker) => {
+                let _ = hand.send(leader);
+                worker
+            }
+            Err(e) => {
+                let mut leader = leader;
+                leader.terminate(true);
+                let _ = leader.reap();
+                return Err(JsError::Error(format!(
+                    "could not supervise the process: {e}"
+                )));
+            }
+        };
         if !stdin {
             let _ = input.send(Input::Close);
         }
@@ -740,7 +760,7 @@ mod native {
             Err(e) => return Later::new(async move { Err::<CommandOutput, _>(e) }),
         };
         let kill = control.input.clone();
-        cx.on_cleanup(move || {
+        let cleanup = cx.on_cleanup(move || {
             let _ = kill.send(Input::Kill);
         });
         let queued = children.inner.queued.clone();
@@ -766,6 +786,7 @@ mod native {
                     }
                     Event::Exit(code, _, error) => {
                         children.inner.finished(id);
+                        cleanup.release();
                         if overflowed {
                             return Err(format!(
                                 "process output exceeded {QUEUE_BYTES} bytes on one stream"
@@ -801,10 +822,10 @@ mod native {
             stdin_open: Cell::new(stdin),
             control,
         });
-        cx.on_cleanup(move || {
+        let cleanup = cx.on_cleanup(move || {
             let _ = kill.send(Input::Kill);
         });
-        cx.start(deliver(child.clone(), events, children, id, lines));
+        cx.start(deliver(child.clone(), events, children, id, lines, cleanup));
         Ok(ChildProcess { pid, child })
     }
 
@@ -815,6 +836,7 @@ mod native {
         children: Rc<super::Children>,
         id: u64,
         lines: bool,
+        cleanup: crate::ui::Cleanup,
     ) {
         let queued = children.inner.queued.clone();
         let mut pending = [String::new(), String::new()];
@@ -863,6 +885,9 @@ mod native {
                         }
                     }
                     children.inner.finished(id);
+                    // An owner that lives long must not collect one cleanup
+                    // per child it ever ran.
+                    cleanup.release();
                     let exit = ExitResult {
                         code,
                         signal: signal.map(signal_name),
