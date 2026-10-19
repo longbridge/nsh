@@ -105,13 +105,13 @@ impl Socket {
 
 impl Socket {
     #[cfg(not(target_arch = "wasm32"))]
-    async fn open(host: String, port: u16, held: crate::ui::Held) -> Result<Socket, String> {
+    async fn open(host: String, port: u16, held: crate::ui::Held) -> Result<Socket, JsError> {
         native::connect(&host, port, held).await
     }
 
     #[cfg(target_arch = "wasm32")]
-    async fn open(_: String, _: u16, _: crate::ui::Held) -> Result<Socket, String> {
-        Err("TCP sockets require a native host".into())
+    async fn open(_: String, _: u16, _: crate::ui::Held) -> Result<Socket, JsError> {
+        Err(JsError::Type("TCP sockets require a native host".into()))
     }
 }
 
@@ -129,7 +129,29 @@ mod native {
     };
 
     use super::{Socket, TIMEOUT};
-    use crate::ui::Held;
+    use crate::ui::{Held, JsError, io_code};
+
+    /// An error with Node's properties: `code` (from `error` when it has
+    /// one, else `fallback`) and `syscall`, keeping `message`.
+    fn failed(
+        message: String,
+        error: Option<&std::io::Error>,
+        fallback: &str,
+        syscall: &'static str,
+    ) -> JsError {
+        let code = error.and_then(io_code).unwrap_or(fallback);
+        JsError::Error(message)
+            .with_code(code)
+            .with("syscall", syscall)
+    }
+
+    fn timed_out(message: String, syscall: &'static str) -> JsError {
+        failed(message, None, "ETIMEDOUT", syscall)
+    }
+
+    fn closed() -> JsError {
+        JsError::Error("socket is closed".into()).with_code("ERR_SOCKET_CLOSED")
+    }
 
     pub(super) struct Inner {
         read: Mutex<OwnedReadHalf>,
@@ -153,13 +175,27 @@ mod native {
         }
     }
 
-    pub(super) async fn connect(host: &str, port: u16, held: Held) -> Result<Socket, String> {
+    pub(super) async fn connect(host: &str, port: u16, held: Held) -> Result<Socket, JsError> {
         let deadline = tokio::time::Instant::now() + TIMEOUT;
         let operation = format!("{host}:{port}");
+        let with_address = |error: JsError| error.with("address", host).with("port", port);
+        // A failed lookup names no OS error: Node calls it ENOTFOUND.
         let addresses = tokio::time::timeout_at(deadline, tokio::net::lookup_host((host, port)))
             .await
-            .map_err(|_| format!("resolving {operation} timed out"))?
-            .map_err(|error| format!("resolving {operation} failed: {error}"))?;
+            .map_err(|_| {
+                with_address(timed_out(
+                    format!("resolving {operation} timed out"),
+                    "getaddrinfo",
+                ))
+            })?
+            .map_err(|error| {
+                with_address(failed(
+                    format!("resolving {operation} failed: {error}"),
+                    None,
+                    "ENOTFOUND",
+                    "getaddrinfo",
+                ))
+            })?;
         let mut last_error = None;
         let mut connected = None;
         for address in addresses {
@@ -169,22 +205,27 @@ mod native {
                     break;
                 }
                 Ok(Err(error)) => last_error = Some(error),
-                Err(_) => return Err(format!("connecting to {operation} timed out")),
+                Err(_) => {
+                    return Err(with_address(timed_out(
+                        format!("connecting to {operation} timed out"),
+                        "connect",
+                    )));
+                }
             }
         }
         let stream = connected.ok_or_else(|| {
-            format!(
+            let message = format!(
                 "connecting to {operation} failed: {}",
                 last_error
+                    .as_ref()
                     .map(|error| error.to_string())
                     .unwrap_or_else(|| "host resolved to no addresses".into())
-            )
+            );
+            with_address(failed(message, last_error.as_ref(), "ENOTFOUND", "connect"))
         })?;
-        let standard = stream.into_std().map_err(|e| e.to_string())?;
-        let closer = standard.try_clone().map_err(|e| e.to_string())?;
-        let (read, write) = tokio::net::TcpStream::from_std(standard)
-            .map_err(|e| e.to_string())?
-            .into_split();
+        let standard = stream.into_std()?;
+        let closer = standard.try_clone()?;
+        let (read, write) = tokio::net::TcpStream::from_std(standard)?.into_split();
         Ok(Socket {
             inner: Rc::new(Inner {
                 read: Mutex::new(read),
@@ -198,7 +239,7 @@ mod native {
         })
     }
 
-    pub(super) async fn read(socket: Rc<Inner>, size: usize) -> Result<Option<Vec<u8>>, String> {
+    pub(super) async fn read(socket: Rc<Inner>, size: usize) -> Result<Option<Vec<u8>>, JsError> {
         let mut reader = socket.read.lock().await;
         let mut bytes = vec![0; size];
         let count = if size == 0 || socket.closed.get() {
@@ -208,8 +249,8 @@ mod native {
                 biased;
                 _ = socket.cancel.notified() => 0,
                 result = tokio::time::timeout(TIMEOUT, reader.read(&mut bytes)) => result
-                    .map_err(|_| "socket.read(size) timed out".to_owned())?
-                    .map_err(|e| format!("socket read failed: {e}"))?,
+                    .map_err(|_| timed_out("socket.read(size) timed out".to_owned(), "read"))?
+                    .map_err(|e| failed(format!("socket read failed: {e}"), Some(&e), "EIO", "read"))?,
             }
         };
         if count == 0 {
@@ -219,7 +260,7 @@ mod native {
         Ok(Some(bytes))
     }
 
-    pub(super) async fn write(socket: Rc<Inner>, data: String) -> Result<(), String> {
+    pub(super) async fn write(socket: Rc<Inner>, data: String) -> Result<(), JsError> {
         struct Pending<'a>(&'a Inner, usize);
         impl Drop for Pending<'_> {
             fn drop(&mut self) {
@@ -227,7 +268,6 @@ mod native {
             }
         }
         let _pending = Pending(&socket, data.len());
-        let closed = || "socket is closed".to_owned();
         // `close()` interrupts a write waiting for its turn or for a peer
         // that stopped reading.
         let mut writer = tokio::select! {
@@ -242,8 +282,8 @@ mod native {
             biased;
             _ = socket.cancel.notified() => Err(closed()),
             result = tokio::time::timeout(TIMEOUT, writer.write_all(data.as_bytes())) => result
-                .map_err(|_| "socket.write(data) timed out".to_owned())?
-                .map_err(|e| format!("socket write failed: {e}")),
+                .map_err(|_| timed_out("socket.write(data) timed out".to_owned(), "write"))?
+                .map_err(|e| failed(format!("socket write failed: {e}"), Some(&e), "EIO", "write")),
         }
     }
 }

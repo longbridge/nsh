@@ -231,3 +231,24 @@ fn dropping_the_engine_closes_its_sockets() {
     );
     peer.join().unwrap();
 }
+
+#[test]
+fn connection_failures_carry_nodes_error_codes() {
+    // A port nothing listens on: bound, then closed again.
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let (_engine, rx) = start(
+        &format!(
+            r#"connect("127.0.0.1", {port}).then(() => report("connected"), (e) =>
+  report(`${{e.constructor.name}} ${{e.code}} ${{e.syscall}} ${{e.address}} ${{e.port === {port}}} ${{e.message.startsWith("connecting to 127.0.0.1:{port} failed")}}`));"#
+        ),
+        &sockets(port),
+    );
+    assert_eq!(
+        shown(&rx, "done"),
+        "done Error ECONNREFUSED connect 127.0.0.1 true true"
+    );
+}

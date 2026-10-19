@@ -87,7 +87,7 @@ child.on("stdout", (line) => console.log(line));
 child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 ```
 
-`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal, error }`（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
+`run` 在任何退出状态下都以 `{ code, stdout, stderr }` 完成，在启动失败、超时和输出超过限制时拒绝。`spawn` 立即返回子进程；`stdin: "pipe"` 启用 `write` 和 `end`，`lines: true` 按完整行送达。`on(event, handler)` 返回子进程本身，处理函数收到事件的内容：文本，或在最后一次输出之后收到一次 `{ code, signal, error }`（之后添加的监听器会立即收到它）。`pid` 是子进程的进程号。未授权的命令或授权范围之外的 `cwd` 抛出带 `code` `EACCES` 的 `TypeError`；启动失败的错误带有 `code`（可执行文件不存在时为 `ENOENT`，无法执行时为 `EACCES`）、`syscall`（`spawn <命令>`）和 `path`：`spawn` 抛出该错误，`run` 以它拒绝。宿主没有数据目录时 `process.dataDir` 为 `null`。`kill`、超时、响应式所有者的清理和 VM 的销毁都会结束整个进程树：在 Unix 上，进程组先收到 SIGTERM，250 ms 后收到 SIGKILL（VM 销毁时立即发送 SIGKILL）。
 
 | 限制 | 值 |
 |---|---|
@@ -103,7 +103,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（旧式规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。每个 VM 的两种 API 合计最多 32 个 WebSocket，单条消息最多 8 MiB，发送队列最多 8 条且缓冲总量最多 8 MiB。握手和写入超时为 30 秒，关闭最多等待 5 秒。
 
-`net.connect(host, port)` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 `Socket` 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。未授权时在调用处抛出 `TypeError`，超出限制时抛出 `RangeError`；连接与 I/O 失败则拒绝 Promise。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
+`net.connect(host, port)` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 `Socket` 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。未授权时在调用处抛出 `TypeError`，超出限制时抛出 `RangeError`；连接与 I/O 失败以带有 Node 的 `code`（`ECONNREFUSED`、`ENOTFOUND`、`ETIMEDOUT`、`ECONNRESET` 等）和 `syscall` 的错误拒绝 Promise，连接失败还带有 `address` 和 `port`，对已关闭 socket 的操作为 `ERR_SOCKET_CLOSED`。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
 
 原始 TCP 和此 WebSocket 传输使用原生宿主。浏览器应用使用平台提供的 [全局 API](./globals.md)；平台支持以实际运行的宿主为准。嵌入宿主的能力授权与应用声明取交集。
 

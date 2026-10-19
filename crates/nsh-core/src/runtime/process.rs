@@ -516,9 +516,11 @@ mod native {
                 return Err(JsError::Type("invalid executable".into()));
             }
             if !sys.access.allows_process(&command) {
-                return Err(JsError::Type(format!(
-                    "process capability denied for `{command}`"
-                )));
+                return Err(spawn_error(
+                    JsError::Type(format!("process capability denied for `{command}`"))
+                        .with_code("EACCES"),
+                    &command,
+                ));
             }
             if args.len() > 4096 {
                 return Err(JsError::Type("too many arguments".into()));
@@ -533,7 +535,11 @@ mod native {
                         &sys.paths,
                         true,
                     )
-                    .map_err(JsError::Type)?,
+                    .map_err(|e| {
+                        JsError::Type(e)
+                            .with_code("EACCES")
+                            .with("path", cwd.as_str())
+                    })?,
                 // The app's own data directory, which needs no grant.
                 None => {
                     let dir = sys.data_dir.clone().ok_or_else(|| {
@@ -583,15 +589,26 @@ mod native {
             .collect()
     }
 
-    fn resolve_executable(command: &str) -> Result<PathBuf, String> {
+    /// Node's properties of a launch failure of `command`: `syscall`
+    /// (`spawn <command>`) and `path`.
+    pub(super) fn spawn_error(error: JsError, command: &str) -> JsError {
+        error
+            .with("syscall", format!("spawn {command}"))
+            .with("path", command)
+    }
+
+    fn resolve_executable(command: &str) -> Result<PathBuf, JsError> {
         let path = Path::new(command);
         if path.is_absolute() {
             return executable(path);
         }
         if command.contains('/') || command.contains('\\') {
-            return Err("use a bare executable name or an absolute path".into());
+            return Err(JsError::Type(
+                "use a bare executable name or an absolute path".into(),
+            ));
         }
-        let host_path = std::env::var_os("PATH").ok_or("host PATH is unset")?;
+        let host_path = std::env::var_os("PATH")
+            .ok_or_else(|| JsError::Error("host PATH is unset".into()).with_code("ENOENT"))?;
         for directory in std::env::split_paths(&host_path).filter(|p| p.is_absolute()) {
             let candidate = directory.join(command);
             if let Ok(path) = executable(&candidate) {
@@ -604,34 +621,40 @@ mod native {
                 return Ok(path);
             }
         }
-        Err(format!(
+        Err(JsError::Error(format!(
             "executable `{command}` was not found in the host PATH"
         ))
+        .with_code("ENOENT"))
     }
 
-    fn executable(path: &Path) -> Result<PathBuf, String> {
-        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    fn executable(path: &Path) -> Result<PathBuf, JsError> {
+        let metadata = std::fs::metadata(path)?;
         if !metadata.is_file() {
-            return Err("executable is not a file".into());
+            return Err(JsError::Error("executable is not a file".into()).with_code("EACCES"));
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             if metadata.permissions().mode() & 0o111 == 0 {
-                return Err("file is not executable".into());
+                return Err(JsError::Error("file is not executable".into()).with_code("EACCES"));
             }
         }
-        std::fs::canonicalize(path).map_err(|e| e.to_string())
+        Ok(std::fs::canonicalize(path)?)
     }
 
     /// Launches `launch` under a supervisor: its id, pid, control and
-    /// events. The VM's quota of children is checked here.
-    fn start(sys: &System, launch: Launch, stdin: bool) -> Result<Started, String> {
+    /// events, or a launch failure with Node's properties (`code`,
+    /// `syscall`, `path`). The VM's quota of children is checked here.
+    fn start(sys: &System, launch: Launch, stdin: bool) -> Result<Started, JsError> {
+        let command = launch.command.clone();
+        launch_child(sys, launch, stdin).map_err(|e| spawn_error(e, &command))
+    }
+
+    fn launch_child(sys: &System, launch: Launch, stdin: bool) -> Result<Started, JsError> {
         let children = sys.locals.get::<super::Children>();
-        let place = sys
-            .quotas
-            .take(CHILDREN, MAX_CHILDREN)
-            .ok_or_else(|| format!("a VM may run at most {MAX_CHILDREN} children"))?;
+        let place = sys.quotas.take(CHILDREN, MAX_CHILDREN).ok_or_else(|| {
+            JsError::Type(format!("a VM may run at most {MAX_CHILDREN} children"))
+        })?;
         let mut cmd = Command::new(resolve_executable(&launch.command)?);
         cmd.env_clear()
             .envs(launch.env)
@@ -651,9 +674,13 @@ mod native {
             // CREATE_NO_WINDOW: a console child gets no console window of its own.
             cmd.creation_flags(0x08000000);
         }
-        let child = cmd
-            .spawn()
-            .map_err(|e| format!("could not launch process: {e}"))?;
+        let child = cmd.spawn().map_err(|e| {
+            let message = format!("could not launch process: {e}");
+            match crate::ui::io_code(&e) {
+                Some(code) => JsError::Error(message).with_code(code),
+                None => JsError::Error(message),
+            }
+        })?;
         let pid = child.id();
         let id = children.next.get() + 1;
         children.next.set(id);
@@ -671,7 +698,7 @@ mod native {
         let worker = thread::Builder::new()
             .name("nsh-process".into())
             .spawn(move || supervise(child, inputs, mailbox, timeout, worker_input))
-            .map_err(|e| format!("could not supervise the process: {e}"))?;
+            .map_err(|e| JsError::Error(format!("could not supervise the process: {e}")))?;
         if !stdin {
             let _ = input.send(Input::Close);
         }
@@ -752,8 +779,7 @@ mod native {
         lines: bool,
         cx: CallCx<'_>,
     ) -> Result<ChildProcess, JsError> {
-        let (id, pid, control, events, children) =
-            start(sys, launch, stdin).map_err(JsError::Type)?;
+        let (id, pid, control, events, children) = start(sys, launch, stdin)?;
         let kill = control.input.clone();
         let child = Rc::new(Child {
             listeners: RefCell::default(),

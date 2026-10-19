@@ -192,17 +192,20 @@ fn run_keeps_split_utf8_and_captures_both_pipes() {
 fn a_refused_command_and_a_failed_launch_throw_and_run_rejects_a_failed_launch() {
     let app = App::start(
         r#"const lines = [];
+const shape = (e) => `${e.constructor.name} ${e.code} ${e.syscall} ${e.path} ${e.message.includes("capability denied")}`;
 for (const command of ["definitely-not-granted", "/nonexistent/nsh-fixture"]) {
-  try { process.spawn(command); lines.push("spawned"); } catch (e) { lines.push(`${e.constructor.name} ${e.message.includes("capability denied")}`); }
+  try { process.spawn(command); lines.push("spawned"); } catch (e) { lines.push(shape(e)); }
 }
-let thrown = false;
-try { process.run("not-granted"); } catch (e) { thrown = e instanceof TypeError; }
-process.run("/nonexistent/nsh-fixture").then(() => report("ran"), (e) => report(`${lines.join(",")} ${thrown} ${e instanceof Error}`));"#,
+try { process.run("not-granted"); } catch (e) { lines.push(shape(e)); }
+process.run("/nonexistent/nsh-fixture").then(() => report("ran"), (e) => report(`${lines.join("|")}|${shape(e)}`));"#,
         shell(),
     );
     assert_eq!(
         app.shown("done"),
-        "done TypeError true,TypeError false true true"
+        "done TypeError EACCES spawn definitely-not-granted definitely-not-granted true|\
+         Error ENOENT spawn /nonexistent/nsh-fixture /nonexistent/nsh-fixture false|\
+         TypeError EACCES spawn not-granted not-granted true|\
+         Error ENOENT spawn /nonexistent/nsh-fixture /nonexistent/nsh-fixture false"
     );
 }
 
