@@ -44,36 +44,30 @@ pub(crate) fn SpringBar(props: SpringBarProps) -> impl IntoElement {
     let width = stored(0.0_f32);
     let placed = stored(false);
     let from_right = props.from_right;
-    let place = {
-        let x = x.clone();
-        move |share: f32| {
-            let width = width.with(|w| *w);
-            if width <= 0.0 {
-                return;
-            }
-            let share = share.clamp(0.0, 1.0);
-            let to = if from_right { 1.0 } else { -1.0 } * (1.0 - share) * width;
-            if placed.replace(true) {
-                let _ = x.spring(
-                    to,
-                    Spring {
-                        stiffness: 180.0,
-                        damping: 22.0,
-                        ..Spring::default()
-                    },
-                );
-            } else {
-                x.set(to);
-            }
+    let place = move |share: f32| {
+        let width = width.with(|w| *w);
+        if width <= 0.0 {
+            return;
+        }
+        let share = share.clamp(0.0, 1.0);
+        let to = if from_right { 1.0 } else { -1.0 } * (1.0 - share) * width;
+        if placed.replace(true) {
+            let _ = x.spring(
+                to,
+                Spring {
+                    stiffness: 180.0,
+                    damping: 22.0,
+                    ..Spring::default()
+                },
+            );
+        } else {
+            x.set(to);
         }
     };
-    {
-        let place = place.clone();
-        effect(move || {
-            let share = props.share.get();
-            untracked(|| place(share));
-        });
-    }
+    effect(move || {
+        let share = props.share.get();
+        untracked(|| place(share));
+    });
     let radius = props.radius.unwrap_or(props.height / 2.0);
     let color = AdaptiveColor::new(props.color.light, props.color.dark);
     view()
@@ -149,7 +143,7 @@ pub(crate) fn run_pulse((v, looped): &(AnimatedValue, Animation), running: bool)
 #[component]
 pub(crate) fn LiveDot(props: LiveDotProps) -> impl IntoElement {
     let pulse = pulse();
-    let p = pulse.0.clone();
+    let p = pulse.0;
     effect(move || run_pulse(&pulse, props.running.get()));
     let size = props.size;
     view()

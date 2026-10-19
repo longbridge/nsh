@@ -19,6 +19,7 @@ mod components;
 mod counter;
 mod errors;
 mod fetch;
+mod handle_bench;
 mod hot;
 mod hover;
 mod js_touch;

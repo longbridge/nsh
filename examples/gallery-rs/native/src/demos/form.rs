@@ -5,8 +5,6 @@
 //! and keys, a sheet of inputs and a message bar riding on the keyboard
 //! (as the TSX gallery's `demos/Form.tsx`).
 
-use std::rc::Rc;
-
 use nsh_core::{
     Size,
     ui::{
@@ -28,7 +26,7 @@ use crate::{
 };
 
 /// What a [`field`] animates: the focus ring and the shake of an error.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct FieldFx {
     /// 0 blurred, 1 focused: the ring's opacity.
     focus: AnimatedValue,
@@ -87,7 +85,7 @@ struct Field {
 /// A [`Field`] labelled `label`, animated by `fx`.
 fn field(fx: &FieldFx, label: impl Into<SharedString>) -> Field {
     Field {
-        fx: fx.clone(),
+        fx: *fx,
         label: label.into(),
         api: None,
         hint: None,
@@ -140,7 +138,7 @@ impl Field {
     /// The field, its input made by `input` from the styled one (values,
     /// listeners, refs, styles of its own).
     fn render(self, input: impl FnOnce(Input) -> Input) -> View {
-        let (focus_in, focus_out) = (self.fx.focus.clone(), self.fx.focus.clone());
+        let focus = self.fx.focus;
         let on_blur = self.on_blur;
         let base = nsh_core::ui::input()
             .placeholder_color(|| color(colors::FAINT))
@@ -149,10 +147,10 @@ impl Field {
             .multiline(self.multiline)
             .editable(self.editable)
             .on_focus(move |_: &()| {
-                focus_in.timing(1.0, 160.0, Easing::EaseInOut);
+                focus.timing(1.0, 160.0, Easing::EaseInOut);
             })
             .on_blur(move |_: &()| {
-                focus_out.timing(0.0, 220.0, Easing::EaseInOut);
+                focus.timing(0.0, 220.0, Easing::EaseInOut);
                 if let Some(on_blur) = &on_blur {
                     on_blur();
                 }
@@ -175,7 +173,7 @@ impl Field {
         let error = self.error;
         let failed = move || error.is_some_and(|e| e.with(Option::is_some));
         if error.is_some() {
-            let fx = self.fx.clone();
+            let fx = self.fx;
             effect(move || fx.error(failed()));
         }
         let editable = self.editable;
@@ -470,30 +468,26 @@ pub(crate) fn Form() -> impl IntoElement {
     let sheet = signal(false);
     let touched = signal(Touched::default());
     // The inputs in return-key order.
-    let refs: Rc<[ElementRef]> = (0..CHAIN).map(|_| element_ref()).collect();
-    let fx: Rc<[FieldFx]> = (0..f::COUNT).map(|_| FieldFx::new()).collect();
+    let refs: [ElementRef; CHAIN] = std::array::from_fn(|_| element_ref());
+    let fx: [FieldFx; f::COUNT] = std::array::from_fn(|_| FieldFx::new());
     let name_err = computed(move || name.with(|n| name_error(touched.get(), n)));
     let email_err = computed(move || email.with(|e| email_error(touched.get(), e)));
     let password_err = computed(move || password.with(|p| password_error(touched.get(), p)));
     let touch = move |f: fn(&mut Touched)| move || touched.update(f);
 
     // Input `i` of the return-key order: return focuses the next one.
-    let chained = {
-        let refs = refs.clone();
-        move |i: usize, input: Input| {
-            let input = input.element_ref(&refs[i]);
-            if i + 1 == CHAIN {
-                return input;
-            }
-            let refs = refs.clone();
-            input
-                .return_key_type(ReturnKeyType::Next)
-                .on_submit_editing(move |_: &str| {
-                    if let Some(next) = refs.get(i + 1) {
-                        next.focus();
-                    }
-                })
+    let chained = move |i: usize, input: Input| {
+        let input = input.element_ref(&refs[i]);
+        if i + 1 == CHAIN {
+            return input;
         }
+        input
+            .return_key_type(ReturnKeyType::Next)
+            .on_submit_editing(move |_: &str| {
+                if let Some(next) = refs.get(i + 1) {
+                    next.focus();
+                }
+            })
     };
     let set = |text: Signal<String>| move |v: &str| text.set(v.to_owned());
 
@@ -531,248 +525,236 @@ pub(crate) fn Form() -> impl IntoElement {
     };
 
     let score = computed(move || password.with(|p| strength(p)));
-    let account = {
-        let (fx, chained) = (fx.clone(), chained.clone());
-        move || {
-            Section::new("Account")
-                .note("autoComplete")
-                .child(
-                    field(&fx[f::NAME], "Name")
-                        .error(name_err)
-                        .on_blur(touch(|t| t.name = true))
-                        .render(|i| {
-                            chained(0, i)
-                                .value(move || name.get())
-                                .on_change_text(set(name))
-                                .auto_capitalize(AutoCapitalize::Words)
-                                .auto_fill(AutoFill::Name)
-                                .placeholder("Ada Lovelace")
-                        }),
-                )
-                .child(
-                    field(&fx[f::EMAIL], "E-mail")
-                        .api("email-address")
-                        .error(email_err)
-                        .on_blur(touch(|t| t.email = true))
-                        .render(|i| {
-                            chained(1, i)
-                                .value(move || email.get())
-                                .on_change_text(set(email))
-                                .keyboard_type(KeyboardType::Email)
-                                .auto_capitalize(AutoCapitalize::None)
-                                .auto_correct(false)
-                                .auto_fill(AutoFill::Email)
-                                .placeholder("ada@example.com")
-                        }),
-                )
-                .child(
-                    view()
-                        .gap_2()
-                        .child(
-                            field(&fx[f::PASSWORD], "Password")
-                                .api("secureTextEntry")
-                                .error(password_err)
-                                .on_blur(touch(|t| t.password = true))
-                                .render(|i| {
-                                    chained(2, i)
-                                        .value(move || password.get())
-                                        .on_change_text(move |v: &str| {
-                                            if strength(v) != score.get_untracked() {
-                                                animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
-                                            }
-                                            password.set(v.to_owned());
-                                        })
-                                        .secure(true)
-                                        .auto_fill(AutoFill::NewPassword)
-                                        .placeholder("At least 8 characters")
-                                }),
-                        )
-                        .child(
-                            view()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(
-                                    view().flex_1().child(
-                                        Meter::new(move || score.get() as f32 / 4.0)
-                                            .tone(move || STRENGTH_TONE[score.get()]),
-                                    ),
-                                )
-                                .child(
-                                    text(move || STRENGTH_LABEL[score.get()])
-                                        .w(px(52.0))
-                                        .text_right()
-                                        .text_size(px(13.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(move || {
-                                            let score = score.get();
-                                            if score > 0 {
-                                                STRENGTH_TONE[score].color()
-                                            } else {
-                                                colors::FAINT
-                                            }
-                                        }),
+    let account = move || {
+        Section::new("Account")
+            .note("autoComplete")
+            .child(
+                field(&fx[f::NAME], "Name")
+                    .error(name_err)
+                    .on_blur(touch(|t| t.name = true))
+                    .render(|i| {
+                        chained(0, i)
+                            .value(move || name.get())
+                            .on_change_text(set(name))
+                            .auto_capitalize(AutoCapitalize::Words)
+                            .auto_fill(AutoFill::Name)
+                            .placeholder("Ada Lovelace")
+                    }),
+            )
+            .child(
+                field(&fx[f::EMAIL], "E-mail")
+                    .api("email-address")
+                    .error(email_err)
+                    .on_blur(touch(|t| t.email = true))
+                    .render(|i| {
+                        chained(1, i)
+                            .value(move || email.get())
+                            .on_change_text(set(email))
+                            .keyboard_type(KeyboardType::Email)
+                            .auto_capitalize(AutoCapitalize::None)
+                            .auto_correct(false)
+                            .auto_fill(AutoFill::Email)
+                            .placeholder("ada@example.com")
+                    }),
+            )
+            .child(
+                view()
+                    .gap_2()
+                    .child(
+                        field(&fx[f::PASSWORD], "Password")
+                            .api("secureTextEntry")
+                            .error(password_err)
+                            .on_blur(touch(|t| t.password = true))
+                            .render(|i| {
+                                chained(2, i)
+                                    .value(move || password.get())
+                                    .on_change_text(move |v: &str| {
+                                        if strength(v) != score.get_untracked() {
+                                            animate_layout(LayoutAnimation::EASE_IN_EASE_OUT);
+                                        }
+                                        password.set(v.to_owned());
+                                    })
+                                    .secure(true)
+                                    .auto_fill(AutoFill::NewPassword)
+                                    .placeholder("At least 8 characters")
+                            }),
+                    )
+                    .child(
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(10.0))
+                            .child(
+                                view().flex_1().child(
+                                    Meter::new(move || score.get() as f32 / 4.0)
+                                        .tone(move || STRENGTH_TONE[score.get()]),
                                 ),
-                        ),
-                )
-                .child(field(&fx[f::PHONE], "Phone").api("phone-pad").render(|i| {
-                    chained(3, i)
-                        .keyboard_type(KeyboardType::Phone)
-                        .auto_fill(AutoFill::Tel)
-                        .placeholder("+1 555 0100")
-                }))
-                .child(field(&fx[f::WEBSITE], "Website").api("url").render(|i| {
-                    chained(4, i)
-                        .keyboard_type(KeyboardType::Url)
-                        .auto_capitalize(AutoCapitalize::None)
-                        .auto_correct(false)
-                        .placeholder("https://")
-                }))
-        }
+                            )
+                            .child(
+                                text(move || STRENGTH_LABEL[score.get()])
+                                    .w(px(52.0))
+                                    .text_right()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(move || {
+                                        let score = score.get();
+                                        if score > 0 {
+                                            STRENGTH_TONE[score].color()
+                                        } else {
+                                            colors::FAINT
+                                        }
+                                    }),
+                            ),
+                    ),
+            )
+            .child(field(&fx[f::PHONE], "Phone").api("phone-pad").render(|i| {
+                chained(3, i)
+                    .keyboard_type(KeyboardType::Phone)
+                    .auto_fill(AutoFill::Tel)
+                    .placeholder("+1 555 0100")
+            }))
+            .child(field(&fx[f::WEBSITE], "Website").api("url").render(|i| {
+                chained(4, i)
+                    .keyboard_type(KeyboardType::Url)
+                    .auto_capitalize(AutoCapitalize::None)
+                    .auto_correct(false)
+                    .placeholder("https://")
+            }))
     };
 
-    let numbers = {
-        let (fx, chained) = (fx.clone(), chained.clone());
-        move || {
-            Section::new("Numbers")
-                .note("keyboardType")
-                .child(pair(
-                    field(&fx[f::AGE], "Age").hint("3 digits").render(|i| {
-                        chained(5, i)
+    let numbers = move || {
+        Section::new("Numbers")
+            .note("keyboardType")
+            .child(pair(
+                field(&fx[f::AGE], "Age").hint("3 digits").render(|i| {
+                    chained(5, i)
+                        .keyboard_type(KeyboardType::Number)
+                        .max_length(3)
+                        .placeholder("36")
+                }),
+                field(&fx[f::AMOUNT], "Amount")
+                    .api("decimal-pad")
+                    .prefix("$")
+                    .render(|i| {
+                        chained(6, i)
+                            .keyboard_type(KeyboardType::Decimal)
+                            .placeholder("0.00")
+                    }),
+            ))
+            .child(
+                field(&fx[f::OFFSET], "Offset")
+                    .api("numbers-and-punctuation")
+                    .hint("dark keyboard (iOS)")
+                    .render(|i| {
+                        i.keyboard_type(KeyboardType::NumbersAndPunctuation)
+                            .keyboard_appearance(KeyboardAppearance::Dark)
+                            .placeholder("-12.5")
+                    }),
+            )
+            .child(
+                field(&fx[f::CODE], "Verification code")
+                    .hint(move || format!("{}/6", code.with(|c| c.encode_utf16().count())))
+                    .render(|i| {
+                        chained(7, i)
+                            .value(move || code.get())
+                            .on_change_text(set(code))
                             .keyboard_type(KeyboardType::Number)
-                            .max_length(3)
-                            .placeholder("36")
+                            .max_length(6)
+                            .placeholder("······")
+                            .letter_spacing(10.0)
+                            .text_size(px(22.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .tabular_nums()
+                            .text_center()
                     }),
-                    field(&fx[f::AMOUNT], "Amount")
-                        .api("decimal-pad")
-                        .prefix("$")
-                        .render(|i| {
-                            chained(6, i)
-                                .keyboard_type(KeyboardType::Decimal)
-                                .placeholder("0.00")
-                        }),
-                ))
-                .child(
-                    field(&fx[f::OFFSET], "Offset")
-                        .api("numbers-and-punctuation")
-                        .hint("dark keyboard (iOS)")
-                        .render(|i| {
-                            i.keyboard_type(KeyboardType::NumbersAndPunctuation)
-                                .keyboard_appearance(KeyboardAppearance::Dark)
-                                .placeholder("-12.5")
-                        }),
-                )
-                .child(
-                    field(&fx[f::CODE], "Verification code")
-                        .hint(move || format!("{}/6", code.with(|c| c.encode_utf16().count())))
-                        .render(|i| {
-                            chained(7, i)
-                                .value(move || code.get())
-                                .on_change_text(set(code))
-                                .keyboard_type(KeyboardType::Number)
-                                .max_length(6)
-                                .placeholder("······")
-                                .letter_spacing(10.0)
-                                .text_size(px(22.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .tabular_nums()
-                                .text_center()
-                        }),
-                )
-        }
+            )
     };
 
-    let address = {
-        let (fx, chained) = (fx.clone(), chained.clone());
-        move || {
-            Section::new("Shipping address")
-                .note("scrolls into view")
-                .child(field(&fx[f::STREET], "Street").render(|i| {
-                    chained(8, i)
-                        .auto_fill(AutoFill::StreetAddress)
-                        .placeholder("12 Analytical Way")
-                }))
-                .child(pair(
-                    field(&fx[f::CITY], "City").render(|i| chained(9, i).placeholder("London")),
-                    field(&fx[f::POSTAL], "Postal code").render(|i| {
-                        chained(10, i)
-                            .auto_capitalize(AutoCapitalize::Characters)
-                            .auto_fill(AutoFill::PostalCode)
-                            .placeholder("SW1A 1AA")
-                    }),
-                ))
-                .child(
-                    field(&fx[f::COUNTRY], "Country")
-                        .render(|i| chained(11, i).placeholder("United Kingdom")),
-                )
-        }
+    let address = move || {
+        Section::new("Shipping address")
+            .note("scrolls into view")
+            .child(field(&fx[f::STREET], "Street").render(|i| {
+                chained(8, i)
+                    .auto_fill(AutoFill::StreetAddress)
+                    .placeholder("12 Analytical Way")
+            }))
+            .child(pair(
+                field(&fx[f::CITY], "City").render(|i| chained(9, i).placeholder("London")),
+                field(&fx[f::POSTAL], "Postal code").render(|i| {
+                    chained(10, i)
+                        .auto_capitalize(AutoCapitalize::Characters)
+                        .auto_fill(AutoFill::PostalCode)
+                        .placeholder("SW1A 1AA")
+                }),
+            ))
+            .child(
+                field(&fx[f::COUNTRY], "Country")
+                    .render(|i| chained(11, i).placeholder("United Kingdom")),
+            )
     };
 
     let note_count = computed(move || notes.with(|n| n.encode_utf16().count()));
-    let texts = {
-        let (fx, chained) = (fx.clone(), chained.clone());
-        move || {
-            Section::new("Text")
-                .note("Input props")
-                .child(
-                    field(&fx[f::SHOUT], "Controlled")
-                        .hint("Uppercased as you type")
-                        .render(|i| {
-                            chained(12, i)
-                                .value(move || shout.get())
-                                .on_change_text(move |t: &str| shout.set(t.to_uppercase()))
-                                .placeholder("TYPE IN LOWER CASE")
+    let texts = move || {
+        Section::new("Text")
+            .note("Input props")
+            .child(
+                field(&fx[f::SHOUT], "Controlled")
+                    .hint("Uppercased as you type")
+                    .render(|i| {
+                        chained(12, i)
+                            .value(move || shout.get())
+                            .on_change_text(move |t: &str| shout.set(t.to_uppercase()))
+                            .placeholder("TYPE IN LOWER CASE")
+                    }),
+            )
+            .child(
+                field(&fx[f::READ_ONLY], "Read only")
+                    .api("editable={false}")
+                    .read_only()
+                    .render(|i| i.value("Not editable")),
+            )
+            .child(
+                field(&fx[f::COLORS], "Custom colors")
+                    .api("selectionColor")
+                    .render(|i| {
+                        chained(13, i)
+                            .placeholder("A blue placeholder, an amber selection")
+                            .placeholder_color(|| color(colors::INFO))
+                            .selection_color(|| color(colors::WARN))
+                    }),
+            )
+            .child(
+                view()
+                    .gap_2()
+                    .child(
+                        field(&fx[f::NOTES], "Notes")
+                            .hint(move || format!("{}/280", note_count.get()))
+                            .multiline()
+                            .render(|i| {
+                                chained(14, i)
+                                    .max_length(280)
+                                    .value(move || notes.get())
+                                    .on_change_text(set(notes))
+                                    .placeholder("Return adds a line")
+                                    .min_h(px(100.0))
+                            }),
+                    )
+                    .child(
+                        Meter::new(move || note_count.get() as f32 / 280.0).tone(move || {
+                            if note_count.get() > 250 {
+                                Tone::Warn
+                            } else {
+                                Tone::Accent
+                            }
                         }),
-                )
-                .child(
-                    field(&fx[f::READ_ONLY], "Read only")
-                        .api("editable={false}")
-                        .read_only()
-                        .render(|i| i.value("Not editable")),
-                )
-                .child(
-                    field(&fx[f::COLORS], "Custom colors")
-                        .api("selectionColor")
-                        .render(|i| {
-                            chained(13, i)
-                                .placeholder("A blue placeholder, an amber selection")
-                                .placeholder_color(|| color(colors::INFO))
-                                .selection_color(|| color(colors::WARN))
-                        }),
-                )
-                .child(
-                    view()
-                        .gap_2()
-                        .child(
-                            field(&fx[f::NOTES], "Notes")
-                                .hint(move || format!("{}/280", note_count.get()))
-                                .multiline()
-                                .render(|i| {
-                                    chained(14, i)
-                                        .max_length(280)
-                                        .value(move || notes.get())
-                                        .on_change_text(set(notes))
-                                        .placeholder("Return adds a line")
-                                        .min_h(px(100.0))
-                                }),
-                        )
-                        .child(Meter::new(move || note_count.get() as f32 / 280.0).tone(
-                            move || {
-                                if note_count.get() > 250 {
-                                    Tone::Warn
-                                } else {
-                                    Tone::Accent
-                                }
-                            },
-                        )),
-                )
-                .child(AutoGrow::element(()))
-                .child(
-                    field(&fx[f::CARET], "No caret")
-                        .api("caretHidden")
-                        .render(|i| i.caret_hidden(true).default_value("No caret here")),
-                )
-        }
+                    ),
+            )
+            .child(AutoGrow::element(()))
+            .child(
+                field(&fx[f::CARET], "No caret")
+                    .api("caretHidden")
+                    .render(|i| i.caret_hidden(true).default_value("No caret here")),
+            )
     };
 
     let submit = move |_: &()| {
@@ -884,7 +866,6 @@ pub(crate) fn Form() -> impl IntoElement {
             )
     };
 
-    let sheet_fx: Vec<FieldFx> = fx[f::SHEET..].to_vec();
     DemoPage::new()
         .keyboard_dismiss_mode(move || MODES[mode.get()].0)
         .card(keyboard)
@@ -899,7 +880,7 @@ pub(crate) fn Form() -> impl IntoElement {
         .card(texts)
         .card(submit_card)
         .card(more)
-        .child(If::new(sheet, move || sheet_view(sheet, &sheet_fx)))
+        .child(If::new(sheet, move || sheet_view(sheet, &fx[f::SHEET..])))
 }
 
 /// The sheet of inputs (`open` while it shows), its fields animated by
@@ -1001,14 +982,11 @@ fn SelectionDemo() -> impl IntoElement {
     let keys = signal(Vec::<String>::new());
     let input = element_ref();
     let fx = [FieldFx::new(), FieldFx::new()];
-    {
-        let input = input.clone();
-        effect(move || {
-            if let Some(s) = selection.get() {
-                input.set_selection(s.start, s.end);
-            }
-        });
-    }
+    effect(move || {
+        if let Some(s) = selection.get() {
+            input.set_selection(s.start, s.end);
+        }
+    });
     let keys_view = view()
         .flex_row()
         .flex_wrap()
@@ -1053,7 +1031,6 @@ fn SelectionDemo() -> impl IntoElement {
                     )
             },
         ));
-    let caret_input = input.clone();
     view()
         .gap_3()
         .child(
@@ -1095,7 +1072,7 @@ fn SelectionDemo() -> impl IntoElement {
                 selection.set(Some(Selection { start: 0, end }));
             }),
             Button::new("Caret to start", move |_: &()| {
-                caret_input.set_selection(0, 0);
+                input.set_selection(0, 0);
             })
             .variant(ButtonVariant::Secondary),
         ))

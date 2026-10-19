@@ -97,13 +97,14 @@ pub struct Attrs {
     pub(crate) props: Vec<Prop>,
     /// A canvas's drawing.
     pub(crate) drawing: Option<Arc<crate::canvas::Drawing>>,
-    /// The handle the view put on the element (not a prop).
-    pub(crate) element_ref: Option<super::ElementRef>,
-    /// Style properties bound to native animation nodes (kept alive while
+    /// What the ref the view put on the element names (not a prop): held
+    /// while the element is, however long the ref's owner lives.
+    pub(crate) element_ref: Option<super::element_ref::RefTarget>,
+    /// Style properties bound to native animation nodes (held while
     /// bound).
-    pub(crate) animated: Vec<(crate::StyleDecl, super::AnimatedNode)>,
-    /// Animated nodes host props read (drags, scroll offsets), kept alive.
-    pub(crate) bound: Vec<super::AnimatedNode>,
+    pub(crate) animated: Vec<(crate::StyleDecl, super::LiveNode)>,
+    /// Animated nodes host props read (drags, scroll offsets), held.
+    pub(crate) bound: Vec<super::LiveNode>,
 }
 
 impl Attrs {
@@ -543,21 +544,14 @@ pub trait Element: IntoElement + Sized {
     }
 
     /// Binds `opacity` to an animated value (it moves natively).
-    fn bind_opacity(mut self, value: &impl super::Animated) -> Self {
-        let node = value.animated_node();
-        let decl = crate::StyleDecl::Animated(nsh_animation::AnimationProp::Opacity, node.id());
-        self.node().attrs.animated.push((decl, node));
-        self
+    fn bind_opacity(self, value: &impl super::Animated) -> Self {
+        self.bind(nsh_animation::AnimationProp::Opacity, value)
     }
 
     /// Binds the background color to a node of colors
     /// ([`super::AnimatedNode::interpolate_colors`]).
-    fn bind_background(mut self, value: &impl super::Animated) -> Self {
-        let node = value.animated_node();
-        let decl =
-            crate::StyleDecl::Animated(nsh_animation::AnimationProp::BackgroundColor, node.id());
-        self.node().attrs.animated.push((decl, node));
-        self
+    fn bind_background(self, value: &impl super::Animated) -> Self {
+        self.bind(nsh_animation::AnimationProp::BackgroundColor, value)
     }
 
     /// Binds the color of every border side to a node of colors.
@@ -586,20 +580,22 @@ pub trait Element: IntoElement + Sized {
     }
 
     /// Binds `prop` (anything but a transform step or a canvas argument)
-    /// to an animated value.
+    /// to an animated value (nothing once the value's owner is gone).
     fn bind(mut self, prop: nsh_animation::AnimationProp, value: &impl super::Animated) -> Self {
-        let node = value.animated_node();
-        let decl = crate::StyleDecl::Animated(prop, node.id());
-        self.node().attrs.animated.push((decl, node));
+        if let Some(node) = value.animated_node().live() {
+            let decl = crate::StyleDecl::Animated(prop, node.id());
+            self.node().attrs.animated.push((decl, node));
+        }
         self
     }
 
     /// Appends a transform step driven by an animated value, after the styles'
     /// transforms.
     fn bind_transform(mut self, kind: crate::TransformKind, value: &impl super::Animated) -> Self {
-        let node = value.animated_node();
-        let decl = crate::StyleDecl::Transform(kind, kind.identity(), Some(node.id()));
-        self.node().attrs.animated.push((decl, node));
+        if let Some(node) = value.animated_node().live() {
+            let decl = crate::StyleDecl::Transform(kind, kind.identity(), Some(node.id()));
+            self.node().attrs.animated.push((decl, node));
+        }
         self
     }
 
@@ -624,9 +620,9 @@ pub trait Element: IntoElement + Sized {
     }
 
     /// Puts `handle` on this element: its commands (`focus`, `scroll_to`)
-    /// go here.
+    /// go here (nothing once the ref's owner is gone).
     fn element_ref(mut self, handle: &super::ElementRef) -> Self {
-        self.node().attrs.element_ref = Some(handle.clone());
+        self.node().attrs.element_ref = handle.target();
         self
     }
 
@@ -984,8 +980,8 @@ pub trait Interactive: Element {
         x: Option<&super::AnimatedValue>,
         y: Option<&super::AnimatedValue>,
     ) -> Self {
-        let x = x.map(|v| v.node().clone());
-        let y = y.map(|v| v.node().clone());
+        let x = x.and_then(|v| v.node().live());
+        let y = y.and_then(|v| v.node().live());
         let prop = Prop::PanValues(x.as_ref().map(|n| n.id()), y.as_ref().map(|n| n.id()));
         super::host::set(self.node(), prop);
         let bound = &mut self.node().attrs.bound;
@@ -999,9 +995,10 @@ pub trait Interactive: Element {
     /// transform ([`Element::bind_scale`]). `on_pinch_start` /
     /// `on_pinch_end` report the pinches.
     fn pinch_value(mut self, scale: &super::AnimatedValue) -> Self {
-        let node = scale.node().clone();
-        super::host::set(self.node(), Prop::PinchValue(Some(node.id())));
-        self.node().attrs.bound.push(node);
+        if let Some(node) = scale.node().live() {
+            super::host::set(self.node(), Prop::PinchValue(Some(node.id())));
+            self.node().attrs.bound.push(node);
+        }
         self
     }
 
@@ -1009,9 +1006,10 @@ pub trait Interactive: Element {
     /// the value it has when the rotation starts; TS: `rotation={{ angle
     /// }}`); bind it to its transform ([`Element::bind_rotate`]).
     fn rotation_value(mut self, angle: &super::AnimatedValue) -> Self {
-        let node = angle.node().clone();
-        super::host::set(self.node(), Prop::RotationValue(Some(node.id())));
-        self.node().attrs.bound.push(node);
+        if let Some(node) = angle.node().live() {
+            super::host::set(self.node(), Prop::RotationValue(Some(node.id())));
+            self.node().attrs.bound.push(node);
+        }
         self
     }
 
@@ -1605,7 +1603,7 @@ impl<C: Component> ComponentElement<C> {
 
     /// Puts `handle` on this component: its updates go to it.
     pub fn component_ref(mut self, handle: &super::ComponentRef<C>) -> Self {
-        self.node.attrs.element_ref = Some(handle.element().clone());
+        self.node.attrs.element_ref = handle.element().target();
         self
     }
 

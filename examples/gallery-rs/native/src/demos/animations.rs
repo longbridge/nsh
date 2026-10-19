@@ -394,31 +394,27 @@ fn EasingPlot() -> impl IntoElement {
     let running = stored(None::<Animation>);
     // The plot's width, from its layout.
     let width = signal(0.0_f32);
-    let play = {
-        let (dot_x, dot_y) = (dot_x.clone(), dot_y.clone());
-        move || {
-            if let Some(run) = running.replace(None) {
-                run.stop();
-            }
-            dot_x.set(0.0);
-            dot_y.set(0.0);
-            let run = Animation::sequence([
-                Animation::delay(120.0),
-                Animation::parallel([
-                    Animation::timing(&dot_x, 1.0, Timing::new(1100.0, Easing::Linear)),
-                    Animation::timing(
-                        &dot_y,
-                        1.0,
-                        Timing::new(1100.0, CURVES[selected.get_untracked()].1),
-                    ),
-                ]),
-            ]);
-            let _ = run.start();
-            running.replace(Some(run));
+    let play = move || {
+        if let Some(run) = running.replace(None) {
+            run.stop();
         }
+        dot_x.set(0.0);
+        dot_y.set(0.0);
+        let run = Animation::sequence([
+            Animation::delay(120.0),
+            Animation::parallel([
+                Animation::timing(&dot_x, 1.0, Timing::new(1100.0, Easing::Linear)),
+                Animation::timing(
+                    &dot_y,
+                    1.0,
+                    Timing::new(1100.0, CURVES[selected.get_untracked()].1),
+                ),
+            ]),
+        ]);
+        let _ = run.start();
+        running.replace(Some(run));
     };
     let chips = CURVES.iter().enumerate().map(|(i, (name, _))| {
-        let play = play.clone();
         chip(
             name,
             computed(move || selected.get() == i),
@@ -449,7 +445,7 @@ fn EasingPlot() -> impl IntoElement {
 /// Every curve at once: ten timings in one `Animation::parallel`.
 #[component]
 fn EasingRace() -> impl IntoElement {
-    let dots: Rc<[AnimatedValue]> = CURVES.iter().map(|_| animated_value(0.0)).collect();
+    let dots = CURVES.map(|_| animated_value(0.0));
     // How far the dots travel: the tracks' width (from the first one's
     // layout) less a dot's.
     let travel = animated_value(0.0);
@@ -460,7 +456,6 @@ fn EasingRace() -> impl IntoElement {
         .zip(dots.iter())
         .enumerate()
         .map(|(i, ((name, _), dot))| {
-            let measure = travel.clone();
             view()
                 .flex_row()
                 .items_center()
@@ -480,7 +475,7 @@ fn EasingRace() -> impl IntoElement {
                         .justify_center()
                         .when(i == 0, |v| {
                             v.on_layout(move |frame: &Rect| {
-                                measure.set((frame.width - 12.0).max(0.0));
+                                travel.set((frame.width - 12.0).max(0.0));
                             })
                         })
                         .child(view().h(px(2.0)).rounded(px(1.0)).bg(colors::RAISED))
@@ -773,7 +768,7 @@ fn draw_springs(
 /// are the springs themselves.
 #[component]
 fn Springs() -> impl IntoElement {
-    let xs: Rc<[AnimatedValue]> = SPRINGS.iter().map(|_| animated_value(0.0)).collect();
+    let xs = SPRINGS.map(|_| animated_value(0.0));
     let clock = animated_value(0.0);
     // The tracks' width, from the first one's layout; the plot's, from its
     // layout.
@@ -808,25 +803,22 @@ fn Springs() -> impl IntoElement {
                 )
         })
         .collect::<Vec<_>>();
-    let release = {
-        let (xs, clock) = (xs.clone(), clock.clone());
-        move |_: &()| {
-            there.update(|t| *t = !*t);
-            let w = (width.get_untracked() - 28.0).max(1.0);
-            clock.set(0.0);
-            let to = if there.get_untracked() { w } else { 0.0 };
-            let runs = std::iter::once(Animation::timing(
-                &clock,
-                1.0,
-                Timing::new(SPRING_MS, Easing::Linear),
-            ))
-            .chain(
-                xs.iter()
-                    .zip(SPRINGS)
-                    .map(|(x, (_, k, c, _))| Animation::spring(x, to, spring(k, c))),
-            );
-            let _ = Animation::parallel(runs).start();
-        }
+    let release = move |_: &()| {
+        there.update(|t| *t = !*t);
+        let w = (width.get_untracked() - 28.0).max(1.0);
+        clock.set(0.0);
+        let to = if there.get_untracked() { w } else { 0.0 };
+        let runs = std::iter::once(Animation::timing(
+            &clock,
+            1.0,
+            Timing::new(SPRING_MS, Easing::Linear),
+        ))
+        .chain(
+            xs.iter()
+                .zip(SPRINGS)
+                .map(|(x, (_, k, c, _))| Animation::spring(x, to, spring(k, c))),
+        );
+        let _ = Animation::parallel(runs).start();
     };
     Card::new()
         .icon(IconName::Physics)
@@ -906,21 +898,17 @@ fn Interpolations() -> impl IntoElement {
     };
     // The extending shape's colors follow the appearance natively.
     let extend = {
-        let t = t.clone();
-        {
-            let fill = t.interpolate_colors(
-                &[0.0, 1.0, 2.0],
-                &[colors::INFO, colors::ACCENT, colors::DANGER],
-            );
-            view()
-                .size(px(64.0))
-                .rounded(px(16.0))
-                .border_curve(BorderCurve::Continuous)
-                .bind_background(&fill)
-                .bind_rotate(&angle)
-        }
+        let fill = t.interpolate_colors(
+            &[0.0, 1.0, 2.0],
+            &[colors::INFO, colors::ACCENT, colors::DANGER],
+        );
+        view()
+            .size(px(64.0))
+            .rounded(px(16.0))
+            .border_curve(BorderCurve::Continuous)
+            .bind_background(&fill)
+            .bind_rotate(&angle)
     };
-    let spring_to = t.clone();
     Card::new()
         .icon(IconName::Styles)
         .title("Interpolation")
@@ -983,7 +971,7 @@ fn Interpolations() -> impl IntoElement {
             segmented(["t = 0", "t = 1", "t = 2"].map(Segment::new), at).on_event(
                 move |SegmentedEvent::Change(to): &SegmentedEvent| {
                     at.set(*to);
-                    let _ = spring_to.spring(*to as f32, spring(140.0, 16.0));
+                    let _ = t.spring(*to as f32, spring(140.0, 16.0));
                 },
             ),
         )

@@ -51,7 +51,6 @@ fn Jumper() -> impl IntoElement {
     };
     let both = [jump.clone(), pulse.clone()];
     let (stop, reset) = (both.clone(), both);
-    let at = x.clone();
     view()
         .flex_1()
         .bind_translate_x(&x)
@@ -63,8 +62,8 @@ fn Jumper() -> impl IntoElement {
         .child(text("Reset").on_press(move |_: &()| reset.iter().for_each(Animation::reset)))
         .child(text("Where").on_press(move |_: &()| {
             // Stopped, then read: where it stopped (TS: `stop()`'s promise).
-            at.stop();
-            let value = at.value();
+            x.stop();
+            let value = x.value();
             spawn(async move {
                 let value = value.await;
                 state.set(format!("at {value:.2}").into());

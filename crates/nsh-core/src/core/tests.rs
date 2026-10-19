@@ -4606,7 +4606,6 @@ mod components {
         let name = signal(String::new());
         let focused = signal(false);
         let field = element_ref();
-        let back = field.clone();
         view()
             .child(
                 scroll().bounces(false).child(
@@ -4639,8 +4638,8 @@ mod components {
             .child(text(move || if focused.get() { "focused" } else { "idle" }))
             // Back to the field: focus it, the caret at the end.
             .child(view().on_press(move |_: &()| {
-                back.focus();
-                back.set_selection(3, 3);
+                field.focus();
+                field.set_selection(3, 3);
             }))
     }
 
@@ -4760,7 +4759,6 @@ mod components {
         let target = element_ref();
         let unused = element_ref();
         let shown = signal(String::new());
-        let measured = target.clone();
         view()
             .p_4()
             .child(
@@ -4770,7 +4768,7 @@ mod components {
             )
             .child(text(move || shown.get()))
             .child(view().w(px(5.0)).h(px(5.0)).on_press(move |_: &()| {
-                let (target, unused) = (measured.measure(), unused.measure());
+                let (target, unused) = (target.measure(), unused.measure());
                 spawn(async move {
                     let (m, none) = (target.await, unused.await);
                     let m = m.expect("laid out");
@@ -4917,14 +4915,13 @@ mod components {
     fn Sheet(_props: FormProps) -> impl IntoElement {
         let offset = animated_value(0.0);
         let state = signal("resting");
-        let springing = offset.clone();
         view()
             .bind_translate_y(&offset)
             .bind_opacity(&offset.interpolate(&[0.0, 300.0], &[1.0, 0.2]))
             .pan_values(None, Some(&offset))
             .on_pan_end(move |e: &PanEvent| {
                 assert_eq!(e.value_y, Some(120.0));
-                let end = springing.spring(0.0, Spring::default());
+                let end = offset.spring(0.0, Spring::default());
                 state.set("springing");
                 spawn(async move {
                     let finished = end.await;
@@ -5041,6 +5038,158 @@ mod components {
             })
             .count();
         assert_eq!(released, 2, "{batch:?}");
+    }
+
+    /// Handles made under an owner of their own, which a press disposes
+    /// while the view stays: the view's binding and input hold what they
+    /// name, so the fade goes on; the handles, shared by two listeners,
+    /// do nothing from then on.
+    #[component]
+    fn Outlived() -> impl IntoElement {
+        let (owner, (fade, field)) =
+            crate::ui::create_root(|| (animated_value(1.0), element_ref()));
+        let _ = fade.timing(0.0, 300.0, Easing::Linear);
+        let shown = signal(String::new());
+        view()
+            .bind_opacity(&fade)
+            .child(input().element_ref(&field))
+            .child(view().on_press(move |_: &()| {
+                field.focus();
+                fade.set(0.5);
+            }))
+            .child(view().on_press(move |_: &()| {
+                owner.dispose();
+                fade.set(0.25);
+                fade.stop();
+                let _ = fade.spring(1.0, Spring::default());
+                field.focus();
+                let gone = fade.interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+                shown.set(format!("{:?} {:?}", field.node(), gone.live().is_none()));
+            }))
+            .child(text(move || shown.get()))
+    }
+
+    #[test]
+    fn handles_outlived_by_what_binds_them_do_nothing() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Outlived>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Outlived>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let animations = |batch: &MountBatch| -> Vec<nsh_animation::AnimationOp> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Animation(op) => Some(op.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let commands = |batch: &MountBatch| -> Vec<(NodeId, Command)> {
+            batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Command { id, command } => Some((*id, command.clone())),
+                    _ => None,
+                })
+                .collect()
+        };
+        let batch = c.commit().unwrap();
+        let ops = animations(&batch);
+        let fade = match ops[..] {
+            [
+                nsh_animation::AnimationOp::CreateValue { node, value: 1.0 },
+                nsh_animation::AnimationOp::Start { node: started, .. },
+            ] if started == node => node,
+            _ => panic!("{ops:?}"),
+        };
+        let input = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Input,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("an input");
+        let buttons: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let [first, second] = buttons[..] else {
+            panic!("{buttons:?}");
+        };
+
+        // The handles work while their owner lives.
+        assert!(c.component_event(first, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            animations(&batch),
+            [nsh_animation::AnimationOp::Set {
+                node: fade,
+                value: 0.5
+            }]
+        );
+        assert_eq!(commands(&batch), [(input, Command::Focus)]);
+
+        // Its owner goes: the binding holds the node (no release, its fade
+        // runs on); the handles do nothing and name nothing, with no panic.
+        assert!(c.component_event(second, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert_eq!(animations(&batch), []);
+        assert_eq!(commands(&batch), []);
+        assert_eq!(texts(&batch), ["None true"]);
+        assert!(c.component_event(first, EventKind::Press, &EventPayload::None));
+        assert!(
+            c.commit()
+                .is_none_or(|b| animations(&b).is_empty() && commands(&b).is_empty())
+        );
+
+        // The node goes with the view that binds it.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        let released: Vec<_> = [c.commit(), c.commit()]
+            .iter()
+            .flatten()
+            .flat_map(animations)
+            .collect();
+        assert_eq!(
+            released,
+            [nsh_animation::AnimationOp::Release { node: fade }]
+        );
     }
 
     /// Its own rows indexing its data; a press clears the data. Its errors

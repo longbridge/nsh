@@ -102,7 +102,6 @@ pub(crate) fn Tape(props: StockProps) -> impl IntoElement {
     });
     let offset = animated_value(0.0);
     {
-        let offset = offset.clone();
         // The newest trade shown so far (-1: none yet).
         let top = stored(-1_i64);
         effect(move || {

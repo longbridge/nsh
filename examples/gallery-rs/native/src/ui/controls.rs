@@ -36,17 +36,14 @@ fn knob(on: bool) -> f32 {
 pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoElement {
     let on = animated_value(knob(props.value.get_untracked()));
     // A new value from the owner springs the knob there.
-    let spring = on.clone();
     let shown = stored(props.value.get_untracked());
     effect(move || {
         let value = props.value.get();
         if shown.replace(value) != value {
-            spring.spring(knob(value), motion::SETTLE);
+            on.spring(knob(value), motion::SETTLE);
         }
     });
     let (knob_light, _) = Finish::Knob.shadows();
-    let press = on.clone();
-    let track = on.clone();
     view()
         .w(px(50.0))
         .h(px(30.0))
@@ -68,7 +65,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
         .hit_slop(EdgeInsets::all(8.0))
         .on_press(move |_: &()| {
             let next = !props.value.get_untracked();
-            press.spring(knob(next), motion::SETTLE);
+            on.spring(knob(next), motion::SETTLE);
             cx.emit(ToggleEvent::Change(next));
         })
         // Inside the border: its radius less the border's width; its colors
@@ -80,7 +77,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
                 .rounded(px(14.0))
                 .pointer_events(PointerEvents::None)
                 .bind_background(
-                    &track.interpolate_colors(&[0.0, 1.0], &[colors::TRACK, colors::ACCENT_FILL]),
+                    &on.interpolate_colors(&[0.0, 1.0], &[colors::TRACK, colors::ACCENT_FILL]),
                 ),
         )
         .child(
@@ -194,7 +191,6 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
     // The indicator's offset: the first place jumps, later moves spring.
     let x = animated_value(0.0);
     let placed = stored(false);
-    let mover = x.clone();
     effect(move || {
         let index = (props.selected.get() as usize).min(count.get() - 1);
         let to = index as f32 * segment.get();
@@ -202,9 +198,9 @@ pub(crate) fn Segmented(props: SegmentedProps, cx: Scope<SegmentedEvent>) -> imp
             return;
         }
         if placed.replace(true) {
-            mover.spring(to, motion::SETTLE);
+            x.spring(to, motion::SETTLE);
         } else {
-            mover.set(to);
+            x.set(to);
         }
     });
     let small = props.size == SegmentedSize::Small;

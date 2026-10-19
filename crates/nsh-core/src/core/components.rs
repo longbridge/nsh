@@ -459,7 +459,7 @@ impl Components {
 fn inline_style(
     id: NodeId,
     inline: Option<&crate::StylePatch>,
-    animated: &[(crate::StyleDecl, crate::ui::AnimatedNode)],
+    animated: &[(crate::StyleDecl, crate::ui::LiveNode)],
     app: Option<&crate::StylePatch>,
 ) -> Op {
     let mut style = Box::<crate::Style>::default();

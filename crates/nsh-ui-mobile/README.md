@@ -54,7 +54,8 @@ state) stays native. JS only gets the events the component emits.
   `video(url)`, `native(name)`, with typed props and events (`.value(move || text.get())`, `.on_change_text(move
   |t: &str| ..)`, `on_layout`, `on_pan_end`, `on_scroll`); their setters take bindings too.
 - **Element refs** send commands to what the view made: `element_ref()`, `.element_ref(&r)` on the element,
-  `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after clearing it).
+  `r.focus()` / `r.scroll_to(..)` from listeners and tasks (`TextField` focuses its input after clearing it). They are
+  `Copy` handles kept by the view's owner, as signals are, and so are animated values.
 - **Animated values** move styles with no binding per frame: `animated_value(0.0)`, `.bind_translate_y(&v)`,
   `.pan_values(..)` (drags move it natively), `v.spring(..)` (await its `AnimationEnd` in a task). `Sheet` is the
   example.

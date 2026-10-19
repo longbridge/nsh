@@ -45,6 +45,24 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
+- Rust components' handles (`handle_bench`: `cargo test --release -p nsh-engine --test engine bench_handles --
+  --ignored --nocapture --test-threads=1`, 1000 calls in one press, the minimum of 200 presses, per call; steady
+  state of five runs). In brackets, when `AnimatedValue` was an `Rc` of its node and `ElementRef` an `Rc` of its
+  slot rather than `Copy` handles their owner keeps (an access is a thread-local, an index and a generation check):
+
+  | call | per call |
+  |---|---|
+  | `AnimatedValue::set` | 8.3–9.2ns [8.2–9.7ns] |
+  | `AnimatedValue::timing` (its end dropped) | 14.6–16.9ns [13.0–14.2ns] |
+  | `AnimatedValue::interpolate` of a node made before (a handle of it in the current owner) | 30.0–31.0ns [20.3–20.9ns] |
+  | `ElementRef::node` | 1.2ns [0.2ns] |
+  | `ElementRef::focus` | 12.5–14.4ns [8.8–9.1ns] |
+
+  They are used when a view is made and on events, never per frame (the graph runs by node id), and left
+  `component_bench` and `nsh trace` of the Rust gallery's Animations and Gestures pages (taps on their controls) where
+  they were: the same ops and mount items in every commit (Animations: 2029 items on the page's first frame, then
+  4 / 10 / 9 / 9 / 3 / 3 / 17 for Release, Stagger, Sequence, Loop, Stop, Reset and a curve; Gestures: 815, then
+  4 / 14 / 3 / 10 / 4 / 2), the commits' times within their run-to-run spread.
 - Calls into Rust from JS (`class_bench`: `cargo test --release -p nsh-engine --test engine bench_calls -- --ignored
   --nocapture --test-threads=1`, min / median of 20 runs, per call, the JS loop included). A member or function that
   is not `async` runs in the call and converts its values directly (`docs/dev/rust-classes.md`); one awaited

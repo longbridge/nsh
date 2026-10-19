@@ -7,6 +7,18 @@
 //!
 //! Ids are odd (JS gives its own nodes, animations and composites even
 //! ones), so the graph, which indexes nodes by id, stays dense.
+//!
+//! [`AnimatedValue`] and [`AnimatedNode`] are `Copy` handles: the reactive
+//! owner current when one is made (the component, a region, a row) keeps
+//! its node, and releases it when it is disposed. Used after that, a
+//! handle does nothing (its derivations are gone as well). What binds a
+//! node keeps it while bound ([`LiveNode`]: an element's styles, drags and
+//! scroll offsets, a drawing, a composed animation, a derived node's
+//! inputs), so a binding in a region that outlives the handle's owner
+//! goes on moving, and an animation running on it goes on running.
+//! Made with no owner (outside a component, in a listener or a task), a
+//! handle keeps its node as long as the surface, as a signal made there
+//! lives as long as the graph.
 
 use std::{
     cell::Cell,
@@ -20,10 +32,12 @@ use nsh_animation::{
 
 use super::{
     AdaptiveColor,
+    reactive::Kept,
     task::{Action, Answer, Executor},
 };
 
-/// A node of the graph, released when its last handle goes.
+/// A node of the graph, released when the last of what holds it goes
+/// (the owner of its handles, its bindings, the nodes derived from it).
 pub(crate) struct Node {
     id: nsh_animation::NodeId,
     executor: Weak<Executor>,
@@ -94,41 +108,122 @@ pub trait Animated {
     fn animated_node(&self) -> AnimatedNode;
 }
 
-/// A node derived from values (an interpolation, arithmetic): bound like a
-/// value, moving when they move.
+/// A node of the graph held while something is bound to it (an element's
+/// style or gesture, a drawing, a composed animation): it outlives the
+/// owner of the handle it came from for as long as it is held.
 #[derive(Clone)]
-pub struct AnimatedNode(Rc<Node>);
+pub(crate) struct LiveNode(Rc<Node>);
 
-impl AnimatedNode {
+impl LiveNode {
     pub(crate) fn id(&self) -> nsh_animation::NodeId {
         self.0.id
+    }
+
+    fn act(&self, op: AnimationOp) {
+        self.0.act(op);
     }
 
     fn executor(&self) -> Option<Rc<Executor>> {
         self.0.executor.upgrade()
     }
+}
+
+impl PartialEq for LiveNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl fmt::Debug for LiveNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("LiveNode").field(&self.id()).finish()
+    }
+}
+
+/// A node derived from values (an interpolation, arithmetic): bound like a
+/// value, moving when they move. A `Copy` handle, kept by the owner it was
+/// made under (see the module's docs).
+#[derive(Clone, Copy)]
+pub struct AnimatedNode {
+    node: Kept<Node>,
+    /// The node's id, for what names it (styles, equality) without
+    /// reaching it.
+    id: nsh_animation::NodeId,
+}
+
+impl AnimatedNode {
+    /// Keeps `node` in the current owner.
+    fn keep(node: Rc<Node>) -> Self {
+        let id = node.id;
+        Self {
+            node: Kept::new(node),
+            id,
+        }
+    }
+
+    /// A handle of no node (made from a handle whose owner is gone).
+    fn gone() -> Self {
+        Self {
+            node: Kept::gone(),
+            id: 0,
+        }
+    }
+
+    pub(crate) fn id(&self) -> nsh_animation::NodeId {
+        self.id
+    }
+
+    /// The node, while the owner of the handle lives: what a binding
+    /// holds.
+    pub(crate) fn live(&self) -> Option<LiveNode> {
+        self.node.get().map(LiveNode)
+    }
+
+    /// Sends `op` to the graph while the node is live (queuing it reaches
+    /// only the executor, never the reactive graph).
+    fn act(&self, op: impl FnOnce(nsh_animation::NodeId) -> AnimationOp) {
+        let id = self.id;
+        self.node.with(|node| node.act(op(id)));
+    }
+
+    /// Where the node's operations go, while it is live.
+    fn executor(&self) -> Option<Rc<Executor>> {
+        self.node.with(|node| node.executor.upgrade()).flatten()
+    }
 
     /// The node `op` makes from this one: the live one made by the same
     /// operation if there is one (a region or a row made again derives it
-    /// again and gets the same node, so its bindings stay as they are).
+    /// again and gets the same node, so its bindings stay as they are). A
+    /// handle of it is kept by the current owner. Of a node whose owner
+    /// is gone (or with an operand whose owner is gone): no node.
     fn derive(
         &self,
         op: impl FnOnce(nsh_animation::NodeId) -> AnimationOp,
-        other: Option<&AnimatedNode>,
+        other: Option<AnimatedNode>,
     ) -> AnimatedNode {
-        let Some(executor) = self.executor() else {
+        let Some(node) = self.live() else {
+            return Self::gone();
+        };
+        let other = match other {
+            Some(other) => match other.live() {
+                Some(other) => Some(other),
+                None => return Self::gone(),
+            },
+            None => None,
+        };
+        let Some(executor) = node.executor() else {
             // The surface is gone: a node nothing reads.
-            return self.clone();
+            return *self;
         };
         let key = op(0);
         if let Some(node) = executor.derived(&key) {
-            return AnimatedNode(node);
+            return Self::keep(node);
         }
-        let mut inputs = vec![self.0.clone()];
-        inputs.extend(other.map(|o| o.0.clone()));
+        let mut inputs = vec![node.0];
+        inputs.extend(other.map(|o| o.0));
         let node = Node::new(&executor, |id| with_node(key.clone(), id), inputs);
         executor.remember_derived(key, &node);
-        AnimatedNode(node)
+        Self::keep(node)
     }
 
     /// Maps the value through `input` breakpoints (ascending) to numbers,
@@ -170,14 +265,16 @@ impl AnimatedNode {
             pick(super::untracked(super::ambient::dark)),
             Interpolation::default(),
         );
-        // The appearance's colors from now on; the handle keeps the node
-        // while the binding lives.
-        let held = node.clone();
+        // The appearance's colors from now on; the effect holds the node
+        // while it lives (it goes with the owner that keeps the handle).
+        let Some(held) = node.live() else {
+            return node;
+        };
         let first = Cell::new(true);
         super::reactive::render_effect(move || {
             let output = pick(super::ambient::dark());
             if !first.replace(false) {
-                held.0.act(AnimationOp::SetOutput {
+                held.act(AnimationOp::SetOutput {
                     node: held.id(),
                     output,
                 });
@@ -216,7 +313,7 @@ impl AnimatedNode {
         let b = other.operand;
         self.derive(
             move |node| AnimationOp::CreateMath { node, op, a, b },
-            other.node.as_ref(),
+            other.node,
         )
     }
 
@@ -263,7 +360,7 @@ impl AnimatedNode {
 
 impl Animated for AnimatedNode {
     fn animated_node(&self) -> AnimatedNode {
-        self.clone()
+        *self
     }
 }
 
@@ -283,7 +380,7 @@ impl fmt::Debug for AnimatedNode {
 #[derive(Debug, Clone)]
 pub struct AnimationOperand {
     operand: Operand,
-    /// The node, kept alive by what derives from it.
+    /// The node, which what derives from it holds.
     node: Option<AnimatedNode>,
 }
 
@@ -339,8 +436,10 @@ impl Default for Interpolation {
 
 /// A settable, animatable value (made with
 /// [`super::ambient::animated_value`]): set it, animate it, bind it, derive
-/// from it. Clones are the same value.
-#[derive(Clone, PartialEq, Debug)]
+/// from it. A `Copy` handle, kept by the owner it was made under: copies
+/// are the same value, closures share it as they share a signal; used
+/// after the owner is gone, it does nothing (see the module's docs).
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct AnimatedValue(AnimatedNode);
 
 /// How a spring moves (TS's defaults: stiffness 170, damping 26, mass 1).
@@ -473,8 +572,9 @@ pub fn sample_decay_within(
 }
 
 /// The end of an animation: `true` when it reached its end, `false` when
-/// it was stopped or replaced. The animation runs either way: await this
-/// in a task to follow it up, or drop it.
+/// it was stopped or replaced (or never ran: its value's owner was gone).
+/// The animation runs either way: await this in a task to follow it up, or
+/// drop it.
 #[derive(Debug)]
 pub struct AnimationEnd(Answer<bool>);
 
@@ -489,7 +589,7 @@ impl std::future::IntoFuture for AnimationEnd {
 
 impl AnimatedValue {
     pub(crate) fn new(executor: &Rc<Executor>, value: f32) -> Self {
-        Self(AnimatedNode(Node::new(
+        Self(AnimatedNode::keep(Node::new(
             executor,
             |node| AnimationOp::CreateValue { node, value },
             Vec::new(),
@@ -503,21 +603,19 @@ impl AnimatedValue {
 
     /// Sets the value at once, stopping its animation.
     pub fn set(&self, value: f32) {
-        self.0.0.act(AnimationOp::Set {
-            node: self.0.id(),
-            value,
-        });
+        self.0.act(|node| AnimationOp::Set { node, value });
     }
 
     /// Stops its animation where it is ([`Self::value`] then reads where
     /// that is; TS: `stop()`'s promise).
     pub fn stop(&self) {
-        self.0.0.act(AnimationOp::Stop { node: self.0.id() });
+        self.0.act(|node| AnimationOp::Stop { node });
     }
 
     /// Its value now, read on the UI thread where it moves (TS:
     /// `getValue()`): after the changes queued before it (a [`Self::stop`],
-    /// a [`Self::set`]). Await it in a task.
+    /// a [`Self::set`]). Await it in a task. Once its owner is gone, it
+    /// never comes.
     pub fn value(&self) -> Answer<f32> {
         let (answer, slot) = Answer::new();
         if let Some(executor) = self.0.executor() {
@@ -529,24 +627,24 @@ impl AnimatedValue {
         answer
     }
 
-    fn executor(&self) -> Weak<Executor> {
-        self.0.0.executor.clone()
-    }
-
     fn start(&self, driver: Driver) -> AnimationEnd {
         let (end, slot) = Answer::new();
         let end = AnimationEnd(end);
-        if let Some(executor) = self.0.executor() {
-            let animation = executor.next_animation_id();
-            executor.act(Action::Animate {
-                op: AnimationOp::Start {
-                    node: self.0.id(),
+        match self.0.executor() {
+            Some(executor) => {
+                let animation = executor.next_animation_id();
+                executor.act(Action::Animate {
+                    op: AnimationOp::Start {
+                        node: self.0.id(),
+                        animation,
+                        driver,
+                    },
                     animation,
-                    driver,
-                },
-                animation,
-                end: slot,
-            });
+                    end: slot,
+                });
+            }
+            // Its owner (or the surface) is gone: it ends at once, unfinished.
+            None => slot.borrow_mut().deliver(false),
         }
         end
     }
@@ -597,25 +695,18 @@ impl AnimatedValue {
     /// Sets the offset added to the value (React Native's `setOffset`):
     /// bindings see value + offset, animations and `set` move the value.
     pub fn set_offset(&self, offset: f32) {
-        self.0.0.act(AnimationOp::SetOffset {
-            node: self.0.id(),
-            offset,
-        });
+        self.0.act(|node| AnimationOp::SetOffset { node, offset });
     }
 
     /// Adds the offset to the value and clears it.
     pub fn flatten_offset(&self) {
-        self.0
-            .0
-            .act(AnimationOp::FlattenOffset { node: self.0.id() });
+        self.0.act(|node| AnimationOp::FlattenOffset { node });
     }
 
     /// Moves the value into the offset, leaving the value 0 (a drag then
     /// starts from where the last one left it).
     pub fn extract_offset(&self) {
-        self.0
-            .0
-            .act(AnimationOp::ExtractOffset { node: self.0.id() });
+        self.0.act(|node| AnimationOp::ExtractOffset { node });
     }
 
     /// See [`AnimatedNode::interpolate`].
@@ -675,7 +766,7 @@ impl AnimatedValue {
 
 impl Animated for AnimatedValue {
     fn animated_node(&self) -> AnimatedNode {
-        self.0.clone()
+        self.0
     }
 }
 
@@ -690,7 +781,9 @@ impl Animated for AnimatedValue {
 /// it going on) and returns its [`AnimationEnd`], [`Self::stop`] stops it
 /// where it is, [`Self::reset`] stops it and puts its values back where
 /// they were when it last started. Clones are the same animation; building a group from
-/// animations makes a new one (its parts are copied in).
+/// animations makes a new one (its parts are copied in). It holds the nodes
+/// of its values while it lives (values whose owner is gone are left
+/// out), wherever it is kept.
 ///
 /// ```ignore
 /// let jump = Animation::sequence([
@@ -706,8 +799,8 @@ pub struct Animation(Rc<Composed>);
 
 struct Composed {
     spec: Composite,
-    /// The values it animates, kept while it is.
-    values: Vec<AnimatedValue>,
+    /// The nodes of the values it animates, held while it is.
+    values: Vec<LiveNode>,
     run: Run,
 }
 
@@ -733,10 +826,10 @@ impl Drop for Run {
 }
 
 impl Animation {
-    fn new(spec: Composite, values: Vec<AnimatedValue>) -> Self {
+    fn new(spec: Composite, values: Vec<LiveNode>) -> Self {
         let executor = values
             .first()
-            .map(AnimatedValue::executor)
+            .map(|n| n.0.executor.clone())
             .unwrap_or_default();
         Self(Rc::new(Composed {
             spec,
@@ -751,7 +844,10 @@ impl Animation {
 
     fn run(value: &AnimatedValue, driver: Driver) -> Self {
         let node = value.0.id();
-        Self::new(Composite::Run { node, driver }, vec![value.clone()])
+        Self::new(
+            Composite::Run { node, driver },
+            value.0.live().into_iter().collect(),
+        )
     }
 
     /// `value` moving to `to` as `timing` says.
@@ -805,7 +901,7 @@ impl Animation {
     }
 
     /// The spec and values of this animation.
-    fn into_parts(self) -> (Composite, Vec<AnimatedValue>) {
+    fn into_parts(self) -> (Composite, Vec<LiveNode>) {
         match Rc::try_unwrap(self.0) {
             Ok(Composed { spec, values, .. }) => (spec, values),
             Err(shared) => (shared.spec.clone(), shared.values.clone()),
@@ -817,7 +913,7 @@ impl Animation {
         make: impl FnOnce(Vec<Composite>) -> Composite,
     ) -> Self {
         let mut specs = Vec::new();
-        let mut values: Vec<AnimatedValue> = Vec::new();
+        let mut values: Vec<LiveNode> = Vec::new();
         for animation in animations {
             let (spec, of) = animation.into_parts();
             specs.push(spec);
@@ -960,6 +1056,7 @@ impl fmt::Debug for Animation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::reactive::{Runtime, create_root};
 
     fn released(executor: &Executor) -> usize {
         executor
@@ -971,15 +1068,99 @@ mod tests {
 
     #[test]
     fn a_derived_chain_keeps_its_middle_nodes() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
         let executor = Rc::new(Executor::default());
-        let v = AnimatedValue::new(&executor, 0.5);
-        // The product has no handle of its own once the difference exists.
-        let end = v.node().mul(2.0).sub(1.0);
+        let (value_owner, v) = create_root(|| AnimatedValue::new(&executor, 0.5));
+        // The chain's handles go with their owner; a binding of its end
+        // holds the product too.
+        let (chain_owner, end) = create_root(|| v.node().mul(2.0).sub(1.0));
+        let bound = end.live().expect("live");
+        chain_owner.dispose();
         assert_eq!(released(&executor), 0, "the product lives with the end");
-        drop(end);
+        assert!(end.live().is_none(), "its handle is gone");
+        drop(bound);
         assert_eq!(released(&executor), 2, "then both go");
-        drop(v);
+        value_owner.dispose();
         assert_eq!(released(&executor), 1);
+    }
+
+    #[test]
+    fn copies_are_the_same_value_in_every_closure() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let executor = Rc::new(Executor::default());
+        let (_owner, v) = create_root(|| AnimatedValue::new(&executor, 0.0));
+        let node = v.node().id();
+        let _ = ops(&executor);
+        // Two closures and the code after them use the one value.
+        let press = move || v.set(1.0);
+        let release = move || v.set_offset(2.0);
+        press();
+        release();
+        let _ = v.timing(3.0, 100.0, Easing::Linear);
+        assert!(matches!(
+            &ops(&executor)[..],
+            [
+                AnimationOp::Set { node: a, value: 1.0 },
+                AnimationOp::SetOffset { node: b, offset: 2.0 },
+                AnimationOp::Start { node: c, .. },
+            ] if [*a, *b, *c] == [node; 3]
+        ));
+        let copy = v;
+        assert_eq!(copy, v);
+        assert_eq!(
+            format!("{v:?}"),
+            format!("AnimatedValue(AnimatedNode({node}))")
+        );
+    }
+
+    #[test]
+    fn handles_do_nothing_once_their_owner_is_gone() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let executor = Rc::new(Executor::default());
+        let (owner, (v, half)) = create_root(|| {
+            let v = AnimatedValue::new(&executor, 0.0);
+            (v, v.mul(0.5))
+        });
+        let jump = Animation::timing(&v, 1.0, Timing::default());
+        let _ = ops(&executor);
+        owner.dispose();
+        // The value and its product go with their owner; the composite
+        // holds the value's node while it lives.
+        assert_eq!(ops(&executor), [AnimationOp::Release { node: half.id() }]);
+        drop(jump);
+        assert_eq!(
+            ops(&executor),
+            [AnimationOp::Release {
+                node: v.node().id()
+            }]
+        );
+
+        v.set(1.0);
+        v.stop();
+        v.set_offset(1.0);
+        v.flatten_offset();
+        v.extract_offset();
+        let ended = v.spring(1.0, Spring::default());
+        let tasks = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert!(!tasks.block_on(ended.into_future()), "unfinished, at once");
+        drop(v.value());
+        let derived = [
+            v.interpolate(&[0.0, 1.0], &[0.0, 1.0]),
+            v.add(&half),
+            half.mul(2.0),
+        ];
+        assert!(derived.iter().all(|n| n.live().is_none()));
+        drop(Animation::timing(&v, 1.0, Timing::default()).start());
+        assert_eq!(ops(&executor), [], "nothing reaches the graph");
+        // Handles keep their identity.
+        let copy = half;
+        assert_eq!(copy, half);
+        assert_eq!(format!("{half:?}"), format!("AnimatedNode({})", half.id()));
     }
 
     /// The graph operations `executor` was asked for (animations' ends
@@ -1001,6 +1182,8 @@ mod tests {
 
     #[test]
     fn composites_describe_their_steps() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
         let executor = Rc::new(Executor::default());
         let (a, b) = (
             AnimatedValue::new(&executor, 0.0),
@@ -1022,7 +1205,8 @@ mod tests {
                 stop_together: true,
             }
         );
-        assert_eq!(staggered.0.values, [a.clone(), b.clone()]);
+        let ids = |a: &Animation| a.0.values.iter().map(LiveNode::id).collect::<Vec<_>>();
+        assert_eq!(ids(&staggered), [na, nb]);
 
         let looped = Animation::sequence([step(&a, 1.0), Animation::delay(10.0), step(&a, 0.0)])
             .looped(Some(3))
@@ -1040,7 +1224,7 @@ mod tests {
             }
         );
         // Each value once.
-        assert_eq!(looped.0.values, std::slice::from_ref(&a));
+        assert_eq!(ids(&looped), [na]);
         let apart = Animation::parallel([step(&a, 1.0)]).stop_together(false);
         assert!(matches!(
             apart.0.spec,
@@ -1074,6 +1258,8 @@ mod tests {
 
     #[test]
     fn composites_start_stop_reset_and_release_by_key() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
         let executor = Rc::new(Executor::default());
         let x = AnimatedValue::new(&executor, 0.0);
         let _ = ops(&executor);
@@ -1136,6 +1322,8 @@ mod tests {
 
     #[test]
     fn values_derive_like_their_nodes() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
         let executor = Rc::new(Executor::default());
         let t = AnimatedValue::new(&executor, 0.0);
         let right = Interpolation {

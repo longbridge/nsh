@@ -617,16 +617,17 @@ where
 
 // --- Handles -----------------------------------------------------------------
 
-/// A native animation value starting at `value` (TS: `createAnimatedValue`):
-/// bind it to styles, drags, scroll offsets or drawings, animate it from
-/// handlers and tasks.
+/// An animated value starting at `value` (TS: `createAnimatedValue`): bind
+/// it to styles, drags, scroll offsets or drawings, animate it from handlers
+/// and tasks. A `Copy` handle the current owner keeps, as a signal is (with
+/// no owner, it lives as long as the surface).
 pub fn animated_value(value: f32) -> super::AnimatedValue {
     super::AnimatedValue::new(&executor(), value)
 }
 
 /// A handle for an element (TS: `ref`): put it on the element with
 /// [`super::Element::element_ref`], call its commands from handlers and
-/// tasks.
+/// tasks. A `Copy` handle the current owner keeps, as a signal is.
 pub fn element_ref() -> super::ElementRef {
     super::ElementRef::new(&executor())
 }
@@ -634,7 +635,7 @@ pub fn element_ref() -> super::ElementRef {
 /// A handle for a component this view renders (TS: a `ref` to a
 /// component): put it on the component's element with
 /// [`super::ComponentElement::component_ref`]; [`super::ComponentRef::api`]
-/// is the API its view registered.
+/// is the API its view registered. A `Copy` handle the current owner keeps.
 pub fn component_ref<C: super::Component>() -> super::ComponentRef<C> {
     super::ComponentRef::new(&executor())
 }

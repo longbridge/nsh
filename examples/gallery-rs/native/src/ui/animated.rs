@@ -75,7 +75,6 @@ pub(crate) enum PressEvent {
 #[component]
 pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElement {
     let scale = animated_value(1.0);
-    let (down, up) = (scale.clone(), scale.clone());
     view()
         .bind_scale(&scale)
         .opacity(move || if props.disabled.get() { 0.4_f32 } else { 1.0 })
@@ -98,10 +97,10 @@ pub(crate) fn Press(props: PressProps, cx: Scope<PressEvent>) -> impl IntoElemen
         })
         .when_some(props.hit_slop, |v, slop| v.hit_slop(EdgeInsets::all(slop)))
         .on_press_in(move |_: &()| {
-            down.spring(props.scale.get_untracked(), motion::PRESS);
+            scale.spring(props.scale.get_untracked(), motion::PRESS);
         })
         .on_press_out(move |_: &()| {
-            up.spring(1.0, motion::PRESS);
+            scale.spring(1.0, motion::PRESS);
         })
         .on_press(move |_: &()| cx.emit(PressEvent::Press))
         .when(props.long_press, |v| {

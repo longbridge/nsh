@@ -207,13 +207,12 @@ fn FlipCard() -> impl IntoElement {
     let angle = animated_value(0.0);
     // Turned to its back (nothing displays it: the angle shows it).
     let flipped = stored(false);
-    let spring = angle.clone();
     let flip = move |_: &()| {
         let to = flipped.with(|flipped| {
             *flipped = !*flipped;
             if *flipped { 180.0 } else { 0.0 }
         });
-        spring.spring(
+        angle.spring(
             to,
             Spring {
                 stiffness: 140.0,
@@ -554,7 +553,6 @@ fn layers() -> Card {
                 .shadow_radius(6.0)
                 .shadow_offset(0.0, 3.0)
         });
-    let fade = opacity.clone();
     Card::new()
         .icon(IconName::Lists)
         .title("Clipping and layers")
@@ -638,7 +636,7 @@ fn layers() -> Card {
                                 move |event: &SegmentedEvent| {
                                     let SegmentedEvent::Change(to) = *event;
                                     level.set(to);
-                                    fade.timing(
+                                    opacity.timing(
                                         LEVELS[to as usize].1,
                                         260.0,
                                         Easing::Curve(Curve::Cubic, EaseMode::Out),

@@ -803,7 +803,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         copy_timer: stored(None),
         following: signal(true),
         dragging: stored(false),
-        list: stored(list.clone()),
+        list: stored(list),
         run: stored(None),
         live: Live {
             id: signal(None),
@@ -830,9 +830,9 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     // The jump button, the menu and the banner: 0 hidden, 1 shown; they
     // spring natively as their state changes.
     let [jump, menu_value, banner_value] = [0.0; 3].map(animated_value);
-    spring_on(jump.clone(), move || !following.get());
-    spring_on(menu_value.clone(), move || menu.get());
-    spring_on(banner_value.clone(), move || chat.banner.get());
+    spring_on(jump, move || !following.get());
+    spring_on(menu_value, move || menu.get());
+    spring_on(banner_value, move || chat.banner.get());
     let streaming = computed(move || chat.live.id.with(Option::is_some));
     let chips: Rc<[(&'static str, &'static str)]> = scenarios()
         .iter()
@@ -843,7 +843,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
 
     let content = If::new(
         move || !messages.with(Vec::is_empty),
-        move || chat.list_view(list.clone(), wide),
+        move || chat.list_view(list, wide),
     )
     .otherwise(move || chat.empty());
 

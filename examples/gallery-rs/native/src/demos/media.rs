@@ -96,7 +96,6 @@ fn Site() -> impl IntoElement {
     // The web site's last navigation state.
     let state = signal(None::<WebNavigation>);
     let loading = computed(move || state.with(|s| s.as_ref().is_some_and(|s| s.loading)));
-    let (back, forward, reload) = (site.clone(), site.clone(), site.clone());
     Card::new()
         .icon(IconName::Search)
         .title("A web site")
@@ -156,17 +155,17 @@ fn Site() -> impl IntoElement {
                     true,
                     "Back",
                     move || state.with(|s| s.as_ref().is_some_and(|s| s.can_go_back)),
-                    move |_: &()| back.go_back(),
+                    move |_: &()| site.go_back(),
                 ))
                 .child(nav_button(
                     false,
                     "Forward",
                     move || state.with(|s| s.as_ref().is_some_and(|s| s.can_go_forward)),
-                    move |_: &()| forward.go_forward(),
+                    move |_: &()| site.go_forward(),
                 ))
                 .child(view().flex_1())
                 .child(
-                    Button::new("Reload", move |_: &()| reload.reload())
+                    Button::new("Reload", move |_: &()| site.reload())
                         .variant(ButtonVariant::Secondary),
                 ),
         )
@@ -176,7 +175,6 @@ fn Site() -> impl IntoElement {
 #[component]
 fn Player() -> impl IntoElement {
     let player = element_ref();
-    let seek = player.clone();
     // The video shows the platform's controls.
     let system_controls = signal(false);
     // The video plays (it starts paused).
@@ -237,11 +235,8 @@ fn Player() -> impl IntoElement {
                     ),
             )
             .child(
-                Button::new("Restart", {
-                    let seek = seek.clone();
-                    move |_: &()| seek.seek(0.0)
-                })
-                .variant(ButtonVariant::Secondary),
+                Button::new("Restart", move |_: &()| player.seek(0.0))
+                    .variant(ButtonVariant::Secondary),
             )
     };
     Card::new()
@@ -319,7 +314,6 @@ fn nav_button(
 /// HTML follows the appearance (it reloads when it changes).
 fn messaging() -> impl IntoElement {
     let web = element_ref();
-    let post = web.clone();
     // What the inline page posted last.
     let message = signal(String::new());
     // What the app posted last (`hi #N`), 0 before.
@@ -361,7 +355,7 @@ fn messaging() -> impl IntoElement {
         .child(Button::new("Post to the page", move |_: &()| {
             let n = (nsh_core::time::unix_ms() as u64 % 1000) as u32;
             sent.set(n);
-            post.post_message(format!("hi #{n}"));
+            web.post_message(format!("hi #{n}"));
         }))
 }
 

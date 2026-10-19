@@ -913,7 +913,7 @@ pub struct CanvasArg(pub(crate) CanvasArgKind);
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum CanvasArgKind {
     Const(f32),
-    Node(super::AnimatedNode),
+    Node(super::LiveNode),
 }
 
 impl From<f32> for CanvasArg {
@@ -922,9 +922,13 @@ impl From<f32> for CanvasArg {
     }
 }
 
+/// An animated value whose owner is gone counts as 0.
 impl<A: super::Animated> From<&A> for CanvasArg {
     fn from(a: &A) -> Self {
-        Self(CanvasArgKind::Node(a.animated_node()))
+        Self(match a.animated_node().live() {
+            Some(node) => CanvasArgKind::Node(node),
+            None => CanvasArgKind::Const(0.0),
+        })
     }
 }
 
@@ -939,7 +943,7 @@ pub struct CanvasPaint(CanvasPaintKind);
 enum CanvasPaintKind {
     Color(Color),
     Gradient(Arc<CanvasGradient>),
-    Node(super::AnimatedNode),
+    Node(super::LiveNode),
 }
 
 impl From<Color> for CanvasPaint {
@@ -960,9 +964,13 @@ impl From<Arc<CanvasGradient>> for CanvasPaint {
     }
 }
 
+/// An animated value whose owner is gone paints nothing (transparent).
 impl<A: super::Animated> From<&A> for CanvasPaint {
     fn from(a: &A) -> Self {
-        Self(CanvasPaintKind::Node(a.animated_node()))
+        Self(match a.animated_node().live() {
+            Some(node) => CanvasPaintKind::Node(node),
+            None => CanvasPaintKind::Color(Color::TRANSPARENT),
+        })
     }
 }
 
@@ -976,8 +984,8 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 #[derive(Debug, Clone, Default)]
 pub struct Painter {
     drawing: Drawing,
-    /// The animated values the drawing reads, kept alive with it.
-    nodes: Vec<super::AnimatedNode>,
+    /// The nodes of the animated values the drawing reads, held with it.
+    nodes: Vec<super::LiveNode>,
 }
 
 impl Painter {
@@ -1011,7 +1019,7 @@ impl Painter {
         }
     }
 
-    fn slot(&mut self, node: super::AnimatedNode) -> u16 {
+    fn slot(&mut self, node: super::LiveNode) -> u16 {
         let slot = self.drawing.slot(node.id());
         self.nodes.push(node);
         slot

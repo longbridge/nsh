@@ -3,8 +3,6 @@
 //! events lighting up as they arrive, hit slop, pointer events and
 //! accessibility labels (as the TSX gallery's `demos/Gestures.tsx`).
 
-use std::rc::Rc;
-
 use nsh_core::{
     Rect, Ripple, TouchPhase, TouchPoint, UNDERLAY_OPACITY,
     nsh_animation::{Curve, EaseMode},
@@ -117,7 +115,7 @@ fn fingers(touch: &TouchEvent) -> (Vec<&TouchPoint>, Option<&TouchPoint>) {
 #[component]
 fn Transformable() -> impl IntoElement {
     let values = [0.0, 0.0, 1.0, 0.0].map(animated_value);
-    let [x, y, scale, angle] = values.clone();
+    let [x, y, scale, angle] = values;
     // The last drag's distance, scale and angle.
     let drag = signal(0.0_f32);
     let pinched = signal(1.0_f32);
@@ -231,7 +229,6 @@ fn Ball() -> impl IntoElement {
     let grab = animated_value(0.0);
     // The ball's colors follow the appearance natively.
     let ball = {
-        let (grant, release, terminate) = (grab.clone(), grab.clone(), grab.clone());
         view()
             .absolute()
             .left(relative(0.5))
@@ -253,7 +250,7 @@ fn Ball() -> impl IntoElement {
             .claim_touches(TouchClaim::on_start())
             .on_responder_grant(move |_: &ResponderEvent| {
                 start.replace(pos.get_untracked());
-                let _ = grant.spring(1.0, spring(420.0, 24.0));
+                let _ = grab.spring(1.0, spring(420.0, 24.0));
                 state.set(("Dragging".into(), Tone::Accent));
             })
             .on_responder_move(move |e: &ResponderEvent| {
@@ -263,11 +260,11 @@ fn Ball() -> impl IntoElement {
             })
             .on_responder_release(move |e: &ResponderEvent| {
                 let g = e.gesture;
-                let _ = release.spring(0.0, spring(300.0, 20.0));
+                let _ = grab.spring(0.0, spring(300.0, 20.0));
                 state.set((format!("{:.2}, {:.2} pt/ms", g.vx, g.vy).into(), Tone::Info));
             })
             .on_responder_terminate(move |_: &ResponderEvent| {
-                let _ = terminate.spring(0.0, Spring::default());
+                let _ = grab.spring(0.0, Spring::default());
                 state.set(("Taken over".into(), Tone::Warn));
             })
             .child(
@@ -447,28 +444,24 @@ const PRESS_EVENTS: [&str; 4] = ["pressIn", "press", "longPress", "pressOut"];
 /// Each press event lights up its chip as it arrives.
 #[component]
 fn PressEvents() -> impl IntoElement {
-    let flashes: Rc<[AnimatedValue]> = PRESS_EVENTS.iter().map(|_| animated_value(0.0)).collect();
+    let flashes = PRESS_EVENTS.map(|_| animated_value(0.0));
     let count = signal(0_u32);
     // The latest first.
     let log = signal(Vec::<&'static str>::new());
     // A listener noting `event`.
-    let fire = {
-        let flashes = flashes.clone();
-        move |event: &'static str| {
-            let flashes = flashes.clone();
-            move |_: &()| {
-                batch(|| {
-                    count.update(|n| *n += 1);
-                    log.update(|log| {
-                        log.insert(0, event);
-                        log.truncate(6);
-                    });
+    let fire = move |event: &'static str| {
+        move |_: &()| {
+            batch(|| {
+                count.update(|n| *n += 1);
+                log.update(|log| {
+                    log.insert(0, event);
+                    log.truncate(6);
                 });
-                if let Some(i) = PRESS_EVENTS.iter().position(|e| *e == event) {
-                    let flash = &flashes[i];
-                    flash.set(1.0);
-                    let _ = flash.timing(0.0, 700.0, Easing::Curve(Curve::Quad, EaseMode::Out));
-                }
+            });
+            if let Some(i) = PRESS_EVENTS.iter().position(|e| *e == event) {
+                let flash = &flashes[i];
+                flash.set(1.0);
+                let _ = flash.timing(0.0, 700.0, Easing::Curve(Curve::Quad, EaseMode::Out));
             }
         }
     };

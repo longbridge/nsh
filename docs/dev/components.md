@@ -165,7 +165,7 @@ child components go with it. The design and its reasons: `reactive-components.md
   | `useSafeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
-  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Clone`); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_shadow_color(..)` / `.bind_shadow_opacity(..)` / `.bind_shadow_radius(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `ui::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
+  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_shadow_color(..)` / `.bind_shadow_opacity(..)` / `.bind_shadow_radius(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `ui::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh/keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`ui/keys.rs`) |
   | `BackHandler.addEventListener("hardwareBackPress", f)`, `.remove()` | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`ui/back.rs`) |
@@ -194,22 +194,33 @@ child components go with it. The design and its reasons: `reactive-components.md
   bar (below); they are actions the core applies in order with the view's other changes (`ui/services.rs`,
   `core/services.rs`). They work wherever the core runs Rust code: a view's body, its bindings, listeners and tasks,
   and modules.
-- **Animated values** (`ui/animated.rs`) are nodes of the platform's animation graph with odd ids (JS's are even,
-  like node ids: the graph indexes nodes by id, so both must stay dense; ids from 2^31 are the graph's own
-  composite steps); the last handle released frees the node. Deriving the same node again gets the live one. Colors
-  interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK, colors::ACCENT])`, any
-  `AdaptiveColor`) follow the appearance: a binding of the view gives the node the other appearance's colors in
-  place when it changes (`AnimationOp::SetOutput`), so nothing is made again and its bindings stay. Bound
-  style properties go into the element's inline style, before the app's `style` on a host (the core keeps the app's
-  and composes the two). The animations' ends come back through `Core::animations_finished` (the engine hands JS
-  the rest). An `Animation` is sent whole as one `AnimationOp::StartComposite` and runs in the graph step after step;
+- **Animated values** (`ui/animated.rs`) are nodes of the platform's animation graph with odd ids (JS's are even, like
+  node ids: the graph indexes nodes by id, so both must stay dense; ids from 2^31 are the graph's own composite steps).
+  `AnimatedValue` and `AnimatedNode` are `Copy` handles, as signals are: the owner current when one is made (the
+  component, a region, a row; `reactive::Kept`, a slot of the graph holding the node's `Rc`) keeps the node and releases
+  it when it is disposed, so closures share a value with no clone. Used after that, a handle does nothing (its
+  animations end at once, unfinished; a derivation of it is no node; a drawing reads it as 0) and never panics. What
+  binds a node holds it while bound (`LiveNode`: an element's bound styles, `pan_values` / `pinch_value` /
+  `rotation_value` / `scroll_value`, a drawing's slots, a composite's values, a derived node's inputs), so a binding in
+  a region that outlives the handle's owner goes on moving, and so does an animation running on it; the node is released
+  when the last of these goes. Made with no owner (a listener, a task, outside a component), a handle lives as long as
+  the surface, as a signal made there does. Deriving the same node again gets the live one (a handle of it in the
+  current owner). Colors interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK,
+  colors::ACCENT])`, any `AdaptiveColor`) follow the appearance: a binding of the view gives the node the other
+  appearance's colors in place when it changes (`AnimationOp::SetOutput`), so nothing is made again and its bindings
+  stay. Bound style properties go into the element's inline style, before the app's `style` on a host (the core keeps
+  the app's and composes the two). The animations' ends come back through `Core::animations_finished` (the engine hands
+  JS the rest). An `Animation` is sent whole as one `AnimationOp::StartComposite` and runs in the graph step after step;
   its composite key (odd, JS's even) is what `reset()` restores by, and dropping the last handle releases it (a run
   going on goes on).
-- **Element refs** (`ui/element_ref.rs`) hold the node of the element that carries them, set when the element is
-  applied and cleared when it goes; their commands go out through the executor, and an event's handling applies them
-  right after its own changes, so they keep their order. A measurement (`measure()`) waits in the core for the layout
-  of the commit it goes out with, as JS's `Command::Measure` does, and is answered there (`Core::measure`); none goes
-  to the platform.
+- **Element refs** (`ui/element_ref.rs`) hold the node of the element that carries them, set when the element is applied
+  and cleared when it goes; their commands go out through the executor, and an event's handling applies them right after
+  its own changes, so they keep their order. `ElementRef` and `ComponentRef` are `Copy` handles kept by the owner
+  current when they are made, as animated values are; the element carrying one holds what it names (`RefTarget`) while
+  it is mounted, so mounting and unmounting it never reach the ref's owner. Once that owner is gone, `node()` is `None`
+  and commands do nothing, as with no element carrying it. A measurement (`measure()`) waits in the core for the layout
+  of the commit it goes out with, as JS's `Command::Measure` does, and is answered there (`Core::measure`); none goes to
+  the platform.
 - **Element attributes for system UI**: `.inset_padding(insets)` / `.inset_margin(insets)` add to the padding /
   margin the styles resolve to (what `SafeAreaView` and `KeyboardAvoidingView` use, so the app's own padding stays),
   `.inline_style(props.content_container_style)` applies a `ui::Style` prop (a value or a binding) (`KeyboardAvoidingView`'s `contentContainerStyle`).

@@ -328,13 +328,12 @@ fn Dial() -> impl IntoElement {
             ("Nominal", Tone::Up)
         }
     });
-    let drawn = needle.clone();
     Card::new()
         .icon(IconName::Spark)
         .title("Turbine 3 load")
         .subtitle("Needle and sweep on one animated value")
         .child(measured(height, move |c, width| {
-            draw_dial(c, width, height, &drawn, load.get())
+            draw_dial(c, width, height, &needle, load.get())
         }))
         .child(
             segmented(PRESETS.map(|(label, _)| Segment::new(label)), preset).on_event(
@@ -522,7 +521,6 @@ fn AreaChart() -> impl IntoElement {
         let (last, avg) = figures.get();
         last >= avg
     });
-    let drawn = sweep.clone();
     Card::new()
         .icon(IconName::Stocks)
         .title("Relay throughput")
@@ -548,7 +546,7 @@ fn AreaChart() -> impl IntoElement {
             .tone(move || if up.get() { Tone::Up } else { Tone::Down }),
         )
         .child(measured(height, move |c, width| {
-            data.with(|data| draw_area(c, width, height, data, &drawn))
+            data.with(|data| draw_area(c, width, height, data, &sweep))
         }))
         .child(legends([
             (colors::ACCENT, "Messages"),
@@ -651,7 +649,6 @@ fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Pa
 fn Ridgeline() -> impl IntoElement {
     let sweep = reveal(1400.0);
     let height = 210.0;
-    let drawn = sweep.clone();
     Card::new()
         .icon(IconName::Animation)
         .title("Footfall by hour")
@@ -661,7 +658,7 @@ fn Ridgeline() -> impl IntoElement {
         }))
         .child(caption("Gate B, last week", Some("Peak 12:00–14:00")))
         .child(measured(height, move |c, width| {
-            draw_ridges(c, width, height, &drawn)
+            draw_ridges(c, width, height, &sweep)
         }))
         .child(legends([
             (colors::ACCENT, "Weekday"),
@@ -857,14 +854,13 @@ fn Dumbbell() -> impl IntoElement {
     let t = animated_value(0.0);
     play(&t);
     let height = 30.0 * ROUTES.len() as f32 + 24.0;
-    let drawn = t.clone();
     Card::new()
         .icon(IconName::Physics)
         .title("Route latency")
         .subtitle("Dumbbell, before → after")
         .right(header_button("Replay", move |_: &()| play(&t)))
         .child(measured(height, move |c, width| {
-            draw_dumbbell(c, width, height, &drawn)
+            draw_dumbbell(c, width, height, &t)
         }))
         .child(legends([
             (colors::MUTED, "Before"),

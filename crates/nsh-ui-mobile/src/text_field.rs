@@ -112,7 +112,6 @@ pub fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> impl IntoE
                             && !props.disabled.get()
                     },
                     move || {
-                        let field = field.clone();
                         view()
                             .size_6()
                             .items_center()

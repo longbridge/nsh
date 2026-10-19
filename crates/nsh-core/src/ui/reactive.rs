@@ -6,7 +6,9 @@
 //! the graph, so closures and async blocks capture them as they are. What is
 //! made under an owner (a component, an effect, a branch of `If`, a row of
 //! `Each`) is disposed with it; a handle of a disposed node reads as gone
-//! ([`Signal::try_get`]) and panics when read as live.
+//! ([`Signal::try_get`]) and panics when read as live. The UI's other
+//! handles (animated values, element refs) are kept the same way
+//! (`Kept`), but find their value gone rather than panic.
 //!
 //! The graph is the engine's: the core enters it ([`Runtime::enter`]) while
 //! Rust code of the components runs on the engine thread, and the functions
@@ -471,6 +473,82 @@ pub fn stored<T: 'static>(value: T) -> Stored<T> {
         Rc::new(RefCell::new(value)),
         SignalEquals::Never,
     ))
+}
+
+/// A value the current owner keeps for a `Copy` handle that is not a
+/// signal ([`super::AnimatedValue`], [`super::ElementRef`]): released with
+/// the owner (with no owner, it lives as long as the graph, as a signal
+/// does). Unlike a signal's, its handle finds it gone afterwards rather
+/// than panicking, and off the engine thread, where no graph is entered.
+pub(crate) struct Kept<T: 'static> {
+    handle: Handle,
+    _t: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for Kept<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Kept<T> {}
+
+impl<T> PartialEq for Kept<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.handle == other.handle
+    }
+}
+
+impl<T: 'static> Kept<T> {
+    /// Keeps `value` in the current owner. The `Rc` is the graph's value
+    /// as it is (no allocation of its own).
+    pub(crate) fn new(value: Rc<T>) -> Self {
+        let graph = graph();
+        let id = graph.owned_signal(Some(value as Rc<dyn Any>), Equals::Never);
+        Self {
+            handle: Handle::of(graph, id),
+            _t: PhantomData,
+        }
+    }
+
+    /// A handle of nothing: always gone.
+    pub(crate) fn gone() -> Self {
+        Self {
+            handle: Handle {
+                id: u32::MAX,
+                generation: 0,
+            },
+            _t: PhantomData,
+        }
+    }
+
+    /// `f` of the graph's value while the owner lives (and a graph is
+    /// entered). `f` must not reach the graph: it runs inside a borrow.
+    fn raw<R>(self, f: impl FnOnce(&Rc<dyn Any>) -> R) -> Option<R> {
+        let graph = CURRENT.with(Cell::get);
+        if graph.is_null() {
+            return None;
+        }
+        // SAFETY: an entered graph lives until its guard drops; the borrow
+        // ends with `f`, which does not reach the graph.
+        let graph = unsafe { &*graph };
+        let Handle { id, generation } = self.handle;
+        if !graph.live(id, generation, u32::MAX) {
+            return None;
+        }
+        graph.value(id).as_ref().map(f)
+    }
+
+    /// `f` of the value while its owner lives (and a graph is entered).
+    /// `f` must not reach the graph: it runs inside a borrow of it.
+    pub(crate) fn with<R>(self, f: impl FnOnce(&T) -> R) -> Option<R> {
+        self.raw(|v| v.downcast_ref::<T>().map(f)).flatten()
+    }
+
+    /// The value while its owner lives (and a graph is entered).
+    pub(crate) fn get(self) -> Option<Rc<T>> {
+        self.raw(Rc::clone)?.downcast::<T>().ok()
+    }
 }
 
 fn make_signal<T: 'static>(value: T, equals: Equals<Compare>) -> Signal<T> {

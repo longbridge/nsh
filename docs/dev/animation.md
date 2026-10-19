@@ -31,7 +31,9 @@
   `box-shadow`, dropping layered `boxShadow`s while bound). Driven on the main thread by `CADisplayLink`,
   paused while nothing animates. `scrollValue` writes the scroll offset into an animated value in the same frame; `pan` lets drags drive animated values
   directly, and JS receives the velocity when the drag ends. Animated values referenced by a view's style (or `pan`, `scrollValue`, ...) are kept by its node
-  (`nsh-js` `dom.rs`) and derived nodes hold their inputs, so bindings do not break when JS objects are collected.
+  (`nsh-js` `dom.rs`) and derived nodes hold their inputs, so bindings do not break when JS objects are collected. In
+  Rust components `AnimatedValue` / `AnimatedNode` are `Copy` handles their owner keeps; the element's bindings, a
+  drawing or a composite hold the node while bound (`docs/dev/components.md`, "Animated values").
 - **Layout animation**: `LayoutAnimation.configureNext(config)` (or the `easeInEaseOut` / `linear` / `spring` presets) animates
   the next commit's frames, insertions and removals natively. The presets are `LayoutAnimation::EASE_IN_EASE_OUT` /
   `LINEAR` / `SPRING` in Rust (what Rust components pass to `animate_layout`), handed to `nsh/animated` as data; the config's

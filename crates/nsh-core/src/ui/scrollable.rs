@@ -150,8 +150,10 @@ pub trait Scrollable: Element {
     /// headers that shrink or fade, parallax, with no engine work per frame
     /// (TS: `scrollValue`).
     fn scroll_value(mut self, value: &AnimatedValue) -> Self {
-        host::set(self.node(), Prop::ScrollValue(Some(value.node().id())));
-        self.node().attrs.bound.push(value.node().clone());
+        if let Some(node) = value.node().live() {
+            host::set(self.node(), Prop::ScrollValue(Some(node.id())));
+            self.node().attrs.bound.push(node);
+        }
         self
     }
 
