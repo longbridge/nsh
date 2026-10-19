@@ -1,6 +1,7 @@
 //! Standard modules share NSH's VM, event loop and native permission boundary.
 use rquickjs::{Ctx, Error, Module, Result, Value, object::Accessor, qjs};
 
+mod bounds;
 mod console;
 pub(crate) mod declarations;
 mod os;
@@ -32,7 +33,7 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
     }
     match name {
         "buffer" => declare!(llrt_buffer::BufferModule),
-        "crypto" => declare!(llrt_crypto::CryptoModule),
+        "crypto" => declare!(bounds::CryptoModule),
         "path" => declare!(llrt_path::PathModule),
         "url" => declare!(url::UrlModule),
         "zlib" => declare!(zlib::ZlibModule),
@@ -122,6 +123,7 @@ fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
         .map(|name| own_property(ctx, name))
         .collect::<Result<_>>()?;
     llrt_buffer::init(ctx)?;
+    bounds::guard_buffer(ctx)?;
     // LLRT URL helper classes are registered once; public constructors remain NSH's.
     #[cfg(not(target_arch = "wasm32"))]
     llrt_url::init(ctx)?;
@@ -220,6 +222,7 @@ fn init_process(ctx: &Ctx<'_>) -> Result<()> {
 fn init_crypto(ctx: &Ctx<'_>) -> Result<()> {
     if take_lazy(ctx, "crypto")? {
         llrt_crypto::init(ctx)?;
+        bounds::guard_crypto(ctx)?;
     }
     Ok(())
 }

@@ -138,6 +138,9 @@ for (const options of [42, { protocols: ["chat"] }, { headers: 42 }, { headers: 
   try { Client.connect("ws://127.0.0.1:9/", options); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError); }
 }
 try { Client.connect("https://127.0.0.1/"); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError); }
+for (const url of ["ws://user:secret@127.0.0.1:9/", "ws://127.0.0.1:9/#part"]) {
+  try { Client.connect(url); threw.push("connected"); } catch (e) { threw.push(e instanceof TypeError && /credentials/.test(e.message)); }
+}
 try { Client.connect("ws://example.com/"); threw.push("connected"); } catch (e) {
   threw.push(e instanceof TypeError && /capabilities.network.http/.test(e.message));
 }
@@ -146,7 +149,7 @@ report(threw.join(" "));"#,
     );
     assert_eq!(
         shown(&rx, "done"),
-        "done true true true true true true true true true"
+        "done true true true true true true true true true true true"
     );
 }
 
@@ -247,4 +250,35 @@ fn a_handshake_redirect_fails_without_contacting_its_target() {
         std::io::ErrorKind::WouldBlock,
         "the redirect's target is never contacted"
     );
+}
+
+#[test]
+fn messages_that_came_before_the_peer_closed_are_still_read() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (tcp, _) = listener.accept().unwrap();
+        let mut socket = tungstenite::accept(tcp).unwrap();
+        socket.send("one".into()).unwrap();
+        socket.send("two".into()).unwrap();
+        socket.close(None).unwrap();
+        let _ = socket.flush();
+        // The close handshake's reply, then the end.
+        while socket.read().is_ok() {}
+    });
+    let (_engine, rx) = start(
+        &format!(
+            r#"(async () => {{
+  const socket = await Client.connect("ws://{address}/");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const first = await socket.read();
+  const second = await socket.read();
+  const last = await socket.read().then((m) => `read ${{m}}`, (e) => e.message);
+  report(`${{first}}|${{second}}|${{last}}`);
+}})().catch((e) => report(String(e)));"#
+        ),
+        LOOPBACK,
+    );
+    assert_eq!(shown(&rx, "done"), "done one|two|WebSocket closed by peer");
+    server.join().unwrap();
 }

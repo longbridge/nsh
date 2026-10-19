@@ -27,6 +27,10 @@ const MAX_IN_FLIGHT: usize = 64 * 1024 * 1024;
 const PENDING: &str = "fs.pending";
 /// The [`Quotas`] kind of bytes in flight.
 const IN_FLIGHT: &str = "fs.bytes";
+/// What a read holds of the budget at a time past the size the file had
+/// when it was opened.
+#[cfg(not(target_arch = "wasm32"))]
+const GROWTH: usize = 1024 * 1024;
 /// The most entries and name bytes one `readdir` lists.
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_ENTRIES: usize = 10_000;
@@ -493,7 +497,9 @@ fn resolved(path: &Path) -> Result<PathBuf, String> {
 /// A checked path: the granted root, opened, and the path within it.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct Grant {
-    dir: cap_std::fs::Dir,
+    /// The root, opened; `None`: a read root that does not exist (yet), in
+    /// which every entry is missing.
+    dir: Option<cap_std::fs::Dir>,
     relative: PathBuf,
     name: String,
     /// The path as the call gave it (an error's `path`).
@@ -539,6 +545,9 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
         } else {
             path
         };
+        // A read root that does not exist yet (`${dataDir}` before the app
+        // writes): its entries are missing, unless another root has them.
+        let mut missing = None;
         for raw in roots {
             let Ok(root) = paths.resolve_root(raw, &data).and_then(|p| resolved(&p)) else {
                 continue;
@@ -589,20 +598,33 @@ fn grant(sys: &System, path: &str, write: bool, link: bool) -> Result<Grant, JsE
             if write && !root.exists() && std::fs::create_dir_all(&root).is_err() {
                 continue;
             }
-            let Ok(dir) = confined::open_root(&root) else {
-                continue;
-            };
             let (relative, name) = if relative.as_os_str().is_empty() {
                 (PathBuf::from("."), ".".to_owned())
             } else {
                 (relative.to_owned(), relative.display().to_string())
             };
+            let dir = match confined::open_root(&root) {
+                Ok(dir) => dir,
+                Err(e) if !write && e.kind() == std::io::ErrorKind::NotFound => {
+                    missing.get_or_insert(Grant {
+                        dir: None,
+                        relative,
+                        name,
+                        path: given.to_owned(),
+                    });
+                    continue;
+                }
+                Err(_) => continue,
+            };
             return Ok(Grant {
-                dir,
+                dir: Some(dir),
                 relative,
                 name,
                 path: given.to_owned(),
             });
+        }
+        if let Some(grant) = missing {
+            return Ok(grant);
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -651,6 +673,13 @@ impl Grant {
         &self.name
     }
 
+    /// The opened root: `NotFound` for a root that does not exist.
+    fn dir(&self) -> std::io::Result<&cap_std::fs::Dir> {
+        self.dir
+            .as_ref()
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+
     /// I/O error `error` of `syscall` as Node's: the message names the
     /// entry, `code`, `syscall` and `path` tell it apart.
     fn error(&self, verb: &str, syscall: &'static str, error: std::io::Error) -> JsError {
@@ -673,7 +702,9 @@ impl Grant {
             .with_code("ERR_FS_FILE_TOO_LARGE")
         };
         let (grant, file, size) = blocking(move || {
-            let file = confined::open_file(&self.dir, &self.relative, false)
+            let file = self
+                .dir()
+                .and_then(|dir| confined::open_file(dir, &self.relative, false))
                 .map_err(|e| self.error("read", "open", e))?;
             let size = file
                 .metadata()
@@ -686,58 +717,85 @@ impl Grant {
         if size > MAX_READ {
             return Err(too_big(size));
         }
-        let held = quotas
-            .reserve(IN_FLIGHT, size, MAX_IN_FLIGHT)
-            .ok_or_else(|| exceeded(&grant.name))?;
-        let name = grant.name.clone();
-        let too_big_read = too_big.clone();
-        // The file may change while it is read: its size is held, then
-        // what was read.
-        let value = blocking(move || {
-            use std::io::Read;
-            let mut bytes = Vec::with_capacity(size);
-            let mut file = file;
-            file.by_ref()
-                .take((MAX_READ + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|e| grant.error("read", "read", e))?;
+        let mut held = vec![
+            quotas
+                .reserve(IN_FLIGHT, size, MAX_IN_FLIGHT)
+                .ok_or_else(|| exceeded(&grant.name))?,
+        ];
+        let mut reserved = size;
+        // The file may grow while it is read (or say 0, as `/proc` does):
+        // what is read never goes past what is held by more than the byte
+        // that tells growth from the end, and more is held a chunk at a time.
+        let grant = std::sync::Arc::new(grant);
+        let mut bytes = Vec::with_capacity(size);
+        let mut file = file;
+        loop {
+            let want = reserved - bytes.len() + 1;
+            let reader = grant.clone();
+            let (back, read, more) = blocking(move || {
+                use std::io::Read;
+                let mut bytes = bytes;
+                let before = bytes.len();
+                file.by_ref()
+                    .take(want as u64)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| reader.error("read", "read", e))?;
+                let more = bytes.len() - before == want;
+                Ok((file, bytes, more))
+            })
+            .await?;
+            (file, bytes) = (back, read);
+            if !more {
+                break;
+            }
             if bytes.len() > MAX_READ {
-                return Err(too_big_read(bytes.len()));
+                return Err(too_big(bytes.len()));
             }
-            if !text {
-                return Ok(FileData::Bytes(bytes));
-            }
+            let chunk = GROWTH.min(MAX_READ + 1 - reserved);
+            held.push(
+                quotas
+                    .reserve(IN_FLIGHT, chunk, MAX_IN_FLIGHT)
+                    .ok_or_else(|| exceeded(&grant.name))?,
+            );
+            reserved += chunk;
+        }
+        if bytes.len() > MAX_READ {
+            return Err(too_big(bytes.len()));
+        }
+        let value = if text {
+            let decoder = grant.clone();
             // Valid UTF-8 keeps its length, and so what it holds of the
             // budget.
-            String::from_utf8(bytes).map(FileData::Text).map_err(|e| {
-                JsError::Error(format!("cannot decode `{}` as UTF-8: {e}", grant.name))
-                    .with_code("EILSEQ")
-                    .with("path", grant.path.as_str())
+            blocking(move || {
+                String::from_utf8(bytes).map(FileData::Text).map_err(|e| {
+                    JsError::Error(format!("cannot decode `{}` as UTF-8: {e}", decoder.name))
+                        .with_code("EILSEQ")
+                        .with("path", decoder.path.as_str())
+                })
             })
-        })
-        .await?;
+            .await?
+        } else {
+            FileData::Bytes(bytes)
+        };
         let len = match &value {
             FileData::Text(text) => text.len(),
             FileData::Bytes(bytes) => bytes.len(),
         };
-        let held = if len > size {
-            let more = quotas
-                .reserve(IN_FLIGHT, len - size, MAX_IN_FLIGHT)
-                .ok_or_else(|| exceeded(&name))?;
-            vec![held, more]
-        } else {
-            drop(held);
-            // Less than was held a moment ago: it fits.
-            let exact = quotas.reserve(IN_FLIGHT, len, MAX_IN_FLIGHT);
-            exact.into_iter().collect()
-        };
+        drop(held);
+        // At most what was held a moment ago: it fits.
+        let held: Vec<Held> = quotas
+            .reserve(IN_FLIGHT, len, MAX_IN_FLIGHT)
+            .into_iter()
+            .collect();
         Ok(Holding { value, _held: held })
     }
 
     async fn write(self, bytes: Vec<u8>) -> Result<(), JsError> {
         blocking(move || {
             use std::io::Write;
-            let mut file = confined::open_file(&self.dir, &self.relative, true)
+            let mut file = self
+                .dir()
+                .and_then(|dir| confined::open_file(dir, &self.relative, true))
                 .map_err(|e| self.error("write", "open", e))?;
             file.set_len(0)
                 .map_err(|e| self.error("write", "ftruncate", e))?;
@@ -749,10 +807,11 @@ impl Grant {
 
     async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
         blocking(move || {
+            let dir = self.dir();
             if recursive {
-                self.dir.create_dir_all(&self.relative)
+                dir.and_then(|dir| dir.create_dir_all(&self.relative))
             } else {
-                self.dir.create_dir(&self.relative)
+                dir.and_then(|dir| dir.create_dir(&self.relative))
             }
             .map_err(|e| self.error("create", "mkdir", e))
         })
@@ -762,15 +821,21 @@ impl Grant {
     /// Whether the entry exists; a symlink exists even when its target does
     /// not.
     async fn exists(self) -> Result<bool, JsError> {
-        blocking(move || Ok(self.dir.symlink_metadata(&self.relative).is_ok())).await
+        blocking(move || {
+            Ok(self
+                .dir()
+                .is_ok_and(|dir| dir.symlink_metadata(&self.relative).is_ok()))
+        })
+        .await
     }
 
     async fn stat(self, link: bool) -> Result<Stats, JsError> {
         blocking(move || {
+            let dir = self.dir();
             if link {
-                self.dir.symlink_metadata(&self.relative)
+                dir.and_then(|dir| dir.symlink_metadata(&self.relative))
             } else {
-                self.dir.metadata(&self.relative)
+                dir.and_then(|dir| dir.metadata(&self.relative))
             }
             .map(confined::stats)
             .map_err(|e| self.error("stat", if link { "lstat" } else { "stat" }, e))
@@ -780,8 +845,8 @@ impl Grant {
 
     async fn readlink(self) -> Result<String, JsError> {
         blocking(move || {
-            self.dir
-                .read_link_contents(&self.relative)
+            self.dir()
+                .and_then(|dir| dir.read_link_contents(&self.relative))
                 .map(|p| p.to_string_lossy().into_owned())
                 .map_err(|e| self.error("read link", "readlink", e))
         })
@@ -790,8 +855,8 @@ impl Grant {
 
     async fn unlink(self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir
-                .remove_file(&self.relative)
+            self.dir()
+                .and_then(|dir| dir.remove_file(&self.relative))
                 .map_err(|e| self.error("remove", "unlink", e))
         })
         .await
@@ -799,8 +864,8 @@ impl Grant {
 
     async fn rmdir(self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir
-                .remove_dir(&self.relative)
+            self.dir()
+                .and_then(|dir| dir.remove_dir(&self.relative))
                 .map_err(|e| self.error("remove", "rmdir", e))
         })
         .await
@@ -808,8 +873,8 @@ impl Grant {
 
     async fn rename(self, to: Self) -> Result<(), JsError> {
         blocking(move || {
-            self.dir
-                .rename(&self.relative, &to.dir, &to.relative)
+            self.dir()
+                .and_then(|dir| dir.rename(&self.relative, to.dir()?, &to.relative))
                 .map_err(|e| self.error("rename", "rename", e))
         })
         .await
@@ -821,8 +886,8 @@ impl Grant {
             let mut entries = Vec::new();
             let mut name_bytes = 0;
             for entry in self
-                .dir
-                .read_dir(&self.relative)
+                .dir()
+                .and_then(|dir| dir.read_dir(&self.relative))
                 .map_err(|e| self.error("list", "scandir", e))?
             {
                 let entry = entry.map_err(|e| self.error("list", "scandir", e))?;
@@ -929,7 +994,21 @@ mod confined {
             path::Component,
         };
         let mut current = std::fs::File::open("/")?;
-        for part in path.components() {
+        let parts: Vec<_> = path.components().collect();
+        for (i, part) in parts.iter().enumerate() {
+            // An ancestor is only passed through: on Linux `O_PATH` needs no
+            // read permission of it (a home directory may be 0711).
+            #[cfg(target_os = "linux")]
+            let access = if i + 1 < parts.len() {
+                libc::O_PATH
+            } else {
+                libc::O_RDONLY
+            };
+            #[cfg(not(target_os = "linux"))]
+            let access = {
+                let _ = i;
+                libc::O_RDONLY
+            };
             match part {
                 Component::RootDir => (),
                 Component::Normal(name) => {
@@ -941,7 +1020,7 @@ mod confined {
                         libc::openat(
                             current.as_raw_fd(),
                             name.as_ptr(),
-                            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                            access | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
                         )
                     };
                     if fd < 0 {

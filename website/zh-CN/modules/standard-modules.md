@@ -43,7 +43,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 ## 压缩
 
-`zlib` 采用 LLRT 的实现，NSH 为其加上一个上限：每次解压（`inflate`、`inflateRaw`、`gunzip`、`brotliDecompress`、`zstdDecompress` 及其 `Sync` 形式）最多输出 64 MiB；VM 的堆上限更小时以堆上限为准。超出时抛出 `RangeError`，与 Node.js 对 `maxOutputLength` 的处理一致；应用自己的 `maxOutputLength` 可以为单次调用设置更低的上限。
+`zlib` 采用 LLRT 的实现，NSH 为其加上一个上限：每次解压（`inflate`、`inflateRaw`、`gunzip`、`brotliDecompress`、`zstdDecompress` 及其 `Sync` 形式）最多输出 64 MiB；VM 的堆上限更小时以堆上限为准。超出时抛出 `RangeError`，与 Node.js 对 `maxOutputLength` 的处理一致；应用自己的 `maxOutputLength` 可以为单次调用设置更低的上限。`Buffer.alloc`、`Buffer.allocUnsafe`、`Buffer.allocUnsafeSlow` 和 `crypto.randomBytes` 在大小超过 VM 的堆上限（没有堆上限时为 1 GiB）时抛出 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）；`allocUnsafe` 返回清零的内存。
 
 ## 文件
 
@@ -76,7 +76,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 }
 ```
 
-命令须与 `process.execute` 完全一致：`git` 和 `/usr/bin/git` 是两项不同的授权。裸命令通过宿主 `PATH` 中的绝对目录解析。子进程的环境是宿主的 `PATH`、`HOME`、`USERPROFILE`、`SystemRoot`、`TEMP`、`TMP`、`TMPDIR`、`LANG` 和 `LC_*`，加上 `process.env` 授权的变量名。子进程在应用的数据目录（不存在时创建）中运行，或在 `cwd` 中运行；`cwd` 须是 `fs.write` 根目录内已存在的目录，因为子进程可以在其运行目录中写入。嵌入应用可以进一步缩小授权。
+命令须与 `process.execute` 完全一致：`git` 和 `/usr/bin/git` 是两项不同的授权。裸命令通过宿主 `PATH` 中的绝对目录解析。子进程的环境是宿主的 `PATH`、`HOME`、`USERPROFILE`、`SystemRoot`、`TEMP`、`TMP`、`TMPDIR`、`LANG` 和 `LC_*`，加上 `process.env` 授权的变量名（按名称精确匹配，仅在环境变量不区分大小写的 Windows 上忽略大小写）。子进程在应用的数据目录（不存在时创建）中运行，或在 `cwd` 中运行；`cwd` 须是 `fs.write` 根目录内已存在的目录，因为子进程可以在其运行目录中写入。嵌入应用可以进一步缩小授权。
 
 ```ts
 import process from "process";
@@ -101,7 +101,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 ## 网络授权与边界
 
-全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。每个 VM 的两种 API 合计最多 32 个 WebSocket，单条消息最多 8 MiB，发送队列最多 8 条且缓冲总量最多 8 MiB。握手和写入超时为 30 秒，关闭最多等待 5 秒。
+全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，单条消息最多 8 MiB，发送队列最多 8 条且缓冲总量最多 8 MiB。握手和写入超时为 30 秒，关闭最多等待 5 秒。`WebSocketConnection` 最多保留八条未读消息：对端关闭后，`read()` 仍按顺序返回这些消息，然后以连接结束的原因拒绝。
 
 `net.connect(host, port)` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 `Socket` 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。未授权时在调用处抛出 `TypeError`，超出限制时抛出 `RangeError`；连接与 I/O 失败以带有 Node 的 `code`（`ECONNREFUSED`、`ENOTFOUND`、`ETIMEDOUT`、`ECONNRESET` 等）和 `syscall` 的错误拒绝 Promise，连接失败还带有 `address` 和 `port`，对已关闭 socket 的操作为 `ERR_SOCKET_CLOSED`。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
 

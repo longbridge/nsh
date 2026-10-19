@@ -55,6 +55,15 @@ impl WebSocket {
                 "WebSocket.connect(url) expects a ws:// or wss:// URL".into(),
             ));
         }
+        // As the global `WebSocket`: the handshake would drop them silently.
+        if parsed.fragment().is_some()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            return Err(JsError::Type(
+                "WebSocket.connect(url) expects a URL without credentials or fragment".into(),
+            ));
+        }
         let host = parsed
             .host_str()
             .ok_or_else(|| JsError::Type("WebSocket URL has no host".into()))?
@@ -349,10 +358,7 @@ async fn open(
     .map_err(|_| "WebSocket handshake timed out".to_owned())?
     .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
     let (commands, receiver) = mpsc::channel(UNREAD);
-    let driver = spawn(async move {
-        let _held = held;
-        drive(socket, receiver).await;
-    });
+    let driver = spawn(drive(socket, receiver, held));
     Ok(WebSocketConnection {
         commands,
         reading: Rc::default(),
@@ -361,14 +367,20 @@ async fn open(
 }
 
 /// Runs the connection's commands and keeps what arrives until it is read.
-async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>) {
+/// Once the peer ends the connection, the messages that came before are
+/// still read, in order, before the reason it ended; the VM's place for
+/// the connection is given back then.
+async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: Held) {
     let mut messages = VecDeque::new();
     let mut read: Option<Reply<Message>> = None;
     let error = loop {
         tokio::select! {
             biased;
             command = commands.recv() => match command {
-                None => break "WebSocket connection is closed".to_owned(),
+                None => {
+                    messages.clear();
+                    break "WebSocket connection is closed".to_owned();
+                }
                 Some(Command::Read(reply)) => match messages.pop_front() {
                     Some(message) => {
                         let _ = reply.send(Ok(message));
@@ -392,6 +404,8 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>) {
                         .map_err(|_| "WebSocket close timed out".to_owned())
                         .and_then(|result| result.map_err(|error| format!("WebSocket close failed: {error}")));
                     let _ = reply.send(result);
+                    // Closed by the app: what was not read goes with it.
+                    messages.clear();
                     break "WebSocket connection is closed".to_owned();
                 }
             },
@@ -422,6 +436,22 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>) {
         }
     };
     if let Some(reply) = read {
-        let _ = reply.send(Err(error));
+        let _ = reply.send(Err(error.clone()));
+    }
+    drop(socket);
+    drop(held);
+    while let Some(command) = commands.recv().await {
+        match command {
+            Command::Read(reply) => {
+                let _ = reply.send(messages.pop_front().ok_or_else(|| error.clone()));
+            }
+            Command::Write(_, reply) => {
+                let _ = reply.send(Err("WebSocket connection is closed".to_owned()));
+            }
+            Command::Close(reply) => {
+                messages.clear();
+                let _ = reply.send(Ok(()));
+            }
+        }
     }
 }

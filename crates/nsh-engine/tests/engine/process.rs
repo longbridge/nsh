@@ -359,7 +359,7 @@ fn granted_environment_names_reach_the_child() {
     // `USER` is not one every child gets; the manifest grants it here.
     let app = App::start(
         r#"process.run("/usr/bin/env").then((r) => report(r.stdout.split("\n").find((l) => l.startsWith("USER=")) ?? "none"));"#,
-        serde_json::json!({ "process": { "execute": ["/usr/bin/env"], "env": ["user"] } }),
+        serde_json::json!({ "process": { "execute": ["/usr/bin/env"], "env": ["USER"] } }),
     );
     let expected = std::env::var("USER").map_or("none".to_owned(), |user| format!("USER={user}"));
     assert_eq!(app.shown("done"), format!("done {expected}"));
@@ -459,4 +459,16 @@ fn past_the_children_limit_spawn_throws_and_run_rejects_a_range_error() {
         shell(),
     );
     assert_eq!(app.shown("done"), "done RangeError RangeError");
+}
+
+#[test]
+fn a_child_runs_under_the_name_it_was_given() {
+    // `/bin/sh` is often a link: the link's name, not its target's, is
+    // the child's `argv[0]`.
+    let app = App::start(
+        r#"process.run("/bin/sh", ["-c", "tr '\\0' '\\n' < /proc/$$/cmdline | head -n 1"])
+  .then((r) => report(r.stdout.trim()), (e) => report(String(e)));"#,
+        shell(),
+    );
+    assert_eq!(app.shown("done"), "done /bin/sh");
 }

@@ -385,7 +385,7 @@ mod native {
 
     use super::{Child, ChildEvent, ChildProcess, CommandOutput, ExitResult, Payload};
     use crate::{
-        access::Access,
+        access::{Access, env_names_match},
         ui::{CallCx, Held, JsError, Later, System},
     };
 
@@ -573,15 +573,14 @@ mod native {
     /// The host variables a child gets: [`CHILD_ENV`], `LC_*`, and the names
     /// both the app's `capabilities.process.env` and its host grant list.
     fn child_env(access: &Access) -> Vec<(OsString, OsString)> {
-        let listed =
-            |names: &[String], name: &str| names.iter().any(|n| n.eq_ignore_ascii_case(name));
+        let listed = |names: &[String], name: &str| names.iter().any(|n| env_names_match(n, name));
         std::env::vars_os()
             .filter(|(name, _)| {
                 let Some(name) = name.to_str() else {
                     return false;
                 };
-                CHILD_ENV.iter().any(|n| n.eq_ignore_ascii_case(name))
-                    || name.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("LC_"))
+                CHILD_ENV.iter().any(|n| env_names_match(n, name))
+                    || name.get(..3).is_some_and(|p| env_names_match(p, "LC_"))
                     || (listed(&access.declared.process.env, name)
                         && access
                             .granted
@@ -669,6 +668,10 @@ mod native {
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
+            // The resolved file runs, under the name the app gave: a link's
+            // name picks its behavior (`clang++`, busybox applets, a venv's
+            // `python`).
+            cmd.arg0(&launch.command);
         }
         #[cfg(target_os = "windows")]
         {

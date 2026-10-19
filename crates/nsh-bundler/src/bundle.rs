@@ -685,6 +685,39 @@ mod tests {
     }
 
     #[test]
+    fn only_code_gets_its_import_meta_url_and_plain_js_keeps_its_imports() {
+        let dir = std::env::temp_dir().join(format!("nsh-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in [
+            (
+                "App.tsx",
+                "import { mount, Text } from \"nsh\";\nimport data from \"./data.json\";\nimport { here } from \"./lib.js\";\nmount(() => <Text>{data.note + here}</Text>);\n",
+            ),
+            ("data.json", "{ \"note\": \"uses import.meta.url\" }"),
+            (
+                "lib.js",
+                "import { unused } from \"./polyfill.js\";\nexport const here = import.meta.url;\n",
+            ),
+            (
+                "polyfill.js",
+                "globalThis.polyfilled = true;\nexport const unused = 1;\n",
+            ),
+        ] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let bundle = bundle_app(&dir, false);
+        let code = &bundle.code;
+        assert!(code.contains("uses import.meta.url"), "{code}");
+        assert!(
+            code.contains("metaUrl as ") && code.contains("(`lib.js`)"),
+            "{code}"
+        );
+        assert!(code.contains("polyfilled"), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn development_bundles_require_what_they_import_dynamically() {
         let dir = app("hot");
         let (code, _) = bundle_hot(&dir.join("App.tsx"), &[]).unwrap().script();
