@@ -133,7 +133,7 @@ fn real_http_sse_streams_before_eof_and_abort_survives_llrt_async_host() {
     });
     let mut bridge = Bridge::new();
     bridge.host.eval_source(&format!(r#"
-        import {{ nextTick }} from 'node:process';
+        import {{ nextTick }} from 'process';
         globalThis.sse = [];
         globalThis.sseFailure = null;
         (async () => {{

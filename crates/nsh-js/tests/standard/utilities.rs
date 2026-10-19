@@ -3,7 +3,7 @@ use super::run;
 #[test]
 fn buffers_round_trip_cjk_and_binary_without_losing_zero_bytes() {
     let out = run(r#"
-        import { Buffer } from 'node:buffer';
+        import { Buffer } from 'buffer';
         const text = Buffer.from('你好 🌍', 'utf8');
         const binary = Buffer.from([0, 255, 128, 65]);
         const decoded = Buffer.from(binary.toString('base64'), 'base64');
@@ -21,7 +21,7 @@ fn buffers_round_trip_cjk_and_binary_without_losing_zero_bytes() {
 #[test]
 fn buffer_views_share_storage_and_endian_access_preserves_bytes() {
     let out = run(r#"
-        import { Buffer } from 'node:buffer';
+        import { Buffer } from 'buffer';
         const bytes = Buffer.alloc(6);
         bytes.writeUInt32BE(0x12345678, 1);
         const view = bytes.subarray(1, 5);
@@ -33,60 +33,12 @@ fn buffer_views_share_storage_and_endian_access_preserves_bytes() {
 }
 
 #[test]
-fn emitter_prepend_once_order_and_removal_are_synchronous() {
-    let out = run(r#"
-        import { EventEmitter } from 'node:events';
-        const events = new EventEmitter();
-        const calls = [];
-        function listener(value) { calls.push('on:' + value + ':' + (this === events)); }
-        events.on('chunk', listener);
-        events.once('chunk', value => calls.push('once:' + value));
-        events.prependListener('chunk', value => calls.push('first:' + value));
-        const first = events.emit('chunk', 1);
-        const count = events.listenerCount('chunk');
-        events.removeListener('chunk', listener);
-        events.emit('chunk', 2);
-        events.removeAllListeners('chunk');
-        globalThis.out = [calls, first, count, events.emit('chunk', 3)];
-    "#);
-    assert_eq!(
-        out,
-        r#"[["first:1","on:1:true","once:1","first:2"],true,2,false]"#
-    );
-}
-
-#[test]
-fn util_format_inheritance_and_assert_preserve_identity_and_failures() {
-    let out = run(r#"
-        import { format, inherits, TextEncoder, TextDecoder } from 'node:util';
-        import assert, { ok } from 'node:assert';
-        function Parent() {}
-        Parent.prototype.value = 7;
-        function Child() {}
-        inherits(Child, Parent);
-        const error = new Error('sentinel');
-        let sameError = false;
-        let message = '';
-        try { ok(false, error); } catch (caught) { sameError = caught === error; }
-        try { assert(0, 'expected failure'); } catch (caught) { message = caught.message; }
-        ok(true);
-        globalThis.out = [format('%s:%d', 'items', 3), new Child().value,
-            Child.super_ === Parent, assert.ok === ok, sameError, message,
-            new TextDecoder().decode(new TextEncoder().encode('中文'))];
-    "#);
-    assert_eq!(
-        out,
-        r#"["items:3",7,true,true,true,"expected failure","中文"]"#
-    );
-}
-
-#[test]
 #[cfg(not(windows))]
 fn path_operations_normalize_without_touching_the_filesystem() {
     // LLRT d9fd873e strips trailing separators in normalize unlike Node.
     // Keep this basic shared contract independent of that upstream limitation.
     let out = run(r#"
-        import path from 'node:path';
+        import path from 'path';
         const parsed = path.parse('/workspace/你好/report.test.md');
         globalThis.out = [path.join('/workspace', 'a', '..', '你好', 'report.md'),
             path.normalize('/a//b/../c'), path.basename('/a/report.test.md', '.md'),
@@ -103,7 +55,7 @@ fn path_operations_normalize_without_touching_the_filesystem() {
 #[test]
 fn url_query_duplicates_unicode_and_relative_resolution() {
     let out = run(r#"
-        import { URL, URLSearchParams, domainToASCII, domainToUnicode } from 'node:url';
+        import { URL, URLSearchParams, domainToASCII, domainToUnicode } from 'url';
         const url = new URL('../你好?q=a+b&q=c%26d#part', 'https://example.com/a/b/');
         const params = new URLSearchParams(url.search);
         const before = params.getAll('q');
@@ -121,8 +73,8 @@ fn url_query_duplicates_unicode_and_relative_resolution() {
 #[test]
 fn crypto_sha256_and_hmac_match_known_vectors_with_chunked_updates() {
     let out = run(r#"
-        import { createHash, createHmac } from 'node:crypto';
-        import { Buffer } from 'node:buffer';
+        import { createHash, createHmac } from 'crypto';
+        import { Buffer } from 'buffer';
         const hash = createHash('sha256').update('a').update(Buffer.from('bc')).digest('hex');
         const empty = createHash('sha256').digest('hex');
         const hmac = createHmac('sha256', 'key')
@@ -139,8 +91,8 @@ fn crypto_sha256_and_hmac_match_known_vectors_with_chunked_updates() {
 fn zlib_decodes_known_gzip_and_round_trips_cjk_and_binary() {
     let out = run(r#"
         import { gzipSync, gunzipSync, deflateSync, inflateSync,
-            deflateRawSync, inflateRawSync } from 'node:zlib';
-        import { Buffer } from 'node:buffer';
+            deflateRawSync, inflateRawSync } from 'zlib';
+        import { Buffer } from 'buffer';
         const source = Buffer.concat([Buffer.from('你好 🌍'), Buffer.from([0, 255, 128])]);
         const known = Buffer.from('1f8b08000000000002034b4c4a0600c241243503000000', 'hex');
         const compressed = gzipSync(source);
@@ -158,8 +110,8 @@ fn zlib_decodes_known_gzip_and_round_trips_cjk_and_binary() {
 #[test]
 fn webcrypto_digest_settles_in_the_same_vm_and_honors_view_bounds() {
     let out = run(r#"
-        import { webcrypto } from 'node:crypto';
-        import { Buffer } from 'node:buffer';
+        import { webcrypto } from 'crypto';
+        import { Buffer } from 'buffer';
         const backing = new Uint8Array([0xff, 97, 98, 99, 0xff]);
         const digest = await webcrypto.subtle.digest('SHA-256', backing.subarray(1, 4));
         globalThis.out = [digest.byteLength, Buffer.from(digest).toString('hex')];
@@ -173,8 +125,8 @@ fn webcrypto_digest_settles_in_the_same_vm_and_honors_view_bounds() {
 #[test]
 fn zlib_callback_settles_once_with_binary_result_in_the_same_vm() {
     let out = run(r#"
-        import { gzip, gunzipSync } from 'node:zlib';
-        import { Buffer } from 'node:buffer';
+        import { gzip, gunzipSync } from 'zlib';
+        import { Buffer } from 'buffer';
         let calls = 0;
         const result = await new Promise((resolve, reject) => {
             gzip(Buffer.from([0, 255, 128, 65]), (error, data) => {
@@ -185,24 +137,4 @@ fn zlib_callback_settles_once_with_binary_result_in_the_same_vm() {
         globalThis.out = [calls, Buffer.isBuffer(result), gunzipSync(result).toString('hex')];
     "#);
     assert_eq!(out, r#"[1,true,"00ff8041"]"#);
-}
-
-#[test]
-fn string_decoder_retains_multibyte_boundaries_and_flushes_incomplete_input() {
-    let out = run(r#"
-        import { StringDecoder } from 'node:string_decoder';
-        import { Buffer } from 'node:buffer';
-        const decoder = new StringDecoder('utf8');
-        const bytes = Buffer.from('你好 🌍');
-        let decoded = '';
-        for (let i = 0; i < bytes.length; i++) {
-            decoded += decoder.write(bytes.subarray(i, i + 1));
-        }
-        decoded += decoder.end();
-        const incomplete = new StringDecoder('utf8');
-        const prefix = incomplete.write(Buffer.from([0xe4, 0xbd]));
-        globalThis.out = [decoded, prefix, incomplete.end(),
-            incomplete.write(Buffer.from('ok')), incomplete.end()];
-    "#);
-    assert_eq!(out, r#"["你好 🌍","","�","ok",""]"#);
 }

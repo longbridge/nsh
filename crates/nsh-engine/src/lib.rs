@@ -94,6 +94,7 @@ impl From<Root> for App {
 
 /// An app bundle: its code plus, in development, a source map.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Bundle {
     /// The code.
     pub code: BundleCode,
@@ -116,6 +117,10 @@ pub struct Bundle {
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
+    /// Trusted filesystem anchors selected by the native host, never decoded
+    /// from application code, its manifest or a development server message.
+    /// Missing anchors deny relative and corresponding placeholder grants.
+    pub system_paths: nsh_core::access::TrustedPaths,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -214,6 +219,12 @@ pub enum BundleCode {
     Source(String),
 }
 
+impl Default for Bundle {
+    fn default() -> Self {
+        Self::source(String::new())
+    }
+}
+
 impl Bundle {
     /// A bytecode bundle.
     ///
@@ -233,6 +244,7 @@ impl Bundle {
             chunks: Arc::default(),
             harden_bytecode: None,
             app_id: None,
+            system_paths: nsh_core::access::TrustedPaths::default(),
         }
     }
 
@@ -246,7 +258,19 @@ impl Bundle {
             chunks: Arc::default(),
             harden_bytecode: None,
             app_id: None,
+            system_paths: nsh_core::access::TrustedPaths::default(),
         }
+    }
+
+    /// Selects trusted source/package and home directory anchors. Supplying a
+    /// path grants nothing by itself: the manifest and host grant must still
+    /// allow the filesystem operation. Only existing absolute directories
+    /// are accepted; unavailable anchors are left unset.
+    pub fn with_system_paths(mut self, mut paths: nsh_core::access::TrustedPaths) -> Self {
+        paths.plugin_dir = trusted_directory(paths.plugin_dir);
+        paths.home_dir = trusted_directory(paths.home_dir);
+        self.system_paths = paths;
+        self
     }
 
     /// The app's id ([`Bundle::app_id`]), as `nsh.json` or the dev server
@@ -328,6 +352,9 @@ impl Bundle {
             bundle.policy.declared = Some(parse_capabilities(&json).map_err(io::Error::other)?);
         }
         bundle.app_id = read_app_id(&path.with_file_name("app.json"));
+        bundle.system_paths.plugin_dir = std::fs::canonicalize(path)?
+            .parent()
+            .map(std::path::Path::to_path_buf);
         Ok(bundle)
     }
 }
@@ -538,6 +565,36 @@ pub struct EngineConfig {
     /// names (the browser's `localStorage`, an embedder's own); `None`
     /// with no data directory either: in memory, for the engine's life.
     pub storage: Option<Arc<dyn nsh_core::storage::StorageBackend>>,
+}
+
+fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let path = path.filter(|path| path.is_absolute())?;
+    std::fs::canonicalize(path)
+        .ok()
+        .filter(|path| path.is_dir())
+}
+
+/// Native hosts choose these anchors before any application JavaScript runs.
+fn bundle_system_paths(bundle: &Bundle) -> nsh_core::access::TrustedPaths {
+    let mut paths = bundle.system_paths.clone();
+    paths.plugin_dir = trusted_directory(paths.plugin_dir);
+    paths.home_dir = trusted_directory(paths.home_dir);
+    if paths.home_dir.is_none() {
+        paths.home_dir = ["HOME", "USERPROFILE"]
+            .into_iter()
+            .filter_map(std::env::var_os)
+            .map(std::path::PathBuf::from)
+            .find_map(|path| trusted_directory(Some(path)));
+    }
+    // Local `nsh run` passes its canonical entry directory directly to the
+    // native child process. Remote dev messages never contain this field.
+    // A packaged/hardened bundle cannot inherit a development source anchor.
+    if paths.plugin_dir.is_none() && !bundle.policy.harden {
+        paths.plugin_dir = std::env::var_os("NSH_DEV_APP_DIR")
+            .map(std::path::PathBuf::from)
+            .and_then(|path| trusted_directory(Some(path)));
+    }
+    paths
 }
 
 /// The storage of the app `config` runs: [`EngineConfig::storage`], or a
@@ -1083,6 +1140,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     script::SystemConfig {
                         access: (*access).clone(),
                         data_dir: system_data_dir,
+                        paths: bundle_system_paths(bundle),
                         wake: system_wake,
                     },
                 )?;
@@ -1859,6 +1917,49 @@ fn extend_frame(frame: &mut Vec<nsh_core::MountItem>, items: Vec<nsh_core::Mount
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bundle_default_has_no_application_selected_path_anchors() {
+        let bundle = super::Bundle::default();
+        assert!(bundle.system_paths.plugin_dir.is_none());
+        assert!(bundle.system_paths.home_dir.is_none());
+        assert!(matches!(bundle.code, super::BundleCode::Source(ref code) if code.is_empty()));
+    }
+
+    #[test]
+    fn bundle_trusted_paths_reject_relative_and_missing_directories() {
+        let mut paths = nsh_core::access::TrustedPaths::default();
+        paths.plugin_dir = Some(std::path::PathBuf::from("relative-app"));
+        paths.home_dir = Some(std::path::PathBuf::from("relative-home"));
+        let bundle = super::Bundle::default().with_system_paths(paths);
+        assert!(bundle.system_paths.plugin_dir.is_none());
+        assert!(bundle.system_paths.home_dir.is_none());
+        assert!(
+            super::trusted_directory(Some(std::path::PathBuf::from(
+                "/nsh-nonexistent-anchor-never-created"
+            )))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn local_bundle_anchors_its_canonical_parent_without_metadata_authority() {
+        let root = std::env::var_os("TMPDIR")
+            .map(std::path::PathBuf::from)
+            .expect("tests must provide TMPDIR outside /tmp");
+        assert!(root.is_absolute() && !root.starts_with("/tmp"));
+        let directory = root.join(format!("nsh-bundle-anchors-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("bundle.js");
+        std::fs::write(&path, "export default null;").unwrap();
+        let bundle = super::Bundle::read(&path).unwrap();
+        assert_eq!(
+            bundle.system_paths.plugin_dir,
+            Some(directory.canonicalize().unwrap())
+        );
+        assert!(bundle.system_paths.home_dir.is_none());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn rust_environment_preserves_native_title_bar_insets() {
         let title_bar = nsh_core::platform::Insets {

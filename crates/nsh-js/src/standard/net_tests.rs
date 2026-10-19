@@ -30,7 +30,7 @@ fn tcp_permissions_never_inherit_http_grants() {
     assert!(!a.allows_socket("127.0.0.1", 1234));
     let mut a = access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}}));
     assert!(a.allows_socket("127.0.0.1", 1234));
-    assert!(!a.allows_socket("127.0.0.1", 0));
+    assert!(a.allows_socket("127.0.0.1", 0));
     a.granted = Some(Capabilities::default());
     assert!(!a.allows_socket("127.0.0.1", 1234));
 }
@@ -54,9 +54,14 @@ fn socket_roundtrip_eof_and_limits() {
         None,
     );
     host.eval_source(&format!(
-        r#"import net from 'node:net';
+        r#"import net from 'net';
         globalThis.done = false; globalThis.failure = '';
         (async () => {{ const socket = await net.connect('127.0.0.1', {port});
+            if (await socket.read(0) !== null) throw Error('zero read must be null');
+            let range = false; try {{ socket.read(1048577); }} catch(e) {{ range = e instanceof RangeError && e.message === 'socket read exceeded the 1048576 byte limit'; }}
+            if (!range) throw Error('read limit must throw synchronously');
+            range = false; try {{ socket.write('x'.repeat(1048577)); }} catch(e) {{ range = e instanceof RangeError && e.message === 'socket write exceeded the 1048576 byte limit'; }}
+            if (!range) throw Error('write limit must throw synchronously');
             await socket.write('ping'); const data = await socket.read();
             if (String.fromCharCode(...data) !== 'pong') throw Error('bad reply');
             if (await socket.read() !== null) throw Error('expected eof');
@@ -101,7 +106,7 @@ fn socket_vm_drop_releases_peer() {
 fn denied_socket_rejects_before_connecting() {
     let host = Host::new().unwrap();
     host.set_system_access(access(serde_json::json!({})), None);
-    host.eval_source("import {connect} from 'net'; globalThis.denied = false; connect('127.0.0.1', 9).catch(e => globalThis.denied = String(e).includes('capabilities.network.hosts'));").unwrap();
+    host.eval_source("import {connect} from 'net'; globalThis.denied = false; try { connect('127.0.0.1', 9); } catch(e) { globalThis.denied = String(e).includes('capabilities.network.hosts'); }").unwrap();
     wait(&host, "globalThis.denied === true");
 }
 
@@ -122,10 +127,21 @@ fn closing_socket_cancels_pending_read() {
         access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}})),
         None,
     );
-    host.eval_source(&format!("import {{connect}} from 'net'; connect('127.0.0.1', {port}).then(s => {{ globalThis.socket = s; globalThis.connected = true; s.read().catch(e => globalThis.cancelled = true); }});")).unwrap();
+    host.eval_source(&format!("import {{connect}} from 'net'; connect('127.0.0.1', {port}).then(s => {{ globalThis.socket = s; globalThis.connected = true; s.read().then(v => globalThis.cancelled = v === null); }});")).unwrap();
     wait(&host, "globalThis.connected === true");
     host.eval_script("close", "globalThis.socket.close()")
         .unwrap();
     wait(&host, "globalThis.cancelled === true");
     peer.join().unwrap();
+}
+
+#[test]
+fn port_zero_is_an_io_failure_not_a_permission_error() {
+    let host = Host::new().unwrap();
+    host.set_system_access(
+        access(serde_json::json!({"network":{"hosts":["127.0.0.1"]}})),
+        None,
+    );
+    host.eval_source("import {connect} from 'net'; globalThis.zeroPort = false; connect('127.0.0.1', 0).catch(e => globalThis.zeroPort = String(e).includes('connecting to 127.0.0.1:0 failed:'));").unwrap();
+    wait(&host, "globalThis.zeroPort === true");
 }

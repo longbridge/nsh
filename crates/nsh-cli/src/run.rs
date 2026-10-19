@@ -133,6 +133,7 @@ pub(crate) fn run(
             let exe = app.join("Contents/MacOS/nsh-ios-host");
             // Its own output (AppKit's notes) is kept for when it fails.
             let mut command = Command::new(&exe);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 // A host that crashed must not ask to reopen its windows
@@ -144,6 +145,7 @@ pub(crate) fn run(
         // bundle around it.
         Target::Linux => {
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?]);
@@ -157,6 +159,7 @@ pub(crate) fn run(
             let config = crate::package::read_config(&entry).unwrap_or_default();
             let (name, id) = crate::package::name_and_id(&entry, &config);
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--name", &name, "--app-id", &id])
@@ -165,6 +168,7 @@ pub(crate) fn run(
         }
         Target::Windows => {
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?]);
@@ -174,6 +178,7 @@ pub(crate) fn run(
         // macOS too) without an app bundle around it.
         Target::Gpui => {
             let mut command = Command::new(&host);
+            command.env("NSH_DEV_APP_DIR", work.parent().expect("source directory"));
             command
                 .args(&args)
                 .args(["--app-id", &crate::package::app_id(entry)?]);

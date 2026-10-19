@@ -1,8 +1,8 @@
 //! Standard modules share NSH's VM, event loop and native permission boundary.
 use rquickjs::{Ctx, Error, Module, Result, Value};
 
-pub(crate) mod declarations;
 mod console;
+pub(crate) mod declarations;
 pub(crate) mod fs;
 pub(crate) mod net;
 mod os;
@@ -15,13 +15,9 @@ mod zlib;
 
 pub(crate) const NAMES: &[&str] = nsh_core::js::STANDARD_MODULES;
 
-/// Only one optional node: prefix is accepted. Private and unknown modules stay denied.
+/// Only canonical reference specifiers are accepted; aliases stay denied.
 pub(crate) fn normalize(name: &str) -> Option<&str> {
-    let canonical = name.strip_prefix("node:").unwrap_or(name);
-    NAMES
-        .iter()
-        .copied()
-        .find(|candidate| *candidate == canonical)
+    NAMES.iter().copied().find(|candidate| *candidate == name)
 }
 
 pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
@@ -36,14 +32,9 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
         "path" => declare!(llrt_path::PathModule),
         "url" => declare!(url::UrlModule),
         "zlib" => declare!(zlib::ZlibModule),
-        "events" => declare!(llrt_events::EventsModule),
-        "assert" => declare!(llrt_assert::AssertModule),
-        "util" => declare!(llrt_util::UtilModule),
-        "string_decoder" => declare!(llrt_string_decoder::StringDecoderModule),
         "process" => declare!(process::ProcessModule),
-        "fs" | "fs/promises" => declare!(fs::FsModule),
+        "fs/promises" => declare!(fs::FsModule),
         "net" => declare!(net::NetModule),
-        "os" => declare!(os::OsModule),
         "console" => declare!(console::ConsoleModule),
         #[cfg(not(target_arch = "wasm32"))]
         "websocket" => declare!(websocket::WebSocketModule),

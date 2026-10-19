@@ -109,7 +109,7 @@ mod tests {
     fn native_and_standard_imports_compile_together_without_host_initialization() {
         let bytes = compile_bytecode(
             r#"import { Text } from 'nsh';
-               import { Buffer } from 'node:buffer';
+               import { Buffer } from 'buffer';
                import path from 'path';
                globalThis.result = [Text, Buffer, path];"#,
             false,
@@ -119,17 +119,19 @@ mod tests {
     }
 
     #[test]
-    fn standard_aliases_and_native_modules_share_runtime_loader() {
+    fn standard_and_native_modules_share_runtime_loader() {
         let host = crate::Host::new().unwrap();
         host.eval_source(
             r#"
             import * as bare from 'buffer';
-            import * as alias from 'node:buffer';
+            import * as second from 'buffer';
             import { Text } from 'nsh';
-            if (bare !== alias || typeof Text !== 'function') throw Error('module identity');
+            if (bare !== second || typeof Text !== 'function') throw Error('module identity');
         "#,
         )
         .unwrap();
+        assert!(host.eval_source("import 'node:buffer';").is_err());
+        assert!(host.eval_source("import 'events';").is_err());
         assert!(host.eval_source("import 'node:vm';").is_err());
         assert!(host.eval_source("import 'node:node:buffer';").is_err());
     }

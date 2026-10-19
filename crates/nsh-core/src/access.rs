@@ -24,6 +24,13 @@
 //! app, its developer's own) retains unrestricted existing APIs. Process and
 //! filesystem access always require an explicit declaration.
 
+//! Scoped HTTP rules use `scheme`, `port`, `methods`, `paths` and
+//! `path_prefixes`. They default to HTTPS and require GET/POST methods and
+//! at least one matching exact path or slash-delimited prefix. Breaking change:
+//! `{host, methods}` now follows this scoped form and grants no paths. Legacy
+//! NSH rules remain explicit through `schemes` or `pathPrefix`; mixing the two
+//! forms is rejected. Serialization preserves the chosen rule form.
+
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Map, Value};
@@ -73,6 +80,7 @@ impl HostPattern {
 /// A finer HTTP grant: a host, optionally limited to methods, schemes and a
 /// path prefix.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HttpGrant {
     /// The host.
     pub host: HostPattern,
@@ -82,6 +90,34 @@ pub struct HttpGrant {
     pub schemes: Vec<String>,
     /// The path must start with it.
     pub path_prefix: Option<String>,
+    /// A reference-compatible scoped HTTP rule, when present.
+    pub scope: Option<HttpScope>,
+}
+
+impl Default for HttpGrant {
+    fn default() -> Self {
+        Self {
+            host: HostPattern(String::new()),
+            methods: Vec::new(),
+            schemes: Vec::new(),
+            path_prefix: None,
+            scope: None,
+        }
+    }
+}
+
+/// Strict HTTP request scope used by reference-compatible manifest rules.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct HttpScope {
+    /// HTTP or HTTPS.
+    pub scheme: String,
+    /// Explicit port; absent means the scheme's default.
+    pub port: Option<u16>,
+    /// Exact URL paths.
+    pub paths: Vec<String>,
+    /// Path prefixes matching a complete slash-delimited boundary.
+    pub path_prefixes: Vec<String>,
 }
 
 /// `capabilities.network`.
@@ -99,6 +135,10 @@ pub struct NetworkGrants {
 pub struct ProcessGrants {
     /// Exact executable names or absolute executable paths.
     pub execute: Vec<String>,
+    /// The app may ask its host to handle an exit request.
+    pub exit: bool,
+    /// Additional environment variable names visible to the app.
+    pub env: Vec<String>,
 }
 
 /// Filesystem roots an app may read or write. `${dataDir}` is resolved by
@@ -110,6 +150,47 @@ pub struct FileGrants {
     pub read: Vec<String>,
     /// Roots available for mutation operations.
     pub write: Vec<String>,
+}
+
+/// Host-selected anchors for manifest paths. Apps cannot supply these roots.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct TrustedPaths {
+    /// The application source/package directory.
+    pub plugin_dir: Option<PathBuf>,
+    /// The native user's home directory, when known.
+    pub home_dir: Option<PathBuf>,
+}
+impl TrustedPaths {
+    /// Expand one manifest root against host anchors. Relative roots are
+    /// anchored to the application directory. Unknown anchors never grant access.
+    pub fn resolve_root(&self, root: &str, data_dir: &Path) -> Result<PathBuf, String> {
+        validate_path_pattern(root)?;
+        for (placeholder, anchor) in [
+            ("${dataDir}", Some(data_dir)),
+            ("${pluginDir}", self.plugin_dir.as_deref()),
+            ("${homeDir}", self.home_dir.as_deref()),
+        ] {
+            if let Some(tail) = root.strip_prefix(placeholder) {
+                let anchor = anchor
+                    .filter(|p| p.is_absolute())
+                    .ok_or_else(|| format!("host anchor {placeholder} unavailable"))?;
+                return Ok(anchor.join(tail.trim_start_matches('/')));
+            }
+        }
+        let path = PathBuf::from(root);
+        if path.is_absolute() {
+            Ok(path)
+        } else {
+            self.plugin_dir
+                .as_ref()
+                .filter(|p| p.is_absolute())
+                .map(|root| root.join(path))
+                .ok_or_else(|| {
+                    "host application directory unavailable for relative filesystem root".into()
+                })
+        }
+    }
 }
 
 /// What an app may do (one declaration, or one grant).
@@ -141,6 +222,8 @@ pub struct UrlParts<'a> {
     pub host: String,
     /// The path (and query), `/` when empty.
     pub path: &'a str,
+    /// Explicit URL port.
+    pub port: Option<u16>,
 }
 
 /// Splits an absolute URL into scheme, host and path; `None` when it has no
@@ -166,10 +249,25 @@ pub fn parse_url(url: &str) -> Option<UrlParts<'_>> {
     if host.is_empty() {
         return None;
     }
+    let port = if host_port.starts_with('[') {
+        host_port
+            .split_once(']')
+            .and_then(|(_, rest)| rest.strip_prefix(':'))
+            .map(str::parse::<u16>)
+            .transpose()
+            .ok()?
+    } else {
+        host_port
+            .split_once(':')
+            .map(|(_, port)| port.parse::<u16>())
+            .transpose()
+            .ok()?
+    };
     Some(UrlParts {
         scheme: scheme.to_ascii_lowercase(),
         host: host.to_ascii_lowercase().trim_end_matches('.').to_owned(),
         path: if path.is_empty() { "/" } else { path },
+        port,
     })
 }
 
@@ -221,13 +319,24 @@ impl Capabilities {
                     known(
                         g,
                         "capabilities.network.http[]",
-                        &["host", "methods", "schemes", "pathPrefix"],
+                        &[
+                            "host",
+                            "methods",
+                            "schemes",
+                            "pathPrefix",
+                            "scheme",
+                            "port",
+                            "paths",
+                            "path_prefixes",
+                        ],
                     )?;
                     let host = g
                         .get("host")
                         .and_then(Value::as_str)
                         .ok_or("capabilities.network.http[] needs a `host`")?;
-                    let strings = |key: &str, upper: bool| -> Result<Vec<String>, String> {
+                    let normalized_strings = |key: &str,
+                                              upper: bool|
+                     -> Result<Vec<String>, String> {
                         match g.get(key) {
                             None => Ok(Vec::new()),
                             Some(v) => strings(v, &format!("capabilities.network.http[].{key}"))
@@ -244,10 +353,79 @@ impl Capabilities {
                                 }),
                         }
                     };
+                    let legacy = g.contains_key("schemes") || g.contains_key("pathPrefix");
+                    let scoped_keys = ["scheme", "port", "paths", "path_prefixes"]
+                        .iter()
+                        .any(|key| g.contains_key(*key));
+                    if legacy && scoped_keys {
+                        return Err(
+                            "network.http cannot mix scoped and legacy HTTP rule keys".into()
+                        );
+                    }
+                    let reference = !legacy;
+                    let scope = if reference {
+                        let scheme = g
+                            .get("scheme")
+                            .map(|v| v.as_str().ok_or("network.http.scheme must be a string"))
+                            .transpose()?
+                            .unwrap_or("https")
+                            .to_owned();
+                        if !matches!(scheme.as_str(), "http" | "https") {
+                            return Err("network.http.scheme must be http or https".into());
+                        }
+                        let methods = g
+                            .get("methods")
+                            .and_then(Value::as_array)
+                            .and_then(|values| {
+                                values.iter().map(Value::as_str).collect::<Option<Vec<_>>>()
+                            })
+                            .ok_or("scoped network.http.methods must be an array")?;
+                        if methods.is_empty()
+                            || methods
+                                .iter()
+                                .any(|method| !matches!(*method, "GET" | "POST"))
+                        {
+                            return Err("scoped network.http.methods needs GET or POST".into());
+                        }
+                        let paths = g
+                            .get("paths")
+                            .map(|value| strings(value, "network.http.paths"))
+                            .transpose()?
+                            .unwrap_or_default();
+                        let path_prefixes = g
+                            .get("path_prefixes")
+                            .map(|value| strings(value, "network.http.path_prefixes"))
+                            .transpose()?
+                            .unwrap_or_default();
+                        if paths
+                            .iter()
+                            .chain(&path_prefixes)
+                            .any(|path| !path.starts_with('/'))
+                        {
+                            return Err("network.http paths must start with /".into());
+                        }
+                        Some(HttpScope {
+                            scheme,
+                            port: g
+                                .get("port")
+                                .map(|value| {
+                                    value
+                                        .as_u64()
+                                        .and_then(|port| u16::try_from(port).ok())
+                                        .ok_or("network.http.port must be a u16")
+                                })
+                                .transpose()?,
+                            paths,
+                            path_prefixes,
+                        })
+                    } else {
+                        None
+                    };
                     caps.network.http.push(HttpGrant {
                         host: HostPattern::new(host)?,
-                        methods: strings("methods", true)?,
-                        schemes: strings("schemes", false)?,
+                        scope,
+                        methods: normalized_strings("methods", true)?,
+                        schemes: normalized_strings("schemes", false)?,
                         path_prefix: match g.get("pathPrefix") {
                             None => None,
                             Some(v) => Some(
@@ -282,11 +460,31 @@ impl Capabilities {
         }
         if let Some(process) = obj.get("process") {
             let process = object(process, "capabilities.process")?;
-            known(process, "capabilities.process", &["execute"])?;
+            known(process, "capabilities.process", &["execute", "exit", "env"])?;
             if let Some(execute) = process.get("execute") {
                 caps.process.execute = strings(execute, "capabilities.process.execute")?;
                 if caps.process.execute.iter().any(|s| !valid_command(s)) {
                     return Err("capabilities.process.execute needs exact executable names or absolute paths".into());
+                }
+            }
+        }
+        if let Some(process) = obj.get("process") {
+            if let Some(exit) = process.get("exit") {
+                caps.process.exit = exit
+                    .as_bool()
+                    .ok_or("capabilities.process.exit must be a boolean")?;
+            }
+            if let Some(env) = process.get("env") {
+                caps.process.env = strings(env, "capabilities.process.env")?;
+                if caps
+                    .process
+                    .env
+                    .iter()
+                    .any(|name| name.is_empty() || name.contains(['=', '\0']))
+                {
+                    return Err(
+                        "capabilities.process.env needs nonempty environment variable names".into(),
+                    );
                 }
             }
         }
@@ -321,7 +519,15 @@ impl Capabilities {
                 if !g.methods.is_empty() {
                     o.insert("methods".into(), g.methods.clone().into());
                 }
-                if !g.schemes.is_empty() {
+                if let Some(scope) = &g.scope {
+                    o.insert("scheme".into(), scope.scheme.clone().into());
+                    if let Some(port) = scope.port {
+                        o.insert("port".into(), port.into());
+                    }
+                    o.insert("paths".into(), scope.paths.clone().into());
+                    o.insert("path_prefixes".into(), scope.path_prefixes.clone().into());
+                }
+                if g.scope.is_none() || !g.schemes.is_empty() {
                     o.insert("schemes".into(), g.schemes.clone().into());
                 }
                 if let Some(p) = &g.path_prefix {
@@ -335,7 +541,7 @@ impl Capabilities {
         obj.insert("network".into(), Value::Object(network));
         obj.insert(
             "process".into(),
-            serde_json::json!({"execute": self.process.execute}),
+            serde_json::json!({"execute": self.process.execute, "exit": self.process.exit, "env": self.process.env}),
         );
         obj.insert(
             "fs".into(),
@@ -357,6 +563,29 @@ impl Capabilities {
         }
         self.network.hosts.iter().any(|h| h.matches(&url.host))
             || self.network.http.iter().any(|g| {
+                if let Some(scope) = &g.scope {
+                    let port = |scheme: &str, explicit: Option<u16>| {
+                        explicit.or(match scheme {
+                            "https" => Some(443),
+                            "http" => Some(80),
+                            _ => None,
+                        })
+                    };
+                    let path = url.path.split(['?', '#']).next().unwrap_or("/");
+                    return g.host.as_str().eq_ignore_ascii_case(&url.host)
+                        && scope.scheme.eq_ignore_ascii_case(&url.scheme)
+                        && port(&scope.scheme, scope.port) == port(&url.scheme, url.port)
+                        && g.methods
+                            .iter()
+                            .any(|allowed| allowed.eq_ignore_ascii_case(method))
+                        && (scope.paths.iter().any(|allowed| allowed == path)
+                            || scope.path_prefixes.iter().any(|allowed| {
+                                path == allowed
+                                    || path.strip_prefix(allowed).is_some_and(|tail| {
+                                        allowed.ends_with('/') || tail.starts_with('/')
+                                    })
+                            }));
+                }
                 g.host.matches(&url.host)
                     && (g.methods.is_empty()
                         || g.methods.iter().any(|m| m.eq_ignore_ascii_case(method)))
@@ -384,17 +613,36 @@ fn valid_command(command: &str) -> bool {
 }
 
 fn validate_path_pattern(path: &str) -> Result<(), String> {
-    let suffix = path.strip_prefix("${dataDir}");
-    if suffix.is_some_and(|s| !s.is_empty() && !s.starts_with('/'))
-        || path.contains('\0')
-        || path.contains('*')
-        || (suffix.is_none() && (!Path::new(path).is_absolute() || path.contains("${")))
+    if [
+        "$HOME",
+        "${HOME}",
+        "$USERPROFILE",
+        "${USERPROFILE}",
+        "%USERPROFILE%",
+        "~",
+    ]
+    .into_iter()
+    .any(|prefix| {
+        path.strip_prefix(prefix)
+            .is_some_and(|tail| tail.is_empty() || tail.starts_with(['/', '\\']))
+    }) {
+        return Err("use ${homeDir} for the native home directory".into());
+    }
+    let placeholder = ["${dataDir}", "${pluginDir}", "${homeDir}"]
+        .into_iter()
+        .find(|prefix| path.starts_with(prefix));
+    let tail = placeholder.and_then(|prefix| path.strip_prefix(prefix));
+    if path.is_empty()
+        || path.contains(['\0', '*'])
+        || tail.is_some_and(|s| !s.is_empty() && !s.starts_with('/'))
+        || (placeholder.is_none() && path.contains("${"))
+        || tail.is_some_and(|s| s.contains("${"))
         || Path::new(path)
             .components()
             .any(|p| matches!(p, Component::ParentDir))
     {
         return Err(
-            "filesystem roots must be absolute paths or ${dataDir} paths without traversal".into(),
+            "filesystem roots must use valid host placeholders and contain no traversal".into(),
         );
     }
     Ok(())
@@ -429,14 +677,6 @@ fn resolved_path(path: &Path) -> Result<PathBuf, String> {
             Err(e) => return Err(e.to_string()),
         }
     }
-}
-
-fn expand_data_dir(path: &str, data_dir: &Path) -> Result<PathBuf, String> {
-    validate_path_pattern(path)?;
-    Ok(match path.strip_prefix("${dataDir}") {
-        Some(tail) => data_dir.join(tail.trim_start_matches('/')),
-        None => PathBuf::from(path),
-    })
 }
 
 fn object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>, String> {
@@ -511,6 +751,30 @@ impl Access {
         valid_command(command) && self.each(|c| c.process.execute.iter().any(|p| p == command))
     }
 
+    /// Whether the app may request an exit from its host. This never exits the
+    /// embedding process by itself; the host supplies the meaning of the request.
+    pub fn allows_exit(&self) -> bool {
+        self.each(|caps| caps.process.exit)
+    }
+
+    /// Whether an environment variable is visible. The built-in metadata names
+    /// are always visible; other names require both app and host permission.
+    pub fn allows_env(&self, name: &str) -> bool {
+        let defaults = include_str!("default-env").lines().filter_map(|line| {
+            let name = line.split('#').next().unwrap_or_default().trim();
+            (!name.is_empty()).then_some(name)
+        });
+        defaults
+            .into_iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(name))
+            || self.each(|caps| {
+                caps.process
+                    .env
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(name))
+            })
+    }
+
     /// Resolve a filesystem path within both the declaration and host grant.
     /// `data_dir` is an app-specific directory supplied only by the host.
     pub fn authorize_file(
@@ -519,8 +783,19 @@ impl Access {
         data_dir: &Path,
         write: bool,
     ) -> Result<PathBuf, String> {
-        let requested = if let Some(text) = path.to_str().filter(|s| s.starts_with("${dataDir}")) {
-            expand_data_dir(text, data_dir)?
+        self.authorize_file_with_paths(path, data_dir, &TrustedPaths::default(), write)
+    }
+
+    /// Authorize a file with trusted host source and home directory anchors.
+    pub fn authorize_file_with_paths(
+        &self,
+        path: &Path,
+        data_dir: &Path,
+        paths: &TrustedPaths,
+        write: bool,
+    ) -> Result<PathBuf, String> {
+        let requested = if let Some(text) = path.to_str().filter(|s| s.starts_with("${")) {
+            paths.resolve_root(text, data_dir)?
         } else {
             path.to_owned()
         };
@@ -528,7 +803,8 @@ impl Access {
         let allowed = self.each(|c| {
             let roots = if write { &c.fs.write } else { &c.fs.read };
             roots.iter().any(|root| {
-                expand_data_dir(root, data_dir)
+                paths
+                    .resolve_root(root, data_dir)
                     .and_then(|r| resolved_path(&r))
                     .is_ok_and(|root| resolved.starts_with(root))
             })
@@ -544,9 +820,9 @@ impl Access {
     }
 
     /// Raw TCP authority comes only from host grants, never HTTP path or method
-    /// grants. The port is checked for validity; host grants cover every port.
-    pub fn allows_socket(&self, host: &str, port: u16) -> bool {
-        if port == 0 || host.is_empty() || host.contains(['/', '@', '?', '#', '\0']) {
+    /// grants. Host grants cover every port accepted by the socket API.
+    pub fn allows_socket(&self, host: &str, _port: u16) -> bool {
+        if host.is_empty() || host.contains(['/', '@', '?', '#', '\0']) {
             return false;
         }
         let host = host.to_ascii_lowercase();
@@ -696,11 +972,128 @@ mod tests {
             r#"{"process":{"execut":[]}}"#,
             r#"{"fs":{"reads":[]}}"#,
             r#"{"fs":{"read":["${dataDir}/../outside"]}}"#,
-            r#"{"fs":{"read":["relative"]}}"#,
             r#"{"process":{"execute":["*"]}}"#,
         ] {
             assert!(Capabilities::from_json(&serde_json::from_str(bad).unwrap()).is_err());
         }
+    }
+
+    #[test]
+    fn trusted_host_anchors_expand_without_implicit_grants() {
+        let root = std::env::current_dir().unwrap();
+        let anchors = TrustedPaths {
+            plugin_dir: Some(root.clone()),
+            home_dir: Some(root.join("native-home")),
+        };
+        let access = Access {
+            declared: caps(
+                r#"{"fs":{"read":["assets","${homeDir}/settings","${pluginDir}/content"]}}"#,
+            ),
+            granted: None,
+        };
+        for path in ["assets/file", "native-home/settings/file", "content/file"] {
+            assert!(
+                access
+                    .authorize_file_with_paths(&root.join(path), &root, &anchors, false)
+                    .is_ok()
+            );
+        }
+        assert!(
+            access
+                .authorize_file(&root.join("content/file"), &root, false)
+                .is_err()
+        );
+        assert!(
+            access
+                .authorize_file_with_paths(&root.join("other/file"), &root, &anchors, false)
+                .is_err()
+        );
+        assert!(
+            TrustedPaths::default()
+                .resolve_root("${homeDir}/settings", &root)
+                .is_err()
+        );
+        assert!(
+            TrustedPaths::default()
+                .resolve_root("assets", &root)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn reference_scoped_http_rules_keep_ports_and_path_boundaries() {
+        let legacy = caps(r#"{"network":{"http":[{"host":"api.example.com","schemes":[]}]}}"#);
+        assert_eq!(Capabilities::from_json(&legacy.to_json()).unwrap(), legacy);
+        let c = caps(
+            r#"{"network":{"http":[{"host":"api.example.com","methods":["GET"],"paths":["/exact"],"path_prefixes":["/v1"]}]}}"#,
+        );
+        assert_eq!(Capabilities::from_json(&c.to_json()).unwrap(), c);
+        let access = Access {
+            declared: c,
+            granted: None,
+        };
+        assert!(access.allows_http("GET", "https://api.example.com/exact?q=1"));
+        assert!(access.allows_http("GET", "https://api.example.com/v1/child"));
+        assert!(!access.allows_http("GET", "https://api.example.com/v10"));
+        assert!(!access.allows_http("GET", "http://api.example.com/exact"));
+        assert!(!access.allows_http("GET", "https://api.example.com:444/exact"));
+        assert!(!access.allows_http("POST", "https://api.example.com/exact"));
+        let ambiguous = Access {
+            declared: caps(
+                r#"{"network":{"http":[{"host":"api.example.com","methods":["GET"]}]}}"#,
+            ),
+            granted: None,
+        };
+        assert!(!ambiguous.allows_http("GET", "https://api.example.com/"));
+        assert!(
+            Capabilities::from_json(
+                &serde_json::json!({"network":{"http":[{"host":"api.example.com"}]}})
+            )
+            .is_err()
+        );
+        let no_paths = Access {
+            declared: caps(
+                r#"{"network":{"http":[{"host":"api.example.com","scheme":"https","methods":["GET"]}]}}"#,
+            ),
+            granted: None,
+        };
+        assert!(!no_paths.allows_http("GET", "https://api.example.com/"));
+        for bad in [
+            r#"{"scheme":"https","schemes":[],"host":"api.example.com","methods":["GET"]}"#,
+            r#"{"scheme":"https","host":"api.example.com","methods":["PUT"]}"#,
+            r#"{"scheme":"https","host":"api.example.com","methods":[]}"#,
+        ] {
+            let grant: serde_json::Value = serde_json::from_str(bad).unwrap();
+            assert!(
+                Capabilities::from_json(&serde_json::json!({"network":{"http":[grant]}})).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn exit_and_environment_permissions_intersect() {
+        let declared = caps(r#"{"process":{"env":["NSH_SECRET","OTHER"],"exit":true}}"#);
+        assert_eq!(
+            Capabilities::from_json(&declared.to_json()).unwrap(),
+            declared
+        );
+        let access = Access {
+            declared,
+            granted: Some(caps(r#"{"process":{"env":["nsh_secret"]}}"#)),
+        };
+        assert!(access.allows_env("NSH_SECRET"));
+        assert!(!access.allows_env("OTHER"));
+        assert!(access.allows_env("http_proxy"));
+        assert!(!access.allows_exit());
+        assert!(!Access::all().allows_exit());
+        assert!(!Access::all().allows_env("NSH_SECRET"));
+        assert!(Access::all().allows_env("PATH"));
+        assert!(!Access::all().allows_env("SSH_AUTH_SOCK"));
+        assert!(!Access::all().allows_env("DBUS_SESSION_BUS_ADDRESS"));
+        assert!(Capabilities::from_json(&serde_json::json!({"process":{"exit":"true"}})).is_err());
+        assert!(
+            Capabilities::from_json(&serde_json::json!({"process":{"env":["BAD=NAME"]}})).is_err()
+        );
     }
 
     #[cfg(unix)]

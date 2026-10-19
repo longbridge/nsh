@@ -13,17 +13,16 @@ use tokio_tungstenite::tungstenite::{
     protocol::{CloseFrame, WebSocketConfig, frame::coding::CloseCode},
 };
 
+#[path = "websocket_client.rs"]
+mod client;
 pub(crate) struct WebSocketModule;
 impl rquickjs::module::ModuleDef for WebSocketModule {
     fn declare(exports: &rquickjs::module::Declarations) -> Result<()> {
         exports.declare("WebSocket")?;
-        exports.declare("default")?;
         Ok(())
     }
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &rquickjs::module::Exports<'js>) -> Result<()> {
-        let constructor: Value<'js> = ctx.globals().get("WebSocket")?;
-        exports.export("WebSocket", constructor.clone())?;
-        exports.export("default", constructor)?;
+        exports.export("WebSocket", client::export(ctx)?)?;
         Ok(())
     }
 }
@@ -386,9 +385,14 @@ mod tests;
 
 /// Module declarations, kept beside the native export definition.
 pub(crate) const TYPES: &str = r#"
-const WebSocket: NSHWebSocketConstructor;
-export { WebSocket };
-export default WebSocket;
+export interface WebSocketConnection {
+  write(data: string | Uint8Array): Promise<void>;
+  read(): Promise<string | Uint8Array>;
+  close(): Promise<void>;
+}
+export const WebSocket: {
+  connect(url: string, options?: { headers?: Record<string, string> }): Promise<WebSocketConnection>;
+};
 "#;
 
 /// Global facade declarations. Message and close payloads are native Event objects.

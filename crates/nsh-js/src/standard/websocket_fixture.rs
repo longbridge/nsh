@@ -193,20 +193,123 @@ fn websocket_handshake_redirect_fails_without_contacting_target() {
         write!(stream, "HTTP/1.1 302 Found\r\nLocation: ws://{target}/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
     });
     let host = host(true);
-    host.eval_source(&format!(r#"
+    host.eval_source(&format!(
+        r#"
+        import {{ WebSocket as ShellWebSocket }} from 'websocket';
         globalThis.wsOpened = false;
         globalThis.wsErrored = false;
-        globalThis.redirectSocket = new WebSocket('ws://{address}/redirect');
-        redirectSocket.onopen = () => {{ globalThis.wsOpened = true; }};
-        redirectSocket.onerror = () => {{ globalThis.wsErrored = true; }};
-        redirectSocket.onclose = event => {{ globalThis.wsClosed = event; globalThis.wsDone = true; }};
-    "#)).unwrap();
+        ShellWebSocket.connect('ws://{address}/redirect')
+          .then(() => {{ globalThis.wsOpened = true; }}, () => {{ globalThis.wsErrored = true; }})
+          .finally(() => {{ globalThis.wsDone = true; }});
+    "#
+    ))
+    .unwrap();
     finish(&host);
-    host.eval_source("if (wsOpened || !wsErrored || wsClosed.code !== 1006 || wsClosed.wasClean) throw Error('redirect accepted');").unwrap();
+    host.eval_source("if (wsOpened || !wsErrored) throw Error('redirect accepted');")
+        .unwrap();
     server.join().unwrap();
     assert_eq!(
         forbidden_target.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock,
         "redirect target must never be contacted"
     );
+}
+
+#[test]
+fn websocket_module_matches_shell_connect_socket_contract() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (tcp, _) = listener.accept().unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut socket = tokio_tungstenite::tungstenite::accept_hdr(
+            tcp,
+            |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+             response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                assert_eq!(request.headers().get("x-shell-test").unwrap(), "yes");
+                Ok(response)
+            },
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let message = socket.read().unwrap();
+            socket.send(message).unwrap();
+        }
+        assert!(socket.read().unwrap().is_close());
+        let _ = socket.flush();
+    });
+    let host = host(true);
+    host.eval_source(&format!(r#"
+        import * as module from 'websocket';
+        if (Object.keys(module).join(',') !== 'WebSocket' || typeof module.WebSocket.connect !== 'function') throw Error('module exports');
+        globalThis.moduleFailure = null;
+        (async () => {{
+            const socket = await module.WebSocket.connect('ws://{address}/', {{headers: {{'X-Shell-Test': 'yes'}}}});
+            if (Object.keys(socket).sort().join(',') !== 'close,read,write') throw Error('socket shape');
+            const pending = socket.read();
+            let duplicate = false;
+            try {{ socket.read(); }} catch (error) {{ duplicate = error instanceof TypeError && error.message === 'WebSocket.read() already has an outstanding read'; }}
+            if (!duplicate) throw Error('concurrent read did not synchronously throw');
+            await socket.write('shell');
+            if (await pending !== 'shell') throw Error('text roundtrip');
+            await socket.write(new Uint8Array([3,7]));
+            const bytes = await socket.read();
+            if (!(bytes instanceof Uint8Array) || bytes.join(',') !== '3,7') throw Error('binary roundtrip');
+            let invalid = false;
+            try {{ socket.write(new ArrayBuffer(1)); }} catch (error) {{ invalid = error instanceof TypeError; }}
+            if (!invalid) throw Error('ArrayBuffer should be rejected synchronously');
+            await socket.close();
+            globalThis.wsDone = true;
+        }})().catch(error => {{ moduleFailure = String(error); globalThis.wsDone = true; }});
+    "#)).unwrap();
+    finish(&host);
+    host.eval_source("if (moduleFailure) throw Error(moduleFailure);")
+        .unwrap();
+    server.join().unwrap();
+}
+
+#[test]
+fn websocket_module_options_fail_synchronously_like_shell() {
+    let host = host(true);
+    host.eval_source(r#"
+        import {WebSocket as ShellWebSocket} from 'websocket';
+        for (const options of [42, {protocols: ['chat']}, {headers: 42}, {headers: {Authorization: 'secret'}}, {headers: {Cookie: 'secret'}}, {headers: {'Sec-WebSocket-Key': 'evil'}}, {headers: {'x-test': 1}}]) {
+            let threw = false;
+            try { ShellWebSocket.connect('ws://127.0.0.1:9/', options); } catch (error) { threw = error instanceof TypeError; }
+            if (!threw) throw Error('invalid options did not synchronously throw: ' + JSON.stringify(options));
+        }
+        let invalidScheme = false;
+        try { ShellWebSocket.connect('https://127.0.0.1/'); } catch (error) { invalidScheme = error instanceof TypeError; }
+        if (!invalidScheme) throw Error('invalid scheme did not synchronously throw');
+    "#).unwrap();
+}
+
+#[test]
+fn websocket_module_pending_read_is_released_with_vm() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (ended_tx, ended_rx) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (tcp, _) = listener.accept().unwrap();
+        tcp.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut socket = tokio_tungstenite::tungstenite::accept(tcp).unwrap();
+        let _ = socket.read();
+        ended_tx.send(()).unwrap();
+    });
+    let host = host(true);
+    host.eval_source(&format!(
+        r#"
+        import {{ WebSocket as ShellWebSocket }} from 'websocket';
+        ShellWebSocket.connect('ws://{address}/').then(socket => {{
+            globalThis.liveShellSocket = socket;
+            globalThis.pendingShellRead = socket.read();
+            globalThis.wsDone = true;
+        }});
+    "#
+    ))
+    .unwrap();
+    finish(&host);
+    drop(host);
+    ended_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    server.join().unwrap();
 }

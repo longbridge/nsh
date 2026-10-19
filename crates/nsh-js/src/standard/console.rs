@@ -9,7 +9,7 @@ use rquickjs::{
     module::{Declarations, Exports, ModuleDef},
 };
 
-/// The shared implementation of `console` and `node:console`.
+/// The standard `console` module implementation.
 pub(crate) struct ConsoleModule;
 
 impl ModuleDef for ConsoleModule {
@@ -59,13 +59,13 @@ mod tests {
     }
 
     #[test]
-    fn aliases_export_the_existing_logger_object_and_only_the_supported_surface() {
+    fn module_exports_the_existing_logger_object_and_only_the_supported_surface() {
         let host = Host::new().unwrap();
         let out = run(
             &host,
             r#"
             import bare from 'console';
-            import node, * as namespace from 'node:console';
+            import node, * as namespace from 'console';
             import {text} from 'nsh:rt';
             for (const name of ['log','info','debug','warn','error']) {
                 bare[name]('console module fixture', {ok:true});
@@ -93,7 +93,7 @@ mod tests {
         let out = run(
             &second,
             r#"
-            import console from 'node:console'; import {text} from 'nsh:rt';
+            import console from 'console'; import {text} from 'nsh:rt';
             text(JSON.stringify([typeof console.localMarker, console === globalThis.console]));
         "#,
         );

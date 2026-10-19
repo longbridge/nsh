@@ -150,6 +150,9 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
     bytecode.policy = nsh_engine::Policy::development();
     bytecode.policy.declared = bundle.capabilities.clone();
     bytecode.app_id = crate::package::app_id(entry).ok();
+    let mut paths = nsh_core::access::TrustedPaths::default();
+    paths.plugin_dir = dunce::canonicalize(entry)?.parent().map(Path::to_path_buf);
+    bytecode = bytecode.with_system_paths(paths);
     let data_dir = options
         .data_dir
         .as_ref()

@@ -32,6 +32,55 @@ pub trait Module {
     /// Its functions are exported one by one (`setStatusBarBackgroundColor`)
     /// rather than as an object (`#[module(flat)]`).
     const FLAT: bool = false;
+    /// Export the same flat module object as `default`.
+    const DEFAULT: bool = false;
+    /// Associated primitive constants exported with the functions.
+    const CONSTANTS: &'static [Constant] = &[];
+}
+
+/// An owned primitive constant, shared by native exports and declarations.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum ConstantValue {
+    /// No value; the default descriptor's value.
+    #[default]
+    Undefined,
+    /// A static UTF-8 string.
+    String(&'static str),
+    /// A JavaScript number.
+    Number(f64),
+    /// A JavaScript boolean.
+    Bool(bool),
+}
+
+impl ConstantValue {
+    /// The TypeScript primitive corresponding to this value.
+    pub const fn ts_type(self) -> &'static str {
+        match self {
+            Self::Undefined => "undefined",
+            Self::String(_) => "string",
+            Self::Number(_) => "number",
+            Self::Bool(_) => "boolean",
+        }
+    }
+}
+
+/// One typed associated constant exported by a module.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct Constant {
+    /// Its JS name (preserved, including uppercase names).
+    pub name: &'static str,
+    /// Documentation.
+    pub doc: &'static str,
+    /// Its primitive value and declaration type.
+    pub value: ConstantValue,
+}
+
+impl Constant {
+    /// Builds a constant descriptor, including from generated downstream code.
+    pub const fn new(name: &'static str, doc: &'static str, value: ConstantValue) -> Self {
+        Self { name, doc, value }
+    }
 }
 
 /// A module function's parameter: its JS name, TypeScript type, and
@@ -125,7 +174,8 @@ pub struct FunctionSpec {
 }
 
 /// What a module is to JS.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct ModuleSpec {
     /// Its JS name.
     pub name: &'static str,
@@ -135,6 +185,10 @@ pub struct ModuleSpec {
     pub functions: Vec<FunctionSpec>,
     /// Exported one by one ([`Module::FLAT`]).
     pub flat: bool,
+    /// A default export of the same flat module object.
+    pub default: bool,
+    /// Primitive constants, including their declaration types.
+    pub constants: Vec<Constant>,
     /// The named TypeScript types they use.
     pub types: TsTypes,
 }
@@ -162,6 +216,8 @@ impl ModuleSpec {
             doc: M::DOC,
             functions,
             flat: M::FLAT,
+            default: M::DEFAULT,
+            constants: M::CONSTANTS.to_vec(),
             types,
         }
     }
@@ -267,5 +323,56 @@ impl ModuleCx {
     /// Asks the platform for `action` (the runtime's own modules).
     pub(crate) fn act(&mut self, action: Action) {
         self.actions.push(action);
+    }
+}
+
+#[cfg(test)]
+mod descriptor_tests {
+    use super::*;
+
+    struct Metadata;
+
+    #[nsh_macros::module(flat, default)]
+    impl Metadata {
+        /// An arbitrary string constant; no name-specific inference.
+        pub(crate) const LABEL: &'static str = "native";
+        pub(crate) const COUNT: i32 = -7;
+        pub(crate) const ENABLED: bool = true;
+        #[cfg(any())]
+        pub(crate) const OMITTED: bool = false;
+
+        pub(crate) fn version() -> u32 {
+            1
+        }
+    }
+
+    #[test]
+    fn descriptors_preserve_constants_default_and_value_derived_types() {
+        let module = ModuleSpec::of::<Metadata>();
+        assert!(module.flat && module.default);
+        assert_eq!(module.functions[0].name, "version");
+        assert_eq!(module.constants.len(), 3);
+        assert_eq!(module.constants[0].name, "LABEL");
+        assert_eq!(module.constants[0].value, ConstantValue::String("native"));
+        assert_eq!(module.constants[1].value, ConstantValue::Number(-7.0));
+        assert_eq!(module.constants[2].value, ConstantValue::Bool(true));
+        assert_eq!(
+            module
+                .constants
+                .iter()
+                .map(|c| c.value.ts_type())
+                .collect::<Vec<_>>(),
+            ["string", "number", "boolean"]
+        );
+    }
+
+    #[test]
+    fn descriptors_have_forward_compatible_defaults() {
+        let constant = Constant::default();
+        assert_eq!(constant.value, ConstantValue::Undefined);
+        assert_eq!(constant.value.ts_type(), "undefined");
+        let module = ModuleSpec::default();
+        assert!(!module.flat && !module.default);
+        assert!(module.functions.is_empty() && module.constants.is_empty());
     }
 }

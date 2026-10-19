@@ -222,7 +222,7 @@ fn internal(source: &str) -> String {
     out
 }
 
-/// Project only actual runtime value exports into bare and `node:` modules.
+/// Project only reference-catalog value exports into canonical bare modules.
 /// The caller supplies the standard registry's native declaration names.
 pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, String)> {
     let mut source_text = String::from(BANNER);
@@ -260,6 +260,9 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
     let mut public = String::from(BANNER);
     public.push_str("/// <reference path=\"./llrt-sources.d.ts\" />\n");
     for (name, values) in exports {
+        if !super::NAMES.contains(name) {
+            continue;
+        }
         let Some((_, source)) = SOURCES.iter().find(|(module, _)| module == name) else {
             continue;
         };
@@ -314,21 +317,11 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
             }
         }
         public.push_str("}\n");
-        let _ = writeln!(
-            public,
-            "declare module \"node:{name}\" {{\n  export * from \"{name}\";"
-        );
-        if values.contains(&"default") {
-            let _ = writeln!(public, "  export {{ default }} from \"{name}\";");
-        }
-        public.push_str("}\n");
     }
     for (name, body) in [
-        ("fs", super::fs::TYPES),
         ("fs/promises", super::fs::TYPES),
         ("process", super::process::TYPES),
         ("net", super::net::TYPES),
-        ("os", super::os::TYPES),
         ("console", super::console::TYPES),
     ] {
         adapter(&mut public, name, body);
@@ -350,10 +343,6 @@ fn adapter(out: &mut String, name: &str, body: &str) {
         .collect::<Vec<_>>()
         .join("\n");
     let _ = writeln!(out, "declare module \"{name}\" {{\n{body}\n}}");
-    let _ = writeln!(
-        out,
-        "declare module \"node:{name}\" {{\n  export * from \"{name}\";\n  export {{ default }} from \"{name}\";\n}}"
-    );
 }
 
 /// New standard globals derive their types from the same projected signatures
@@ -403,7 +392,7 @@ mod tests {
         let public = &files[1].1;
         assert!(public.contains("export { URL }"));
         assert!(!public.contains("export { parse }"));
-        assert!(public.contains("declare module \"node:url\""));
+        assert!(!public.contains("declare module \"node:"));
     }
 
     #[test]

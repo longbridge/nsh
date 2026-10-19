@@ -130,7 +130,7 @@ pub use self::{
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
     module::{
-        Function, FunctionCall, FunctionKind, FunctionSpec, Module, ModuleCx, ModuleFuture,
+        Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module, ModuleCx, ModuleFuture,
         ModuleParam, ModuleSpec, SyncCall,
     },
     once::Scope,

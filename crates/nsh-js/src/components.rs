@@ -359,6 +359,7 @@ pub(crate) fn module(ctx: *mut JsContext, module: &ModuleSpec) -> JsValue {
     // SAFETY: a new object taking the functions.
     let obj = unsafe { qjs::JS_NewObject(ctx) };
     add_functions(ctx, obj, module);
+
     obj
 }
 
@@ -368,6 +369,27 @@ fn add_functions(ctx: *mut JsContext, obj: JsValue, module: &ModuleSpec) {
         let name = CString::new(f.name).unwrap_or_default();
         // SAFETY: the object takes the function.
         unsafe { qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), func) };
+    }
+    for constant in &module.constants {
+        use nsh_core::ui::ConstantValue;
+        let value = match constant.value {
+            ConstantValue::Undefined => UNDEFINED,
+            ConstantValue::String(value) => new_string(ctx, value),
+            ConstantValue::Number(value) => qjs::JS_NewFloat64(value),
+            ConstantValue::Bool(value) => {
+                if value {
+                    qjs::JS_TRUE
+                } else {
+                    qjs::JS_FALSE
+                }
+            }
+        };
+        let name = CString::new(constant.name).unwrap_or_default();
+        // SAFETY: this live module object takes ownership of the newly
+        // created primitive; its constant name is NUL-terminated.
+        unsafe {
+            qjs::JS_SetPropertyStr(ctx, obj, name.as_ptr(), value);
+        }
     }
 }
 

@@ -55,7 +55,7 @@ fn npm_package_esm_imports_native_standard_modules_without_polyfill_bundles() {
         "node_modules/standard-consumer/package.json",
         r#"{"name":"standard-consumer","type":"module","exports":"./index.js"}"#,
     );
-    fixture.write("node_modules/standard-consumer/index.js", "import {Buffer} from 'node:buffer'; import path from 'path'; export const sample = value => path.join('native-standard-marker',Buffer.from(value).toString('hex'));\n");
+    fixture.write("node_modules/standard-consumer/index.js", "import {Buffer} from 'buffer'; import path from 'path'; export const sample = value => path.join('native-standard-marker',Buffer.from(value).toString('hex'));\n");
     let bundled = fixture
         .build()
         .expect("bundle npm dependency importing native standards");
@@ -65,7 +65,7 @@ fn npm_package_esm_imports_native_standard_modules_without_polyfill_bundles() {
         bundled.code
     );
     assert!(
-        bundled.code.contains("from \"buffer\"") || bundled.code.contains("from \"node:buffer\""),
+        bundled.code.contains("from \"buffer\""),
         "Buffer must remain a native import: {}",
         bundled.code
     );
@@ -82,7 +82,18 @@ fn npm_package_esm_imports_native_standard_modules_without_polyfill_bundles() {
 
 #[test]
 fn unsupported_node_and_private_type_modules_do_not_silently_bundle() {
-    for name in ["node:vm", "@nsh/llrt-types/buffer", "node:crypto/private"] {
+    for name in [
+        "node:vm",
+        "node:buffer",
+        "node:fs/promises",
+        "events",
+        "assert",
+        "util",
+        "string_decoder",
+        "fs",
+        "@nsh/llrt-types/buffer",
+        "node:crypto/private",
+    ] {
         let fixture = Fixture::new();
         fixture.write(
             "App.ts",

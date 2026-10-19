@@ -981,6 +981,15 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             let (params, returns) = signature(f);
             let _ = writeln!(out, "  {}({params}): {returns};", f.name);
         }
+        for constant in &m.constants {
+            doc(out, "  ", constant.doc);
+            let _ = writeln!(
+                out,
+                "  readonly {}: {};",
+                constant.name,
+                constant.value.ts_type()
+            );
+        }
         out.push('}');
     };
     for spec in &specs {
@@ -1073,6 +1082,22 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
                     f.name
                 );
             }
+            for constant in &m.constants {
+                if !omit.contains(&constant.name) {
+                    doc(&mut out, "", constant.doc);
+                    let _ = writeln!(
+                        out,
+                        "export declare const {}: {};\n",
+                        constant.name,
+                        constant.value.ts_type()
+                    );
+                }
+            }
+            if m.default && !omit.contains(&"default") {
+                let _ = write!(out, "declare const defaultExport: ");
+                module_object(&mut out, m);
+                out.push_str(";\nexport default defaultExport;\n\n");
+            }
             continue;
         }
         doc(&mut out, "", m.doc);
@@ -1082,6 +1107,13 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         if !omit.contains(&m.name) {
             doc(&mut out, "", m.doc);
             let _ = write!(out, "export declare const {0}: {0}Module;\n\n", m.name);
+        }
+        if m.default && !omit.contains(&"default") {
+            let _ = write!(
+                out,
+                "declare const defaultExport: {}Module;\nexport default defaultExport;\n\n",
+                m.name
+            );
         }
     }
     for c in classes.iter().filter(|c| !omit.contains(&c.name)) {

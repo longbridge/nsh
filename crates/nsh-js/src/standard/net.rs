@@ -2,8 +2,8 @@
 use std::{rc::Rc, time::Duration};
 
 use rquickjs::{
-    Ctx, Exception, Object, Result, TypedArray, Value,
-    function::{Async, Func, Opt},
+    Ctx, Exception, Object, Promise, Result, TypedArray, Value,
+    function::{Func, Opt},
     module::{Declarations, Exports, ModuleDef},
 };
 
@@ -18,7 +18,7 @@ impl ModuleDef for NetModule {
     }
     fn evaluate<'js>(ctx: &Ctx<'js>, exports: &Exports<'js>) -> Result<()> {
         let net = Object::new(ctx.clone())?;
-        net.set("connect", Func::from(Async(connect)))?;
+        net.set("connect", Func::from(connect))?;
         exports.export("connect", net.get::<_, Value>("connect")?)?;
         exports.export("default", net)?;
         Ok(())
@@ -40,22 +40,33 @@ impl Socket {
         let _ = self.closer.shutdown(std::net::Shutdown::Both);
         self.cancel.notify_waiters();
     }
-    async fn operation<T>(
-        &self,
-        future: impl std::future::Future<Output = std::io::Result<T>>,
-    ) -> std::result::Result<T, String> {
-        if self.closed.get() {
-            return Err("socket is closed".into());
-        }
-        tokio::select! {
-            biased;
-            _ = self.cancel.notified() => Err("socket is closed".into()),
-            result = tokio::time::timeout(TIMEOUT, future) => result.map_err(|_| "socket operation timed out".to_owned())?.map_err(|e| e.to_string()),
-        }
-    }
 }
 
-async fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Object<'js>> {
+#[cfg(not(target_arch = "wasm32"))]
+async fn connect_tcp(host: &str, port: u16) -> std::result::Result<tokio::net::TcpStream, String> {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let operation = format!("{host}:{port}");
+    let addresses = tokio::time::timeout_at(deadline, tokio::net::lookup_host((host, port)))
+        .await
+        .map_err(|_| format!("resolving {operation} timed out"))?
+        .map_err(|error| format!("resolving {operation} failed: {error}"))?;
+    let mut last_error = None;
+    for address in addresses {
+        match tokio::time::timeout_at(deadline, tokio::net::TcpStream::connect(address)).await {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(error)) => last_error = Some(error),
+            Err(_) => return Err(format!("connecting to {operation} timed out")),
+        }
+    }
+    Err(format!(
+        "connecting to {operation} failed: {}",
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "host resolved to no addresses".into())
+    ))
+}
+
+fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Promise<'js>> {
     if !crate::dom::shared(ctx.as_raw().as_ptr())
         .system_access
         .borrow()
@@ -63,7 +74,10 @@ async fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Object<'
     {
         return Err(Exception::throw_type(
             &ctx,
-            "TCP destination is not granted by capabilities.network.hosts",
+            &format!(
+                "network access to `{}` is not granted; add it to capabilities.network.hosts",
+                host.to_ascii_lowercase()
+            ),
         ));
     }
     #[cfg(target_arch = "wasm32")]
@@ -75,85 +89,84 @@ async fn connect<'js>(ctx: Ctx<'js>, host: String, port: u16) -> Result<Object<'
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let stream = tokio::time::timeout(
-            TIMEOUT,
-            tokio::net::TcpStream::connect((host.as_str(), port)),
-        )
-        .await
-        .map_err(|_| Exception::throw_message(&ctx, "TCP connection timed out"))?
-        .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-        let standard = stream
-            .into_std()
-            .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-        let closer = standard
-            .try_clone()
-            .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-        let stream = tokio::net::TcpStream::from_std(standard)
-            .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-        let (read, write) = stream.into_split();
-        let socket = Rc::new(Socket {
-            closer,
-            read: tokio::sync::Mutex::new(read),
-            write: tokio::sync::Mutex::new(write),
-            closed: std::cell::Cell::new(false),
-            cancel: tokio::sync::Notify::new(),
-        });
-        let object = Object::new(ctx.clone())?;
-        let reader = socket.clone();
-        object.set(
-            "read",
-            Func::from(Async(move |ctx: Ctx<'js>, size: Opt<usize>| {
-                let socket = reader.clone();
-                async move {
-                    use tokio::io::AsyncReadExt;
-                    let size = size.0.unwrap_or(64 * 1024);
-                    if size == 0 || size > IO_LIMIT {
-                        return Err(Exception::throw_range(
-                            &ctx,
-                            "socket read size must be between 1 and 1048576",
-                        ));
+        let owned = ctx.clone();
+        Promise::wrap_future(&ctx, async move {
+            let ctx = owned;
+            let stream = connect_tcp(&host, port)
+                .await
+                .map_err(|error| Exception::throw_message(&ctx, &error))?;
+            let standard = stream
+                .into_std()
+                .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+            let closer = standard
+                .try_clone()
+                .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+            let stream = tokio::net::TcpStream::from_std(standard)
+                .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+            let (read, write) = stream.into_split();
+            let socket = Rc::new(Socket {
+                closer,
+                read: tokio::sync::Mutex::new(read),
+                write: tokio::sync::Mutex::new(write),
+                closed: std::cell::Cell::new(false),
+                cancel: tokio::sync::Notify::new(),
+            });
+            let object = Object::new(ctx.clone())?;
+            let reader = socket.clone();
+            object.set("read", Func::from(move |ctx: Ctx<'js>, size: Opt<usize>| -> Result<Promise<'js>> {
+            let size = size.0.unwrap_or(64 * 1024);
+            if size > IO_LIMIT { return Err(Exception::throw_range(&ctx, "socket read exceeded the 1048576 byte limit")); }
+            let socket = reader.clone();
+            let owned = ctx.clone();
+            Promise::wrap_future(&ctx, async move {
+                use tokio::io::AsyncReadExt;
+                let ctx = owned;
+                let mut reader = socket.read.lock().await;
+                let mut bytes = vec![0; size];
+                let count = if size == 0 || socket.closed.get() { 0 } else {
+                    tokio::select! {
+                        biased;
+                        _ = socket.cancel.notified() => 0,
+                        result = tokio::time::timeout(TIMEOUT, reader.read(&mut bytes)) => result
+                            .map_err(|_| Exception::throw_message(&ctx, "socket.read(size) timed out"))?
+                            .map_err(|e| Exception::throw_message(&ctx, &format!("socket read failed: {e}")))?,
                     }
-                    let mut reader = socket.read.try_lock().map_err(|_| {
-                        Exception::throw_type(&ctx, "socket already has a pending read")
-                    })?;
-                    let mut bytes = vec![0; size];
-                    let count = socket
-                        .operation(async { reader.read(&mut bytes).await })
-                        .await
-                        .map_err(|e| Exception::throw_message(&ctx, &e))?;
-                    if count == 0 {
-                        return Ok(Value::new_null(ctx));
-                    }
-                    bytes.truncate(count);
-                    Ok(TypedArray::<u8>::new(ctx, bytes)?.into_value())
-                }
-            })),
-        )?;
-        let writer = socket.clone();
-        object.set(
-            "write",
-            Func::from(Async(move |ctx: Ctx<'js>, data: String| {
-                let socket = writer.clone();
-                async move {
-                    use tokio::io::AsyncWriteExt;
+                };
+                if count == 0 { return Ok::<_, rquickjs::Error>(Value::new_null(ctx)); }
+                bytes.truncate(count);
+                Ok(TypedArray::<u8>::new(ctx, bytes)?.into_value())
+            })
+        }))?;
+            let writer = socket.clone();
+            object.set(
+                "write",
+                Func::from(move |ctx: Ctx<'js>, data: String| -> Result<Promise<'js>> {
                     if data.len() > IO_LIMIT {
                         return Err(Exception::throw_range(
                             &ctx,
                             "socket write exceeded the 1048576 byte limit",
                         ));
                     }
-                    let mut writer = socket.write.try_lock().map_err(|_| {
-                        Exception::throw_type(&ctx, "socket already has a pending write")
-                    })?;
-                    socket
-                        .operation(async { writer.write_all(data.as_bytes()).await })
-                        .await
-                        .map_err(|e| Exception::throw_message(&ctx, &e))
-                }
-            })),
-        )?;
-        object.set("close", Func::from(move || socket.close()))?;
-        Ok(object)
+                    let socket = writer.clone();
+                    let owned = ctx.clone();
+                    Promise::wrap_future(&ctx, async move {
+                        use tokio::io::AsyncWriteExt;
+                        let ctx = owned;
+                        let mut writer = socket.write.lock().await;
+                        tokio::time::timeout(TIMEOUT, writer.write_all(data.as_bytes()))
+                            .await
+                            .map_err(|_| {
+                                Exception::throw_message(&ctx, "socket.write(data) timed out")
+                            })?
+                            .map_err(|e| {
+                                Exception::throw_message(&ctx, &format!("socket write failed: {e}"))
+                            })
+                    })
+                }),
+            )?;
+            object.set("close", Func::from(move || socket.close()))?;
+            Ok::<_, rquickjs::Error>(object)
+        })
     }
 }
 

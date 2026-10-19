@@ -7,6 +7,7 @@
 pub(crate) struct SystemConfig {
     pub(crate) access: nsh_core::access::Access,
     pub(crate) data_dir: Option<std::path::PathBuf>,
+    pub(crate) paths: nsh_core::access::TrustedPaths,
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
 }
 
@@ -79,6 +80,7 @@ mod imp {
                 }
             };
             host.set_system_access(system.access, system.data_dir);
+            host.set_system_paths(system.paths);
             host.set_system_wake(system.wake);
             host.set_stop_flag(stop.clone());
             let symbolicator = Rc::new(RefCell::new(Symbolicator::new(bundle.source_map.clone())));

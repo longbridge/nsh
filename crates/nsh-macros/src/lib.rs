@@ -1290,20 +1290,18 @@ fn module_cx(ty: &Type) -> bool {
 /// (`Registry::module::<Alert>()`); a component exported under the same
 /// name gets the functions too (`StatusBar.setHidden(...)`).
 /// `#[module(flat)]` exports the functions one by one instead of as an
-/// object.
+/// object. `#[module(flat, default)]` also exports that object as `default`.
+/// Visible associated constants of type `&'static str`, `bool`, or a primitive
+/// numeric type are exported under their unchanged Rust names; their values
+/// determine both the native representation and TypeScript primitive type.
 #[proc_macro_attribute]
 pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let flat = match attr.to_string().as_str() {
-        "" => false,
-        "flat" => true,
-        _ => {
-            return syn::Error::new(Span::call_site(), "`#[module]` takes `flat` or nothing")
-                .into_compile_error()
-                .into();
-        }
+    let (flat, default) = match module_options(attr.into()) {
+        Ok(options) => options,
+        Err(error) => return error.into_compile_error().into(),
     };
     let item = parse_macro_input!(item as ItemImpl);
-    module_impl(item, flat)
+    module_impl(item, flat, default)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
@@ -1346,7 +1344,75 @@ fn result_ok(ty: &Type) -> Option<&Type> {
     }
 }
 
-fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
+/// Parse flags without depending on attribute token spacing or ordering.
+fn module_options(tokens: TokenStream2) -> syn::Result<(bool, bool)> {
+    struct Options(bool, bool);
+    impl Parse for Options {
+        fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+            use syn::ext::IdentExt;
+            let mut options = Self(false, false);
+            while !input.is_empty() {
+                let flag = input.call(Ident::parse_any)?;
+                let target = match flag.to_string().as_str() {
+                    "flat" => &mut options.0,
+                    "default" => &mut options.1,
+                    _ => {
+                        return Err(syn::Error::new(
+                            flag.span(),
+                            "`#[module]` accepts only `flat` and `default`",
+                        ));
+                    }
+                };
+                if *target {
+                    return Err(syn::Error::new(flag.span(), "duplicate module flag"));
+                }
+                *target = true;
+                if !input.is_empty() {
+                    input.parse::<Token![,]>()?;
+                }
+            }
+            if options.1 && !options.0 {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "`default` requires `#[module(flat, default)]`",
+                ));
+            }
+            Ok(options)
+        }
+    }
+    syn::parse2::<Options>(tokens).map(|options| (options.0, options.1))
+}
+
+/// Primitive constants have a single runtime representation and TS type.
+fn module_constant_variant(ty: &Type) -> syn::Result<&'static str> {
+    if let Type::Reference(reference) = ty
+        && reference.mutability.is_none()
+        && matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"))
+        && reference
+            .lifetime
+            .as_ref()
+            .is_none_or(|lifetime| lifetime.ident == "static")
+    {
+        return Ok("String");
+    }
+    if let Type::Path(path) = ty
+        && path.qself.is_none()
+        && let Some((name, _)) = last_segment(ty)
+    {
+        match name.to_string().as_str() {
+            "bool" => return Ok("Bool"),
+            "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
+            | "i128" | "isize" | "f32" | "f64" => return Ok("Number"),
+            _ => {}
+        }
+    }
+    Err(syn::Error::new(
+        ty.span(),
+        "module constants support only `&'static str`, `bool`, and primitive numeric types",
+    ))
+}
+
+fn module_impl(item: ItemImpl, flat: bool, default: bool) -> syn::Result<TokenStream2> {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
     let self_ty = &item.self_ty;
@@ -1359,7 +1425,29 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
     let module_name = type_name.to_string();
     let module_doc = decl(&docs(&item.attrs));
     let mut entries = Vec::new();
+    let mut constants = Vec::new();
     for member in &item.items {
+        if let ImplItem::Const(constant) = member {
+            if matches!(constant.vis, syn::Visibility::Inherited) {
+                continue;
+            }
+            let ident = &constant.ident;
+            let name = ident.to_string();
+            let doc = decl(&docs(&constant.attrs));
+            let variant = module_constant_variant(&constant.ty)?;
+            let value = if variant == "Number" {
+                quote!(#ui::ConstantValue::Number(#self_ty::#ident as f64))
+            } else {
+                let variant = Ident::new(variant, constant.ty.span());
+                quote!(#ui::ConstantValue::#variant(#self_ty::#ident))
+            };
+            let cfgs = constant
+                .attrs
+                .iter()
+                .filter(|attr| attr.path().is_ident("cfg"));
+            constants.push(quote!(#(#cfgs)* #ui::Constant::new(#name, #doc, #value)));
+            continue;
+        }
         let ImplItem::Fn(f) = member else { continue };
         let ident = &f.sig.ident;
         let js = camel(&ident.to_string());
@@ -1534,6 +1622,85 @@ fn module_impl(item: ItemImpl, flat: bool) -> syn::Result<TokenStream2> {
             const DOC: &'static str = #module_doc;
             const FUNCTIONS: &'static [#ui::Function] = &[#(#entries),*];
             const FLAT: bool = #flat;
+            const DEFAULT: bool = #default;
+            const CONSTANTS: &'static [#ui::Constant] = &[#(#constants),*];
         }
     })
+}
+
+#[cfg(test)]
+mod module_tests {
+    use super::*;
+
+    #[test]
+    fn module_flags_accept_order_whitespace_and_trailing_comma() {
+        assert_eq!(module_options(quote!()).unwrap(), (false, false));
+        assert_eq!(module_options(quote!(flat)).unwrap(), (true, false));
+        assert_eq!(
+            module_options(quote!(flat, default,)).unwrap(),
+            (true, true)
+        );
+        assert_eq!(module_options(quote!(default, flat)).unwrap(), (true, true));
+        for flags in [
+            quote!(default),
+            quote!(flat, flat),
+            quote!(flat, unknown),
+            quote!(flat default),
+        ] {
+            assert!(module_options(flags.clone()).is_err(), "{flags}");
+        }
+    }
+
+    #[test]
+    fn primitive_constant_types_have_explicit_unsupported_type_diagnostics() {
+        for (ty, expected) in [
+            (quote!(&'static str), "String"),
+            (quote!(&str), "String"),
+            (quote!(bool), "Bool"),
+            (quote!(i32), "Number"),
+            (quote!(f64), "Number"),
+        ] {
+            assert_eq!(
+                module_constant_variant(&syn::parse2(ty).unwrap()).unwrap(),
+                expected
+            );
+        }
+        for ty in [
+            quote!(String),
+            quote!([u8; 2]),
+            quote!(Option<bool>),
+            quote!(&mut str),
+        ] {
+            let error = module_constant_variant(&syn::parse2(ty).unwrap()).unwrap_err();
+            assert!(error.to_string().contains("module constants support only"));
+        }
+    }
+
+    #[test]
+    fn constants_keep_associated_expressions_names_and_cfgs() {
+        let item = syn::parse_quote! {
+            impl Metadata {
+                /// Native line ending.
+                pub const EOL: &'static str = if cfg!(windows) { "\r\n" } else { "\n" };
+                pub const LIMIT: usize = 3;
+                #[cfg(any())]
+                pub const DISABLED: bool = false;
+                const PRIVATE: [u8; 2] = [1, 2];
+            }
+        };
+        let expanded = module_impl(item, true, true).unwrap().to_string();
+        assert!(expanded.contains("ConstantValue :: String (Metadata :: EOL)"));
+        assert!(expanded.contains("ConstantValue :: Number (Metadata :: LIMIT as f64)"));
+        assert!(expanded.contains("ConstantValue :: Bool (Metadata :: DISABLED)"));
+        assert!(expanded.contains("const DEFAULT : bool = true"));
+        assert!(!expanded.contains("Constant :: new (\"PRIVATE\""));
+        let unsupported =
+            syn::parse_quote! { impl Metadata { pub const BYTES: [u8; 2] = [1, 2]; } };
+        assert!(
+            module_impl(unsupported, true, false)
+                .unwrap_err()
+                .to_string()
+                .contains("module constants support only")
+        );
+    }
 }

@@ -116,3 +116,72 @@ fn retained_child_delivers_late_exit_after_registry_release_and_gc() {
     // Another concurrently running test may share this harmless fixture directory.
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn process_cwd_uses_host_plugin_and_home_anchors_with_escape_checks() {
+    let (host, dir) = configured();
+    let plugin = dir.join("plugin");
+    let home = dir.join("home");
+    let outside = dir.join("outside");
+    for path in [&plugin, &home, &outside] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    std::os::unix::fs::symlink(&outside, plugin.join("escape")).unwrap();
+    let mut paths = nsh_core::access::TrustedPaths::default();
+    paths.plugin_dir = Some(plugin.clone());
+    paths.home_dir = Some(home.clone());
+    host.set_system_paths(paths);
+    let declared = Capabilities::from_json(&serde_json::json!({
+        "process": {"execute": ["/bin/sh"]},
+        "fs": {"read": ["${pluginDir}", "${homeDir}"]}
+    }))
+    .unwrap();
+    host.set_system_access(
+        Access {
+            declared,
+            granted: None,
+        },
+        Some(dir.clone()),
+    );
+    host.eval_source(
+        r#"
+        import {Process} from 'nsh/process';
+        import process from 'process';
+        import {text} from 'nsh:rt';
+        Process.run('/bin/sh',['-c','pwd'],{cwd:'${pluginDir}'})
+            .then(r=>text(JSON.stringify(['plugin',r.stdout.trim()])));
+        process.run('/bin/sh',['-c','pwd'],{cwd:'${homeDir}'})
+            .then(r=>text(JSON.stringify(['home',r.stdout.trim()])));
+        let denied=false;
+        try {process.spawn('/bin/sh',[],{cwd:'${pluginDir}/escape'});} catch(e) {
+            denied=String(e).includes('not granted');
+        }
+        text(JSON.stringify(['escape',denied]));
+    "#,
+    )
+    .unwrap();
+    finish(&host);
+    let mut ops = Vec::new();
+    host.take_ops(&mut ops);
+    let output = ops
+        .into_iter()
+        .filter_map(|op| match op {
+            nsh_core::Op::CreateText { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        output.contains(&serde_json::json!(["plugin", plugin.to_string_lossy()]).to_string()),
+        "{output:?}"
+    );
+    assert!(
+        output.contains(&serde_json::json!(["home", home.to_string_lossy()]).to_string()),
+        "{output:?}"
+    );
+    assert!(
+        output.contains(&r#"["escape",true]"#.to_owned()),
+        "{output:?}"
+    );
+    drop(host);
+    std::fs::remove_dir_all(dir).unwrap();
+}

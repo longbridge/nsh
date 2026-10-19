@@ -38,30 +38,25 @@ pub const NATIVE_MODULES: &[&str] = &[
     "nsh/fs",
 ];
 
-/// Standard modules available in the same VM, with optional `node:` import aliases.
+/// The exact gpui-shell standard catalog, using canonical bare specifiers.
 /// Privileged entries route through NSH capability adapters.
 pub const STANDARD_MODULES: &[&str] = &[
     "buffer",
+    "console",
     "crypto",
-    "path",
-    "url",
-    "zlib",
-    "events",
-    "assert",
-    "util",
-    "string_decoder",
-    "process",
-    "fs",
     "fs/promises",
     "net",
-    "websocket",
     "os",
-    "console",
+    "path",
+    "process",
+    "url",
+    "websocket",
+    "zlib",
 ];
 
-/// Whether a module is a standard builtin with an accepted canonical spelling.
+/// Whether a module is a standard builtin with its canonical spelling.
 pub fn is_standard_module(name: &str) -> bool {
-    STANDARD_MODULES.contains(&name.strip_prefix("node:").unwrap_or(name))
+    STANDARD_MODULES.contains(&name)
 }
 
 /// The module name of an app's bundle (its entry chunk): stack traces show

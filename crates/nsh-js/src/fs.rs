@@ -14,21 +14,27 @@ use crate::{
     web::js::{self, Ctx, Deferred, R, Raw, V, native},
 };
 const MAX_TEXT: usize = 16 * 1024 * 1024;
+const STANDARD_READ: usize = 64 * 1024 * 1024;
+const STANDARD_WRITE: usize = 8 * 1024 * 1024;
 #[derive(Clone)]
 struct Config {
     dir: PathBuf,
     access: Access,
+    paths: nsh_core::access::TrustedPaths,
     wake: Arc<dyn Fn() + Send + Sync>,
 }
 struct FileInfo {
     size: u64,
     modified: f64,
+    accessed: f64,
+    created: f64,
+    mode: u32,
     file: bool,
     directory: bool,
     symlink: bool,
 }
 enum Value {
-    Bytes(Vec<u8>, Option<String>),
+    Bytes(Vec<u8>),
     Entries(Vec<(String, FileInfo)>, bool),
     Stat(FileInfo),
     Text(String),
@@ -39,8 +45,9 @@ struct Completion {
     id: u64,
     result: Result<Value, String>,
 }
+#[non_exhaustive]
 pub(crate) struct FileSystem {
-    pending: RefCell<HashMap<u64, Deferred>>,
+    pending: RefCell<HashMap<u64, (Deferred, bool)>>,
     tx: mpsc::Sender<Completion>,
     rx: mpsc::Receiver<Completion>,
     next: std::cell::Cell<u64>,
@@ -74,7 +81,7 @@ pub(crate) fn poll(ctx: Ctx) -> bool {
     while let Ok(c) = state(ctx).rx.try_recv() {
         completed = true;
         let d = state(ctx).pending.borrow_mut().remove(&c.id);
-        if let Some(d) = d {
+        if let Some((d, standard)) = d {
             match c.result {
                 Ok(v) => {
                     let v = value_js(ctx, v);
@@ -87,14 +94,21 @@ pub(crate) fn poll(ctx: Ctx) -> bool {
                     }
                 }
                 Err(e) => {
-                    if let Ok(v) = js::dom_exception(ctx, &e, "FileSystemError") {
-                        let code = e.split_once(':').map_or("EIO", |(code, _)| code);
-                        if let Ok(code) = js::string(ctx, code)
-                            && js::define(ctx, v.raw(), "code", code, true).is_err()
-                        {
-                            let _ = js::take_exception(ctx);
+                    let error = if standard {
+                        error_value(ctx, &e)
+                    } else {
+                        js::dom_exception(ctx, &e, "FileSystemError")
+                    };
+                    if let Ok(v) = error {
+                        if !standard {
+                            let code = e.split_once(':').map_or("EIO", |(code, _)| code);
+                            if let Ok(code) = js::string(ctx, code) {
+                                if js::define(ctx, v.raw(), "code", code, true).is_err() {
+                                    let _ = js::take_exception(ctx);
+                                }
+                            }
                         }
-                        d.reject(ctx, v.raw())
+                        d.reject(ctx, v.raw());
                     }
                 }
             }
@@ -102,24 +116,23 @@ pub(crate) fn poll(ctx: Ctx) -> bool {
     }
     completed
 }
-fn buffer_value(ctx: Ctx, bytes: &[u8], encoding: Option<&str>) -> R<V> {
-    let global = js::global(ctx);
-    let buffer = js::get(ctx, global.raw(), "Buffer")?;
-    let from = js::get(ctx, buffer.raw(), "from")?;
-    let data = js::array_buffer(ctx, bytes)?;
-    let value = js::call(ctx, from.raw(), buffer.raw(), &[data.raw()])?;
-    if let Some(encoding) = encoding {
-        let encoding = js::string(ctx, encoding)?;
-        let to_string = js::get(ctx, value.raw(), "toString")?;
-        js::call(ctx, to_string.raw(), value.raw(), &[encoding.raw()])
-    } else {
-        Ok(value)
-    }
+fn error_value(ctx: Ctx, message: &str) -> R<V> {
+    // SAFETY: JS_NewError creates an owned intrinsic Error in this live context.
+    let error = V::checked(ctx, unsafe { qjs::JS_NewError(ctx) })?;
+    js::define(
+        ctx,
+        error.raw(),
+        "message",
+        js::string(ctx, message)?,
+        false,
+    )?;
+    Ok(error)
+}
+fn bytes_value(ctx: Ctx, bytes: &[u8]) -> R<V> {
+    js::uint8_array(ctx, bytes)
 }
 fn info_value(ctx: Ctx, info: FileInfo) -> R<V> {
     let obj = js::new_object(ctx)?;
-    js::define(ctx, obj.raw(), "size", V::num(info.size as f64), true)?;
-    js::define(ctx, obj.raw(), "mtimeMs", V::num(info.modified), true)?;
     for (name, value) in [
         ("isFile", info.file),
         ("isDirectory", info.directory),
@@ -128,19 +141,45 @@ fn info_value(ctx: Ctx, info: FileInfo) -> R<V> {
         let method = js::closure(ctx, vec![], move |_, _, _| Ok(V::bool(value)))?;
         js::define(ctx, obj.raw(), name, method, true)?;
     }
+    js::define(ctx, obj.raw(), "size", V::num(info.size as f64), true)?;
+    js::define(ctx, obj.raw(), "mode", V::num(info.mode as f64), true)?;
+    let global = js::global(ctx);
+    let date = js::get(ctx, global.raw(), "Date")?;
+    for (name, millis) in [
+        ("mtime", info.modified),
+        ("atime", info.accessed),
+        ("birthtime", info.created),
+    ] {
+        js::define(ctx, obj.raw(), &format!("{name}Ms"), V::num(millis), true)?;
+        js::define(
+            ctx,
+            obj.raw(),
+            name,
+            js::construct(ctx, date.raw(), &[V::num(millis).raw()])?,
+            true,
+        )?;
+    }
     Ok(obj)
 }
 fn value_js(ctx: Ctx, value: Value) -> R<V> {
     match value {
-        Value::Bytes(b, encoding) => buffer_value(ctx, &b, encoding.as_deref()),
+        Value::Bytes(b) => bytes_value(ctx, &b),
         Value::Entries(entries, with_types) => js::new_array(
             ctx,
             entries
                 .into_iter()
                 .map(|(name, info)| {
                     if with_types {
-                        let obj = info_value(ctx, info)?;
+                        let obj = js::new_object(ctx)?;
                         js::define(ctx, obj.raw(), "name", js::string(ctx, &name)?, true)?;
+                        let directory = info.directory;
+                        js::define(
+                            ctx,
+                            obj.raw(),
+                            "isDirectory",
+                            js::closure(ctx, vec![], move |_, _, _| Ok(V::bool(directory)))?,
+                            true,
+                        )?;
                         Ok(obj)
                     } else {
                         js::string(ctx, &name)
@@ -155,6 +194,19 @@ fn value_js(ctx: Ctx, value: Value) -> R<V> {
     }
 }
 fn submit(ctx: Ctx, job: impl FnOnce(Config) -> Result<Value, String> + Send + 'static) -> R<V> {
+    submit_kind(ctx, false, job)
+}
+fn standard_submit(
+    ctx: Ctx,
+    job: impl FnOnce(Config) -> Result<Value, String> + Send + 'static,
+) -> R<V> {
+    submit_kind(ctx, true, job)
+}
+fn submit_kind(
+    ctx: Ctx,
+    standard: bool,
+    job: impl FnOnce(Config) -> Result<Value, String> + Send + 'static,
+) -> R<V> {
     let d = Deferred::new(ctx)?;
     let promise = d.promise.clone_ref();
     if !available(ctx) {
@@ -167,16 +219,23 @@ fn submit(ctx: Ctx, job: impl FnOnce(Config) -> Result<Value, String> + Send + '
         return Ok(promise);
     }
     let shared = crate::dom::shared(ctx);
-    let config = shared
-        .system_data_dir
-        .borrow()
-        .clone()
-        .zip(shared.system_wake.borrow().clone())
-        .map(|(dir, wake)| Config {
-            dir,
+    let dir = shared.system_data_dir.borrow().clone();
+    let wake = shared.system_wake.borrow().clone();
+    let config = if standard {
+        Some(Config {
+            dir: dir.unwrap_or_default(),
+            wake: wake.unwrap_or_else(|| Arc::new(|| {})),
             access: shared.system_access.borrow().clone(),
+            paths: shared.system_paths.borrow().clone(),
+        })
+    } else {
+        dir.zip(wake).map(|(dir, wake)| Config {
+            dir,
             wake,
-        });
+            access: shared.system_access.borrow().clone(),
+            paths: shared.system_paths.borrow().clone(),
+        })
+    };
     let Some(config) = config else {
         let e = js::dom_exception(
             ctx,
@@ -186,7 +245,14 @@ fn submit(ctx: Ctx, job: impl FnOnce(Config) -> Result<Value, String> + Send + '
         d.reject(ctx, e.raw());
         return Ok(promise);
     };
-    if state(ctx).pending.borrow().len() >= 64 {
+    let limit = if standard { 1024 } else { 64 };
+    if state(ctx).pending.borrow().len() >= limit {
+        if standard {
+            return Err(js::range_error(
+                ctx,
+                "fs exceeded the per-runtime outstanding host task limit of 1024",
+            ));
+        }
         let e = js::dom_exception(
             ctx,
             "Too many pending filesystem operations",
@@ -197,19 +263,25 @@ fn submit(ctx: Ctx, job: impl FnOnce(Config) -> Result<Value, String> + Send + '
     }
     let id = state(ctx).next.get();
     state(ctx).next.set(id.wrapping_add(1));
-    state(ctx).pending.borrow_mut().insert(id, d);
+    state(ctx).pending.borrow_mut().insert(id, (d, standard));
     let tx = state(ctx).tx.clone();
     let wake = config.wake.clone();
+    let work = move || {
+        let result = job(config);
+        let _ = tx.send(Completion { id, result });
+        wake();
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    if standard && let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let _ = handle.spawn_blocking(work);
+        return Ok(promise);
+    }
     let spawned = std::thread::Builder::new()
         .name("nsh-files".into())
-        .spawn(move || {
-            let result = job(config);
-            let _ = tx.send(Completion { id, result });
-            wake();
-        });
+        .spawn(work);
     if let Err(e) = spawned {
         let d = state(ctx).pending.borrow_mut().remove(&id);
-        if let Some(d) = d {
+        if let Some((d, _)) = d {
             let e = js::dom_exception(ctx, &e.to_string(), "FileSystemError")?;
             d.reject(ctx, e.raw());
         }
@@ -221,7 +293,7 @@ fn path(ctx: Ctx, raw: Raw) -> R<PathBuf> {
 }
 fn authorize(c: &Config, p: &std::path::Path, write: bool) -> Result<PathBuf, String> {
     c.access
-        .authorize_file(p, &c.dir, write)
+        .authorize_file_with_paths(p, &c.dir, &c.paths, write)
         .map_err(|e| format!("EACCES: {e}"))
 }
 fn io(e: std::io::Error) -> String {
@@ -245,57 +317,425 @@ native! {fn exists(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|
 native! {fn mkdir(ctx,_this,args){let p=path(ctx,args.get(0))?;let options=args.get(1);let recursive=if js::is_nullish(options){false}else{js::to_bool(ctx,js::get(ctx,options,"recursive")?.raw())};submit(ctx,move|c|{let p=authorize(&c,&p,true)?;secure::mkdir(&p,recursive)?;Ok(Value::Unit)})}}
 native! {fn rename(ctx,_this,args){let a=path(ctx,args.get(0))?;let b=path(ctx,args.get(1))?;submit(ctx,move|c|{let a=authorize(&c,&a,true)?;let b=authorize(&c,&b,true)?;secure::rename(&a,&b)?;Ok(Value::Unit)})}}
 native! {fn remove(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{let p=authorize(&c,&p,true)?;secure::remove(&p)?;Ok(Value::Unit)})}}
-fn bounded_bytes(ctx: Ctx, value: Raw) -> R<Vec<u8>> {
-    // SAFETY: the bytes are inspected and copied before running any JS.
-    let bytes = unsafe { js::bytes_of(ctx, value) }
-        .ok_or_else(|| js::type_error(ctx, "writeFile expects string, Buffer or Uint8Array"))?;
-    if bytes.len() > MAX_TEXT {
-        return Err(js::range_error(ctx, "writeFile exceeds 16 MiB"));
-    }
-    Ok(bytes.to_vec())
-}
 fn is_string(value: Raw) -> bool {
-    // SAFETY: the value is live; this only inspects its tag.
+    // SAFETY: inspecting the live value's tag does not execute JS.
     unsafe { qjs::JS_IsString(value) }
 }
-fn encoding(ctx: Ctx, options: Raw) -> R<Option<String>> {
-    if js::is_nullish(options) {
-        return Ok(None);
-    }
-    if is_string(options) {
-        return Ok(Some(js::to_string(ctx, options)?));
-    }
+fn option_keys(ctx: Ctx, value: Raw) -> R<Vec<String>> {
+    let mut table = std::ptr::null_mut();
+    let mut len = 0;
+    // SAFETY: value is a live object; QuickJS returns a table owned until FreePropertyEnum.
+    if unsafe {
+        qjs::JS_GetOwnPropertyNames(
+            ctx,
+            &mut table,
+            &mut len,
+            value,
+            (qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY) as i32,
+        )
+    } < 0
     {
-        let value = js::get(ctx, options, "encoding")?;
-        if js::is_nullish(value.raw()) {
-            Ok(None)
-        } else {
-            js::to_string(ctx, value.raw()).map(Some)
+        return Err(js::Throw);
+    }
+    let result = (|| -> R<Vec<String>> {
+        let mut keys = Vec::with_capacity(len as usize);
+        for i in 0..len as usize {
+            // SAFETY: table contains len entries; AtomToString returns an owned string value.
+            let key = V::checked(ctx, unsafe {
+                qjs::JS_AtomToString(ctx, (*table.add(i)).atom)
+            })?;
+            keys.push(js::to_string(ctx, key.raw())?);
+        }
+        Ok(keys)
+    })();
+    // SAFETY: table and len are exactly the allocation returned above.
+    unsafe { qjs::JS_FreePropertyEnum(ctx, table, len) };
+    result
+}
+fn strict_options(ctx: Ctx, value: Raw, allowed: &[&str]) -> R<()> {
+    if js::is_nullish(value) {
+        return Ok(());
+    }
+    if !js::is_object(value) {
+        return Err(js::type_error(ctx, "filesystem options must be an object"));
+    }
+    for key in option_keys(ctx, value)? {
+        if !allowed.contains(&key.as_str()) {
+            return Err(js::type_error(
+                ctx,
+                &format!("unknown filesystem option `{key}`"),
+            ));
         }
     }
+    Ok(())
 }
-native! {fn read_file(ctx,_this,args){let p=path(ctx,args.get(0))?;let encoding=encoding(ctx,args.get(1))?;submit(ctx,move|c|{let p=authorize(&c,&p,false)?;let mut file=secure::open(&p,false,false)?;use std::io::Read;let mut bytes=Vec::new();file.by_ref().take((MAX_TEXT+1)as u64).read_to_end(&mut bytes).map_err(io)?;if bytes.len()>MAX_TEXT{return Err("EFBIG: file exceeds 16 MiB".into())}Ok(Value::Bytes(bytes,encoding))})}}
-native! {fn write_file(ctx,_this,args){let p=path(ctx,args.get(0))?;let data=args.get(1);let options=args.get(2);let encoding=encoding(ctx,options)?;let bytes=if is_string(data){let global=js::global(ctx);let buffer=js::get(ctx,global.raw(),"Buffer")?;let from=js::get(ctx,buffer.raw(),"from")?;let enc=js::string(ctx,encoding.as_deref().unwrap_or("utf8"))?;let data=js::call(ctx,from.raw(),buffer.raw(),&[data,enc.raw()])?;bounded_bytes(ctx,data.raw())?}else{bounded_bytes(ctx,data)?};let flag=if js::is_object(options){js::opt_string(ctx,js::get(ctx,options,"flag")?.raw())?}else{None};if !matches!(flag.as_deref(),None|Some("w"|"wx")){return Err(js::type_error(ctx,"writeFile supports flags w and wx"))}let exclusive=flag.as_deref()==Some("wx");submit(ctx,move|c|{if bytes.len()>MAX_TEXT{return Err("EFBIG: file exceeds 16 MiB".into())}let p=authorize(&c,&p,true)?;let mut file=secure::open(&p,true,exclusive)?;use std::io::Write;file.write_all(&bytes).map_err(io)?;file.sync_all().map_err(io)?;Ok(Value::Unit)})}}
-native! {fn access(ctx,_this,args){let p=path(ctx,args.get(0))?;let mode=if js::is_nullish(args.get(1)){0}else{js::to_string(ctx,args.get(1))?.parse::<u32>().map_err(|_|js::type_error(ctx,"access mode must be 0, 4, 2, or 6"))?};if mode&!6!=0{return Err(js::type_error(ctx,"access supports F_OK, R_OK and W_OK"))}submit(ctx,move|c|{let p=authorize(&c,&p,mode&2!=0)?;if mode&4!=0{authorize(&c,&p,false)?;}secure::check_access(&p,mode)?;Ok(Value::Unit)})}}
-native! {fn readdir(ctx,_this,args){let p=path(ctx,args.get(0))?;let options=args.get(1);let types=if js::is_object(options){js::to_bool(ctx,js::get(ctx,options,"withFileTypes")?.raw())}else{false};submit(ctx,move|c|{let p=authorize(&c,&p,false)?;Ok(Value::Entries(secure::entries(&p)?,types))})}}
-native! {fn stat(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{let p=authorize(&c,&p,false)?;Ok(Value::Stat(secure::metadata(&p,false)?))})}}
-native! {fn lstat(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{authorize(&c,&p,false)?;let leaf=p.file_name().ok_or("EINVAL: lstat requires a file or directory name")?;let parent=p.parent().ok_or("EINVAL: lstat requires an absolute path")?;let parent=authorize(&c,parent,false)?;let p=parent.join(leaf);Ok(Value::Stat(secure::metadata(&p,true)?))})}}
-native! {fn rmdir(ctx,_this,args){let p=path(ctx,args.get(0))?;submit(ctx,move|c|{let p=authorize(&c,&p,true)?;secure::remove_dir(&p)?;Ok(Value::Unit)})}}
+fn bool_option(ctx: Ctx, value: Raw, key: &str) -> R<bool> {
+    strict_options(ctx, value, &[key])?;
+    if js::is_nullish(value) {
+        return Ok(false);
+    }
+    let v = js::get(ctx, value, key)?;
+    if js::is_nullish(v.raw()) {
+        return Ok(false);
+    }
+    // SAFETY: this only checks a live value's tag.
+    if !unsafe { qjs::JS_IsBool(v.raw()) } {
+        return Err(js::type_error(ctx, &format!("{key} must be a boolean")));
+    }
+    Ok(js::to_bool(ctx, v.raw()))
+}
+fn lexical(path: &std::path::Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => (),
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+fn resolved(path: &std::path::Path) -> Result<PathBuf, String> {
+    let mut current = path.to_path_buf();
+    let mut tail = Vec::new();
+    loop {
+        if let Ok(mut real) = current.canonicalize() {
+            real.extend(tail.into_iter().rev());
+            return Ok(real);
+        }
+        let name = current
+            .file_name()
+            .ok_or("invalid filesystem path")?
+            .to_owned();
+        if !current.pop() {
+            return Err("invalid filesystem path".into());
+        }
+        tail.push(name);
+    }
+}
+struct StandardGrant {
+    #[cfg(unix)]
+    dir: cap_std::fs::Dir,
+    #[cfg(unix)]
+    relative: PathBuf,
+    #[cfg(unix)]
+    name: String,
+}
+fn prepare_grant(ctx: Ctx, value: Raw, write: bool, keep: bool) -> R<StandardGrant> {
+    if !is_string(value) {
+        return Err(js::type_error(ctx, "filesystem path must be a string"));
+    }
+    let path = PathBuf::from(js::to_string(ctx, value)?);
+    let shared = crate::dom::shared(ctx);
+    let data = shared.system_data_dir.borrow().clone().unwrap_or_default();
+    let access = shared.system_access.borrow().clone();
+    let paths = shared.system_paths.borrow().clone();
+    let roots = if write {
+        &access.declared.fs.write
+    } else {
+        &access.declared.fs.read
+    };
+    if !roots.is_empty() && !available(ctx) {
+        return Err(js::type_error(
+            ctx,
+            "native filesystem unavailable on this platform",
+        ));
+    }
+    let requested = if path.to_string_lossy().starts_with("${") {
+        paths
+            .resolve_root(&path.to_string_lossy(), &data)
+            .map_err(|e| js::type_error(ctx, &e))?
+    } else {
+        path
+    };
+    for raw in roots {
+        let Ok(root) = paths.resolve_root(raw, &data).and_then(|p| resolved(&p)) else {
+            continue;
+        };
+        let candidate = if requested.is_absolute() {
+            if keep {
+                match (requested.parent(), requested.file_name()) {
+                    (Some(parent), Some(name)) => resolved(parent).map(|p| p.join(name)),
+                    _ => resolved(&requested),
+                }
+            } else {
+                resolved(&requested)
+            }
+        } else {
+            Ok(lexical(&root.join(&requested)))
+        };
+        let mut candidate = candidate.unwrap_or_else(|_| lexical(&requested));
+        if !candidate.starts_with(&root) {
+            if keep && requested.is_absolute() && resolved(&requested).is_ok_and(|p| p == root) {
+                candidate = root.clone();
+            } else {
+                continue;
+            }
+        }
+        let effective = if let Some(host) = &access.granted {
+            let grants = if write { &host.fs.write } else { &host.fs.read };
+            grants
+                .iter()
+                .filter_map(|r| paths.resolve_root(r, &data).and_then(|p| resolved(&p)).ok())
+                .filter(|r| candidate.starts_with(r))
+                .map(|r| {
+                    if r.starts_with(&root) {
+                        r
+                    } else {
+                        root.clone()
+                    }
+                })
+                .next()
+        } else {
+            Some(root.clone())
+        };
+        let Some(root) = effective else { continue };
+        #[cfg(not(unix))]
+        let _ = root;
+        #[cfg(unix)]
+        {
+            if write && !root.exists() && secure::mkdir(&root, true).is_err() {
+                continue;
+            }
+            let Ok(dir) = secure::dir(&root) else {
+                continue;
+            };
+            let Ok(relative) = candidate.strip_prefix(&root) else {
+                continue;
+            };
+            return Ok(StandardGrant {
+                dir,
+                relative: if relative.as_os_str().is_empty() {
+                    PathBuf::from(".")
+                } else {
+                    relative.to_owned()
+                },
+                name: if relative.as_os_str().is_empty() {
+                    ".".into()
+                } else {
+                    relative.display().to_string()
+                },
+            });
+        }
+    }
+    Err(js::type_error(
+        ctx,
+        &format!(
+            "filesystem {} is not granted by capabilities.fs.{}",
+            if write { "write" } else { "read" },
+            if write { "write" } else { "read" }
+        ),
+    ))
+}
+impl StandardGrant {
+    fn describe(&self) -> &str {
+        #[cfg(unix)]
+        {
+            &self.name
+        }
+        #[cfg(not(unix))]
+        {
+            "unavailable filesystem"
+        }
+    }
+    #[cfg(unix)]
+    fn error(&self, verb: &str, error: std::io::Error) -> String {
+        format!("cannot {verb} `{}`: {error}", self.name)
+    }
+    #[cfg(unix)]
+    fn read(self, text: bool) -> Result<Value, String> {
+        use std::io::Read;
+        let mut file = self
+            .dir
+            .open(&self.relative)
+            .map_err(|e| self.error("read", e))?;
+        let size = file.metadata().map_err(|e| self.error("read", e))?.len();
+        if size > STANDARD_READ as u64 {
+            return Err(format!(
+                "`{}` is {size} bytes, over the {STANDARD_READ}-byte limit for fs.readFile; read it in pieces or keep it out of the script",
+                self.name
+            ));
+        }
+        let mut bytes = Vec::with_capacity(size as usize);
+        file.by_ref()
+            .take((STANDARD_READ + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| self.error("read", e))?;
+        if bytes.len() > STANDARD_READ {
+            return Err(format!(
+                "`{}` is {} bytes, over the {STANDARD_READ}-byte limit for fs.readFile; read it in pieces or keep it out of the script",
+                self.name,
+                bytes.len()
+            ));
+        }
+        if text {
+            String::from_utf8(bytes)
+                .map(Value::Text)
+                .map_err(|e| format!("cannot decode `{}` as UTF-8: {e}", self.name))
+        } else {
+            Ok(Value::Bytes(bytes))
+        }
+    }
+    #[cfg(unix)]
+    fn write(self, bytes: Vec<u8>) -> Result<Value, String> {
+        self.dir
+            .write(&self.relative, bytes)
+            .map_err(|e| self.error("write", e))?;
+        Ok(Value::Unit)
+    }
+    #[cfg(unix)]
+    fn mkdir(self, recursive: bool) -> Result<Value, String> {
+        if recursive {
+            self.dir.create_dir_all(&self.relative)
+        } else {
+            self.dir.create_dir(&self.relative)
+        }
+        .map_err(|e| self.error("create", e))?;
+        Ok(Value::Unit)
+    }
+    #[cfg(unix)]
+    fn exists(self) -> Result<Value, String> {
+        Ok(Value::Bool(
+            self.dir.try_exists(&self.relative).unwrap_or(false),
+        ))
+    }
+    #[cfg(unix)]
+    fn stat(self, link: bool) -> Result<Value, String> {
+        let m = if link {
+            self.dir.symlink_metadata(&self.relative)
+        } else {
+            self.dir.metadata(&self.relative)
+        }
+        .map_err(|e| self.error("stat", e))?;
+        Ok(Value::Stat(secure::info(m)))
+    }
+    #[cfg(unix)]
+    fn readlink(self) -> Result<Value, String> {
+        self.dir
+            .read_link_contents(&self.relative)
+            .map(|p| Value::Text(p.to_string_lossy().into_owned()))
+            .map_err(|e| self.error("read link", e))
+    }
+    #[cfg(unix)]
+    fn unlink(self) -> Result<Value, String> {
+        self.dir
+            .remove_file(&self.relative)
+            .map_err(|e| self.error("remove", e))?;
+        Ok(Value::Unit)
+    }
+    #[cfg(unix)]
+    fn rmdir(self) -> Result<Value, String> {
+        self.dir
+            .remove_dir(&self.relative)
+            .map_err(|e| self.error("remove", e))?;
+        Ok(Value::Unit)
+    }
+    #[cfg(unix)]
+    fn rename(self, to: Self) -> Result<Value, String> {
+        self.dir
+            .rename(&self.relative, &to.dir, &to.relative)
+            .map_err(|e| self.error("rename", e))?;
+        Ok(Value::Unit)
+    }
+    #[cfg(unix)]
+    fn entries(self, types: bool) -> Result<Value, String> {
+        let mut entries = Vec::new();
+        let mut name_bytes = 0;
+        for entry in self
+            .dir
+            .read_dir(&self.relative)
+            .map_err(|e| self.error("list", e))?
+        {
+            let entry = entry.map_err(|e| self.error("list", e))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name_bytes += name.len();
+            if entries.len() == 10_000 || name_bytes > 1024 * 1024 {
+                return Err(format!(
+                    "cannot list `{}`: directory exceeded the 10000-entry or 1048576-name-byte fs.readdir limit",
+                    self.name
+                ));
+            }
+            let kind = entry.file_type().ok();
+            let info = FileInfo {
+                size: 0,
+                mode: 0,
+                modified: 0.0,
+                accessed: 0.0,
+                created: 0.0,
+                file: false,
+                directory: kind.is_some_and(|t| t.is_dir()),
+                symlink: false,
+            };
+            entries.push((name, info));
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(Value::Entries(entries, types))
+    }
+}
+#[cfg(not(unix))]
+impl StandardGrant {
+    fn read(self, _: bool) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn write(self, _: Vec<u8>) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn mkdir(self, _: bool) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn exists(self) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn stat(self, _: bool) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn readlink(self) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn unlink(self) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn rmdir(self) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn rename(self, _: Self) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+    fn entries(self, _: bool) -> Result<Value, String> {
+        Err("native filesystem unavailable".into())
+    }
+}
+native! {fn read_file(ctx,_this,args){let text=if js::is_nullish(args.get(1)){false}else{let encoding=if is_string(args.get(1)){js::to_string(ctx,args.get(1))?}else{strict_options(ctx,args.get(1),&["encoding"])?;let v=js::get(ctx,args.get(1),"encoding")?;if !is_string(v.raw()){return Err(js::type_error(ctx,"fs.readFile encoding must be utf8"))}js::to_string(ctx,v.raw())?};if !matches!(encoding.to_ascii_lowercase().as_str(),"utf8"|"utf-8"){return Err(js::type_error(ctx,"fs.readFile only supports UTF-8 text decoding"))}true};let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.read(text))}}
+native! {fn write_file(ctx,_this,args){let value=args.get(1);let bytes=if is_string(value){js::to_string(ctx,value)?.into_bytes()}else{let view=js::view(ctx,value).ok_or_else(||js::type_error(ctx,"fs.writeFile expects string or Uint8Array"))?;if view.kind!=Some(qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as i32){return Err(js::type_error(ctx,"fs.writeFile expects string or Uint8Array"))}
+// SAFETY: copy the buffer before any JS can detach it.
+unsafe{js::bytes_of(ctx,value)}.ok_or_else(||js::type_error(ctx,"detached Uint8Array"))?.to_vec()};let grant=prepare_grant(ctx,args.get(0),true,false)?;if bytes.len()>STANDARD_WRITE{return Err(js::range_error(ctx,&format!("`{}` write is {} bytes, over the {STANDARD_WRITE}-byte fs.writeFile limit",grant.describe(),bytes.len())))}standard_submit(ctx,move|_|grant.write(bytes))}}
+native! {fn standard_mkdir(ctx,_this,args){let recursive=bool_option(ctx,args.get(1),"recursive")?;let grant=prepare_grant(ctx,args.get(0),true,false)?;standard_submit(ctx,move|_|grant.mkdir(recursive))}}
+native! {fn standard_exists(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.exists())}}
+native! {fn readdir(ctx,_this,args){let types=bool_option(ctx,args.get(1),"withFileTypes")?;let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.entries(types))}}
+native! {fn stat(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,false)?;standard_submit(ctx,move|_|grant.stat(false))}}
+native! {fn lstat(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,true)?;standard_submit(ctx,move|_|grant.stat(true))}}
+native! {fn readlink(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),false,true)?;standard_submit(ctx,move|_|grant.readlink())}}
+native! {fn standard_unlink(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),true,true)?;standard_submit(ctx,move|_|grant.unlink())}}
+native! {fn standard_rename(ctx,_this,args){let source=prepare_grant(ctx,args.get(0),true,true)?;let target=prepare_grant(ctx,args.get(1),true,true)?;standard_submit(ctx,move|_|source.rename(target))}}
+native! {fn rmdir(ctx,_this,args){let grant=prepare_grant(ctx,args.get(0),true,true)?;standard_submit(ctx,move|_|grant.rmdir())}}
 pub(crate) fn make_standard(ctx: Ctx) -> Raw {
     (|| -> R<V> {
         let obj = js::new_object(ctx)?;
         for (name, fun, len) in [
             ("readFile", read_file as js::Native, 2),
-            ("writeFile", write_file, 3),
-            ("mkdir", mkdir, 2),
-            ("rename", rename, 2),
-            ("unlink", remove, 1),
-            ("exists", exists, 1),
-            ("access", access, 2),
+            ("writeFile", write_file, 2),
             ("readdir", readdir, 2),
+            ("exists", standard_exists, 1),
+            ("unlink", standard_unlink, 1),
+            ("rmdir", rmdir, 1),
+            ("mkdir", standard_mkdir, 2),
             ("stat", stat, 1),
             ("lstat", lstat, 1),
-            ("rmdir", rmdir, 1),
+            ("rename", standard_rename, 2),
+            ("readlink", readlink, 1),
         ] {
             let cname = std::ffi::CString::new(name).unwrap();
             js::define(
@@ -306,11 +746,6 @@ pub(crate) fn make_standard(ctx: Ctx) -> Raw {
                 true,
             )?;
         }
-        let constants = js::new_object(ctx)?;
-        for (name, value) in [("F_OK", 0), ("R_OK", 4), ("W_OK", 2)] {
-            js::define(ctx, constants.raw(), name, V::num(value as f64), true)?;
-        }
-        js::define(ctx, obj.raw(), "constants", constants, true)?;
         Ok(obj)
     })()
     .map_or(qjs::JS_EXCEPTION, V::take)
@@ -434,26 +869,23 @@ mod secure {
         }
         Ok((dir, name))
     }
-    pub(super) fn check_access(path: &Path, mode: u32) -> Result<(), String> {
-        let (d, name) = parent(path)?;
-        // SAFETY: d is live, name is NUL-terminated, and mode contains only R_OK/W_OK.
-        if unsafe {
-            libc::faccessat(
-                d.as_raw_fd(),
-                name.as_ptr(),
-                mode as i32,
-                libc::AT_EACCESS | libc::AT_SYMLINK_NOFOLLOW,
-            )
-        } < 0
-        {
-            Err(last_error())
-        } else {
-            Ok(())
-        }
-    }
-    fn info(meta: cap_std::fs::Metadata) -> super::FileInfo {
+    pub(super) fn info(meta: cap_std::fs::Metadata) -> super::FileInfo {
         super::FileInfo {
             size: meta.len(),
+            mode: {
+                use cap_std::fs::MetadataExt;
+                meta.mode()
+            },
+            accessed: meta
+                .accessed()
+                .ok()
+                .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0.0, |t| t.as_secs_f64() * 1000.0),
+            created: meta
+                .created()
+                .ok()
+                .and_then(|t| t.into_std().duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0.0, |t| t.as_secs_f64() * 1000.0),
             modified: meta
                 .modified()
                 .ok()
@@ -464,7 +896,7 @@ mod secure {
             symlink: meta.is_symlink(),
         }
     }
-    fn dir(path: &Path) -> Result<cap_std::fs::Dir, String> {
+    pub(super) fn dir(path: &Path) -> Result<cap_std::fs::Dir, String> {
         let mut current = root()?;
         for part in path.components() {
             match part {
@@ -474,44 +906,6 @@ mod secure {
             }
         }
         Ok(cap_std::fs::Dir::from_std_file(current))
-    }
-    pub(super) fn metadata(path: &Path, link: bool) -> Result<super::FileInfo, String> {
-        let (d, name) = parent(path)?;
-        let d = cap_std::fs::Dir::from_std_file(d);
-        let name = std::ffi::OsStr::new(name.to_str().map_err(|_| "EILSEQ: non-UTF8 filename")?);
-        let metadata = if link {
-            d.symlink_metadata(name)
-        } else {
-            d.metadata(name)
-        }
-        .map_err(io)?;
-        Ok(info(metadata))
-    }
-    pub(super) fn entries(path: &Path) -> Result<Vec<(String, super::FileInfo)>, String> {
-        let d = dir(path)?;
-        let mut entries = Vec::new();
-        let mut bytes = 0;
-        for entry in d.entries().map_err(io)? {
-            let entry = entry.map_err(io)?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| "EILSEQ: non-UTF8 filename")?;
-            bytes += name.len() + 128;
-            if bytes > super::MAX_TEXT {
-                return Err("EFBIG: directory listing exceeds 16 MiB".into());
-            }
-            let metadata = entry.metadata().map_err(io)?;
-            entries.push((name, info(metadata)));
-        }
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(entries)
-    }
-    pub(super) fn remove_dir(path: &Path) -> Result<(), String> {
-        let (d, name) = parent(path)?;
-        let d = cap_std::fs::Dir::from_std_file(d);
-        let name = std::ffi::OsStr::new(name.to_str().map_err(|_| "EILSEQ: non-UTF8 filename")?);
-        d.remove_dir(name).map_err(io)
     }
     pub(super) fn open(p: &Path, write: bool, exclusive: bool) -> Result<File, String> {
         let (dir, name) = parent(p)?;
@@ -595,13 +989,13 @@ mod secure {
     fn unavailable<T>() -> Result<T, String> {
         Err("ENOTSUP: secure native file operations are unavailable on this platform".into())
     }
-    pub(super) fn check_access(_: &Path, _: u32) -> Result<(), String> {
-        unavailable()
-    }
     pub(super) fn metadata(_: &Path, _: bool) -> Result<super::FileInfo, String> {
         unavailable()
     }
     pub(super) fn entries(_: &Path) -> Result<Vec<(String, super::FileInfo)>, String> {
+        unavailable()
+    }
+    pub(super) fn readlink(_: &Path) -> Result<String, String> {
         unavailable()
     }
     pub(super) fn remove_dir(_: &Path) -> Result<(), String> {

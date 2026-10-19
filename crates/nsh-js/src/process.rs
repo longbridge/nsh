@@ -53,6 +53,7 @@ struct Entry {
     stderr: String,
     capture: bool,
     max_output: usize,
+    per_stream: bool,
     handle: Weak<HandleState>,
     queued_input: Arc<AtomicUsize>,
     stdin_closed: Cell<bool>,
@@ -215,6 +216,7 @@ struct Options {
     cwd: PathBuf,
     timeout: Option<Duration>,
     max_output: usize,
+    standard: bool,
 }
 
 fn options(
@@ -222,6 +224,7 @@ fn options(
     argc: c_int,
     argv: *mut Value,
     capture: bool,
+    standard: bool,
 ) -> Result<Options, String> {
     if !available(ctx) {
         return Err("nsh/process is available on desktop hosts".into());
@@ -262,30 +265,60 @@ fn options(
     if !nullish(opts) && !unsafe { qjs::JS_IsObject(opts) } {
         return Err("options must be an object".into());
     }
-    let data_dir = shared
-        .system_data_dir
-        .borrow()
-        .clone()
-        .ok_or("host did not configure an application data directory")?;
-    let cwd = if nullish(opts) {
-        data_dir.clone()
+    let data_dir = shared.system_data_dir.borrow().clone();
+    let requested_cwd = if nullish(opts) {
+        None
     } else {
-        option_text(ctx, opts, c"cwd")?
-            .map(PathBuf::from)
-            .unwrap_or_else(|| data_dir.clone())
+        option_text(ctx, opts, c"cwd")?.map(PathBuf::from)
     };
-    let cwd = shared
-        .system_access
-        .borrow()
-        .authorize_file(&cwd, &data_dir, false)?;
+    let cwd = if standard && requested_cwd.is_none() {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    } else {
+        let data_dir = data_dir.ok_or("host did not configure an application data directory")?;
+        let cwd = requested_cwd.unwrap_or_else(|| data_dir.clone());
+        shared.system_access.borrow().authorize_file_with_paths(
+            &cwd,
+            &data_dir,
+            &shared.system_paths.borrow(),
+            false,
+        )?
+    };
     if !cwd.is_dir() {
         return Err("cwd must be an existing directory".into());
     }
     // Resolve before changing cwd. Child lookup never consults a workspace or app-provided PATH.
-    let command = resolve_executable(&command)?;
-    let timeout = if nullish(opts) {
+    let command = if standard && capture {
+        PathBuf::from(command)
+    } else {
+        resolve_executable(&command)?
+    };
+    let default_ms = if standard { 30_000 } else { 10_000 };
+    let timeout = if standard {
+        let value = if nullish(opts) {
+            U
+        } else {
+            get(ctx, opts, c"timeoutMs")
+        };
+        let result = if nullish(value) {
+            Ok(capture.then(|| Duration::from_millis(default_ms)))
+        } else {
+            let mut ms = 0.0;
+            // SAFETY: converting the owned timeout property of the options object.
+            if !unsafe { qjs::JS_IsNumber(value) && qjs::JS_ToFloat64(ctx, &mut ms, value) == 0 }
+                || !ms.is_finite()
+                || ms <= 0.0
+                || ms > u32::MAX as f64
+            {
+                Err("process timeoutMs must be a positive number of milliseconds".to_owned())
+            } else {
+                Ok(Some(Duration::from_secs_f64(ms / 1000.0)))
+            }
+        };
+        free(ctx, value);
+        result?
+    } else if nullish(opts) {
         if capture {
-            Some(Duration::from_secs(10))
+            Some(Duration::from_millis(default_ms))
         } else {
             None
         }
@@ -294,19 +327,29 @@ fn options(
         let supplied = !nullish(t);
         free(ctx, t);
         if supplied || capture {
-            Some(Duration::from_millis(
-                option_number(ctx, opts, c"timeoutMs", 10_000, 3_600_000)? as u64,
-            ))
+            Some(Duration::from_millis(option_number(
+                ctx,
+                opts,
+                c"timeoutMs",
+                default_ms as usize,
+                if standard {
+                    u32::MAX as usize
+                } else {
+                    3_600_000
+                },
+            )? as u64))
         } else {
             None
         }
     };
-    let max_output = if nullish(opts) {
+    let max_output = if standard {
+        QUEUE_BYTES
+    } else if nullish(opts) {
         1024 * 1024
     } else {
         option_number(ctx, opts, c"maxOutputBytes", 1024 * 1024, QUEUE_BYTES)?
     };
-    if !nullish(opts) {
+    if !nullish(opts) && !standard {
         if let Some(stdin) = option_text(ctx, opts, c"stdin")?
             && stdin != "pipe"
         {
@@ -315,7 +358,7 @@ fn options(
         let env = get(ctx, opts, c"env");
         let has_env = !nullish(env);
         free(ctx, env);
-        if has_env {
+        if has_env && !standard {
             return Err(
                 "custom environment is not supported; children inherit the host environment".into(),
             );
@@ -327,6 +370,7 @@ fn options(
         cwd,
         timeout,
         max_output,
+        standard,
     })
 }
 
@@ -378,6 +422,7 @@ struct Mailbox {
     stopped: Arc<AtomicBool>,
     overflow: Arc<AtomicBool>,
     wake: Option<Wake>,
+    backpressure: bool,
 }
 impl Mailbox {
     fn output(&self, stderr: bool, chunk: String) -> bool {
@@ -385,10 +430,19 @@ impl Mailbox {
             return false;
         }
         let len = chunk.len();
-        if self.queued.fetch_add(len, Ordering::AcqRel) + len > QUEUE_BYTES {
+        loop {
+            if self.queued.fetch_add(len, Ordering::AcqRel) + len <= QUEUE_BYTES {
+                break;
+            }
             self.queued.fetch_sub(len, Ordering::AcqRel);
-            self.overflow.store(true, Ordering::Release);
-            return false;
+            if !self.backpressure {
+                self.overflow.store(true, Ordering::Release);
+                return false;
+            }
+            if self.stopped.load(Ordering::Acquire) {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
         }
         if self.tx.send(Event::Output(self.id, stderr, chunk)).is_err() {
             return false;
@@ -650,7 +704,15 @@ fn start(
     if p.entries.borrow().len() >= MAX_CHILDREN {
         return Err("a VM may run at most 32 children".into());
     }
-    let mut cmd = Command::new(&opts.command);
+    let executable = if opts.standard && capture {
+        resolve_executable(opts.command.to_str().ok_or("invalid executable encoding")?)?
+    } else {
+        opts.command.clone()
+    };
+    let mut cmd = Command::new(executable);
+    if opts.standard {
+        cmd.env_clear();
+    }
     cmd.args(opts.args)
         .current_dir(opts.cwd)
         .stdin(Stdio::piped())
@@ -685,6 +747,7 @@ fn start(
         stopped: p.stopped.clone(),
         overflow: Arc::new(AtomicBool::new(false)),
         wake: shared.system_wake.borrow().clone(),
+        backpressure: opts.standard,
     };
     let queued_input = Arc::new(AtomicUsize::new(0));
     let worker_input = queued_input.clone();
@@ -704,6 +767,7 @@ fn start(
             stderr: String::new(),
             capture,
             max_output: opts.max_output,
+            per_stream: opts.standard,
             handle: Weak::new(),
             queued_input,
             stdin_closed: Cell::new(capture),
@@ -734,7 +798,18 @@ unsafe extern "C" fn spawn(
     argc: c_int,
     argv: *mut Value,
 ) -> Value {
-    let opts = match options(ctx, argc, argv, false) {
+    spawn_impl(ctx, argc, argv, false)
+}
+unsafe extern "C" fn standard_spawn(
+    ctx: *mut Context,
+    _this: Value,
+    argc: c_int,
+    argv: *mut Value,
+) -> Value {
+    spawn_impl(ctx, argc, argv, true)
+}
+fn spawn_impl(ctx: *mut Context, argc: c_int, argv: *mut Value, standard: bool) -> Value {
+    let opts = match options(ctx, argc, argv, false, standard) {
         Ok(o) => o,
         Err(e) => return throw(ctx, &e),
     };
@@ -778,11 +853,25 @@ unsafe extern "C" fn spawn(
     }
 }
 unsafe extern "C" fn run(ctx: *mut Context, _this: Value, argc: c_int, argv: *mut Value) -> Value {
+    run_impl(ctx, argc, argv, false)
+}
+unsafe extern "C" fn standard_run(
+    ctx: *mut Context,
+    _this: Value,
+    argc: c_int,
+    argv: *mut Value,
+) -> Value {
+    run_impl(ctx, argc, argv, true)
+}
+fn run_impl(ctx: *mut Context, argc: c_int, argv: *mut Value, standard: bool) -> Value {
+    let options = options(ctx, argc, argv, true, standard);
+    if standard && let Err(message) = &options {
+        return throw(ctx, message);
+    }
     let mut callbacks = [U; 2];
     // SAFETY: creates an owned promise and two owned resolving functions.
     let promise = unsafe { qjs::JS_NewPromiseCapability(ctx, callbacks.as_mut_ptr()) };
-    let result = options(ctx, argc, argv, true)
-        .and_then(|o| start(ctx, o, true, callbacks[0], callbacks[1]));
+    let result = options.and_then(|o| start(ctx, o, true, callbacks[0], callbacks[1]));
     if let Err(e) = result {
         call(ctx, callbacks[1], string(ctx, &e));
         free(ctx, callbacks[0]);
@@ -929,7 +1018,16 @@ pub(crate) fn pump(ctx: *mut Context) -> bool {
                         continue;
                     };
                     if e.capture {
-                        if e.stdout.len() + e.stderr.len() + chunk.len() > e.max_output {
+                        let captured = if e.per_stream {
+                            if stderr {
+                                e.stderr.len()
+                            } else {
+                                e.stdout.len()
+                            }
+                        } else {
+                            e.stdout.len() + e.stderr.len()
+                        };
+                        if captured + chunk.len() > e.max_output {
                             let _ = e.input.send(Input::Kill);
                             e.stderr = "process capture exceeded maxOutputBytes".into();
                             e.max_output = 0;
@@ -1030,6 +1128,27 @@ pub(crate) fn pump(ctx: *mut Context) -> bool {
 /// Whether the VM owns a running subprocess.
 pub(crate) fn has_pending(ctx: *mut Context) -> bool {
     !processes(ctx).entries.borrow().is_empty()
+}
+
+/// Checked standard process functions with empty child environments and reference limits.
+pub(crate) fn standard_module(ctx: *mut Context) -> Value {
+    // SAFETY: a fresh object takes both native functions.
+    unsafe {
+        let object = qjs::JS_NewObject(ctx);
+        put(
+            ctx,
+            object,
+            c"spawn",
+            reactive::new_function(ctx, c"spawn", standard_spawn, 3),
+        );
+        put(
+            ctx,
+            object,
+            c"run",
+            reactive::new_function(ctx, c"run", standard_run, 3),
+        );
+        object
+    }
 }
 
 pub(crate) fn module(ctx: *mut Context) -> Value {

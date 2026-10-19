@@ -6,27 +6,28 @@ use nsh_js::{Host, type_definitions};
 
 use super::run;
 
-const PURE_MODULES: &[&str] = &[
-    "assert",
+const REFERENCE_MODULES: &[&str] = &[
     "buffer",
+    "console",
     "crypto",
-    "events",
+    "fs/promises",
+    "net",
+    "os",
     "path",
-    "string_decoder",
+    "process",
     "url",
-    "util",
+    "websocket",
     "zlib",
 ];
 
 #[test]
-fn node_aliases_reuse_the_same_native_module_namespace() {
-    for name in PURE_MODULES {
-        assert_eq!(
-            run(&format!(
-                "import * as bare from '{name}';\nimport * as node from 'node:{name}';\nglobalThis.out = bare === node;"
-            )),
-            "true",
-            "{name} aliases must normalize to one canonical module"
+fn standard_catalog_is_exact_and_node_aliases_are_unavailable() {
+    assert_eq!(nsh_core::js::STANDARD_MODULES, REFERENCE_MODULES);
+    for name in REFERENCE_MODULES {
+        let host = Host::new().unwrap();
+        assert!(
+            host.eval_source(&format!("import 'node:{name}';")).is_err(),
+            "node:{name} is absent in reference runtime"
         );
     }
 }
@@ -35,6 +36,11 @@ fn node_aliases_reuse_the_same_native_module_namespace() {
 fn private_unsupported_and_noncanonical_imports_do_not_resolve() {
     for name in [
         "node:vm",
+        "events",
+        "assert",
+        "util",
+        "string_decoder",
+        "fs",
         "node:node:buffer",
         "buffer/",
         "node:buffer/",
@@ -84,10 +90,30 @@ fn every_public_standard_value_is_declared_and_every_declared_value_exists() {
         .find(|(path, _)| path == "standard/index.d.ts")
         .expect("standard declaration index")
         .1;
-    let mut names = PURE_MODULES.to_vec();
-    names.extend(["fs", "fs/promises", "process", "net"]);
-    #[cfg(not(target_arch = "wasm32"))]
-    names.push("websocket");
+    let names = REFERENCE_MODULES
+        .iter()
+        .copied()
+        .filter(|name| *name != "websocket" || cfg!(not(target_arch = "wasm32")));
+    assert!(!public.contains("declare module \"node:"));
+    for removed in ["assert", "events", "util", "string_decoder", "fs"] {
+        assert!(!public.contains(&format!("declare module \"{removed}\"")));
+    }
+    let declared_modules: BTreeSet<_> = public
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("declare module \"")
+                .and_then(|rest| rest.split('"').next())
+        })
+        .collect();
+    let expected_modules: BTreeSet<_> = REFERENCE_MODULES
+        .iter()
+        .copied()
+        .filter(|name| *name != "websocket" || cfg!(not(target_arch = "wasm32")))
+        .collect();
+    assert_eq!(
+        declared_modules, expected_modules,
+        "public declaration catalog must be exact"
+    );
     for name in names {
         let actual: String = serde_json::from_str(&run(&format!(
             "import * as standard from '{name}';\nglobalThis.out = Object.keys(standard).sort().join(',');"

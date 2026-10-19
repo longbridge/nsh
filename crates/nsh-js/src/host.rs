@@ -42,9 +42,12 @@ pub(crate) struct Shared {
     /// Native animation nodes and composites collected meanwhile.
     pub(crate) animation_releases: RefCell<Vec<nsh_animation::AnimationOp>>,
     timers: RefCell<Timers>,
+    /// Per-VM host delegate for capability-gated exit requests.
+    pub(crate) system_exit_handler: RefCell<Option<Rc<dyn Fn(i32)>>>,
     /// Permissions and host-selected app directory for native system operations.
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
+    pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// Worker completion wakes the owning engine without polling.
     pub(crate) system_wake: RefCell<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub(crate) warnings: RefCell<Warnings>,
@@ -272,6 +275,7 @@ impl Host {
     fn stop_work(&self) {
         self.scheduler.disable();
         self.shared.system_wake.borrow_mut().take();
+        self.shared.system_exit_handler.borrow_mut().take();
         self.evaluations.borrow_mut().clear();
         self.shared.timers.borrow_mut().clear();
         self.shared.frames.borrow_mut().clear();
@@ -326,7 +330,7 @@ impl Host {
                     crate::standard::NAMES
                         .iter()
                         .map(|name| {
-                            let module = crate::standard::load(&ctx, name)
+                            let module = crate::modules::load_module(&ctx, name)
                                 .catch(&ctx)
                                 .map_err(JsError::caught)?;
                             let (module, promise) =
@@ -636,6 +640,21 @@ impl Host {
     ) {
         *self.shared.system_access.borrow_mut() = access;
         *self.shared.system_data_dir.borrow_mut() = data_dir;
+    }
+
+    /// Sets trusted application and home directory anchors for manifest grants.
+    pub fn set_system_paths(&self, paths: nsh_core::access::TrustedPaths) {
+        *self.shared.system_paths.borrow_mut() = paths;
+    }
+
+    /// Installs the meaning of `process.exit(code)` for this VM. The callback
+    /// runs on the owning engine thread after the app's exit capability check.
+    /// NSH never terminates the embedding process itself.
+    pub fn set_exit_handler(&self, handler: Rc<dyn Fn(i32)>) {
+        if self.fatal().is_some() {
+            return;
+        }
+        *self.shared.system_exit_handler.borrow_mut() = Some(handler);
     }
 
     /// Wakes this host's engine when a process or filesystem worker produces an event.
@@ -1433,6 +1452,27 @@ const report = (v) => text(String(v));
         assert!(host.rt.borrow().is_none());
         assert!(dropped.load(Ordering::SeqCst));
         assert!(!host.has_system_tasks());
+    }
+
+    #[test]
+    fn stopping_host_releases_exit_delegate_and_refuses_replacement() {
+        let host = Host::new().unwrap();
+        let captured = Rc::new(());
+        let retained = captured.clone();
+        host.set_exit_handler(Rc::new(move |_| {
+            let _ = &retained;
+        }));
+        assert_eq!(Rc::strong_count(&captured), 2);
+        host.stop("test exit delegate lifetime".into());
+        assert_eq!(Rc::strong_count(&captured), 1);
+        assert!(host.shared.system_exit_handler.borrow().is_none());
+        let retained = captured.clone();
+        host.set_exit_handler(Rc::new(move |_| {
+            let _ = &retained;
+        }));
+        assert_eq!(Rc::strong_count(&captured), 1);
+        assert!(host.shared.system_exit_handler.borrow().is_none());
+        host.stop("idempotent stop".into());
     }
 
     #[test]

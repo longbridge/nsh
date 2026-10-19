@@ -362,6 +362,10 @@ enum Made {
     Module(Arc<ModuleSpec>),
     /// One function of a flat module.
     Function(Arc<ModuleSpec>, &'static str),
+    /// A constant projected from the same generated module object.
+    Constant(Arc<ModuleSpec>, &'static str),
+    /// The generated module object itself.
+    Default(Arc<ModuleSpec>),
     /// A Rust class (`#[class]`).
     Class(&'static nsh_core::ui::ClassDef),
     /// A runtime value a registry exports as it is (`safeArea`).
@@ -446,8 +450,17 @@ impl ModuleTable {
                     for f in &m.functions {
                         out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
                     }
+                    for constant in &m.constants {
+                        out.push((
+                            constant.name.to_owned(),
+                            Made::Constant(m.clone(), constant.name),
+                        ));
+                    }
                 } else {
                     out.push((m.name.to_owned(), Made::Module(m.clone())));
+                }
+                if m.default {
+                    out.push(("default".to_owned(), Made::Default(m.clone())));
                 }
             }
             for class in registry.class_specs() {
@@ -532,13 +545,25 @@ impl rquickjs::loader::Loader for Loader {
         name: &str,
         _attributes: Option<rquickjs::loader::ImportAttributes<'js>>,
     ) -> rquickjs::Result<Module<'js>> {
-        if let Some(name) = crate::standard::normalize(name) {
+        // Framework typed registries own their native exports, including
+        // standard names migrated from handwritten adapters. LLRT providers
+        // remain on their original ModuleDef path in this same VM.
+        let registered = ctx
+            .userdata::<ModuleTablePtr>()
+            .is_some_and(|table| unsafe { (&*table.0).exports(name).is_some() });
+        if !registered && let Some(name) = crate::standard::normalize(name) {
             return crate::standard::load(ctx, name);
         }
         // SAFETY: the thunk uses this live context's registered table and
         // returns exactly the module created by the existing native loader.
         unsafe { Module::from_load_fn(ctx.clone(), name, load_native) }
     }
+}
+
+/// Resolve an already-canonical native specifier through the same provider
+/// selection used by the runtime loader (also used by type discovery).
+pub(crate) fn load_module<'js>(ctx: &Ctx<'js>, name: &str) -> rquickjs::Result<Module<'js>> {
+    rquickjs::loader::Loader::load(&mut Loader, ctx, name, None)
 }
 
 unsafe extern "C" fn load_native(
@@ -680,6 +705,9 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
         let Some(exports) = exports else {
             return -1;
         };
+        // One object per typed module in this ES namespace: default and
+        // flat named exports must share the exact same functions and values.
+        let mut module_objects: HashMap<usize, crate::web::js::V> = HashMap::new();
         for (export, made) in exports {
             let value = match made {
                 Made::Own(Export::Function(f, length)) => {
@@ -688,8 +716,27 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
                 }
                 Made::Own(Export::Value(make)) => make(ctx),
                 Made::Component(spec, module) => components::component(ctx, spec, module),
-                Made::Module(spec) => components::module(ctx, &spec),
-                Made::Function(spec, f) => components::module_function(ctx, &spec, f),
+                Made::Module(spec) | Made::Default(spec) => {
+                    let key = Arc::as_ptr(&spec) as usize;
+                    let object = module_objects.entry(key).or_insert_with(|| {
+                        crate::web::js::V::own(ctx, components::module(ctx, &spec))
+                    });
+                    qjs::JS_DupValue(ctx, object.raw())
+                }
+                Made::Function(spec, member) if !spec.default => {
+                    components::module_function(ctx, &spec, member)
+                }
+                Made::Function(spec, member) | Made::Constant(spec, member) => {
+                    let key = Arc::as_ptr(&spec) as usize;
+                    let object = module_objects.entry(key).or_insert_with(|| {
+                        crate::web::js::V::own(ctx, components::module(ctx, &spec))
+                    });
+                    if qjs::JS_IsException(object.raw()) {
+                        return -1;
+                    }
+                    let member = CString::new(member).unwrap_or_default();
+                    qjs::JS_GetPropertyStr(ctx, object.raw(), member.as_ptr())
+                }
                 Made::Class(def) => match crate::classes::constructor(ctx, def) {
                     Ok(ctor) => ctor.take(),
                     Err(_) => qjs::JS_EXCEPTION,
@@ -720,6 +767,34 @@ mod tests {
 #[cfg(test)]
 mod loader_tests {
     use super::normalize_chunk;
+
+    #[test]
+    fn typed_os_uses_one_object_in_source_bytecode_and_generated_types() {
+        let source = r#"
+            import os, {EOL,platform,arch,homedir} from 'os';
+            import {Buffer} from 'buffer';
+            import {Text} from 'nsh';
+            if (Object.keys(os).sort().join(',') !== 'EOL,arch,homedir,platform') throw Error('shape');
+            if (os.platform !== platform || os.arch !== arch || os.homedir !== homedir || os.EOL !== EOL) throw Error('identity');
+            if (typeof platform() !== 'string' || typeof arch() !== 'string') throw Error('sync result');
+            if (Buffer.from('os').toString() !== 'os' || typeof Text !== 'function') throw Error('mixed provider');
+        "#;
+        crate::Host::new().unwrap().eval_source(source).unwrap();
+        let bytecode = crate::compile_bytecode(source, false).unwrap();
+        crate::Host::new()
+            .unwrap()
+            .eval_bytecode(&bytecode)
+            .unwrap();
+        let declarations = crate::type_definitions(&[]);
+        let (_, generated) = declarations
+            .iter()
+            .find(|(path, _)| path == "os.d.ts")
+            .expect("registry declaration file");
+        assert!(generated.contains("export declare function platform(): string;"));
+        assert!(generated.contains("export declare const EOL: string;"));
+        assert!(generated.contains("export default defaultExport;"));
+        assert!(generated.contains("readonly EOL: string;"));
+    }
 
     #[test]
     fn relative_chunks_keep_quickjs_default_resolution() {

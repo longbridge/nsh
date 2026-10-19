@@ -207,7 +207,10 @@ impl Plugin for NshPlugin {
                 "{from}`{spec}` is not part of nsh apps: import signal, computed, effect, batch, untracked, cleanup, context and mount from \"nsh\""
             )));
         }
-        if spec.starts_with("node:")
+        // Rolldown may otherwise replace unsupported Node builtins with browser
+        // shims. These are absent from the reference runtime catalog.
+        if ["events", "assert", "util", "string_decoder", "fs"].contains(&spec)
+            || spec.starts_with("node:")
             || spec.starts_with("@nsh/llrt-types/")
             || spec.starts_with("nsh/")
             || spec.starts_with("nsh:")
