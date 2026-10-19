@@ -396,8 +396,14 @@ pub(crate) struct ListEl {
 #[derive(Clone)]
 pub(crate) enum ElKind {
     Plain,
-    /// The glue's node of slot `name`.
+    /// Where slot `name` goes (a view placing it).
     Slot(&'static str),
+    /// What a view fills a nested component's slot `name` with: its
+    /// children, placed as they are where the nested view places the slot.
+    Fill(&'static str),
+    /// Where the nested view places what a view filled slot `name` with
+    /// (no node of its own).
+    Filled(&'static str),
     /// Where the JSX children go (a list row's content, in a row).
     Children,
     /// One JSX child (in [`ParentElement::children_each`]).
@@ -1703,16 +1709,18 @@ impl<C: Component> ComponentElement<C> {
         }
     }
 
-    /// Fills its slot `slot` (its prop's JS name: `header`) with `content`.
+    /// Fills its slot `slot` (its prop's JS name: `header`) with `content`
+    /// (in place of what filled it): the component's view places it as it
+    /// is where it places the slot, with no node around it (a node of its
+    /// own only where the view styles the slot).
     pub fn fill(mut self, slot: &'static str, content: impl IntoElement) -> Self {
-        let mut holder = ElNode::new(Tag::View);
-        holder
-            .attrs
-            .props
-            .push(crate::Prop::ComponentSlot(slot.into()));
-        holder.key = Some(format!("slot:{slot}").into());
-        holder.children.push(content.into_element().0);
-        self.node.children.push(holder);
+        self.node
+            .children
+            .retain(|c| !matches!(c.kind, ElKind::Fill(s) if s == slot));
+        let mut fill = ElNode::new(Tag::View);
+        fill.kind = ElKind::Fill(slot);
+        fill.children.push(content.into_element().0);
+        self.node.children.push(fill);
         self
     }
 

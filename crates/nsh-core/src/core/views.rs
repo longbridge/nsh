@@ -88,7 +88,10 @@ pub(super) struct RegionState {
     /// What its nodes go before.
     anchor: Anchor,
     /// Its elements, as applied.
-    children: Vec<Expanded>,
+    pub(super) children: Vec<Expanded>,
+    /// The slot whose fill it is part of, in content of the nested
+    /// component `parent`.
+    fill: Option<&'static str>,
 }
 
 /// What a region's nodes go before in their parent.
@@ -304,6 +307,11 @@ impl<M: TextEngine> Core<M> {
                 parent,
                 anchor: Anchor::End,
                 children: Vec::new(),
+                fill: self
+                    .components
+                    .filling
+                    .filter(|&(nested, _)| nested == parent)
+                    .map(|(_, name)| name),
             },
         );
         let patches = self.components.patches.clone();
@@ -336,6 +344,8 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn placed(&self, e: &Expanded) -> Vec<NodeId> {
         match e.part {
             Part::Region(region) => self.region_nodes(region),
+            Part::Fill(_) => e.children.iter().flat_map(|c| self.placed(c)).collect(),
+            Part::Filled(_) => Vec::new(),
             _ => vec![e.id],
         }
     }
@@ -527,11 +537,22 @@ impl<M: TextEngine> Core<M> {
                 Placement::At(parent, after)
             };
         }
+        self.place_filled(&out, &mut inst, anchor, |after| {
+            if nested {
+                Placement::Nested(parent, after)
+            } else {
+                Placement::At(parent, after)
+            }
+        });
         // In place: from the last, each before the next, from the anchor.
         let nodes: Vec<NodeId> = out
             .iter()
             .flat_map(|e| match e.part {
                 Part::Children => inst.js_children.clone(),
+                Part::Filled(name) => self
+                    .fill_of(&inst, name)
+                    .map(|f| self.fill_nodes(f))
+                    .unwrap_or_default(),
                 _ => self.placed(e),
             })
             .collect();
@@ -544,8 +565,15 @@ impl<M: TextEngine> Core<M> {
                 parent,
                 anchor: state.anchor,
                 children: out,
+                fill: state.fill,
             },
         );
+        // Part of what fills a nested component's slot: it goes where the
+        // nested view places the slot, whose prop follows.
+        if let Some(name) = state.fill {
+            self.refill(parent, name);
+            return;
+        }
         let mut before = anchor;
         for &child in nodes.iter().rev() {
             if nested {
@@ -561,6 +589,14 @@ impl<M: TextEngine> Core<M> {
             }
             before = Some(child);
         }
+    }
+
+    /// A region of the fill of slot `name` of the nested component hosted
+    /// by `nested` changed: the nested view places the fill's nodes again,
+    /// and its slot prop follows whether there are any.
+    fn refill(&mut self, nested: NodeId, name: &'static str) {
+        self.components.mark(nested);
+        self.place_fill(nested, name);
     }
 
     /// Forgets what `host`'s view knew of the nodes released since: their

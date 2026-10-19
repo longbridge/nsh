@@ -8059,6 +8059,262 @@ mod views {
         assert_eq!(c.nodes.len(), 2, "the root and JS's child are left");
     }
 
+    /// Places its corner slot as it is after a title, or padded when
+    /// `framed`.
+    #[derive(Default)]
+    struct Corner;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct CornerProps {
+        #[prop(default)]
+        framed: bool,
+        corner: crate::ui::Prop<Option<Slot>>,
+    }
+
+    impl Component for Corner {
+        type Props = CornerProps;
+        type Event = NoEvent;
+
+        fn view(props: CornerProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let framed = props.framed;
+            view().child(text("title")).child(
+                props
+                    .corner
+                    .place(move |c| if framed { c.p_2() } else { c }),
+            )
+        }
+    }
+
+    /// Fills corners: with a counter, with what a press switches (a
+    /// text, a view of a text), with a text shown while on, and framed.
+    #[derive(Default)]
+    struct Corners;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct CornersProps {}
+
+    impl Component for Corners {
+        type Props = CornersProps;
+        type Event = NoEvent;
+
+        fn view(_: CornersProps, _: Scope<NoEvent>) -> impl IntoElement {
+            let n = signal(0);
+            view()
+                .on_press(move || n.update(|n| *n += 1))
+                .child(Corner::element(CornerProps::default()).fill(
+                    "corner",
+                    Counter::element(CounterProps {
+                        label: "Aside".into(),
+                    }),
+                ))
+                .child(dynamic(move || {
+                    // A corner each run, filled anew.
+                    let fill = if n.get() % 2 == 0 {
+                        text("even").into_element()
+                    } else {
+                        view().child(text("odd")).into_element()
+                    };
+                    Corner::element(CornerProps::default()).fill("corner", fill)
+                }))
+                .child(Corner::element(CornerProps::default()).fill(
+                    "corner",
+                    dynamic(move || (n.get() == 1).then(|| text("one"))),
+                ))
+                .child(
+                    Corner::element(CornerProps {
+                        framed: true,
+                        ..Default::default()
+                    })
+                    .fill("corner", text("framed")),
+                )
+        }
+    }
+
+    #[test]
+    fn a_slot_a_view_fills_is_placed_as_it_is() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Corners>(|| CornersProps {}));
+        let batch = c.commit().unwrap();
+        let root = root_host(&batch);
+        let corners = native_children(&c, root);
+        assert_eq!(corners.len(), 4);
+        // The third corner's fill shows nothing: its title alone.
+        assert_eq!(native_children(&c, corners[2]).len(), 1);
+        // The counter's host is the corner's child: no holder.
+        let counted = native_parent(&c, text_node(&batch, "Aside 0")).expect("placed");
+        assert_eq!(native_parent(&c, counted), Some(corners[0]));
+        assert_eq!(native_children(&c, corners[0]).len(), 2);
+        assert_eq!(
+            native_parent(&c, text_node(&batch, "even")),
+            Some(corners[1])
+        );
+        // Styled: in a node of the corner's own.
+        let framed = native_parent(&c, text_node(&batch, "framed")).expect("placed");
+        assert_ne!(framed, corners[3]);
+        assert_eq!(native_parent(&c, framed), Some(corners[3]));
+        // Its listener and events are its own.
+        assert!(c.component_event(counted, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["Aside 1"]);
+        // Filled anew: the new element takes the old one's place.
+        assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let odd = native_parent(&c, text_node(&batch, "odd")).expect("placed");
+        let corners = native_children(&c, root);
+        assert_eq!(native_parent(&c, odd), Some(corners[1]));
+        assert_eq!(native_children(&c, corners[1]).len(), 2);
+        // A fill that shows something now: placed in its corner.
+        let one = text_node(&batch, "one");
+        assert_eq!(native_parent(&c, one), Some(corners[2]));
+        // And gone again (released with no holder to leave); even again.
+        assert!(c.component_event(root, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        assert!(c.key(one).is_err(), "released");
+        assert!(
+            !batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Remove { .. })),
+            "{:?}",
+            batch.items
+        );
+        let corners = native_children(&c, root);
+        assert_eq!(native_children(&c, corners[2]).len(), 1, "the title alone");
+        let even = text_node(&batch, "even");
+        assert_eq!(native_parent(&c, even), Some(corners[1]));
+        assert_eq!(native_children(&c, corners[1]).len(), 2);
+    }
+
+    /// A corner as its view's root, its fill switched by a press on it
+    /// (a text, a view of a text).
+    #[component]
+    fn RootedCorner() -> impl IntoElement {
+        let on = signal(true);
+        let flip = move || on.update(|o| *o = !*o);
+        Corner::element(CornerProps::default()).fill(
+            "corner",
+            dynamic(move || {
+                if on.get() {
+                    text("x").on_press(flip).into_element()
+                } else {
+                    view().on_press(flip).child(text("y")).into_element()
+                }
+            }),
+        )
+    }
+
+    #[test]
+    fn a_component_rooted_in_another_fills_its_slot() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RootedCorner>(|| ()));
+        let batch = c.commit().unwrap();
+        let host = root_host(&batch);
+        assert_eq!(native_parent(&c, text_node(&batch, "x")), Some(host));
+        assert_eq!(native_children(&c, host).len(), 2);
+        for round in 0..4 {
+            let fill = native_children(&c, host)[1];
+            assert!(c.component_event(fill, EventKind::Press, &EventPayload::None));
+            let batch = c.commit().unwrap();
+            assert_eq!(
+                native_children(&c, host).len(),
+                2,
+                "{round}: {:?}",
+                batch.items
+            );
+        }
+    }
+
+    /// Rows of a list, each with a filled corner, a holder of a text and a
+    /// plaque.
+    #[component]
+    fn FilledRows() -> impl IntoElement {
+        view().flex_1().child(
+            virtual_list(200, move |at| {
+                let i = at.index();
+                view()
+                    .h(px(40.0))
+                    .child(
+                        Corner::element(CornerProps::default())
+                            .fill("corner", text(format!("r{i}"))),
+                    )
+                    .child(
+                        Holder::element(HolderProps {
+                            children: Children::default(),
+                        })
+                        .child(text(format!("h{i}"))),
+                    )
+                    .child(Plaque::element(PlaqueProps {}))
+            })
+            .estimated_item_size(40.0)
+            .flex_1(),
+        )
+    }
+
+    #[test]
+    fn list_rows_with_filled_slots_follow_their_rows() {
+        let mut c = core();
+        c.mount_root(&Root::new::<FilledRows>(|| ()));
+        let batch = c.commit().unwrap();
+        let list = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Scroll,
+                } => Some(*id),
+                _ => None,
+            })
+            .expect("a list");
+        let mut shown: std::collections::HashMap<String, NodeId> = Default::default();
+        let mut record = |b: &MountBatch, shown: &mut std::collections::HashMap<String, NodeId>| {
+            for i in &b.items {
+                if let MountItem::Text { id, text, .. } = i {
+                    shown.retain(|_, v| v != id);
+                    shown.insert(text.text.clone(), *id);
+                }
+            }
+        };
+        record(&batch, &mut shown);
+        let mut sizes = Vec::new();
+        for step in 1..=12u32 {
+            let y = (step as f32 * 900.0) % 7000.0;
+            c.set_scroll_offset(list, 0.0, y, u32::MAX);
+            for _ in 0..3 {
+                if let Some(b) = c.commit() {
+                    record(&b, &mut shown);
+                }
+            }
+            sizes.push((c.nodes.len(), c.components.instances.len()));
+            // Every r<i> shown is in the corner of the row showing h<i>.
+            for (t, &id) in &shown {
+                let Some(n) = t.strip_prefix('r') else {
+                    continue;
+                };
+                if c.key(id).is_err() {
+                    continue;
+                }
+                let Some(corner) = native_parent(&c, id) else {
+                    continue;
+                };
+                let row = native_parent(&c, corner).expect("a corner in a row");
+                if let Some(&h) = shown.get(&format!("h{n}"))
+                    && c.key(h).is_ok()
+                {
+                    let holder = native_parent(&c, h).unwrap();
+                    assert_eq!(native_parent(&c, holder), Some(row), "{step}: {t} and h{n}");
+                }
+            }
+        }
+        assert!(
+            sizes
+                .windows(2)
+                .skip(2)
+                .all(|w| w[0].0.abs_diff(w[1].0) < 40),
+            "{sizes:?}"
+        );
+        assert_eq!(sizes[3].1, sizes[sizes.len() - 1].1, "{sizes:?}");
+    }
+
     /// A count its API reads.
     #[derive(Default)]
     struct Dial;
