@@ -119,7 +119,16 @@ child components go with it. The design and its reasons: `reactive-components.md
   `virtual_list(..)` and a placed `ListElement`: snapping, `scroll_enabled`, `keyboard_dismiss_mode`,
   `scroll_value(&v)`, refresh, the scroll events); `on(kind, listener)` takes any native event with its raw
   payload. Host props are the core's `Prop`s, kept one per property and diffed by kind against what the binding
-  applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured.
+  applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured. It runs
+  under the owner current when it was made (the component, region or row whose view made it: `Owner::scope`, no
+  batch, so writes notify as they happen), so the signals, animated values, refs and tasks it makes are that owner's
+  and go with it rather than living as long as the surface. Once that owner is disposed the listener no longer runs
+  (its view is gone). When the owner is disposed while a listener or task runs under it (a press closing the view it
+  is in, then going on), the graph's current owner becomes `reactive::DISPOSED` rather than the freed slot's id, and
+  what is made from then on goes at once: signals and memos are disposed (using them panics, as with any disposed
+  signal), effects never run, cleanups run at once (a task spawned there is cancelled), animated values and refs do
+  nothing. An owner put back after a nested run that was disposed meanwhile is `DISPOSED` too
+  (`Graph::enter_owner` / `leave_owner` keep its generation).
 - **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
   the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option` or a `Vec`) is made
   again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
@@ -203,9 +212,9 @@ child components go with it. The design and its reasons: `reactive-components.md
   binds a node holds it while bound (`LiveNode`: an element's bound styles, `pan_values` / `pinch_value` /
   `rotation_value` / `scroll_value`, a drawing's slots, a composite's values, a derived node's inputs), so a binding in
   a region that outlives the handle's owner goes on moving, and so does an animation running on it; the node is released
-  when the last of these goes. Made with no owner (a listener, a task, outside a component), a handle lives as long as
-  the surface, as a signal made there does. Deriving the same node again gets the live one (a handle of it in the
-  current owner). Colors interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK,
+  when the last of these goes. Deriving the same node again gets the live one, through the handle the current owner
+  keeps of it (made the first time: `Derived`), so a derivation run over and over adds no slot. Made with no owner at
+  all (outside any component), a handle lives as long as the surface, as a signal made there does. Colors interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK,
   colors::ACCENT])`, any `AdaptiveColor`) follow the appearance: a binding of the view gives the node the other
   appearance's colors in place when it changes (`AnimationOp::SetOutput`), so nothing is made again and its bindings
   stay. Bound style properties go into the element's inline style, before the app's `style` on a host (the core keeps
@@ -343,7 +352,8 @@ tokio timer wakes the engine from another thread, which the OS may run late); aw
 `background`), a `Delay` is tokio's. A task changes what it wants by writing
 signals, inside the graph like any other Rust code of the view; the patches that makes go out with the next commit.
 `spawn`, `set_timeout`, `set_interval` and `request_animation_frame` return a `Spawned`: the task belongs to the owner
-current when it was made and ends with it (or at `.cancel()`); awaiting a `Spawned` gives its output.
+current when it was made and ends with it (or at `.cancel()`), and is polled under it, so what it makes is that
+owner's; awaiting a `Spawned` gives its output.
 
 ## Environment
 

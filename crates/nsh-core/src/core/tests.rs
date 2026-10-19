@@ -5192,6 +5192,184 @@ mod components {
         );
     }
 
+    /// One press derives nodes from the view's value (colors that follow
+    /// the appearance too); the other makes state of its own, and a task
+    /// that makes more.
+    #[component]
+    fn Repeated() -> impl IntoElement {
+        let v = animated_value(0.0);
+        let presses = signal(0);
+        let colors = [AdaptiveColor {
+            light: Color::BLACK,
+            dark: Color::TRANSPARENT,
+        }; 2];
+        view()
+            .bind_opacity(&v)
+            .child(view().on_press(move |_: &()| {
+                let half = v.mul(0.5);
+                let _ = half.interpolate(&[0.0, 1.0], &[0.0, 1.0]);
+                let _ = v.interpolate_colors(&[0.0, 1.0], &colors);
+                presses.update(|n| *n += 1);
+            }))
+            .child(view().on_press(move |_: &()| {
+                let _ = (signal(0), animated_value(1.0), element_ref(), stored(0));
+                spawn(async move {
+                    let _ = (signal(1), animated_value(2.0));
+                });
+            }))
+            .child(text(move || presses.get().to_string()))
+    }
+
+    #[test]
+    fn repeated_presses_do_not_grow_the_graph() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Repeated>();
+        c.set_components(registry);
+        let mount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    Op::SetProp {
+                        id,
+                        prop: Prop::Component(std::any::type_name::<Repeated>().into()),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+            let batch = c.commit().unwrap();
+            let buttons: Vec<_> = batch
+                .items
+                .iter()
+                .filter_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            [buttons[0], buttons[1]]
+        };
+        let unmount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Remove {
+                        parent: ROOT_ID,
+                        child: id,
+                    },
+                    Op::Release { id },
+                ],
+            );
+            let _ = (c.commit(), c.commit());
+        };
+        let press = |c: &mut Core<FakeEngine>, button| {
+            assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+            c.run_component_tasks();
+            let _ = c.commit();
+        };
+        let slots = |c: &Core<FakeEngine>| c.components.runtime.slots_in_use();
+        // What the surface makes once (its environment, the theme) first.
+        let _ = mount(&mut c, 2);
+        unmount(&mut c, 2);
+        let empty = slots(&c);
+
+        let [derive, make] = mount(&mut c, 4);
+        for _ in 0..5 {
+            press(&mut c, derive);
+        }
+        let derived = slots(&c);
+        for _ in 0..500 {
+            press(&mut c, derive);
+        }
+        assert_eq!(slots(&c), derived, "deriving again adds nothing");
+
+        // State a press makes is the component's: it goes with it.
+        for _ in 0..50 {
+            press(&mut c, make);
+        }
+        assert!(slots(&c) > derived);
+        unmount(&mut c, 4);
+        assert_eq!(slots(&c), empty, "released with the component");
+    }
+
+    /// A press disposes the branch its view is in (as what closes it does,
+    /// unbatched), then makes state and a task.
+    #[component]
+    fn SelfClosing() -> impl IntoElement {
+        let open = signal(true);
+        view().child(If::new(open, move || {
+            view().on_press(move |_: &()| {
+                Owner::current().dispose();
+                let _ = (signal(5), animated_value(1.0), element_ref());
+                spawn(async {});
+            })
+        }))
+    }
+
+    #[test]
+    fn a_listener_closing_its_own_view_leaves_nothing() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<SelfClosing>();
+        c.set_components(registry);
+        let mount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Create { id, tag: Tag::View },
+                    Op::SetProp {
+                        id,
+                        prop: Prop::Component(std::any::type_name::<SelfClosing>().into()),
+                    },
+                    Op::Insert {
+                        parent: ROOT_ID,
+                        child: id,
+                        before: None,
+                    },
+                ],
+            );
+            let batch = c.commit().unwrap();
+            batch
+                .items
+                .iter()
+                .find_map(|i| match i {
+                    MountItem::Events { id, events } if events.contains(EventKind::Press) => {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let unmount = |c: &mut Core<FakeEngine>, id| {
+            apply(
+                c,
+                vec![
+                    Op::Remove {
+                        parent: ROOT_ID,
+                        child: id,
+                    },
+                    Op::Release { id },
+                ],
+            );
+            let _ = (c.commit(), c.commit());
+        };
+        let _ = mount(&mut c, 2);
+        unmount(&mut c, 2);
+        let empty = c.components.runtime.slots_in_use();
+        let button = mount(&mut c, 4);
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.run_component_tasks();
+        let _ = c.commit();
+        unmount(&mut c, 4);
+        assert_eq!(c.components.runtime.slots_in_use(), empty);
+    }
+
     /// Its own rows indexing its data; a press clears the data. Its errors
     /// show as a text.
     #[component]

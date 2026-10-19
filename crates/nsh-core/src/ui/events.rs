@@ -1,7 +1,7 @@
 //! Typed native events: what the `on_*` methods of elements hand their
 //! listeners, decoded from the platform's [`EventPayload`].
 
-use std::{borrow::Cow, rc::Rc, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
 use super::element::Listener;
 use crate::{EventPayload, JsonValue, PayloadValue, Rect, Size, TouchEvent};
@@ -181,12 +181,11 @@ pub(crate) fn typed<T: ?Sized + ToOwned + 'static>(
     listener: Listener<T>,
     decode: Decode<T>,
 ) -> Listener<EventPayload> {
-    let inner = listener.0;
-    Listener(Rc::new(move |payload: &EventPayload| {
+    listener.wrap(move |inner, payload: &EventPayload| {
         if let Some(value) = decode(payload) {
             inner(&value);
         }
-    }))
+    })
 }
 
 /// Events without data.

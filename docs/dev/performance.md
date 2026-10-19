@@ -54,11 +54,12 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   |---|---|
   | `AnimatedValue::set` | 8.3–9.2ns [8.2–9.7ns] |
   | `AnimatedValue::timing` (its end dropped) | 14.6–16.9ns [13.0–14.2ns] |
-  | `AnimatedValue::interpolate` of a node made before (a handle of it in the current owner) | 30.0–31.0ns [20.3–20.9ns] |
+  | `AnimatedValue::interpolate` of a node made before (the handle the current owner keeps of it) | 26.5–27.5ns [20.3–20.9ns] |
   | `ElementRef::node` | 1.2ns [0.2ns] |
   | `ElementRef::focus` | 12.5–14.4ns [8.8–9.1ns] |
 
-  They are used when a view is made and on events, never per frame (the graph runs by node id), and left
+  Deriving a node again under an owner that keeps a handle of it returns that handle (30–31ns while it made a new
+  slot each time). They are used when a view is made and on events, never per frame (the graph runs by node id), and left
   `component_bench` and `nsh trace` of the Rust gallery's Animations and Gestures pages (taps on their controls) where
   they were: the same ops and mount items in every commit (Animations: 2029 items on the page's first frame, then
   4 / 10 / 9 / 9 / 3 / 3 / 17 for Release, Stagger, Sequence, Loop, Stop, Reset and a curve; Gestures: 815, then

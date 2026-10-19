@@ -16,39 +16,69 @@ use crate::{
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
-/// writes the signals it captured.
-pub struct Listener<E: ?Sized>(pub(crate) Rc<dyn Fn(&E)>);
+/// writes the signals it captured. It runs under the owner current when it
+/// was made (the component, region or row whose view made it), so what it
+/// makes (signals, animated values, element refs, tasks) is that owner's
+/// and goes with it; once that owner is disposed it no longer runs.
+pub struct Listener<E: ?Sized> {
+    f: Rc<dyn Fn(&E)>,
+    owner: super::Owner,
+}
 
 impl<E: ?Sized + 'static> Listener<E> {
     /// A listener that does nothing (the element still listens).
     pub(crate) fn noop() -> Self {
-        Self(Rc::new(|_| {}))
+        Self::new(Rc::new(|_| {}))
     }
 
-    /// Calls it with `event`.
+    fn new(f: Rc<dyn Fn(&E)>) -> Self {
+        Self {
+            f,
+            owner: super::Owner::current_or_detached(),
+        }
+    }
+
+    /// Calls it with `event`, under its owner; not once that owner is
+    /// disposed: the view it was made for is gone.
     pub(crate) fn call(&self, event: &E) {
-        (self.0)(event);
+        if self.owner == super::Owner::detached() {
+            (self.f)(event);
+        } else if self.owner.is_live() {
+            self.owner.scope(|| (self.f)(event));
+        }
+    }
+
+    /// A listener of `F` that runs `f` with this one's closure, under its
+    /// owner.
+    pub(crate) fn wrap<F: ?Sized>(self, f: impl Fn(&dyn Fn(&E), &F) + 'static) -> Listener<F> {
+        let inner = self.f;
+        Listener {
+            f: Rc::new(move |event: &F| f(&*inner, event)),
+            owner: self.owner,
+        }
     }
 }
 
 impl<E: 'static> Listener<E> {
     /// This listener for events of another type, turned into `E` by `f`.
     pub fn map<F: ?Sized + 'static>(self, f: impl Fn(&F) -> E + 'static) -> Listener<F> {
-        let inner = self.0;
-        Listener(Rc::new(move |event: &F| inner(&f(event))))
+        self.wrap(move |inner, event: &F| inner(&f(event)))
     }
 }
 
 /// A closure as a listener.
 impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
     fn from(f: F) -> Self {
-        Listener(Rc::new(f))
+        Self::new(Rc::new(f))
     }
 }
 
 impl<E: ?Sized> Clone for Listener<E> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            f: self.f.clone(),
+            owner: self.owner,
+        }
     }
 }
 
@@ -1609,13 +1639,13 @@ impl<C: Component> ComponentElement<C> {
 
     /// Handles its events (they then do not reach the app).
     pub fn on_event(mut self, listener: impl Into<Listener<C::Event>>) -> Self {
-        let inner = listener.into().0;
+        let listener = listener.into();
         if let ElKind::Component(c) = &mut self.node.kind {
-            c.on_event = Some(Listener(Rc::new(move |event: &dyn Any| {
+            c.on_event = Some(listener.wrap(|inner, event: &dyn Any| {
                 if let Some(event) = event.downcast_ref::<C::Event>() {
                     inner(event);
                 }
-            })));
+            }));
         }
         self
     }

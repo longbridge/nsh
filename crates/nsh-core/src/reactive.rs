@@ -22,6 +22,18 @@ pub const NONE: u32 = u32::MAX;
 /// The owner of nodes made in a root that is never disposed: they are owned
 /// by nothing.
 pub const UNOWNED: u32 = u32::MAX - 1;
+/// The current owner once the owner that was current is disposed while it
+/// runs (a listener closing the view it belongs to, then going on): what is
+/// made under it is disposed at once, since what it belongs to is gone. Its
+/// slot is free to be reused, so the owner is never named by id again.
+pub const DISPOSED: u32 = u32::MAX - 2;
+
+/// Whether `owner` names a node (not [`NONE`], [`UNOWNED`] or
+/// [`DISPOSED`]).
+#[inline]
+fn is_node(owner: u32) -> bool {
+    owner < DISPOSED
+}
 
 const CLEAN: u8 = 0;
 const STALE: u8 = 1;
@@ -208,6 +220,13 @@ impl<H: Host> Held<H> {
     }
 }
 
+/// The owner that was current before a run ([`Graph::enter_owner`]).
+#[derive(Clone, Copy, Debug)]
+pub struct SavedOwner {
+    id: u32,
+    generation: u32,
+}
+
 /// The nodes and the scheduler's state.
 pub struct Graph<H: Host> {
     nodes: Vec<Node<H>>,
@@ -277,9 +296,9 @@ impl<H: Host> Graph<H> {
         let n = &mut self.nodes[id as usize];
         let old = std::mem::replace(&mut n.value, value);
         n.equals = equals;
-        n.owner = owner;
+        n.owner = if is_node(owner) { owner } else { NONE };
         drop(old);
-        if owner != NONE && owner != UNOWNED {
+        if is_node(owner) {
             self.nodes[owner as usize].owned.push(id);
         }
         id
@@ -296,9 +315,9 @@ impl<H: Host> Graph<H> {
         let old = std::mem::replace(&mut n.value, value);
         drop(old);
         n.state = STALE;
-        n.owner = owner;
+        n.owner = if is_node(owner) { owner } else { NONE };
         n.context = context;
-        if owner != NONE && owner != UNOWNED {
+        if is_node(owner) {
             self.nodes[owner as usize].owned.push(id);
         }
         id
@@ -311,13 +330,13 @@ impl<H: Host> Graph<H> {
         let id = self.alloc(Kind::Root);
         let context = self.context_of(current);
         let n = &mut self.nodes[id as usize];
-        n.owner = current;
+        n.owner = if current == DISPOSED { NONE } else { current };
         n.context = context;
         id
     }
 
     fn context_of(&self, owner: u32) -> Option<Rc<Frame<H>>> {
-        if owner == NONE || owner == UNOWNED {
+        if !is_node(owner) {
             return None;
         }
         self.nodes[owner as usize].context.clone()
@@ -334,7 +353,7 @@ impl<H: Host> Graph<H> {
     /// `data` comes back).
     pub fn provide(&mut self, data: H::Context) -> Result<Option<Rc<Frame<H>>>, H::Context> {
         let owner = self.owner;
-        if owner == NONE || owner == UNOWNED {
+        if !is_node(owner) {
             return Err(data);
         }
         let parent = self.nodes[owner as usize].context.clone();
@@ -428,6 +447,35 @@ impl<H: Host> Graph<H> {
         std::mem::replace(&mut self.owner, owner)
     }
 
+    /// Makes `owner` current for a run; returns the previous owner, to put
+    /// back with [`Self::leave_owner`].
+    pub fn enter_owner(&mut self, owner: u32) -> SavedOwner {
+        let previous = std::mem::replace(&mut self.owner, owner);
+        SavedOwner {
+            id: previous,
+            generation: if is_node(previous) {
+                self.nodes[previous as usize].generation
+            } else {
+                0
+            },
+        }
+    }
+
+    /// Puts back the owner [`Self::enter_owner`] saved: [`DISPOSED`] if it
+    /// was disposed meanwhile (its slot may name another node now).
+    pub fn leave_owner(&mut self, saved: SavedOwner) {
+        self.owner = if is_node(saved.id) {
+            let n = &self.nodes[saved.id as usize];
+            if n.generation == saved.generation && !n.disposed {
+                saved.id
+            } else {
+                DISPOSED
+            }
+        } else {
+            saved.id
+        };
+    }
+
     /// The current listener (what reads track into).
     pub fn listener(&self) -> u32 {
         self.listener
@@ -440,17 +488,18 @@ impl<H: Host> Graph<H> {
 
     /// Whether a live owner owns what runs now.
     pub fn has_owner(&self) -> bool {
-        self.owner != NONE && self.owner != UNOWNED && !self.nodes[self.owner as usize].disposed
+        self.is_live_owner(self.owner)
     }
 
     /// Whether node `id` is a live owner (not disposed).
     pub fn is_live_owner(&self, id: u32) -> bool {
-        id != NONE && id != UNOWNED && !self.nodes[id as usize].disposed
+        is_node(id) && !self.nodes[id as usize].disposed
     }
 
-    /// Adds cleanup `f` to the current owner; gives it back without one.
+    /// Adds cleanup `f` to the current owner; gives it back without one
+    /// (and under [`DISPOSED`], where the host runs it at once).
     pub fn on_cleanup(&mut self, f: H::Cleanup) -> Result<(), H::Cleanup> {
-        if self.owner == NONE || self.owner == UNOWNED {
+        if !is_node(self.owner) {
             return Err(f);
         }
         self.nodes[self.owner as usize].cleanups.push(f);
@@ -700,7 +749,7 @@ fn run_top<H: Host>(h: H, id: u32) {
     let exec = graph.exec;
     let mut ancestors = vec![id];
     let mut at = node.owner;
-    while at != NONE && at != UNOWNED {
+    while is_node(at) {
         let n = &graph.nodes[at as usize];
         if n.updated_at.is_some_and(|t| t >= exec) {
             break;
@@ -769,12 +818,12 @@ fn run_computation<H: Host>(h: H, id: u32, time: u64) {
     };
     let prev = h.dup(&n.value);
     let listener = std::mem::replace(&mut graph.listener, id);
-    let owner = std::mem::replace(&mut graph.owner, id);
+    let owner = graph.enter_owner(id);
     let result = h.call(&func, prev);
     h.free_func(func);
     let graph = g(h);
     graph.listener = listener;
-    graph.owner = owner;
+    graph.leave_owner(owner);
     let Some(next) = result else {
         let n = &mut graph.nodes[id as usize];
         if n.kind == Kind::Memo {
@@ -896,8 +945,13 @@ fn clean_node<H: Host>(h: H, id: u32) {
 /// Disposes node `id`: cleans it, unlinks it and frees it (a node named by
 /// a handle keeps its value until the handle goes).
 pub fn dispose<H: Host>(h: H, id: u32) {
-    if g(h).nodes[id as usize].disposed {
+    if !is_node(id) || g(h).nodes[id as usize].disposed {
         return;
+    }
+    // Code running under it goes on under no owner it could reuse the slot
+    // of: what it makes from now on goes at once (its cleanups' too).
+    if g(h).owner == id {
+        g(h).owner = DISPOSED;
     }
     clean_node(h, id);
     let graph = g(h);
@@ -930,10 +984,15 @@ pub fn memo<H: Host>(
     handle: bool,
 ) -> u32 {
     let graph = g(h);
+    let gone = graph.owner == DISPOSED;
     let id = graph.computation(Kind::Memo, func, value);
     graph.nodes[id as usize].equals = equals;
     graph.nodes[id as usize].handle = handle;
-    update_computation(h, id);
+    if gone {
+        dispose(h, id);
+    } else {
+        update_computation(h, id);
+    }
     id
 }
 
@@ -943,8 +1002,11 @@ pub fn memo<H: Host>(
 pub fn effect<H: Host>(h: H, kind: Kind, func: H::Func, value: H::Value) -> u32 {
     debug_assert!(matches!(kind, Kind::Effect | Kind::UserEffect));
     let graph = g(h);
+    let gone = graph.owner == DISPOSED;
     let id = graph.computation(kind, func, value);
-    if kind == Kind::UserEffect && graph.effects.is_some() {
+    if gone {
+        dispose(h, id);
+    } else if kind == Kind::UserEffect && graph.effects.is_some() {
         graph.queue_effect(id);
     } else {
         update_computation(h, id);
@@ -969,11 +1031,11 @@ pub fn batch<H: Host, R>(h: H, f: impl FnOnce() -> R) -> R {
 /// makes runs at once).
 pub fn with_owner<H: Host, R>(h: H, owner: u32, f: impl FnOnce() -> R) -> R {
     let graph = g(h);
-    let previous_owner = graph.set_owner(owner);
+    let previous_owner = graph.enter_owner(owner);
     let previous_listener = graph.set_listener(NONE);
     let r = run_updates(h, true, f);
     let graph = g(h);
-    graph.owner = previous_owner;
+    graph.leave_owner(previous_owner);
     graph.listener = previous_listener;
     r
 }
@@ -981,7 +1043,13 @@ pub fn with_owner<H: Host, R>(h: H, owner: u32, f: impl FnOnce() -> R) -> R {
 /// Runs `f` in a new root owner under the current one (context passes
 /// through it); returns the root and `f`'s result. The root is disposed
 /// with [`dispose_owner`].
+///
+/// Under [`DISPOSED`] there is no root: `f` runs there too (what it makes
+/// goes at once) and the root is `DISPOSED`, which disposing ignores.
 pub fn with_root<H: Host, R>(h: H, f: impl FnOnce() -> R) -> (u32, R) {
+    if g(h).owner == DISPOSED {
+        return (DISPOSED, with_owner(h, DISPOSED, f));
+    }
     let id = g(h).root();
     (id, with_owner(h, id, f))
 }
@@ -991,9 +1059,9 @@ pub fn with_root<H: Host, R>(h: H, f: impl FnOnce() -> R) -> (u32, R) {
 pub fn with_root_under<H: Host, R>(h: H, owner: u32, f: impl FnOnce() -> R) -> (u32, R) {
     let graph = g(h);
     let live = graph.is_live_owner(owner);
-    let previous = graph.set_owner(if live { owner } else { NONE });
+    let previous = graph.enter_owner(if live { owner } else { NONE });
     let r = with_root(h, f);
-    g(h).owner = previous;
+    g(h).leave_owner(previous);
     r
 }
 

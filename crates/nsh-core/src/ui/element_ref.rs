@@ -9,8 +9,10 @@
 //! Used after that, a ref does nothing and names no node (no panic). The
 //! element carrying a ref holds what it names ([`RefTarget`]) for as long
 //! as it is mounted, so mounting and unmounting it never reach the ref's
-//! owner. Made with no owner (outside a component, in a listener or a
-//! task), a ref lives as long as the surface, as a signal made there does.
+//! owner. Listeners and tasks run under the owner that made them, so a ref
+//! one makes is that owner's; made with no owner at all (outside any
+//! component), a ref lives as long as the surface, as a signal made there
+//! does.
 
 use std::{
     cell::Cell,

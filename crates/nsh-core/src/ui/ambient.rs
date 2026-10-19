@@ -474,13 +474,39 @@ impl<T> Future for Spawned<T> {
 }
 
 /// Runs `future` on the engine thread (TS: an `async` function): it changes
-/// what it wants by writing signals, and ends with the current owner.
+/// what it wants by writing signals, and ends with the current owner. It
+/// runs under that owner: what it makes is the owner's.
 pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T> {
     let executor = executor();
-    let task = task::spawn_future(&executor, future);
+    let owner = Owner::current();
+    let task = task::spawn_future(
+        &executor,
+        Owned {
+            owner,
+            future: Box::pin(future),
+        },
+    );
     let handle = task.handle();
     cleanup(move || handle.cancel());
     Spawned(task)
+}
+
+/// A future polled under `owner` ([`Owner::scope`]).
+struct Owned<F> {
+    owner: Owner,
+    future: std::pin::Pin<Box<F>>,
+}
+
+impl<F: Future> Future for Owned<F> {
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<F::Output> {
+        let this = self.get_mut();
+        this.owner.scope(|| this.future.as_mut().poll(cx))
+    }
 }
 
 /// Runs `f` once after `delay` (TS: `setTimeout`; cancelling the task is

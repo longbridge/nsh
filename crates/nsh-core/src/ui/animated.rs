@@ -16,9 +16,12 @@
 //! scroll offsets, a drawing, a composed animation, a derived node's
 //! inputs), so a binding in a region that outlives the handle's owner
 //! goes on moving, and an animation running on it goes on running.
-//! Made with no owner (outside a component, in a listener or a task), a
-//! handle keeps its node as long as the surface, as a signal made there
-//! lives as long as the graph.
+//! Listeners and tasks run under the owner that made them, so what they
+//! make is that owner's too; deriving a node again under an owner that
+//! has a handle of it returns that handle ([`Derived`]), so code run over
+//! and over adds nothing. Made with no owner at all (outside any
+//! component), a handle keeps its node as long as the surface, as a
+//! signal made there lives as long as the graph.
 
 use std::{
     cell::Cell,
@@ -32,7 +35,7 @@ use nsh_animation::{
 
 use super::{
     AdaptiveColor,
-    reactive::Kept,
+    reactive::{Kept, Owner},
     task::{Action, Answer, Executor},
 };
 
@@ -87,17 +90,24 @@ fn with_node(mut op: AnimationOp, id: nsh_animation::NodeId) -> AnimationOp {
 }
 
 /// Derived nodes by the operation that made them (its node id 0), while
-/// alive.
+/// alive, with the handles of each that owners keep: deriving a node again
+/// under an owner that has a handle of it returns that handle, so doing it
+/// over and over (in a listener, a binding run again) adds nothing.
 #[derive(Default)]
-pub(crate) struct Derived(pub(crate) Vec<(AnimationOp, Weak<Node>)>);
+pub(crate) struct Derived(Vec<DerivedNode>);
+
+struct DerivedNode {
+    key: AnimationOp,
+    node: Weak<Node>,
+    /// The live handles of it, by the owner keeping each.
+    handles: Vec<(Owner, AnimatedNode)>,
+}
 
 impl Derived {
-    pub(crate) fn get(&mut self, key: &AnimationOp) -> Option<Rc<Node>> {
-        self.0.retain(|(_, n)| n.strong_count() > 0);
-        self.0
-            .iter()
-            .find(|(k, _)| k == key)
-            .and_then(|(_, n)| n.upgrade())
+    /// The live node `key` made.
+    fn entry(&mut self, key: &AnimationOp) -> Option<&mut DerivedNode> {
+        self.0.retain(|d| d.node.strong_count() > 0);
+        self.0.iter_mut().find(|d| d.key == *key)
     }
 }
 
@@ -193,37 +203,56 @@ impl AnimatedNode {
 
     /// The node `op` makes from this one: the live one made by the same
     /// operation if there is one (a region or a row made again derives it
-    /// again and gets the same node, so its bindings stay as they are). A
-    /// handle of it is kept by the current owner. Of a node whose owner
-    /// is gone (or with an operand whose owner is gone): no node.
+    /// again and gets the same node, so its bindings stay as they are),
+    /// through the handle the current owner keeps of it (made the first
+    /// time), and whether that handle is new. Of a node whose owner is gone
+    /// (or with an operand whose owner is gone): no node.
     fn derive(
         &self,
         op: impl FnOnce(nsh_animation::NodeId) -> AnimationOp,
         other: Option<AnimatedNode>,
-    ) -> AnimatedNode {
+    ) -> (AnimatedNode, bool) {
         let Some(node) = self.live() else {
-            return Self::gone();
+            return (Self::gone(), false);
         };
         let other = match other {
             Some(other) => match other.live() {
                 Some(other) => Some(other),
-                None => return Self::gone(),
+                None => return (Self::gone(), false),
             },
             None => None,
         };
         let Some(executor) = node.executor() else {
             // The surface is gone: a node nothing reads.
-            return *self;
+            return (*self, false);
         };
         let key = op(0);
-        if let Some(node) = executor.derived(&key) {
-            return Self::keep(node);
+        let owner = Owner::current();
+        let mut derived = executor.derived();
+        if let Some(entry) = derived.entry(&key) {
+            entry.handles.retain(|(_, h)| h.node.is_live());
+            if let Some(&(_, handle)) = entry.handles.iter().find(|(o, _)| *o == owner) {
+                return (handle, false);
+            }
+            let Some(node) = entry.node.upgrade() else {
+                unreachable!("entries are of live nodes");
+            };
+            let handle = Self::keep(node);
+            entry.handles.push((owner, handle));
+            return (handle, true);
         }
+        drop(derived);
         let mut inputs = vec![node.0];
         inputs.extend(other.map(|o| o.0));
         let node = Node::new(&executor, |id| with_node(key.clone(), id), inputs);
-        executor.remember_derived(key, &node);
-        Self::keep(node)
+        let weak = Rc::downgrade(&node);
+        let handle = Self::keep(node);
+        executor.derived().0.push(DerivedNode {
+            key,
+            node: weak,
+            handles: vec![(owner, handle)],
+        });
+        (handle, true)
     }
 
     /// Maps the value through `input` breakpoints (ascending) to numbers,
@@ -260,14 +289,15 @@ impl AnimatedNode {
         if colors.iter().all(|c| c.light == c.dark) {
             return self.interpolate_with(input, pick(false), Interpolation::default());
         }
-        let node = self.interpolate_with(
+        let (node, new) = self.interpolate_derived(
             input,
             pick(super::untracked(super::ambient::dark)),
             Interpolation::default(),
         );
         // The appearance's colors from now on; the effect holds the node
-        // while it lives (it goes with the owner that keeps the handle).
-        let Some(held) = node.live() else {
+        // while it lives (it goes with the owner that keeps the handle,
+        // which has one already when the handle is not new).
+        let Some(held) = node.live().filter(|_| new) else {
             return node;
         };
         let first = Cell::new(true);
@@ -292,6 +322,16 @@ impl AnimatedNode {
         output: Output,
         interpolation: Interpolation,
     ) -> AnimatedNode {
+        self.interpolate_derived(input, output, interpolation).0
+    }
+
+    /// [`Self::interpolate_with`], and whether its handle is new.
+    fn interpolate_derived(
+        &self,
+        input: &[f32],
+        output: Output,
+        interpolation: Interpolation,
+    ) -> (AnimatedNode, bool) {
         let source = self.id();
         let input_range = input.to_vec();
         self.derive(
@@ -315,6 +355,7 @@ impl AnimatedNode {
             move |node| AnimationOp::CreateMath { node, op, a, b },
             other.node,
         )
+        .0
     }
 
     /// The sum with `other`.
@@ -355,6 +396,7 @@ impl AnimatedNode {
             },
             None,
         )
+        .0
     }
 }
 
