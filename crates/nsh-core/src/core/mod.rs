@@ -2230,6 +2230,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Selected, patch);
                 return Ok(());
             }
+            Prop::CheckedStyle(patch) => {
+                self.set_part_style(key, classes::Part::Checked, patch);
+                return Ok(());
+            }
             Prop::HeaderStyle(patch) => {
                 self.set_part_style(key, classes::Part::Header, patch);
                 return Ok(());
@@ -2288,6 +2292,10 @@ impl<M: TextEngine> Core<M> {
                 }
                 let selected =
                     (a.state.selected != before.state.selected).then_some(a.state.selected);
+                let is_checked =
+                    |s: &crate::AccessibilityState| s.checked == Some(crate::Checked::True);
+                let checked = (is_checked(&a.state) != is_checked(&before.state))
+                    .then(|| is_checked(&a.state));
                 if *a != before {
                     flags |= if label_only {
                         dirty::LABEL
@@ -2295,11 +2303,16 @@ impl<M: TextEngine> Core<M> {
                         dirty::VIEW_PROPS
                     };
                 }
-                if let Some(selected) = selected {
+                if selected.is_some() || checked.is_some() {
                     if flags != 0 {
                         self.mark(key, flags);
                     }
-                    self.set_selected(key, selected);
+                    if let Some(selected) = selected {
+                        self.set_selected(key, selected);
+                    }
+                    if let Some(checked) = checked {
+                        self.set_checked(key, checked);
+                    }
                     return Ok(());
                 }
             }

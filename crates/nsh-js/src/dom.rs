@@ -1222,7 +1222,7 @@ fn set_prop(
             return set_prop(ctx, content, name, value, prev);
         }
         "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "selectedStyle"
-        | "headerStyle" => {
+        | "checkedStyle" | "headerStyle" => {
             let patch = part_style(ctx, name, value)?;
             let prop = match name {
                 "activeStyle" => nsh_core::Prop::ActiveStyle(patch),
@@ -1230,6 +1230,7 @@ fn set_prop(
                 "focusStyle" => nsh_core::Prop::FocusStyle(patch),
                 "disabledStyle" => nsh_core::Prop::DisabledStyle(patch),
                 "selectedStyle" => nsh_core::Prop::SelectedStyle(patch),
+                "checkedStyle" => nsh_core::Prop::CheckedStyle(patch),
                 _ => nsh_core::Prop::HeaderStyle(patch),
             };
             return dom(ctx).push(ctx, Op::SetProp { id, prop });

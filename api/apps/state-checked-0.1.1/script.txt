@@ -1,0 +1,43 @@
+# What a user does and sees (compat/apps.rs).
+expect On: false
+# Off: the plain classes, on the track and on the thumb.
+prop id:switch role switch
+style id:switch backgroundColor #ccccccff
+style id:switch borderWidth 0
+style id:thumb backgroundColor #ffffffff
+# On: `checked:` and `checkedStyle` on the track, `group-checked:` on
+# the thumb.
+tap id:switch
+expect On: true
+prop id:switch accessibilityState checked=true
+style id:switch backgroundColor #00aa55ff
+style id:switch borderWidth 2
+style id:switch borderColor #000000ff
+style id:thumb backgroundColor #222222ff
+# Mixed is not checked.
+tap id:mixed
+prop id:switch accessibilityState checked=mixed
+style id:switch backgroundColor #ccccccff
+style id:switch borderWidth 0
+style id:thumb backgroundColor #ffffffff
+tap id:mixed
+style id:switch backgroundColor #00aa55ff
+style id:thumb backgroundColor #222222ff
+# Disabled: `disabledStyle` applies and `checkedStyle` does not; the
+# `checked:` class still does, as every class variant but `enabled:`.
+tap id:disable
+style id:switch opacity 0.4
+style id:switch borderWidth 0
+style id:switch backgroundColor #00aa55ff
+tap id:disable
+style id:switch opacity 1
+style id:switch borderWidth 2
+# Off again.
+tap id:switch
+expect On: false
+style id:switch backgroundColor #ccccccff
+style id:switch borderWidth 0
+style id:thumb backgroundColor #ffffffff
+covers [props] checkedStyle
+covers [props] accessibilityState
+covers [props] role

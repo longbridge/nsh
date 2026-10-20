@@ -2883,6 +2883,8 @@ caret-red-500/50 props.caret_color=Some(Color(#fb2c3680))
 caret-red-500/[0.3] props.caret_color=Some(Color(#fb2c364d))
 caret-transparent props.caret_color=Some(Color(#00000000))
 caret-white props.caret_color=Some(Color(#ffffffff))
+checked:bg-accent -
+checked:p-4 -
 col-(--accent) -
 col-(--font-size) -
 col-(--radius) -
@@ -4088,6 +4090,10 @@ group-active/item:bg-accent - | group/item pressed: view.background_color=Color(
 group-active/item:p-4 - | group/item pressed: layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)
 group-active:bg-accent - | group pressed: view.background_color=Color(#f5f5f5ff)
 group-active:p-4 - | group pressed: layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)
+group-checked/item:bg-accent -
+group-checked/item:p-4 -
+group-checked:bg-accent -
+group-checked:p-4 -
 group-disabled/item:bg-accent - | group/item disabled: view.background_color=Color(#f5f5f5ff)
 group-disabled/item:p-4 - | group/item disabled: layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)
 group-disabled:bg-accent - | group disabled: view.background_color=Color(#f5f5f5ff)

@@ -47,8 +47,8 @@ export interface CommonProps extends TouchProps, HostProps, StateStyleProps {
 
 /** Styles while the element is in a state, over its own `style` and
  * classes, applied natively (no JS runs): as the `<state>:` classes.
- * Later states win (hover, focus, active); `disabledStyle` wins over all,
- * and the others do not apply while disabled. */
+ * Later states win (checked, then hover, focus, active); `disabledStyle`
+ * wins over all, and the others do not apply while disabled. */
 export interface StateStyleProps {
   /** While pressed (`active:`). */
   activeStyle?: StyleProp<ViewStyle>;
@@ -58,6 +58,10 @@ export interface StateStyleProps {
   focusStyle?: StyleProp<ViewStyle>;
   /** While `disabled` (`disabled:`). */
   disabledStyle?: StyleProp<ViewStyle>;
+  /** While `accessibilityState.checked` is `true` (`checked:`; `"mixed"`
+   * is not checked): a checkbox, a switch or a radio styled by its
+   * value. */
+  checkedStyle?: StyleProp<ViewStyle>;
 }
 
 /** iOS-only props of every element (`ios={{…}}`); elements add their own. */

@@ -895,6 +895,28 @@ impl Registry {
         specs
     }
 
+    /// The module whose functions JS finds on the function `function` of
+    /// a flat module of the set: a module named like it
+    /// (`#[module(name = "test")]`: `test.skip`), as a module named like a
+    /// component is on the component.
+    pub fn function_members(&self, function: &str) -> Option<Arc<ModuleSpec>> {
+        let exported = self.modules.values().any(|m| {
+            m.spec.flat
+                && m.spec
+                    .functions
+                    .iter()
+                    .any(|f| !f.getter && f.name == function)
+        });
+        exported
+            .then(|| {
+                self.modules
+                    .values()
+                    .find(|m| !m.spec.flat && m.spec.name == function)
+                    .map(|m| m.spec.clone())
+            })
+            .flatten()
+    }
+
     /// The registered components, by export.
     pub fn specs(&self) -> Vec<Arc<ComponentSpec>> {
         let mut specs: Vec<_> = self.types.values().map(|t| t.spec.clone()).collect();
@@ -908,8 +930,8 @@ impl Registry {
     /// doc comment. A component is documented by its `#[component]`
     /// function, a module or class by its struct, the rest by their own
     /// (a setter needs none beside its getter's; a module merged into a
-    /// component of its name, or exported flat, by its component or its
-    /// functions).
+    /// component or a function of its name, or exported flat, by that
+    /// component or function, or its functions).
     pub fn undocumented(&self) -> Vec<String> {
         let mut out = Vec::new();
         let specs = self.specs();
@@ -928,7 +950,8 @@ impl Registry {
             }
         }
         for m in self.module_specs() {
-            let merged = specs.iter().any(|c| c.export == m.name);
+            let merged = specs.iter().any(|c| c.export == m.name)
+                || (!m.flat && self.function_members(m.name).is_some());
             if m.doc.is_empty() && !merged && !m.flat {
                 out.push(m.name.to_owned());
             }
@@ -1167,7 +1190,9 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         );
     }
     for m in &modules {
-        if specs.iter().any(|s| s.export == m.name) {
+        if specs.iter().any(|s| s.export == m.name)
+            || (!m.flat && registry.function_members(m.name).is_some())
+        {
             continue;
         }
         if m.flat {
@@ -1183,6 +1208,30 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
                         "export declare function {}({params}): {returns};",
                         f.name
                     );
+                }
+                // A module of its name: its functions on the function.
+                if let Some(members) = registry.function_members(f.name) {
+                    let _ = writeln!(out, "export declare namespace {} {{", f.name);
+                    for member in &members.functions {
+                        for (params, returns) in signatures(member) {
+                            doc(&mut out, "  ", member.doc);
+                            let _ = if member.getter {
+                                writeln!(out, "  const {}: {returns};", member.name)
+                            } else {
+                                writeln!(out, "  function {}({params}): {returns};", member.name)
+                            };
+                        }
+                    }
+                    for constant in &members.constants {
+                        doc(&mut out, "  ", constant.doc);
+                        let _ = writeln!(
+                            out,
+                            "  const {}: {};",
+                            constant.name,
+                            constant.value.ts_type()
+                        );
+                    }
+                    out.push_str("}\n");
                 }
                 out.push('\n');
             }
@@ -1520,6 +1569,94 @@ mod tests {
         r.class::<Lonely>();
         assert_eq!(r.class_specs().len(), 1);
         let _ = Registry::merged(&[r]);
+    }
+
+    /// Checks.
+    #[crate::ui::module]
+    struct Checks;
+
+    #[crate::ui::module(flat)]
+    impl Checks {
+        /// Declares a check.
+        pub(crate) fn check(name: String) {
+            let _ = name;
+        }
+    }
+
+    /// Unused: a module's doc when its functions are on `check`.
+    #[crate::ui::module]
+    struct CheckVariants;
+
+    #[crate::ui::module(name = "check")]
+    impl CheckVariants {
+        /// How many variants there are.
+        pub(crate) const COUNT: u32 = 2;
+
+        /// Declares a check that does not run.
+        pub(crate) fn skip(name: String) {
+            let _ = name;
+        }
+
+        pub(crate) fn todo(name: String) {
+            let _ = name;
+        }
+    }
+
+    /// Named like no function of the set: an object of its own.
+    #[crate::ui::module]
+    struct Loose;
+
+    #[crate::ui::module(name = "loose")]
+    impl Loose {
+        /// Nothing.
+        pub(crate) fn nothing() {}
+    }
+
+    #[test]
+    fn a_module_named_like_a_function_puts_its_functions_on_it() {
+        let mut r = Registry::ui_set("test/checks");
+        r.module::<Checks>()
+            .module::<CheckVariants>()
+            .module::<Loose>();
+        assert_eq!(r.function_members("check").unwrap().name, "check");
+        assert!(r.function_members("loose").is_none());
+        let ts = declarations(&r, &[]);
+        assert!(
+            ts.contains(
+                "/** Declares a check. */\n\
+                 export declare function check(name: string): void;\n\
+                 export declare namespace check {\n  \
+                 /** Declares a check that does not run. */\n  \
+                 function skip(name: string): void;\n  \
+                 function todo(name: string): void;\n  \
+                 /** How many variants there are. */\n  \
+                 const COUNT: number;\n}\n"
+            ),
+            "{ts}"
+        );
+        assert!(
+            !ts.contains("CheckVariants") && !ts.contains("checkModule"),
+            "{ts}"
+        );
+        assert!(
+            ts.contains("export declare const loose: looseModule;"),
+            "{ts}"
+        );
+        // The members are documented as the function's.
+        assert_eq!(r.undocumented(), ["check.todo"]);
+        let described = super::super::description::SetDescription::of(&r).unwrap();
+        let exports: Vec<_> = described
+            .exports
+            .iter()
+            .map(|e| (e.name.as_str(), e.kind))
+            .collect();
+        assert_eq!(
+            exports,
+            [
+                ("check", super::super::description::ExportKind::Function),
+                ("loose", super::super::description::ExportKind::Module)
+            ]
+        );
     }
 
     mod clash {

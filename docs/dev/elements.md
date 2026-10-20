@@ -74,9 +74,10 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 
 ## Interaction and the environment
 
-- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle` (and a
-  `Button`'s `selectedStyle`) on any view, the same as the `active:` / `hover:` / `focus:` / `disabled:` /
-  `selected:` classes: the core restyles the view while the platform reports it pressed, hovered or focused; later
+- **State styles** (native, no JS round trip): `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle`,
+  `checkedStyle` (and a `Button`'s `selectedStyle`) on any view (declared in `StateStyleProps`), the same as the `active:` / `hover:` / `focus:` /
+  `disabled:` / `selected:` / `checked:` classes: the core restyles the view while the platform reports it pressed,
+  hovered or focused, and while its accessibility state is selected or checked; later
   states win, `disabled` over all (`docs/dev/styles.md`). Press feedback is the app's: the platforms add no fade or
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin; `offset`).

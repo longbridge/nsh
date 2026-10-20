@@ -401,8 +401,9 @@ enum Made {
     Component(Arc<ComponentSpec>, Option<Arc<ModuleSpec>>),
     /// A module object.
     Module(Arc<ModuleSpec>),
-    /// One function of a flat module.
-    Function(Arc<ModuleSpec>, &'static str),
+    /// One function of a flat module, with the functions of a module of
+    /// its name.
+    Function(Arc<ModuleSpec>, &'static str, Option<Arc<ModuleSpec>>),
     /// A constant projected from the same generated module object.
     Constant(Arc<ModuleSpec>, &'static str),
     /// The generated module object itself.
@@ -509,6 +510,26 @@ impl ModuleTable {
         // SAFETY: inline tag check.
         if unsafe { qjs::JS_IsException(object) } {
             return object;
+        }
+        if spec.flat {
+            for f in spec.functions.iter().filter(|f| !f.getter) {
+                let Some(members) = self
+                    .registries
+                    .iter()
+                    .filter(|r| r.specifier() == Some(name))
+                    .find_map(|r| r.function_members(f.name))
+                else {
+                    continue;
+                };
+                let cname = CString::new(f.name).unwrap_or_default();
+                // SAFETY: a property of the object we own; the reference
+                // it returns is ours to free.
+                unsafe {
+                    let function = qjs::JS_GetPropertyStr(ctx, object, cname.as_ptr());
+                    components::add_functions(ctx, function, &members);
+                    qjs::JS_FreeValue(ctx, function);
+                }
+            }
         }
         if spec.flat && spec.default {
             for native in self.natives(name) {
@@ -627,13 +648,19 @@ fn registry_exports(registry: &Registry, out: &mut Vec<(String, Made)>) {
         out.push((spec.export.clone(), Made::Component(spec.clone(), module)));
     }
     for m in &modules {
-        if specs.iter().any(|s| s.export == m.name) {
+        if specs.iter().any(|s| s.export == m.name)
+            || (!m.flat && registry.function_members(m.name).is_some())
+        {
             continue;
         }
         if m.flat {
             // A getter reads the object's property; it is no export.
             for f in m.functions.iter().filter(|f| !f.getter) {
-                out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
+                let members = registry.function_members(f.name);
+                out.push((
+                    f.name.to_owned(),
+                    Made::Function(m.clone(), f.name, members),
+                ));
             }
             for constant in &m.constants {
                 out.push((
@@ -943,8 +970,15 @@ fn make(
         Made::Own(Export::Value(make)) => make(ctx),
         Made::Component(spec, module) => components::component(ctx, spec, module),
         Made::Module(spec) | Made::Default(spec) => table.object(ctx, name, &spec),
-        Made::Function(spec, f) if !spec.default => components::module_function(ctx, &spec, f),
-        Made::Function(spec, f) | Made::Constant(spec, f) => member(&spec, f),
+        Made::Function(spec, f, members) if !spec.default => {
+            let function = components::module_function(ctx, &spec, f);
+            if let Some(members) = members {
+                components::add_functions(ctx, function, &members);
+            }
+            function
+        }
+        // The object's function, which has its members already.
+        Made::Function(spec, f, _) | Made::Constant(spec, f) => member(&spec, f),
         Made::Class(def) => match crate::classes::constructor(ctx, def) {
             Ok(ctor) => ctor.take(),
             Err(_) => qjs::JS_EXCEPTION,
