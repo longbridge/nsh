@@ -1779,8 +1779,6 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             if state.trace {
                 log::info!(target: "nsh::perf", "event {event:?} on view {id}");
             }
-            // The core tracks input text for layout and to recognize stale
-            // values (from JS and from Rust components alike).
             // Hover moves wait for the frame, the latest per view; any other
             // event comes after the moves before it (a view hears where the
             // mouse went before it hears it leave).
@@ -1794,6 +1792,8 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 return true;
             }
             state.dispatch_hover_moves(script);
+            // The core tracks input text for layout and to recognize stale
+            // values (from JS and from Rust components alike).
             if let (EventKind::ChangeText, EventPayload::Text { text, count }) = (event, &payload) {
                 state.core.input_changed(id, text, *count);
             }
