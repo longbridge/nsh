@@ -42,6 +42,11 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
   # The toolchain file's iOS and Android targets are only the release's.
   RUSTUP_TOOLCHAIN: stable
+  # A pull request only checks that the site and its runtimes build:
+  # without whole-program optimization they build several times faster.
+  # What main deploys is built as shipped.
+  CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'pull_request' && 'false' || 'fat' }}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'pull_request' && '16' || '1' }}
 
 jobs:
   build:
@@ -68,6 +73,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Not the profile settings above, which differ between main and
+          # pull requests: the dependencies' sources and tools still match.
+          env-vars: "CC CFLAGS CXX CMAKE RUST"
 
       - name: Install website dependencies
         working-directory: website
