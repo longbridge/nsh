@@ -25,6 +25,7 @@ nsh-js = { workspace = true, optional = true }
 crossbeam-channel.workspace = true
 dunce.workspace = true
 log.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [[test]]

@@ -195,7 +195,7 @@ import { Platform } from "nsh/device";
 const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
 ```
 
-`nsh trace` runs headless as iOS.
+`nsh test` runs headless as iOS.
 
 On [Linux](./linux.md), `Platform.OS` is `"linux"`, the idiom `"desktop"` and `Platform.Version` the kernel's major
 and minor version (`"6.12"`): distributions number their releases in ways that cannot be compared. There, the safe

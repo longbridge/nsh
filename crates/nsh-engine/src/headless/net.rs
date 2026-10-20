@@ -1,4 +1,4 @@
-//! Network and assets for headless runs (`nsh trace`): `fetch` on ureq (one
+//! Network and assets for headless runs (`nsh test`): `fetch` on ureq (one
 //! thread per request, streaming both ways), assets from the app's source
 //! directory and its UI sets' files.
 

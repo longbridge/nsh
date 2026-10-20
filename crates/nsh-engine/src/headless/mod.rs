@@ -1,6 +1,6 @@
 //! Headless runs (feature `headless`): an app on an engine with no
 //! platform, driven by steps a user's hands would take, its mount batches
-//! seen as they come. Tests and `nsh trace` both run apps this way.
+//! seen as they come.
 //!
 //! [`Headless`] is the driver: it starts an app on an engine with display
 //! frames at 60 Hz ([`start`]), applies its batches to a model of the
@@ -12,19 +12,11 @@
 //! would, in its order, and fails with what is on screen when it cannot
 //! be taken or when the app throws. An observer ([`Headless::observe`])
 //! sees every batch with the step it came in ([`print_batch`] prints it as
-//! `nsh trace` does). [`StubNetwork`] and [`MemoryStorage`] stand in for
+//! `nsh test --trace` does). [`StubNetwork`] and [`MemoryStorage`] stand in for
 //! the device's network and storage.
 //!
-//! [`trace`] is `nsh trace` on the driver. The prebuilt `nsh` runs it
-//! itself for apps it can serve (the UI sets it links). An app with Rust
-//! crates of its own is run by a runner `nsh` generates for it (`nsh-cli`
-//! `rust_app.rs`), which links the app's crates and calls [`runner`]: `nsh`
-//! bundles and compiles the app (or, for a Rust app's root, nothing), then
-//! starts the runner with a [`TraceRequest`] as its one argument. The
-//! runner prints the batches on its standard output as `nsh trace` does;
-//! its log lines, warnings and errors go to standard error as
-//! [`RunnerMessage`]s, which `nsh` shows as its own. A Rust app's runner is
-//! built without feature `js`: no QuickJS.
+//! `nsh test` runs apps this way (`nsh-testing`), printing the batches
+//! under their steps with `--trace`; so do Rust tests of an app's crate.
 
 mod net;
 mod screen;
@@ -32,8 +24,6 @@ mod stub;
 
 use std::{
     io::Write,
-    path::PathBuf,
-    process::ExitCode,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
@@ -41,11 +31,8 @@ use std::{
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId,
-    PayloadValue, Size, SubmitBehavior,
-    platform::Os,
-    ui::{Registry, Root},
+    PayloadValue, SubmitBehavior,
 };
-use serde_json::{Value, json};
 
 use self::screen::Selector;
 pub use self::{
@@ -53,10 +40,7 @@ pub use self::{
     screen::Screen,
     stub::{MemoryStorage, StubNetwork, StubResponse},
 };
-use crate::{
-    App, AppError, AppErrorKind, Assets, Engine, EngineConfig, EngineControl, Environment, Insets,
-    MountSink,
-};
+use crate::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, MountSink};
 
 /// How long [`Headless::wait_for`] and [`Headless::wait_until`] wait by
 /// default, and a first render at most.
@@ -68,143 +52,10 @@ const QUIET: Duration = Duration::from_millis(100);
 const SETTLE: Duration = Duration::from_secs(2);
 /// How long [`Headless::idle`] may take at most.
 const MAX_IDLE: Duration = Duration::from_secs(10);
+/// A display frame at 60 Hz.
+const FRAME: Duration = Duration::from_micros(16_667);
 /// How far a scroll moves per display frame, in points.
 const SCROLL_STEP: f32 = 10.0;
-
-/// What a trace does after the first render (`nsh trace`'s flags).
-#[derive(Debug, Clone, PartialEq)]
-pub struct TraceOptions {
-    /// Taps on the first pressable view (when `tap` is empty).
-    pub taps: u32,
-    /// Views to tap, in order (the steps' selectors).
-    pub tap: Vec<String>,
-    /// How long the app must be quiet before the taps, in milliseconds.
-    pub idle_ms: u64,
-    /// Run this long before the first tap and after each one, instead of
-    /// waiting for quiet, in milliseconds.
-    pub wait: Option<u64>,
-    /// Keep running this long after the last tap, in milliseconds.
-    pub duration: u64,
-    /// Points to scroll the first scroll view by.
-    pub scroll: Option<f32>,
-    /// Viewport width in points.
-    pub width: f32,
-    /// Viewport height in points.
-    pub height: f32,
-    /// The simulated safe area insets.
-    pub safe_area: Insets,
-    /// The app's data root (`nsh/storage`, the native file APIs' data
-    /// directory), an existing directory; `None`: memory-only storage and
-    /// no data directory.
-    pub data_dir: Option<PathBuf>,
-    /// The simulated operating system; `None`: this build's default
-    /// ([`Os::default`]).
-    pub os: Option<Os>,
-}
-
-impl TraceOptions {
-    fn to_value(&self) -> Value {
-        let insets = &self.safe_area;
-        json!({
-            "taps": self.taps,
-            "tap": self.tap,
-            "idle_ms": self.idle_ms,
-            "wait": self.wait,
-            "duration": self.duration,
-            "scroll": self.scroll,
-            "width": self.width,
-            "height": self.height,
-            "safe_area": [insets.top, insets.right, insets.bottom, insets.left],
-            "data_dir": self.data_dir.as_ref().map(|p| p.to_string_lossy().into_owned()),
-            "os": self.os.map(Os::name),
-        })
-    }
-
-    fn from_value(value: &Value) -> Option<TraceOptions> {
-        let number = |key: &str| value.get(key)?.as_f64();
-        let insets: Vec<f32> = value
-            .get("safe_area")?
-            .as_array()?
-            .iter()
-            .map(|v| v.as_f64().map(|v| v as f32))
-            .collect::<Option<_>>()?;
-        let [top, right, bottom, left] = insets[..] else {
-            return None;
-        };
-        let os = match value.get("os").and_then(Value::as_str) {
-            None => None,
-            Some(name) => Some(
-                [
-                    Os::Ios,
-                    Os::Android,
-                    Os::MacOs,
-                    Os::Windows,
-                    Os::Linux,
-                    Os::Web,
-                ]
-                .into_iter()
-                .find(|os| os.name() == name)?,
-            ),
-        };
-        Some(TraceOptions {
-            taps: u32::try_from(value.get("taps")?.as_u64()?).ok()?,
-            tap: value
-                .get("tap")?
-                .as_array()?
-                .iter()
-                .map(|t| t.as_str().map(str::to_owned))
-                .collect::<Option<_>>()?,
-            idle_ms: value.get("idle_ms")?.as_u64()?,
-            wait: value.get("wait").and_then(Value::as_u64),
-            duration: value.get("duration")?.as_u64()?,
-            scroll: number("scroll").map(|v| v as f32),
-            width: number("width")? as f32,
-            height: number("height")? as f32,
-            safe_area: Insets {
-                top,
-                right,
-                bottom,
-                left,
-            },
-            data_dir: value
-                .get("data_dir")
-                .and_then(Value::as_str)
-                .map(PathBuf::from),
-            os,
-        })
-    }
-}
-
-/// Parses `--safe-area <top,right,bottom,left>` (one value: all four).
-pub fn parse_insets(value: &str) -> Result<Insets, String> {
-    let parts = value
-        .split(',')
-        .map(|p| p.trim().parse::<f32>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("{e}: expected top,right,bottom,left in points"))?;
-    match parts[..] {
-        [all] => Ok(Insets {
-            top: all,
-            right: all,
-            bottom: all,
-            left: all,
-        }),
-        [top, right, bottom, left] => Ok(Insets {
-            top,
-            right,
-            bottom,
-            left,
-        }),
-        _ => Err("expected top,right,bottom,left in points (or one value for all)".into()),
-    }
-}
-
-/// Checks `--tap`'s selectors before anything is built.
-pub fn check_taps(taps: &[String]) -> Result<(), String> {
-    taps.iter()
-        .try_for_each(|s| Selector::parse(s).map(|_| ()))
-        .map_err(|e| format!("--tap {e}"))
-}
 
 struct ChannelSink {
     batches: Sender<MountBatch>,
@@ -225,7 +76,7 @@ impl MountSink for ChannelSink {
     fn request_frame(&self) {
         let control = self.control.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_micros(16_667));
+            std::thread::sleep(FRAME);
             if let Some(control) = control.get() {
                 control.frame();
             }
@@ -747,8 +598,9 @@ impl Headless {
             }
             let (x, y, applied) = (scroll.x, scroll.y, scroll.applied);
             self.engine.control().scroll(id, x, y, applied);
-            // A frame that needs nothing produces no batch.
-            self.next_batch(Duration::from_millis(50));
+            // One display frame per step; a frame that needs nothing
+            // produces no batch, and a late one is applied with the next.
+            self.next_batch(FRAME);
         }
         self.send(id, EventKind::ScrollEndDrag, offset(&self.screen));
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
@@ -765,7 +617,7 @@ fn failure(error: AppError) -> Result<(), String> {
     }
 }
 
-/// Prints `batch`, which came in step `step`, as `nsh trace` does: a line
+/// Prints `batch`, which came in step `step`, as `nsh test --trace` does: a line
 /// naming the step and the number of items, then one line per item.
 pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
     // A closed output (`| head`) ends nothing: the run goes on unseen.
@@ -790,397 +642,12 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
     let _ = out.flush();
 }
 
-/// Runs `app` (with the UI sets `ui_sets` and its files from `assets`)
-/// headless as `options` say, on [`Headless`]: prints every mount batch
-/// to `out` with its step, scrolls, presses views, runs timers. `warn` gets
-/// what the run notices without failing (no pressable view, a press that
-/// changed nothing, an app that never goes quiet).
-pub fn trace(
-    app: App,
-    ui_sets: Vec<Registry>,
-    assets: Arc<dyn Assets>,
-    options: &TraceOptions,
-    mut out: Box<dyn Write + Send>,
-    warn: &mut dyn FnMut(&str),
-) -> Result<(), String> {
-    check_taps(&options.tap)?;
-    let config = EngineConfig {
-        viewport: Size::new(options.width, options.height),
-        trace: true,
-        network: Some(Arc::new(UreqNetwork::new())),
-        assets: Some(assets),
-        environment: Environment {
-            safe_area: options.safe_area,
-            os: options.os.unwrap_or_default(),
-            ..Default::default()
-        },
-        ui_sets,
-        data_dir: options.data_dir.clone(),
-        ..EngineConfig::new(app)
-    };
-    let mut app = Headless::start(config).map_err(|e| e.to_string())?;
-    app.observe(move |step, batch| print_batch(&mut out, step, batch));
-    app.first_render()?;
-    if app.exited {
-        return Ok(());
-    }
-    if let Some(distance) = options.scroll
-        && let Some(id) = app.screen.first_scroll_view()
-    {
-        app.scroll(&format!("view:{id}"), distance)?;
-    }
-    let settle = |app: &mut Headless, quiet: Duration, warn: &mut dyn FnMut(&str)| {
-        match options.wait {
-            Some(ms) => app.wait(Duration::from_millis(ms)),
-            None => app.idle(quiet).map(|quiet| {
-                if !quiet {
-                    warn(&format!(
-                        "still rendering after {} s (a timer or an animation runs); --wait <ms> bounds it",
-                        MAX_IDLE.as_secs()
-                    ));
-                }
-            }),
-        }
-    };
-    settle(&mut app, Duration::from_millis(options.idle_ms), warn)?;
-    let taps: Vec<Option<&str>> = if options.tap.is_empty() {
-        (0..options.taps).map(|_| None).collect()
-    } else {
-        options.tap.iter().map(|s| Some(s.as_str())).collect()
-    };
-    for (i, selector) in taps.into_iter().enumerate() {
-        if app.exited {
-            break;
-        }
-        let selector = match selector {
-            Some(selector) => selector.to_owned(),
-            None => match app.screen.first_pressable() {
-                Some(id) => format!("view:{id}"),
-                None => {
-                    warn("no pressable view found");
-                    break;
-                }
-            },
-        };
-        let before = app.applied();
-        app.press(&selector)
-            .map_err(|e| format!("tap #{}: {e}", i + 1))?;
-        if app.applied() == before {
-            warn(&format!(
-                "tap #{} (press({selector})) changed nothing",
-                i + 1
-            ));
-        }
-        if let Some(ms) = options.wait {
-            app.wait(Duration::from_millis(ms))?;
-        }
-    }
-    if options.duration > 0 && !app.exited {
-        app.wait(Duration::from_millis(options.duration))?;
-    }
-    Ok(())
-}
-
-/// The version of the [`TraceRequest`] and [`RunnerMessage`] formats:
-/// `nsh` and the runner it built speak the same.
-pub const PROTOCOL: u32 = 1;
-
-/// What `nsh` asks of an app's runner ([`runner`]), as its one argument
-/// ([`TraceRequest::to_json`]).
-#[derive(Debug, Clone, PartialEq)]
-pub struct TraceRequest {
-    /// The app's bytecode, compiled by `nsh` (`None`: the runner's Rust
-    /// root).
-    pub bytecode: Option<PathBuf>,
-    /// The QuickJS build `nsh` compiled it for (`nsh_js::BYTECODE_VERSION`),
-    /// which must be the runner's.
-    pub bytecode_version: Option<String>,
-    /// The bundle's source map, for errors at source positions.
-    pub source_map: Option<PathBuf>,
-    /// The app's source directory (its `asset:/` files).
-    pub dir: PathBuf,
-    /// Whether the runner forwards debug lines (`nsh -v`).
-    pub verbose: bool,
-    /// What the run does.
-    pub options: TraceOptions,
-    /// How the bytecode runs ([`Release`]): as a release build does.
-    pub release: Release,
-}
-
-/// What makes a traced bundle run as a release build does (docs: "Test
-/// the release behavior with `nsh trace`"): hardened, with what the app
-/// declared and its id, its source directory as its plugin directory.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Release {
-    /// The app's declared capabilities (`nsh.json` `capabilities`).
-    pub capabilities: Option<nsh_core::access::Capabilities>,
-    /// The app's id (`nsh.json` `id`).
-    pub app_id: Option<String>,
-    /// The app's source directory, canonical.
-    pub plugin_dir: Option<PathBuf>,
-}
-
-impl Release {
-    /// `bundle` running as a release build of this app does.
-    #[cfg(feature = "js")]
-    pub fn apply(&self, mut bundle: crate::Bundle) -> crate::Bundle {
-        bundle.policy.declared = self.capabilities.clone();
-        bundle.app_id = self.app_id.clone();
-        let mut paths = nsh_core::access::TrustedPaths::default();
-        paths.plugin_dir = self.plugin_dir.clone();
-        bundle.with_system_paths(paths)
-    }
-
-    fn to_value(&self) -> Value {
-        json!({
-            "capabilities": self.capabilities.as_ref().map(nsh_core::access::Capabilities::to_json),
-            "app_id": self.app_id,
-            "plugin_dir": self.plugin_dir.as_ref().map(|p| p.to_string_lossy().into_owned()),
-        })
-    }
-
-    fn from_value(value: &Value) -> Result<Release, String> {
-        Ok(Release {
-            capabilities: match value.get("capabilities") {
-                None | Some(Value::Null) => None,
-                Some(caps) => Some(nsh_core::access::Capabilities::from_json(caps)?),
-            },
-            app_id: value
-                .get("app_id")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            plugin_dir: value
-                .get("plugin_dir")
-                .and_then(Value::as_str)
-                .map(PathBuf::from),
-        })
-    }
-}
-
-impl TraceRequest {
-    /// The request as JSON.
-    pub fn to_json(&self) -> String {
-        let path = |p: &Option<PathBuf>| p.as_ref().map(|p| p.to_string_lossy().into_owned());
-        json!({
-            "protocol": PROTOCOL,
-            "bytecode": path(&self.bytecode),
-            "bytecode_version": self.bytecode_version,
-            "source_map": path(&self.source_map),
-            "dir": self.dir.to_string_lossy(),
-            "verbose": self.verbose,
-            "options": self.options.to_value(),
-            "release": self.release.to_value(),
-        })
-        .to_string()
-    }
-
-    /// Reads a request [`TraceRequest::to_json`] wrote, of this
-    /// [`PROTOCOL`].
-    pub fn from_json(text: &str) -> Result<TraceRequest, String> {
-        let value: Value = serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
-        let protocol = value.get("protocol").and_then(Value::as_u64);
-        if protocol != Some(u64::from(PROTOCOL)) {
-            return Err(format!(
-                "a request of protocol {}, and this runner speaks {PROTOCOL}: run the nsh it was built for",
-                protocol.map_or("none".to_owned(), |p| p.to_string())
-            ));
-        }
-        let path = |key: &str| value.get(key).and_then(Value::as_str).map(PathBuf::from);
-        Ok(TraceRequest {
-            bytecode: path("bytecode"),
-            bytecode_version: value
-                .get("bytecode_version")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            source_map: path("source_map"),
-            dir: path("dir").ok_or("the request has no dir")?,
-            verbose: value.get("verbose").and_then(Value::as_bool) == Some(true),
-            options: value
-                .get("options")
-                .and_then(TraceOptions::from_value)
-                .ok_or("the request's options are incomplete")?,
-            release: Release::from_value(value.get("release").unwrap_or(&Value::Null))?,
-        })
-    }
-}
-
-/// A line a runner writes to standard error for `nsh` to show as its own;
-/// other lines (a panic's) are shown as they are.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunnerMessage {
-    /// A log record of the run (the app's `console.*`, `nsh::perf`).
-    Log {
-        /// Its level.
-        level: log::Level,
-        /// Its target (`js`, `nsh::perf`).
-        target: String,
-        /// The message.
-        message: String,
-    },
-    /// Something the run noticed without failing.
-    Warn(String),
-    /// Why the run failed.
-    Error(String),
-}
-
-/// The key that marks a runner's lines.
-const MESSAGE_KEY: &str = "nsh_trace";
-
-impl RunnerMessage {
-    /// The message as one line (no newline).
-    pub fn to_line(&self) -> String {
-        match self {
-            RunnerMessage::Log {
-                level,
-                target,
-                message,
-            } => json!({
-                MESSAGE_KEY: "log",
-                "level": level.as_str(),
-                "target": target,
-                "message": message,
-            }),
-            RunnerMessage::Warn(message) => json!({ MESSAGE_KEY: "warn", "message": message }),
-            RunnerMessage::Error(message) => json!({ MESSAGE_KEY: "error", "message": message }),
-        }
-        .to_string()
-    }
-
-    /// The message `line` holds, if it is one.
-    pub fn parse(line: &str) -> Option<RunnerMessage> {
-        if !line.starts_with('{') {
-            return None;
-        }
-        let value: Value = serde_json::from_str(line).ok()?;
-        let message = value.get("message")?.as_str()?.to_owned();
-        Some(match value.get(MESSAGE_KEY)?.as_str()? {
-            "log" => RunnerMessage::Log {
-                level: value.get("level")?.as_str()?.parse().ok()?,
-                target: value.get("target")?.as_str()?.to_owned(),
-                message,
-            },
-            "warn" => RunnerMessage::Warn(message),
-            "error" => RunnerMessage::Error(message),
-            _ => return None,
-        })
-    }
-}
-
-/// Forwards log records to standard error as [`RunnerMessage::Log`].
-struct ForwardLogger;
-
-impl log::Log for ForwardLogger {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
-        let line = RunnerMessage::Log {
-            level: record.level(),
-            target: record.target().to_owned(),
-            message: record.args().to_string(),
-        }
-        .to_line();
-        let _ = writeln!(std::io::stderr().lock(), "{line}");
-    }
-
-    fn flush(&self) {}
-}
-
-/// The `main` of an app's headless runner: runs the [`TraceRequest`] its
-/// argument holds with `ui_sets` (the mobile UI and the app's sets), the
-/// app's bytecode or, without it, `root` (a Rust app's). The batches go to
-/// standard output, everything else to standard error as
-/// [`RunnerMessage`]s.
-pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
-    let fail = |message: String| {
-        let _ = writeln!(
-            std::io::stderr().lock(),
-            "{}",
-            RunnerMessage::Error(message).to_line()
-        );
-        ExitCode::FAILURE
-    };
-    let Some(arg) = std::env::args().nth(1) else {
-        return fail("the runner takes nsh's request as its argument".into());
-    };
-    let request = match TraceRequest::from_json(&arg) {
-        Ok(request) => request,
-        Err(e) => return fail(e),
-    };
-    static LOGGER: ForwardLogger = ForwardLogger;
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(if request.verbose {
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Info
-    });
-    let app = match (&request.bytecode, root) {
-        (Some(bytecode), _) => match js_app(&request, bytecode) {
-            Ok(app) => app,
-            Err(e) => return fail(e),
-        },
-        (None, Some(root)) => App::Rust(root()),
-        (None, None) => return fail("no bytecode, and this runner has no Rust root".into()),
-    };
-    let files = ui_sets
-        .iter()
-        .flat_map(Registry::asset_files)
-        .map(|file| (file.path().to_owned(), PathBuf::from(file.source)))
-        .collect();
-    let assets = Arc::new(DirectoryAssets::new(request.dir.clone(), files));
-    let mut warn = |message: &str| {
-        let _ = writeln!(
-            std::io::stderr().lock(),
-            "{}",
-            RunnerMessage::Warn(message.to_owned()).to_line()
-        );
-    };
-    let out = Box::new(std::io::stdout());
-    match trace(app, ui_sets, assets, &request.options, out, &mut warn) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => fail(e),
-    }
-}
-
-/// The JS app of `request`: the bytecode `nsh` compiled, at `bytecode`.
-#[cfg(feature = "js")]
-fn js_app(request: &TraceRequest, bytecode: &std::path::Path) -> Result<App, String> {
-    if request.bytecode_version.as_deref() != Some(crate::BYTECODE_VERSION) {
-        return Err(format!(
-            "the bytecode is for {}, and this runner's QuickJS is {}",
-            request.bytecode_version.as_deref().unwrap_or("no QuickJS"),
-            crate::BYTECODE_VERSION
-        ));
-    }
-    let bytes = std::fs::read(bytecode).map_err(|e| format!("read {}: {e}", bytecode.display()))?;
-    // SAFETY: `nsh` compiled it for this runner just now, for the QuickJS
-    // build it links (checked above).
-    let bundle = request
-        .release
-        .apply(unsafe { crate::Bundle::bytecode(bytes) });
-    let map = request
-        .source_map
-        .as_ref()
-        .and_then(|map| std::fs::read_to_string(map).ok());
-    Ok(App::Js(match map {
-        Some(map) => bundle.with_source_map(map),
-        None => bundle,
-    }))
-}
-
-/// A runner without feature `js` runs a Rust root only.
-#[cfg(not(feature = "js"))]
-fn js_app(_: &TraceRequest, _: &std::path::Path) -> Result<App, String> {
-    Err("this runner has no JS runtime: it runs the app's Rust root".into())
-}
-
 #[cfg(test)]
 mod tests {
-    use nsh_core::ui::prelude::*;
+    use nsh_core::{
+        platform::Os,
+        ui::{Root, prelude::*},
+    };
 
     use super::*;
 
@@ -1313,9 +780,11 @@ mod tests {
         app.wait_for("At 600").unwrap();
         // Not past the end: 100 rows of 50 in what the screen leaves.
         app.scroll("id:rows", 100_000.0).unwrap();
-        let end = app
-            .screen()
-            .scroll_end(app.screen().first_scroll_view().unwrap());
+        let end = app.screen().scroll_end(
+            app.screen()
+                .scroll_view(&Selector::TestId("rows".into()))
+                .unwrap(),
+        );
         assert!(end > 4000.0 && end < 5000.0, "{end}");
         app.wait_for(&format!("At {end}")).unwrap();
         let error = app.scroll("id:rows", 10.0).unwrap_err();
@@ -1332,7 +801,6 @@ mod tests {
         let error = app.first_render().unwrap_err();
         assert!(error.starts_with("the app threw: Error: boom"), "{error}");
     }
-
     #[test]
     fn process_exit_ends_a_timed_headless_wait() {
         let bundle = crate::Bundle::source(
@@ -1347,159 +815,5 @@ mod tests {
         app.wait(Duration::from_secs(5)).unwrap();
         assert!(app.screen().sent(&Command::ExitApp));
         assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn insets_parse() {
-        let i = parse_insets("47,0,34,0").unwrap();
-        assert_eq!((i.top, i.right, i.bottom, i.left), (47.0, 0.0, 34.0, 0.0));
-        assert_eq!(parse_insets("10").unwrap().left, 10.0);
-        assert!(parse_insets("1,2").is_err());
-    }
-
-    /// A counter in Rust: what a Rust app's runner mounts.
-    #[nsh_core::ui::component]
-    fn Counter() -> impl nsh_core::ui::IntoElement {
-        use nsh_core::ui::prelude::*;
-        let count = signal(0_u32);
-        view()
-            .on_press(move || count.update(|c| *c += 1))
-            .child(text(move || format!("Count {}", count.get())))
-    }
-
-    #[test]
-    fn a_rust_root_is_traced_with_its_taps() {
-        let options = TraceOptions {
-            taps: 1,
-            tap: Vec::new(),
-            idle_ms: 0,
-            wait: None,
-            duration: 0,
-            scroll: None,
-            width: 390.0,
-            height: 844.0,
-            safe_area: Insets::default(),
-            data_dir: None,
-            os: None,
-        };
-        let out = Buffer::default();
-        let mut warnings = Vec::new();
-        trace(
-            App::Rust(Root::of::<Counter>()),
-            Vec::new(),
-            Arc::new(DirectoryAssets::new(PathBuf::from("."), Vec::new())),
-            &options,
-            Box::new(out.clone()),
-            &mut |w| warnings.push(w.to_owned()),
-        )
-        .unwrap();
-        let out = out.text();
-        assert!(out.starts_with("── open: "), "{out}");
-        assert!(out.contains("text: \"Count 0\""), "{out}");
-        assert!(out.contains("── press(view:"), "{out}");
-        assert!(out.contains("text: \"Count 1\""), "{out}");
-        assert!(warnings.is_empty(), "{warnings:?}");
-        // An unknown view fails the run, saying which tap.
-        let options = TraceOptions {
-            tap: vec!["label:Nope".into()],
-            ..options
-        };
-        let error = trace(
-            App::Rust(Root::of::<Counter>()),
-            Vec::new(),
-            Arc::new(DirectoryAssets::new(PathBuf::from("."), Vec::new())),
-            &options,
-            Box::new(std::io::sink()),
-            &mut |_| {},
-        )
-        .unwrap_err();
-        assert_eq!(
-            error,
-            "tap #1: no pressable view matches `label:Nope`; on screen: [\"Count 0\"]"
-        );
-    }
-
-    /// Output shared with the test that reads it.
-    #[derive(Clone, Default)]
-    struct Buffer(Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl Buffer {
-        fn text(&self) -> String {
-            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
-        }
-    }
-
-    impl Write for Buffer {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn requests_and_messages_survive_their_lines() {
-        let request = TraceRequest {
-            bytecode: Some(PathBuf::from("C:\\app\\.nsh\\rust\\trace\\bundle.nshc")),
-            bytecode_version: Some("quickjs-ng-0.16.2+0fdea21/bc28/le".into()),
-            source_map: None,
-            dir: PathBuf::from("/apps/charts"),
-            verbose: true,
-            options: TraceOptions {
-                taps: 2,
-                tap: vec!["label:Plan".into(), "text:\"quoted\"".into()],
-                idle_ms: 1200,
-                wait: Some(500),
-                duration: 0,
-                scroll: Some(3000.0),
-                width: 390.0,
-                height: 844.0,
-                safe_area: Insets {
-                    top: 47.0,
-                    right: 0.0,
-                    bottom: 34.0,
-                    left: 0.0,
-                },
-                data_dir: Some(PathBuf::from("/apps/charts/data")),
-                os: Some(Os::Windows),
-            },
-            release: Release {
-                capabilities: Some(nsh_core::access::Capabilities::default()),
-                app_id: Some("com.example.charts".into()),
-                plugin_dir: Some(PathBuf::from("/apps/charts")),
-            },
-        };
-        assert_eq!(
-            TraceRequest::from_json(&request.to_json()).unwrap(),
-            request
-        );
-        let mut other: Value = serde_json::from_str(&request.to_json()).unwrap();
-        other["protocol"] = (PROTOCOL + 1).into();
-        let error = TraceRequest::from_json(&other.to_string()).unwrap_err();
-        assert!(
-            error.contains(&format!("protocol {}", PROTOCOL + 1)),
-            "{error}"
-        );
-        for message in [
-            RunnerMessage::Log {
-                level: log::Level::Info,
-                target: "js".into(),
-                message: "line one\nline two".into(),
-            },
-            RunnerMessage::Warn("no pressable view found".into()),
-            RunnerMessage::Error("the app rendered nothing".into()),
-        ] {
-            let line = message.to_line();
-            assert!(!line.contains('\n'), "{line}");
-            assert_eq!(RunnerMessage::parse(&line), Some(message));
-        }
-        assert_eq!(
-            RunnerMessage::parse("thread 'main' panicked at src/lib.rs:1:1"),
-            None
-        );
-        assert_eq!(RunnerMessage::parse("{\"other\": 1}"), None);
     }
 }

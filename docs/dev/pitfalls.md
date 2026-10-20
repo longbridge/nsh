@@ -15,8 +15,8 @@ Things that were found the hard way. Read the section of the area you change bef
   the heap ran out are dropped, the VM stops with that report.
 - **The JS object graph must stay reachable from a GC root.** The renderer holds the root node, which holds its children's
   objects and each node its handlers (`dom.rs`, reported by the classes' GC marks). Without that the whole rendered app (nodes,
-  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh trace` taps after 1.2s of idling by
-  default; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
+  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh test App.tsx` runs the steps of stdin after 1.2s of idling
+  for that; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
 - **Nodes are released by GC, not by Remove.** A memo may keep removed nodes and insert them again, so `Remove` only detaches;
   `Release` (queued by the node's finalizer) frees the node and its native view.
 - **`nsh_js::BUNDLE_NAME` (`bundle.js`)** is the module name of every bundle and is how stacks are matched for symbolication; `BYTECODE_VERSION`

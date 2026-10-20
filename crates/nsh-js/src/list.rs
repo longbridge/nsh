@@ -29,6 +29,7 @@ const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 /// The host props a list forwards as they are.
 const FORWARDED: &[&str] = &[
     "style",
+    "testID",
     "horizontal",
     "showsIndicator",
     "refreshing",
@@ -1068,6 +1069,8 @@ export interface ListProps<T> extends ScrollingHostProps, ListHostProps {
   keyExtractor?: (item: T, index: number) => string;
   onViewableItemsChanged?: (info: { viewableItems: ViewToken<T>[]; changed: ViewToken<T>[] }) => void;
   style?: StyleProp<ViewStyle>;
+  /** The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). */
+  testID?: string;
   /** How close to the end (in viewports) `onEndReached` fires; default 1. */
   onEndReachedThreshold?: number;
   ref?: YNode | ((node: YNode) => void);

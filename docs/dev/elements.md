@@ -78,7 +78,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`, Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin,
   `position` → an inner view moved up; `keyboardVerticalOffset`).
 - **Platform modules**: `Platform` (`OS`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
-  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh trace` is iOS); `isDesktop`,
+  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `isDesktop`,
   `Version`, `isPad`, `isTV`, `isMacCatalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); `isDesktop`, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `PixelRatio`, `AccessibilityInfo` (`isScreenReaderEnabled`,
   `isReduceMotionEnabled`, `addEventListener("screenReaderChanged" | "reduceMotionChanged")`, `announceForAccessibility`,
   `setAccessibilityFocus(ref)`: Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,

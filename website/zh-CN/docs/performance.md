@@ -1,6 +1,6 @@
 ---
 title: 性能
-description: NSH 如何让应用保持高速（原生运行时、批量跨线程、原生动画、虚拟化列表），这对你的代码意味着什么，以及如何用 nsh trace 测量。
+description: NSH 如何让应用保持高速（原生运行时、批量跨线程、原生动画、虚拟化列表），这对你的代码意味着什么，以及如何用 nsh test --trace 测量。
 order: 62
 group: tools
 ---
@@ -76,7 +76,7 @@ function Price(props: { quote: Accessor<Quote> }) {
 - 集合使用 `<Each>`（按 key 保留行）或 [`List`](./lists.md)；JSX 中普通的 `.map()` 会在每次变化时重新创建所有行。
 - 当多个绑定用到同一个派生值时，用 `computed` 计算它，这样每次变化只计算一次。
 
-向一个三项列表追加第四项，`nsh trace` 显示的结果如下：
+向一个三项列表追加第四项，`nsh test --trace` 显示的结果如下：
 
 ```tsx
 {items().map((n) => <Text>{`row ${n}`}</Text>)}                   // 22 mount items: 3 views removed, 4 created
@@ -88,7 +88,7 @@ function Price(props: { quote: Accessor<Quote> }) {
 ### 4. 不发送不需要的内容
 
 core 只发送变化的部分：新视图不带默认样式，也不带空的事件掩码；未变化的样式和 frame 不会发送；文本颜色的变化不会让文本
-重新布局。一次只改变一个数字的点击只发送一个文本条目。你可以在 `nsh trace` 的输出中看到这一点（见下文）。
+重新布局。一次只改变一个数字的点击只发送一个文本条目。你可以在 `nsh test --trace` 的输出中看到这一点（见下文）。
 
 ### 5. 原生执行动画
 
@@ -136,11 +136,11 @@ const scrollY = createAnimatedValue(0);
 
 ## 测量
 
-### 无界面运行：`nsh trace`
+### 无界面运行：`nsh test --trace`
 
 ```sh
-nsh trace App.tsx                                   # first frame + 2 taps
-nsh trace App.tsx --scroll 3000 --taps 0            # scrolling, 10 pt per frame
+echo 'await app.press("Add")' | nsh test App.tsx --trace                 # first frame + a press
+echo 'await app.scroll("id:feed", 3000)' | nsh test App.tsx --trace       # scrolling, 10 pt per frame
 ```
 
 ```text
@@ -158,7 +158,7 @@ perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 - **commit**：core 渲染组件、布局和 diff 的开销。
 - **list js**：该次 commit 中绑定列表行所花费的 JS 时间。
 
-完整指南：[用 nsh trace 测试](./testing-and-trace.md)。
+完整指南：[测试](./testing-and-trace.md)。
 
 ### 在设备上：`--trace`
 
@@ -208,5 +208,5 @@ nsh run App.tsx --target macos --fps --release
 ## 另请参阅
 
 - [架构](./architecture.md)
-- [用 nsh trace 测试](./testing-and-trace.md)
+- [测试](./testing-and-trace.md)
 - [列表](./lists.md)、[动画](./animation.md)、[响应式](./reactivity.md)

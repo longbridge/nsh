@@ -22,7 +22,7 @@ import { Button, SafeAreaView } from "nsh/ui/mobile";
 
 NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方。平台专有的 API 位于 `nsh/ios`、`nsh/android` 和 `nsh/desktop`（macOS、Windows、Linux）；这些模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行（在其他平台上调用它们什么也不做，`isAvailable` 告诉你当前是否在该平台上）。
 
-类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh trace` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
+类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh test` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
 
 ## 全部模块
 

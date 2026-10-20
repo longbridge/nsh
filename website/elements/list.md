@@ -84,6 +84,7 @@ stay with the cell and show up on another item.
 | `scrollValue` | `AnimatedValue` | | An animated value fed with the scroll offset, for scroll-linked animations. |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `style` | `StyleProp<ViewStyle>` | | The list's own style (it needs a bounded size: `flex: 1` or a height). |
+| `testID` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
 | `ref` | `YNode \| (node: YNode) => void` | | The list's node (see [ref methods](#ref-methods)). |
 
 Lists also take the scrolling props of [`<Scroll>`](./scroll.md#scrolling): `pagingEnabled`, `snapToInterval`,

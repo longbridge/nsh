@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Every NSH subcommand and flag - init, build, trace, test, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
+description: Every NSH subcommand and flag - init, build, test, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
 order: 6
 group: start
 ---
@@ -14,7 +14,6 @@ nsh <COMMAND>
 
   init         Create an app
   build        Bundle an app and compile it to QuickJS bytecode
-  trace        Run an app headless and print the mount instructions and timings
   test         Run an app's tests headless
   check        Type check an app with TypeScript's native compiler
   dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
@@ -63,7 +62,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 | Template | What it creates |
 |---|---|
 | `ts` | A TSX app: `App.tsx`, its test `App.test.tsx` (`nsh test`), `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
-| `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run`, `nsh trace` and `nsh package` mount the root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
+| `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run` and `nsh package` mount the root with no QuickJS on every target (`nsh test` opens it for TypeScript tests), the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
 | `mixed` | A TSX app with a Rust crate of its own: `App.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "native"`, `.gitignore`, `.nsh/types`, a README, and the crate in `native/`, whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. |
 
 | Flag | Description |
@@ -123,7 +122,7 @@ Use it with hosts you start yourself, for example an app that embeds the develop
 nsh test [PATH] [--filter <NAME>] [--trace]
 ```
 
-Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app).
+Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`; a Rust app's: `nsh test nsh.json`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app). A TSX app runs in the CLI's own process; an app with Rust crates of its own runs in a headless runner built with them, which the CLI builds the entries for. Headless runs behave as iOS: `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
 
 ```text
 ✓ App.test.tsx › counts taps (321ms)
@@ -133,42 +132,7 @@ Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test file
 | Flag | Description |
 |---|---|
 | `--filter <NAME>` | Runs only the tests whose name contains `NAME`. |
-| `--trace` | Prints every mount batch of the apps the tests open, under the step it came in (`── press(Add): 7 items`), and the time of every commit, as `nsh trace` does. |
-
-## nsh trace
-
-```sh
-nsh trace [ENTRY] [--tap <SELECTOR>]... [--taps <N>] [--idle-ms <MS>] [--wait <MS>] [--duration <MS>]
-          [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>] [--data-dir <DIR>] [--os <OS>]
-```
-
-Runs the app headless, with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)). A TSX app runs in the CLI's own process. An app with Rust crates runs in a headless runner built with them, which the CLI hands the bytecode it compiled; a Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs in one with its root mounted, no bundle and no QuickJS. The output is the same either way.
-
-```text
-✓ bundled App.tsx (3255 B in 12.6 ms)
-perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
-── initial render: 49 items
-   Create { id: 2, kind: View }
-   ...
-── tap #1 on view 20: 3 items
-   Text { id: 14, text: "1", content: 71x77 @ 0,0 }
-```
-
-| Flag | Default | Description |
-|---|---|---|
-| `--tap <SELECTOR>` | | Tap a view; repeat it for several taps, in order. `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` (a view id from the output), or a bare string, matched as a `testID`, then a label, then a text. The first match on screen is tapped, or its nearest pressable ancestor (the button around a text). No match is an error. |
-| `--taps <N>` | `2` | Without `--tap`: taps sent to the first pressable view. A tap that changes nothing is an error (exit code 1). |
-| `--idle-ms <MS>` | `1200` | Before tapping, wait until the app renders nothing for this long (at most 10 s, for apps with timers or animations). The default lets the engine's idle garbage collection run first, so retention bugs show up. |
-| `--wait <MS>` | | Run timers and animations exactly this long before the first tap and after each one, printing what they render, instead of waiting until the app is idle. |
-| `--duration <MS>` | `0` | Keep running this long after the last tap. |
-| `--safe-area <INSETS>` | `0` | Safe area insets in points, `top,right,bottom,left` (or one value for all four), e.g. `47,0,34,0` for a phone with a notch. |
-| `--scroll <POINTS>` | | Scrolls the first scroll view or list by this many points, 10 points per frame, and prints each frame's batch. |
-| `--width <W>` | `390` | Viewport width in points. |
-| `--height <H>` | `844` | Viewport height in points. |
-| `--data-dir <DIR>` | | Use an explicit on-disk data root for this run; defaults to in-memory data. |
-| `--os <OS>` | `ios` | Simulate `ios`, `android`, `macos`, `windows`, `linux` or `web`; selects platform APIs and props. |
-
-`nsh trace` defaults to iOS: `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply. Select another platform with `--os`. `--data-dir` selects only the data root; platform APIs also require support from the actual native host.
+| `--trace` | Prints every mount batch of the apps the tests open, under the step it came in (`── press(Add): 7 items`), and the time of every commit: what the first frame, a step or a frame of scrolling costs. |
 
 ## nsh check
 

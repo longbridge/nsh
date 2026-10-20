@@ -1,17 +1,17 @@
 ---
 title: 测试
-description: 用 TypeScript 编写测试并用 nsh test 无界面运行：像用户一样打开应用、点击、输入、滚动和等待，模拟网络和存储；读懂 nsh trace 打印的原生视图操作和耗时；以及用于 UI 测试的 testID。
+description: 用 TypeScript 编写测试并用 nsh test 无界面运行：像用户一样打开应用、点击、输入、滚动和等待，模拟网络和存储；读懂 --trace 打印的原生视图操作和耗时；以及用于 UI 测试的 testID。
 order: 61
 group: tools
 ---
 
 # 测试
 
-NSH 可以 **无界面（headless）** 地运行应用：使用真实的运行时（与设备上相同的 QuickJS VM、响应式图、渲染器、组件、
-布局和列表虚拟化），但不需要模拟器、设备或窗口。有两个命令基于它，只要 CLI 能运行的地方都能运行，包括 Linux CI 机器：
+`nsh test` 以 **无界面（headless）** 方式运行应用：使用真实的运行时（与设备上相同的 QuickJS VM、响应式图、渲染器、
+组件、布局和列表虚拟化），但不需要模拟器、设备或窗口。只要 CLI 能运行的地方它都能运行，包括 Linux CI 机器。它做两件事：
 
-- `nsh test` 运行用 TypeScript 编写的测试：每个测试打开应用，像用户一样操作（点击、输入、滚动），并检查屏幕上的内容。
-- `nsh trace` 打印运行时本应发送给原生视图的每一个操作，并附带耗时。
+- 运行用 TypeScript 编写的测试：每个测试打开应用，像用户一样操作（点击、输入、滚动），并检查屏幕上的内容；
+- 加上 `--trace` 时，打印运行时发送给原生视图的每一个操作并附带耗时：首帧、一次点击或一帧滚动的开销。
 
 ## 用 nsh test 编写测试
 
@@ -51,7 +51,8 @@ error 2 tests: 1 passed, 1 failed (0.9s)
 
 每个测试文件在各自的引擎上运行，文件中的测试按顺序逐个运行。`open` 在另一个全新的引擎上启动应用，因此测试之间从不
 共享状态；测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超过 30 秒时失败。带有自己
-Rust crate 的应用（`nsh.json` 的 `"rust"`）用 `nsh trace` 运行。
+Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH 用这些 crate 构建的无界面运行器中运行测试；在 Rust 应用
+（`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。
 
 ### 打开应用
 
@@ -68,7 +69,7 @@ Rust crate 的应用（`nsh.json` 的 `"rust"`）用 `nsh trace` 运行。
 ### 操作步骤
 
 步骤用 **选择器** 指定视图：`id:<testID>`、`label:<accessibilityLabel>`、`text:<text>`、`view:<id>`（来自
-`nsh trace` 的视图 id），或者一个裸字符串，依次按 `testID`、标签、文字匹配。选择器找到的是用户最先会看到的视图：先在
+`--trace` 输出的视图 id），或者一个裸字符串，依次按 `testID`、标签、文字匹配。选择器找到的是用户最先会看到的视图：先在
 最上层的模态窗口中找，再在屏幕上找；对于导航栈只看最上面的页面。
 
 | 步骤 | 说明 |
@@ -108,15 +109,21 @@ Rust crate 的应用（`nsh.json` 的 `"rust"`）用 `nsh trace` 运行。
 echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh test App.tsx
 ```
 
-`--trace` 会打印测试所打开应用的每个挂载批次，标注它所属的步骤（`── press(text:+1): 7 items`），以及每次提交的耗时，
-和下文的 `nsh trace` 一样。
+这 1.2 s 让引擎的空闲垃圾回收在第一步之前运行，这样，如果应用丢掉了它仍在使用的对象，问题就会暴露出来：它的处理函数
+不再生效。
 
-## nsh trace
+示例中有可以参考的测试：TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求），带
+Rust crate 的应用见 `examples/rust-exports`，Rust 应用见 `examples/gallery-rs`。
 
-`nsh trace` 打印运行时本应发送给原生视图的每一个操作，并附带耗时。
+## 用 --trace 跟踪
+
+`--trace` 会打印测试所打开应用的每个挂载批次，标注它所属的步骤，以及每次提交的耗时。可以对测试文件使用，也可以对应用
+入口使用，并从标准输入给出步骤：
 
 ```sh
-nsh trace App.tsx
+nsh test App.test.tsx --trace
+nsh test App.tsx --trace                                   # 首帧，然后空闲 1.2 s
+echo 'await app.press("Add")' | nsh test App.tsx --trace    # 再加一次点击
 ```
 
 它的用途：
@@ -126,75 +133,43 @@ nsh trace App.tsx
 - 测量首帧、一次点击以及每一帧滚动的开销；
 - 在 CI 中发现回归。
 
-### 它做了什么
-
-1. 打包入口（开发配置，不压缩）并编译为字节码。
-2. 以 390×844 的视口启动引擎，渲染首帧。
-3. 可选地滚动第一个滚动视图或列表。
-4. 在应用空闲时等待（默认 1.2 s，让引擎的空闲垃圾回收先运行，从而暴露对象保留方面的 bug），同时打印应用在此期间渲染
-   的任何内容（定时器、fetch、动画）。
-5. 对第一个可按压视图（第一个带 `onPress` 的视图）点击若干次，并打印每次点击带来的变化。
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--taps <n>` | 2 | 对第一个可按压视图发送的点击次数。 |
-| `--idle-ms <ms>` | 1200 | 点击前的空闲时间。 |
-| `--scroll <points>` | 无 | 将第一个滚动视图或列表滚动这么多点，每帧 10 pt，并打印每一帧的批次。 |
-| `--width <points>` | 390 | 视口宽度。 |
-| `--height <points>` | 844 | 视口高度。 |
-| `--data-dir <DIR>` | | 为此次运行设置显式磁盘数据根目录；默认使用内存数据。 |
-| `--os <OS>` | `ios` | 模拟 `ios`、`android`、`macos`、`windows`、`linux` 或 `web`；影响平台 API 和属性的选择。 |
-
-
-## 隔离磁盘数据
-
-使用显式数据根目录验证原生文件读写：
-
-```sh
-nsh trace App.tsx --os linux --data-dir "$HOME/.cache/my-app-trace" --taps 0
-```
-
-运行时在该根目录下按应用 id 隔离数据，`${dataDir}` 授权仍由应用声明与宿主配置决定。选择专用于测试的目录，避免改写日常应用数据。默认情况下 trace 使用内存数据，原生文件操作需要显式的 `--data-dir` 根目录。
-
-`--os linux` 选择 Linux 平台环境；`--data-dir` 本身不会改变平台。进程等平台 API 还要求实际原生宿主支持该能力；模拟平台不能让移动端或浏览器宿主获得桌面进程能力。
-
 ### 读懂输出
 
-下面是计数器示例（`examples/counter/App.tsx`）的输出，有删节：
+下面是计数器示例按一次按钮的输出（`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --trace`），
+有删节：
 
 ```text
-✓ bundled App.tsx (3255 B in 14.3 ms)
-perf commit: 56 ops, 395µs (list js 6µs), 49 mount items, 21 nodes
-perf first frame: eval 271µs, total 1235µs
-── initial render: 49 items
+✓ bundled App.tsx (3255 B in 6.2 ms)
+perf commit: 56 ops, 271µs (list js 5µs), 49 mount items, 21 nodes
+perf first frame: eval 187µs, total 820µs
+── open(App.tsx): 49 items
    LayoutDirection { rtl: false }
    Create { id: 2, kind: View }
    Create { id: 4, kind: Text }
    Insert { parent: 2, child: 4, before: None }
    ...
-   Events { id: 20, events: EventMask(1) }
    Frame { id: 2, x: 0, y: 0, w: 390, h: 844 }
    Frame { id: 4, x: 24, y: 64, w: 342, h: 34 }
    ...
    Text { id: 4, text: "nsh counter", content: 342x34 @ 0,0 }
    Text { id: 14, text: "0", content: 36x77 @ 0,0 }
-perf event Press on view 20
-perf event js: 196µs
-perf commit: 10 ops, 248µs (list js 6µs), 8 mount items, 24 nodes
-── tap #1 on view 20: 8 items
+perf event Press on view 26
+perf event js: 413µs
+perf commit: 10 ops, 672µs (list js 7µs), 7 mount items, 24 nodes
+── press(+1): 7 items
    Create { id: 42, kind: Text }
    Insert { parent: 32, child: 42, before: None }
-   Frame { id: 14, x: 136, y: 49, w: 71, h: 77 }
    Frame { id: 32, x: 24, y: 366, w: 342, h: 43 }
    Frame { id: 42, x: 0, y: 23, w: 342, h: 20 }
-   Text { id: 14, text: "-1", content: 71x77 @ 0,0 }
-   Text { id: 42, text: "• -1", content: 342x20 @ 0,0 }
+   Text { id: 14, text: "1", content: 36x77 @ 0,0 }
+   Text { id: 42, text: "• 1", content: 342x20 @ 0,0 }
    Text { id: 34, text: "Recent values: 1", content: 342x17 @ 0,0 }
+✓ App.tsx › steps (1.4s)
 ```
 
 #### 批次与 mount item
 
-每个 `── title: N items` 块是一个 **mount 批次（mount batch）**：平台在一帧内应用到原生视图上的全部内容，一次性切换到
+每个 `── step: N items` 块是一个 **mount 批次（mount batch）**，标注它所属的步骤：平台在一帧内应用到原生视图上的全部内容，一次性切换到
 主线程完成。其中的每一行是一个 **mount item**：
 
 | Item | 含义 |
@@ -232,82 +207,48 @@ perf commit: 10 ops, 248µs (list js 6µs), 8 mount items, 24 nodes
 ### 滚动
 
 ```sh
-nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0
+echo 'await app.scroll("id:photos", 3000)' | nsh test examples/gallery/Bench.tsx --trace
 ```
 
-以每帧 10 点的速度滚动第一个 `<Scroll>` 或 `List`，并打印每一帧的批次：
+`scroll` 以每秒 60 帧、每帧 10 点的速度滚动列表，并打印每一帧的批次：
 
 ```text
-perf commit: 26 ops, 297µs (list js 111µs), 22 mount items, 233 nodes
-── scroll to 20: 22 items
-   Create { id: 448, kind: View }
+perf commit: 55 ops, 1667µs (list js 771µs), 46 mount items, 414 nodes
+── scroll(id:photos, 3000): 46 items
+   Create { id: 792, kind: View }
+   Insert { parent: 94, child: 792, before: None }
    ...
-   Text { id: 456, text: "Photo #25", content: 298x20 @ 0,0 }
 ```
 
 对于[列表](./lists.md)，这能展示虚拟化的实际效果：哪些帧绑定了新行、一行需要多少操作，以及没有露出新行的帧不产生任何
 内容。要得到有意义的耗时，请使用 release 构建的 CLI（在源码检出中为 `./target/release/nsh`）。
 
-### 点击
-
-`nsh trace` 点击首帧中 **第一个** 带 `onPress` 的视图。要设计便于 trace 的入口，可以把要测量的交互放在最前面，或者为它
-单独写一个小的入口文件：
-
-```tsx
-// trace/AddItem.tsx: renders the screen and puts the button under test first
-import { mount } from "nsh";
-import { Cart } from "../src/Cart";
-
-mount(() => <Cart initialItems={[]} />);
-```
-
-```sh
-nsh trace trace/AddItem.tsx --taps 5
-```
-
-如果某次点击没有产生任何更新，`nsh trace` 会以 `error tap #1 produced no update` 停止，并返回非零退出码：它正是靠这一点
-发现失效的处理函数，例如应用的节点被垃圾回收的情况。
-
 ### 在 CI 中
 
-`nsh trace` 只需要 CLI，因此可以在 Linux runner 上运行。应用中的错误（bundle 执行失败、未捕获的异常、未处理的 Promise rejection）会打印为 `error`
-行；构建失败、应用什么都没渲染，或者某次点击没有带来任何变化，都会使它以非零退出码退出。两者都要检查：
-
-```sh
-#!/bin/sh
-set -e
-for entry in App.tsx trace/*.tsx; do
-  out=$(nsh trace "$entry" --idle-ms 300 2>&1) || { echo "$out"; exit 1; }
-  if echo "$out" | grep -E '^ *error' >/dev/null; then
-    echo "$out"
-    echo "errors in $entry"
-    exit 1
-  fi
-done
-```
+`nsh test` 只需要 CLI，因此可以在 Linux runner 上运行；只要有测试失败，它就以非零退出码退出：测试本身失败、应用无法构建
+或什么都没渲染、应用在某一步中抛出异常，都算失败。
 
 ```yaml
-# .github/workflows/trace.yml
+# .github/workflows/test.yml
 jobs:
-  trace:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/trace.sh
+      - run: nsh test
 ```
 
 （在 runner 上安装 `nsh` CLI 的方式与本地安装相同；参见[安装](./installation.md)。）
 
-要守住性能，可以记录几个交互的 item 数（`── … : N items` 行以及 `ops` / `mount items` 的数字），在它们增长时让 CI 失败。
-这些计数是确定的；共享 CI 机器上的耗时则不是。
+要守住性能，可以记录几个交互的 item 数（`--trace` 输出中的 `── … : N items` 行以及 `ops` / `mount items` 的数字），在它们
+增长时让 CI 失败。这些计数是确定的；共享 CI 机器上的耗时则不是。
 
 > [!NOTE]
-> `nsh trace` 会应用构建产物中的应用 id 和 `nsh.json` 能力声明。`fetch` 会按网络授权实际访问网络；
-> 进程和文件操作需要显式授权，与桌面宿主中的规则相同。
+> 测试以全部能力运行：不应用 `nsh.json` 中的 `capabilities`。能力规则请在设备上或打包后的构建中测试。
 
 ## 用于 UI 测试的 `testID`
 
-`nsh trace` 检查的是运行时渲染出的内容。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
+`nsh test` 检查的是运行时渲染出的内容，它的 `id:` 选择器按 `testID` 查找视图。如果要用平台的测试工具（XCUITest、Espresso / UI Automator、Appium、Maestro）
 驱动真实的原生 UI，请给视图设置 `testID`：
 
 ```tsx
@@ -322,7 +263,7 @@ jobs:
 | Android | 无障碍节点的 view id 资源名（在 UI Automator 中为 `By.res("add-to-cart")`）。 |
 
 `testID` 是每个元素以及 `nsh/ui/mobile` 中各组件都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
-`accessibilityLabel`（参见[无障碍](./accessibility.md)）。在 `nsh trace` 的输出中，它出现在视图的 `ViewProps` item 里，
+`accessibilityLabel`（参见[无障碍](./accessibility.md)）。在 `--trace` 的输出中，它出现在视图的 `ViewProps` item 里，
 形如 `test_id: Some("add-to-cart")`。
 
 ## 另请参阅

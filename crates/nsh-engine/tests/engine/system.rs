@@ -202,10 +202,8 @@ fn process_exit_requests_the_platform_to_close_the_app() {
 
 #[cfg(feature = "headless")]
 #[test]
-fn headless_trace_preserves_environment_and_data_and_stops_on_process_exit() {
-    use std::sync::Arc;
-
-    use nsh_engine::headless::{DirectoryAssets, TraceOptions};
+fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
+    use nsh_engine::headless::Headless;
 
     let root = crate::temporary_root().join(format!("nsh-trace-exit-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
@@ -221,38 +219,20 @@ fn headless_trace_preserves_environment_and_data_and_stops_on_process_exit() {
         .with_app_id(Some("com.example.trace-exit"))
         .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))
         .unwrap();
-    let options = TraceOptions {
-        taps: 3,
-        tap: Vec::new(),
-        idle_ms: 10_000,
-        wait: Some(10_000),
-        duration: 10_000,
-        scroll: None,
-        width: 390.0,
-        height: 844.0,
-        safe_area: Default::default(),
-        data_dir: Some(root.clone()),
-        os: Some(Os::MacOs),
-    };
-    let output = root.join("trace.txt");
-    let mut warnings = Vec::new();
+    let mut config = EngineConfig::new(bundle);
+    config.environment.os = Os::MacOs;
+    config.data_dir = Some(root.clone());
     let started = Instant::now();
-    let result = nsh_engine::headless::trace(
-        nsh_engine::App::Js(bundle),
-        Vec::new(),
-        Arc::new(DirectoryAssets::new(root.clone(), Vec::new())),
-        &options,
-        Box::new(std::fs::File::create(&output).unwrap()),
-        &mut |warning| warnings.push(warning.to_owned()),
-    );
+    let mut app = Headless::start(config).unwrap();
+    let result = app.wait(Duration::from_secs(10));
     let elapsed = started.elapsed();
-    let output = std::fs::read_to_string(output).unwrap();
+    let exited = app.screen().sent(&nsh_core::Command::ExitApp);
+    drop(app);
     let _ = std::fs::remove_dir_all(root);
     result.unwrap();
     assert!(
         elapsed < Duration::from_secs(5),
-        "trace ignored exit: {elapsed:?}"
+        "headless ignored exit: {elapsed:?}"
     );
-    assert!(output.contains("ExitApp"), "{output}");
-    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(exited, "process.exit did not reach the headless platform");
 }

@@ -292,6 +292,7 @@ export function Form() {
               ref={ref(7)}
               next={next(7)}
               label="Verification code"
+              testID="code"
               hint={`${code().length}/6`}
               value={code()}
               onChangeText={(v) => code.set(v)}
@@ -323,6 +324,7 @@ export function Form() {
               ref={ref(12)}
               next={next(12)}
               label="Controlled"
+              testID="shout"
               hint="Uppercased as you type"
               value={shout()}
               onChangeText={(t) => shout.set(t.toUpperCase())}

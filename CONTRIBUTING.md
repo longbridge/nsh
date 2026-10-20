@@ -33,7 +33,7 @@ Before opening a pull request, please make sure that:
 
 - The problem is real and the change is necessary.
 - The API and implementation follow the existing patterns of NSH, and the rules in [AGENTS.md](AGENTS.md).
-- The code has been reviewed by you and properly tested: tests at the layer that owns the behavior, `nsh trace` for
+- The code has been reviewed by you and properly tested: tests at the layer that owns the behavior, `nsh test --trace` for
   the JS runtime, engine and core, and a run on a simulator, emulator or device for platform code (screenshots or
   recordings are encouraged for UI changes).
 - A pull request focuses on one thing and keeps the diff as small as practical. When using AI, ask it to avoid
@@ -83,7 +83,7 @@ Commit subjects and pull request titles name the area first, then say what chang
 - Do not use conventional prefixes (`fix:`, `feat:`, `chore:`). Pull requests are squash merged and GitHub appends
   their number: `tailwind: Make flex a row as in CSS (#12)`.
 - The body (optional for small changes) explains why, wrapped at 72 columns: the problem, the approach and what it
-  costs. A change to a hot path includes its before / after `nsh trace` numbers.
+  costs. A change to a hot path includes its before / after `nsh test --trace` numbers.
 
 Examples:
 
@@ -166,14 +166,14 @@ rendering are typical examples.
 ## Performance
 
 Performance is NSH's first priority (the rules are in [AGENTS.md](AGENTS.md)). A change to a hot path (the JS
-runtime, the op buffer, the core, layout, text, lists, mounting) comes with before / after `nsh trace` timings and
+runtime, the op buffer, the core, layout, text, lists, mounting) comes with before / after `nsh test --trace` timings and
 mount item counts, compared with the baselines in [docs/dev/performance.md](docs/dev/performance.md); update the
 baselines when they move.
 
 ```sh
-./target/debug/nsh trace examples/counter
+./target/debug/nsh test examples/counter/App.tsx --trace
 cargo build --release -p nsh-cli
-./target/release/nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0
+echo 'await app.scroll("id:photos", 3000)' | ./target/release/nsh test examples/gallery/Bench.tsx --trace
 cargo test --release -p nsh-engine --test list_bench -- --ignored --nocapture
 ```
 

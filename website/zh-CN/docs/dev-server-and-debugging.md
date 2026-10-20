@@ -146,7 +146,7 @@ Promise 或给它加上 `.catch`。
 perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 ```
 
-这些数字的含义参见[用 nsh trace 测试](./testing-and-trace.md)。
+这些数字的含义参见[测试](./testing-and-trace.md)。
 
 ## 错误浮层
 
@@ -195,12 +195,12 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 - **应用保留了你以为会重置的旧状态**：热替换会刻意保留未变化组件的状态。用 Ctrl-C 后重新 `nsh run` 重启，或者修改入口
   模块。
 - **请求只在打包或嵌入的构建中失败**：检查应用的[能力](./sandbox-and-capabilities.md)；被拒绝时日志会写明需要添加的键。
-- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
+- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh test --trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
   原生视图操作。
 - **编辑器中出现类型错误**：`nsh run` 和 `nsh dev` 会保持 `.nsh/types` 为最新；参见[项目结构](./project-structure.md)。
 
 ## 另请参阅
 
 - [CLI](./cli.md)
-- [用 nsh trace 测试](./testing-and-trace.md)
+- [测试](./testing-and-trace.md)
 - [嵌入 iOS 应用](./embedding-ios.md)、[嵌入 Android 应用](./embedding-android.md)
