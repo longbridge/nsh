@@ -212,7 +212,9 @@ impl Gradient {
         if out[n - 1].1.is_nan() {
             out[n - 1].1 = 1.0;
         }
-        let mut max = f32::NEG_INFINITY;
+        // From 0, not -∞: released apps' negative stops resolve to 0, as
+        // they always have (docs/dev/compatibility.md, rule 4).
+        let mut max = 0.0f32;
         for s in out.iter_mut().filter(|s| !s.1.is_nan()) {
             max = max.max(s.1);
             s.1 = max;
@@ -780,6 +782,35 @@ mod tests {
             .map(|(_, p)| p)
             .collect();
         assert_eq!(p, [0.0, 0.4, 0.8, 0.8]);
+    }
+
+    #[test]
+    fn negative_stops_resolve_to_zero() {
+        let stop = |p: f32| ColorStop {
+            color: Color::BLACK,
+            position: Some(StopPosition::Fraction(p)),
+        };
+        let mut g = Gradient {
+            kind: GradientKind::Linear { angle: 180.0 },
+            stops: vec![stop(-0.5), stop(1.0)],
+            repeating: false,
+        };
+        let positions = |g: &Gradient| -> Vec<f32> {
+            g.resolved_stops(100.0, 40.0)
+                .into_iter()
+                .map(|(_, p)| p)
+                .collect()
+        };
+        assert_eq!(positions(&g), [0.0, 1.0]);
+        g.stops = vec![
+            stop(-0.5),
+            ColorStop {
+                color: Color::BLACK,
+                position: Some(StopPosition::Points(-20.0)),
+            },
+            stop(1.0),
+        ];
+        assert_eq!(positions(&g), [0.0, 0.0, 1.0]);
     }
 
     #[test]

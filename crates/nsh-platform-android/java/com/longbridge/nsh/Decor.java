@@ -216,7 +216,8 @@ final class Decor extends Drawable {
             }
             if (Float.isNaN(positions[0])) positions[0] = 0;
             if (Float.isNaN(positions[n - 1])) positions[n - 1] = 1;
-            float max = Float.NEGATIVE_INFINITY;
+            // From 0, as the core's Gradient::resolve_stops: negative stops resolve to 0.
+            float max = 0;
             for (int k = 0; k < n; k++) {
                 if (Float.isNaN(positions[k])) continue;
                 max = Math.max(max, positions[k]);

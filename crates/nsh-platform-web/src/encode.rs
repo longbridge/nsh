@@ -324,19 +324,28 @@ fn origin(o: OriginLen) -> String {
     }
 }
 
-/// The CSS of `g`: stops as written (lengths in pixels), which the
-/// browser resolves against the box as the core does on the other
-/// platforms.
+/// The CSS of `g`. Without lengths, the stops the core resolves, so the
+/// browser places them as every platform does (a negative stop at 0);
+/// with lengths, the stops as written (lengths in pixels), which only the
+/// box resolves.
 fn gradient(g: &Gradient) -> String {
-    let stops: Vec<String> = g
-        .stops
-        .iter()
-        .map(|s| match s.position {
-            Some(StopPosition::Fraction(p)) => format!("{} {}%", css_color(s.color), p * 100.0),
-            Some(StopPosition::Points(p)) => format!("{} {p}px", css_color(s.color)),
-            None => css_color(s.color),
-        })
-        .collect();
+    let stops: Vec<String> = if g.has_lengths() {
+        g.stops
+            .iter()
+            .map(|s| match s.position {
+                Some(StopPosition::Fraction(p)) => {
+                    format!("{} {}%", css_color(s.color), p * 100.0)
+                }
+                Some(StopPosition::Points(p)) => format!("{} {p}px", css_color(s.color)),
+                None => css_color(s.color),
+            })
+            .collect()
+    } else {
+        g.resolved_stops(0.0, 0.0)
+            .iter()
+            .map(|(c, p)| format!("{} {}%", css_color(*c), p * 100.0))
+            .collect()
+    };
     let stops = stops.join(", ");
     let repeating = if g.repeating { "repeating-" } else { "" };
     match g.kind {
