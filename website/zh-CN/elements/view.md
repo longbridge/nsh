@@ -82,7 +82,7 @@ Tailwind 的 `flex` 类遵循 CSS 而不是样式的默认值：`class="flex"` �
 | `onPressIn` / `onPressOut` | 无 | 手指按下 / 抬起或移出。 |
 | `onHoverIn` / `onHoverOut` | 无 | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口（见[悬停](./index.md#悬停)）。 |
 | `onHoverMove` | `HoverEvent` | 没有按下按键时鼠标在视图上移动：`locationX` / `locationY`、`pageX` / `pageY` 和修饰键；每帧最多一次。 |
-| `onContextMenu` | `ContextMenuEvent` | 辅助键在视图上按下（见[上下文菜单](./index.md#上下文菜单)）。 |
+| `onContextMenu` | `ContextMenuEvent` | 辅助按钮在视图上按下（见[上下文菜单](./index.md#上下文菜单)）。 |
 | `onFileDragEnter` / `onFileDragLeave` | 无 | 本地文件拖入 / 离开当前桌面拖放目标。 |
 | `onFileDrop` | `{ uris: string[] }` | 本地文件或目录被放到桌面拖放目标。 |
 | `onLayout` | `{ x, y, width, height }` | 相对父视图的 frame 发生变化。 |

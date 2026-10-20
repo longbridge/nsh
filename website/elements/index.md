@@ -148,9 +148,9 @@ import { Menu } from "nsh/desktop";
 `ContextMenuEvent` has `locationX` / `locationY` in the view, `pageX` / `pageY` in its root view (where `Menu.popup`
 places a menu) and the modifier keys (`altKey`, `ctrlKey`, `metaKey`, `shiftKey`). The nearest view that listens, from
 the one under the pointer outwards, hears it. A text input, or selectable text with an edit menu (Windows, the GPUI
-backend, browsers), nearer than that view shows its own menu instead; with no listener around, nothing happens. The platform decides this as the button goes down, from what is mounted, so the handler is told after
-the fact and nothing has to be cancelled. On touchscreens, a long press opens menus: handle `onLongPress` with the same
-function.
+backend, browsers), nearer than that view shows its own menu instead. The platform decides this as the button goes
+down, from what is mounted, so the handler is told after the fact and nothing has to be cancelled. On touchscreens, a
+long press opens menus: handle `onLongPress` with the same function.
 
 ### Keyboard focus
 

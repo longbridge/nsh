@@ -115,7 +115,7 @@ const at = signal<number | null>(null);
 
 ### 上下文菜单
 
-`onContextMenu` 告诉视图：辅助键在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有键盘的菜单键。在这里用 [`Menu.popup`](../modules/nsh-desktop.md) 打开应用自己的菜单：
+`onContextMenu` 告诉视图：鼠标的辅助按钮在它上面按下了——右键单击、macOS 上的 Control 单击、触控板的双指单击、iPad 指针的辅助点按；在浏览器里还有键盘的菜单键。在这里用 [`Menu.popup`](../modules/nsh-desktop.md) 打开应用自己的菜单：
 
 ```tsx
 import { Menu } from "nsh/desktop";
@@ -125,9 +125,9 @@ import { Menu } from "nsh/desktop";
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `onContextMenu` | `(e: ContextMenuEvent) => void` | 辅助键在视图或其内部的视图上按下。 |
+| `onContextMenu` | `(e: ContextMenuEvent) => void` | 辅助按钮在视图或其内部的视图上按下。 |
 
-`ContextMenuEvent` 包含视图中的 `locationX` / `locationY`、根视图中的 `pageX` / `pageY`（`Menu.popup` 放置菜单的位置）以及修饰键（`altKey`、`ctrlKey`、`metaKey`、`shiftKey`）。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单；周围没有监听者时什么也不会发生。平台在按键按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
+`ContextMenuEvent` 包含视图中的 `locationX` / `locationY`、根视图中的 `pageX` / `pageY`（`Menu.popup` 放置菜单的位置）以及修饰键（`altKey`、`ctrlKey`、`metaKey`、`shiftKey`）。从指针下方的视图向外，最近的一个监听者收到事件。如果比它更近的是文本输入框，或带有编辑菜单的可选中文本（Windows、GPUI 后端、浏览器），则显示它们自己的菜单。平台在按钮按下时根据已挂载的内容做出决定，因此处理函数在事后得到通知，不需要取消任何东西。在触摸屏上用长按打开菜单：用同一个函数处理 `onLongPress`。
 
 ### 键盘焦点
 
