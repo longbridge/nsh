@@ -665,6 +665,10 @@ fn uncovered_only_shrinks() {
             return;
         }
     };
+    if git(&["show", &format!("{base}:api/{}", super::IN_FORCE)]).is_err() {
+        // The record was not in force at the base: it holds nothing.
+        return;
+    }
     let Ok(at_base) = git(&["show", &format!("{base}:api/{FILE}")]) else {
         // The list did not exist yet at the base.
         return;

@@ -4,15 +4,31 @@
 //! steps ([`Selector`]) as a user's eyes would: the top screen of a stack
 //! and the top modal first.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use nsh_core::{
-    Bounds, Command, EventKind, EventMask, InputConfig, MountBatch, MountItem, NodeId, Points,
-    Size, ViewKind,
+    Bounds, Command, Dialog, EventKind, EventMask, InputConfig, MountBatch, MountItem, NodeId,
+    Points, Size, ViewKind,
 };
 
 /// The surface's root view: every app view hangs below it.
 const ROOT: NodeId = 1;
+
+/// What a back does ([`Screen::back_target`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Back {
+    /// The stack pops this screen.
+    Pop(NodeId),
+    /// This screen prevents going back: it is asked.
+    Ask(NodeId),
+    /// The modal asks to close, and closes when the user may close it.
+    Close { modal: NodeId, dismissible: bool },
+    /// Nothing to go back from.
+    Nothing,
+}
 
 /// What a step names: `id:<testID>`, `label:<accessibilityLabel>`,
 /// `text:<text>`, `view:<node id>`, or a bare string, matched as each of the
@@ -55,8 +71,9 @@ impl std::fmt::Display for Selector {
 
 /// The native views as the mount items built them: their tree, what they
 /// show (text, test id, accessibility label), the events they report,
-/// inputs' text, scroll views' offsets, and the commands sent (the
-/// clipboard, focus, scrolling, ...).
+/// inputs' text, scroll views' offsets, the screens and modals a back
+/// took away, the dialogs shown, the clipboard, and the commands sent
+/// (focus, scrolling, ...).
 #[derive(Debug, Default)]
 pub struct Screen {
     nodes: HashMap<NodeId, View>,
@@ -68,6 +85,25 @@ pub struct Screen {
     /// Scroll views a command moved, whose offset the engine is told
     /// ([`Screen::take_scrolled`]), as a platform reports it.
     scrolled: Vec<NodeId>,
+    /// Screens a back popped natively, until the app removes them.
+    popped: HashSet<NodeId>,
+    /// Modals a back closed natively, until the app removes them.
+    closed: HashSet<NodeId>,
+    /// Modals presented since the last call (`onShow`).
+    presented: Vec<NodeId>,
+    /// The dialogs shown, in order, and how many were answered.
+    dialogs: Vec<Dialog>,
+    answered: usize,
+    /// The clipboard's text.
+    clipboard: Option<String>,
+    /// Clipboard reads to answer: the request, and whether it asks only if
+    /// the clipboard holds text.
+    clipboard_reads: Vec<(u32, bool)>,
+    /// What the app asked that only a real platform answers, since the
+    /// last call.
+    unsupported: Vec<&'static str>,
+    /// The app asked for a back (`Command::Back`, what no listener took).
+    back_asked: bool,
 }
 
 #[derive(Debug, Default)]
@@ -81,6 +117,10 @@ struct View {
     frame: Bounds<Points>,
     input: Option<Input>,
     scroll: Option<Scroll>,
+    /// A screen that asks before going back (`preventBack`).
+    prevent_back: bool,
+    /// A modal the user can close natively (`ModalConfig::dismissible`).
+    dismissible: bool,
 }
 
 /// What an input holds, as its platform view keeps it.
@@ -135,15 +175,30 @@ impl Screen {
                     .unwrap_or(siblings.len());
                 siblings.insert(at, *child);
                 self.nodes.entry(*child).or_default().parent = Some(*parent);
+                if self.kind(*child) == Some(ViewKind::Modal) {
+                    self.presented.push(*child);
+                }
             }
-            MountItem::Remove { id } => self.detach(*id),
+            MountItem::Remove { id } => {
+                self.detach(*id);
+                self.popped.remove(id);
+                self.closed.remove(id);
+            }
             MountItem::Delete { id } => {
                 self.detach(*id);
                 self.nodes.remove(id);
                 self.children.remove(id);
+                self.popped.remove(id);
+                self.closed.remove(id);
                 if self.focused == Some(*id) {
                     self.focused = None;
                 }
+            }
+            MountItem::ScreenConfig { id, config } => {
+                self.nodes.entry(*id).or_default().prevent_back = config.prevent_back;
+            }
+            MountItem::ModalConfig { id, config } => {
+                self.nodes.entry(*id).or_default().dismissible = config.dismissible;
             }
             MountItem::Frame { id, frame } => self.nodes.entry(*id).or_default().frame = *frame,
             MountItem::Events { id, events } => self.nodes.entry(*id).or_default().events = *events,
@@ -204,6 +259,22 @@ impl Screen {
     /// keeps it.
     fn command(&mut self, id: NodeId, command: &Command) {
         match command {
+            Command::Dialog(dialog) => self.dialogs.push((**dialog).clone()),
+            Command::SetClipboard(text) => self.clipboard = Some(text.clone()),
+            // An image replaces the text.
+            Command::SetClipboardImage(_) => self.clipboard = None,
+            Command::ReadClipboard { id, has_only } => self.clipboard_reads.push((*id, *has_only)),
+            Command::ReadClipboardImage { .. } => {
+                self.unsupported.push("reading an image from the clipboard");
+            }
+            Command::ReadClipboardFiles { .. } => {
+                self.unsupported.push("reading files from the clipboard");
+            }
+            Command::ImageInfo { .. } => {
+                self.unsupported
+                    .push("an image's size (`Image.getSize`, `Image.prefetch`)");
+            }
+            Command::Back => self.back_asked = true,
             Command::Focus if self.input(id).is_some() => self.focused = Some(id),
             Command::Blur if id == ROOT || self.focused == Some(id) => self.focused = None,
             Command::ScrollTo { x, y, .. } => {
@@ -242,25 +313,144 @@ impl Screen {
         }
     }
 
-    /// The views on screen, in tree order: below the root, and of a
-    /// stack only its top screen (the others are covered).
+    /// The views on screen, in tree order: below the root, of a stack
+    /// only its top screen (the others are covered), without what a back
+    /// took away.
     fn attached(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
         let mut stack = vec![ROOT];
         while let Some(id) = stack.pop() {
+            if self.closed.contains(&id) {
+                continue;
+            }
             if id != ROOT {
                 out.push(id);
             }
-            let Some(children) = self.children.get(&id) else {
-                continue;
-            };
             if self.kind(id) == Some(ViewKind::Stack) {
-                stack.extend(children.last());
-            } else {
+                stack.extend(self.screens(id).last());
+            } else if let Some(children) = self.children.get(&id) {
                 stack.extend(children.iter().rev());
             }
         }
         out
+    }
+
+    /// The screens stack `id` shows, bottom to top (without those a back
+    /// popped).
+    fn screens(&self, id: NodeId) -> Vec<NodeId> {
+        self.children
+            .get(&id)
+            .map(|c| {
+                c.iter()
+                    .copied()
+                    .filter(|s| !self.popped.contains(s))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// What going back does now, as a platform's back does it: in the
+    /// newest modal (else the whole screen) the innermost stack that can go
+    /// back pops its top screen, or asks it when it prevents going back;
+    /// without one, the newest modal asks to close.
+    pub(crate) fn back_target(&self) -> Back {
+        let attached = self.attached();
+        let modal = attached
+            .iter()
+            .rev()
+            .copied()
+            .find(|id| self.kind(*id) == Some(ViewKind::Modal));
+        let can_go_back = |stack: NodeId| {
+            let screens = self.screens(stack);
+            screens.len() >= 2
+                || screens
+                    .last()
+                    .is_some_and(|s| self.nodes.get(s).is_some_and(|v| v.prevent_back))
+        };
+        let stacks: Vec<NodeId> = attached
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.kind(*id) == Some(ViewKind::Stack)
+                    && modal.is_none_or(|m| self.is_inside(*id, m))
+                    && can_go_back(*id)
+            })
+            .collect();
+        let innermost = stacks
+            .iter()
+            .copied()
+            .find(|s| !stacks.iter().any(|o| o != s && self.is_inside(*o, *s)));
+        if let Some(stack) = innermost
+            && let Some(&top) = self.screens(stack).last()
+        {
+            return if self.nodes.get(&top).is_some_and(|v| v.prevent_back) {
+                Back::Ask(top)
+            } else {
+                Back::Pop(top)
+            };
+        }
+        match modal {
+            Some(modal) => Back::Close {
+                modal,
+                dismissible: self.nodes.get(&modal).is_some_and(|v| v.dismissible),
+            },
+            None => Back::Nothing,
+        }
+    }
+
+    /// A back popped `screen` natively: it is gone until the app removes it.
+    pub(crate) fn pop(&mut self, screen: NodeId) {
+        self.popped.insert(screen);
+    }
+
+    /// A back closed `modal` natively.
+    pub(crate) fn close(&mut self, modal: NodeId) {
+        self.closed.insert(modal);
+    }
+
+    /// The modals presented since the last call.
+    pub(crate) fn take_presented(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut self.presented)
+    }
+
+    /// Whether the app asked for a back since the last call.
+    pub(crate) fn take_back_asked(&mut self) -> bool {
+        std::mem::take(&mut self.back_asked)
+    }
+
+    /// The dialogs shown so far, in order (`Alert.alert`, action sheets).
+    pub fn dialogs(&self) -> &[Dialog] {
+        &self.dialogs
+    }
+
+    /// The oldest dialog not answered yet.
+    pub(crate) fn pending_dialog(&self) -> Option<&Dialog> {
+        self.dialogs.get(self.answered)
+    }
+
+    /// The oldest dialog was answered.
+    pub(crate) fn answered(&mut self) {
+        self.answered = (self.answered + 1).min(self.dialogs.len());
+    }
+
+    /// The clipboard's text.
+    pub fn clipboard(&self) -> Option<&str> {
+        self.clipboard.as_deref()
+    }
+
+    pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
+        self.clipboard = text;
+    }
+
+    /// The clipboard reads asked since the last call.
+    pub(crate) fn take_clipboard_reads(&mut self) -> Vec<(u32, bool)> {
+        std::mem::take(&mut self.clipboard_reads)
+    }
+
+    /// What the app asked that only a real platform answers, since the
+    /// last call.
+    pub(crate) fn take_unsupported(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.unsupported)
     }
 
     /// The views on screen in the order a user's eyes find them: the

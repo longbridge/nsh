@@ -158,6 +158,17 @@ fn base_revision() -> Result<String, String> {
     }
 }
 
+/// The file of `api/` whose presence at the base revision puts the record
+/// in force (docs/dev/compatibility.md). It is read at the base, so a
+/// change that deletes it is held all the same.
+pub(crate) const IN_FORCE: &str = "in-force.txt";
+
+/// Whether `base` (the files of `api/` at the base revision) holds this
+/// checkout: the record was in force there.
+fn in_force(base: &BTreeMap<String, Vec<u8>>) -> bool {
+    base.contains_key(IN_FORCE)
+}
+
 /// The files of `api/` at `rev`, as (path relative to `api/`, bytes).
 fn record_at(rev: &str) -> Result<BTreeMap<String, Vec<u8>>, String> {
     let names = git(&["ls-tree", "-r", "--name-only", rev, "--", "api/"])?;
@@ -276,8 +287,8 @@ fn nothing_merged_is_removed() {
             return;
         }
     };
-    if !base.contains_key("runtime.txt") {
-        // Nothing was recorded yet at the base.
+    if !in_force(&base) {
+        eprintln!("note: nothing_merged_is_removed: the record was not in force at {rev}");
         return;
     }
     let dir = api_dir();

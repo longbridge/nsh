@@ -69,6 +69,7 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 | `network` | none | The responses the app's requests get, by `"<METHOD> <URL>"` (a bare URL is a `GET`): `{ "GET https://api.example.com/todos": { status: 200, body: [] } }`. `body` is a string, or a value sent as JSON. A request not listed fails, so tests never reach the network unasked. `"live"`: the real network. |
 | `width`, `height` | 390, 844 | The viewport in points. |
 | `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
+| `clipboard` | empty | The text on the clipboard at the start. |
 
 ### Steps
 
@@ -88,11 +89,31 @@ user would look at first: in the top modal, then on screen, and of a navigation 
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.storage()` | What the app's storage holds now. |
+| `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
+| `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
+| `app.dialogs()` | The dialogs the app showed, in order. |
+| `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
 
-A step resolves once the app rendered nothing for 100 ms (2 s at most, for apps with a running animation), so what it
-changed is on screen when the next line runs; use `waitFor` for what comes later (a response, a timer). A step rejects,
-failing the test, when nothing matches its selector (the error lists the texts on screen) and when the app threw an
-exception meanwhile.
+A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
+render all the time), so what it changed is on screen when the next line runs; use `waitFor` for what comes later (a
+response, a timer). A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
+screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
+
+### What headless runs play of the platform
+
+A headless run has the real runtime and no platform. It plays the platform's part NSH's protocol defines, and nothing
+that only a real platform can do:
+
+- **Native animations run** frame by frame, to their end: `start(callback)` callbacks run, and so does what waits for
+  them.
+- **Going back** pops screens and closes modals as a platform does (`app.back()`).
+- **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
+  be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
+- **The clipboard holds text**: what the app copies, read back when it pastes (`clipboard` to start with some).
+- **Modals show at once**: `onShow` comes when one is presented.
+- **Images are not loaded**: no `onLoad` or `onError` comes.
+- **What only a real platform answers fails the step**: an image's size (`Image.getSize`, `Image.prefetch`), an image
+  or files on the clipboard.
 
 ### Expectations
 

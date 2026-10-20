@@ -80,6 +80,11 @@ it. There are no copies per version. Git's history is the baseline: every change
 request, each pull request is held to `api/` as of its merge base, so by induction everything that ever reached
 `main`, every release included, is still offered and still passes its tests. Releases need nothing from `api/`.
 
+The record holds from the commit that added `api/in-force.txt` on. `nothing_merged_is_removed` and
+`uncovered_only_shrinks` read the marker at the base revision, not in the checkout: a base without it (a `main` from
+before the record was in force) holds nothing and both tests pass with a note, and a base with it holds every later
+change for good, so a pull request that deletes the marker is held all the same.
+
 The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pull request (the Core workflow):
 
 - `surface_is_recorded`: `api/runtime.txt`, `api/types/` and `api/tailwind.txt` are the code's surface. Any change to

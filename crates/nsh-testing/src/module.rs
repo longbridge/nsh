@@ -12,7 +12,7 @@ use nsh_core::{
 };
 
 use crate::{
-    headless::{Headless, MemoryStorage, StubResponse},
+    headless::{self, Headless, MemoryStorage, StubResponse, default_answer},
     run::{OpenApp, Session},
 };
 
@@ -78,7 +78,11 @@ impl Testing {
         let (app, storage) = blocking(move || session.open(&entry, options))
             .await
             .map_err(|e| e.to_string())??;
-        Ok(App { app, storage })
+        Ok(App {
+            app,
+            storage,
+            dialog: None,
+        })
     }
 
     /// What to expect of `value`, compared as JSON is (`undefined` is
@@ -114,6 +118,35 @@ pub struct OpenOptions {
     pub height: Option<f64>,
     /// The safe area insets in points (none).
     pub safe_area: Option<SafeArea>,
+    /// The text on the clipboard at the start (none).
+    pub clipboard: Option<String>,
+}
+
+/// A dialog the app showed (`Alert.alert`, an action sheet).
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct Dialog {
+    /// Its title.
+    pub title: Option<String>,
+    /// Its message.
+    pub message: Option<String>,
+    /// Its buttons' texts (an action sheet's options), in order.
+    pub buttons: Vec<String>,
+    /// Whether it can be closed without a button (tapping outside).
+    pub cancelable: bool,
+    /// An action sheet rather than an alert.
+    pub sheet: bool,
+}
+
+impl From<&nsh_core::Dialog> for Dialog {
+    fn from(dialog: &nsh_core::Dialog) -> Self {
+        Dialog {
+            title: dialog.title.clone(),
+            message: dialog.message.clone(),
+            buttons: dialog.buttons.iter().map(|b| b.text.clone()).collect(),
+            cancelable: dialog.cancelable,
+            sheet: dialog.sheet,
+        }
+    }
 }
 
 /// Safe area insets in points.
@@ -291,6 +324,8 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 pub struct App {
     app: OpenApp,
     storage: Arc<MemoryStorage>,
+    /// Answers the dialogs the app shows ([`App::on_dialog`]).
+    dialog: Option<Callback<Dialog, Option<String>>>,
 }
 
 /// What a step on an app that was closed says.
@@ -381,6 +416,34 @@ impl App {
         Entries(self.storage.entries())
     }
 
+    /// Goes back as the user does (a header's back button, swiping a sheet
+    /// down): the innermost stack of the newest modal (else of the screen)
+    /// pops its top screen, or asks it when it prevents going back; without
+    /// one, the newest modal asks to close. Rejects when there is nothing
+    /// to go back from.
+    pub async fn back(this: Instance<Self>) -> Result<(), String> {
+        step(&this, Headless::back).await
+    }
+
+    /// Answers the dialogs the app shows from now on (`Alert.alert`, action
+    /// sheets): `handler` returns the text of the button to press, or
+    /// `null` to close it without one. Without a handler, a dialog's cancel
+    /// button is pressed, else it is closed when it can be, else the step
+    /// that showed it rejects.
+    pub fn on_dialog(&mut self, #[args(dialog)] handler: Callback<Dialog, Option<String>>) {
+        self.dialog = Some(handler);
+    }
+
+    /// The dialogs the app showed, in order.
+    pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
+        self.with(|app| Ok(app.screen().dialogs().iter().map(Dialog::from).collect()))
+    }
+
+    /// The text on the clipboard now, `null` when it holds none.
+    pub fn clipboard(&self) -> Result<Option<String>, String> {
+        self.with(|app| Ok(app.screen().clipboard().map(str::to_owned)))
+    }
+
     /// `f` with the app as it is now (the batches that came applied).
     fn with<R>(&self, f: impl FnOnce(&mut Headless) -> Result<R, String>) -> Result<R, String> {
         let mut app = self.app.lock().unwrap_or_else(|e| e.into_inner());
@@ -390,12 +453,37 @@ impl App {
     }
 }
 
-/// Runs the step `f` of the app `this` on a blocking thread.
+/// Runs the step `f` of the app `this` on a blocking thread, then answers
+/// the dialogs it showed: with the test's handler (JS, on this thread),
+/// else as [`default_answer`] says.
 async fn step(
     this: &Instance<App>,
     f: impl FnOnce(&mut Headless) -> Result<(), String> + Send + 'static,
 ) -> Result<(), String> {
     let app = this.with(|a| a.app.clone());
+    on_app(&app, f).await?;
+    loop {
+        let pending = on_app(&app, |a| Ok(a.pending_dialog().cloned())).await?;
+        let Some(dialog) = pending else {
+            return Ok(());
+        };
+        let answer = match this.with(|a| a.dialog.clone()) {
+            Some(handler) => match handler.call_async((&dialog).into()).await? {
+                Some(text) => headless::DialogAnswer::Press(text),
+                None => headless::DialogAnswer::Dismiss,
+            },
+            None => default_answer(&dialog)?,
+        };
+        on_app(&app, move |a| a.answer_dialog(answer)).await?;
+    }
+}
+
+/// `f` with the app `app`, on a blocking thread.
+async fn on_app<R: Send + 'static>(
+    app: &OpenApp,
+    f: impl FnOnce(&mut Headless) -> Result<R, String> + Send + 'static,
+) -> Result<R, String> {
+    let app = app.clone();
     blocking(move || {
         let mut app = app.lock().unwrap_or_else(|e| e.into_inner());
         f(app.as_mut().ok_or(CLOSED)?)

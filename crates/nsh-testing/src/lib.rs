@@ -46,8 +46,8 @@ use nsh_core::ui::description::SetDescription;
 use nsh_engine::{Bundle, EngineConfig};
 
 pub use self::headless::{
-    DirectoryAssets, Headless, MemoryStorage, Screen, StubNetwork, StubResponse, UreqNetwork, WAIT,
-    print_batch, start,
+    DialogAnswer, DirectoryAssets, Headless, MemoryStorage, Screen, StubNetwork, StubResponse,
+    UreqNetwork, WAIT, default_answer, print_batch, start,
 };
 #[cfg(feature = "js")]
 pub use self::{
