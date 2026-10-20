@@ -105,6 +105,7 @@ describe("the cart", () => {
 | `locale` | `"en-US"` | 设备的区域设置，BCP 47 标签（`locale()`、`Intl` 的默认值）。 |
 | `reducedMotion` | `false` | 用户要求减少动态效果（`reduceMotion()`）。 |
 | `platform` | `"ios"` | 应用运行时所在的平台：`"ios"` 或 `"android"`（`Platform.OS`、`ios={{…}}` / `android={{…}}` 属性）。 |
+| `clock` | 系统时钟 | 手动时钟，它的时间只随测试推进：`{}`，或者用 `{ time }` 从某个 `Date`（或自 Unix 纪元起的毫秒数）开始。见[控制时间](#控制时间)。 |
 
 ### 模拟网络
 
@@ -131,10 +132,34 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 | `headers` | 无 | 响应头的名称和值。 |
 | `body` | 空 | 字符串，或者作为 JSON 发送的值（`headers` 未指定时带上 `content-type: application/json`）。 |
 | `error` | 无 | 请求改为以这条消息失败，就像设备离线时那样。 |
-| `delay` | 0 | 响应需要的时间，单位为毫秒；步骤不会等它，`waitFor` 会。 |
+| `delay` | 0 | 响应需要的时间，单位为毫秒；步骤不会等它，`waitFor` 会。在手动时钟上，时钟走过这段时间后响应才到达。 |
 
 路由的函数接收请求（`method`、`url`、`headers`，以及文字形式的 `body`），在测试文件中运行，所以可以统计请求次数，或者根据
 测试准备好的数据作答。函数抛出异常时，请求失败，发出该请求的步骤也随之失败。`app.requests()` 以同样的形式按顺序列出应用发出的请求。
+
+### 控制时间
+
+在系统时钟上，应用的定时器和原生动画与在设备上耗时相同，等待它们的测试也一样慢。给 `open` 传 `clock` 后，应用改在手动
+时钟上运行，就像 Jest 的假定时器或 Playwright 的 `page.clock`：时间只随测试推进，并且立即推进：
+
+```tsx
+const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
+await app.type("label:Note", "Milk");
+await app.clock.runFor(10_000);            // 十秒后的自动保存
+expect(app.texts()).toContain("Saved at 09:00:10");
+```
+
+| 步骤 | 说明 |
+|---|---|
+| `await app.clock.runFor(ms)` | 把时钟推进 `ms` 毫秒，每次一个显示帧：定时器、`requestAnimationFrame`、原生动画和延迟的响应在到期时按顺序执行，各自在自己的时刻；应用空闲后 resolve。 |
+| `await app.clock.fastForward(ms)` | 一次把时钟推进 `ms` 毫秒，就像设备从睡眠中醒来：期间到期的定时器各执行一次。 |
+| `app.clock.setSystemTime(time)` | 把墙上时间（`Date.now()`、`new Date()`）设为某个 `Date` 或毫秒数，不触发任何定时器。 |
+
+`Date`、`performance.now()` 和 `Intl` 的默认日期都跟随这个时钟。步骤不再等待正在进行的内容：只要应用在请求帧或有原生
+动画在运行，帧就一帧接一帧地立即到来，每帧在时钟上相隔一帧的时间（1/60 s）；300 ms 的转场只需几毫秒，期间到期的
+定时器也会执行。`app.wait(ms)` 和长按会把时钟推进它们各自的时长。更晚到期的定时器只有在测试把时钟推进到那里时才会执行。
+`waitFor` 的超时仍按真实时间计算，因为它也在等待来自外部的内容（路由的函数、网络）。gallery 的测试就是这样运行的
+（`examples/gallery/tests`）：其中十二个要等动画的测试用 6 s，而不是 28 s。
 
 ### 操作步骤
 
@@ -162,7 +187,7 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 | `await app.type(selector, text)` | 在输入框（或该视图内的第一个输入框；`text:` 也匹配输入框的内容或占位文字）已有内容的末尾逐键输入：输入框先获得焦点，然后每个字符触发一次 `onKeyPress` 和一次 `onChange`，不超过 `maxLength`。单行输入框中的 `\n` 相当于回车键。 |
 | `await app.submit(selector)` | 在输入框中按回车键，行为由它的 `submitBehavior` 决定：触发 `onSubmit`（单行输入框随后失去焦点），或者在多行输入框中换行。 |
 | `await app.scroll(selector, distance)` | 沿滚动视图或列表（该视图、它外层的滚动视图，或它内部的第一个）的方向拖动 `distance` 点，每帧 10 点，不超出内容范围。负数表示往回滚。 |
-| `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。 |
+| `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
 | `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。 |
 | `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。 |
 | `app.shows(selector)` | 当前是否有视图匹配。 |
@@ -179,7 +204,7 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 
-步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的原生动画（对一直在渲染的应用最多等 2 s）后才 resolve，所以下一行
+步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。选择器没有匹配到任何视图
 （错误信息会列出屏幕上的文字）、应用在此期间抛出了异常，或者应用请求了只有真实平台才能回答的内容时，步骤会 reject，
 测试随之失败。
@@ -226,7 +251,7 @@ echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh tes
 这 1.2 s 让引擎的空闲垃圾回收在第一步之前运行，这样，如果应用丢掉了它仍在使用的对象，问题就会暴露出来：它的处理函数
 不再生效。
 
-示例中有可以参考的测试：TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、深色模式），带
+示例中有可以参考的测试：TSX 应用见 `examples/counter` 和 `examples/gallery/tests`（存储、输入框、长列表、模拟请求、深色模式、手动时钟），带
 Rust crate 的应用见 `examples/rust-exports`，Rust 应用见 `examples/gallery-rs`。
 
 ## 用 --trace 跟踪

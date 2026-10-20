@@ -2,7 +2,7 @@
 import { expect, open, test } from "nsh/test";
 
 test("scrolling the list shows the rows further down", async () => {
-  const app = await open("../App.tsx");
+  const app = await open("../App.tsx", { clock: {} });
   await app.press("label:Photos");
   await app.waitFor("Ridge 0001");
   // The rows are buttons, found inside the list.

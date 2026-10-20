@@ -6,7 +6,7 @@ import type { App } from "nsh/test";
 
 let app: App;
 beforeEach(async () => {
-  app = await open("../App.tsx", { storage: { launches: "4", note: "Milk" } });
+  app = await open("../App.tsx", { clock: {}, storage: { launches: "4", note: "Milk" } });
   await app.press("role:button[Storage]");
 });
 

@@ -39,6 +39,7 @@ pub fn registry() -> Registry {
         .module::<TestVariants>()
         .module::<DescribeVariants>()
         .class::<App>()
+        .class::<Clock>()
         .class::<Expectation>()
         .class::<Rejection>();
     registry
@@ -255,17 +256,22 @@ impl Testing {
             locale: options.locale,
             reduced_motion: options.reduced_motion.unwrap_or(false),
             platform: options.platform.unwrap_or_default(),
+            clock: options
+                .clock
+                .map(|c| c.time.map_or_else(std::time::SystemTime::now, |t| t.0)),
         };
         let opening = blocking(move || session.open(&entry, launch));
         let (app, storage, requests) = serve(server.as_ref(), opening)
             .await?
             .map_err(|e| e.to_string())??;
         Ok(App {
-            app,
+            steps: Steps {
+                app,
+                server: server.map(Rc::new),
+                dialog: Rc::default(),
+            },
             storage,
             requests,
-            server: server.map(Rc::new),
-            dialog: None,
         })
     }
 
@@ -369,6 +375,46 @@ pub struct OpenOptions {
     pub reduced_motion: Option<bool>,
     /// The platform the app believes it runs on (`"ios"`).
     pub platform: Option<MobilePlatform>,
+    /// A manual clock for the app (none: the system's): its time moves only
+    /// as the test moves it (`app.clock`), steps finish native animations
+    /// at once, and `app.wait` moves it.
+    pub clock: Option<ClockOptions>,
+}
+
+/// The manual clock `open` gives the app (`clock: {}`).
+#[derive(Debug, Default, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ClockOptions {
+    /// Its wall time at the start (`Date.now()`): a `Date` or milliseconds
+    /// since the Unix epoch (now).
+    pub time: Option<Time>,
+}
+
+/// A point in time as a test gives it: a `Date`, or milliseconds since the
+/// Unix epoch.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Time(pub std::time::SystemTime);
+
+impl JsValue for Time {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "Date | number".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        let ms = value.as_date().or_else(|| value.as_number());
+        let since = |ms: f64| Duration::from_secs_f64(ms.abs() / 1000.0);
+        let time = match ms {
+            Some(ms) if ms.is_finite() && ms >= 0.0 => std::time::UNIX_EPOCH.checked_add(since(ms)),
+            Some(ms) if ms.is_finite() => std::time::UNIX_EPOCH.checked_sub(since(ms)),
+            _ => None,
+        };
+        time.map(Time)
+            .ok_or_else(|| value.expected("a Date or milliseconds since the Unix epoch"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
 }
 
 /// The system's appearance.
@@ -646,6 +692,8 @@ pub(crate) struct Launch {
     pub(crate) locale: Option<String>,
     pub(crate) reduced_motion: bool,
     pub(crate) platform: MobilePlatform,
+    /// A manual clock's start.
+    pub(crate) clock: Option<std::time::SystemTime>,
 }
 
 /// The network an app opens with, made where it starts (it is `Send`).
@@ -846,14 +894,68 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 /// is on screen, when it cannot be taken or the app threw.
 #[class]
 pub struct App {
-    app: OpenApp,
+    steps: Steps,
     storage: Arc<MemoryStorage>,
     /// The requests the app made.
     requests: Arc<RecordingNetwork>,
+}
+
+/// What steps on an app take: `App`'s and its clock's.
+#[derive(Clone)]
+struct Steps {
+    app: OpenApp,
     /// The JS functions of its routes.
     server: Option<Rc<RouteServer>>,
     /// Answers the dialogs the app shows ([`App::on_dialog`]).
-    dialog: Option<Callback<Dialog, Option<String>>>,
+    dialog: Rc<RefCell<Option<DialogCallback>>>,
+}
+
+/// A test's answer to the dialogs (`app.onDialog`).
+type DialogCallback = Callback<Dialog, Option<String>>;
+
+/// The manual clock of an app (`app.clock`, after `open(entry, { clock:
+/// {} })`), as Playwright's `page.clock`: its time moves only as these
+/// say.
+#[class]
+pub struct Clock {
+    steps: Steps,
+}
+
+#[class]
+impl Clock {
+    /// Moves the clock by `ms` milliseconds, a display frame at a time:
+    /// timers, frames and native animations run as they come due, in order;
+    /// resolves once the app is quiet.
+    pub async fn run_for(this: Instance<Self>, ms: f64) -> Result<(), String> {
+        let time = duration(ms)?;
+        let steps = this.with(|c| c.steps.clone());
+        steps.run(move |app| app.run_for(time)).await
+    }
+
+    /// Moves the clock by `ms` milliseconds at once, as a device waking from
+    /// sleep: the timers due meanwhile run once each; resolves once the app
+    /// is quiet.
+    pub async fn fast_forward(this: Instance<Self>, ms: f64) -> Result<(), String> {
+        let time = duration(ms)?;
+        let steps = this.with(|c| c.steps.clone());
+        steps.run(move |app| app.fast_forward(time)).await
+    }
+
+    /// Sets the wall time (`Date.now()`, `new Date()`) to `time`, moving no
+    /// timer.
+    pub fn set_system_time(&self, time: Time) -> Result<(), String> {
+        let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
+        app.as_mut().ok_or(CLOSED)?.set_system_time(time.0)
+    }
+}
+
+/// `ms` milliseconds, which a test gives as a number.
+fn duration(ms: f64) -> Result<Duration, String> {
+    if ms.is_finite() && ms >= 0.0 {
+        Ok(Duration::from_secs_f64(ms / 1000.0))
+    } else {
+        Err(format!("a time is milliseconds, zero or more, not {ms}"))
+    }
 }
 
 /// What a step on an app that was closed says.
@@ -898,7 +1000,8 @@ impl App {
         .await
     }
 
-    /// Lets the app run for `ms` milliseconds (timers and animations).
+    /// Lets the app run for `ms` milliseconds (timers and animations): on a
+    /// manual clock, moves it by `ms` (`clock.runFor`).
     pub async fn wait(this: Instance<Self>, ms: f64) -> Result<(), String> {
         let time = Duration::from_secs_f64(ms.max(0.0) / 1000.0);
         step(&this, move |app| app.wait(time)).await
@@ -932,8 +1035,8 @@ impl App {
     ) -> Result<(), String> {
         let timeout = options.unwrap_or_default().timeout();
         let deadline = std::time::Instant::now() + timeout;
-        let app = this.with(|a| a.app.clone());
-        let server = this.with(|a| a.server.clone());
+        let app = this.with(|a| a.steps.app.clone());
+        let server = this.with(|a| a.steps.server.clone());
         on_app(&app, |a| {
             a.step("waitUntil");
             Ok(())
@@ -1026,12 +1129,20 @@ impl App {
     /// button is pressed, else it is closed when it can be, else the step
     /// that showed it rejects.
     pub fn on_dialog(&mut self, #[args(dialog)] handler: Callback<Dialog, Option<String>>) {
-        self.dialog = Some(handler);
+        *self.steps.dialog.borrow_mut() = Some(handler);
     }
 
     /// The dialogs the app showed, in order.
     pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
         self.with(|app| Ok(app.screen().dialogs().iter().map(Dialog::from).collect()))
+    }
+
+    /// The app's manual clock (`open`'s `clock`), which the test moves.
+    #[getter]
+    pub fn clock(&self) -> Clock {
+        Clock {
+            steps: self.steps.clone(),
+        }
     }
 
     /// The requests the app made, in order.
@@ -1067,7 +1178,7 @@ impl App {
 
     /// `f` with the app as it is now (the batches that came applied).
     fn with<R>(&self, f: impl FnOnce(&mut Headless) -> Result<R, String>) -> Result<R, String> {
-        let mut app = self.app.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
         let app = app.as_mut().ok_or(CLOSED)?;
         app.catch_up();
         f(app)
@@ -1081,26 +1192,41 @@ async fn step(
     this: &Instance<App>,
     f: impl FnOnce(&mut Headless) -> Result<(), String> + Send + 'static,
 ) -> Result<(), String> {
-    let app = this.with(|a| a.app.clone());
-    let server = this.with(|a| a.server.clone());
-    serve(server.as_deref(), on_app(&app, f)).await??;
-    loop {
-        let pending = on_app(&app, |a| Ok(a.pending_dialog().cloned())).await?;
-        let Some(dialog) = pending else {
-            return Ok(());
-        };
-        let answer = match this.with(|a| a.dialog.clone()) {
-            Some(handler) => match handler.call_async((&dialog).into()).await? {
-                Some(text) => headless::DialogAnswer::Press(text),
-                None => headless::DialogAnswer::Dismiss,
-            },
-            None => default_answer(&dialog)?,
-        };
-        serve(
-            server.as_deref(),
-            on_app(&app, move |a| a.answer_dialog(answer)),
-        )
-        .await??;
+    this.with(|a| a.steps.clone()).run(f).await
+}
+
+impl Steps {
+    /// Runs the step `f` on a blocking thread, then answers the dialogs it
+    /// showed ([`step`]).
+    async fn run(
+        &self,
+        f: impl FnOnce(&mut Headless) -> Result<(), String> + Send + 'static,
+    ) -> Result<(), String> {
+        let Steps {
+            app,
+            server,
+            dialog,
+        } = self;
+        serve(server.as_deref(), on_app(app, f)).await??;
+        loop {
+            let pending = on_app(app, |a| Ok(a.pending_dialog().cloned())).await?;
+            let Some(shown) = pending else {
+                return Ok(());
+            };
+            let handler = dialog.borrow().clone();
+            let answer = match handler {
+                Some(handler) => match handler.call_async((&shown).into()).await? {
+                    Some(text) => headless::DialogAnswer::Press(text),
+                    None => headless::DialogAnswer::Dismiss,
+                },
+                None => default_answer(&shown)?,
+            };
+            serve(
+                server.as_deref(),
+                on_app(app, move |a| a.answer_dialog(answer)),
+            )
+            .await??;
+        }
     }
 }
 

@@ -14,6 +14,14 @@
 //! `nsh test --trace` does). [`StubNetwork`] and [`MemoryStorage`] stand in for
 //! the device's network and storage.
 //!
+//! On a manual clock (`EngineConfig::clock`) the app's time moves only as
+//! the driver moves it: display frames come at once, one frame's time
+//! apart, while the app asks for them or a native animation runs (so steps
+//! finish animations without waiting for them), [`Headless::wait`] and a
+//! long press move the clock by their time, and [`Headless::run_for`] /
+//! [`Headless::fast_forward`] move it as a test says. What the driver
+//! waits for (a step's quiet, a `waitFor`'s timeout) stays real time.
+//!
 //! `nsh test` runs apps this way (feature `js`: [`crate::run_file`]),
 //! printing the batches under their steps with `--trace`; so do Rust tests
 //! of an app's crate, which need no QuickJS for a Rust root.
@@ -26,7 +34,10 @@ mod stub;
 
 use std::{
     io::Write,
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -37,7 +48,7 @@ use nsh_core::{
     geometry::{point, px},
 };
 use nsh_engine::{
-    AppError, AppErrorKind, Engine, EngineConfig, EngineControl, Environment, MountSink,
+    AppError, AppErrorKind, Clock, Engine, EngineConfig, EngineControl, Environment, MountSink,
 };
 
 use self::{
@@ -72,6 +83,9 @@ struct ChannelSink {
     errors: Sender<AppError>,
     /// Set once the engine runs; drives `requestAnimationFrame` at 60 Hz.
     control: Arc<OnceLock<EngineControl>>,
+    /// On a manual clock: the engine asked for a frame, which the driver
+    /// gives it when it moves the clock ([`Headless`]).
+    wanted: Option<Arc<AtomicBool>>,
 }
 
 impl MountSink for ChannelSink {
@@ -84,6 +98,10 @@ impl MountSink for ChannelSink {
     }
 
     fn request_frame(&self) {
+        if let Some(wanted) = &self.wanted {
+            wanted.store(true, Ordering::Relaxed);
+            return;
+        }
         let control = self.control.clone();
         std::thread::spawn(move || {
             std::thread::sleep(FRAME);
@@ -99,23 +117,37 @@ impl MountSink for ChannelSink {
 /// animations and what waits for a frame run), laying text out with
 /// [`ApproxTextEngine`]: the engine, and the batches it sends.
 pub fn start(config: EngineConfig) -> std::io::Result<(Engine, Receiver<MountBatch>)> {
-    launch(config).map(|(engine, batches, _)| (engine, batches))
+    launch(config).map(|launched| (launched.engine, launched.batches))
 }
 
-fn launch(
-    config: EngineConfig,
-) -> std::io::Result<(Engine, Receiver<MountBatch>, Receiver<AppError>)> {
+/// A started engine and what it sends.
+struct Launched {
+    engine: Engine,
+    batches: Receiver<MountBatch>,
+    errors: Receiver<AppError>,
+    /// On a manual clock: it asked for a frame.
+    wanted: Option<Arc<AtomicBool>>,
+}
+
+fn launch(config: EngineConfig) -> std::io::Result<Launched> {
     let (batches, batches_rx) = crossbeam_channel::unbounded();
     let (errors, errors_rx) = crossbeam_channel::unbounded();
     let control = Arc::new(OnceLock::new());
+    let wanted = config.clock.is_manual().then(Arc::default);
     let sink = ChannelSink {
         batches,
         errors,
         control: control.clone(),
+        wanted: wanted.clone(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, sink)?;
     let _ = control.set(engine.control());
-    Ok((engine, batches_rx, errors_rx))
+    Ok(Launched {
+        engine,
+        batches: batches_rx,
+        errors: errors_rx,
+        wanted,
+    })
 }
 
 /// Sees each batch a [`Headless`] applies, with the step it came in.
@@ -149,7 +181,8 @@ enum Pumped {
     Batch,
     /// The app threw.
     Error,
-    /// The deadline passed.
+    /// The deadline passed, or a frame on the manual clock brought
+    /// nothing.
     Timeout,
     /// The app left: nothing more comes.
     Exited,
@@ -197,6 +230,10 @@ pub struct Headless {
     environment: Environment,
     viewport: Size<Points>,
     observer: Option<Observer>,
+    /// The app's clock.
+    clock: Clock,
+    /// On a manual clock: the engine asked for a frame.
+    wanted: Option<Arc<AtomicBool>>,
 }
 
 impl Headless {
@@ -204,14 +241,20 @@ impl Headless {
     pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
         let environment = config.environment;
         let viewport = config.viewport;
-        let (engine, batches, errors) = launch(config)?;
+        let clock = config.clock.clone();
+        let Launched {
+            engine,
+            batches,
+            errors,
+            wanted,
+        } = launch(config)?;
         Ok(Headless {
             engine,
             batches,
             errors,
             seen: Vec::new(),
             screen: Screen::default(),
-            animator: Animator::default(),
+            animator: Animator::new(clock.clone()),
             dialogs: Dialogs::Default,
             step: "open".to_owned(),
             applied: 0,
@@ -219,7 +262,111 @@ impl Headless {
             environment,
             viewport,
             observer: None,
+            clock,
+            wanted,
         })
+    }
+
+    /// The app's clock (`EngineConfig::clock`).
+    pub fn clock(&self) -> &Clock {
+        &self.clock
+    }
+
+    /// The step `clock.runFor(<ms>)`: moves the app's manual clock by
+    /// `time`, a display frame at a time (timers, frames and native
+    /// animations run as they come due), then settles.
+    pub fn run_for(&mut self, time: Duration) -> Result<(), String> {
+        self.manual_clock("runFor")?;
+        self.step(format!("clock.runFor({})", time.as_millis()));
+        self.elapse(time);
+        self.done()
+    }
+
+    /// The step `clock.fastForward(<ms>)`: moves the app's manual clock by
+    /// `time` at once, as a device waking from sleep does: the timers due
+    /// meanwhile run once each, then the app settles.
+    pub fn fast_forward(&mut self, time: Duration) -> Result<(), String> {
+        self.manual_clock("fastForward")?;
+        self.step(format!("clock.fastForward({})", time.as_millis()));
+        self.clock.advance_to(self.clock.now() + time);
+        self.advance(Duration::ZERO);
+        self.done()
+    }
+
+    /// Sets the wall time of the app's manual clock (`Date.now()`) to `at`,
+    /// without moving its timers.
+    pub fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String> {
+        self.manual_clock("setSystemTime")?;
+        self.clock.set_system_time(at);
+        Ok(())
+    }
+
+    /// An error unless the app's clock is manual.
+    fn manual_clock(&self, what: &str) -> Result<(), String> {
+        if self.clock.is_manual() {
+            Ok(())
+        } else {
+            Err(format!(
+                "clock.{what} needs a manual clock: open the app with one (`open(entry, {{ clock: {{}} }})`)"
+            ))
+        }
+    }
+
+    /// Moves the manual clock by `by` and waits until the engine got
+    /// there (its batches sent).
+    fn advance(&self, by: Duration) {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        self.engine.control().advance_clock(by, move || {
+            let _ = tx.send(());
+        });
+        let _ = rx.recv_timeout(MAX_IDLE);
+    }
+
+    /// One display frame on the manual clock, `by` after the last: the
+    /// clock moves, then the frame comes if the engine asked for one, and
+    /// the native animations take it.
+    fn frame(&mut self, by: Duration) {
+        self.advance(by);
+        if self
+            .wanted
+            .as_ref()
+            .is_some_and(|w| w.swap(false, Ordering::Relaxed))
+        {
+            self.engine.control().frame();
+            self.advance(Duration::ZERO);
+        }
+        self.animator.tick();
+        self.report_finished();
+    }
+
+    /// Whether, on a manual clock, the app wants frames: it asked for one,
+    /// or a native animation runs.
+    fn wants_frames(&self) -> bool {
+        self.wanted
+            .as_ref()
+            .is_some_and(|w| w.load(Ordering::Relaxed))
+            || (self.clock.is_manual() && self.animator.running())
+    }
+
+    /// Lets the app's time pass by `time`: real time on the system's clock,
+    /// the manual clock moved a frame at a time otherwise; batches are
+    /// applied as they come.
+    fn elapse(&mut self, time: Duration) {
+        if !self.clock.is_manual() {
+            let end = Instant::now() + time;
+            while Instant::now() < end {
+                if let Pumped::Exited = self.pump(end) {
+                    return;
+                }
+            }
+            return;
+        }
+        let end = self.clock.now() + time;
+        while !self.exited && self.clock.now() < end {
+            let by = end.saturating_duration_since(self.clock.now()).min(FRAME);
+            self.frame(by);
+            self.drain();
+        }
     }
 
     /// The step `setViewport(<w>, <h>)`: the surface becomes `size` (a
@@ -394,10 +541,17 @@ impl Headless {
             if self.exited {
                 return Pumped::Exited;
             }
-            let wake = self
-                .animator
-                .next_frame()
-                .map_or(deadline, |frame| frame.min(deadline));
+            // On a manual clock a wanted frame comes at once; with no
+            // batch from it, the caller looks again (and bounds the frames).
+            let framed = self.wants_frames();
+            if framed {
+                self.frame(FRAME);
+            }
+            let wake = match self.animator.next_frame() {
+                _ if framed => Instant::now(),
+                Some(frame) if !self.clock.is_manual() => frame.min(deadline),
+                _ => deadline,
+            };
             let timeout = wake.saturating_duration_since(Instant::now());
             crossbeam_channel::select_biased! {
                 recv(self.errors) -> error => {
@@ -414,6 +568,9 @@ impl Headless {
                     Err(_) => return Pumped::Timeout,
                 },
                 default(timeout) => {}
+            }
+            if framed {
+                return Pumped::Timeout;
             }
             self.animator.tick();
             self.report_finished();
@@ -440,8 +597,13 @@ impl Headless {
     /// animation runs, or for `limit` at most: false if the limit ended it.
     fn quiet(&mut self, quiet: Duration, limit: Duration) -> bool {
         let end = Instant::now() + limit;
+        // Frames on a manual clock come at once: the limit is its time too.
+        let clock_end = self.clock.now() + limit;
         let mut last = Instant::now();
         loop {
+            if self.clock.is_manual() && self.clock.now() >= clock_end {
+                return false;
+            }
             match self.pump((last + quiet).min(end)) {
                 Pumped::Batch => last = Instant::now(),
                 Pumped::Error | Pumped::Exited => return true,
@@ -623,14 +785,7 @@ impl Headless {
     /// animations run).
     pub fn wait(&mut self, time: Duration) -> Result<(), String> {
         self.step(format!("wait({})", time.as_millis()));
-        let end = Instant::now() + time;
-        while Instant::now() < end {
-            match self.pump(end) {
-                Pumped::Error => self.check()?,
-                Pumped::Exited => break,
-                Pumped::Batch | Pumped::Timeout => {}
-            }
-        }
+        self.elapse(time);
         self.check()
     }
 
@@ -752,12 +907,7 @@ impl Headless {
         let id = self.picked(pick, selector, "pressable view")?;
         let delay = self.screen.long_press_delay(id).unwrap_or(500.0).max(0.0);
         self.send(id, EventKind::PressDown, EventPayload::None);
-        let held = Instant::now() + Duration::from_secs_f64(f64::from(delay) / 1000.0);
-        while Instant::now() < held {
-            if let Pumped::Exited = self.pump(held) {
-                break;
-            }
-        }
+        self.elapse(Duration::from_secs_f64(f64::from(delay) / 1000.0));
         self.send(id, EventKind::LongPress, EventPayload::None);
         self.send(id, EventKind::PressUp, EventPayload::None);
         self.done()
@@ -963,6 +1113,11 @@ impl Headless {
             self.animator.scrolled(id, point(x, y));
             // One display frame per step; a frame that needs nothing
             // produces no batch, and a late one is applied with the next.
+            if self.clock.is_manual() {
+                self.frame(FRAME);
+                self.drain();
+                continue;
+            }
             let frame = Instant::now() + FRAME;
             while Instant::now() < frame {
                 if let Pumped::Batch | Pumped::Exited = self.pump(frame) {

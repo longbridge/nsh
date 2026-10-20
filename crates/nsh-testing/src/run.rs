@@ -328,9 +328,14 @@ impl Session {
             Built::Js(bundle, None) => nsh_engine::App::Js(*bundle),
             Built::Rust(root) => nsh_engine::App::Rust(root),
         };
+        let clock = launch
+            .clock
+            .map_or_else(nsh_engine::Clock::system, nsh_engine::Clock::manual);
         let inner: Arc<dyn nsh_engine::Network> = match launch.network {
             NetworkSetup::Live => Arc::new(UreqNetwork::new()),
-            NetworkSetup::Stub(routes) => Arc::new(StubNetwork::new(routes)),
+            NetworkSetup::Stub(routes) => {
+                Arc::new(StubNetwork::new(routes).with_clock(clock.clone()))
+            }
             NetworkSetup::None => Arc::new(StubNetwork::default()),
         };
         let requests = RecordingNetwork::new(inner);
@@ -372,6 +377,7 @@ impl Session {
                 ..Default::default()
             },
             ui_sets: self.run.ui_sets.clone(),
+            clock,
             ..default
         };
         let mut app = Headless::start(config)

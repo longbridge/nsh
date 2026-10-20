@@ -3,7 +3,7 @@
 import { expect, open, test } from "nsh/test";
 
 test("back returns to the demo index", async () => {
-  const app = await open("../App.tsx");
+  const app = await open("../App.tsx", { clock: {} });
   await app.press("label:Navigation");
   await app.waitFor("Native stack");
   await app.back();
@@ -12,7 +12,7 @@ test("back returns to the demo index", async () => {
 });
 
 test("unsaved changes ask before going back", async () => {
-  const app = await open("../App.tsx");
+  const app = await open("../App.tsx", { clock: {} });
   await app.press("label:Navigation");
   await app.press("Unsaved changes");
   await app.waitFor("Nothing to lose: back pops");

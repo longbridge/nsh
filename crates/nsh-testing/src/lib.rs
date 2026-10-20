@@ -53,8 +53,8 @@ pub use self::headless::{
 #[cfg(feature = "js")]
 pub use self::{
     module::{
-        App, ColorScheme, Entries, Expectation, MobilePlatform, NetworkOption, OpenOptions,
-        RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
+        App, ClockOptions, ColorScheme, Entries, Expectation, MobilePlatform, NetworkOption,
+        OpenOptions, RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
     },
     run::{Built, Compile, Entry, Failure, Output, TestResult, TestRun, TestStatus, run_file},
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},

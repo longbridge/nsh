@@ -7,7 +7,7 @@ describe("the Form demo", () => {
   // Each test starts on the demo, in an app of its own.
   let app: App;
   beforeEach(async () => {
-    app = await open("../App.tsx");
+    app = await open("../App.tsx", { clock: {} });
     await app.press("label:Form");
   });
 

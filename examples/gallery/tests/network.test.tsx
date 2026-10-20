@@ -6,6 +6,7 @@ const POSTS = `GET ${URL}`;
 
 test("loads the posts the server answers with", async () => {
   const app = await open("../App.tsx", {
+    clock: {},
     network: { [POSTS]: { body: [{ id: 1, title: "Hello from the test" }] } },
   });
   await app.press("role:button[System]");
@@ -16,7 +17,7 @@ test("loads the posts the server answers with", async () => {
 });
 
 test("shows why the request failed", async () => {
-  const app = await open("../App.tsx", { network: { [POSTS]: { error: "offline" } } });
+  const app = await open("../App.tsx", { clock: {}, network: { [POSTS]: { error: "offline" } } });
   await app.press("role:button[System]");
   await app.press("role:button[fetch()]");
   await app.waitFor("text:/offline/");
@@ -26,6 +27,7 @@ test("asks the server again on each press", async () => {
   // A function answers each request as it comes.
   let asked = 0;
   const app = await open("../App.tsx", {
+    clock: {},
     network: { [POSTS]: () => ({ body: [{ id: ++asked, title: `Answer ${asked}` }] }) },
   });
   await app.press("role:button[System]");

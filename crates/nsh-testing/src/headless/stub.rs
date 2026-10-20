@@ -9,7 +9,9 @@ use std::{
 };
 
 use nsh_core::storage::{StorageBackend, StorageChange};
-use nsh_engine::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
+use nsh_engine::{
+    Clock, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network,
+};
 use regex::Regex;
 
 /// A response [`StubNetwork`] gives.
@@ -99,6 +101,8 @@ impl Url {
 pub struct StubNetwork {
     routes: Vec<(String, Url, StubRoute)>,
     requests: Mutex<Vec<HttpRequest>>,
+    /// What responses' `delay`s are on: the app's clock.
+    clock: Clock,
 }
 
 impl StubNetwork {
@@ -125,7 +129,15 @@ impl StubNetwork {
         Self {
             routes,
             requests: Mutex::new(Vec::new()),
+            clock: Clock::system(),
         }
+    }
+
+    /// Its responses' `delay`s pass on `clock`, the app's: on a manual one
+    /// they come when the test moves it past them.
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// The requests made so far, in order (bodies streamed by JS are not
@@ -162,6 +174,7 @@ impl Network for StubNetwork {
             route,
             request,
             events: task.events.clone(),
+            clock: self.clock.clone(),
         };
         let mut task = task;
         if streamed {
@@ -179,13 +192,15 @@ struct Pending {
     request: HttpRequest,
     /// Taken by the answer (or a cancel).
     events: Arc<Mutex<Option<FetchEvents>>>,
+    clock: Clock,
 }
 
 impl Pending {
     fn answer(self) {
         let url = self.request.url.clone();
         let events = self.events;
-        let send = move |response: StubResponse| deliver(&events, url, response);
+        let clock = self.clock;
+        let send = move |response: StubResponse| deliver(&events, url, response, &clock);
         match self.route {
             Some(StubRoute::Response(response)) => send(response),
             Some(StubRoute::Handler(handler)) => handler(self.request, StubReply(Box::new(send))),
@@ -203,21 +218,23 @@ impl Pending {
     }
 }
 
-/// Reports `response` (after its delay, from a thread then) to the request
-/// whose events are `events`, unless it was cancelled.
-fn deliver(events: &Arc<Mutex<Option<FetchEvents>>>, url: String, response: StubResponse) {
+/// Reports `response` (after its delay on `clock`) to the request whose
+/// events are `events`, unless it was cancelled.
+fn deliver(
+    events: &Arc<Mutex<Option<FetchEvents>>>,
+    url: String,
+    response: StubResponse,
+    clock: &Clock,
+) {
     if !response.delay.is_zero() {
         let events = events.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(response.delay);
-            deliver(
-                &events,
-                url,
-                StubResponse {
-                    delay: Duration::ZERO,
-                    ..response
-                },
-            );
+        let later = clock.clone();
+        clock.at(clock.now() + response.delay, move || {
+            let response = StubResponse {
+                delay: Duration::ZERO,
+                ..response
+            };
+            deliver(&events, url, response, &later);
         });
         return;
     }

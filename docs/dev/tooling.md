@@ -231,7 +231,13 @@ failure is the log's only). The model keeps inputs' text and edit count as platf
 edits than were typed is dropped. `headless::StubNetwork` (routes by `"<METHOD> <URL>"`, `*` matching any text, others
 fail: a `StubResponse`, which may fail the request with `error` or come after `delay`, or a `StubHandler` that answers
 through a `StubReply` whenever it likes) and `headless::MemoryStorage` (entries given up front) stand in for the
-device's services; `RecordingNetwork` keeps the requests a network gets. `Headless::set_viewport` and
+device's services; `RecordingNetwork` keeps the requests a network gets. On a manual clock (`EngineConfig::clock`,
+`architecture.md` "Time") the driver moves the app's time: the engine's frame requests set a flag instead of waking a
+sleeping thread, and while it is set or a native animation runs, every wait (`pump`) takes a frame at once
+(`Headless::frame`: `advance_clock` by a frame's time, the frame, the animator's tick on the clock's time); `wait`,
+a long press's hold and scroll frames move the clock by their time; `run_for` / `fast_forward` / `set_system_time` are
+the test's (`app.clock`); the settle limit is also 2 s of the clock's time; `StubNetwork::with_clock` holds delayed
+responses back as the clock's alarms. Quiet detection and `waitFor` timeouts stay real time. `Headless::set_viewport` and
 `set_environment` change the window and the environment while the app runs, as a rotation or a system setting does.
 
 Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
