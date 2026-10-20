@@ -30,7 +30,7 @@ fn main() {
 }
 
 fn build(entry: &Path, out: &Path, release: bool) -> Result<(), String> {
-    // The mobile UI as the toolchain takes it: data (`SetDescription`).
+    // `nsh/base` as the toolchain takes it: data (`SetDescription`).
     let ui_sets = vec![nsh_core::ui::description::SetDescription::from(
         nsh_base::registry(),
     )];

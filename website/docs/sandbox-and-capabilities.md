@@ -92,7 +92,7 @@ commonly overridden members (`constructor`, `toString`, `valueOf`, `toJSON`, ...
 the property on the object assigned to, so such code (and libraries like axios that use it) keeps working.
 
 Bundles served by `nsh dev` / `nsh run` (with or without `--release`) are not hardened, so you can debug with `eval`. Test the release
-behavior with `nsh trace` (which hardens) or a packaged build before shipping code that relies on dynamic code.
+behavior with `nsh test` (which hardens) or a packaged build before shipping code that relies on dynamic code.
 
 ## Capabilities
 

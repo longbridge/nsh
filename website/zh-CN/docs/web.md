@@ -256,4 +256,4 @@ Web 运行时用于演示和文档，下列能力不提供：
 
 - [打包](./packaging.md)：`nsh package` 的其他目标。
 - [架构](./architecture.md)：Web 版复用的引擎、核心和挂载批次。
-- [测试与 trace](./testing-and-trace.md)：`nsh trace` 以近似的文本引擎无界面地运行同一个引擎。
+- [测试](./testing-and-trace.md)：`nsh test` 以近似的文本引擎无界面地运行同一个引擎。

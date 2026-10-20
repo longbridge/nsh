@@ -1,6 +1,6 @@
 import { Input, signal, Text, View } from "nsh";
-import { Storage } from "nsh/storage";
 import { AlertDialog } from "nsh/base";
+import { Storage } from "nsh/storage";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, Figure, finish, mono, radius, Row } from "../ui";
 
@@ -53,11 +53,12 @@ export function StorageDemo() {
       description: "Removes every key the gallery keeps, the launch count and the note among them.",
       actions: [
         { label: "Cancel", role: "cancel" },
-        { label: "Clear", role: "destructive", id: "clear" },
+        { label: "Clear", role: "destructive" },
       ],
+      closeOnEscape: true,
       closeOnBackdropPress: true,
     });
-    if (action !== "clear") return;
+    if (action !== "Clear") return;
     await Storage.clear();
     launches.set(0);
     note.set("");
@@ -96,7 +97,16 @@ export function StorageDemo() {
             onChange={write}
             placeholder="Write something, then come back to it"
             accessibilityLabel="Note"
-            style={{ placeholderColor: colors.faint, selectionColor: colors.accent, height: 120, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, fontSize: 15, color: colors.text }}
+            style={{
+              height: 120,
+              paddingHorizontal: 14,
+              paddingTop: 12,
+              paddingBottom: 12,
+              fontSize: 15,
+              color: colors.text,
+              placeholderColor: colors.faint,
+              selectionColor: colors.accent,
+            }}
           />
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 16 }}>

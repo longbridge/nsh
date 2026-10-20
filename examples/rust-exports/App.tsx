@@ -3,7 +3,7 @@
 // (`native/`, nsh.json "rust"), imported by its specifier. Their types are
 // generated from the Rust code into `.nsh/types/rust-exports/native.d.ts`.
 import { type JSX, mount, Scroll, signal, Text, View } from "nsh";
-import { Button, SafeAreaView } from "nsh/base";
+import { Button as BaseButton, SafeAreaView } from "nsh/base";
 import { Account, Gauge, Ledger } from "rust-exports/native";
 
 // Each object owns an instance kept in Rust.
@@ -17,30 +17,30 @@ function preview(): string {
   return draft.statement();
 }
 
-/** A card: a heading over its content. */
-function Card(props: { header: JSX.Element; children: JSX.Element | JSX.Element[] }) {
+/** A press target with a label: `nsh/base`'s Button, given the app's look. */
+function Button(props: { title: string; variant?: "primary" | "secondary" | "danger"; onPress: () => void }) {
+  const colors = { primary: "#2563eb", secondary: "#e5e7eb", danger: "#dc2626" };
+  const variant = () => props.variant ?? "primary";
   return (
-    <View style={{ gap: 8, padding: 16, borderRadius: 12, backgroundColor: "#f4f4f5" }}>
-      {props.header}
-      {props.children}
-    </View>
+    <BaseButton
+      onPress={props.onPress}
+      style={{ backgroundColor: colors[variant()], borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 }}
+      activeStyle={{ opacity: 0.7 }}
+    >
+      <Text style={{ fontSize: 15, fontWeight: "600", color: variant() === "secondary" ? "#111827" : "#ffffff" }}>
+        {props.title}
+      </Text>
+    </BaseButton>
   );
 }
 
-const ACTION_COLORS = { primary: "#2563eb", secondary: "#e4e4e7", danger: "#dc2626" };
-
-/** A button of `nsh/base` with this app's look. */
-function Action(props: { title: string; variant?: "primary" | "secondary" | "danger"; onPress: () => void }) {
-  const variant = () => props.variant ?? "primary";
+/** A titled group of lines. */
+function Card(props: { title: string; children: JSX.Element }) {
   return (
-    <Button
-      onPress={props.onPress}
-      accessibilityLabel={props.title}
-      style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: ACTION_COLORS[variant()] }}
-      activeStyle={{ opacity: 0.7 }}
-    >
-      <Text style={{ fontWeight: "600", color: variant() === "secondary" ? "#18181b" : "#ffffff" }}>{props.title}</Text>
-    </Button>
+    <View style={{ gap: 8, padding: 16, borderRadius: 12, backgroundColor: "#f3f4f6" }}>
+      <Text style={{ fontSize: 13, fontWeight: "600", opacity: 0.6 }}>{props.title}</Text>
+      {props.children}
+    </View>
   );
 }
 
@@ -79,28 +79,28 @@ function App() {
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <Scroll contentStyle={{ padding: 16, gap: 16 }}>
-        <Card header={<Text>Ledger · a module</Text>}>
+        <Card title="Ledger · a module">
           <Line>{`Formatted at once: ${Ledger.format(1234.5)}`}</Line>
           <Line muted>{copied()}</Line>
           <Line muted>{rate() ? `Rate: ${rate() * 100}%` : "Rate not fetched"}</Line>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            <Action
+            <Button
               title="Copy statement"
               variant="secondary"
               onPress={async () => copied.set(`Copied ${await Ledger.copy(savings.statement())} characters`)}
             />
-            <Action title="Fetch rate" variant="secondary" onPress={async () => rate.set(await Ledger.fetchRate())} />
+            <Button title="Fetch rate" variant="secondary" onPress={async () => rate.set(await Ledger.fetchRate())} />
           </View>
         </Card>
 
-        <Card header={<Text>Account · a class</Text>}>
+        <Card title="Account · a class">
           <Line>{`${name()}: ${Ledger.format(balance())}`}</Line>
           <Line>{`Checking: ${toChecking() === null ? "closed" : Ledger.format(toChecking()!)}`}</Line>
           <Line muted>{`Heard: ${heard().join(", ") || "nothing yet"}`}</Line>
           <Line muted>{status()}</Line>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            <Action title="Deposit $25" onPress={() => attempt(() => `Deposited: ${Ledger.format(savings.deposit(25))}`)} />
-            <Action
+            <Button title="Deposit $25" onPress={() => attempt(() => `Deposited: ${Ledger.format(savings.deposit(25))}`)} />
+            <Button
               title="Move $30"
               onPress={() =>
                 attempt(() => {
@@ -110,11 +110,11 @@ function App() {
                 })
               }
             />
-            <Action
+            <Button
               title="Accrue"
               onPress={async () => status.set(`Accrued: ${Ledger.format(await savings.accrue(rate() || 0.01))}`)}
             />
-            <Action
+            <Button
               title="Rename"
               variant="secondary"
               onPress={() => {
@@ -122,7 +122,7 @@ function App() {
                 name.set(savings.name);
               }}
             />
-            <Action
+            <Button
               title="Close checking"
               variant="danger"
               onPress={() => {
@@ -134,7 +134,7 @@ function App() {
           </View>
         </Card>
 
-        <Card header={<Text>Gauge · a component</Text>}>
+        <Card title="Gauge · a component">
           <Gauge
             value={spent()}
             step={25}

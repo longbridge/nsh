@@ -1,7 +1,8 @@
 # Performance
 
 Performance is the project's first priority; the rules are in `AGENTS.md`. Changes to hot paths come with before /
-after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
+after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
+(Apple Silicon):
 
 - counter, headless (debug): first frame ~0.5–0.65ms (58 ops / 49 mount items), one tap ~0.15ms (12 ops / 8 items).
 - counter, Catalyst (release): first frame ~1.05–1.15ms (of which ~0.7ms is cold CoreText layout of 10 texts), one tap ~0.12ms.
@@ -13,7 +14,7 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   no batch. `list_bench` runs at ~9µs per frame back to back (JS ~4µs; ~30µs / JS ~20µs before reactivity went native) and
   ~50µs with caches flushed between frames, but ~60–150µs after the thread sleeps 10ms. The difference is the CPU clocking down while the thread sleeps (Apple CLPC), not the code path; neither QoS (the engine
   thread is USER_INTERACTIVE) nor the Mach time-constraint policy changes it. Judge optimizations by the back-to-back and flushed-cache numbers:
-  single-frame `nsh trace` timings are dominated by the clock state.
+  single-frame `nsh test --trace` timings are dominated by the clock state.
 - On Catalyst (release), rebinding one row while scrolling slowly takes ~0.4ms (clocked down) and rebinding a whole screen of ~32 rows on a
   fast fling 0.9–1.6ms.
 - Host startup (`Host::new`, release): ~75–155µs (clock state). The web APIs add nothing until first used, then ~90µs to

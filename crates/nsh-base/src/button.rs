@@ -5,12 +5,7 @@ use nsh_core::{
     ui::{Style, prelude::*},
 };
 
-/// A press target that owns its behavior (presses, the disabled and
-/// selected states, its role for screen readers) and leaves its look to the
-/// app: no colors, sizes or label of its own. The app's `class` and `style`
-/// style it, its states with `active:`, `hover:`, `focus:`, `selected:` and
-/// `disabled:` classes or `activeStyle`, `hoverStyle`, `focusStyle`,
-/// `selectedStyle` and `disabledStyle`, and its children are its content.
+/// The props of [`Button`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct ButtonProps {
     /// No presses, no press feedback; `disabled:` styles apply and screen
@@ -45,7 +40,12 @@ pub enum ButtonEvent {
     PressUp,
 }
 
-/// A press target ([`ButtonProps`]).
+/// A press target that owns its behavior (presses, the disabled and
+/// selected states, its role for screen readers) and leaves its look to the
+/// app: no colors, sizes or label of its own. The app's `class` and `style`
+/// style it, its states with `active:`, `hover:`, `focus:`, `selected:` and
+/// `disabled:` classes or `activeStyle`, `hoverStyle`, `focusStyle`,
+/// `selectedStyle` and `disabledStyle`, and its children are its content.
 #[component]
 pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
     view()

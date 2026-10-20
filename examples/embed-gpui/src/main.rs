@@ -634,7 +634,7 @@ fn bundle_path() -> PathBuf {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    // What the apps reach by name: NSH's UI set and the host's desk
+    // What the apps reach by name: `nsh/base` and the host's desk
     // (`nativeModule("host/trading")`), served by every surface.
     nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading::registry()]);
     let bundle = bundle_path();

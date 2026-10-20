@@ -25,6 +25,7 @@ nsh-dev = { workspace = true, features = ["server"] }
 nsh-js.workspace = true
 nsh-base.workspace = true
 nsh-package.workspace = true
+nsh-testing.workspace = true
 crossbeam-channel.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }

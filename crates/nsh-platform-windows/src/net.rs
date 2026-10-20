@@ -1,7 +1,7 @@
 //! The HTTP stack behind `fetch`, on ureq (rustls with the webpki roots):
 //! one thread per request, streaming both ways.
 //!
-//! Adapted from the stack of `nsh trace` (`nsh-engine`'s feature
+//! Adapted from the stack of headless runs (`nsh-engine`'s feature
 //! `headless`, `headless/net.rs`), which platforms do not build. The
 //! differences: no events at all after `cancel` (the engine would ignore
 //! them anyway), `redirected` compares normalized URLs, and only connecting

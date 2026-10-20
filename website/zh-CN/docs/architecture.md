@@ -75,7 +75,7 @@ group: tools
 ```
 
 在计数器示例中，Mac 上的 release 构建里一次点击（JS 加 commit）约耗时 0.12 ms，并产生少量 mount item（参见
-[用 nsh trace 测试](./testing-and-trace.md)）。
+[测试](./testing-and-trace.md)）。
 
 这一设计带来三个特性：
 
@@ -143,7 +143,7 @@ NSH 是一个 Rust workspace。编写应用时你永远不需要构建它（发�
 | `nsh-cli` | `nsh` 命令。 |
 
 依赖方向是 `nsh-core` ← `nsh-js` ← `nsh-engine` ← 各平台；`nsh-base` 构建在 `nsh-core` 之上。core 不依赖任何平台，也不依赖任何 JS 引擎，正因如此
-`nsh trace` 才能在任何机器上无界面地运行真实的运行时。
+`nsh test` 才能在任何机器上无界面地运行真实的运行时。
 
 ## 另请参阅
 

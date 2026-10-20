@@ -17,7 +17,7 @@
 //!   quiet);
 //! - `tap <selector>`: presses the first view on screen `id:<testID>`,
 //!   `label:<accessibility label>` or `text:<text>` names, or its nearest
-//!   pressable ancestor (as `nsh trace --tap`);
+//!   pressable ancestor (as `nsh test`'s `press`);
 //! - `wait <ms>`: lets timers and animations run;
 //! - `frame <selector> <x> <y> <width> <height>`: the first view on screen
 //!   the selector names (itself, pressable or not) is laid out at that

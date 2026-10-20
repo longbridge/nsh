@@ -1,7 +1,7 @@
 // Storage: a launch counter kept across reloads, the stored keys and a reset.
 import { mount, signal, Text, View } from "nsh";
-import { Storage } from "nsh/storage";
 import { Button } from "nsh/base";
+import { Storage } from "nsh/storage";
 import { ui } from "./palette";
 
 function App() {
@@ -32,11 +32,7 @@ function App() {
         <Text style={{ color: ui().muted }}>Reload the page: the count is still there.</Text>
       </View>
       <Text style={{ color: ui().muted }}>{`Keys: ${keys().length ? keys().join(", ") : "none"}`}</Text>
-      <Button
-        onPress={reset}
-        style={{ alignSelf: "flex-start", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: ui().muted }}
-        activeStyle={{ opacity: 0.7 }}
-      >
+      <Button onPress={reset} style={ui().raised} class="items-center rounded-xl py-3 active:opacity-75">
         <Text style={{ fontWeight: "600", color: ui().text }}>Reset</Text>
       </Button>
     </View>

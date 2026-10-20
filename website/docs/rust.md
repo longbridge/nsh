@@ -115,8 +115,8 @@ and no QuickJS linked in:
 
 `nsh` builds what your crate needs and nothing more: a small program of your crate and NSH's core that describes its
 components and modules to the CLI, which then does the rest itself, and the runner of each target you run or
-package. The first build of a new Rust app compiles your crate and NSH's core, about 60 crates. `nsh trace` mounts
-the root headless in a runner of your crate built the same way.
+package. The first build of a new Rust app compiles your crate and NSH's core, about 60 crates. `nsh test` runs
+the app's tests headless in a runner of your crate built the same way.
 
 During `nsh run`, a change to the crate's Rust code builds the runner again and restarts the app; in the browser,
 the open page loads the new runtime by itself. `cargo run` starts the same root directly on the desktop backend
@@ -289,26 +289,42 @@ the wrong type throws a `TypeError` in the call, or rejects the Promise of one t
 throws (or rejects) with its message. A class's object owns its Rust value: it is freed when the object is collected, or at
 once with `ledger.dispose()` (also `using ledger = new Ledger()`). Name the TSX entry to run it, `nsh run App.tsx` or `nsh package App.tsx --target …`: TSX edits are hot
 updates, Rust edits rebuild and restart the app. The CLI bundles and compiles the TSX itself, knowing your crate's
-exports from its description; the development hosts and `nsh trace`'s headless runner are built with your crate and
+exports from its description; the development hosts and `nsh test`'s headless runner are built with your crate and
 QuickJS.
 
 `examples/rust-exports` in the repository is the reference for exporting: a small TSX app whose crate exports one
 component (props required, defaulted and optional, an event, children), one module (a function of each kind) and
 one class (a constructor, methods, a getter and a setter, a static, an `async` member, another instance as an
-argument, a callback Rust posts to, `dispose()` and `using`), each with a short doc comment, and headless tests that
-press through the app and check what each one shows.
+argument, a callback Rust posts to, `dispose()` and `using`), each with a short doc comment, and tests, in Rust and
+in TypeScript (`App.test.tsx`), that press through the app and check what each one shows.
 
 `examples/gallery-rs` in the repository is a complete Rust app: every demo is Rust, `nsh run examples/gallery-rs
---target web` (or `ios`, `android`, …) runs its root, `nsh trace examples/gallery-rs` runs it headless, and
+--target web` (or `ios`, `android`, …) runs its root, `nsh test examples/gallery-rs` runs its tests headless, and
 `cargo run -p gallery-native` starts it on the desktop backend.
 
 ## Testing
 
-Tests run the app headless in `cargo test`: on the real engine, without a window, with display frames at 60 Hz, so
-timers, tasks and animations run as on screen. `nsh_engine::headless::Headless` (nsh-engine's feature `headless`)
-starts the app, keeps a model of the views it shows (`app.screen()`: their texts, the commands it sent) and presses
-views as a tap does, named as `nsh trace --tap` names them (a text, an accessibility label or a test id; `text:`,
-`label:`, `id:`). A Rust app runs its root; `EngineConfig::new` is a phone-sized engine with nothing else set:
+`nsh test` runs an app's TypeScript tests ([Testing](./testing-and-trace.md)) for apps with Rust crates too: in a
+headless runner built with your crates. In a Rust app, `open(".")` starts its root:
+
+```tsx
+// App.test.tsx, next to nsh.json
+import { expect, open, test } from "nsh/test";
+
+test("a tap counts", async () => {
+  const app = await open(".");
+  await app.press("Tap");
+  expect(app.texts()).toContain("Count: 1");
+});
+```
+
+Tests can also run the app headless in `cargo test`, with the same driver: on the real engine, without a window,
+with display frames at 60 Hz, so timers, tasks and animations run as on screen. `nsh_engine::headless::Headless`
+(nsh-engine's feature `headless`) starts the app, keeps a model of the views it shows (`app.screen()`: their texts,
+the commands it sent) and takes the steps of `nsh test` (`press`, `type_text`, `submit`, `scroll`, `wait_for`), on
+views named by the same selectors (a text, an accessibility label or a test id; `text:`, `label:`, `id:`); a step
+returns an error with the texts on screen when it cannot be taken. A Rust app runs its root; `EngineConfig::new` is a
+phone-sized engine with nothing else set:
 
 ```toml
 [dev-dependencies]
@@ -321,9 +337,9 @@ use nsh_engine::{EngineConfig, headless::Headless};
 #[test]
 fn a_tap_counts() {
     let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
-    app.wait_for("Count: 0");
-    app.press("Tap");
-    app.wait_for("Count: 1");
+    app.wait_for("Count: 0").unwrap();
+    app.press("Tap").unwrap();
+    app.wait_for("Count: 1").unwrap();
 }
 ```
 
@@ -341,7 +357,7 @@ nsh-base = "0.1"
 fn the_module_formats_money() {
     let sets = vec![nsh_base::registry(), my_app_native::registry()];
     let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
-    app.wait_for("Formatted at once: $1,234.50");
+    app.wait_for("Formatted at once: $1,234.50").unwrap();
 }
 ```
 

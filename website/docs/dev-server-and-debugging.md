@@ -175,7 +175,7 @@ prints everything: every log line with its level and source, cargo's output and 
 perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 ```
 
-See [Testing with nsh trace](./testing-and-trace.md) for what these numbers mean.
+See [Testing](./testing-and-trace.md) for what these numbers mean.
 
 ## The error overlay
 
@@ -228,7 +228,7 @@ with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#er
   signals and navigators on purpose. Restart with Ctrl-C and `nsh run`, or change the state's initializer.
 - **A request fails only in a packaged or embedded build**: check the app's [capabilities](./sandbox-and-capabilities.md);
   refusals are logged with the key to add.
-- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh trace`](./testing-and-trace.md), which
+- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh test --trace`](./testing-and-trace.md), which
   prints every native view operation.
 - **Type errors in the editor**: `nsh run` and `nsh dev` keep `.nsh/types` up to date; see
   [Project structure](./project-structure.md).
@@ -236,5 +236,5 @@ with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#er
 ## See also
 
 - [CLI](./cli.md)
-- [Testing with nsh trace](./testing-and-trace.md)
+- [Testing](./testing-and-trace.md)
 - [Embedding in iOS apps](./embedding-ios.md), [Embedding in Android apps](./embedding-android.md)

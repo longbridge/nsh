@@ -1726,16 +1726,14 @@ mod tests {
     /// as they say, whatever the default animation would have done.
     #[test]
     fn modals_show_as_the_options_after_their_insertion_say() {
-        for (animation, transparent) in [
-            (ModalAnimation::None, true),
-            (ModalAnimation::None, false),
-            (ModalAnimation::Slide, true),
-            (ModalAnimation::Fade, true),
+        for animation in [
+            ModalAnimation::None,
+            ModalAnimation::Slide,
+            ModalAnimation::Fade,
         ] {
             let surface = Surface::new(nsh_engine::Environment::default());
             let config = ModalConfig {
                 animation,
-                transparent,
                 ..ModalConfig::default()
             };
             for item in [
@@ -1760,7 +1758,7 @@ mod tests {
             } else {
                 1.0
             };
-            assert_eq!(fade, expected, "{animation:?}, transparent: {transparent}");
+            assert_eq!(fade, expected, "{animation:?}");
         }
     }
 }

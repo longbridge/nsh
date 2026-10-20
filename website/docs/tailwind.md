@@ -171,7 +171,7 @@ Classes naming tokens are resolved once per theme, like any other class: drawing
 
 ## The class check
 
-`nsh build`, `nsh dev`, `nsh run` and `nsh trace` check the static class names in your JSX (string literals in `class` and the keys of `classList`) with the same parser and theme the runtime uses, and warn about classes that do not exist:
+`nsh build`, `nsh dev`, `nsh run` and `nsh test` check the static class names in your JSX (string literals in `class` and the keys of `classList`) with the same parser and theme the runtime uses, and warn about classes that do not exist:
 
 ```text
  warn nsh::build App.tsx:12:36: unknown class `bg-brand-550`

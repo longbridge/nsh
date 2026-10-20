@@ -22,7 +22,7 @@ export function Button(props: { title: string; variant?: "primary" | "danger"; o
   );
 }
 
-/** A rounded surface with a title over its content. */
+/** A rounded surface with an optional title over its content. */
 export function Card(props: { title?: string; children: JSX.Element }) {
   return (
     <View class="gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

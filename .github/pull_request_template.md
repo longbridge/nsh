@@ -29,7 +29,7 @@ Describe any breaking changes introduced by this pull request. If none, remove t
 
 ## Performance
 
-For changes to a hot path: before / after `nsh trace` timings and mount item counts. If none, remove this section.
+For changes to a hot path: before / after `nsh test --trace` timings and mount item counts. If none, remove this section.
 
 ## How to Test
 

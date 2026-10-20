@@ -14,7 +14,7 @@ exclude = ["run"]
 
 [dependencies]
 nsh-platform-gpui = { path = "../../crates/gpui/nsh-platform-gpui" }
-# The host's own set (`host/trading`): `#[module]`, and NSH's UI set next to it.
+# The host's own set (`host/trading`): `#[module]`, and `nsh/base` next to it.
 nsh-core = { path = "../../crates/nsh-core" }
 nsh-base = { path = "../../crates/nsh-base" }
 # The desk the host and the apps share (`watch`).

@@ -273,4 +273,4 @@ The player and the dev server run apps with development settings (no hardening);
 
 - [Packaging](./packaging.md): the other targets of `nsh package`.
 - [Architecture](./architecture.md): the engine, the core and the mount batches the web build reuses.
-- [Testing and trace](./testing-and-trace.md): `nsh trace` runs the same engine headless, with an approximate text engine.
+- [Testing](./testing-and-trace.md): `nsh test` runs the same engine headless, with an approximate text engine.

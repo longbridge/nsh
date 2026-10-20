@@ -24,10 +24,10 @@ use super::{
 /// JS (or from the component whose view has it), its events go to JS.
 /// `#[component]` on a function makes the type and this impl.
 ///
-/// It is registered under its type's name ([`std::any::type_name`]:
-/// `gallery_native::Gallery`, the root component of `examples/gallery-rs`)
-/// and exported to JS as the type's own name (`Gallery`), so neither is
-/// written by hand ([`Registry::register`]).
+/// It is registered under its type's full path ([`std::any::type_name`]:
+/// its crate, modules and name) and exported to JS as the type's own name
+/// (the last segment), so neither is written by hand
+/// ([`Registry::register`]).
 ///
 /// ```ignore
 /// #[component]
@@ -354,10 +354,10 @@ impl Event for NoEvent {
 /// from it ([`declarations`]).
 #[derive(Debug, Clone)]
 pub struct ComponentSpec {
-    /// Its registered name: its type's ([`std::any::type_name`]:
-    /// `gallery_native::Gallery`), unique within one binary.
+    /// Its registered name: its type's full path ([`std::any::type_name`]),
+    /// unique within one binary.
     pub name: &'static str,
-    /// Its JS export: the type's own name (`Gallery`).
+    /// Its JS export: the type's own name, the last segment of its path.
     pub export: String,
     /// Documentation.
     pub doc: &'static str,
@@ -431,9 +431,8 @@ pub(crate) fn name_of<C: Component>() -> &'static str {
     std::any::type_name::<C>()
 }
 
-/// A type's own name, its JS export: `gallery_native::demos::physics::Physics`
-/// -> `Physics` (a generic one's without its arguments: `app::Picker<app::Fruit>`
-/// -> `Picker`).
+/// A type's own name, its JS export: the last segment of its path, without
+/// a generic type's arguments (the test `components_are_named_after_their_types`).
 fn export_name(type_name: &str) -> &str {
     let path = type_name.split('<').next().unwrap_or(type_name);
     path.rsplit("::").next().unwrap_or(path)

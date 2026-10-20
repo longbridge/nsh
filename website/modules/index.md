@@ -29,15 +29,15 @@ The look of an app is the app's own. Its component library is the third layer: c
 
 There is no catch-all module: each API lives in exactly one place. Platform-only APIs live in `nsh/ios`, `nsh/android` and `nsh/desktop` (macOS, Windows, Linux); all can be imported on every platform, so one bundle runs everywhere (their calls do nothing elsewhere, and `isAvailable` tells you which platform you are on).
 
-Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `nsh trace` write `.nsh/types` next to your app, so the TypeScript declarations always match the runtime you build with (see [Project structure](../docs/project-structure.md)).
+Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `nsh test` write `.nsh/types` next to your app, so the TypeScript declarations always match the runtime you build with (see [Project structure](../docs/project-structure.md)).
 
 ## All modules
 
 | Module | Exports | Page |
 |---|---|---|
 | `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; `View`, `Text`, `Scroll`, `Input`; the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
-| `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/base` | `Button`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
+| `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/list` | `List` (virtualized, recycling list) | [nsh/list](./nsh-list.md) |
 | `nsh/canvas` | `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient` | [nsh/canvas](./nsh-canvas.md) |
 | `nsh/device` | `windowSize`, `colorScheme`, `fontScale`, `Platform`, `PixelRatio`, `I18nManager` | [nsh/device](./nsh-device.md) |

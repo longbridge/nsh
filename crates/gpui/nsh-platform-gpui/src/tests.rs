@@ -44,7 +44,7 @@ function App() {
   return (
     <View style={{ flex: 1, padding: 8, gap: 8 }}>
       <Square style={{ width: 40, height: 20 }} />
-      <Input autoFocus value={text()} onChangeText={(t) => text.set(t)} style={{ height: 30 }} />
+      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
     </View>
   );
 }

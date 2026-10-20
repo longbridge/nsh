@@ -460,10 +460,13 @@ fn references(body: &str) -> (Vec<String>, Vec<String>) {
             .rsplit(|c: char| !is_ident(c))
             .next()
             .unwrap_or_default();
+        let after = &code[before.len() + word.len()..];
         if DECLARING.contains(&prev_word) && prev.ends_with(prev_word) {
             local.push(word.to_owned());
         } else if prev.ends_with('.') {
             // A member (`JSX.Element`, `Symbol.iterator`).
+        } else if after.starts_with(':') || after.starts_with("?:") {
+            // A property's or a parameter's name (`safeArea?: SafeArea`).
         } else {
             used.push(word.to_owned());
         }
@@ -645,8 +648,10 @@ mod tests {
     #[test]
     fn references_skip_members_strings_and_declarations() {
         let (used, local) = references(
-            "/** A `Foo` */\nexport interface Bar<T> { a: JSX.Element; b: \"Baz\"; c: Qux<T> }",
+            "/** A `Foo` */\nexport interface Bar<T> { a: JSX.Element; b: \"Baz\"; c: Qux<T>; safeArea?: Quux }",
         );
+        assert!(used.contains(&"Quux".to_owned()));
+        assert!(!used.contains(&"safeArea".to_owned()));
         assert!(used.contains(&"JSX".to_owned()));
         assert!(used.contains(&"Qux".to_owned()));
         assert!(!used.contains(&"Element".to_owned()));

@@ -213,6 +213,7 @@ export function Photos() {
         when={wide}
         else={
           <List
+            testID="photos"
             each={photos()}
             estimatedItemSize={76}
             style={{ flex: 1 }}
@@ -234,6 +235,7 @@ export function Photos() {
           const tile = untracked(() => ((paneWidth() - 48) / n) * 0.75 + 60);
           return (
             <List
+              testID="photos"
               each={photos()}
               numColumns={n}
               estimatedItemSize={tile}

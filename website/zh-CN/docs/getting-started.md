@@ -270,13 +270,13 @@ nsh package my-app --target windows
 
 ## 在终端中试运行
 
-`nsh trace` 以无界面方式（不需要设备）运行应用，打印它产生的原生视图操作及耗时，然后点击第一个可按压的视图两次：
+`nsh test` 以无界面方式（不需要设备）运行应用的测试：`nsh init` 已经写好了一个 `App.test.tsx`，它打开应用、按下按钮并检查显示的内容：
 
 ```sh
-nsh trace my-app/App.tsx
+nsh test my-app
 ```
 
-这是检查应用能否正常启动、查看一次交互引起多少工作量的快捷方式（[测试与 trace](./testing-and-trace.md)）。
+加上 `--trace` 时，它还会打印应用产生的原生视图操作及耗时，可以快速查看一次交互引起多少工作量（[测试](./testing-and-trace.md)）。
 
 ## 下一步
 

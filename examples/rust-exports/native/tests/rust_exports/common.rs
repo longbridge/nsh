@@ -30,13 +30,13 @@ pub(crate) fn start(ready: &str) -> Headless {
         ..EngineConfig::new(app())
     })
     .expect("the engine starts");
-    app.wait_for(ready);
+    app.wait_for(ready).unwrap();
     app
 }
 
 /// Presses what the text `label` is in (a button, the gauge), as a tap
 /// does, and waits until `then` shows.
 pub(crate) fn press(app: &mut Headless, label: &str, then: &str) {
-    app.press(label);
-    app.wait_for(then);
+    app.press(label).unwrap();
+    app.wait_for(then).unwrap();
 }

@@ -61,7 +61,7 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   kilobytes instead of ICU4X's megabytes; trade-offs and limits in its module doc), in `Environment::locale` by
   default (the platform's region format: `NSLocale.currentLocale`, `Locale.getDefault()`).
 - **Networking**: requests go to the platform stack through `nsh_engine::Network`
-  (NSURLSession, HttpURLConnection; ureq on Linux, on Windows and for `nsh trace`), streaming both ways: the stack reports the response head,
+  (NSURLSession, HttpURLConnection; ureq on Linux, on Windows and for `nsh test`), streaming both ways: the stack reports the response head,
   then body chunks as they arrive (`FetchEvent`), and JS can pause reading (back pressure); a streamed request body is
   sent in chunks the stack asks for one at a time (`FetchEvent::BodyWanted`, chunked transfer encoding).
 

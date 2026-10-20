@@ -11,8 +11,24 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["bundle"]
+# Building entries in this process (`compile_tsx`, `tsx`, `compiler`): nsh's
+# bundler. Off in apps' headless runners, which `nsh` builds the entries for.
+bundle = ["dep:nsh-bundler", "dep:nsh-js"]
+
 [dependencies]
-nsh-bundler = { workspace = true, features = ["bundle"] }
+nsh-bundler = { workspace = true, features = ["bundle"], optional = true }
 nsh-core.workspace = true
 nsh-engine = { workspace = true, features = ["js", "headless"] }
-nsh-js.workspace = true
+nsh-js = { workspace = true, optional = true }
+crossbeam-channel.workspace = true
+dunce.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[test]]
+name = "testing"
+# It builds a test file's app in this process.
+required-features = ["bundle"]
