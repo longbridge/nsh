@@ -39,7 +39,7 @@ use objc2::{MainThreadOnly, define_class, msg_send, rc::Retained};
 use objc2_app_kit::{NSResponder, NSView};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGColor;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSUserDefaults, ns_string};
 use objc2_quartz_core::CALayer;
 
 use crate::{
@@ -1380,10 +1380,14 @@ pub(crate) fn grabs_thumb(view: &NshView, x: f32, y: f32) -> bool {
         && (start - THUMB_SLOP..=start + len + THUMB_SLOP).contains(&along)
 }
 
-/// The mouse moved over `view`: its indicator shows (and fades again
-/// once the mouse rests), as overlay scroll bars do, so that a mouse user
-/// sees it can scroll and where its scroll bar is.
+/// Reveal the indicator on hover unless the user only wants it while scrolling.
 pub(crate) fn hovered(surface: &Rc<Surface>, view: &NshView) {
+    if NSUserDefaults::standardUserDefaults()
+        .stringForKey(ns_string!("AppleShowScrollBars"))
+        .is_some_and(|setting| setting.isEqualToString(ns_string!("WhenScrolling")))
+    {
+        return;
+    }
     {
         let mut state = view.state_mut();
         let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
