@@ -141,7 +141,7 @@ function Card(props: { title: string; children?: JSX.Element }) {
 </Card>
 ```
 
-每读取一次 `props.children` 都会重新构建一遍子元素（新的原生视图）。只在子元素应该出现的位置读取一次。children 也可以是函数，即组件带参数调用的渲染回调：
+每读取一次 `props.children` 都会重新构建一遍子元素（新的原生视图）。只在子元素应该出现的位置读取一次。多个子元素中会变化的那一个（`<If>`、`<Each>`、`{cond() ? a : b}`）以函数的形式传入，`{props.children}` 只更新它自己：其他子元素保留各自的视图，输入框保留输入的文字和焦点。children 也可以是函数，即组件带参数调用的渲染回调：
 
 ```tsx
 function Repeat(props: { times: number; children: (i: number) => JSX.Element }) {

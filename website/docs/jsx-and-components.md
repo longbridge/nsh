@@ -141,7 +141,7 @@ function Card(props: { title: string; children?: JSX.Element }) {
 </Card>
 ```
 
-Each read of `props.children` builds the children again (new native views). Read it once, in the place where the children go. Children can also be a function, a render callback the component calls with arguments:
+Each read of `props.children` builds the children again (new native views). Read it once, in the place where the children go. Among several children, one that changes (an `<If>`, an `<Each>`, `{cond() ? a : b}`) arrives as a function, and `{props.children}` updates that one alone: its siblings keep their views, an input its text and focus. Children can also be a function, a render callback the component calls with arguments:
 
 ```tsx
 function Repeat(props: { times: number; children: (i: number) => JSX.Element }) {

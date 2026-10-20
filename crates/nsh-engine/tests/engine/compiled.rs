@@ -395,3 +395,128 @@ fn screens_and_modals_build_their_content_once() {
         "{shown:?}"
     );
 }
+
+const CHILDREN_SIBLINGS: &str = r#"
+import { Input, mount, signal, Text, View } from "nsh";
+import { KeyboardAvoidingView } from "nsh/ui/mobile";
+
+function Wrap(props: { children?: any }) {
+  return <View>{props.children}</View>;
+}
+
+const saved = signal(false);
+mount(() => (
+  <View>
+    <KeyboardAvoidingView>
+      <Input testID="a" />
+      <If when={saved()}><Text>saved a</Text></If>
+    </KeyboardAvoidingView>
+    <Wrap>
+      <Input testID="b" />
+      {saved() ? <Text>saved b</Text> : null}
+    </Wrap>
+    <Wrap>
+      <Input testID="c" />
+      <Each of={saved() ? ["saved c"] : []}>{(t: string) => <Text>{t}</Text>}</Each>
+    </Wrap>
+    <Text onPress={() => saved.set(true)}>save</Text>
+  </View>
+));
+"#;
+
+/// A change in one child of a component's children (`<If>`, a ternary,
+/// `<Each>`) updates that child alone: its siblings, made by the same
+/// `children` getter, stay (an input keeps its text and focus).
+#[test]
+fn a_changing_child_leaves_its_siblings() {
+    let (engine, rx) = start_app(CHILDREN_SIBLINGS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let save = text_id(&first, "save").expect("the save text");
+    engine
+        .control()
+        .dispatch_event(save, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t.starts_with("saved")));
+    let shown = texts(&batch);
+    for text in ["saved a", "saved b", "saved c"] {
+        assert!(shown.contains(&text.to_owned()), "{shown:?}");
+    }
+    let remade: Vec<&MountItem> = batch
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                MountItem::Create {
+                    kind: nsh_core::ViewKind::Input,
+                    ..
+                } | MountItem::Remove { .. }
+                    | MountItem::Delete { .. }
+            )
+        })
+        .collect();
+    assert!(remade.is_empty(), "{remade:#?}");
+}
+
+const NESTED_CHILDREN: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+function Wrap(props: { children?: any }) {
+  return <View>{props.children}</View>;
+}
+
+const list = signal(true);
+const extra = signal(false);
+mount(() => (
+  <View>
+    <Wrap>
+      {list()
+        ? [<Text>first</Text>, <If when={extra()}><Text>extra</Text></If>]
+        : <Text>other</Text>}
+    </Wrap>
+    <Text onPress={() => extra.set(!extra())}>extra?</Text>
+    <Text onPress={() => list.set(!list())}>list?</Text>
+  </View>
+));
+"#;
+
+/// An insert whose value changes (the getter reads `list`) makes its items'
+/// effect again, for the new value: the one of the old value no longer
+/// shows anything.
+#[test]
+fn a_new_value_replaces_the_effect_of_its_items() {
+    let (engine, rx) = start_app(NESTED_CHILDREN);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let (extra, list) = (
+        text_id(&first, "extra?").expect("extra?"),
+        text_id(&first, "list?").expect("list?"),
+    );
+    let press = |id| control.dispatch_event(id, EventKind::Press, EventPayload::None);
+    press(extra);
+    let batch = next(&rx, |b| texts(b).contains(&"extra".to_owned()));
+    assert!(!texts(&batch).contains(&"first".to_owned()), "first stays");
+    press(list);
+    let batch = next(&rx, |b| texts(b).contains(&"other".to_owned()));
+    let removed = batch
+        .items
+        .iter()
+        .filter(|i| matches!(i, MountItem::Remove { .. }))
+        .count();
+    assert_eq!(removed, 2, "{:#?}", batch.items);
+    // The old value's `<If>` shows nothing any more, in any batch until the
+    // new value is shown again.
+    press(extra);
+    press(list);
+    loop {
+        let batch = rx.recv_timeout(Duration::from_secs(5)).expect("a batch");
+        let shown = texts(&batch);
+        assert!(!shown.contains(&"extra".to_owned()), "{shown:?}");
+        if shown.contains(&"first".to_owned()) {
+            break;
+        }
+    }
+}

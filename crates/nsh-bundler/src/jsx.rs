@@ -328,6 +328,21 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
+/// How many values `children` give (text that is not only whitespace,
+/// elements, fragments and expressions).
+fn child_count(children: &[JSXChild<'_>]) -> usize {
+    children
+        .iter()
+        .filter(|c| match c {
+            JSXChild::Text(t) => clean_text(&t.value).is_some(),
+            JSXChild::ExpressionContainer(c) => {
+                !matches!(c.expression, JSXExpression::EmptyExpression(_))
+            }
+            JSXChild::Element(_) | JSXChild::Fragment(_) | JSXChild::Spread(_) => true,
+        })
+        .count()
+}
+
 /// Whether an expression's value may change: it calls something or reads a
 /// member, outside nested functions.
 fn is_dynamic(e: &Expression<'_>) -> bool {
@@ -965,7 +980,17 @@ impl<'a> Compiler<'a, '_> {
                 }
             }
         }
-        let values = self.children(el.children, g, Mode::Getter);
+        // A lone child is read through the getter alone; among siblings an
+        // expression that changes is a function of its own, which the insert
+        // of the children runs alone (`nsh:rt`'s `insert`): reading it in
+        // the getter would make the getter, and every sibling it makes,
+        // run again.
+        let mode = if child_count(&el.children) > 1 {
+            Mode::Value
+        } else {
+            Mode::Getter
+        };
+        let values = self.children(el.children, g, mode);
         if !values.is_empty() {
             let value = match values.as_slice() {
                 [one] => one.clone(),
@@ -1371,10 +1396,20 @@ mod tests {
             "{code}"
         );
         assert!(code.contains("get footer() { return (() => {"), "{code}");
+        // Among siblings, what changes is a function of its own; a lone
+        // child is the getter's.
         assert!(
-            code.contains(r#"get children() { return ["one ", s()]; }"#),
+            code.contains(r#"get children() { return ["one ", () => s()]; }"#),
             "{code}"
         );
+        let code = flat(
+            &compile(
+                r#"declare const Card: any, s: () => number;
+            export const a = <Card>{s()}</Card>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(code.contains("get children() { return s(); }"), "{code}");
     }
 
     #[test]

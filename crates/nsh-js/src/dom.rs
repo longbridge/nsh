@@ -1753,20 +1753,19 @@ fn insert_value(
     marker: Option<JsValue>,
 ) -> Result<(), JsValue> {
     if is_dynamic(ctx, value, 0) {
-        // A run of children (`{a()}{b()}`, one insert): each function gets
-        // a memo of its own, so a change in one runs only that one and the
-        // others' nodes stay (not made again).
-        let memos = memoize_run(ctx, value);
-        let value = memos.unwrap_or(value);
-        let mut data = [parent, marker.unwrap_or(UNDEFINED), value];
-        // SAFETY: the function keeps dups of `data`.
-        let func =
-            unsafe { qjs::JS_NewCFunctionData(ctx, Some(insert_run), 1, 0, 3, data.as_mut_ptr()) };
-        if let Some(memos) = memos {
-            unsafe { qjs::JS_FreeValue(ctx, memos) };
-        }
-        let r = reactive::render_effect(ctx, func);
-        unsafe { qjs::JS_FreeValue(ctx, r) };
+        // What the insert shows now, which its effects update.
+        let shown = new_array(ctx, Vec::new());
+        let r = if unsafe { qjs::JS_IsFunction(ctx, value) } {
+            insert_effect(
+                ctx,
+                insert_run,
+                [parent, marker.unwrap_or(UNDEFINED), value, shown],
+            )
+        } else {
+            insert_items(ctx, parent, marker.unwrap_or(UNDEFINED), value, shown)
+        };
+        unsafe { qjs::JS_FreeValue(ctx, shown) };
+        r?;
         // A throw in the effect is the round's error.
         let r = reactive::finish_value(ctx, UNDEFINED);
         return if unsafe { qjs::JS_IsException(r) } {
@@ -1792,6 +1791,53 @@ fn insert_value(
     });
     free_values(ctx, keep);
     result
+}
+
+/// A render effect of an insert running `run` with `data` (borrowed:
+/// the parent, the marker, the value and the array of the nodes shown).
+fn insert_effect(
+    ctx: *mut JsContext,
+    run: unsafe extern "C" fn(
+        *mut JsContext,
+        JsValue,
+        c_int,
+        *mut JsValue,
+        c_int,
+        *mut JsValue,
+    ) -> JsValue,
+    mut data: [JsValue; 4],
+) -> Result<(), JsValue> {
+    // SAFETY: the function keeps dups of `data`.
+    let func = unsafe { qjs::JS_NewCFunctionData(ctx, Some(run), 0, 0, 4, data.as_mut_ptr()) };
+    if unsafe { qjs::JS_IsException(func) } {
+        return Err(func);
+    }
+    let r = reactive::render_effect(ctx, func);
+    unsafe { qjs::JS_FreeValue(ctx, r) };
+    Ok(())
+}
+
+/// The insert of an array holding functions (`items`, borrowed): each
+/// function gets a memo of its own, so a change in one runs only that one
+/// and the others' nodes stay (not made again), and one render effect
+/// shows them all.
+fn insert_items(
+    ctx: *mut JsContext,
+    parent: JsValue,
+    marker: JsValue,
+    items: JsValue,
+    shown: JsValue,
+) -> Result<(), JsValue> {
+    let memos = memoize_run(ctx, items);
+    let r = insert_effect(
+        ctx,
+        insert_items_run,
+        [parent, marker, memos.unwrap_or(items), shown],
+    );
+    if let Some(memos) = memos {
+        unsafe { qjs::JS_FreeValue(ctx, memos) };
+    }
+    r
 }
 
 /// For an array of children holding functions, a copy with a memo for each
@@ -1866,27 +1912,84 @@ fn new_array(ctx: *mut JsContext, mut values: Vec<JsValue>) -> JsValue {
     unsafe { qjs::JS_NewArrayFrom(ctx, values.len() as c_int, values.as_mut_ptr()) }
 }
 
-/// A run of a dynamic insert: the nodes inserted last time (an array) in,
-/// the nodes inserted now out.
+/// A run of a dynamic insert of a function: calls it, and the functions it
+/// returns, tracked by this effect. An array holding functions gets an
+/// effect of its own ([`insert_items`]), made again only when this one
+/// runs again: a component's `children` getter makes every node of the
+/// array, and a change in one of its functions (an `<If>`, a ternary)
+/// must run only that one, not the getter.
 unsafe extern "C" fn insert_run(
     ctx: *mut JsContext,
     _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: three data values (`insert_value`).
-    let (parent, marker, value) = unsafe { (*data, *data.add(1), *data.add(2)) };
+    // SAFETY: four data values (`insert_effect`).
+    let (parent, marker, value, shown) =
+        unsafe { (*data, *data.add(1), *data.add(2), *data.add(3)) };
+    // SAFETY: a dup of a live value; each call's result replaces it.
+    let mut value = unsafe { qjs::JS_DupValue(ctx, value) };
+    let mut depth = 0;
+    while unsafe { qjs::JS_IsFunction(ctx, value) } && node_ptr(ctx, value).is_null() {
+        if depth > MAX_DEPTH {
+            unsafe { qjs::JS_FreeValue(ctx, value) };
+            return throw_type(ctx, "nsh: children nested too deeply");
+        }
+        let r = unsafe { qjs::JS_Call(ctx, value, UNDEFINED, 0, ptr::null_mut()) };
+        unsafe { qjs::JS_FreeValue(ctx, value) };
+        if unsafe { qjs::JS_IsException(r) } {
+            return r;
+        }
+        value = r;
+        depth += 1;
+    }
+    let r = if unsafe { qjs::JS_IsArray(value) } && is_dynamic(ctx, value, 0) {
+        insert_items(ctx, parent, marker, value, shown)
+    } else {
+        show(ctx, parent, marker, value, shown)
+    };
+    unsafe { qjs::JS_FreeValue(ctx, value) };
+    r.err().unwrap_or(UNDEFINED)
+}
+
+/// A run of the effect of [`insert_items`]: shows the array, its functions
+/// called (tracked by this effect).
+unsafe extern "C" fn insert_items_run(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: four data values (`insert_effect`).
+    let (parent, marker, items, shown) =
+        unsafe { (*data, *data.add(1), *data.add(2), *data.add(3)) };
+    show(ctx, parent, marker, items, shown)
+        .err()
+        .unwrap_or(UNDEFINED)
+}
+
+/// Shows `value` (borrowed; its functions are called) in `parent` before
+/// `marker` in place of the nodes `shown` holds, which then holds the new
+/// ones.
+fn show(
+    ctx: *mut JsContext,
+    parent: JsValue,
+    marker: JsValue,
+    value: JsValue,
+    shown: JsValue,
+) -> Result<(), JsValue> {
     let marker = (!node_ptr(ctx, marker).is_null()).then_some(marker);
-    let old = array_items(ctx, arg(argc, argv, 0));
     let mut items = Vec::new();
     let mut keep = Vec::new();
     if let Err(e) = resolve(ctx, value, &mut items, &mut keep, 0) {
         free_values(ctx, keep);
-        free_values(ctx, old);
-        return e;
+        return Err(e);
     }
+    let old = array_items(ctx, shown);
     // A lone text node shown again as text is updated in place.
     let reuse = match old.as_slice() {
         [only] => Some(*only),
@@ -1898,7 +2001,7 @@ unsafe extern "C" fn insert_run(
         Err(e) => {
             free_values(ctx, keep);
             free_values(ctx, old);
-            return e;
+            return Err(e);
         }
     };
     free_values(ctx, keep);
@@ -1907,10 +2010,25 @@ unsafe extern "C" fn insert_run(
     // alive until then.
     free_values(ctx, old);
     match result {
-        Ok(()) => new_array(ctx, new),
+        Ok(()) => {
+            set_shown(ctx, shown, new);
+            Ok(())
+        }
         Err(e) => {
             free_values(ctx, new);
-            e
+            Err(e)
+        }
+    }
+}
+
+/// Makes array `shown` hold `nodes` (taken) alone.
+fn set_shown(ctx: *mut JsContext, shown: JsValue, nodes: Vec<JsValue>) {
+    // SAFETY: writes to a live array, which takes the values.
+    unsafe {
+        let len = qjs::JS_NewFloat64(0.0);
+        qjs::JS_SetPropertyStr(ctx, shown, c"length".as_ptr(), len);
+        for (i, node) in nodes.into_iter().enumerate() {
+            qjs::JS_SetPropertyUint32(ctx, shown, i as u32, node);
         }
     }
 }
