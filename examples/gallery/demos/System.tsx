@@ -1,4 +1,4 @@
-import { cleanup, signal, Text, View } from "nsh";
+import { cleanup, resource, signal, Text, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh/animated";
 import { Toast } from "nsh/android";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
@@ -347,22 +347,24 @@ function Shortcuts() {
 type Post = { id: number; title: string };
 
 function Network() {
-  const posts = signal<Post[]>([]);
-  const status = signal<{ text: string; tone: Tone } | null>(null);
-  const loading = signal(false);
-  const load = async () => {
-    loading.set(true);
-    status.set({ text: "loading…", tone: "neutral" });
+  // Loads once asked, and again on each press after: a resource keeps the
+  // posts while it loads again, and a failure next to them.
+  const asked = signal(false);
+  const result = resource(asked, async (_, { signal }) => {
     const started = performance.now();
-    try {
-      const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=3");
-      posts.set(await response.json());
-      status.set({ text: `HTTP ${response.status} · ${Math.round(performance.now() - started)} ms`, tone: response.ok ? "up" : "danger" });
-    } catch (e) {
-      status.set({ text: String(e), tone: "danger" });
-    }
-    loading.set(false);
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=3", { signal });
+    const posts: Post[] = await response.json();
+    return { posts, ok: response.ok, line: `HTTP ${response.status} · ${Math.round(performance.now() - started)} ms` };
+  });
+  const posts = () => result()?.posts ?? [];
+  const loading = result.loading;
+  const status = (): { text: string; tone: Tone } | null => {
+    if (result.loading()) return { text: "loading…", tone: "neutral" };
+    if (result.error()) return { text: String(result.error()), tone: "danger" };
+    const done = result();
+    return done ? { text: done.line, tone: done.ok ? "up" : "danger" } : null;
   };
+  const load = () => (asked() ? result.refetch() : asked.set(true));
   return (
     <Card icon="search" title="Network and logs" subtitle="fetch() · console.log">
       <If when={posts().length > 0} else={<Caption label="Three posts from jsonplaceholder.typicode.com" />}>

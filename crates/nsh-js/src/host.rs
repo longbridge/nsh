@@ -1145,6 +1145,105 @@ mod tests {
         assert_eq!(tags, bit(nsh_core::Tag::View) | bit(nsh_core::Tag::Scroll));
     }
 
+    #[test]
+    fn resources_follow_their_source_and_count_the_latest_load_only() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ effect, resource, signal }} from "nsh";
+const id = signal(1);
+const loads = [];
+globalThis.report = report;
+globalThis.id = id;
+globalThis.loads = loads;
+globalThis.user = resource(id, (n, info) => new Promise((resolve, reject) => {{
+  loads.push({{ n, resolve, reject, info }});
+  info.signal.addEventListener("abort", () => report(`aborted ${{n}}`));
+}}));
+effect(() => report(`${{user.state()}}|${{user() ?? ""}}|${{user.error() ?? ""}}|${{user.loading()}}`));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["pending|||true"]);
+        let step = |code: &str| {
+            host.eval_source(code).unwrap();
+            reported(&host)
+        };
+        // A new source aborts the running load; the old one ending later
+        // changes nothing.
+        assert_eq!(step("id.set(2);"), ["aborted 1"]);
+        assert_eq!(step(r#"loads[0].resolve("one");"#), Vec::<String>::new());
+        assert_eq!(step(r#"loads[1].resolve("two");"#), ["ready|two||false"]);
+        // A refetch keeps the value and says so to the fetcher.
+        assert_eq!(
+            step("user.refetch(); report(`refetching ${loads[2].info.refetching}`);"),
+            ["refreshing|two||true", "refetching true"]
+        );
+        // A failure keeps the value too.
+        assert_eq!(
+            step(r#"loads[2].reject(new Error("boom"));"#),
+            ["errored|two|Error: boom|false"]
+        );
+        // A value set here clears the error; no source loads nothing.
+        assert_eq!(step(r#"user.mutate("local");"#), ["ready|local||false"]);
+        assert!(step("id.set(null);").is_empty());
+        // Three loads in all: none for the unset source.
+        host.eval_source("if (loads.length !== 3) throw new Error(`${loads.length} loads`);")
+            .unwrap();
+    }
+
+    #[test]
+    fn resources_without_a_source_with_values_and_throws() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ effect, resource }} from "nsh";
+const now = resource(() => 42);
+const kept = resource(() => new Promise(() => {{}}), {{ initialValue: "first" }});
+const thrown = resource(() => {{ throw new Error("no"); }});
+effect(() => report(`${{now.state()}} ${{now()}} | ${{kept.state()}} ${{kept()}} | ${{thrown.state()}} ${{thrown.error()}}`));
+// The methods are bound: they work taken off their resource.
+const {{ loading, state }} = kept;
+report(`${{loading()}} ${{state()}}`);"#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [
+                "ready 42 | refreshing first | errored Error: no",
+                "true refreshing"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_resource_going_with_its_owner_aborts_its_load() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ cond, component, element, insert }} from "nsh:rt";
+import {{ effect, resource, signal }} from "nsh";
+const shown = signal(true);
+globalThis.shown = shown;
+function Card() {{
+  const r = resource((info) => new Promise((resolve) => {{
+    globalThis.later = resolve;
+    info.signal.addEventListener("abort", () => report("aborted"));
+  }}));
+  effect(() => report(r.state()));
+  return element("view");
+}}
+const root = element("view");
+insert(root, cond(() => shown(), () => component(Card, {{}})));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["pending"]);
+        host.eval_source("shown.set(false);").unwrap();
+        assert_eq!(reported(&host), ["aborted"]);
+        // Its load ending later finds nothing to change.
+        host.eval_source(r#"later("late");"#).unwrap();
+        assert!(reported(&host).is_empty());
+    }
+
     fn ops(host: &Host) -> Vec<Op> {
         let mut out = Vec::new();
         host.take_ops(&mut out);

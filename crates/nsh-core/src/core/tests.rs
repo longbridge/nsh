@@ -5092,6 +5092,107 @@ mod components {
         }))
     }
 
+    /// A resource through its states, driven by a task of its own: a slow
+    /// load overtaken, a refetch, a failure, a value set here, no source.
+    #[derive(Clone, PartialEq, Props)]
+    struct ProfileProps {}
+
+    #[component]
+    fn Profile(_props: ProfileProps) -> impl IntoElement {
+        let id = signal(Some(1u32));
+        let profile = resource(
+            move || id.get(),
+            |id, info: crate::ui::ResourceInfo| async move {
+                // The first load is slow: the second overtakes it.
+                let ms = if id == 1 { 80 } else { 5 };
+                timer(std::time::Duration::from_millis(ms)).await;
+                if id == 3 {
+                    Err(format!("no user {id}"))
+                } else {
+                    Ok(format!(
+                        "user {id}{}",
+                        if info.refetching { " again" } else { "" }
+                    ))
+                }
+            },
+        );
+        spawn(async move {
+            let settled = || async {
+                while profile.loading() {
+                    timer(std::time::Duration::from_millis(2)).await;
+                }
+            };
+            timer(std::time::Duration::from_millis(10)).await;
+            id.set(Some(2));
+            settled().await;
+            profile.refetch();
+            settled().await;
+            id.set(Some(3));
+            settled().await;
+            profile.mutate("local".into());
+            id.set(None);
+        });
+        view().child(text(move || {
+            format!(
+                "{:?}|{}|{}",
+                profile.state(),
+                profile.get().unwrap_or_default(),
+                profile.error().unwrap_or_default()
+            )
+        }))
+    }
+
+    #[test]
+    fn resources_load_refresh_fail_and_count_the_latest_load_only() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .build()
+            .unwrap();
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Profile>();
+        c.set_components(registry);
+        c.set_task_runtime(runtime.handle().clone());
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Profile>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let mut shown = texts(&c.commit().unwrap());
+        shown.extend(run_until(&mut c, |s| s.iter().any(|t| t == "Ready|local|")));
+        shown.dedup();
+        assert_eq!(
+            shown,
+            [
+                "Pending||",
+                // The slow first load never shows: the second replaced it.
+                "Ready|user 2|",
+                "Refreshing|user 2|",
+                "Ready|user 2 again|",
+                "Refreshing|user 2 again|",
+                // A failure keeps the value.
+                "Errored|user 2 again|no user 3",
+                // A value set here clears the error; no source loads nothing.
+                "Ready|local|",
+            ]
+        );
+        assert_eq!(c.components.executor.task_count(), 0);
+    }
+
     /// Runs the tasks and commits until `done` holds of what was shown.
     fn run_until(c: &mut Core<FakeEngine>, done: impl Fn(&[String]) -> bool) -> Vec<String> {
         let mut shown = Vec::new();

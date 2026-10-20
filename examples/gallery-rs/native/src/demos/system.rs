@@ -663,54 +663,60 @@ fn FramesAndTimers() -> impl IntoElement {
 /// Three posts loaded over HTTP, and a log line.
 #[component]
 fn Network() -> impl IntoElement {
-    // The posts loaded: id and title.
-    let posts = signal(Vec::<(u64, String)>::new());
-    // How the last request went.
-    let status = signal(None::<Toned>);
-    // A request is in progress.
-    let loading = signal(false);
-    let owner = Owner::current();
-    // Loads three posts (TS: `fetch`) with the engine's network stack: the
+    // Loads once asked, and again on each press after (TS: `resource`): it
+    // keeps the posts while it loads again, and a failure next to them. The
+    // request goes with the engine's network stack (TS: `fetch`): the
     // platform's, or the browser's on the web.
-    let load = move |_: &()| {
-        batch(|| {
-            status.set(Some(Toned {
+    let asked = signal(false);
+    let result = resource(
+        move || asked.get().then_some(()),
+        |(), _| async move {
+            let started = Instant::now();
+            let response = fetch(POSTS).await?;
+            let (code, posts) = (response.status(), parse_posts(&response.text())?);
+            let ms = started.elapsed().as_millis();
+            Ok::<_, String>((code, posts, ms))
+        },
+    );
+    // The posts loaded: id and title.
+    let posts = computed(move || {
+        result
+            .with(|r| r.map(|(_, posts, _)| posts.clone()))
+            .unwrap_or_default()
+    });
+    // How the last request went.
+    let status = computed(move || {
+        if result.loading() {
+            return Some(Toned {
                 text: "loading…".to_owned(),
                 tone: Tone::Neutral,
-            }));
-            loading.set(true);
-        });
-        owner.run(|| {
-            spawn(async move {
-                let started = Instant::now();
-                let result = fetch(POSTS)
-                    .await
-                    .map(|response| (response.status(), response.text()));
-                let ms = started.elapsed().as_millis();
-                batch(|| {
-                    loading.set(false);
-                    status.set(Some(
-                        match result.and_then(|(code, body)| Ok((code, parse_posts(&body)?))) {
-                            Ok((code, loaded)) => {
-                                posts.set(loaded);
-                                Toned {
-                                    text: format!("HTTP {code} · {ms} ms"),
-                                    tone: if (200..300).contains(&code) {
-                                        Tone::Up
-                                    } else {
-                                        Tone::Danger
-                                    },
-                                }
-                            }
-                            Err(error) => Toned {
-                                text: error,
-                                tone: Tone::Danger,
-                            },
-                        },
-                    ));
-                });
+            });
+        }
+        if let Some(error) = result.error() {
+            return Some(Toned {
+                text: error,
+                tone: Tone::Danger,
+            });
+        }
+        result.with(|r| {
+            r.map(|(code, _, ms)| Toned {
+                text: format!("HTTP {code} · {ms} ms"),
+                tone: if (200..300).contains(code) {
+                    Tone::Up
+                } else {
+                    Tone::Danger
+                },
             })
-        });
+        })
+    });
+    // A request is in progress.
+    let loading = computed(move || result.loading());
+    let load = move |_: &()| {
+        if asked.get_untracked() {
+            result.refetch();
+        } else {
+            asked.set(true);
+        }
     };
     let list = If::new(
         move || posts.with(Vec::is_empty),
