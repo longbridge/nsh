@@ -333,19 +333,23 @@ enum Item {
     Input(NshView),
     /// Selectable text (mouse selection).
     Text(NshView),
+    /// A selection area (mouse selection across its texts).
+    Area(NshView),
 }
 
 impl Item {
     fn view(&self) -> &NshView {
         match self {
-            Item::Hosted(view, _) | Item::Input(view) | Item::Text(view) => view,
+            Item::Hosted(view, _) | Item::Input(view) | Item::Text(view) | Item::Area(view) => view,
         }
     }
 
     fn same(&self, other: &Item) -> bool {
         match (self, other) {
             (Item::Hosted(_, a), Item::Hosted(_, b)) => Rc::ptr_eq(&a.item, &b.item),
-            (Item::Input(a), Item::Input(b)) | (Item::Text(a), Item::Text(b)) => a == b,
+            (Item::Input(a), Item::Input(b))
+            | (Item::Text(a), Item::Text(b))
+            | (Item::Area(a), Item::Area(b)) => a == b,
             _ => false,
         }
     }
@@ -376,6 +380,9 @@ impl Item {
             }
             Item::Input(view) => crate::text_input::pointer(surface, view, &event),
             Item::Text(view) => crate::text::pointer(surface, view, &event),
+            // Areas follow the pointer in root coordinates: autoscrolling
+            // moves the area under it.
+            Item::Area(_) => crate::selection_area::pointer(surface, kind, x, y),
         }
     }
 }
@@ -762,11 +769,17 @@ pub(crate) fn cursor(surface: &Rc<Surface>, x: f32, y: f32) -> Cursor {
             return c;
         }
     }
+    let in_area = crate::selection_area::area_of(&hit.view).is_some();
     let mut view = Some(hit.view);
     while let Some(v) = view {
-        if let Some(c) = view_cursor(&v.state()) {
+        let s = v.state();
+        if let Some(c) = view_cursor(&s) {
             return c;
         }
+        if in_area && crate::selection_area::selects(&s) {
+            return Cursor::Text;
+        }
+        drop(s);
         view = v.parent_view();
     }
     Cursor::Arrow
@@ -890,6 +903,7 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return;
     };
+    let area = crate::selection_area::area_of(&hit.view);
     let mut view = Some(hit.view);
     while let Some(v) = view {
         let (id, listens, input, selectable) = {
@@ -920,9 +934,17 @@ fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
             crate::text_input::context_menu(surface, &v);
             return;
         }
-        if selectable {
-            crate::text::context_menu(surface, &v);
-            return;
+        // Texts in a selection area select with it.
+        match &area {
+            Some(area) if *area == v => {
+                crate::selection_area::context_menu(surface, area);
+                return;
+            }
+            None if selectable => {
+                crate::text::context_menu(surface, &v);
+                return;
+            }
+            _ => {}
         }
         view = v.parent_view();
     }
@@ -950,6 +972,7 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
             }
             // Any press elsewhere clears a text selection.
             crate::text::window_pressed(surface, x, y);
+            crate::selection_area::window_pressed(surface, x, y);
             if mouse {
                 surface.input.last.set(Some((x, y)));
                 match event.button {
@@ -1039,6 +1062,7 @@ pub(crate) fn key(surface: &Rc<Surface>, event: KeyEvent) -> bool {
         || crate::chrome::shortcut(surface, &event)
         || crate::text_input::key(surface, &event)
         || crate::text::key(surface, &event)
+        || crate::selection_area::key(surface, &event)
         || crate::navigation::key_pressed(surface, &event)
         || {
             let (x, y) = input.last.get().unwrap_or((-1.0, -1.0));
@@ -1257,6 +1281,35 @@ fn chain(view: &NshView) -> Vec<NshView> {
     out
 }
 
+/// The selection area a mouse press on `view` selects in: the area around
+/// it, unless `view` is a text that is `selectable={false}` or a view
+/// between them pans or handles touches itself.
+fn area_press(surface: &Surface, view: &NshView) -> Option<NshView> {
+    let area = crate::selection_area::area_of(view)?;
+    if !crate::selection_area::takes(view) {
+        return None;
+    }
+    let mut current = Some(view.clone());
+    while let Some(v) = current {
+        let s = v.state();
+        let values = gesture_values(surface, &v, s.id);
+        if values.pan_x.is_some()
+            || values.pan_y.is_some()
+            || [EventKind::Touch, EventKind::PanStart, EventKind::PanEnd]
+                .into_iter()
+                .any(|k| s.events.contains(k))
+        {
+            return None;
+        }
+        drop(s);
+        if v == area {
+            break;
+        }
+        current = v.parent_view();
+    }
+    Some(area)
+}
+
 /// A point in root coordinates in `view`'s.
 fn local(view: &NshView, x: f32, y: f32) -> (f32, f32) {
     view.to_root()
@@ -1373,6 +1426,16 @@ fn down(
         put(surface, p);
         return;
     }
+    if item.is_none()
+        && !touch
+        && hit.view.kind() != ViewKind::Input
+        && let Some(area) = area_press(surface, &hit.view)
+    {
+        // Mouse drags in a selection area select across its texts; its
+        // texts never select alone.
+        crate::selection_area::down(surface, &area, &hit.view, (x, y), clicks, modifiers.shift);
+        item = Some(Item::Area(area));
+    }
     if item.is_none() {
         let candidate = if hit.view.kind() == ViewKind::Input {
             Some(Item::Input(hit.view.clone()))
@@ -1389,7 +1452,7 @@ fn down(
         }
     }
     let native = matches!(item, Some(Item::Hosted(..) | Item::Input(_)));
-    let selects = matches!(item, Some(Item::Text(_)));
+    let selects = matches!(item, Some(Item::Text(_) | Item::Area(_)));
     let input = &surface.input;
     if input.pointers.borrow().is_empty() {
         input.js_block.set(false);
