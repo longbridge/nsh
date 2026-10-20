@@ -1,0 +1,43 @@
+# What a user does and sees (compat/apps.rs).
+expect Motion
+style id:fade transitionProperty opacity, transform
+style id:fade transitionDuration 300
+style id:fade transitionDelay 50
+style id:fade transitionTimingFunction cubic-bezier(0.42, 0, 0.58, 1)
+style id:all transitionProperty all
+style id:all transitionDuration 200
+style id:all transitionTimingFunction cubic-bezier(0, 0, 1, 1)
+style id:colors transitionProperty colors
+style id:colors transitionTimingFunction cubic-bezier(0.25, 0.1, 0.25, 1)
+style id:shadow transitionProperty shadow
+style id:shadow transitionTimingFunction cubic-bezier(0.42, 0, 1, 1)
+style id:shape transitionProperty shape
+style id:shape transitionTimingFunction cubic-bezier(0, 0, 0.58, 1)
+style id:none transitionProperty none
+style id:bezier transitionDuration 150
+style id:bezier transitionTimingFunction cubic-bezier(0.4, 0, 0.2, 1)
+style id:spin animationName spin
+style id:spin animationDuration 1000
+style id:spin animationDelay 0
+style id:spin animationTimingFunction cubic-bezier(0, 0, 1, 1)
+style id:spin animationIterationCount infinite
+style id:ping animationName ping
+style id:ping animationDuration 1000
+style id:ping animationDelay 200
+style id:ping animationTimingFunction cubic-bezier(0, 0, 0.2, 1)
+style id:ping animationIterationCount 3
+style id:pulse animationName pulse
+style id:pulse animationDuration 2000
+style id:pulse animationTimingFunction cubic-bezier(0.42, 0, 0.58, 1)
+style id:bounce animationName bounce
+style id:bounce animationIterationCount 1
+nostyle id:still animationName
+covers [styles] transitionProperty
+covers [styles] transitionDuration
+covers [styles] transitionDelay
+covers [styles] transitionTimingFunction
+covers [styles] animationName
+covers [styles] animationDuration
+covers [styles] animationDelay
+covers [styles] animationTimingFunction
+covers [styles] animationIterationCount

@@ -1,0 +1,12 @@
+# What apps could once use and NSH no longer offers, closed because it
+# could not be kept safe (docs/dev/compatibility.md, rule 7). Nothing else
+# is ever removed: the pull request that adds an entry says why in its
+# description and the release notes.
+#
+# One entry per line, `<entry> -- <reason>`; it closes the name and
+# everything under it, as the engine's `compat` tests report breaks:
+#
+#   [<module>] <path> -- <reason>          a name of runtime.txt
+#   <file>: <Name> -- <reason>             a declaration of types/
+#   <file>: <Name>.<member> -- <reason>    one of its members
+#   tailwind <class> -- <reason>           one Tailwind class of tailwind.txt (exactly that class)

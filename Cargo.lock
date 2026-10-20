@@ -2822,6 +2822,7 @@ dependencies = [
  "oxc_sourcemap",
  "rustc-hash",
  "serde_json",
+ "taffy",
  "tokio",
  "tokio-tungstenite 0.28.0",
  "ureq",

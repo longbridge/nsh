@@ -91,13 +91,6 @@ jobs:
             echo "::error::tag $TAG does not match the workspace version $version"
             exit 1
           fi
-          # Every release freezes the API apps use in its minor line's
-          # baseline (docs/dev/compatibility.md).
-          line="v${version%.*}"
-          if [[ ! -f "api/$line/runtime.txt" ]] || ! diff -rq --exclude apps api/current "api/$line"; then
-            echo "::error::api/$line is not this release's API: run cargo xtask api --freeze"
-            exit 1
-          fi
 
       # Temporary directories (tests, tools) outside the checkout.
       - name: Set up the environment

@@ -1,0 +1,12 @@
+expect Hop tests
+expect ±6°
+tap label:Increase Gimbal limit
+expect ±7°
+tap label:Decrease Gimbal limit
+tap label:Decrease Gimbal limit
+expect ±5°
+tap text:Defaults
+expect ±6°
+tap text:Fly hop
+expect Flying…
+covers [props] accessibilityLabel

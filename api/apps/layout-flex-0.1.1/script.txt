@@ -1,0 +1,105 @@
+# What a user does and sees (compat/apps.rs).
+expect Flex layout
+frame id:row-a 0 0 50 20
+frame id:row-b 50 0 50 20
+frame id:column-a 0 0 50 20
+frame id:column-b 0 20 50 20
+frame id:row-reverse-a 250 0 50 20
+frame id:row-reverse-b 200 0 50 20
+frame id:column-reverse-a 0 80 50 20
+frame id:column-reverse-b 0 60 50 20
+frame id:jc-start-a 0 0 50 20
+frame id:jc-start-b 50 0 50 20
+frame id:jc-center-a 100 0 50 20
+frame id:jc-center-b 150 0 50 20
+frame id:jc-end-a 200 0 50 20
+frame id:jc-end-b 250 0 50 20
+frame id:jc-between-a 0 0 50 20
+frame id:jc-between-b 250 0 50 20
+frame id:jc-around-a 50 0 50 20
+frame id:jc-around-b 200 0 50 20
+frame id:jc-evenly-a 50 0 50 20
+frame id:jc-evenly-b 150 0 50 20
+frame id:jc-column-a 0 80 50 20
+frame id:ai-start-a 0 0 50 20
+frame id:ai-center-a 0 40 50 20
+frame id:ai-end-a 0 80 50 20
+frame id:ai-stretch-a 0 0 50 100
+frame id:ai-baseline-a 0 20 50 20
+frame id:ai-baseline-b 50 0 50 40
+frame id:ai-column-a 125 0 50 20
+frame id:ai-column-b 150 20 0 20
+frame id:as-start 0 0 50 20
+frame id:as-center 50 40 50 20
+frame id:as-end 100 80 50 20
+frame id:as-stretch 150 0 50 100
+frame id:as-auto 200 80 50 20
+frame id:grow-a 0 0 100 20
+frame id:grow-b 100 0 200 20
+frame id:grow-column-a 0 0 50 20
+frame id:grow-column-b 0 20 50 80
+frame id:shrink-a 0 0 175 20
+frame id:shrink-b 175 0 125 20
+frame id:no-shrink-a 0 0 200 20
+frame id:no-shrink-b 200 0 200 20
+frame id:basis-a 0 0 120 20
+frame id:basis-b 120 0 150 20
+frame id:basis-grow-a 0 0 200 20
+frame id:basis-grow-b 200 0 100 20
+frame id:wrap-a 0 0 50 20
+frame id:wrap-b 50 0 50 20
+frame id:wrap-c 0 20 50 20
+frame id:nowrap-a 0 0 50 20
+frame id:nowrap-b 50 0 50 20
+frame id:nowrap-c 100 0 50 20
+frame id:wrap-reverse-a 0 80 50 20
+frame id:wrap-reverse-b 50 80 50 20
+frame id:wrap-reverse-c 0 60 50 20
+frame id:wrap-column-a 0 0 50 20
+frame id:wrap-column-b 0 20 50 20
+frame id:wrap-column-c 50 0 50 20
+frame id:ac-start-a 0 0 50 20
+frame id:ac-start-b 50 0 50 20
+frame id:ac-start-c 0 20 50 20
+frame id:ac-center-a 0 30 50 20
+frame id:ac-center-b 50 30 50 20
+frame id:ac-center-c 0 50 50 20
+frame id:ac-end-a 0 60 50 20
+frame id:ac-end-b 50 60 50 20
+frame id:ac-end-c 0 80 50 20
+frame id:ac-between-a 0 0 50 20
+frame id:ac-between-b 50 0 50 20
+frame id:ac-between-c 0 80 50 20
+frame id:ac-around-a 0 15 50 20
+frame id:ac-around-b 50 15 50 20
+frame id:ac-around-c 0 65 50 20
+frame id:ac-evenly-a 0 20 50 20
+frame id:ac-evenly-b 50 20 50 20
+frame id:ac-evenly-c 0 60 50 20
+frame id:ac-stretch-a 0 0 50 50
+frame id:ac-stretch-b 50 0 50 50
+frame id:ac-stretch-c 0 50 50 50
+frame id:gap-row-a 0 0 50 20
+frame id:gap-row-b 60 0 50 20
+frame id:gap-column-a 0 0 50 20
+frame id:gap-column-b 0 28 50 20
+frame id:gap-wrap-a 0 0 50 20
+frame id:gap-wrap-b 56 0 50 20
+frame id:gap-wrap-c 0 26 50 20
+frame id:gaps-a 0 0 50 20
+frame id:gaps-b 55 0 50 20
+frame id:gaps-c 0 30 50 20
+frame id:gap-override-a 0 0 50 20
+frame id:gap-override-b 54 0 50 20
+covers [styles] flexDirection
+covers [styles] justifyContent
+covers [styles] alignItems
+covers [styles] alignSelf
+covers [styles] flexGrow
+covers [styles] flexShrink
+covers [styles] flexBasis
+covers [styles] flexWrap
+covers [styles] alignContent
+covers [styles] gap
+covers [styles] rowGap
+covers [styles] columnGap

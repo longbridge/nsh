@@ -1,0 +1,5 @@
+# What a user does and sees (compat/apps.rs).
+expect Family: Pacifico
+frame id:spaced 0 81 80 40
+covers [nsh:rt] font
+covers [nsh:rt] setup

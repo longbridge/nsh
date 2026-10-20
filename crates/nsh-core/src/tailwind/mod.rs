@@ -117,19 +117,22 @@ pub struct ClassEnvironment {
     pub reduce_motion: bool,
 }
 
-/// What a node's classes are matched against.
-pub(crate) struct Context<'a> {
-    pub(crate) env: ClassEnvironment,
+/// What a node's classes are matched against: the core builds it per
+/// node; tools resolve classes outside a tree with one of their own.
+pub struct Context<'a> {
+    /// The appearance, platform and motion setting.
+    pub env: ClassEnvironment,
     /// The window (root view) size.
-    pub(crate) window: (f32, f32),
-    pub(crate) rtl: bool,
+    pub window: (f32, f32),
+    /// Right-to-left layout.
+    pub rtl: bool,
     /// [`state`] bits of the node.
-    pub(crate) states: u8,
+    pub states: u8,
     /// [`position`] bits of the node.
-    pub(crate) position: u8,
+    pub position: u8,
     /// [`state`] bits of the nearest ancestor group with this name (`""`
     /// for unnamed groups).
-    pub(crate) group: &'a dyn Fn(&str) -> u8,
+    pub group: &'a dyn Fn(&str) -> u8,
 }
 
 /// Conditions of one rule (all must hold).
@@ -345,8 +348,10 @@ impl ClassList {
         self.rules.is_empty()
     }
 
-    /// Applies the matching rules to `style` and `props`.
-    pub(crate) fn apply(
+    /// Applies the rules matching `cx` to `style` and `props`, then
+    /// `inline` (the node's inline style, which only `!` utilities win
+    /// over).
+    pub fn apply(
         &self,
         cx: &Context<'_>,
         theme: &Theme,

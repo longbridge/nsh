@@ -1,4 +1,4 @@
-//! What a version of NSH offers apps, as text files `api/<version>/` keeps:
+//! What this checkout offers apps, as the text files `api/` records:
 //!
 //! - `runtime.txt`: every module's exports as the runtime makes them (the
 //!   module `nsh:rt` compiled JSX calls included) and the globals, one line
@@ -9,7 +9,7 @@
 //!   sources of apps are checked against.
 //!
 //! Only public API of `nsh-js` is used, so the same file makes the
-//! baseline of an older release from its checkout.
+//! record of an older checkout too.
 
 use std::fmt::Write as _;
 

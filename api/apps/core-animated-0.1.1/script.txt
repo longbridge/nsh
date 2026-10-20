@@ -1,0 +1,25 @@
+# What a user does and sees (compat/apps.rs).
+expect Linear: 0.000 0.500 1.000
+expect Quad: 0.000 0.250 1.000
+expect Quad out: 0.000 0.750 1.000
+expect Bezier ends: 0.000 1.000
+expect Spring rests at: 1.00
+expect Spring moves: yes
+expect Decay starts at: 0.0
+expect Decay moves forward: yes
+expect Value is a node: true
+expect Sum is a node: true
+expect Interpolation is a node: true
+expect Composite: function/function/function
+expect Preset duration: 300
+expect Created: 250 linear opacity
+frame id:faded 0 302 40 40
+frame id:box 0 359 50 20
+tap id:grow
+frame id:box 0 359 150 20
+covers [nsh/animated] Animated
+covers [nsh/animated] AnimatedNode
+covers [nsh/animated] AnimatedValue
+covers [nsh/animated] Easing
+covers [nsh/animated] LayoutAnimation
+covers [nsh/animated] createAnimatedValue
