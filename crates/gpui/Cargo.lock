@@ -5095,6 +5095,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-testing",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",
  "rustc-hash 2.1.3",
@@ -5108,6 +5109,20 @@ dependencies = [
  "windows-sys 0.61.2",
  "x11rb",
  "zbus",
+]
+
+[[package]]
+name = "nsh-testing"
+version = "0.1.1"
+dependencies = [
+ "base64 0.22.1",
+ "crossbeam-channel",
+ "log",
+ "nsh-core",
+ "nsh-dev",
+ "nsh-engine",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]

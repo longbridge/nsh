@@ -20,7 +20,7 @@ live = ["dep:ureq"]
 # A real host's test agent (`agent`): `nsh test --target` steps on the app it
 # shows, through the platform's input. No QuickJS and no network: the dev
 # hosts link it.
-agent = ["dep:nsh-dev", "dep:serde_json", "dep:base64"]
+agent = ["dep:nsh-dev", "nsh-dev/client", "dep:serde_json", "dep:base64"]
 # `nsh test`'s side: the `nsh/test` module, test files on an engine of their
 # own (`run_file`) and apps' headless runners (`runner`): QuickJS.
 js = ["live", "nsh-engine/js", "dep:nsh-dev", "dep:base64", "dep:dunce", "dep:serde", "dep:serde_json", "dep:tokio"]

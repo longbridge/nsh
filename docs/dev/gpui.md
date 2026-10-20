@@ -197,6 +197,18 @@ viewport-sized MSAA pass for GPUI), the animation frames requested and the notif
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
 real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
 
+## Tests in GPUI windows: `nsh test --target gpui`
+
+The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
+implements `nsh_testing::agent::Native`. Each call goes to the main thread (`rt::invoke`, then `rt::on_app` for the
+app), finds the window whose `AppView` shows the surface, and acts through the handlers real input goes through
+(`synth.rs`, which `--script` steps use too): a press is a mouse down and up at the view's middle (the window's view
+focused first), a scroll precise touchpad events a frame apart, typing `text_input::char_input`, select all the
+platform's command key with A, back the mouse's back button (it goes back from wherever the focus is), a dialog's
+answer a click at its button's laid-out middle (`system::dialog_point`), a screenshot `synth::frame` (what `shot`
+takes) as a PNG. A view's bounds are its frame's corners through `NshView::to_root`. `dev.rs` hands the test
+session's model to the surface through the session's own messages, so it comes before the first bundle.
+
 ## Checking a change: `--script`
 
 `nsh-gpui-host --script "<steps>"` (or `AppOptions::script`) runs steps once the window shows, separated by `;` or

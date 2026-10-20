@@ -134,7 +134,7 @@ nsh test [PATH] [--filter <NAME>] [--trace] [--junit <FILE>] [--target <TARGET>]
 | `--filter <NAME>` | 只运行名称（前面带上所在 `describe` 块的名称）包含 `NAME` 的测试。 |
 | `--trace` | 打印测试所打开应用的每个挂载批次，标注它所属的步骤（`── press(Add): 7 items`），以及每次 commit 的耗时：首帧、一个步骤或一帧滚动的开销。 |
 | `--junit <FILE>` | 同时把结果以 JUnit XML 报告写入 `FILE`，CI 服务按这种格式展示测试结果：每个测试文件一个 `testsuite`，每个测试一个 `testcase`。 |
-| `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（目前为 `macos`）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)）。 |
+| `--target <TARGET>` | 在该平台的开发 host 上运行测试打开的应用，而不是 headless（目前为 `macos` 和 `gpui`）：步骤用平台自己的输入执行（[测试](./testing-and-trace.md#在真实平台上运行)）。 |
 
 ## nsh build
 

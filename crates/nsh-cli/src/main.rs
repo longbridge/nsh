@@ -144,7 +144,7 @@ enum Command {
         junit: Option<PathBuf>,
         /// Run the apps the tests open on this platform's development host
         /// instead of headless: the steps act with the platform's own input
-        /// (macos for now).
+        /// (macos and gpui for now).
         #[arg(long, value_enum)]
         target: Option<run::Target>,
     },

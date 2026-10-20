@@ -26,15 +26,15 @@ const CONNECT: Duration = Duration::from_secs(60);
 
 /// Starts the apps tests open on `target`'s host.
 pub(crate) fn starter(target: Target) -> anyhow::Result<StartHost> {
-    if target != Target::Macos {
+    if !matches!(target, Target::Macos | Target::Gpui) {
         anyhow::bail!(
-            "nsh test --target runs on macos for now (the other platforms' test agents follow)"
+            "nsh test --target runs on macos and gpui for now (the other platforms' test agents follow)"
         );
     }
     // Built (in a checkout) or found once, before the first test.
     let host = crate::runtime::file(target.platform(), false)?;
     Ok(Arc::new(move |entry: &Path, options: &HostOptions| {
-        start(&host, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
+        start(target, &host, entry, options).map(|h| Box::new(h) as Box<dyn Host>)
     }))
 }
 
@@ -73,7 +73,12 @@ impl Drop for TestHost {
 }
 
 /// Builds `entry`, serves it in a test session and starts `host` on it.
-fn start(host: &Path, entry: &Path, options: &HostOptions) -> Result<TestHost, String> {
+fn start(
+    target: Target,
+    host: &Path,
+    entry: &Path,
+    options: &HostOptions,
+) -> Result<TestHost, String> {
     let built = build::compile(entry, false).map_err(|e| e.plain)?;
     let dir = entry.parent().unwrap_or(Path::new("."));
     let server = DevServer::start(
@@ -125,9 +130,11 @@ fn start(host: &Path, entry: &Path, options: &HostOptions) -> Result<TestHost, S
         .args(["--dev-server", &url])
         .arg("--data-dir")
         .arg(&data)
-        // A window restored from an earlier run would not be this one.
-        .args(["-ApplePersistenceIgnoreState", "YES"])
         .stdin(Stdio::null());
+    if target == Target::Macos {
+        // A window AppKit restored from an earlier run would not be this one.
+        command.args(["-ApplePersistenceIgnoreState", "YES"]);
+    }
     if let Some(size) = options.size {
         command.args([
             "--window-size",

@@ -64,6 +64,9 @@ pub fn main() -> std::process::ExitCode {
             }
             "--fps" => options.fps = true,
             "--script" => options.script = args.next(),
+            // Where apps keep their data (`nsh test --target` gives each app
+            // a fresh one); the system's data directory otherwise.
+            "--data-dir" => options.data_dir = args.next().map(PathBuf::from),
             "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));

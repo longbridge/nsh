@@ -70,9 +70,9 @@ use std::{
 };
 
 use gpui::{Font, FontStyle, Hsla, RenderImage, TextRun, WindowTextSystem, px};
-use nsh_core::animation::AnimationValue;
 use nsh_core::{
     Color,
+    animation::AnimationValue,
     canvas::{
         CanvasFont, CanvasGradient, CanvasOp, CanvasTextAlign, CanvasTextBaseline, Composite,
         Damage, DamageScan, Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint,

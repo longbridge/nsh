@@ -26,6 +26,8 @@
 #![cfg(any(target_os = "linux", target_os = "macos", windows))]
 
 mod access;
+#[cfg(feature = "dev")]
+mod agent;
 mod animation;
 mod app;
 mod canvas;
@@ -49,6 +51,7 @@ mod script;
 mod scroll;
 mod stats;
 mod surface;
+mod synth;
 mod system;
 mod text;
 mod text_input;

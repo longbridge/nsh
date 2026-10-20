@@ -354,7 +354,10 @@ macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with
 and key events (which `--script` steps use too), `NSView` frames converted to the content's top-left points, `NSAlert`
 buttons pressed by title (`system::answer_dialog`), and the content view cached into a PNG; `dev.rs`'s `Tester`
 attaches the model to the surface on the server's test session (before the first bundle) and starts the agent's
-thread.
+thread. GPUI (`nsh-platform-gpui`, feature `dev`): `agent.rs` on GPUI's main thread, input through the handlers real
+input goes through (`synth.rs`), back the mouse's back button, dialogs pressed at their buttons' laid-out middles
+(`docs/dev/gpui.md`). Both use `nsh_testing::agent::Tester`, which turns the dev client's test events into an agent's
+steps on a `Worker` thread.
 
 ## New apps (`nsh init --template`)
 

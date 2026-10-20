@@ -29,6 +29,7 @@ private_interfaces = "deny"
 # nsh's crates, from the main workspace.
 nsh-core = { version = "0.1.1", path = "../nsh-core" }
 nsh-dev = { version = "0.1.1", path = "../nsh-dev" }
+nsh-testing = { version = "0.1.1", path = "../nsh-testing", default-features = false }
 nsh-engine = { version = "0.1.1", path = "../nsh-engine", default-features = false }
 nsh-base = { version = "0.1.1", path = "../nsh-base" }
 # The JSX compiler alone (tests compile their apps).

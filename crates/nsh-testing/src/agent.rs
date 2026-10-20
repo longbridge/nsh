@@ -142,6 +142,118 @@ pub trait Native: Send + Sync {
     fn quit(&self);
 }
 
+/// An [`Agent`] on a thread of its own, taking the steps handed to it one
+/// after the other: what a host's dev client feeds the steps it gets.
+pub struct Worker {
+    steps: Mutex<std::sync::mpsc::Sender<(u64, TestStep)>>,
+}
+
+impl Worker {
+    /// Starts `agent`'s thread; each step's outcome goes to `done` with the
+    /// step's id.
+    pub fn spawn(
+        agent: Agent,
+        done: impl Fn(u64, StepOutcome) + Send + 'static,
+    ) -> std::io::Result<Worker> {
+        let (tx, rx) = std::sync::mpsc::channel::<(u64, TestStep)>();
+        std::thread::Builder::new()
+            .name("nsh-test-agent".into())
+            .spawn(move || {
+                for (id, step) in rx {
+                    done(id, agent.take(step));
+                }
+            })?;
+        Ok(Worker {
+            steps: Mutex::new(tx),
+        })
+    }
+
+    /// Hands step `id` to the agent; false when its thread is gone.
+    pub fn take(&self, id: u64, step: TestStep) -> bool {
+        self.steps
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send((id, step))
+            .is_ok()
+    }
+}
+
+/// A dev host's test session: when the server says it runs one
+/// ([`nsh_dev::DevEvent::Testing`]), it makes the app's [`Model`] and the
+/// platform's [`Native`] (`start`, which attaches the model to the surface
+/// before the first bundle comes) and takes the steps that follow on a
+/// [`Worker`], answering each through the dev client.
+pub struct Tester {
+    start: Box<dyn Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync>,
+    client: std::sync::OnceLock<std::sync::Weak<nsh_dev::DevClient>>,
+    worker: Mutex<Option<Worker>>,
+}
+
+impl Tester {
+    /// A host's tester; `start` runs on the dev client's thread.
+    pub fn new(
+        start: impl Fn(std::sync::Arc<Model>) -> Box<dyn Native> + Send + Sync + 'static,
+    ) -> std::sync::Arc<Tester> {
+        std::sync::Arc::new(Tester {
+            start: Box::new(start),
+            client: std::sync::OnceLock::new(),
+            worker: Mutex::new(None),
+        })
+    }
+
+    /// The client that answers the steps (once it exists).
+    pub fn set_client(&self, client: &std::sync::Arc<nsh_dev::DevClient>) {
+        let _ = self.client.set(std::sync::Arc::downgrade(client));
+    }
+
+    /// Takes the test session's events (on the dev client's thread); gives
+    /// back the others.
+    pub fn event(&self, event: nsh_dev::DevEvent) -> Option<nsh_dev::DevEvent> {
+        match event {
+            nsh_dev::DevEvent::Testing => self.start(),
+            nsh_dev::DevEvent::Step { id, step } => self.take(id, step),
+            other => return Some(other),
+        }
+        None
+    }
+
+    fn start(&self) {
+        let mut worker = self.worker.lock().unwrap_or_else(|e| e.into_inner());
+        if worker.is_some() {
+            return;
+        }
+        let model = std::sync::Arc::new(Model::default());
+        let native = (self.start)(model.clone());
+        let client = self.client.clone();
+        let started = Worker::spawn(Agent::new(model, native), move |id, outcome| {
+            if let Some(client) = client.get().and_then(std::sync::Weak::upgrade) {
+                client.step_done(id, outcome);
+            }
+        });
+        match started {
+            Ok(started) => *worker = Some(started),
+            Err(err) => log::error!("cannot start the test agent: {err}"),
+        }
+    }
+
+    fn take(&self, id: u64, step: TestStep) {
+        let taken = self
+            .worker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|w| w.take(id, step));
+        if !taken && let Some(client) = self.client.get().and_then(std::sync::Weak::upgrade) {
+            client.step_done(
+                id,
+                StepOutcome::Failed {
+                    message: "the host runs no test session".into(),
+                },
+            );
+        }
+    }
+}
+
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
 pub struct Agent {
     model: std::sync::Arc<Model>,

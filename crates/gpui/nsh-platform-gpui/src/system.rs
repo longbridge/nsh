@@ -1801,6 +1801,9 @@ struct DialogItem {
     opacity: Cell<f32>,
     /// Answered: fading out, no more input.
     closing: Cell<bool>,
+    /// The buttons' texts, in order.
+    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+    labels: Vec<String>,
 }
 
 impl DialogItem {
@@ -2136,8 +2139,50 @@ fn show_dialog(surface: &Rc<Surface>, dialog: &Dialog) {
         keyboard: Cell::new(false),
         opacity: Cell::new(0.0),
         closing: Cell::new(false),
+        labels: buttons.iter().map(|b| b.text.clone()).collect(),
     });
     add_overlay(surface, serial, OverlayKind::Dialog(item));
+}
+
+/// Where a user presses to answer the newest dialog on `surface` (root
+/// points): the middle of its button titled `button`, or outside its card
+/// to close it without one (`None`; only a dialog that can be closed so).
+#[cfg(feature = "dev")]
+pub(crate) fn dialog_point(
+    surface: &Rc<Surface>,
+    button: Option<&str>,
+) -> Result<(f32, f32), String> {
+    let dialog = OVERLAYS
+        .with(|o| {
+            o.borrow().iter().rev().find_map(|o| match &o.kind {
+                OverlayKind::Dialog(d) if o.key == surface.key() && !d.closing.get() => {
+                    Some(d.clone())
+                }
+                _ => None,
+            })
+        })
+        .ok_or("no dialog is shown")?;
+    let layout = dialog.layout.borrow();
+    let (_, geometry) = layout.as_ref().ok_or("the dialog is not drawn yet")?;
+    match button {
+        Some(text) => {
+            let index = dialog
+                .labels
+                .iter()
+                .position(|l| l == text)
+                .ok_or_else(|| format!("the dialog has no button {text:?}"))?;
+            let r = geometry
+                .buttons
+                .get(index)
+                .ok_or("the dialog's button is not laid out")?;
+            Ok((
+                r.origin.x.0 + r.size.width.0 / 2.0,
+                r.origin.y.0 + r.size.height.0 / 2.0,
+            ))
+        }
+        None if dialog.cancelable => Ok((1.0, 1.0)),
+        None => Err("the dialog can only be answered with a button".into()),
+    }
 }
 
 /// Keys while a dialog shows over the app (it is modal: every key goes to
