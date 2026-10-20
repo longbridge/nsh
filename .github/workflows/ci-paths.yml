@@ -2,8 +2,11 @@ name: CI paths
 
 # The Rust workflows run only when what they build changes, listed crate by
 # crate in their `paths`. This checks those lists against the workspace's
-# dependency graph whenever a manifest or a workflow changes, so a crate a
-# workflow tests can never be left out (.github/ci/paths.py).
+# dependency graph, so a crate a workflow tests can never be left out
+# (.github/ci/paths.py). It runs on every pull request, whatever it
+# changes: its job is the `check` main's ruleset requires, which a pull
+# request that runs no other workflow with that job (one touching only
+# `crates/gpui`) would otherwise never report. It takes seconds.
 
 on:
   push:
@@ -13,10 +16,6 @@ on:
       - ".github/workflows/**"
       - ".github/ci/**"
   pull_request:
-    paths:
-      - "**/Cargo.toml"
-      - ".github/workflows/**"
-      - ".github/ci/**"
   workflow_dispatch:
 
 permissions:
