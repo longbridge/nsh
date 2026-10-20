@@ -137,6 +137,10 @@ enum Command {
         /// step it came in, and the time of every commit.
         #[arg(long)]
         trace: bool,
+        /// Also write the results to this file as a JUnit XML report, the
+        /// format CI services read.
+        #[arg(long, value_name = "FILE")]
+        junit: Option<PathBuf>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -552,7 +556,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             entry,
             filter,
             trace,
-        } => test::test(&path, &entry, filter, trace),
+            junit,
+        } => test::test(&path, &entry, filter, trace, junit.as_deref()),
         Command::Dev {
             entry,
             port,

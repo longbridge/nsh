@@ -153,3 +153,70 @@ fn open_sets_the_environment_and_routes_answer_requests() {
     assert!(failed.is_empty(), "{failed:#?}");
     assert_eq!(results.len(), 7);
 }
+
+#[test]
+fn describe_hooks_skip_only_todo_and_timeouts_behave_as_jest_s() {
+    use nsh_testing::TestStatus::{Failed, Passed, Skipped, Todo};
+
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/suites");
+    let results = run_file(&test_run(None), &dir.join("Suites.test.ts"), &mut |_| {}).unwrap();
+    let ended: Vec<_> = results
+        .iter()
+        .map(|r| (r.name.as_str(), r.status))
+        .collect();
+    assert_eq!(
+        ended,
+        [
+            ("cart › adds", Passed),
+            ("cart › again › keeps what the first test added", Passed),
+            ("ran the hooks in order", Passed),
+            ("is skipped", Skipped),
+            ("is still to write", Todo),
+            ("skipped block › is skipped too", Skipped),
+            ("fails after its timeout", Failed),
+            ("a failing beforeEach › fails", Failed),
+            ("a failing beforeEach › still ran its afterEach", Failed),
+            ("a failing beforeAll › fails", Failed),
+            ("a failing beforeAll › inner › fails too", Failed),
+            ("a failing afterAll › passes", Passed),
+            ("a failing afterAll › afterAll", Failed),
+            ("cannot declare tests", Passed),
+        ],
+        "{results:#?}"
+    );
+    let message = |name: &str| {
+        let result = results.iter().find(|r| r.name == name).unwrap();
+        result.failure.as_ref().unwrap().message.clone()
+    };
+    assert_eq!(
+        message("fails after its timeout"),
+        "the test did not end in 100 ms"
+    );
+    assert_eq!(
+        message("a failing beforeEach › fails"),
+        "beforeEach: no fixture"
+    );
+    assert_eq!(
+        message("a failing beforeAll › inner › fails too"),
+        "beforeAll: no server"
+    );
+    assert_eq!(
+        message("a failing afterAll › afterAll"),
+        "afterAll: left a mess"
+    );
+
+    let results = run_file(&test_run(None), &dir.join("Only.test.ts"), &mut |_| {}).unwrap();
+    let ended: Vec<_> = results
+        .iter()
+        .map(|r| (r.name.as_str(), r.status))
+        .collect();
+    assert_eq!(
+        ended,
+        [
+            ("is skipped while another is only", Skipped),
+            ("runs", Passed),
+            ("focused block › runs too", Passed),
+            ("other block › is skipped", Skipped),
+        ]
+    );
+}

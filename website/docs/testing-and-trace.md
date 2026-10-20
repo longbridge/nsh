@@ -54,9 +54,45 @@ checks test files with the rest (`.nsh/types` declares `nsh/test`).
 
 Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
 another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A
-test fails when it throws, when the promise it returns rejects, and after 30 seconds. An app with Rust crates of its own
+test fails when it throws, when the promise it returns rejects, and after its timeout: 30 seconds, or the milliseconds
+`test`'s third argument gives (`test("syncs", body, 60_000)`). An app with Rust crates of its own
 (`nsh.json` `"rust"`) runs its tests in a headless runner NSH builds with them, the same way; in a Rust app
 (`nsh.json` `"root"`, [Building with Rust](./rust.md)), `open(".")` starts its root component.
+
+### Grouping tests and setting them up
+
+`describe`, the hooks and the variants of `test` work as Jest's:
+
+```tsx
+import { beforeEach, describe, expect, open, test } from "nsh/test";
+import type { App } from "nsh/test";
+
+describe("the cart", () => {
+  let app: App;
+  beforeEach(async () => {
+    app = await open("./App.tsx", { storage: { cart: "[]" } });
+    await app.press("Cart");
+  });
+
+  test("starts empty", () => {
+    expect(app.texts()).toContain("No items");
+  });
+
+  test.todo("applies a coupon");
+});
+```
+
+| Function | Description |
+|---|---|
+| `describe(name, body)` | Groups the tests and blocks `body` declares (at once, as the file loads): their names start with `name` (`the cart › starts empty`), and the hooks it declares run around them only. Blocks nest. |
+| `beforeEach(fn, timeout?)`, `afterEach(fn, timeout?)` | Run `fn` before / after each test of the block they are declared in (the file, a `describe`): `beforeEach` of the outer blocks first, `afterEach` of the inner ones first. A `beforeEach` that fails fails the test; `afterEach` runs either way. |
+| `beforeAll(fn, timeout?)`, `afterAll(fn, timeout?)` | Run `fn` once before the first and after the last test of their block, when one of its tests runs. A `beforeAll` that fails fails the block's tests; an `afterAll` that fails is reported as a failed `<block> › afterAll`. An app a `beforeAll` opens stays open for the block's tests, and is closed after its `afterAll`. |
+| `test.skip(name, body, timeout?)`, `describe.skip(name, body)` | Declares a test, or a block whose tests, do not run: they are reported as skipped. |
+| `test.only(name, body, timeout?)`, `describe.only(name, body)` | While a test file has one, only those tests and blocks run; the file's others are reported as skipped. |
+| `test.todo(name)` | A test still to write, reported as one. |
+
+A hook may be `async`; its `timeout` is 30 seconds unless given. Tests and hooks are declared as the file loads: a
+test declared inside a test or a hook throws.
 
 ### Opening the app
 
@@ -326,10 +362,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: nsh test
+      - run: nsh test --junit test-results.xml
 ```
 
 (Install the `nsh` CLI on the runner the way you install it locally; see [Installation](./installation.md).)
+
+`--junit <FILE>` also writes the results as a JUnit XML report, which CI services (GitHub Actions test reporters,
+GitLab, Jenkins, Azure Pipelines) show per test: a `testsuite` per test file, a `testcase` per test, with what failed,
+where, and the texts on screen.
 
 To guard performance, record the item counts of a few interactions (the `── … : N items` lines and the `ops` /
 `mount items` numbers of `--trace`) and fail when they grow. Counts are deterministic; timings on shared CI machines

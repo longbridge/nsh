@@ -50,9 +50,44 @@ error 2 tests: 1 passed, 1 failed (0.9s)
 （`.nsh/types` 中声明了 `nsh/test`）。
 
 每个测试文件在各自的引擎上运行，文件中的测试按顺序逐个运行。`open` 在另一个全新的引擎上启动应用，因此测试之间从不
-共享状态；测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超过 30 秒时失败。带有自己
+共享状态；测试结束时，它打开的应用会被关闭。测试在抛出异常、返回的 promise 被 reject 或超时时失败：超时默认 30 秒，
+也可以用 `test` 的第三个参数按毫秒指定（`test("syncs", body, 60_000)`）。带有自己
 Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH 用这些 crate 构建的无界面运行器中运行测试；在 Rust 应用
 （`nsh.json` 的 `"root"`，[用 Rust 开发](./rust.md)）中，`open(".")` 启动它的根组件。
+
+### 分组与准备测试
+
+`describe`、各个钩子和 `test` 的变体与 Jest 的用法一致：
+
+```tsx
+import { beforeEach, describe, expect, open, test } from "nsh/test";
+import type { App } from "nsh/test";
+
+describe("the cart", () => {
+  let app: App;
+  beforeEach(async () => {
+    app = await open("./App.tsx", { storage: { cart: "[]" } });
+    await app.press("Cart");
+  });
+
+  test("starts empty", () => {
+    expect(app.texts()).toContain("No items");
+  });
+
+  test.todo("applies a coupon");
+});
+```
+
+| 函数 | 说明 |
+|---|---|
+| `describe(name, body)` | 把 `body` 声明的测试和块归为一组（在文件加载时立即声明）：它们的名称以 `name` 开头（`the cart › starts empty`），其中声明的钩子只在它们前后运行。块可以嵌套。 |
+| `beforeEach(fn, timeout?)`、`afterEach(fn, timeout?)` | 在所在块（文件或某个 `describe`）的每个测试之前 / 之后运行 `fn`：`beforeEach` 外层块的先运行，`afterEach` 内层块的先运行。`beforeEach` 失败时该测试失败；无论如何 `afterEach` 都会运行。 |
+| `beforeAll(fn, timeout?)`、`afterAll(fn, timeout?)` | 当所在块有测试要运行时，在第一个测试之前、最后一个测试之后各运行一次 `fn`。`beforeAll` 失败时，该块的测试都失败；`afterAll` 失败时报告为一个失败的 `<块> › afterAll`。`beforeAll` 打开的应用在该块的测试期间保持打开，在其 `afterAll` 之后关闭。 |
+| `test.skip(name, body, timeout?)`、`describe.skip(name, body)` | 声明不运行的测试或块：它们报告为已跳过。 |
+| `test.only(name, body, timeout?)`、`describe.only(name, body)` | 测试文件中有它们时，只运行这些测试和块；文件中的其他测试报告为已跳过。 |
+| `test.todo(name)` | 还没写的测试，报告为 todo。 |
+
+钩子可以是 `async` 函数；`timeout` 默认 30 秒。测试和钩子在文件加载时声明：在测试或钩子里声明测试会抛出异常。
 
 ### 打开应用
 
@@ -314,10 +349,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: nsh test
+      - run: nsh test --junit test-results.xml
 ```
 
 （在 runner 上安装 `nsh` CLI 的方式与本地安装相同；参见[安装](./installation.md)。）
+
+`--junit <FILE>` 还会把结果写成 JUnit XML 报告，CI 服务（GitHub Actions 的测试报告、GitLab、Jenkins、Azure Pipelines）
+会按测试展示它：每个测试文件一个 `testsuite`，每个测试一个 `testcase`，并附上失败的内容、位置和屏幕上的文字。
 
 要守住性能，可以记录几个交互的 item 数（`--trace` 输出中的 `── … : N items` 行以及 `ops` / `mount items` 的数字），在它们
 增长时让 CI 失败。这些计数是确定的；共享 CI 机器上的耗时则不是。

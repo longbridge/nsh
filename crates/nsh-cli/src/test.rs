@@ -23,7 +23,9 @@ use anyhow::{Context as _, bail};
 use nsh_bundler::BundleOptions;
 use nsh_core::ui::description::SetDescription;
 use nsh_engine::Bundle;
-use nsh_testing::{Built, Entry, Reply, RunnerMessage, TestRequest, TestResult, TestRun};
+use nsh_testing::{
+    Built, Entry, Reply, RunnerMessage, TestRequest, TestResult, TestRun, TestStatus,
+};
 
 use crate::{build::BuildError, logger, rust_app::RustApp, ui};
 
@@ -40,6 +42,7 @@ pub(crate) fn test(
     entry: &Path,
     filter: Option<String>,
     trace: bool,
+    junit: Option<&Path>,
 ) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let work_dir = app_dir.join(".nsh/test");
@@ -101,12 +104,21 @@ pub(crate) fn test(
             }
         }
     }
-    let total = tally.passed + tally.failed;
+    if let Some(report) = junit {
+        std::fs::write(report, tally.junit(start.elapsed()))
+            .with_context(|| format!("write {}", ui::path(report)))?;
+    }
+    let total = tally.passed + tally.failed + tally.skipped + tally.todo;
+    let mut counts = format!("{} passed, {} failed", tally.passed, tally.failed);
+    if tally.skipped > 0 {
+        counts.push_str(&format!(", {} skipped", tally.skipped));
+    }
+    if tally.todo > 0 {
+        counts.push_str(&format!(", {} todo", tally.todo));
+    }
     let summary = format!(
-        "{total} {}: {} passed, {} failed {}",
+        "{total} {}: {counts} {}",
         if total == 1 { "test" } else { "tests" },
-        tally.passed,
-        tally.failed,
         ui::dim(format!("({})", ui::duration(start.elapsed())))
     );
     if tally.failed > 0 {
@@ -116,29 +128,153 @@ pub(crate) fn test(
     Ok(())
 }
 
-/// The tests that passed and failed so far.
+/// How the tests ended so far, by file.
 #[derive(Default)]
 struct Tally {
     passed: usize,
     failed: usize,
+    skipped: usize,
+    todo: usize,
+    /// The files shown, in order, with their results, or why one could not
+    /// run.
+    files: Vec<(String, Vec<TestResult>, Option<String>)>,
 }
 
 impl Tally {
     /// Shows how a test of the file shown as `file` ended, and counts it.
     fn show(&mut self, file: &str, result: &TestResult) {
         show(file, result);
-        if result.failure.is_some() {
-            self.failed += 1;
-        } else {
-            self.passed += 1;
+        match result.status {
+            TestStatus::Passed => self.passed += 1,
+            TestStatus::Skipped => self.skipped += 1,
+            TestStatus::Todo => self.todo += 1,
+            TestStatus::Failed => self.failed += 1,
         }
+        self.file(file).1.push(result.clone());
     }
 
     /// The test file shown as `file` could not run: it counts as a failure.
     fn failed(&mut self, file: &str, message: &str) {
         self.failed += 1;
         ui::error(format!("{file}: {message}"));
+        self.file(file).2 = Some(message.to_owned());
     }
+
+    fn file(&mut self, file: &str) -> &mut (String, Vec<TestResult>, Option<String>) {
+        let at = match self.files.iter().position(|(f, ..)| f == file) {
+            Some(at) => at,
+            None => {
+                self.files.push((file.to_owned(), Vec::new(), None));
+                self.files.len() - 1
+            }
+        };
+        &mut self.files[at]
+    }
+
+    /// The results as a JUnit XML report: a `testsuite` per file, a
+    /// `testcase` per test, a file that could not run as an `error`.
+    fn junit(&self, elapsed: std::time::Duration) -> String {
+        use std::fmt::Write as _;
+        let seconds = |d: std::time::Duration| format!("{:.3}", d.as_secs_f64());
+        let mut suites = String::new();
+        let (mut tests, mut failures, mut errors, mut skipped) = (0, 0, 0, 0);
+        for (file, results, error) in &self.files {
+            let failed = results
+                .iter()
+                .filter(|r| r.status == TestStatus::Failed)
+                .count();
+            let skips = results
+                .iter()
+                .filter(|r| matches!(r.status, TestStatus::Skipped | TestStatus::Todo))
+                .count();
+            let errs = usize::from(error.is_some());
+            let time: std::time::Duration = results.iter().map(|r| r.elapsed).sum();
+            tests += results.len() + errs;
+            failures += failed;
+            errors += errs;
+            skipped += skips;
+            let file = xml(file);
+            let _ = writeln!(
+                suites,
+                "  <testsuite name=\"{file}\" tests=\"{}\" failures=\"{failed}\" errors=\"{errs}\" \
+                 skipped=\"{skips}\" time=\"{}\">",
+                results.len() + errs,
+                seconds(time)
+            );
+            for result in results {
+                let _ = write!(
+                    suites,
+                    "    <testcase classname=\"{file}\" name=\"{}\" time=\"{}\"",
+                    xml(&result.name),
+                    seconds(result.elapsed)
+                );
+                match (&result.status, &result.failure) {
+                    (TestStatus::Skipped, _) => {
+                        suites.push_str(">\n      <skipped/>\n    </testcase>\n")
+                    }
+                    (TestStatus::Todo, _) => {
+                        suites.push_str(">\n      <skipped message=\"todo\"/>\n    </testcase>\n");
+                    }
+                    (_, Some(failure)) => {
+                        let mut text = failure.message.clone();
+                        if let Some(stack) = &failure.stack {
+                            text.push('\n');
+                            text.push_str(stack);
+                        }
+                        if let Some(screen) = &failure.screen {
+                            let texts: Vec<String> =
+                                screen.iter().map(|t| format!("{t:?}")).collect();
+                            text.push_str(&format!("\non screen: {}", texts.join(", ")));
+                        }
+                        let message = failure.message.lines().next().unwrap_or_default();
+                        let _ = write!(
+                            suites,
+                            ">\n      <failure message=\"{}\">{}</failure>\n    </testcase>\n",
+                            xml(message),
+                            xml(&text)
+                        );
+                    }
+                    _ => suites.push_str("/>\n"),
+                }
+            }
+            if let Some(error) = error {
+                let _ = write!(
+                    suites,
+                    "    <testcase classname=\"{file}\" name=\"{file}\" time=\"0.000\">\n      \
+                     <error message=\"{}\">{}</error>\n    </testcase>\n",
+                    xml(error.lines().next().unwrap_or_default()),
+                    xml(error)
+                );
+            }
+            suites.push_str("  </testsuite>\n");
+        }
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <testsuites name=\"nsh test\" tests=\"{tests}\" failures=\"{failures}\" errors=\"{errors}\" \
+             skipped=\"{skipped}\" time=\"{}\">\n{suites}</testsuites>\n",
+            seconds(elapsed)
+        )
+    }
+}
+
+/// `text` as XML text or an attribute's value: escaped, without the
+/// control characters XML 1.0 refuses.
+fn xml(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            '\n' => out.push_str("&#10;"),
+            '\t' | '\r' => out.push(c),
+            c if (c as u32) < 0x20 => {}
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Runs `request` in the headless runner of the app with Rust crates
@@ -274,9 +410,25 @@ fn show(file: &str, result: &TestResult) {
         result.name,
         ui::dim(format!("({})", ui::duration(result.elapsed)))
     );
-    let Some(failure) = &result.failure else {
-        ui::done(line);
-        return;
+    let failure = match (result.status, &result.failure) {
+        (TestStatus::Skipped, _) => {
+            ui::plain(format!("{} {line} {}", ui::dim("○"), ui::dim("skipped")));
+            return;
+        }
+        (TestStatus::Todo, _) => {
+            ui::plain(format!(
+                "{} {file} › {} {}",
+                ui::yellow("✎"),
+                result.name,
+                ui::yellow("todo")
+            ));
+            return;
+        }
+        (_, Some(failure)) => failure,
+        (_, None) => {
+            ui::done(line);
+            return;
+        }
     };
     ui::plain(format!("{} {line}", ui::red("✗")));
     for text in failure.message.lines() {
@@ -460,5 +612,64 @@ mod tests {
             dir.join("src/cart/Cart.tsx")
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_junit_report_has_a_suite_per_file_and_says_how_each_test_ended() {
+        let result =
+            |json: serde_json::Value| -> TestResult { serde_json::from_value(json).unwrap() };
+        let elapsed = serde_json::json!({ "secs": 0, "nanos": 250_000_000 });
+        let mut tally = Tally::default();
+        tally.show(
+            "App.test.tsx",
+            &result(serde_json::json!({ "name": "cart › adds", "elapsed": elapsed, "status": "Passed", "failure": null })),
+        );
+        tally.show(
+            "App.test.tsx",
+            &result(serde_json::json!({
+                "name": "shows <b>",
+                "elapsed": elapsed,
+                "status": "Failed",
+                "failure": { "message": "expected \"a\" to be \"b\"\nmore", "stack": "at (App.test.tsx:3:5)", "screen": ["a"] },
+            })),
+        );
+        tally.show(
+            "App.test.tsx",
+            &result(serde_json::json!({ "name": "later", "elapsed": elapsed, "status": "Skipped", "failure": null })),
+        );
+        tally.show(
+            "App.test.tsx",
+            &result(serde_json::json!({ "name": "someday", "elapsed": elapsed, "status": "Todo", "failure": null })),
+        );
+        tally.failed("Broken.test.ts", "the file is broken");
+        assert_eq!(
+            (tally.passed, tally.failed, tally.skipped, tally.todo),
+            (1, 2, 1, 1)
+        );
+        let report = tally.junit(std::time::Duration::from_secs(2));
+        assert_eq!(
+            report,
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nsh test" tests="5" failures="1" errors="1" skipped="2" time="2.000">
+  <testsuite name="App.test.tsx" tests="4" failures="1" errors="0" skipped="2" time="1.000">
+    <testcase classname="App.test.tsx" name="cart › adds" time="0.250"/>
+    <testcase classname="App.test.tsx" name="shows &lt;b&gt;" time="0.250">
+      <failure message="expected &quot;a&quot; to be &quot;b&quot;">expected &quot;a&quot; to be &quot;b&quot;&#10;more&#10;at (App.test.tsx:3:5)&#10;on screen: &quot;a&quot;</failure>
+    </testcase>
+    <testcase classname="App.test.tsx" name="later" time="0.250">
+      <skipped/>
+    </testcase>
+    <testcase classname="App.test.tsx" name="someday" time="0.250">
+      <skipped message="todo"/>
+    </testcase>
+  </testsuite>
+  <testsuite name="Broken.test.ts" tests="1" failures="0" errors="1" skipped="0" time="0.000">
+    <testcase classname="Broken.test.ts" name="Broken.test.ts" time="0.000">
+      <error message="the file is broken">the file is broken</error>
+    </testcase>
+  </testsuite>
+</testsuites>
+"#
+        );
     }
 }

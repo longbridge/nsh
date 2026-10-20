@@ -26,7 +26,7 @@ use crate::run::{Built, Entry, TestResult, TestRun, run_file};
 
 /// The version of the [`TestRequest`], [`RunnerMessage`] and [`Reply`]
 /// formats: `nsh` and the runner it built speak the same.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// What `nsh` asks of a runner: the test files to run and how.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -269,6 +269,7 @@ mod tests {
                 result: TestResult {
                     name: "adds".into(),
                     elapsed: Duration::from_millis(84),
+                    status: crate::TestStatus::Failed,
                     failure: Some(Failure {
                         message: "expected 1 to be 2".into(),
                         stack: Some("    at <anonymous> (App.test.tsx:3:5)".into()),
