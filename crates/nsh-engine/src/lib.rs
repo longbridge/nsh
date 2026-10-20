@@ -20,6 +20,18 @@ mod storage;
 #[cfg(feature = "js")]
 mod symbolicate;
 
+// The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
+// nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.
+#[cfg(test)]
+#[path = "../../nsh-core/src/geometry/unit_scan.rs"]
+mod unit_scan;
+
+#[cfg(test)]
+#[test]
+fn public_api_is_typed() {
+    unit_scan::check(std::path::Path::new(env!("CARGO_MANIFEST_DIR")), &[]);
+}
+
 use std::{io, rc::Rc, sync::Arc, time::Duration};
 
 use crossbeam_channel::{Receiver, Sender};

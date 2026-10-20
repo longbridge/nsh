@@ -41,6 +41,8 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 libc.workspace = true
 
 [dev-dependencies]
+# The typed API check reads the crate's public API.
+syn = { workspace = true, features = ["visit"] }
 nsh-ui-mobile.workspace = true
 # The host's shared data in `nativeModule`'s tests.
 tokio = { workspace = true, features = ["sync"] }

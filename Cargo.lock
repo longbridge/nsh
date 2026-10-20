@@ -2273,6 +2273,7 @@ dependencies = [
  "oxc_sourcemap",
  "rustc-hash",
  "serde_json",
+ "syn 2.0.119",
  "tokio",
  "ureq",
 ]
@@ -2308,6 +2309,7 @@ dependencies = [
  "rquickjs",
  "rustc-hash",
  "serde_json",
+ "syn 2.0.119",
  "thiserror 2.0.21",
  "url",
 ]

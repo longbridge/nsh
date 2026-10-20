@@ -38,6 +38,18 @@ mod timers;
 mod touch;
 mod web;
 
+// The typed API check (docs/dev/geometry.md, "Typed API"): the scan is
+// nsh-core's; this crate's lists are `unitless.txt` and `untyped.txt`.
+#[cfg(test)]
+#[path = "../../nsh-core/src/geometry/unit_scan.rs"]
+mod unit_scan;
+
+#[cfg(test)]
+#[test]
+fn public_api_is_typed() {
+    unit_scan::check(std::path::Path::new(env!("CARGO_MANIFEST_DIR")), &[]);
+}
+
 pub use nsh_core::{
     js::Limits,
     platform::{ColorScheme, Environment, Idiom, Os},

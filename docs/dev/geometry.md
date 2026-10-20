@@ -77,6 +77,10 @@ constructors take the bare value) and `color` (a color's components have no unit
 `unreachable_pub` lint keeps every `pub` item reachable. Colors (`Color`, and GPUI's `Hsla` / `Rgba` if NSH adopts them)
 are typed; a bare float or integer holding a color is not.
 
+nsh-js and nsh-engine are held the same way, by a `public_api_is_typed` test at their crate root (`cargo test -p nsh-js
+public_api_is_typed`, `-p nsh-engine`). The scan is one file, `crates/nsh-core/src/geometry/unit_scan.rs`, which their
+tests include with `#[path]` (a test-only dependency on `syn`, nothing in their builds); they scan all of their `src`.
+
 Each flagged item must be listed in one of two files next to the crate's `Cargo.toml`, by its path (`module::Type::method(param)`,
 `module::Type::method ->` for a return type, `module::Struct.field`, `module::Enum::Variant.field`):
 
@@ -100,7 +104,7 @@ Counts are the entries of `untyped.txt` when the check landed (379 in all; `unit
 | C | `text.rs`, `canvas.rs`, `canvas/`, `ui/host.rs` (`Painter`) | 126 | Text metrics (`TextLine`, `LinePiece`, `BackgroundBox`, attachments: `Points`, `Bounds<Points>`), `TextEngine::measure(max_width)`; the canvas's ops, gradients, hit tests and `Painter`'s methods (`Point<Points>`, `Bounds<Points>`, `Radians` for arcs and rotations, `Percentage` for color stop offsets). The recorded canvas ops' wire encoding stays |
 | D | `ui/` except `host.rs` | 100 | `Styled`'s remaining methods (`border(width)`, `rotate(degrees)` → `Radians`, `translate_x`, `blur`, shadows, `gradient_*_position` → `Percentage`), events (`ScrollEvent`, `PanEvent`, `ResponderEvent`, `VideoInfo` → `Size<DevicePixels>` for pixel sizes), `ElementRef::scroll_to*`, `Scrollable`, `ListLayout`, `Theme` lengths, `ambient::keyboard_height` / `measure_text` / `round_to_nearest_pixel`, image and clipboard sizes (`Size<DevicePixels>`) |
 | E | `ops.rs`, `props.rs`, `mount.rs`, `core/`, `platform.rs`, `desktop.rs`, `js/`; `nsh-js`'s decoding; the backends that read them | 86 | The wire types: `EventPayload` (layout, scroll, pan, image), touch / hover / context menu locations (`Point<Points>`), `Prop` / `ScrollProp` lengths, `props::EdgeInsets` (→ `Edges<Points>`), `PanActivation`, `Command::ScrollTo` / `ZoomTo`, `ScrollBehavior` snapping, `StickyCell`, `ScreenConfig.header_height`, `WindowFrame` (`Bounds<Points>`), `Core::set_scroll_offset` and the header heights. JS numbers become typed where `nsh-js` decodes them; the backends unwrap them where they hand them to their toolkits |
-| F | `nsh-js`, `nsh-engine` | – | Extend the check to their public API (the scan is a function of a source directory; each crate gets its own two lists) |
+| F | `nsh-js`, `nsh-engine` | 1, 7 | The check covers their public API with lists of their own (`crates/nsh-js/untyped.txt`: `TextMeasurer`'s width, with C; `crates/nsh-engine/untyped.txt`: `EngineControl::scroll`, `set_screen_header`, `EngineConfig.header_heights`, `TraceOptions`' sizes) |
 
 Groups A–E touch disjoint files in nsh-core; a group that changes a type other crates read (C's text metrics, E's wire
 types) also updates those readers (`nsh-js`, `nsh-engine`, the backends, `crates/gpui`), so C and E should not land at
