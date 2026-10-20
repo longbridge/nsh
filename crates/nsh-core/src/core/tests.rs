@@ -10576,6 +10576,85 @@ fn grid_auto_tracks_stretch_unless_aligned() {
     assert_eq!((f[0].size.height.0, f[1].origin.y.0), (0.0, 0.0));
 }
 
+/// A container `2` with `classes` and empty children `4`, `6`, ... with
+/// theirs, laid out at the root; the children's frames.
+fn class_frames(classes: &str, children: &[&str]) -> Vec<Bounds<Points>> {
+    let mut c = core();
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        class_op(2, classes),
+    ];
+    for (i, child) in children.iter().enumerate() {
+        let id = 4 + 2 * i as NodeId;
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(class_op(id, child));
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(Op::Insert {
+        parent: ROOT_ID,
+        child: 2,
+        before: None,
+    });
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    (0..children.len())
+        .map(|i| frame_of(&batch, 4 + 2 * i as NodeId).expect("a frame"))
+        .collect()
+}
+
+/// The alignment classes lay out as their Tailwind CSS declarations do in
+/// a browser.
+#[test]
+fn alignment_classes_lay_out_as_in_a_browser() {
+    let yh = |r: Bounds<Points>| (r.origin.y.0, r.size.height.0);
+    let grid = "grid grid-cols-2 w-[300px] h-[200px]";
+    // Unset (`normal`) and `content-normal`: the auto rows stretch.
+    let f = class_frames(grid, &["", "", ""]);
+    assert_eq!((yh(f[0]), yh(f[2])), ((0.0, 100.0), (100.0, 100.0)));
+    let f = class_frames(&format!("{grid} content-normal"), &["", "", ""]);
+    assert_eq!(yh(f[2]), (100.0, 100.0));
+    // `content-start` (`align-content: flex-start`) packs them at the start.
+    let f = class_frames(&format!("{grid} content-start"), &["h-5", "", "h-8"]);
+    assert_eq!((yh(f[0]), yh(f[2])), ((0.0, 20.0), (20.0, 32.0)));
+    // `justify-normal` stretches auto columns; `place-content-start`
+    // packs both axes.
+    let free = "grid w-[300px] h-[200px]";
+    let f = class_frames(&format!("{free} justify-normal"), &[""]);
+    assert_eq!((f[0].size.width.0, f[0].size.height.0), (300.0, 200.0));
+    let f = class_frames(&format!("{free} place-content-start"), &[""]);
+    assert_eq!((f[0].size.width.0, f[0].size.height.0), (0.0, 0.0));
+    let f = class_frames(&format!("{free} place-content-end"), &["w-10 h-5"]);
+    assert_eq!((f[0].origin.x.0, f[0].origin.y.0), (260.0, 180.0));
+    // Items: `place-items-end`, `justify-items-start`.
+    let cells = "grid grid-cols-[100px] grid-rows-[40px] w-[300px]";
+    let f = class_frames(&format!("{cells} place-items-end"), &["w-10 h-5"]);
+    assert_eq!((f[0].origin.x.0, f[0].origin.y.0), (60.0, 20.0));
+    let f = class_frames(&format!("{cells} justify-items-start"), &["w-10"]);
+    assert_eq!((f[0].origin.x.0, f[0].size.height.0), (0.0, 40.0));
+
+    // Flex containers: unset keeps React Native's `flex-start` for wrapped
+    // lines, as before; `content-start` is the same, and `content-normal`
+    // stretches the lines, as CSS's `normal` does there.
+    let flex = "flex flex-wrap w-[300px] h-[200px]";
+    let lines = ["w-[200px]", "w-[200px]"];
+    let f = class_frames(flex, &lines);
+    assert_eq!((yh(f[0]), yh(f[1])), ((0.0, 0.0), (0.0, 0.0)));
+    let f = class_frames(&format!("{flex} content-start"), &lines);
+    assert_eq!((yh(f[0]), yh(f[1])), ((0.0, 0.0), (0.0, 0.0)));
+    let f = class_frames(&format!("{flex} content-normal"), &lines);
+    assert_eq!((yh(f[0]), yh(f[1])), ((0.0, 100.0), (100.0, 100.0)));
+    // `justify-normal` is `flex-start` in a flex container.
+    let f = class_frames("flex w-[300px] justify-normal", &["w-10"]);
+    assert_eq!(f[0].origin.x.0, 0.0);
+}
+
 #[test]
 fn start_and_end_follow_the_writing_direction() {
     let s = StyleValue::Str;

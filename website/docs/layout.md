@@ -118,7 +118,7 @@ Templates name their lines in brackets, one or several names per line, and items
 </View>
 ```
 
-In a grid, `justifyContent` and `alignContent` default to CSS's `"normal"`: tracks sized `auto` stretch to fill the container, so a grid with a height and no row template shares that height among its rows. A value set explicitly (`"start"`, `"center"`, `"space-between"`, ...) places the tracks as it does in CSS. The Tailwind classes `content-start`, `content-normal` and `place-content-start` keep this default; `alignContent: "start"` packs the tracks at the start.
+In a grid, `justifyContent` and `alignContent` default to CSS's `"normal"`: tracks sized `auto` stretch to fill the container, so a grid with a height and no row template shares that height among its rows. A value set explicitly (`"start"`, `"center"`, `"space-between"`, ...) places the tracks as it does in CSS. The alignment classes set exactly what Tailwind CSS sets: `content-start` (`align-content: flex-start`) and `place-content-start` pack the tracks at the start, and `content-normal` and `justify-normal` stretch them, as in a browser.
 
 `display: "block"` uses CSS block layout (children stacked, each as wide as the container), and `display: "none"` removes the view from layout.
 

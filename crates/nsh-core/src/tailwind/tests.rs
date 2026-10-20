@@ -482,17 +482,6 @@ fn grid() {
     assert_eq!(s.layout.grid_column.start, named("a"));
     assert_eq!(s.layout.grid_column.end, named("b"));
     assert_eq!(s.layout.grid_row.start, named("main"));
-    // These classes resolve as they always have (api/tailwind.txt): the
-    // flex keywords, and `content-start` / `content-normal` the default
-    // (`flex-start` outside grids, CSS's `normal` in grids).
-    let s = styled("justify-items-end justify-self-start content-start justify-normal");
-    assert_eq!(s.layout.justify_items, taffy::AlignItems::FLEX_END);
-    assert_eq!(s.layout.justify_self, Some(taffy::AlignItems::FLEX_START));
-    assert_eq!(
-        s.layout.align_content,
-        Style::default().layout.align_content
-    );
-    assert_eq!(s.layout.justify_content, taffy::AlignContent::FLEX_START);
     // Invalid arbitrary placements and tracks stay known classes that set
     // nothing (the style logs them); a negative named line is unknown.
     let theme = Theme::default();
@@ -507,6 +496,129 @@ fn grid() {
         s.layout.grid_auto_rows,
         Style::default().layout.grid_auto_rows
     );
+}
+
+/// Each alignment class against the declaration Tailwind CSS (v4.3)
+/// generates for it, in the comment: the same property, the same value.
+#[test]
+fn alignment_follows_tailwind_css() {
+    use taffy::{AlignContent as C, AlignItems as I};
+    let content: &[(&str, C, C)] = &[
+        // (class, align-content, justify-content)
+        ("justify-start", C::NORMAL, C::FLEX_START), // justify-content: flex-start
+        ("justify-end", C::NORMAL, C::FLEX_END),     // justify-content: flex-end
+        ("justify-center", C::NORMAL, C::CENTER),    // justify-content: center
+        ("justify-between", C::NORMAL, C::SPACE_BETWEEN), // justify-content: space-between
+        ("justify-around", C::NORMAL, C::SPACE_AROUND), // justify-content: space-around
+        ("justify-evenly", C::NORMAL, C::SPACE_EVENLY), // justify-content: space-evenly
+        ("justify-stretch", C::NORMAL, C::STRETCH),  // justify-content: stretch
+        ("justify-normal", C::NORMAL, C::NORMAL),    // justify-content: normal
+        // align-content: normal, which is `stretch` in flex and grid
+        // containers (the style's `normal` is the unset value).
+        ("content-normal", C::STRETCH, C::NORMAL),
+        ("content-start", C::FLEX_START, C::NORMAL), // align-content: flex-start
+        ("content-end", C::FLEX_END, C::NORMAL),     // align-content: flex-end
+        ("content-center", C::CENTER, C::NORMAL),    // align-content: center
+        ("content-between", C::SPACE_BETWEEN, C::NORMAL), // align-content: space-between
+        ("content-around", C::SPACE_AROUND, C::NORMAL), // align-content: space-around
+        ("content-evenly", C::SPACE_EVENLY, C::NORMAL), // align-content: space-evenly
+        ("content-stretch", C::STRETCH, C::NORMAL),  // align-content: stretch
+        ("place-content-center", C::CENTER, C::CENTER), // place-content: center
+        ("place-content-start", C::START, C::START), // place-content: start
+        ("place-content-end", C::END, C::END),       // place-content: end
+        ("place-content-between", C::SPACE_BETWEEN, C::SPACE_BETWEEN), /* place-content: space-between */
+        ("place-content-stretch", C::STRETCH, C::STRETCH),             // place-content: stretch
+    ];
+    for &(class, align, justify) in content {
+        let s = styled(class);
+        assert_eq!(
+            (s.layout.align_content, s.layout.justify_content),
+            (align, justify),
+            "{class}"
+        );
+    }
+    let items: &[(&str, I, I)] = &[
+        // (class, align-items, justify-items)
+        ("items-start", I::FLEX_START, I::NORMAL), // align-items: flex-start
+        ("items-end", I::FLEX_END, I::NORMAL),     // align-items: flex-end
+        ("items-center", I::CENTER, I::NORMAL),    // align-items: center
+        ("items-baseline", I::BASELINE, I::NORMAL), // align-items: baseline
+        ("items-stretch", I::STRETCH, I::NORMAL),  // align-items: stretch
+        ("justify-items-start", I::NORMAL, I::START), // justify-items: start
+        ("justify-items-end", I::NORMAL, I::END),  // justify-items: end
+        ("justify-items-center", I::NORMAL, I::CENTER), // justify-items: center
+        ("justify-items-stretch", I::NORMAL, I::STRETCH), // justify-items: stretch
+        ("justify-items-normal", I::NORMAL, I::NORMAL), // justify-items: normal
+        ("place-items-center", I::CENTER, I::CENTER), // place-items: center
+        ("place-items-start", I::START, I::START), // place-items: start
+        ("place-items-end", I::END, I::END),       // place-items: end
+        ("place-items-stretch", I::STRETCH, I::STRETCH), // place-items: stretch
+    ];
+    for &(class, align, justify) in items {
+        let s = styled(class);
+        assert_eq!(
+            (s.layout.align_items, s.layout.justify_items),
+            (align, justify),
+            "{class}"
+        );
+    }
+    let selves: &[(&str, Option<I>, Option<I>)] = &[
+        // (class, align-self, justify-self); `auto` is unset.
+        ("self-auto", None, None),                  // align-self: auto
+        ("self-start", Some(I::FLEX_START), None),  // align-self: flex-start
+        ("self-end", Some(I::FLEX_END), None),      // align-self: flex-end
+        ("self-center", Some(I::CENTER), None),     // align-self: center
+        ("self-stretch", Some(I::STRETCH), None),   // align-self: stretch
+        ("self-baseline", Some(I::BASELINE), None), // align-self: baseline
+        ("justify-self-auto", None, None),          // justify-self: auto
+        ("justify-self-start", None, Some(I::FLEX_START)), // justify-self: flex-start
+        ("justify-self-end", None, Some(I::FLEX_END)), // justify-self: flex-end
+        ("justify-self-center", None, Some(I::CENTER)), // justify-self: center
+        ("justify-self-stretch", None, Some(I::STRETCH)), // justify-self: stretch
+        ("place-self-auto", None, None),            // place-self: auto
+        ("place-self-start", Some(I::START), Some(I::START)), // place-self: start
+        ("place-self-end", Some(I::END), Some(I::END)), // place-self: end
+        ("place-self-center", Some(I::CENTER), Some(I::CENTER)), // place-self: center
+        ("place-self-stretch", Some(I::STRETCH), Some(I::STRETCH)), // place-self: stretch
+    ];
+    for &(class, align, justify) in selves {
+        let s = styled(class);
+        assert_eq!(
+            (s.layout.align_self, s.layout.justify_self),
+            (align, justify),
+            "{class}"
+        );
+    }
+}
+
+/// Grid utilities as Tailwind CSS generates them: a type hint is dropped
+/// from the value (`col-[number:2]` is `grid-column: 2`), and the classes
+/// it has no negative of are unknown.
+#[test]
+fn grid_utilities_follow_tailwind_css() {
+    let s = styled("col-[number:2] row-span-[number:3] auto-cols-[length:13px]");
+    assert_eq!(
+        s.layout.grid_column.start,
+        taffy::GridPlacement::Line(2.into())
+    );
+    assert_eq!(s.layout.grid_row.start, taffy::GridPlacement::Span(3));
+    assert_eq!(s.layout.grid_auto_columns.len(), 1);
+    // `-col-[2]` is `grid-column: calc(2 * -1)`.
+    assert_eq!(
+        styled("-col-[2]").layout.grid_column.start,
+        taffy::GridPlacement::Line((-2).into())
+    );
+    // A number is no track size: the class sets nothing, as a browser
+    // drops `grid-auto-rows: 2`.
+    let s = styled("auto-rows-[number:2]");
+    assert_eq!(
+        s.layout.grid_auto_rows,
+        Style::default().layout.grid_auto_rows
+    );
+    let theme = Theme::default();
+    let negatives = "-grid-cols-2 -grid-rows-[13px] -col-span-2 -row-span-1 -auto-cols-[13px] -auto-rows-fr -col-auto";
+    let list = parse(&theme, negatives);
+    assert_eq!(list.unknown().len(), 7, "{:?}", list.unknown());
 }
 
 #[test]

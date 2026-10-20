@@ -90,8 +90,8 @@ Layout is computed in Rust (flexbox and CSS grid). The defaults differ from CSS'
 | `flexShrink` | `number` | How much the element shrinks when space runs out. Default `0`, not `1` as in CSS. |
 | `flexBasis` | `DimensionValue` | The main-axis size before free space is distributed. |
 | `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | Distribution of children along the main axis. Default `"normal"`: `"flex-start"` in flex containers; in grids, tracks sized `auto` stretch. |
-| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | Alignment of children on the cross axis. Default `"stretch"`. |
-| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | Overrides the parent's `alignItems` for this element. |
+| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | Alignment of children on the cross axis. Default `"stretch"`. |
+| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | Overrides the parent's `alignItems` for this element. |
 | `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | Distribution of wrapped lines (and grid tracks) on the cross axis. Default `"flex-start"` in flex containers and `"normal"` in grids, where tracks sized `auto` stretch. `"start"` / `"end"` follow the writing direction. |
 | `gap` | `LengthValue` | Space between rows and columns of children. |
 | `rowGap` | `LengthValue` | Space between rows. |
@@ -114,8 +114,8 @@ Set `display: "grid"` to lay out children in a CSS grid. Track lists use CSS syn
 | `gridRow` | `number \| string` | Row placement, same syntax as `gridColumn`. |
 | `gridRowStart` | `number \| string` | Start row line. |
 | `gridRowEnd` | `number \| string` | End row line. |
-| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | How grid items sit in their areas along the row. |
-| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | Overrides `justifyItems` for this item. |
+| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | How grid items sit in their areas along the row. |
+| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | Overrides `justifyItems` for this item. |
 
 ```tsx
 <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>

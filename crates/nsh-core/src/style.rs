@@ -1610,6 +1610,8 @@ fn align_items(v: StyleValue<'_>) -> Result<Option<AlignItems>, StyleError> {
         Some("center") => Some(AlignItems::CENTER),
         Some("stretch") => Some(AlignItems::STRETCH),
         Some("baseline") => Some(AlignItems::BASELINE),
+        // CSS's `normal`: `stretch` for items without an aspect ratio.
+        Some("normal") => Some(AlignItems::NORMAL),
         Some(_) => return Err(StyleError::InvalidValue),
     })
 }

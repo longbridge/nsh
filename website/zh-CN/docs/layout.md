@@ -118,7 +118,7 @@ NSH 使用 [Taffy](https://github.com/DioxusLabs/taffy) 为每个元素做布局
 </View>
 ```
 
-在网格中，`justifyContent` 和 `alignContent` 默认是 CSS 的 `"normal"`：尺寸为 `auto` 的轨道会拉伸以填满容器，因此有高度但没有行模板的网格会把高度分给各行。显式设置的值（`"start"`、`"center"`、`"space-between"` 等）按 CSS 的方式放置轨道。Tailwind 类 `content-start`、`content-normal` 和 `place-content-start` 保持这个默认值；`alignContent: "start"` 把轨道放在起始处。
+在网格中，`justifyContent` 和 `alignContent` 默认是 CSS 的 `"normal"`：尺寸为 `auto` 的轨道会拉伸以填满容器，因此有高度但没有行模板的网格会把高度分给各行。显式设置的值（`"start"`、`"center"`、`"space-between"` 等）按 CSS 的方式放置轨道。对齐类设置的值与 Tailwind CSS 完全相同：`content-start`（`align-content: flex-start`）和 `place-content-start` 把轨道放在起始处，`content-normal` 和 `justify-normal` 让轨道拉伸，与浏览器中一致。
 
 `display: "block"` 使用 CSS 块布局（子元素依次堆叠，每个都与容器同宽），`display: "none"` 则把视图从布局中移除。
 

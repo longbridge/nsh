@@ -8,7 +8,7 @@ order: 17
 
 每个元素都可以在 `class` 属性中写 Tailwind CSS 类（条件类写在 `classList` 中）。NSH 在 Rust 中按 Tailwind 4 的默认主题解析它们：JS 只传递字符串，每个不同的字符串只解析一次并缓存；当外观、窗口尺寸或按压状态变化时，`dark:`、`active:` 等变体在原生侧重新求值，不运行任何 JS。
 
-本页列出支持的内容。入门介绍见 [Tailwind](../docs/tailwind.md)；工具类最终设置的样式键见 [样式参考](./style-reference.md)。
+每个工具类设置的值都与 Tailwind CSS 4 为它生成的完全相同，含义与浏览器中一致。本页列出支持的内容。入门介绍见 [Tailwind](../docs/tailwind.md)；工具类最终设置的样式键见 [样式参考](./style-reference.md)。
 
 ```tsx
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-md active:scale-[0.98] transition dark:bg-zinc-800">

@@ -10,6 +10,8 @@ demo: guide-styling
 
 Every element takes a `style` prop: an object of camelCase properties, including CSS features such as box shadows, gradients, filters, outlines, transitions and grid. Styles are decoded in Rust and only the properties that changed are sent to the native view. You can also style with [Tailwind classes](./tailwind.md); both resolve to the same native styles.
 
+CSS values (colors, lengths, gradients, filters, shadows, transforms, alignment keywords) mean exactly what they mean in a browser, and each Tailwind utility and variant sets exactly what Tailwind CSS 4 generates for it, so what you know from the web carries over as is. Keys you leave out of a `style` object take the defaults listed below.
+
 ```tsx
 <View
   style={{

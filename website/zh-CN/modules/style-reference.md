@@ -90,8 +90,8 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | `flexShrink` | `number` | 空间不足时的收缩比例。默认 `0`，而不是 CSS 的 `1`。 |
 | `flexBasis` | `DimensionValue` | 分配剩余空间之前的主轴尺寸。 |
 | `justifyContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "space-between" \| "space-around" \| "space-evenly" \| "stretch" \| "normal"` | 子元素沿主轴的分布。默认 `"normal"`：在 flex 容器中即 `"flex-start"`；在网格中，尺寸为 `auto` 的轨道会拉伸。 |
-| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 子元素在交叉轴上的对齐。默认 `"stretch"`。 |
-| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 为当前元素覆盖父元素的 `alignItems`。 |
+| `alignItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 子元素在交叉轴上的对齐。默认 `"stretch"`。 |
+| `alignSelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 为当前元素覆盖父元素的 `alignItems`。 |
 | `alignContent` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "center" \| "stretch" \| "space-between" \| "space-around" \| "space-evenly" \| "normal"` | 多行（及网格轨道）在交叉轴上的分布。flex 容器中默认 `"flex-start"`，网格中默认 `"normal"`，尺寸为 `auto` 的轨道会拉伸。`"start"` / `"end"` 跟随书写方向。 |
 | `gap` | `LengthValue` | 子元素行与列之间的间距。 |
 | `rowGap` | `LengthValue` | 行间距。 |
@@ -114,8 +114,8 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | `gridRow` | `number \| string` | 行位置，语法同 `gridColumn`。 |
 | `gridRowStart` | `number \| string` | 起始行线。 |
 | `gridRowEnd` | `number \| string` | 结束行线。 |
-| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 网格项在其区域内沿行方向的位置。 |
-| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline"` | 为当前项覆盖 `justifyItems`。 |
+| `justifyItems` | `"flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 网格项在其区域内沿行方向的位置。 |
+| `justifySelf` | `"auto" \| "flex-start" \| "flex-end" \| "start" \| "end" \| "self-start" \| "self-end" \| "center" \| "stretch" \| "baseline" \| "normal"` | 为当前项覆盖 `justifyItems`。 |
 
 ```tsx
 <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>

@@ -286,7 +286,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   only widen; inputs gain optional members only; behavior and defaults stay (new behavior is opt-in); formats
   (`.nshpkg`, certificates) are read forever. Every API change, additive ones included, is recorded in `api/`
   (`cargo xtask api`), one record that only grows; the only removals are security closures listed in
-  `api/closed.txt`. A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
+  `api/closed.txt` (beside one pre-release alignment with Tailwind CSS). A new API lands with its test, a fixture whose script checks it (`api/cases/`, `cargo xtask api
   --keep`); fixtures and their steps never change, and while they pass, old apps keep working
   (`docs/dev/compatibility.md`).
 - **No styles in NSH.** Nothing NSH ships has a look of its own: no default colors, paddings, radii, fonts or variants
@@ -297,6 +297,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `active:`), no built-in strings (every label comes from the app); system UI keeps the platform's look (iOS / Android
   headers; `AlertDialog`, drawn in the platform's dialog style where the system has no dialog to show). React Native and
   UIKit are references for which capabilities exist, not APIs to be compatible with.
+- **CSS and Tailwind as in a browser.** CSS values (colors, lengths, gradients, filters, shadows, transforms,
+  alignment keywords, ...) and Tailwind utilities and variants mean exactly what they mean in a browser and in
+  Tailwind CSS (v4); Tailwind's generated CSS is the reference for each utility. What NSH cannot support is
+  unsupported (an unknown class, a rejected value with a warning), never given a different meaning: nothing
+  NSH-specific, so there are no traps (`docs/dev/styles.md`).
 - **Components are Rust.** Rust components live in `crates/nsh-base` or in an app's own crate (its UI set,
   `#[native_module("…")]`), run in the core and render primitives with typed styles (GPUI-style `Styled` methods,
   never class strings); props and events are derived types, their JS face is made from the specs (`nsh-js`

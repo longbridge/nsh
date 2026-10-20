@@ -55,7 +55,9 @@ NSH-owned declarations and behavior rather than copying the upstream API into it
    closes it adds the entries it removes to `api/closed.txt`, each with its reason (`<entry> -- <reason>`, the entry
    as the `compat` tests report the break: `[<module>] <path>`, `<file>: <Name>` or `<file>: <Name>.<member>`; the
    file's header has the details), and says why in its description and the release notes. `api/closed.txt` is the
-   only list of removals there will ever be.
+   only list of removals there will ever be. Its only entries not made for security record one alignment made before
+   the first compatible release (v0.1.2): the alignment and grid utilities, changed to resolve exactly as Tailwind CSS
+   does (#181).
 
 ## How it is enforced
 
@@ -72,7 +74,7 @@ api/
     script.txt          what a user does and sees in it, and the API it checks (`covers`)
   cases/<case>.tsx      the sources of small fixtures: the tests of single APIs
   uncovered.txt         the API no fixture's script checks yet; it only shrinks
-  closed.txt            the entries closed for security (rule 7), each with its reason
+  closed.txt            the entries closed (rule 7), each with its reason
   in-force.txt          the start marker: the record holds from the commit that added it on
 ```
 

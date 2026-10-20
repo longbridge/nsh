@@ -1,7 +1,5 @@
 !p-4 layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)
 -aspect-1/2 layout.aspect_ratio=Some(0.5)
--auto-cols-[13px] layout.grid_auto_columns=[MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) }]
--auto-rows-[13px] layout.grid_auto_rows=[MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) }]
 -backdrop-blur-[13px] view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [], backdrop_filters: [Blur(13.0)] })
 -backdrop-brightness-0 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [], backdrop_filters: [Brightness(0.0)] })
 -backdrop-brightness-0.5 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [], backdrop_filters: [Brightness(0.005)] })
@@ -116,8 +114,6 @@
 -col-end-0 -
 -col-end-1 layout.grid_column.end=Line(GridLine(-1))
 -col-end-4 layout.grid_column.end=Line(GridLine(-4))
--col-span-1 layout.grid_column.end=Span(1) layout.grid_column.start=Span(1)
--col-span-4 layout.grid_column.end=Span(4) layout.grid_column.start=Span(4)
 -col-start-0 -
 -col-start-1 layout.grid_column.start=Line(GridLine(-1))
 -col-start-4 layout.grid_column.start=Line(GridLine(-4))
@@ -180,12 +176,6 @@
 -grayscale-0.5 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [Grayscale(0.005)], backdrop_filters: [] })
 -grayscale-1 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [Grayscale(0.01)], backdrop_filters: [] })
 -grayscale-4 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [Grayscale(0.04)], backdrop_filters: [] })
--grid-cols-1 layout.grid_template_columns=[Repeat(GridTemplateRepetition { count: Count(1), tracks: [MinMax { min: MinTrackSizingFunction(length 0), max: MaxTrackSizingFunction(fr 1) }], line_names: [] })]
--grid-cols-4 layout.grid_template_columns=[Repeat(GridTemplateRepetition { count: Count(4), tracks: [MinMax { min: MinTrackSizingFunction(length 0), max: MaxTrackSizingFunction(fr 1) }], line_names: [] })]
--grid-cols-[13px] layout.grid_template_columns=[Single(MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) })]
--grid-rows-1 layout.grid_template_rows=[Repeat(GridTemplateRepetition { count: Count(1), tracks: [MinMax { min: MinTrackSizingFunction(length 0), max: MaxTrackSizingFunction(fr 1) }], line_names: [] })]
--grid-rows-4 layout.grid_template_rows=[Repeat(GridTemplateRepetition { count: Count(4), tracks: [MinMax { min: MinTrackSizingFunction(length 0), max: MaxTrackSizingFunction(fr 1) }], line_names: [] })]
--grid-rows-[13px] layout.grid_template_rows=[Single(MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) })]
 -grow-0 -
 -grow-0.5 layout.flex_grow=0.5
 -grow-1 layout.flex_grow=1.0
@@ -518,8 +508,6 @@
 -row-end-0 -
 -row-end-1 layout.grid_row.end=Line(GridLine(-1))
 -row-end-4 layout.grid_row.end=Line(GridLine(-4))
--row-span-1 layout.grid_row.end=Span(1) layout.grid_row.start=Span(1)
--row-span-4 layout.grid_row.end=Span(4) layout.grid_row.start=Span(4)
 -row-start-0 -
 -row-start-1 layout.grid_row.start=Line(GridLine(-1))
 -row-start-4 layout.grid_row.start=Line(GridLine(-4))
@@ -692,7 +680,7 @@ auto-cols-[3_0_50%] layout.grid_auto_columns=[MinMax { min: MinTrackSizingFuncti
 auto-cols-[45deg] -
 auto-cols-[50%] layout.grid_auto_columns=[MinMax { min: MinTrackSizingFunction(percent 0.5), max: MaxTrackSizingFunction(percent 0.5) }]
 auto-cols-[color:#abcdef] -
-auto-cols-[length:13px] -
+auto-cols-[length:13px] layout.grid_auto_columns=[MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) }]
 auto-cols-[number:2] -
 auto-cols-[repeat(3,1fr)] -
 auto-cols-[rgb(1_2_3)] -
@@ -717,7 +705,7 @@ auto-rows-[3_0_50%] layout.grid_auto_rows=[MinMax { min: MinTrackSizingFunction(
 auto-rows-[45deg] -
 auto-rows-[50%] layout.grid_auto_rows=[MinMax { min: MinTrackSizingFunction(percent 0.5), max: MaxTrackSizingFunction(percent 0.5) }]
 auto-rows-[color:#abcdef] -
-auto-rows-[length:13px] -
+auto-rows-[length:13px] layout.grid_auto_rows=[MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) }]
 auto-rows-[number:2] -
 auto-rows-[repeat(3,1fr)] -
 auto-rows-[rgb(1_2_3)] -
@@ -2956,7 +2944,7 @@ col-[45deg] -
 col-[50%] -
 col-[color:#abcdef] -
 col-[length:13px] -
-col-[number:2] -
+col-[number:2] layout.grid_column.start=Line(GridLine(2))
 col-[repeat(3,1fr)] -
 col-[rgb(1_2_3)] -
 col-accent -
@@ -3016,6 +3004,7 @@ col-end-90 layout.grid_column.end=Line(GridLine(90))
 col-end-95 layout.grid_column.end=Line(GridLine(95))
 col-end-96 layout.grid_column.end=Line(GridLine(96))
 col-end-[2] layout.grid_column.end=Line(GridLine(2))
+col-end-[number:2] layout.grid_column.end=Line(GridLine(2))
 col-end-auto -
 col-span-1 layout.grid_column.end=Span(1) layout.grid_column.start=Span(1)
 col-span-10 layout.grid_column.end=Span(10) layout.grid_column.start=Span(10)
@@ -3071,6 +3060,7 @@ col-span-90 layout.grid_column.end=Span(90) layout.grid_column.start=Span(90)
 col-span-95 layout.grid_column.end=Span(95) layout.grid_column.start=Span(95)
 col-span-96 layout.grid_column.end=Span(96) layout.grid_column.start=Span(96)
 col-span-[2] layout.grid_column.end=Span(2) layout.grid_column.start=Span(2)
+col-span-[number:2] layout.grid_column.end=Span(2) layout.grid_column.start=Span(2)
 col-span-full layout.grid_column.end=Line(GridLine(-1)) layout.grid_column.start=Line(GridLine(1))
 col-start-0 -
 col-start-1 layout.grid_column.start=Line(GridLine(1))
@@ -3127,6 +3117,7 @@ col-start-90 layout.grid_column.start=Line(GridLine(90))
 col-start-95 layout.grid_column.start=Line(GridLine(95))
 col-start-96 layout.grid_column.start=Line(GridLine(96))
 col-start-[2] layout.grid_column.start=Line(GridLine(2))
+col-start-[number:2] layout.grid_column.start=Line(GridLine(2))
 col-start-auto -
 collapse view.hidden=true
 content-around layout.align_content.keyword=SpaceAround
@@ -3134,8 +3125,8 @@ content-between layout.align_content.keyword=SpaceBetween
 content-center layout.align_content.keyword=Center
 content-end layout.align_content.keyword=FlexEnd
 content-evenly layout.align_content.keyword=SpaceEvenly
-content-normal -
-content-start -
+content-normal layout.align_content.keyword=Stretch
+content-start layout.align_content.keyword=FlexStart
 content-stretch layout.align_content.keyword=Stretch
 contrast-0 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [Contrast(0.0)], backdrop_filters: [] })
 contrast-0.5 view.effects=Some(Effects { box_shadows: [], background_images: [], filters: [Contrast(0.005)], backdrop_filters: [] })
@@ -4014,6 +4005,7 @@ grid-cols-[13px] layout.grid_template_columns=[Single(MinMax { min: MinTrackSizi
 grid-cols-[2] layout.grid_template_columns=[Single(MinMax { min: MinTrackSizingFunction(length 2), max: MaxTrackSizingFunction(length 2) })]
 grid-cols-[3_0_50%] layout.grid_template_columns=[Single(MinMax { min: MinTrackSizingFunction(length 3), max: MaxTrackSizingFunction(length 3) }), Single(MinMax { min: MinTrackSizingFunction(length 0), max: MaxTrackSizingFunction(length 0) }), Single(MinMax { min: MinTrackSizingFunction(percent 0.5), max: MaxTrackSizingFunction(percent 0.5) })]
 grid-cols-[50%] layout.grid_template_columns=[Single(MinMax { min: MinTrackSizingFunction(percent 0.5), max: MaxTrackSizingFunction(percent 0.5) })]
+grid-cols-[length:13px] layout.grid_template_columns=[Single(MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) })]
 grid-cols-[repeat(3,1fr)] layout.grid_template_columns=[Repeat(GridTemplateRepetition { count: Count(3), tracks: [MinMax { min: MinTrackSizingFunction(auto), max: MaxTrackSizingFunction(fr 1) }], line_names: [] })]
 grid-cols-none -
 grid-flow-col layout.grid_auto_flow=Column
@@ -4083,6 +4075,7 @@ grid-rows-[13px] layout.grid_template_rows=[Single(MinMax { min: MinTrackSizingF
 grid-rows-[2] layout.grid_template_rows=[Single(MinMax { min: MinTrackSizingFunction(length 2), max: MaxTrackSizingFunction(length 2) })]
 grid-rows-[3_0_50%] layout.grid_template_rows=[Single(MinMax { min: MinTrackSizingFunction(length 3), max: MaxTrackSizingFunction(length 3) }), Single(MinMax { min: MinTrackSizingFunction(length 0), max: MaxTrackSizingFunction(length 0) }), Single(MinMax { min: MinTrackSizingFunction(percent 0.5), max: MaxTrackSizingFunction(percent 0.5) })]
 grid-rows-[50%] layout.grid_template_rows=[Single(MinMax { min: MinTrackSizingFunction(percent 0.5), max: MaxTrackSizingFunction(percent 0.5) })]
+grid-rows-[length:13px] layout.grid_template_rows=[Single(MinMax { min: MinTrackSizingFunction(length 13), max: MaxTrackSizingFunction(length 13) })]
 grid-rows-[repeat(3,1fr)] layout.grid_template_rows=[Repeat(GridTemplateRepetition { count: Count(3), tracks: [MinMax { min: MinTrackSizingFunction(auto), max: MaxTrackSizingFunction(fr 1) }], line_names: [] })]
 grid-rows-none -
 group - | groups: [""]
@@ -4766,11 +4759,11 @@ justify-center layout.justify_content.keyword=Center
 justify-end layout.justify_content.keyword=FlexEnd
 justify-evenly layout.justify_content.keyword=SpaceEvenly
 justify-items-center layout.justify_items.keyword=Center
-justify-items-end layout.justify_items.keyword=FlexEnd
-justify-items-normal layout.justify_items.keyword=Stretch
-justify-items-start layout.justify_items.keyword=FlexStart
+justify-items-end layout.justify_items.keyword=End
+justify-items-normal -
+justify-items-start layout.justify_items.keyword=Start
 justify-items-stretch layout.justify_items.keyword=Stretch
-justify-normal layout.justify_content.keyword=FlexStart
+justify-normal -
 justify-self-auto -
 justify-self-center layout.justify_self=Some(AlignItems { keyword: Center, safety: Default })
 justify-self-end layout.justify_self=Some(AlignItems { keyword: FlexEnd, safety: Default })
@@ -6769,17 +6762,17 @@ pl-full layout.padding.left=LengthPercentage(percent 1)
 pl-px layout.padding.left=LengthPercentage(length 1)
 place-content-between layout.align_content.keyword=SpaceBetween layout.justify_content.keyword=SpaceBetween
 place-content-center layout.align_content.keyword=Center layout.justify_content.keyword=Center
-place-content-end layout.align_content.keyword=FlexEnd layout.justify_content.keyword=FlexEnd
-place-content-start layout.justify_content.keyword=FlexStart
+place-content-end layout.align_content.keyword=End layout.justify_content.keyword=End
+place-content-start layout.align_content.keyword=Start layout.justify_content.keyword=Start
 place-content-stretch layout.align_content.keyword=Stretch layout.justify_content.keyword=Stretch
 place-items-center layout.align_items.keyword=Center layout.justify_items.keyword=Center
-place-items-end layout.align_items.keyword=FlexEnd layout.justify_items.keyword=FlexEnd
-place-items-start layout.align_items.keyword=FlexStart layout.justify_items.keyword=FlexStart
+place-items-end layout.align_items.keyword=End layout.justify_items.keyword=End
+place-items-start layout.align_items.keyword=Start layout.justify_items.keyword=Start
 place-items-stretch layout.align_items.keyword=Stretch layout.justify_items.keyword=Stretch
 place-self-auto -
 place-self-center layout.align_self=Some(AlignItems { keyword: Center, safety: Default }) layout.justify_self=Some(AlignItems { keyword: Center, safety: Default })
-place-self-end layout.align_self=Some(AlignItems { keyword: FlexEnd, safety: Default }) layout.justify_self=Some(AlignItems { keyword: FlexEnd, safety: Default })
-place-self-start layout.align_self=Some(AlignItems { keyword: FlexStart, safety: Default }) layout.justify_self=Some(AlignItems { keyword: FlexStart, safety: Default })
+place-self-end layout.align_self=Some(AlignItems { keyword: End, safety: Default }) layout.justify_self=Some(AlignItems { keyword: End, safety: Default })
+place-self-start layout.align_self=Some(AlignItems { keyword: Start, safety: Default }) layout.justify_self=Some(AlignItems { keyword: Start, safety: Default })
 place-self-stretch layout.align_self=Some(AlignItems { keyword: Stretch, safety: Default }) layout.justify_self=Some(AlignItems { keyword: Stretch, safety: Default })
 placeholder:bg-accent -
 placeholder:p-4 -
@@ -8011,7 +8004,7 @@ row-[45deg] -
 row-[50%] -
 row-[color:#abcdef] -
 row-[length:13px] -
-row-[number:2] -
+row-[number:2] layout.grid_row.start=Line(GridLine(2))
 row-[repeat(3,1fr)] -
 row-[rgb(1_2_3)] -
 row-accent -
@@ -8071,6 +8064,7 @@ row-end-90 layout.grid_row.end=Line(GridLine(90))
 row-end-95 layout.grid_row.end=Line(GridLine(95))
 row-end-96 layout.grid_row.end=Line(GridLine(96))
 row-end-[2] layout.grid_row.end=Line(GridLine(2))
+row-end-[number:2] layout.grid_row.end=Line(GridLine(2))
 row-end-auto -
 row-span-1 layout.grid_row.end=Span(1) layout.grid_row.start=Span(1)
 row-span-10 layout.grid_row.end=Span(10) layout.grid_row.start=Span(10)
@@ -8126,6 +8120,7 @@ row-span-90 layout.grid_row.end=Span(90) layout.grid_row.start=Span(90)
 row-span-95 layout.grid_row.end=Span(95) layout.grid_row.start=Span(95)
 row-span-96 layout.grid_row.end=Span(96) layout.grid_row.start=Span(96)
 row-span-[2] layout.grid_row.end=Span(2) layout.grid_row.start=Span(2)
+row-span-[number:2] layout.grid_row.end=Span(2) layout.grid_row.start=Span(2)
 row-span-full layout.grid_row.end=Line(GridLine(-1)) layout.grid_row.start=Line(GridLine(1))
 row-start-0 -
 row-start-1 layout.grid_row.start=Line(GridLine(1))
@@ -8182,6 +8177,7 @@ row-start-90 layout.grid_row.start=Line(GridLine(90))
 row-start-95 layout.grid_row.start=Line(GridLine(95))
 row-start-96 layout.grid_row.start=Line(GridLine(96))
 row-start-[2] layout.grid_row.start=Line(GridLine(2))
+row-start-[number:2] layout.grid_row.start=Line(GridLine(2))
 row-start-auto -
 rtl:bg-accent - | rtl: view.background_color=Color(#f5f5f5ff)
 rtl:p-4 - | rtl: layout.padding.bottom=LengthPercentage(length 16) layout.padding.left=LengthPercentage(length 16) layout.padding.right=LengthPercentage(length 16) layout.padding.top=LengthPercentage(length 16)

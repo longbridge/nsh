@@ -1,5 +1,11 @@
 # Styles, classes and effects
 
+- **CSS and Tailwind as in a browser**: CSS values (colors, lengths, gradients, filters, shadows, transforms,
+  alignment keywords, ...) and Tailwind utilities and variants mean exactly what they mean in a browser and in Tailwind
+  CSS (v4), whose generated CSS is the reference for each utility (the tests compare against it). What NSH cannot
+  support is unsupported (an unknown class, a rejected value with a warning), never given a different meaning. Inline
+  style objects keep React Native's defaults for unset keys (a column, `flexShrink: 0`, `alignContent: flex-start`
+  outside grids).
 - **Tailwind** (`class` / `classList` on every element): JS only passes the strings; the core resolves them (how, and
   what is cached: `crates/nsh-core/src/tailwind/mod.rs`, `core/classes.rs`). The inline `style` always wins over classes; a key set to `undefined` sets nothing, so the class value (or the default) stays, while `null` sets the default.
   Later utilities win over earlier ones (components append a `class` prop, no `tailwind-merge`); variant rules apply
@@ -59,10 +65,14 @@
   number or name, `span name`), `justifyItems/Self`; CSS's logical `start` / `end` / `self-start` / `self-end` (taffy's,
   right to left aware) besides `flex-start` / `flex-end`; an unset `alignContent` / `justifyContent` is taffy's `normal`,
   which `style::resolve_normal_alignment` makes `flex-start` outside grids when a style reaches the tree, so grids
-  stretch their `auto` tracks as CSS does while flex keeps React Native's default (Tailwind's classes resolve as
-  `api/tailwind.txt` records them: `content-start` / `content-normal` / `place-content-start` leave `alignContent`
-  unset, `justify-normal` is `flex-start`, `justify-items-*` / `justify-self-*` `start` / `end` are `flex-start` /
-  `flex-end`, an invalid arbitrary `col-[…]` / `row-[…]` / `auto-cols-[…]` / `auto-rows-[…]` sets nothing); text
+  stretch their `auto` tracks as CSS does while flex keeps React Native's default (the alignment and grid classes set
+  exactly what Tailwind CSS generates for them: `content-start` is `flex-start`, `place-content-start` /
+  `place-items-*` / `place-self-*` `start` / `end`, `justify-items-*` `start` / `end` / `normal`, `justify-normal`
+  `normal`, `justify-self-*` / `items-*` / `self-*` `flex-start` / `flex-end`; `content-normal` sets `stretch`, which
+  is what CSS's `normal` does in flex and grid containers, since the style's `normal` is the unset value; a type hint
+  is dropped from an arbitrary value (`col-[number:2]` is line 2), classes Tailwind has no negative of
+  (`-grid-cols-*`, `-col-span-*`, `-auto-cols-*`) are unknown, and an invalid arbitrary `col-[…]` / `row-[…]` /
+  `auto-cols-[…]` / `auto-rows-[…]` sets nothing, as a browser drops the declaration); text
   `textDecorationStyle` (`double` / `dotted` / `dashed` / `wavy`), `textDecorationThickness`, `textUnderlineOffset`, `em`
   letter spacing and unitless line heights (multiples). Translations by a fraction of the size (`translate-x-1/2`) are resolved by
   the core against the frame and sent again when the size changes.

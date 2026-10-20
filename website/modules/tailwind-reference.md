@@ -8,7 +8,7 @@ order: 17
 
 Every element takes Tailwind CSS classes in its `class` prop (and conditional ones in `classList`). NSH resolves them in Rust against Tailwind 4's default theme: JS passes only the string, each distinct string is parsed once and cached, and variants such as `dark:` or `active:` are re-evaluated natively when the appearance, window size or press state changes, without running any JS.
 
-This page lists what is supported. For an introduction see [Tailwind](../docs/tailwind.md); for the style keys the utilities set, see the [Style reference](./style-reference.md).
+Each utility sets exactly what Tailwind CSS 4 generates for it, with the same meaning as in a browser. This page lists what is supported. For an introduction see [Tailwind](../docs/tailwind.md); for the style keys the utilities set, see the [Style reference](./style-reference.md).
 
 ```tsx
 <View class="flex-row items-center gap-3 rounded-2xl bg-white p-4 shadow-md active:scale-[0.98] transition dark:bg-zinc-800">

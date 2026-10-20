@@ -10,6 +10,8 @@ demo: guide-styling
 
 每个元素都接受 `style` 属性：一个由 camelCase 属性组成的对象，包括盒阴影、渐变、滤镜、轮廓线、过渡和 grid 等 CSS 能力。样式在 Rust 中解析，只有变化了的属性才会发送给原生视图。你也可以用 [Tailwind 类名](./tailwind.md)设置样式，两者最终得到的是相同的原生样式。
 
+CSS 值（颜色、长度、渐变、滤镜、阴影、变换、对齐关键字）的含义与浏览器中完全相同，每个 Tailwind 工具类和变体设置的值也与 Tailwind CSS 4 生成的完全相同，因此你在 Web 上的经验可以直接沿用。`style` 对象中未写出的属性取下文列出的默认值。
+
 ```tsx
 <View
   style={{

@@ -10,3 +10,35 @@
 #   <file>: <Name> -- <reason>             a declaration of types/
 #   <file>: <Name>.<member> -- <reason>    one of its members
 #   tailwind <class> -- <reason>           one Tailwind class of tailwind.txt (exactly that class)
+#
+# The `tailwind` entries below are the one exception, made before the
+# first compatible release: the alignment and grid utilities, aligned
+# with what Tailwind CSS generates (rule 7).
+tailwind -auto-cols-[13px] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -auto-rows-[13px] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -col-span-1 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -col-span-4 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -grid-cols-1 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -grid-cols-4 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -grid-cols-[13px] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -grid-rows-1 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -grid-rows-4 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -grid-rows-[13px] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -row-span-1 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind -row-span-4 -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind auto-cols-[length:13px] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind auto-rows-[length:13px] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind col-[number:2] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind content-normal -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind content-start -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind justify-items-end -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind justify-items-normal -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind justify-items-start -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind justify-normal -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind place-content-end -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind place-content-start -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind place-items-end -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind place-items-start -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind place-self-end -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind place-self-start -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
+tailwind row-[number:2] -- aligned with Tailwind CSS by the maintainer's decision before the first compatible release (v0.1.2); see #181
