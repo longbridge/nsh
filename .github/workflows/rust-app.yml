@@ -82,7 +82,7 @@ jobs:
       - name: Check the native dependency graph
         run: |
           cargo tree -p gallery-native --locked -e normal > "$RUNNER_TEMP/rust-app-dependencies.txt"
-          if grep -E 'nsh-js |rquickjs' "$RUNNER_TEMP/rust-app-dependencies.txt"; then
+          if grep -E 'nsh-js |rquickjs|quickjs-jit' "$RUNNER_TEMP/rust-app-dependencies.txt"; then
             echo "The Rust executable unexpectedly links a JS runtime"
             exit 1
           fi
@@ -138,7 +138,7 @@ jobs:
             cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
               -p "nsh-app-gallery-native-$member" -e normal --target all \
               > "$RUNNER_TEMP/$member-dependencies.txt"
-            if grep -E '(rquickjs|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "$RUNNER_TEMP/$member-dependencies.txt"; then
+            if grep -E '(rquickjs|quickjs-jit|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "$RUNNER_TEMP/$member-dependencies.txt"; then
               echo "The Rust app's $member program unexpectedly links a JS engine or the bundler"
               exit 1
             fi
