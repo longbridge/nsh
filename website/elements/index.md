@@ -92,8 +92,8 @@ with no JS round trip (below).
 ### State styles
 
 Styles that apply while the view is in a state, over its own `style` and classes, natively. Each is the object form of
-a Tailwind variant. Later states win (hover, focus, active); `disabledStyle` wins over all, and the others do not apply
-while the view is disabled.
+a Tailwind variant. Later states win (checked, then hover, focus, active); `disabledStyle` wins over all, and the others
+do not apply while the view is disabled.
 
 | Prop | Type | Class variant | Applies |
 |---|---|---|---|
@@ -101,6 +101,7 @@ while the view is disabled.
 | `hoverStyle` | `StyleProp<ViewStyle>` | `hover:` | While a pointer is over the view. |
 | `focusStyle` | `StyleProp<ViewStyle>` | `focus:` | While the view has focus. |
 | `disabledStyle` | `StyleProp<ViewStyle>` | `disabled:` | While `disabled`. |
+| `checkedStyle` | `StyleProp<ViewStyle>` | `checked:` | While `accessibilityState.checked` is `true` (a checkbox, a switch, a radio; `"mixed"` is not checked). |
 
 ```tsx
 <View onPress={save} activeStyle={{ opacity: 0.6 }} hoverStyle={{ backgroundColor: "#1d4ed8" }} class="rounded-lg bg-blue-600 px-4 py-2">

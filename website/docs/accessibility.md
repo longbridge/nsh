@@ -36,7 +36,7 @@ NSH renders with native views, so the platforms' assistive technologies (VoiceOv
 | `accessibilityLabel` | `string` | What screen readers read, instead of the texts inside. |
 | `accessibilityHint` | `string` | What activating the element does, read after a pause. |
 | `role` | `AccessibilityRole` | What the element is. |
-| `accessibilityState` | `AccessibilityState` | Its state: disabled, selected, checked, busy, expanded. `selected` also applies `selected:` classes. |
+| `accessibilityState` | `AccessibilityState` | Its state: disabled, selected, checked, busy, expanded. `selected` also applies `selected:` classes, `checked` (when `true`) `checked:` classes and `checkedStyle`. |
 | `accessibilityValue` | `{ min?, max?, now?, text? }` | The value of a range or textual element. |
 | `accessibilityActions` | `{ name, label? }[]` | Actions offered to assistive technologies. |
 | `onAccessibilityAction` | `(e: { actionName }) => void` | An action was performed. |

@@ -83,7 +83,7 @@ mount(App);
 
 ### 状态样式
 
-视图处于某种状态时，在其自身的 `style` 和类之上、由原生侧应用的样式。每一个都是某个 Tailwind 变体的对象形式。后面的状态优先（hover、focus、active）；`disabledStyle` 优先于所有状态，视图被禁用时其他状态样式不生效。
+视图处于某种状态时，在其自身的 `style` 和类之上、由原生侧应用的样式。每一个都是某个 Tailwind 变体的对象形式。后面的状态优先（checked，然后是 hover、focus、active）；`disabledStyle` 优先于所有状态，视图被禁用时其他状态样式不生效。
 
 | 属性 | 类型 | 类变体 | 生效时机 |
 |---|---|---|---|
@@ -91,6 +91,7 @@ mount(App);
 | `hoverStyle` | `StyleProp<ViewStyle>` | `hover:` | 指针悬停在视图上时。 |
 | `focusStyle` | `StyleProp<ViewStyle>` | `focus:` | 视图获得焦点时。 |
 | `disabledStyle` | `StyleProp<ViewStyle>` | `disabled:` | `disabled` 时。 |
+| `checkedStyle` | `StyleProp<ViewStyle>` | `checked:` | `accessibilityState.checked` 为 `true` 时（复选框、开关、单选框；`"mixed"` 不算勾选）。 |
 
 ```tsx
 <View onPress={save} activeStyle={{ opacity: 0.6 }} hoverStyle={{ backgroundColor: "#1d4ed8" }} class="rounded-lg bg-blue-600 px-4 py-2">

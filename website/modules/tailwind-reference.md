@@ -429,7 +429,7 @@ States are tracked by the platform only for elements whose classes use them, and
 | `selected:` | the element is selected: a `Button`'s `selected`, or `accessibilityState.selected` |
 | `checked:` | the element is checked: `accessibilityState.checked` is `true` (`"mixed"` is not checked) |
 
-The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle` and `disabledStyle` props of every element (and a `Button`'s `selectedStyle`, a control's `checkedStyle`); they go over the element's style and classes.
+The same states as style objects are the `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle` and `checkedStyle` props of every element (and a `Button`'s `selectedStyle`); they go over the element's style and classes.
 
 `disabled` works on any element: it applies `disabled:` and removes the element's press handlers, so it shows no press feedback either.
 

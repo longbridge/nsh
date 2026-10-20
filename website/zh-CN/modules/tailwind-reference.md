@@ -429,7 +429,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `selected:` | 元素处于选中状态：`Button` 的 `selected`，或 `accessibilityState.selected` |
 | `checked:` | 元素处于勾选状态：`accessibilityState.checked` 为 `true`（`"mixed"` 不算） |
 
-这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle` 和 `disabledStyle` 属性（以及 `Button` 的 `selectedStyle`、控件的 `checkedStyle`）；它们叠加在元素的样式和类之上。
+这些状态写成样式对象，就是每个元素都有的 `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle` 和 `checkedStyle` 属性（以及 `Button` 的 `selectedStyle`）；它们叠加在元素的样式和类之上。
 
 `disabled` 适用于任何元素：它会让 `disabled:` 生效，并移除元素的按压处理器，因此也不会显示按压反馈。
 

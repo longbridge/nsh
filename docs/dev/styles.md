@@ -13,7 +13,7 @@
   `selected`) / `checked:` (`accessibilityState.checked`, not mixed), `group-*:` (named groups `group/name`), `first:` / `last:` /
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only: the `placeholderColor` / `selectionColor`
   style keys), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
-  `focusStyle`, `disabledStyle`, a `Button`'s `selectedStyle`, `checkedStyle`), resolved the same way: later states
+  `focusStyle`, `disabledStyle`, `checkedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states
   win, `disabled` over all. `selected` and `checked` are value states the core sets from the accessibility state
   (never reported by the platform), below the interaction states: `checked`, then `selected`, then `hover`, `focus`,
   `active` (gpui-base's order of value states). `disabled` (any element) applies `disabled:` and drops
