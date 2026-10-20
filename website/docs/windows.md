@@ -105,6 +105,10 @@ tells it where `asset:/` URIs resolve (`AssetBase::Directory` or `AssetBase::Htt
 load with `unsafe { Bundle::bytecode(bytes) }` (or `Bundle::read_trusted(path)`, unsafe too): QuickJS bytecode is trusted input, so
 only load it from your own app's files. A standalone window is `nsh_platform_windows::run_app(source, options)`.
 
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-windows-rust).
 

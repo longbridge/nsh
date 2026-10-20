@@ -98,6 +98,8 @@ fn embed(parent: HWND) -> windows::core::Result<Rc<AppView>> {
 字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }`（或同样是 unsafe 的 `Bundle::read_trusted(path)`）加载：
 QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加载。独立窗口用 `nsh_platform_windows::run_app(source, options)`。
 
+`AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
+
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-windows-上注册rust)。
 
 ## Windows 上的差异

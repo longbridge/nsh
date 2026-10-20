@@ -127,7 +127,7 @@ const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh:
 
 ## 在嵌入它的应用中
 
-嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 的 `set_locale` 和 `set_font_scale`（Swift 中为 `locale` 和 `fontScale`，Java 中为 `setLocale` 和 `setFontScale`；见 [iOS](./embedding-ios.md)、[Android](./embedding-android.md)）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
+嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./embedding-ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./embedding-android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
 
 ## 安全区域
 
