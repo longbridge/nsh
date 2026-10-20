@@ -425,7 +425,7 @@ impl ModuleTable {
 
     /// The names module `name` exports, if it is one: what the loader
     /// declares (the values are made when it is evaluated, [`init`]).
-    fn export_names(&self, name: &str) -> Option<Vec<String>> {
+    pub(crate) fn export_names(&self, name: &str) -> Option<Vec<String>> {
         let own = self.exports(name);
         let mut found = own.is_some();
         let mut names: Vec<String> = own.into_iter().flatten().map(|(name, _)| name).collect();
