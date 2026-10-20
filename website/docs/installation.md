@@ -93,6 +93,17 @@ nsh --version
 
 The distribution is made with `cargo xtask dist` in a checkout (below). The `nsh` binary it contains is built for that machine. On a Mac with Xcode it includes the iOS and macOS runtimes (Apple Silicon); on Linux it includes the Linux runtime instead, built for that machine; on Windows the Windows runtime, with `bin\nsh.exe`. Each also includes the [GPUI](./gpui.md) development host, built for that machine. All include the Android runtime (on Windows only when the Android SDK is found).
 
+## Installing the latest source
+
+On macOS and Linux, install the latest `main` with Git, Rust and the platform build dependencies below:
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+The installer keeps the checkout in `~/.nsh/source`, builds the release CLI and links it into `~/.local/bin`. Re-run the command to update; local source changes must be saved first. The retained checkout lets NSH build native runtimes on demand. Cargo uses its existing configuration and target directory. `NSH_INSTALL_DIR` changes the installation prefix; `NSH_VERSION` selects prebuilt releases only. Both `-V` and `--version` show the version and seven-character source revision.
+
 ## Building from a checkout
 
 You need Rust through [rustup](https://rustup.rs). The repository's `rust-toolchain.toml` selects the stable toolchain and installs the iOS and Android targets on first use.

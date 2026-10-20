@@ -63,7 +63,7 @@ pub(crate) fn set_app_sets(app: Vec<SetDescription>) {
 }
 
 #[derive(Parser)]
-#[command(name = "nsh", version, about = "Build and run nsh apps")]
+#[command(name = "nsh", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("NSH_GIT_SHA"), ")"), about = "Build and run nsh apps")]
 struct Cli {
     /// Show everything: log lines with their targets, cargo's output and
     /// the hosts' own.
@@ -727,6 +727,24 @@ mod command_tests {
     use clap::Parser as _;
 
     use super::{Cli, Command, run::Target};
+
+    #[test]
+    fn version_includes_the_source_revision() {
+        for flag in ["-V", "--version"] {
+            let error = Cli::try_parse_from(["nsh", flag])
+                .err()
+                .expect("version exits");
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "nsh {} ({})\n",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("NSH_GIT_SHA")
+                )
+            );
+        }
+    }
 
     #[test]
     fn generated_outputs_default_to_the_project_cache() {

@@ -94,6 +94,17 @@ nsh --version
 发行包由源码仓库中的 `cargo xtask dist` 生成（见下文）。其中的 `nsh` 可执行文件是为该机器构建的。在装有 Xcode 的 Mac 上，它包含 iOS 和 macOS 运行时（Apple Silicon）；在 Linux 上，它改为包含为该机器构建的 Linux 运行时；在 Windows 上则包含 Windows 运行时，CLI 为 `bin\nsh.exe`。每个发行包还包含为该机器构建的 [GPUI](./gpui.md) 开发宿主。它们都包含
 Android 运行时（在 Windows 上，只有找到 Android SDK 时才包含）。
 
+## 安装最新源码版
+
+在 macOS 和 Linux 上，准备好 Git、Rust 和下文的平台构建依赖后，可以安装最新 `main`：
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
+nsh -V # nsh 0.1.1 (abcdef0)
+```
+
+安装器保留 `~/.nsh/source` 中的源码，构建 release CLI，并链接到 `~/.local/bin`。再次运行即可更新；更新前需要保存本地源码改动。NSH 使用保留的源码按需构建原生运行时。Cargo 使用已有配置和 target 目录。`NSH_INSTALL_DIR` 修改安装目录；`NSH_VERSION` 仅用于选择预构建发行版。`-V` 和 `--version` 都显示版本号和七位源码提交 SHA。
+
 ## 从源码构建
 
 你需要通过 [rustup](https://rustup.rs) 安装 Rust。仓库中的 `rust-toolchain.toml` 会选择 stable 工具链，并在首次使用时安装 iOS 和 Android 目标。

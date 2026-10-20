@@ -534,6 +534,9 @@ both workspaces' `[workspace.dependencies]` (the run fails otherwise). Crates al
 skipped, so a run stopped by crates.io's rate limit on new crates can simply be run again; running it by hand with
 *dry run* packages and verifies without uploading.
 
+The CLI build script stamps `-V` / `--version` with seven characters of Git HEAD
+(or Cargo's packaged VCS metadata); crate dependency versions stay unchanged.
+
 How users get it (`website/docs/installation.md`):
 
 - `website/public/install.sh` and `install.ps1` (served at `nsh.dev/install.sh`, `/install.ps1`, and
@@ -541,6 +544,9 @@ How users get it (`website/docs/installation.md`):
   `~/.nsh` (`%LOCALAPPDATA%\nsh` on Windows) with it; `~/.local/bin/nsh` links to it, Windows adds `bin` to the
   user's `PATH`. The CLI resolves its own symlink (`runtime::cli_exe`) to find `bin/../runtime`: macOS reports
   `current_exe` as it was run.
+- `install.sh --source` clones the latest `main` into `~/.nsh/source`, builds the release CLI with
+  Cargo's existing configuration and links to that executable. Re-running fetches `main`; dirty checkouts
+  are preserved and rejected. The checkout stays available for on-demand native runtime builds.
 - Homebrew: publishing a stable release runs `.github/workflows/packages.yml`, which fills in
   `.github/packages/nsh.rb` with the archives' checksums and pushes it to `longbridge/homebrew-tap` as
   `Formula/nsh.rb`. It validates the tag and checksum sidecars, downloads and verifies both archives, then installs
