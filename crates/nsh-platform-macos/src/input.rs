@@ -527,6 +527,10 @@ fn cursor_at(hit: &Hit) -> Cursor {
             let s = v.state();
             cursor_of(s.style.cursor, has_press(s.events))
                 .or_else(|| crate::text::selectable(&s).then_some(Cursor::Text))
+                .or_else(|| {
+                    (v == &hit.view && crate::selection_area::is_area_text(v, &s))
+                        .then_some(Cursor::Text)
+                })
         })
         .unwrap_or(Cursor::Default)
 }
@@ -1059,7 +1063,7 @@ fn chain(view: &NshView) -> Vec<NshView> {
 }
 
 /// A point in root coordinates in `view`'s.
-fn local(_surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32, f32) {
+pub(crate) fn local(_surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32, f32) {
     let views = chain(view);
     let mut p = (x, y);
     // From the outermost (the root) inwards.
@@ -1116,10 +1120,12 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
         finish(surface, stale, true);
     }
     let hit = pick(&surface.root, x, y);
-    let selecting = hit
-        .as_ref()
-        .filter(|h| !h.native && crate::text::selectable(&h.view.state()))
-        .map(|h| h.view.clone());
+    // A selection area around the view selects across its texts; else a
+    // selectable text selects alone.
+    let selecting = hit.as_ref().filter(|h| !h.native).and_then(|h| {
+        crate::selection_area::target(&h.view)
+            .or_else(|| crate::text::selectable(&h.view.state()).then(|| h.view.clone()))
+    });
     let Some(hit) = hit else {
         crate::text::selection_down(surface, None, 0.0, 0.0, clicks, shift, false);
         return;
@@ -1212,6 +1218,9 @@ fn down(surface: &Rc<Surface>, x: f32, y: f32, time: f64, clicks: usize, shift: 
         find_press(surface, &hit.view, &views, x, y)
     };
     match &selecting {
+        Some(area) if crate::selection_area::is_area(area) => {
+            crate::selection_area::down(surface, area, x, y, clicks, shift, press.is_some());
+        }
         Some(view) => {
             let (lx, ly) = local(surface, view, x, y);
             crate::text::selection_down(
@@ -1288,8 +1297,13 @@ fn motion(surface: &Rc<Surface>, x: f32, y: f32, time: f64) {
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     if let Mode::Select(view) = &p.mode {
         let view = view.clone();
-        let (lx, ly) = local(surface, &view, x, y);
-        if crate::text::selection_drag(&view, tx, ty, lx, ly) {
+        let selects = if crate::selection_area::is_area(&view) {
+            crate::selection_area::drag(surface, &view, tx, ty, x, y)
+        } else {
+            let (lx, ly) = local(surface, &view, x, y);
+            crate::text::selection_drag(&view, tx, ty, lx, ly)
+        };
+        if selects {
             // The drag selects: no press, as text editors do.
             cancel_press(surface, &mut p);
             release_pressed(surface, &mut p);
@@ -1396,7 +1410,7 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         Mode::Thumb(view, _) => crate::scroll::thumb_end(surface, &view),
         Mode::Idle | Mode::Free | Mode::Select(_) => {
             if let Mode::Select(view) = &mode
-                && crate::text::selection_up(view)
+                && selection_up(surface, view)
             {
                 // A selecting drag ended: no press.
                 cancel_press(surface, &mut p);
@@ -1410,6 +1424,16 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
                 }
             }
         }
+    }
+}
+
+/// The button pressed on selecting `view` (an area's or a text's) went
+/// up. True if it ended a selecting drag.
+fn selection_up(surface: &Surface, view: &NshView) -> bool {
+    if crate::selection_area::is_area(view) {
+        crate::selection_area::up(surface)
+    } else {
+        crate::text::selection_up(view)
     }
 }
 
