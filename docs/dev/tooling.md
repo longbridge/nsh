@@ -115,8 +115,10 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   (`DevServer::set_limits`, the bundle message's `limits`, `HostLimits`' syntax; the hosts read it with
   `Limits::development` and start the app with it, and an invalid one is shown over the app). `sandbox.md`.
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
-  `/nsh.wasm`) when a web runtime exists; browsers connect to `/ws` on the same port. `nsh run --target web` builds the
-  runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's web target").
+  `/nsh.wasm`, `/nsh.version`, and for a runtime whose crates call JS through wasm-bindgen its glue, `/nsh-bindgen.js`,
+  with the snippets it imports, `/snippets/…`) when a web runtime exists; browsers connect to `/ws` on the same port.
+  `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
+  web target" and "Crates that call JS through wasm-bindgen").
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the
   sources would start the next build, forever.
 - `nsh dev` and `nsh run` default to the host that runs on this machine: `--target macos` on macOS, `--target linux` (the GTK

@@ -40,6 +40,8 @@
   // A Rust app (`nsh.json` "root"): the runtime mounts its root; there are
   // no bundles. A change to its Rust code makes another runtime (above).
   const RUST = {{rust}};
+  // The runtime's wasm-bindgen glue (an app's crates that call JS through it).
+  const GLUE = {{glue}};
   const status = document.getElementById("status");
   const problem = document.getElementById("problem");
   const decoder = new TextDecoder();
@@ -88,6 +90,7 @@
 
   const player = await createPlayer(document.getElementById("app"), {
     wasm: "./nsh.wasm",
+    glue: GLUE ?? undefined,
     assetBase: "/assets/",
     readAsset,
     onLog: (level, message) => send({ type: "log", level: levels[level] ?? "info", target: "js", message }),

@@ -290,4 +290,5 @@ nsh revoke --root <ROOT.secret> [--extend <LIST>] [--sequence <N>] [--key <ID>].
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | keystore 密码。 |
 | `NSH_RUNTIME` | `run`、`package` | 用来替代 CLI 旁边运行时的运行时目录。 |
 | `NSH_VERBOSE` | 所有命令 | `1`：等同于 `--verbose`。 |
+| `NSH_WASM_BINDGEN` | `run`、`package`（`--target web`） | 应用的 crate [调用浏览器 API](./web.md#在-rust-中使用浏览器-api) 时使用的 `wasm-bindgen` CLI。默认使用 `PATH` 中的。 |
 | `NO_COLOR` | 所有命令 | 设置后，终端输出不带颜色。 |

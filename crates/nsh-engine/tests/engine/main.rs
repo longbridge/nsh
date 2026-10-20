@@ -20,6 +20,7 @@ mod component_bench;
 mod components;
 mod counter;
 mod errors;
+mod external_wake;
 mod fetch;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fs;

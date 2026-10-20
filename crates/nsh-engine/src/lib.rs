@@ -1095,6 +1095,11 @@ pub struct LocalEngine<M: TextEngine + 'static> {
     driver: Driver<M>,
     rx: Receiver<Message>,
     control: EngineControl,
+    /// The host's wake ([`LocalEngine::set_wake`]).
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Set while [`LocalEngine::pump`] runs: what it wakes it runs itself,
+    /// so the host's wake is not called for it.
+    pumping: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<M: TextEngine + 'static> LocalEngine<M> {
@@ -1110,6 +1115,8 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             driver,
             rx,
             control,
+            wake: None,
+            pumping: Arc::default(),
         })
     }
 
@@ -1118,11 +1125,38 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         self.control.clone()
     }
 
+    /// Calls `wake` when there is work outside a [`pump`](Self::pump): a
+    /// component task is woken or Rust posts a JS call while no pump runs
+    /// (a callback of the host's completing what a task waits for, such as
+    /// a WebSocket message through wasm-bindgen), once per wake-up, or a
+    /// pump ends with work its bound left. The host then calls `pump` soon,
+    /// instead of only at the deadline it returned or at the next input.
+    /// What a pump wakes itself (a task waking another, a reply it hands
+    /// over) it runs without calling `wake`.
+    pub fn set_wake(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        let tx = self.control.tx.clone();
+        let pumping = self.pumping.clone();
+        let host = wake.clone();
+        let notify: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            let _ = tx.send(Message::Wake);
+            // After the send: a pump that is ending sees the message
+            // (`pump` clears the flag, then looks at the queue).
+            if !pumping.load(std::sync::atomic::Ordering::SeqCst) {
+                host();
+            }
+        });
+        self.driver.state.core.set_task_notify(notify.clone());
+        self.driver.posts.set_notify(notify);
+        self.wake = Some(wake);
+    }
+
     /// Handles the input sent since the last call, runs what is due
     /// (timers, tasks) and commits. Returns when to call again at the
     /// latest (sooner if input arrives); `None`: only for input.
     pub fn pump(&mut self) -> Option<Instant> {
         let _clock = self.driver.clock.enter();
+        self.pumping
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         // Bounded: messages sent while handling (a task waking another)
         // are handled in the same call, a loop that never settles is not.
         for _ in 0..4 {
@@ -1137,6 +1171,15 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
             }
         }
         self.driver.collect_if_idle();
+        self.pumping
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        // What the bound left waits for the next pump: soon, not at the
+        // deadline.
+        if !self.rx.is_empty()
+            && let Some(wake) = &self.wake
+        {
+            wake();
+        }
         self.driver.deadline()
     }
 }
@@ -1151,6 +1194,9 @@ struct Driver<M: TextEngine + 'static> {
     /// once; its views stay as they were and no JS runs any more.
     stopped: bool,
     last_gc: Instant,
+    /// The queue of the JS calls Rust posts: its notify wakes the engine,
+    /// as the core's task notify does ([`LocalEngine::set_wake`]).
+    posts: nsh_core::ui::Posts,
     /// The engine's clock, its thread's ([`Clock::enter`]).
     clock: Clock,
 }
@@ -1284,6 +1330,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             assets: config.assets.clone(),
             stopped: false,
             last_gc: Instant::now(),
+            posts: posts.clone(),
             clock: config.clock.clone(),
         };
         let eval_us = match &config.app {

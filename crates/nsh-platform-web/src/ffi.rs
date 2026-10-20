@@ -23,6 +23,8 @@ unsafe extern "C" {
     fn js_submit(json: *const u8, len: usize);
     #[link_name = "request_frame"]
     fn js_request_frame();
+    #[link_name = "request_pump"]
+    fn js_request_pump();
     #[link_name = "report_error"]
     fn js_report_error(message: *const u8, len: usize);
     #[link_name = "log"]
@@ -131,6 +133,15 @@ pub(crate) fn submit(json: &str) {
 pub(crate) fn request_frame() {
     // SAFETY: no arguments.
     unsafe { js_request_frame() }
+}
+
+/// Asks for an `nsh_pump` soon: the engine has work that came outside a
+/// call into it (a task woken by a browser callback, through wasm-bindgen's
+/// glue) or that a pump left for the next. JS coalesces the requests into
+/// one pump per turn and never calls in while a call runs.
+pub(crate) fn request_pump() {
+    // SAFETY: no arguments.
+    unsafe { js_request_pump() }
 }
 
 /// Shows an app error.

@@ -73,6 +73,7 @@
     const [loaded, code, harden] = await Promise.all([
       createPlayer(document.getElementById("app"), {
         wasm: app.wasm,
+        glue: app.glue,
         assets: app.assets,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
         prepareChunk: (id) => Promise.all((app.chunkFonts[id] ?? []).map(loadFont)),
