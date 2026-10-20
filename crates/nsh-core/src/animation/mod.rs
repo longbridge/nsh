@@ -6,12 +6,16 @@
 //!
 //! It is platform-free: the platform feeds it [`AnimationOp`]s, frame
 //! timestamps, gesture and scroll values, and reads back evaluated values.
+//! [`Animator`] does that for the desktop backends, binding the graph to
+//! their views, gestures and scroll views.
 
+mod animator;
 mod driver;
 mod graph;
 mod ops;
 
 pub use self::{
+    animator::{AnimValues, Animator},
     driver::{MAX_SAMPLES, sample_driver, sample_easing},
     graph::{AnimationValue, Finished, Graph},
     ops::{

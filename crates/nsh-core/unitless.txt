@@ -1,6 +1,12 @@
 # Public API of nsh-core with bare floats that have no unit (geometry::unit_types,
 # docs/dev/geometry.md): one item path per line, then the reason.
 
+animation::animator::AnimValues.opacity                          # an opacity factor
+animation::animator::AnimValues.shadow_opacity                   # an opacity factor
+animation::animator::AnimValues.transform                        # transform operands (any of their kinds' units)
+animation::animator::Animator::pan_values ->                     # a generic animated value (any prop: opacity, a color channel, a length)
+animation::animator::Animator::tick(now)                         # time
+animation::animator::Animator::transform_moved(amount)           # a gesture amount fed to a generic animated value (a pinch scale, a rotation in degrees)
 animation::driver::sample_driver ->                              # generic animated values, sampled
 animation::driver::sample_driver(from)                           # a generic animated value (any prop: opacity, a color channel, a length)
 animation::driver::sample_driver(step)                           # time
@@ -163,6 +169,9 @@ transform::Transform::matrix(value)                              # a transform o
 transform::Transform::push(value)                                # a transform operand (any of its kinds' units)
 transform::TransformKind::identity ->                            # a transform operand (any of its kinds' units)
 transform::TransformOp.value                                     # a transform operand (any of its kinds' units)
+transition::Extra.scale                                          # a scale factor
+transition::Live::opacity ->                                     # an opacity factor
+transition::Live::step(now)                                      # time
 ui::ambient::animated_value(value)                               # an animated value (any quantity)
 ui::ambient::font_scale ->                                       # a font scale factor
 ui::ambient::keyboard_duration ->                                # time

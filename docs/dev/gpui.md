@@ -136,9 +136,9 @@ import -window root -display :170 whole.png        # the display, if the window'
   orders each line's clusters by their bidi levels (`unicode-bidi`). Line heights follow Pango's model, as on Linux
   and Windows. The final layout is plain data (lines, cluster boxes, positioned glyphs); the main thread paints the
   glyphs (`paint_glyph`, `paint_emoji`) and reads colors and decorations from the spans, as the Linux backend does.
-- **Frames**: native animations, JS frame requests, transitions, scroll glides and navigation transitions tick on the
-  window's frames (`Surface::tick`, called while drawing; `window.request_animation_frame()` while something
-  animates), and nothing is drawn otherwise.
+- **Frames**: native animations (`nsh_core::animation::Animator`), JS frame requests, transitions (`transition.rs`
+  over `nsh_core::transition`), scroll glides and navigation transitions tick on the window's frames (`Surface::tick`,
+  called while drawing; `window.request_animation_frame()` while something animates), and nothing is drawn otherwise.
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle

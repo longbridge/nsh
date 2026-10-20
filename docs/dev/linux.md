@@ -56,9 +56,11 @@ works and its runner only needs GTK.
   description, glyph ids and positions; the main thread loads the same fonts by description from GTK's font map and
   draws `gsk::TextNode`s where the engine put them. Hinted metrics and rounded positions are off on both sides, so
   what was measured is what is drawn (`text.rs`).
-- **Animations run on the frame clock**: native animation values (`anim.rs`, the Android animator's design), JS frame
-  requests (the root's tick callback, `surface.rs`), `LayoutAnimation`, style transitions and keyframes
-  (`transition.rs`), scroll glides and navigation transitions; tick callbacks exist only while something animates.
+- **Animations run on the frame clock**: native animation values (`animation.rs` over `nsh_core::animation`, the
+  Android animator's design), JS frame requests (the root's tick callback, `surface.rs`), `LayoutAnimation`, style
+  transitions and keyframes (`transition.rs`; curves, interpolation and timing in `nsh_core::transition`, shared
+  with Windows, GPUI and macOS), scroll glides and navigation transitions; tick callbacks exist only while something
+  animates.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a widget; `run_app` opens one in a window. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets).

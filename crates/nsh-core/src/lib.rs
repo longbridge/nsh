@@ -41,6 +41,7 @@ mod text;
 pub mod text_edit;
 pub mod time;
 mod transform;
+pub mod transition;
 pub mod ui;
 pub mod websocket;
 

@@ -23,32 +23,11 @@ use std::{
 };
 
 use nsh_core::{
-    Bounds, EventMask, MAX_TRANSFORMS, NodeId, Points, TransformKind, ViewKind, ViewProps,
-    ViewStyle,
+    Bounds, EventMask, NodeId, Points, TransformKind, ViewKind, ViewProps, ViewStyle,
+    animation::AnimValues,
 };
 
 use crate::{geom::Mat4, render::DrawCx};
-
-/// Values native animations set on a view; they win over the style's.
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub(crate) struct AnimValues {
-    /// Animated opacity.
-    pub(crate) opacity: Option<f32>,
-    /// Animated background color.
-    pub(crate) background: Option<nsh_core::Color>,
-    /// Animated entries of the transform list (by position).
-    pub(crate) transform: [Option<f32>; MAX_TRANSFORMS],
-    /// Animated border color (every side).
-    pub(crate) border_color: Option<nsh_core::Color>,
-    /// Animated text color (a text view's runs, an input's text).
-    pub(crate) color: Option<nsh_core::Color>,
-    /// Animated shadow color.
-    pub(crate) shadow_color: Option<nsh_core::Color>,
-    /// Animated shadow opacity.
-    pub(crate) shadow_opacity: Option<f32>,
-    /// Animated shadow blur radius.
-    pub(crate) shadow_radius: Option<f32>,
-}
 
 /// Scroll position and extent of a [`ViewKind::Scroll`] view.
 #[derive(Default)]
@@ -227,7 +206,7 @@ impl ViewState {
 
     /// The opacity it is drawn with.
     pub(crate) fn opacity(&self) -> f32 {
-        let live = self.live.as_ref().map_or(1.0, |l| l.opacity);
+        let live = self.live.as_ref().map_or(1.0, |l| l.opacity());
         self.anim.opacity.unwrap_or(self.style.opacity) * self.fade * live
     }
 
@@ -237,7 +216,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.map_or(s.radius, Points);
+        s.radius = a.shadow_radius.unwrap_or(s.radius);
         s
     }
 
@@ -326,7 +305,7 @@ impl ViewState {
             };
         }
         if let Some(extra) = extra {
-            m = extra.apply(m, h);
+            m = crate::transition::apply_extra(extra, m, h);
         }
         Some(m.translate_3d(-ox, -oy, -oz))
     }

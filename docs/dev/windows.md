@@ -79,9 +79,10 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   data (glyph runs recorded through a text renderer of NSH's own), which the main thread only draws and hit-tests
   (`text.rs`).
 - **Frames**: a ticker thread waits for each composition (`DwmFlush`) and posts `WM_NSH_TICK` (one at a time) while
-  something animates: native animation values (`animation.rs`), JS frame requests, transitions and keyframes
-  (`transition.rs`), scroll glides, navigation transitions, video frames (`Surface::on_frame`). The ticker parks when
-  nothing animates. Caret blinking and animated GIF / WebP frames use thread timers instead, so they cost no frames.
+  something animates: native animation values (`animation.rs` over `nsh_core::animation`), JS frame requests,
+  transitions and keyframes (`transition.rs`; curves, interpolation and timing in `nsh_core::transition`), scroll
+  glides, navigation transitions, video frames (`Surface::on_frame`). The ticker parks when nothing animates. Caret
+  blinking and animated GIF / WebP frames use thread timers instead, so they cost no frames.
 - **Devices**: one Direct3D 11 device (hardware, else WARP) and its Direct2D device and context per thread
   (`gfx.rs`); a lost device (driver update, GPU reset) is made again and `gfx::generation` tells caches of device
   resources (bitmaps, command lists) to make theirs again.
