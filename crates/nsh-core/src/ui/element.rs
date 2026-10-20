@@ -1782,8 +1782,12 @@ impl IntoElement for Children {
 /// Another component in a view ([`Component::element`]). Its styles go
 /// after the component's own, like an app's classes, and so do its inline
 /// style, animated values and insets ([`Element`]'s), on the component's
-/// root. It hears and is to assistive technologies what the component says
-/// (its events and props): it is not [`Interactive`] or [`Accessible`].
+/// root; its state styles ([`Self::active`], [`Self::hover`],
+/// [`Self::focus`], [`Self::disabled_style`], [`Styled::selected`],
+/// [`Styled::checked`]) follow the states of that root, as an app's
+/// `active:` / `hover:` classes on a TSX component do. It hears and is to
+/// assistive technologies what the component says (its events and props):
+/// it is not [`Interactive`] or [`Accessible`].
 pub struct ComponentElement<C: Component> {
     node: ElNode,
     _component: PhantomData<fn() -> C>,
@@ -1834,6 +1838,38 @@ impl<C: Component> ComponentElement<C> {
                 log::error!(target: "js", "{} has no `Items` prop to fill", super::component::name_of::<C>())
             }
         }
+        self
+    }
+
+    /// Styles while its root is pressed (Tailwind's `active:`; TS: an
+    /// `active:` class or `activeStyle` given the component), applied
+    /// natively. The root follows presses when it handles them (a
+    /// [`Interactive::on_press`] of the component's view).
+    pub fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::ACTIVE, s);
+        self
+    }
+
+    /// Styles while a pointer hovers its root (`hover:`).
+    pub fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::HOVER, s);
+        self
+    }
+
+    /// Styles while its root has focus (`focus:`).
+    pub fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root is disabled (`disabled:`): the component's
+    /// view disables it ([`Interactive::disabled`], a `disabled` prop).
+    pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::DISABLED, s);
         self
     }
 

@@ -292,7 +292,9 @@ reasons: `reactive-components.md`.
   | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(px(40.0))` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `Feed::element(props).items(virtual_list(n, row).keys(move \|\| ids).header(..))` |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
-  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)` (native, no binding) |
+  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)` (native, no binding) |
+  | `<Button class="bg-blue-500 active:opacity-70 selected:bg-green-500">` (state styles on a component) | `Button::element(props).bg(..).active(\|s\| s.opacity(0.7)).selected(\|s\| s.bg(..))`: `ComponentElement`'s `active` / `hover` / `focus` / `disabled_style` and `Styled`'s `selected` / `checked`, on the component's root |
+  | `<NavPage headerClass="bg-white text-black tint-blue-500">` | `nav_page().header_style_with(\|s\| s.bg(..).text_color(..).tint_color(..))` (theme colors follow the appearance natively; `header_style(Style)`, TS `headerStyle`, wins key by key) |
   | `bg-sky-500` (the palette) | `.bg(palette::SKY.shade(500))` |
 
 - **Platform services** are free functions (`ui/ambient.rs`): `dialog(Dialog)` shows an alert or action sheet and
@@ -340,8 +342,12 @@ reasons: `reactive-components.md`.
   the root's own, as its styles do: an inline style (`.inline_style(..)`), animated values (`.bind_opacity(&v)`,
   `.bind_translate_y(&v)`), insets (bound ones are a binding, applied again when they change), on a rooted
   component's host as on any (`Instance::given`, `RootContext`: the inner first, the outer last, then the app's style
-  on the top host). Listeners and accessibility are not on it (`ComponentElement` is not `Interactive` or
-  `Accessible`): a component says what it hears and is through its events and props.
+  on the top host). Its state styles (`.active(|s| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)`, and
+  `Styled`'s `.selected(..)` / `.checked(..)`) are variants of those styles, so they follow the states of that root
+  (pressed and hovered as reported by the platform when the root takes presses, disabled, selected and checked as its
+  view sets them), as an app's `active:` classes on a TSX component do. Listeners and accessibility are not on it
+  (`ComponentElement` is not `Interactive` or `Accessible`): a component says what it hears and is through its events
+  and props.
 - An app's own types become static values for setters with `nsh_core::static_reactive!(Tone: Tone);`. A closure
   returning a bare float literal for an `f32` setter needs its type: `move || if on { 0.5_f32 } else { 1.0 }`.
 
@@ -536,8 +542,9 @@ it changes, and they are resolved again when the tokens change (`Components::app
   from both (`Core::set_appearance`), and tells the platform (`MountItem::Appearance`: iOS
   `overrideUserInterfaceStyle` on the root view, presented modals and alerts, the status bar's default style; Android
   the status bar's default style and alert themes; native widgets elsewhere keep the system's).
-- `.active(|s| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)` lower into rules on the view's interaction
-  states (Tailwind's ranks): press feedback is native. `.group()` makes a view a group and `.group_active(|s| ..)`
+- `.active(|s| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)`, `.selected(..)`, `.checked(..)` lower into
+  rules on the view's interaction states (Tailwind's ranks): press feedback is native. On a nested component's element
+  they style its root. `.group()` makes a view a group and `.group_active(|s| ..)`
   (`_hover`, `_focus_within`, `_named` for `group/name`) styles what is inside it by the group's states;
   `.dark(|s| ..)` styles what is not a color in dark appearance. Nested variants all have to hold.
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.

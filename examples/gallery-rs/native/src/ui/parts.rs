@@ -4,10 +4,7 @@
 //! with a root to place (a card in a row) take [`Styled`] methods for it.
 
 use nsh_base::nav_page;
-use nsh_core::{
-    PatchValue, StyleDecl, StyleKey,
-    ui::{AnyElement, Os, Screen, Style, StyleRefinement, prelude::*},
-};
+use nsh_core::ui::{AnyElement, Os, Screen, StyleRefinement, prelude::*};
 
 /// A text a builder shows: a value, a signal or a closure.
 type Label = Reactive<SharedString>;
@@ -55,32 +52,15 @@ macro_rules! content {
     )*};
 }
 
-/// A header's colors as a screen takes them (TS: `headerStyle`): the
-/// background, the title's color and the buttons' (`tintColor`).
-pub(crate) fn header_style(
-    background: AdaptiveColor,
-    title: AdaptiveColor,
-    tint: AdaptiveColor,
-) -> impl Fn() -> Style + 'static {
-    move || {
-        let hex = |c: AdaptiveColor| PatchValue::Str(color(c).to_hex().into());
-        Style::from_decls([
-            StyleDecl::Set(StyleKey::BackgroundColor, hex(background)),
-            StyleDecl::Set(StyleKey::Color, hex(title)),
-            StyleDecl::Set(StyleKey::TintColor, hex(tint)),
-        ])
-    }
-}
-
 /// The gallery's header colors on a screen (TS `{...header}`): the page's
 /// background, the text color for the title, the accent for the back
 /// button, following the appearance.
 pub(crate) fn header(screen: Screen) -> Screen {
-    screen.header_style(header_style(
-        colors::BACKGROUND,
-        colors::TEXT,
-        colors::ACCENT,
-    ))
+    screen.header_style_with(|s| {
+        s.bg(colors::BACKGROUND)
+            .text_color(colors::TEXT)
+            .tint_color(colors::ACCENT)
+    })
 }
 
 /// Whether the app draws its pages' headers ([`PageHeader`]): on the
