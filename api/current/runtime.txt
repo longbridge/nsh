@@ -247,6 +247,7 @@ Platform.isTV boolean
 Platform.select function
 colorScheme function
 fontScale function
+locale function
 setColorScheme function
 windowSize function
 
