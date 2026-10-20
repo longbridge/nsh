@@ -396,8 +396,8 @@ Windows), plus the embedding SDKs alone (`nsh-embed-ios.zip`, `nsh-embed-android
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
-workflow by hand without a tag, or a pull request that changes it or xtask, builds the archives only (the run's
-artifacts). The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
+workflow by hand without a tag, or a pull request that changes it or how xtask builds the distribution (`dist.rs`,
+`android.rs`, `ios.rs`), builds the archives only (the run's artifacts). The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
 The same tag runs `.github/workflows/release-crate.yml`, which publishes the library crates to crates.io (secret

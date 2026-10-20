@@ -34,6 +34,14 @@ defaults:
   run:
     shell: bash
 
+env:
+  # CI builds each crate once: no incremental state and no debug info
+  # (faster builds, smaller caches; panics still name their file and line).
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # The toolchain file's iOS and Android targets are only the release's.
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   check:
     name: check (${{ matrix.os }})
@@ -80,16 +88,12 @@ jobs:
         with:
           components: clippy
 
+      # Dependencies only: main's runs save it, pull requests restore it.
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-gpui-cargo-${{ hashFiles('crates/gpui/Cargo.lock', 'examples/embed-gpui/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-gpui-cargo-
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: crates/gpui -> ../../target
 
       # The GPUI workspace builds into the repository's `target/`
       # (`crates/gpui/.cargo/config.toml`).
