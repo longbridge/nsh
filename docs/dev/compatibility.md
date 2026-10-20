@@ -150,7 +150,10 @@ cargo xtask api --keep <app>...
 `<app>` is an example's name, or the path of an app directory or of a single entry module (`api/cases/<case>.tsx`).
 It is built with this checkout into `api/apps/<name>-<version>/`, with the newest script of that app or a stub;
 `--keep` records nothing. Check that the scripts pass (`compat::apps_still_run`), extend them to what the change added,
-run `cargo xtask api`, and commit the fixtures with the change. Existing steps stay.
+run `cargo xtask api`, and commit the fixtures with the change. Existing steps stay. An app whose `nsh.json` declares
+`capabilities` (a case directory, `api/cases/<case>/`) keeps the `capabilities.json` and `app.json` its build wrote,
+and runs with them and a new, empty data directory, so a script checks what a grant allows and what stays refused
+(`api/cases/mod-standard-files/`).
 
 ### Scripts
 

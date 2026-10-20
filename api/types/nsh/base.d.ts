@@ -65,7 +65,7 @@ export interface ButtonProps extends ComponentHostProps {
   onPressUp?: () => void;
 }
 
-/** A press target (`ButtonProps`). */
+/** A press target that owns its behavior (presses, the disabled and selected states, its role for screen readers) and leaves its look to the app: no colors, sizes or label of its own. The app's `class` and `style` style it, its states with `active:`, `hover:`, `focus:`, `selected:` and `disabled:` classes or `activeStyle`, `hoverStyle`, `focusStyle`, `selectedStyle` and `disabledStyle`, and its children are its content. */
 export declare const Button: ((props: ButtonProps) => JSX.Element);
 
 export interface KeyboardAvoidingViewProps extends ComponentHostProps {
@@ -172,7 +172,7 @@ export interface NavStackState<R> {
 
 export interface NavStackProps<R> {
   state: NavStackState<R>;
-  /** Finds the stack in tests and `nsh trace`. */
+  /** Finds the stack in tests and `nsh test --trace`. */
   testID?: string;
   style?: StyleProp<ViewStyle>;
   class?: string;
@@ -205,7 +205,7 @@ export interface HeaderStyle {
 }
 
 export interface NavPageProps extends NavPageHostProps {
-  /** Finds the page in tests and `nsh trace`. */
+  /** Finds the page in tests and `nsh test --trace`. */
   testID?: string;
   /** The app's header on the desktops and the web, which have no system
    * header: placed at the top of the page, as wide as the page and as tall
@@ -241,7 +241,7 @@ export interface NavPageProps extends NavPageHostProps {
 export type DialogChangeReason = "cancel" | "backdropPress" | "swipe";
 
 export interface DialogProps extends DialogHostProps {
-  /** Finds the dialog in tests and `nsh trace`. */
+  /** Finds the dialog in tests and `nsh test --trace`. */
   testID?: string;
   /** Shown while true (default). */
   open?: boolean;
@@ -271,7 +271,7 @@ export interface DialogProps extends DialogHostProps {
   backdropStyle?: StyleProp<ViewStyle>;
   /** The backdrop's classes (see `backdropStyle`). */
   backdropClass?: string;
-  /** Finds the backdrop in tests and `nsh trace`. */
+  /** Finds the backdrop in tests and `nsh test --trace`. */
   backdropTestID?: string;
   children?: JSX.Element;
   ios?: IOSDialogHostProps;
