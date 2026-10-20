@@ -7,8 +7,9 @@ test("loads the posts the server answers with", async () => {
   const app = await open("../App.tsx", {
     network: { [POSTS]: { body: [{ id: 1, title: "Hello from the test" }] } },
   });
-  await app.press("label:System");
-  await app.press("fetch()");
+  await app.press("role:button[System]");
+  await app.press("role:button[fetch()]");
+  await app.waitFor("loading…", { state: "gone" });
   await app.waitFor("Hello from the test");
   expect(app.texts()).toContain("#1");
 });

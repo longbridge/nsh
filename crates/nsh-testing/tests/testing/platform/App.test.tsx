@@ -1,15 +1,5 @@
 import { expect, open, test } from "nsh/test";
 
-/** What `promise` rejected with, or "" when it did not. */
-async function rejection(promise: Promise<void>): Promise<string> {
-  try {
-    await promise;
-    return "";
-  } catch (e) {
-    return String(e);
-  }
-}
-
 test("back pops the screen pushed last", async () => {
   const app = await open("./App.tsx");
   await app.press("Open");
@@ -17,7 +7,7 @@ test("back pops the screen pushed last", async () => {
   await app.back();
   expect(app.shows("Detail body")).toBe(false);
   expect(app.texts()).toContain("Answer: none");
-  expect(await rejection(app.back())).toContain("nothing to go back from");
+  await expect(() => app.back()).rejects.toThrow("nothing to go back from");
 });
 
 test("a screen that prevents going back is asked", async () => {
@@ -45,12 +35,12 @@ test("a dialog is cancelled unless the test answers it", async () => {
   await app.press("Delete");
   await app.waitFor("Answer: Delete");
   // Closing it without a button is the user's choice only when it can be.
-  expect(await rejection(app.press("Update"))).toContain("cannot be dismissed");
+  await expect(() => app.press("Update")).rejects.toThrow("cannot be dismissed");
 });
 
 test("a dialog without a cancel button needs an answer", async () => {
   const app = await open("./App.tsx");
-  expect(await rejection(app.press("Update"))).toContain("needs an answer");
+  await expect(() => app.press("Update")).rejects.toThrow("needs an answer");
 });
 
 test("the clipboard holds what was copied", async () => {
@@ -69,5 +59,5 @@ test("native animations run to their end", async () => {
 
 test("what only a real platform answers fails the step", async () => {
   const app = await open("./App.tsx");
-  expect(await rejection(app.press("Measure"))).toContain("only a real platform answers");
+  await expect(() => app.press("Measure")).rejects.toThrow("only a real platform answers");
 });

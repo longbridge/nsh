@@ -3088,6 +3088,7 @@ dependencies = [
  "nsh-core",
  "nsh-engine",
  "nsh-js",
+ "regex",
  "serde",
  "serde_json",
  "ureq",

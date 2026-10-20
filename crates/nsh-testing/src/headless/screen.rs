@@ -10,12 +10,23 @@ use std::{
 };
 
 use nsh_core::{
-    Command, Dialog, EventKind, EventMask, InputConfig, MountBatch, MountItem, NodeId, Rect, Size,
-    ViewKind,
+    AccessibilityRole, Command, Dialog, EventKind, EventMask, InputConfig, MountBatch, MountItem,
+    NodeId, Rect, Size, ViewKind, ui::PropEnum,
 };
+
+use super::selector::{Matcher, Selector, TextMatch};
 
 /// The surface's root view: every app view hangs below it.
 const ROOT: NodeId = 1;
+
+/// Whether view `v` shows a text `want` matches: its own, or an input's
+/// (what it holds, or while empty its placeholder).
+fn shows_text(v: &View, want: &TextMatch) -> bool {
+    v.text.as_deref().is_some_and(|t| want.matches(t))
+        || v.input.as_ref().is_some_and(|i| {
+            want.matches(&i.text) || (i.text.is_empty() && want.matches(&i.config.placeholder))
+        })
+}
 
 /// What a back does ([`Screen::back_target`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,45 +42,6 @@ pub(crate) enum Back {
     },
     /// Nothing to go back from.
     Nothing,
-}
-
-/// What a step names: `id:<testID>`, `label:<accessibilityLabel>`,
-/// `text:<text>`, `view:<node id>`, or a bare string, matched as each of the
-/// first three in turn.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Selector {
-    TestId(String),
-    Label(String),
-    Text(String),
-    View(NodeId),
-    Any(String),
-}
-
-impl Selector {
-    pub(crate) fn parse(s: &str) -> Result<Self, String> {
-        Ok(match s.split_once(':') {
-            Some(("id", v)) => Self::TestId(v.into()),
-            Some(("label", v)) => Self::Label(v.into()),
-            Some(("text", v)) => Self::Text(v.into()),
-            Some(("view", v)) => Self::View(
-                v.parse()
-                    .map_err(|e| format!("`{s}`: not a view id: {e}"))?,
-            ),
-            _ => Self::Any(s.into()),
-        })
-    }
-}
-
-impl std::fmt::Display for Selector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TestId(v) => write!(f, "id:{v}"),
-            Self::Label(v) => write!(f, "label:{v}"),
-            Self::Text(v) => write!(f, "text:{v}"),
-            Self::View(v) => write!(f, "view:{v}"),
-            Self::Any(v) => f.write_str(v),
-        }
-    }
 }
 
 /// The native views as the mount items built them: their tree, what they
@@ -124,6 +96,27 @@ struct View {
     prevent_back: bool,
     /// A modal the user's back closes natively (`ModalConfig::close_on_escape`).
     close_on_escape: bool,
+    /// Its `role`.
+    role: AccessibilityRole,
+    /// It takes no presses (`disabled`, its accessibility state).
+    disabled: bool,
+    /// How long a press must last to be a long one (`delayLongPress`), in
+    /// milliseconds.
+    long_press_delay: Option<f32>,
+}
+
+/// Which views a selector matched, for a step that acts on one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Pick {
+    /// The view.
+    One(NodeId),
+    /// None matched.
+    None,
+    /// Several did: how many.
+    Many(usize),
+    /// The match takes no presses (it, or the view between it and the one
+    /// that would hear them, is disabled).
+    Disabled,
 }
 
 /// What an input holds, as its platform view keeps it.
@@ -209,6 +202,9 @@ impl Screen {
                 let view = self.nodes.entry(*id).or_default();
                 view.test_id = props.test_id.clone();
                 view.label = props.accessibility.label.clone();
+                view.role = props.accessibility.role;
+                view.disabled = props.accessibility.state.disabled;
+                view.long_press_delay = props.long_press_delay;
             }
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
@@ -421,7 +417,7 @@ impl Screen {
         std::mem::take(&mut self.back_asked)
     }
 
-    /// The dialogs shown so far, in order (`Alert.alert`, action sheets).
+    /// The dialogs shown so far, in order (`AlertDialog.show`, action sheets).
     pub fn dialogs(&self) -> &[Dialog] {
         &self.dialogs
     }
@@ -503,13 +499,18 @@ impl Screen {
         self.texts().iter().any(|t| t.trim() == text)
     }
 
-    /// Whether a view on screen matches `selector` (`id:<testID>`,
-    /// `label:<label>`, `text:<text>`, `view:<id>`, or a bare string
-    /// matched as each of the first three in turn); an error for a
-    /// selector that does not parse.
+    /// Whether a view on screen matches `selector` (the module
+    /// `selector`'s: `id:<testID>`, `label:<label>`, `text:<text>`,
+    /// `role:<role>[<name>]`, `view:<id>`, a bare string; ` >> ` looks
+    /// inside, `nth=<n>` picks); an error for a selector that does not
+    /// parse.
     pub fn matches(&self, selector: &str) -> Result<bool, String> {
-        let selector = Selector::parse(selector)?;
-        Ok(self.first(&selector, Some).is_some())
+        self.count(selector).map(|n| n > 0)
+    }
+
+    /// How many views on screen match `selector` ([`Screen::matches`]).
+    pub fn count(&self, selector: &str) -> Result<usize, String> {
+        Ok(self.resolve(&Selector::parse(selector)?).len())
     }
 
     /// The commands sent so far, in order, with the view each went to.
@@ -523,78 +524,213 @@ impl Screen {
     }
 
     /// The view a press on `selector` goes to ([`Screen::matches`]'s
-    /// selectors): the first matching view on screen, or its nearest
-    /// ancestor that hears presses (a text inside a button). `None` when
-    /// none matches; an error for a selector that does not parse.
+    /// selectors): the matching view, or its nearest ancestor that hears
+    /// presses (a text inside a button). `None` when none matches, or it is
+    /// disabled; an error for a selector that does not parse or matches
+    /// views a press would reach apart.
     pub fn press_target(&self, selector: &str) -> Result<Option<NodeId>, String> {
-        Selector::parse(selector).map(|s| self.pressable(&s))
-    }
-
-    /// The text of the input `selector` names ([`Screen::matches`]'s
-    /// selectors; `text:` matches an input's text or placeholder).
-    pub fn input_text(&self, selector: &str) -> Result<Option<&str>, String> {
-        let selector = Selector::parse(selector)?;
-        Ok(self
-            .input_view(&selector)
-            .and_then(|id| self.input(id))
-            .map(|input| input.text.as_str()))
-    }
-
-    /// The first view on screen that matches `selector`, where `find` (the
-    /// view and its id) gives what is wanted of it.
-    fn first<T>(&self, selector: &Selector, find: impl Fn(NodeId) -> Option<T>) -> Option<T> {
-        let layers = self.by_layer();
-        let matching = |test: &dyn Fn(&View) -> bool| {
-            layers.iter().find_map(|id| {
-                self.nodes
-                    .get(id)
-                    .filter(|v| test(v))
-                    .and_then(|_| find(*id))
-            })
-        };
-        let is = |value: &Option<Arc<str>>, want: &str| value.as_deref() == Some(want);
-        // Spaces around a text are not seen, on either side.
-        let text = |v: &View, want: &str| {
-            let want = want.trim();
-            v.text.as_deref().map(str::trim) == Some(want)
-                || v.input.as_ref().is_some_and(|i| {
-                    i.text.trim() == want || (i.text.is_empty() && i.config.placeholder == want)
-                })
-        };
-        match selector {
-            Selector::TestId(want) => matching(&|v| is(&v.test_id, want)),
-            Selector::Label(want) => matching(&|v| is(&v.label, want)),
-            Selector::Text(want) => matching(&|v| text(v, want)),
-            Selector::View(id) => layers.contains(id).then(|| find(*id)).flatten(),
-            Selector::Any(want) => matching(&|v| is(&v.test_id, want))
-                .or_else(|| matching(&|v| is(&v.label, want)))
-                .or_else(|| matching(&|v| text(v, want))),
+        let parsed = Selector::parse(selector)?;
+        match self.pressable(&parsed) {
+            Pick::One(id) => Ok(Some(id)),
+            Pick::None | Pick::Disabled => Ok(None),
+            Pick::Many(n) => Err(format!("`{selector}` matches {n} views")),
         }
     }
 
-    /// The first view on screen the selector matches, or its nearest
-    /// pressable ancestor (a text inside a button).
-    pub(crate) fn pressable(&self, selector: &Selector) -> Option<NodeId> {
-        self.first(selector, |id| {
-            self.up_to(id, |v| v.events.contains(EventKind::Press))
+    /// The text of the input `selector` names ([`Screen::matches`]'s
+    /// selectors; `text:` matches an input's text or placeholder); an
+    /// error when it names several.
+    pub fn input_text(&self, selector: &str) -> Result<Option<&str>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.input_view(&parsed) {
+            Pick::One(id) => Ok(self.input(id).map(|input| input.text.as_str())),
+            Pick::Many(n) => Err(format!("`{selector}` matches {n} inputs")),
+            Pick::None | Pick::Disabled => Ok(None),
+        }
+    }
+
+    /// Whether the view `selector` names takes input: neither it nor a view
+    /// around it is disabled, and an input is editable; an error when none
+    /// or several match.
+    pub fn enabled(&self, selector: &str) -> Result<bool, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => {
+                Ok(!self.disabled_from(id, None)
+                    && self.input(id).is_none_or(|i| i.config.editable))
+            }
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The views on screen `selector` matches, in the order a user's eyes
+    /// find them ([`Screen::by_layer`]): each part looks inside what the
+    /// one before matched.
+    pub(crate) fn resolve(&self, selector: &Selector) -> Vec<NodeId> {
+        let layers = self.by_layer();
+        let mut scope: Option<Vec<NodeId>> = None;
+        for part in &selector.parts {
+            let inside = |id: NodeId| {
+                scope
+                    .as_ref()
+                    .is_none_or(|scope| scope.iter().any(|s| self.is_inside(id, *s)))
+            };
+            let matching = |test: &dyn Fn(NodeId, &View) -> bool| -> Vec<NodeId> {
+                layers
+                    .iter()
+                    .copied()
+                    .filter(|id| inside(*id) && self.nodes.get(id).is_some_and(|v| test(*id, v)))
+                    .collect()
+            };
+            let is = |value: &Option<Arc<str>>, want: &str| value.as_deref() == Some(want);
+            let mut found = match &part.matcher {
+                Matcher::TestId(want) => matching(&|_, v| is(&v.test_id, want)),
+                Matcher::Label(want) => {
+                    matching(&|_, v| v.label.as_deref().is_some_and(|l| want.matches(l)))
+                }
+                Matcher::Text(want) => matching(&|_, v| shows_text(v, want)),
+                Matcher::Role { role, name } => matching(&|id, v| {
+                    v.role != AccessibilityRole::None
+                        && v.role.js_name() == role
+                        && name
+                            .as_ref()
+                            .is_none_or(|name| name.matches(&self.name(id)))
+                }),
+                Matcher::View(id) => layers
+                    .iter()
+                    .copied()
+                    .filter(|v| v == id && inside(*v))
+                    .collect(),
+                Matcher::Any(want) => {
+                    let exact = TextMatch::Exact(want.trim().to_owned());
+                    let ids = matching(&|_, v| is(&v.test_id, want));
+                    let ids = if ids.is_empty() {
+                        matching(&|_, v| is(&v.label, want))
+                    } else {
+                        ids
+                    };
+                    if ids.is_empty() {
+                        matching(&|_, v| shows_text(v, &exact))
+                    } else {
+                        ids
+                    }
+                }
+            };
+            if let Some(n) = part.nth {
+                found = found.get(n).copied().into_iter().collect();
+            }
+            scope = Some(found);
+        }
+        scope.unwrap_or_default()
+    }
+
+    /// The one view the matches of `selector` lead to through `target`
+    /// (several matches leading to one view are one).
+    fn pick(&self, selector: &Selector, target: impl Fn(NodeId) -> Option<NodeId>) -> Pick {
+        let mut targets: Vec<NodeId> = Vec::new();
+        for id in self.resolve(selector) {
+            if let Some(t) = target(id)
+                && !targets.contains(&t)
+            {
+                targets.push(t);
+            }
+        }
+        match targets[..] {
+            [] => Pick::None,
+            [one] => Pick::One(one),
+            ref all => Pick::Many(all.len()),
+        }
+    }
+
+    /// The view a press on the selector's match goes to: it, or its nearest
+    /// pressable ancestor (a text inside a button); [`Pick::Disabled`] when
+    /// it or a view on the way is disabled.
+    pub(crate) fn pressable(&self, selector: &Selector) -> Pick {
+        let matches = self.resolve(selector);
+        if !matches.is_empty()
+            && matches.iter().all(|id| {
+                let target = self.up_to(*id, |v| v.events.contains(EventKind::Press));
+                self.disabled_from(*id, target)
+            })
+        {
+            return Pick::Disabled;
+        }
+        self.pick(selector, |id| {
+            let target = self.up_to(id, |v| v.events.contains(EventKind::Press))?;
+            (!self.disabled_from(id, Some(target))).then_some(target)
         })
+    }
+
+    /// Whether `id` or a view around it, up to `until` (else the root), is
+    /// disabled.
+    fn disabled_from(&self, mut id: NodeId, until: Option<NodeId>) -> bool {
+        loop {
+            let Some(view) = self.nodes.get(&id) else {
+                return false;
+            };
+            if view.disabled {
+                return true;
+            }
+            if Some(id) == until {
+                return false;
+            }
+            match view.parent {
+                Some(parent) => id = parent,
+                None => return false,
+            }
+        }
     }
 
     /// The input the selector names: the matching view, or the first input
     /// in it (a text field's frame).
-    pub(crate) fn input_view(&self, selector: &Selector) -> Option<NodeId> {
-        self.first(selector, |id| self.down_to(id, |v| v.input.is_some()))
+    pub(crate) fn input_view(&self, selector: &Selector) -> Pick {
+        self.pick(selector, |id| self.down_to(id, |v| v.input.is_some()))
     }
 
     /// The scroll view the selector names: the matching view, or the
     /// nearest scroll view around it (a row of a list), else the first in
     /// it.
-    pub(crate) fn scroll_view(&self, selector: &Selector) -> Option<NodeId> {
+    pub(crate) fn scroll_view(&self, selector: &Selector) -> Pick {
         let is_scroll = |v: &View| v.scroll.is_some();
-        self.first(selector, |id| {
+        self.pick(selector, |id| {
             self.up_to(id, is_scroll)
                 .or_else(|| self.down_to(id, is_scroll))
         })
+    }
+
+    /// The view the selector names, for a long press: it, or its nearest
+    /// ancestor that hears long presses or presses.
+    pub(crate) fn long_pressable(&self, selector: &Selector) -> Pick {
+        self.pick(selector, |id| {
+            let target = self.up_to(id, |v| {
+                v.events.contains(EventKind::LongPress) || v.events.contains(EventKind::Press)
+            })?;
+            (!self.disabled_from(id, Some(target))).then_some(target)
+        })
+    }
+
+    /// How long a press on `id` must last to be a long one, in milliseconds.
+    pub(crate) fn long_press_delay(&self, id: NodeId) -> Option<f32> {
+        self.nodes.get(&id)?.long_press_delay
+    }
+
+    /// A view's accessible name: its label, else the texts in it.
+    fn name(&self, id: NodeId) -> String {
+        if let Some(label) = self.nodes.get(&id).and_then(|v| v.label.as_deref()) {
+            return label.to_owned();
+        }
+        let mut texts = Vec::new();
+        let mut stack = vec![id];
+        while let Some(id) = stack.pop() {
+            if let Some(text) = self.nodes.get(&id).and_then(|v| v.text.as_deref()) {
+                texts.push(text.trim());
+            }
+            if let Some(children) = self.children.get(&id) {
+                stack.extend(children.iter().rev());
+            }
+        }
+        texts.join(" ")
     }
 
     /// `id`, or its nearest ancestor, that `test` accepts.
@@ -680,28 +816,6 @@ impl Screen {
 mod tests {
     use super::*;
 
-    #[test]
-    fn selectors_parse() {
-        assert_eq!(
-            Selector::parse("id:save").unwrap(),
-            Selector::TestId("save".into())
-        );
-        assert_eq!(
-            Selector::parse("label:Close").unwrap(),
-            Selector::Label("Close".into())
-        );
-        assert_eq!(
-            Selector::parse("text:+1").unwrap(),
-            Selector::Text("+1".into())
-        );
-        assert_eq!(Selector::parse("view:20").unwrap(), Selector::View(20));
-        assert_eq!(Selector::parse("a:b").unwrap(), Selector::Any("a:b".into()));
-        assert_eq!(
-            Selector::parse("view:x").unwrap_err(),
-            "`view:x`: not a view id: invalid digit found in string"
-        );
-    }
-
     fn batch(items: Vec<MountItem>) -> MountBatch {
         MountBatch { items }
     }
@@ -753,8 +867,8 @@ mod tests {
         assert_eq!(screen.texts(), ["Close", "Close"]);
         // The modal's text comes first, though the stack is before it.
         assert_eq!(
-            screen.first(&Selector::Text("Close".into()), Some),
-            Some(14)
+            screen.resolve(&Selector::parse("text:Close").unwrap()),
+            [14, 10]
         );
         screen.apply(&batch(vec![MountItem::Remove { id: 8 }]));
         assert_eq!(screen.texts(), ["Home", "Close"]);

@@ -73,19 +73,37 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 
 ### Steps
 
-Steps name views with **selectors**: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` (a view
-id from `--trace` output), or a bare string, matched as a `testID`, then a label, then a text. A selector finds the view a
-user would look at first: in the top modal, then on screen, and of a navigation stack only the top screen.
+Steps name views with **selectors**, written as Playwright's:
+
+| Selector | Matches |
+|---|---|
+| `id:<testID>` | The view with that `testID`. |
+| `label:<label>` | The view with that `accessibilityLabel`. |
+| `text:<text>` | A text that reads it (spaces around it aside), or an input holding it or, while empty, with that placeholder. |
+| `role:<role>`, `role:<role>[<name>]` | A view with that `accessibilityRole` (`role:button`), and that name: its label, else the texts in it (`role:button[Save]`). |
+| `view:<id>` | The view with that id in `--trace` output. |
+| anything else | A `testID`, else a label, else a text, as written. |
+
+`label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`. ` >> ` looks inside what the part before matched
+(`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0 (`text:Delete >> nth=1`). A
+selector finds the views a user would look at first: in the top modal, then on screen, and of a navigation stack only
+the top screen. A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
+one: a selector matching several fails the step, and the error says how to narrow it.
 
 | Step | Description |
 |---|---|
-| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`. |
+| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressDown`, `onPressUp`, `onPress`. Rejects when it is disabled. |
+| `await app.longPress(selector)` | Holds a finger on it for its `delayLongPress` (500 ms): `onPressDown`, `onLongPress`, `onPressUp`; no `onPress` follows. |
+| `await app.clear(selector)` | Empties the input, as selecting all and deleting does. |
 | `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) at the end of what it holds, key by key: it takes the focus, then each character is an `onKeyPress` and an `onChange`, within `maxLength`. A `\n` in a single-line input is the return key. |
 | `await app.submit(selector)` | The return key in the input, as its `submitBehavior` says: `onSubmit` (and the focus leaves a single-line input), or a line break in a multiline one. |
 | `await app.scroll(selector, distance)` | Drags the scroll view or list (the view, the one around it, or the first inside it) by `distance` points along its axis, 10 points per frame, within its content. Negative scrolls back. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. |
-| `await app.waitFor(selector, timeout?)` | Resolves once a view matches; rejects after `timeout` ms (5000). |
+| `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). |
+| `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). |
 | `app.shows(selector)` | Whether a view matches now. |
+| `app.count(selector)` | How many views match now. |
+| `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is editable. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.storage()` | What the app's storage holds now. |
@@ -125,6 +143,12 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 | `toBe(expected)`, `toEqual(expected)` | The value equals `expected`, member by member. |
 | `toContain(item)` | An array holds `item`, or a string contains it. |
 | `toBeTruthy()`, `toBeFalsy()` | The value is truthy / falsy, as JS sees it. |
+| `toMatch(pattern)` | A string contains `pattern` (a string), or matches it (a `RegExp`). |
+| `toHaveLength(n)` | An array has `n` items, or a string `n` UTF-16 units. |
+| `toBeNull()` | The value is `null` (or `undefined`). |
+| `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
+| `toThrow(message?)` | `expect(fn)`: calling `fn` throws, with a message matching `message` when given. |
+| `rejects.toThrow(message?)` | `expect(fn)`: the promise `fn` returns rejects: `await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`. |
 
 ### Steps from standard input
 
