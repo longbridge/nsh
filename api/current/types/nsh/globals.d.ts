@@ -23,7 +23,7 @@ declare function clearInterval(id: number | undefined): void;
 declare function queueMicrotask(callback: () => void): void;
 /** Runs `callback` at the next display frame with its time in milliseconds. */
 declare function requestAnimationFrame(callback: (time: number) => void): number;
-declare function cancelAnimationFrame(id: number): void;
+declare function cancelAnimationFrame(id: number | undefined): void;
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
 
