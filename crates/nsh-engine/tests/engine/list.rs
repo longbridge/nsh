@@ -182,7 +182,7 @@ function App() {
   return (
     <View style={{ flex: 1 }}>
       <Text>{`size ${size()}`}</Text>
-      <List each={[1, 2, 3]} testID="feed" accessibilityLabel={label()} accessibilityRole="list"
+      <List each={[1, 2, 3]} testID="feed" accessibilityLabel={label()} role="list"
             accessibilityHint="Posts" class="bg-red-500" pointerEvents="box-none" style={{ flex: 1 }}
             onLayout={(e) => { size.set(`${e.width}x${e.height}`); label.set("Feed 2"); }}>
         {(row) => <View style={{ height: 50 }}><Text>{`row ${row()}`}</Text></View>}

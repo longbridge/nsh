@@ -66,7 +66,7 @@ Rust crate 的应用（`nsh.json` 的 `"rust"`）以同样的方式，在 NSH �
 | `width`、`height` | 390、844 | 视口大小，单位为点。 |
 | `safeArea` | 0 | 安全区域内边距，单位为点：`{ top: 47, bottom: 34 }`。 |
 | `clipboard` | 空 | 剪贴板初始的文字。 |
-| `colorScheme` | `"light"` | 系统外观：`"light"` 或 `"dark"`（`colorScheme()`、`dark:` 类、组件的主题）。 |
+| `colorScheme` | `"light"` | 系统外观：`"light"` 或 `"dark"`（`colorScheme()`、`dark:` 类）。 |
 | `locale` | `"en-US"` | 设备的区域设置，BCP 47 标签（`locale()`、`Intl` 的默认值）。 |
 | `reducedMotion` | `false` | 用户要求减少动态效果（`reduceMotion()`）。 |
 | `platform` | `"ios"` | 应用运行时所在的平台：`"ios"` 或 `"android"`（`Platform.OS`、`ios={{…}}` / `android={{…}}` 属性）。 |
@@ -110,7 +110,7 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 | `id:<testID>` | 设置了该 `testID` 的视图。 |
 | `label:<label>` | 设置了该 `accessibilityLabel` 的视图。 |
 | `text:<text>` | 内容为该文字的文本（忽略首尾空格），或者内容为该文字、空着时占位文字为该文字的输入框。 |
-| `role:<role>`、`role:<role>[<name>]` | 设置了该 `accessibilityRole` 的视图（`role:button`），并且名称为 `<name>`：它的标签，没有标签时取它内部的文字（`role:button[Save]`）。 |
+| `role:<role>`、`role:<role>[<name>]` | 设置了该 `role` 的视图（`role:button`），并且名称为 `<name>`：它的标签，没有标签时取它内部的文字（`role:button[Save]`）。 |
 | `view:<id>` | `--trace` 输出中该 id 的视图。 |
 | 其他写法 | 依次按 `testID`、标签、文字匹配。 |
 
@@ -132,7 +132,7 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 | `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。 |
 | `app.shows(selector)` | 当前是否有视图匹配。 |
 | `app.count(selector)` | 当前匹配的视图个数。 |
-| `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求可编辑。 |
+| `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求不是 `readonly`。 |
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
 | `app.storage()` | 应用存储当前保存的内容。 |

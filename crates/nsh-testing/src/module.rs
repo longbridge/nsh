@@ -774,7 +774,7 @@ impl App {
     }
 
     /// Whether the view `selector` names takes input now: neither it nor a
-    /// view around it is disabled, and an input is editable.
+    /// view around it is disabled, and an input is not `readonly`.
     pub fn enabled(&self, selector: String) -> Result<bool, String> {
         self.with(|app| app.screen().enabled(&selector))
     }

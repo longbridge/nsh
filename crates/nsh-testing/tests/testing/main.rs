@@ -143,8 +143,8 @@ fn selectors_find_one_view_and_steps_act_on_it() {
 #[test]
 fn open_sets_the_environment_and_routes_answer_requests() {
     let run = TestRun {
-        ui_sets: vec![nsh_ui_mobile::registry()],
-        compile: compiler(vec![nsh_ui_mobile::registry()]),
+        ui_sets: vec![nsh_base::registry()],
+        compile: compiler(vec![nsh_base::registry()]),
         ..test_run(None)
     };
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/environment");

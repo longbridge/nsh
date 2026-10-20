@@ -70,7 +70,7 @@ starts it on a 390×844 viewport and resolves once it rendered and is quiet.
 | `width`, `height` | 390, 844 | The viewport in points. |
 | `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
 | `clipboard` | empty | The text on the clipboard at the start. |
-| `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes, the components' theme). |
+| `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
 | `platform` | `"ios"` | The platform the app runs as: `"ios"` or `"android"` (`Platform.OS`, `ios={{…}}` / `android={{…}}` props). |
@@ -116,7 +116,7 @@ Steps name views with **selectors**, written as Playwright's:
 | `id:<testID>` | The view with that `testID`. |
 | `label:<label>` | The view with that `accessibilityLabel`. |
 | `text:<text>` | A text that reads it (spaces around it aside), or an input holding it or, while empty, with that placeholder. |
-| `role:<role>`, `role:<role>[<name>]` | A view with that `accessibilityRole` (`role:button`), and that name: its label, else the texts in it (`role:button[Save]`). |
+| `role:<role>`, `role:<role>[<name>]` | A view with that `role` (`role:button`), and that name: its label, else the texts in it (`role:button[Save]`). |
 | `view:<id>` | The view with that id in `--trace` output. |
 | anything else | A `testID`, else a label, else a text, as written. |
 
@@ -139,7 +139,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). |
 | `app.shows(selector)` | Whether a view matches now. |
 | `app.count(selector)` | How many views match now. |
-| `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is editable. |
+| `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
 | `app.storage()` | What the app's storage holds now. |
