@@ -95,7 +95,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
                 .bg_linear_to_b()
                 .gradient_from(rgb_a(0xffffff, 0.3))
                 .gradient_to(rgb_a(0xffffff, 0.0))
-                .gradient_to_position(0.6)
+                .gradient_to_position(percentage(0.6))
                 .adaptive_shadow(
                     knob_light.iter().copied(),
                     [

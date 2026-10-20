@@ -160,7 +160,7 @@ pub fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement
                 .size_10()
                 .items_center()
                 .justify_center()
-                .rounded(move || px(theme().radius))
+                .rounded(move || theme().radius)
                 .bg(move || theme().secondary)
                 .active(|s| s.bg(move || theme().secondary_active))
                 .style_when(off, |v| v.opacity(0.4))
@@ -171,7 +171,7 @@ pub fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement
                 .on(EventKind::PressOut, move |_: &EventPayload| stop())
                 .child(
                     text(label)
-                        .text_size(move || px(theme().font_size + 4.0))
+                        .text_size(move || theme().font_size + px(4.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(move || theme().secondary_foreground),
                 )
@@ -190,7 +190,7 @@ pub fn Stepper(props: StepperProps, cx: Scope<StepperEvent>) -> impl IntoElement
             text(move || format!("{:.*}", decimals(range.get().step), value.get()))
                 .min_w(px(48.0))
                 .text_center()
-                .text_size(move || px(theme().font_size + 1.0))
+                .text_size(move || theme().font_size + px(1.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || theme().foreground),
         )

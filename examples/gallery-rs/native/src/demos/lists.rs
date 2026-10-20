@@ -130,7 +130,7 @@ fn grid_header(
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(colors::TEXT)
                             .tabular_nums()
-                            .letter_spacing(-0.5)
+                            .letter_spacing(px(-0.5))
                             .child(
                                 text(move || {
                                     visible.get().map_or(String::new(), |(first, last)| {
@@ -158,7 +158,7 @@ fn grid_header(
                 .child(action(
                     "Jump to 60",
                     Some(IconName::ArrowDown),
-                    move |_: &()| list.scroll_to_index(60, 0.5, 0.0, true),
+                    move |_: &()| list.scroll_to_index(60, percentage(0.5), px(0.0), true),
                 ))
                 .child(action("End", None, move |_: &()| list.scroll_to_end(true))),
         )
@@ -220,10 +220,10 @@ fn Grid() -> impl IntoElement {
                 )
         })
         .columns(columns)
-        .estimated_item_size(110.0)
-        .content_padding(padding)
-        .row_gap(gap)
-        .column_gap(gap)
+        .estimated_item_size(px(110.0))
+        .content_padding(px(padding))
+        .row_gap(px(gap))
+        .column_gap(px(gap))
         .viewability(Viewability {
             item_visible_percent: Some(50.0),
             ..Viewability::default()
@@ -437,8 +437,8 @@ fn Contacts() -> impl IntoElement {
             If::new(header, move || contact_header(row)).otherwise(move || contact_person(row))
         })
         .sticky_header_indices(headers)
-        .estimated_item_size(60.0)
-        .content_padding_bottom(24.0)
+        .estimated_item_size(px(60.0))
+        .content_padding_bottom(px(24.0))
         .flex_1(),
     )
 }
@@ -558,10 +558,10 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     )
     .keys(move || messages.with(|m| m.iter().map(|m| m.id).collect::<Vec<_>>()))
     .inverted()
-    .estimated_item_size(52.0)
-    .content_padding_x(16.0)
-    .content_padding_y(12.0)
-    .row_gap(6.0)
+    .estimated_item_size(px(52.0))
+    .content_padding_x(px(16.0))
+    .content_padding_y(px(12.0))
+    .row_gap(px(6.0))
     .flex_1()
     .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
     .on_end_reached(load_older)
@@ -593,7 +593,7 @@ fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         );
     // Clear of the home indicator unless the keyboard covers it.
     let bottom = move || {
-        if keyboard_height() > 0.0 {
+        if keyboard_height() > px(0.0) {
             0.0
         } else {
             cx.insets().bottom
@@ -833,10 +833,10 @@ fn cards() -> Section {
             .child(Meter::new(load).tone(tone))
     })
     .horizontal()
-    .estimated_item_size(130.0)
+    .estimated_item_size(px(130.0))
     .shows_indicator(false)
-    .content_padding_x(14.0)
-    .column_gap(10.0)
+    .content_padding_x(px(14.0))
+    .column_gap(px(10.0))
     .h(px(124.0));
     Section::new("Horizontal list")
         .note("1,000 recycled cards")
@@ -893,7 +893,7 @@ fn empty_list() -> Section {
             )
             .child(Badge::new(move || tone_name(tone())).tone(tone))
     })
-    .estimated_item_size(48.0)
+    .estimated_item_size(px(48.0))
     .empty(
         view()
             .items_center()

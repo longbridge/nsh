@@ -117,7 +117,7 @@ fn theme_tokens() {
     assert_eq!(s.view.background_color, Color::from(ui.primary.light));
     assert_eq!(s.text.color, Some(Color::from(ui.muted_foreground.light)));
     assert_eq!(s.view.borders.colors[0], Color::from(ui.border.light));
-    assert_eq!(s.view.border_radius, ui.radius);
+    assert_eq!(s.view.border_radius, ui.radius.0);
     let (s, _) = styled_with(
         "bg-primary text-(--muted-foreground)",
         dark,
@@ -163,8 +163,8 @@ fn theme_tokens() {
     let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color::from(ui.accent.dark));
     let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
-    assert_eq!(s.text.font_size, Some(ui.font_size));
-    assert_eq!(s.view.border_radius, ui.radius_lg);
+    assert_eq!(s.text.font_size, Some(ui.font_size.0));
+    assert_eq!(s.view.border_radius, ui.radius_lg.0);
     // Later utilities still win, in both appearances.
     let (s, _) = styled_with("bg-primary bg-red-500", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color(0xfb2c_36ff));

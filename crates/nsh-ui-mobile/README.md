@@ -33,7 +33,7 @@ state) stays native. JS only gets the events the component emits.
 - **The app's content is props, placed by closures**; the component lays it out, never creates or changes it:
   `header: Prop<Option<Slot>>` (`props.header.place(|h| h.px_4())`), `children: Children` (`.child(props.children)`,
   or `.children_each(props.children, |child, at| ..)` to wrap each), `items: Items` for virtualized rows
-  (`.list(props.items, |l| l.estimated_item_size(48.0), |row, at| ..)`; in JS `each` and a row renderer, like `List`).
+  (`.list(props.items, |l| l.estimated_item_size(px(48.0)), |row, at| ..)`; in JS `each` and a row renderer, like `List`).
   `at` is a `Position` of signals: `at.index()`, `at.is_first()`, `at.is_last()`, read in bindings. `#[prop(lazy)]`
   on `children` has JS make them only while the view places them (`Sheet`: fresh content on each opening). `Group`
   and `ListView` are the examples. A Rust component fills them the same way: `.child(..)`, `.fill("header", ..)`, and

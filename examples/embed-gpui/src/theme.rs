@@ -112,9 +112,9 @@ pub fn nsh_theme(theme: &Theme) -> nsh_platform_gpui::Theme {
         warning_active,
         warning_foreground,
     );
-    nsh.radius = f32::from(theme.radius);
-    nsh.radius_lg = f32::from(theme.radius_lg);
-    nsh.font_size = f32::from(theme.font_size);
+    nsh.radius = nsh_core::Points(f32::from(theme.radius));
+    nsh.radius_lg = nsh_core::Points(f32::from(theme.radius_lg));
+    nsh.font_size = nsh_core::Points(f32::from(theme.font_size));
     nsh
 }
 
@@ -151,6 +151,6 @@ mod tests {
             nsh.primary.light,
             nsh_platform_gpui::Theme::default().primary.light
         );
-        assert_eq!(nsh.radius, 6.0);
+        assert_eq!(nsh.radius, nsh_core::Points(6.0));
     }
 }

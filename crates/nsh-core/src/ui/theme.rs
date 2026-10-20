@@ -23,6 +23,7 @@ use super::style::AdaptiveColor;
 use crate::{
     JsonValue,
     color::{Hsla, opaque_grey},
+    geometry::Points,
     style::Color,
     tailwind,
 };
@@ -175,12 +176,12 @@ theme_colors! {
 pub struct Theme {
     /// The semantic colors.
     pub colors: ThemeColors,
-    /// The corner radius of controls (buttons, inputs), in points.
-    pub radius: f32,
+    /// The corner radius of controls (buttons, inputs).
+    pub radius: Points,
     /// The corner radius of large surfaces (cards, sheets, dialogs).
-    pub radius_lg: f32,
-    /// The base font size, in points.
-    pub font_size: f32,
+    pub radius_lg: Points,
+    /// The base font size.
+    pub font_size: Points,
     /// Colors and numbers under the keys the fields above do not have.
     custom: Custom,
 }
@@ -215,9 +216,9 @@ impl std::error::Error for ThemeError {}
 static DEFAULT: LazyLock<Theme> = LazyLock::new(|| {
     let mut theme = Theme {
         colors: ThemeColors::default(),
-        radius: 0.0,
-        radius_lg: 0.0,
-        font_size: 0.0,
+        radius: Points(0.0),
+        radius_lg: Points(0.0),
+        font_size: Points(0.0),
         custom: Custom::default(),
     };
     theme
@@ -304,9 +305,9 @@ impl Theme {
     /// any other number a theme sets).
     pub fn number(&self, key: &str) -> Option<f32> {
         match key {
-            "radius" => Some(self.radius),
-            "radius.lg" => Some(self.radius_lg),
-            "font.size" => Some(self.font_size),
+            "radius" => Some(self.radius.0),
+            "radius.lg" => Some(self.radius_lg.0),
+            "font.size" => Some(self.font_size.0),
             key => self.custom.numbers.get(key).copied(),
         }
     }
@@ -314,9 +315,9 @@ impl Theme {
     /// Sets the number of theme key `key`.
     pub fn set_number(&mut self, key: &str, value: f32) {
         match key {
-            "radius" => self.radius = value,
-            "radius.lg" => self.radius_lg = value,
-            "font.size" => self.font_size = value,
+            "radius" => self.radius = Points(value),
+            "radius.lg" => self.radius_lg = Points(value),
+            "font.size" => self.font_size = Points(value),
             key => {
                 self.custom.numbers.insert(key.into(), value);
             }
@@ -333,9 +334,9 @@ impl Theme {
 
     /// Each number by key.
     pub(crate) fn each_number(&self, mut f: impl FnMut(&str, f32)) {
-        f("radius", self.radius);
-        f("radius.lg", self.radius_lg);
-        f("font.size", self.font_size);
+        f("radius", self.radius.0);
+        f("radius.lg", self.radius_lg.0);
+        f("font.size", self.font_size.0);
         for (key, n) in &self.custom.numbers {
             f(key, *n);
         }
@@ -370,13 +371,13 @@ impl Theme {
             };
             let number = |key: &str| entry.get(key).and_then(JsonValue::as_f64).map(|n| n as f32);
             if let Some(r) = number("radius") {
-                self.radius = r;
+                self.radius = Points(r);
             }
             if let Some(r) = number("radius.lg") {
-                self.radius_lg = r;
+                self.radius_lg = Points(r);
             }
             if let Some(s) = number("font.size") {
-                self.font_size = s;
+                self.font_size = Points(s);
             }
             // Other numbers (`radius.card`, `mono_font.size`) are
             // tokens for classes.
@@ -447,7 +448,7 @@ impl Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::color::rgb;
+    use crate::{color::rgb, geometry::px};
 
     fn hsla(hex: u32) -> Hsla {
         rgb(hex).into()
@@ -485,7 +486,7 @@ mod tests {
         assert_eq!(theme.primary.dark, hsla(0xfafafa));
         assert_eq!(
             (theme.radius, theme.radius_lg, theme.font_size),
-            (12.0, 16.0, 16.0)
+            (px(12.0), px(16.0), px(16.0))
         );
     }
 
@@ -505,7 +506,7 @@ mod tests {
         assert_eq!(theme.primary_active.dark, hsla(0xffffff));
         // Palette names; keys only desktop components use are ignored.
         assert_eq!(theme.border.light, PALETTE.colors["red-500"].into());
-        assert_eq!(theme.radius, 8.0);
+        assert_eq!(theme.radius, px(8.0));
         assert_eq!(theme.secondary, Theme::default().secondary);
         assert!(Theme::from_json(r#"{ "themes": [{ "colors": { "ring": 3 } }] }"#).is_err());
     }
@@ -533,7 +534,7 @@ mod tests {
         assert_eq!(theme.color("title_bar.background"), None);
         assert_eq!(theme.color("primary.background"), Some(theme.primary));
         assert_eq!(theme.number("radius.card"), Some(10.0));
-        assert_eq!(theme.number("radius"), Some(theme.radius));
+        assert_eq!(theme.number("radius"), Some(theme.radius.0));
         let mut host = Theme::default();
         host.set_color("sidebar.background", hsla(0x222222).into());
         host.inherit(&theme);

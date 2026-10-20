@@ -197,10 +197,10 @@ fn Pager() -> impl IntoElement {
     let pages_wide = animated_value(width.get_untracked().max(1.0));
     effect(move || pages_wide.set(width.get().max(1.0)));
     let at = x.div(&pages_wide);
-    let settle = move |e: &ScrollOffset| {
+    let settle = move |e: &Point<Points>| {
         let width = width.get_untracked();
         if width > 0.0 {
-            page.set((e.x / width).round().max(0.0) as usize);
+            page.set((e.x.0 / width).round().max(0.0) as usize);
         }
     };
     let pages = PAGES
@@ -354,16 +354,16 @@ fn Cards() -> impl IntoElement {
             )
     })
     .horizontal()
-    .estimated_item_size(CARD + GAP)
-    .snap_interval(CARD + GAP)
+    .estimated_item_size(px(CARD + GAP))
+    .snap_interval(px(CARD + GAP))
     .snap_alignment(move || ALIGNS[align.get()].0)
     // `decelerationRate="fast"`.
     .deceleration(0.99)
     .disable_interval_momentum(one_step)
     .shows_indicator(false)
     .h(px(128.0))
-    .column_gap(GAP)
-    .content_padding_x(14.0);
+    .column_gap(px(GAP))
+    .content_padding_x(px(14.0));
     view()
         .gap_3()
         .child(view().mx(px(-14.0)).child(cards))
@@ -437,15 +437,17 @@ fn Events() -> impl IntoElement {
     // Which of [`THROTTLES`].
     let throttle = signal(1_usize);
     let note = move |name: &'static str, tone: Tone| {
-        move |e: &ScrollOffset| {
+        move |e: &Point<Points>| {
             log.update(|log| {
-                log.insert(0, (name, e.y.round(), tone));
+                log.insert(0, (name, e.y.0.round(), tone));
                 log.truncate(5);
             });
         }
     };
     let progress = move || match offset.get() {
-        Some(o) if o.content_height > o.height => o.y / (o.content_height - o.height),
+        Some(o) if o.content_size.height > o.size.height => {
+            o.offset.y / (o.content_size.height - o.size.height)
+        }
         _ => 0.0,
     };
     let rows = (1..=30).map(|i: u32| {
@@ -474,11 +476,11 @@ fn Events() -> impl IntoElement {
     let figure = Figure::new(move || {
         offset
             .get()
-            .map_or("0".to_owned(), |o| o.y.round().to_string())
+            .map_or("0".to_owned(), |o| o.offset.y.0.round().to_string())
     })
     .note(move || {
         offset.get().map_or("Scroll the box".to_owned(), |o| {
-            format!("/ {}", o.content_height.round())
+            format!("/ {}", o.content_size.height.0.round())
         })
     });
     view()
@@ -492,7 +494,7 @@ fn Events() -> impl IntoElement {
                     text(move || {
                         let viewport = offset
                             .get()
-                            .map_or("—".to_owned(), |o| o.height.round().to_string());
+                            .map_or("—".to_owned(), |o| o.size.height.0.round().to_string());
                         format!("viewport {viewport} pt")
                     })
                     .text_size(px(13.0))
@@ -594,7 +596,7 @@ fn Zoom() -> impl IntoElement {
                 } else {
                     1.0
                 };
-                scroll_ref.zoom_to(to, Some((x, y)), true);
+                scroll_ref.zoom_to(to, Some(point(px(x), px(y))), true);
             })
             .child(
                 view()
@@ -776,7 +778,7 @@ fn Feed() -> impl IntoElement {
                 },
             )
             .keys(move || posts.with(|p| p.iter().map(|p| p.id).collect::<Vec<_>>()))
-            .estimated_item_size(48.0)
+            .estimated_item_size(px(48.0))
             .h(px(240.0))
             .rounded(px(radius::CONTROL))
             .bg(colors::SURFACE)

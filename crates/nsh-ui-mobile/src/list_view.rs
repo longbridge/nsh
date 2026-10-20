@@ -51,13 +51,13 @@ pub fn ListView(props: ListViewProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             move |list| {
                 let margin = move || if inset.get() { 16.0 } else { 0.0 };
                 list.flex_1()
-                    .estimated_item_size(48.0)
+                    .estimated_item_size(px(48.0))
                     .content_padding(margin)
                     // The last rows scroll clear of the home indicator.
                     .content_padding_bottom(move || safe_area().bottom + margin())
             },
             move |row, at| {
-                let radius = move || px(theme().radius_lg);
+                let radius = move || theme().radius_lg;
                 view()
                     .px_4()
                     .py_3()

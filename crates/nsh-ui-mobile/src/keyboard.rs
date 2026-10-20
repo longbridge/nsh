@@ -83,7 +83,7 @@ pub fn KeyboardAvoidingView(props: KeyboardAvoidingViewProps) -> impl IntoElemen
         }
     });
     let lift = computed(move || {
-        let height = keyboard_height();
+        let height = keyboard_height().0;
         if !props.enabled.get() || height == 0.0 {
             0.0
         } else {

@@ -5,8 +5,9 @@ use std::{borrow::Cow, sync::Arc};
 
 use super::element::Listener;
 use crate::{
-    Bounds, ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Points, Size,
-    TouchEvent,
+    Bounds, ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Point, Points,
+    Size, TouchEvent,
+    geometry::{DevicePixels, Radians, point, px},
 };
 
 /// Local files or directories dropped on an element (`on_file_drop`).
@@ -19,18 +20,12 @@ pub struct FileDropEvent {
 /// A scroll view moved (`on_scroll`): the offset, and the sizes it moves in.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollEvent {
-    /// Horizontal content offset.
-    pub x: f32,
-    /// Vertical content offset.
-    pub y: f32,
-    /// The content's width.
-    pub content_width: f32,
-    /// The content's height.
-    pub content_height: f32,
-    /// The scroll view's width.
-    pub width: f32,
-    /// The scroll view's height.
-    pub height: f32,
+    /// The content offset (TS: `contentOffset`).
+    pub offset: Point<Points>,
+    /// The content's size (TS: `contentSize`).
+    pub content_size: Size<Points>,
+    /// The scroll view's size (TS: `layoutMeasurement`).
+    pub size: Size<Points>,
     /// How far a zooming scroll view is zoomed (1: not zoomed; the content
     /// sizes are the zoomed ones).
     pub zoom_scale: f32,
@@ -39,49 +34,38 @@ pub struct ScrollEvent {
 impl Default for ScrollEvent {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            content_width: 0.0,
-            content_height: 0.0,
-            width: 0.0,
-            height: 0.0,
+            offset: Point::default(),
+            content_size: Size::default(),
+            size: Size::default(),
             zoom_scale: 1.0,
         }
     }
-}
-
-/// A scroll view's offset (drags, momentum, rest).
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct ScrollOffset {
-    /// Horizontal content offset.
-    pub x: f32,
-    /// Vertical content offset.
-    pub y: f32,
 }
 
 /// A drag (`on_pan_start` / `on_pan_end`): translation since it started and
 /// velocity, in points (per second).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PanEvent {
-    /// Horizontal translation.
-    pub translation_x: f32,
-    /// Vertical translation.
-    pub translation_y: f32,
+    /// The translation.
+    pub translation: Point<Points>,
     /// Horizontal velocity.
     pub velocity_x: f32,
     /// Vertical velocity.
     pub velocity_y: f32,
-    /// The bound horizontal animated value now (`Interactive::pan`).
+    /// The bound horizontal animated value now (`Interactive::pan`; the
+    /// values an app binds are of any quantity).
     pub value_x: Option<f32>,
     /// The bound vertical animated value now.
     pub value_y: Option<f32>,
 }
 
-/// A pinch or a rotation: its amount (scale, or radians) and velocity.
+/// A pinch or a rotation: its amount and velocity. A pinch's amount is
+/// its scale (`GestureEvent<f32>`), a rotation's an angle
+/// (`GestureEvent<Radians>`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct GestureEvent {
-    /// The scale (pinches) or the rotation in radians.
-    pub value: f32,
+pub struct GestureEvent<T = f32> {
+    /// The scale (pinches) or the rotation (rotations).
+    pub value: T,
     /// Per second.
     pub velocity: f32,
 }
@@ -115,10 +99,9 @@ pub struct WebNavigation {
 pub struct VideoInfo {
     /// Seconds.
     pub duration: f32,
-    /// Width.
-    pub width: f32,
-    /// Height.
-    pub height: f32,
+    /// Its frames' size in pixels, as decoded (GPUI's images' sizes are
+    /// [`DevicePixels`] too).
+    pub size: Size<DevicePixels>,
 }
 
 /// A video played on (`on_progress`).
@@ -256,17 +239,16 @@ pub(crate) fn size(p: &EventPayload) -> Option<Cow<'_, Size<Points>>> {
 pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
     Some(Cow::Owned(match *p {
         EventPayload::Scroll { x, y } => ScrollEvent {
-            x,
-            y,
+            offset: point(px(x), px(y)),
             ..ScrollEvent::default()
         },
         _ => ScrollEvent {
-            x: number(p, "x"),
-            y: number(p, "y"),
-            content_width: number(p, "contentWidth"),
-            content_height: number(p, "contentHeight"),
-            width: number(p, "width"),
-            height: number(p, "height"),
+            offset: point(px(number(p, "x")), px(number(p, "y"))),
+            content_size: Size::new(
+                px(number(p, "contentWidth")),
+                px(number(p, "contentHeight")),
+            ),
+            size: Size::new(px(number(p, "width")), px(number(p, "height"))),
             zoom_scale: match field(p, "zoomScale") {
                 Some(PayloadValue::Number(n)) => *n as f32,
                 _ => 1.0,
@@ -275,13 +257,10 @@ pub(crate) fn scroll(p: &EventPayload) -> Option<Cow<'_, ScrollEvent>> {
     }))
 }
 
-pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, ScrollOffset>> {
+pub(crate) fn offset(p: &EventPayload) -> Option<Cow<'_, Point<Points>>> {
     Some(Cow::Owned(match *p {
-        EventPayload::Scroll { x, y } => ScrollOffset { x, y },
-        _ => ScrollOffset {
-            x: number(p, "x"),
-            y: number(p, "y"),
-        },
+        EventPayload::Scroll { x, y } => point(px(x), px(y)),
+        _ => point(px(number(p, "x")), px(number(p, "y"))),
     }))
 }
 
@@ -295,8 +274,7 @@ pub(crate) fn pan(p: &EventPayload) -> Option<Cow<'_, PanEvent>> {
             value_x,
             value_y,
         } => Some(Cow::Owned(PanEvent {
-            translation_x,
-            translation_y,
+            translation: point(px(translation_x), px(translation_y)),
             velocity_x,
             velocity_y,
             value_x,
@@ -313,9 +291,9 @@ pub(crate) fn pinch(p: &EventPayload) -> Option<Cow<'_, GestureEvent>> {
     }))
 }
 
-pub(crate) fn rotation(p: &EventPayload) -> Option<Cow<'_, GestureEvent>> {
+pub(crate) fn rotation(p: &EventPayload) -> Option<Cow<'_, GestureEvent<Radians>>> {
     Some(Cow::Owned(GestureEvent {
-        value: number(p, "rotation"),
+        value: Radians(number(p, "rotation")),
         velocity: number(p, "velocity"),
     }))
 }
@@ -340,8 +318,10 @@ pub(crate) fn navigation(p: &EventPayload) -> Option<Cow<'_, WebNavigation>> {
 pub(crate) fn video(p: &EventPayload) -> Option<Cow<'_, VideoInfo>> {
     Some(Cow::Owned(VideoInfo {
         duration: number(p, "duration"),
-        width: number(p, "width"),
-        height: number(p, "height"),
+        size: Size::new(
+            DevicePixels(number(p, "width").round() as i32),
+            DevicePixels(number(p, "height").round() as i32),
+        ),
     }))
 }
 

@@ -400,5 +400,5 @@ pub(crate) fn head(label: &'static str, col: Col, right: bool) -> Text {
         .text_size(px(11.0))
         .text_color(colors::FAINT)
         .tabular_nums()
-        .letter_spacing(0.6)
+        .letter_spacing(px(0.6))
 }

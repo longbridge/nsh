@@ -20,7 +20,7 @@ use std::{rc::Rc, time::Duration};
 use nsh_core::{
     LayoutAnimation, Points, Size,
     time::Instant,
-    ui::{AccessibilityState, ScrollEvent, ScrollOffset, View, prelude::*},
+    ui::{AccessibilityState, ScrollEvent, View, prelude::*},
 };
 use nsh_ui_mobile::{KeyboardAvoidingView, KeyboardAvoidingViewProps};
 
@@ -1040,7 +1040,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .pt_2()
         .pb(move || {
             px(8.0
-                + if keyboard_height() > 0.0 {
+                + if keyboard_height() > px(0.0) {
                     0.0
                 } else {
                     cx.insets().bottom
@@ -1111,7 +1111,9 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .gap_2()
                         .child(
                             view()
-                                .style_with(move |s| s.rotate(if menu.get() { 45.0 } else { 0.0 }))
+                                .style_with(move |s| {
+                                    s.rotate(deg(if menu.get() { 45.0 } else { 0.0 }))
+                                })
                                 .transition_transform()
                                 .duration(200.0)
                                 .ease_out()
@@ -1288,7 +1290,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                 .text_size(px(11.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors::FAINT)
-                .letter_spacing(0.6)
+                .letter_spacing(px(0.6))
                 .px_3()
                 .pt(px(18.0))
                 .pb(px(6.0)),
@@ -1483,27 +1485,27 @@ impl ChatState {
             },
         )
         .keys(move || messages.with(|m| m.iter().map(|m| m.id().to_owned()).collect::<Vec<_>>()))
-        .estimated_item_size(140.0)
+        .estimated_item_size(px(140.0))
         .initial_scroll_index(count.saturating_sub(1))
         .flex_1()
-        .content_padding_top(8.0)
-        .content_padding_bottom(16.0)
+        .content_padding_top(px(8.0))
+        .content_padding_bottom(px(16.0))
         .keyboard_dismiss_mode(KeyboardDismissMode::Interactive)
-        .follow_end(40.0)
+        .follow_end(px(40.0))
         .event_throttle(100.0)
         .element_ref(&list)
-        .on_scroll_begin_drag(move |_: &ScrollOffset| {
+        .on_scroll_begin_drag(move |_: &Point<Points>| {
             dragging.replace(true);
         })
         .on_scroll(move |e: &ScrollEvent| {
             if dragging.with(|d| *d) {
-                following.set(e.y + e.height >= e.content_height - 40.0);
+                following.set(e.offset.y + e.size.height >= e.content_size.height - px(40.0));
             }
         })
-        .on_momentum_scroll_end(move |_: &ScrollOffset| {
+        .on_momentum_scroll_end(move |_: &Point<Points>| {
             dragging.replace(false);
         })
-        .on_scroll_end(move |_: &ScrollOffset| {
+        .on_scroll_end(move |_: &Point<Points>| {
             dragging.replace(false);
         })
     }
@@ -1811,7 +1813,7 @@ fn reasoning_toggle(
         )
         .child(
             view()
-                .style_with(move |s| s.rotate(if open.get() { 0.0 } else { -90.0 }))
+                .style_with(move |s| s.rotate(deg(if open.get() { 0.0 } else { -90.0 })))
                 .transition_transform()
                 .duration(220.0)
                 .ease_out()

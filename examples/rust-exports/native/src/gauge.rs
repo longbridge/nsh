@@ -42,7 +42,7 @@ pub fn Gauge(props: GaugeProps, cx: Scope<GaugeEvent>) -> impl IntoElement {
     view()
         .gap_2()
         .p_4()
-        .rounded(move || px(theme().radius_lg))
+        .rounded(move || theme().radius_lg)
         .bg(move || theme().group_box)
         .border_1()
         .border_color(move || theme().border)

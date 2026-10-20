@@ -3,12 +3,13 @@
 //! (`ScrollingHostProps`).
 
 use super::{
-    AnimatedValue, Element, IntoListener, IntoReactive, Listener, ScrollEvent, ScrollOffset,
+    AnimatedValue, Element, IntoListener, IntoReactive, Listener, ScrollEvent,
     events::{self, Decode},
     host,
 };
 use crate::{
     EdgeInsets, EventKind, KeyboardDismissMode, KeyboardTaps, Prop, ScrollProp, SnapAlignment,
+    geometry::{Point, Points},
 };
 
 /// How an element scrolls: [`super::Scroll`], [`super::VirtualList`] and
@@ -43,18 +44,20 @@ pub trait Scrollable: Element {
         self
     }
 
-    /// Stops on multiples of `points` (TS: `snapToInterval`; 0: off).
-    fn snap_interval(mut self, points: impl IntoReactive<f32>) -> Self {
-        host::bind_prop(self.node(), points, |points| {
-            Prop::Scroll(ScrollProp::SnapInterval(points))
+    /// Stops on multiples of `interval` (TS: `snapToInterval`; 0: off).
+    fn snap_interval(mut self, interval: impl IntoReactive<Points>) -> Self {
+        host::bind_prop(self.node(), interval, |interval: Points| {
+            Prop::Scroll(ScrollProp::SnapInterval(interval.0))
         });
         self
     }
 
     /// Stops at these offsets (TS: `snapToOffsets`).
-    fn snap_offsets(mut self, offsets: impl IntoReactive<Vec<f32>>) -> Self {
-        host::bind_prop(self.node(), offsets, |offsets| {
-            Prop::Scroll(ScrollProp::SnapOffsets(offsets))
+    fn snap_offsets(mut self, offsets: impl IntoReactive<Vec<Points>>) -> Self {
+        host::bind_prop(self.node(), offsets, |offsets: Vec<Points>| {
+            Prop::Scroll(ScrollProp::SnapOffsets(
+                offsets.into_iter().map(|o| o.0).collect(),
+            ))
         });
         self
     }
@@ -109,8 +112,10 @@ pub trait Scrollable: Element {
     }
 
     /// Where it starts (set once).
-    fn content_offset(self, x: f32, y: f32) -> Self {
-        self.set_scroll_prop(Prop::Scroll(ScrollProp::ContentOffset(x, y)))
+    fn content_offset(self, offset: Point<Points>) -> Self {
+        self.set_scroll_prop(Prop::Scroll(ScrollProp::ContentOffset(
+            offset.x.0, offset.y.0,
+        )))
     }
 
     /// Taps while the keyboard shows: dismiss it, or reach the content (TS:
@@ -168,7 +173,7 @@ pub trait Scrollable: Element {
     }
 
     /// The user started dragging it.
-    fn on_scroll_begin_drag<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+    fn on_scroll_begin_drag<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
             EventKind::ScrollBeginDrag,
             listener.into_listener(),
@@ -177,7 +182,7 @@ pub trait Scrollable: Element {
     }
 
     /// The user let go.
-    fn on_scroll_end_drag<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+    fn on_scroll_end_drag<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
             EventKind::ScrollEndDrag,
             listener.into_listener(),
@@ -186,7 +191,7 @@ pub trait Scrollable: Element {
     }
 
     /// It started gliding after a fling.
-    fn on_momentum_scroll_begin<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+    fn on_momentum_scroll_begin<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
             EventKind::MomentumScrollBegin,
             listener.into_listener(),
@@ -195,7 +200,7 @@ pub trait Scrollable: Element {
     }
 
     /// It stopped gliding.
-    fn on_momentum_scroll_end<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+    fn on_momentum_scroll_end<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
             EventKind::MomentumScrollEnd,
             listener.into_listener(),
@@ -204,7 +209,7 @@ pub trait Scrollable: Element {
     }
 
     /// It came to rest.
-    fn on_scroll_end<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+    fn on_scroll_end<M>(self, listener: impl IntoListener<Point<Points>, M>) -> Self {
         self.listen_scroll(
             EventKind::ScrollEnd,
             listener.into_listener(),
@@ -217,3 +222,4 @@ crate::static_reactive!(SnapAlignment: SnapAlignment);
 crate::static_reactive!(KeyboardTaps: KeyboardTaps);
 crate::static_reactive!(KeyboardDismissMode: KeyboardDismissMode);
 crate::static_reactive!(Vec<f32>: Vec<f32>);
+crate::static_reactive!(Vec<Points>: Vec<Points>);

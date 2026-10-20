@@ -409,7 +409,7 @@ fn last(data: &[f64]) -> f64 {
 fn draw_area(c: Palette, width: f32, height: f32, data: &[f64], sweep: &AnimatedValue) -> Painter {
     let values: Vec<f32> = data.iter().map(|v| *v as f32).collect();
     let font = sans(11.0, 400);
-    let measure = |s: &str| measure_text(&font, s);
+    let measure = |s: &str| measure_text(&font, s).0;
     let (left, right, top, bottom) = (measure("100") + 8.0, 4.0, 16.0, 20.0);
     let w = width - left - right;
     let h = height - top - bottom;
@@ -582,7 +582,7 @@ fn ridges() -> Vec<Vec<f32>> {
 /// The ridgeline, its curves clipped to `sweep`.
 fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Painter {
     let font = sans(11.0, 400);
-    let measure = |s: &str| measure_text(&font, s);
+    let measure = |s: &str| measure_text(&font, s).0;
     let left = measure("Mon") + 10.0;
     let bottom = 18.0;
     let step = (height - bottom - 30.0) / (DAYS.len() - 1) as f32;
@@ -782,10 +782,10 @@ fn draw_dumbbell(c: Palette, width: f32, height: f32, t: &AnimatedValue) -> Pain
     let (name_font, small) = (sans(13.0, 400), sans(11.0, 400));
     let left = ROUTES
         .iter()
-        .map(|r| measure_text(&name_font, r.0))
+        .map(|r| measure_text(&name_font, r.0).0)
         .fold(0.0, f32::max)
         + 12.0;
-    let right = measure_text(&small, "+00%") + 10.0;
+    let right = measure_text(&small, "+00%").0 + 10.0;
     let max = 250.0;
     let x = |ms: f32| left + ms / max * (width - left - right);
     let mut p = Painter::new()
@@ -796,7 +796,7 @@ fn draw_dumbbell(c: Palette, width: f32, height: f32, t: &AnimatedValue) -> Pain
         let label = format!("{ms}");
         p = p.fill_color(c.faint).fill_text(
             &label,
-            x(ms) - measure_text(&small, &label) / 2.0,
+            x(ms) - measure_text(&small, &label).0 / 2.0,
             height - 3.0,
         );
     }
@@ -837,7 +837,7 @@ fn draw_dumbbell(c: Palette, width: f32, height: f32, t: &AnimatedValue) -> Pain
             .fill()
             .font(&small)
             .fill_color(tone)
-            .fill_text(&label, width - measure_text(&small, &label), cy);
+            .fill_text(&label, width - measure_text(&small, &label).0, cy);
     }
     p
 }
@@ -1167,13 +1167,13 @@ fn Sketch() -> impl IntoElement {
     .claim_touches(TouchClaim::on_start())
     .keep_touches(true)
     .on_responder_grant(move |e: &ResponderEvent| {
-        strokes.update(|s| s.push(vec![(e.location_x, e.location_y)]));
+        strokes.update(|s| s.push(vec![(e.location.x.0, e.location.y.0)]));
     })
     .on_responder_move(move |e: &ResponderEvent| {
         if strokes.with_untracked(|s| !s.is_empty()) {
             strokes.update(|s| {
                 if let Some(stroke) = s.last_mut() {
-                    stroke.push((e.location_x, e.location_y));
+                    stroke.push((e.location.x.0, e.location.y.0));
                 }
             });
         }

@@ -13,7 +13,8 @@ use nsh_core::{
     geometry::px,
     nsh_animation::{Curve, EaseMode},
     ui::{
-        AdaptiveColor, BoxShadow, Easing, Rgba, Spring, StyleRefinement, Styled, Timing, rgb, rgba,
+        AdaptiveColor, BoxShadow, Easing, Rgba, Spring, StyleRefinement, Styled, Timing,
+        percentage, rgb, rgba,
     },
 };
 
@@ -508,12 +509,14 @@ pub(crate) trait Finished: Styled + Sized {
                 this = this
                     .bg_linear_to_b()
                     .gradient_from(*from)
-                    .gradient_from_position(*from_at);
+                    .gradient_from_position(percentage(*from_at));
                 if let [(via, via_at), _] = rest {
-                    this = this.gradient_via(*via).gradient_via_position(*via_at);
+                    this = this
+                        .gradient_via(*via)
+                        .gradient_via_position(percentage(*via_at));
                 }
                 let (to, to_at) = rest[rest.len() - 1];
-                this.gradient_to(to).gradient_to_position(to_at)
+                this.gradient_to(to).gradient_to_position(percentage(to_at))
             }
             _ => this,
         }

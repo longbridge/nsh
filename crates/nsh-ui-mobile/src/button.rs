@@ -69,7 +69,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         .justify_center()
         .px_4()
         .py_3()
-        .rounded(move || px(theme().radius))
+        .rounded(move || theme().radius)
         .bg(move || colors.get().0)
         .active(|s| s.bg(move || colors.get().1))
         .style_when(props.disabled, |v| v.opacity(0.5))
@@ -84,7 +84,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
         .child(
             text(props.title)
-                .text_size(move || px(theme().font_size))
+                .text_size(move || theme().font_size)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(move || colors.get().2),
         )

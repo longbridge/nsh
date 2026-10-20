@@ -24,7 +24,11 @@ use std::{
 use rustc_hash::FxHashMap;
 use tokio::runtime::Handle;
 
-use crate::{Command, Dialog, NodeId, ROOT_ID, StatusBarSetting, time::Instant};
+use crate::{
+    Command, Dialog, NodeId, ROOT_ID, StatusBarSetting,
+    geometry::{DevicePixels, Size},
+    time::Instant,
+};
 
 type LocalFuture = Pin<Box<dyn Future<Output = ()>>>;
 
@@ -123,18 +127,38 @@ pub struct ClipboardImage {
     /// source, and `fetch(uri)` gives its bytes.
     pub uri: String,
     /// Width in pixels.
-    pub width: f64,
+    pub width: DevicePixels,
     /// Height in pixels.
-    pub height: f64,
+    pub height: DevicePixels,
+}
+
+impl ClipboardImage {
+    /// Its size in pixels.
+    pub fn size(&self) -> Size<DevicePixels> {
+        Size::new(self.width, self.height)
+    }
 }
 
 /// An image's size in pixels (`Image.getSize`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, super::JsObject)]
 pub struct ImageSize {
     /// Width.
-    pub width: f64,
+    pub width: DevicePixels,
     /// Height.
-    pub height: f64,
+    pub height: DevicePixels,
+}
+
+impl ImageSize {
+    /// As a [`Size`].
+    pub fn size(&self) -> Size<DevicePixels> {
+        Size::new(self.width, self.height)
+    }
+}
+
+impl From<ImageSize> for Size<DevicePixels> {
+    fn from(s: ImageSize) -> Self {
+        s.size()
+    }
 }
 
 /// The status bar's base setting, as a command for the surface's root.

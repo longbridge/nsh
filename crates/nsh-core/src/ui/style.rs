@@ -25,8 +25,8 @@ use crate::{
     color::{Hsla, Rgba, transparent_black},
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     geometry::{
-        AbsoluteLength, DefiniteLength, Length, Percentage, Points, REM_SIZE, Rems, deg,
-        percentage, px, relative,
+        AbsoluteLength, DefiniteLength, Length, Percentage, Point, Points, REM_SIZE, Radians, Rems,
+        deg, percentage, px, relative,
     },
     style::{Color, OriginLen, PatchValue, StyleDecl, StyleKey},
     tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
@@ -44,6 +44,11 @@ fn length_patch(length: Length) -> PatchValue {
         }
         Length::Auto => PatchValue::Str("auto".into()),
     }
+}
+
+/// An absolute length in points (a rem at [`REM_SIZE`]).
+fn points(length: AbsoluteLength) -> f32 {
+    length.to_points(REM_SIZE).0
 }
 
 /// A font weight (100–900).
@@ -276,13 +281,13 @@ impl ColorPart {
 /// A gradient's geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum GradientShape {
-    /// Along a line at an angle (degrees, 0 up, 90 right).
+    /// Along a line at an angle (radians, 0 up, a quarter turn right).
     Linear(Bits),
     /// Towards a corner.
     Corner { right: bool, bottom: bool },
     /// An ellipse from the center to the farthest corner.
     Radial,
-    /// Around the center, from an angle (degrees, 0 up).
+    /// Around the center, from an angle (radians, 0 up).
     Conic(Bits),
 }
 
@@ -550,7 +555,7 @@ impl Declaration {
                 out,
                 Part::Gradient(match *shape {
                     GradientShape::Linear(angle) => GradientKind::Linear {
-                        angle: deg(angle.0),
+                        angle: Radians(angle.0),
                     },
                     GradientShape::Corner { right, bottom } => {
                         GradientKind::LinearCorner { right, bottom }
@@ -562,7 +567,7 @@ impl Declaration {
                         y: percentage(0.5),
                     },
                     GradientShape::Conic(from) => GradientKind::Conic {
-                        from: deg(from.0),
+                        from: Radians(from.0),
                         x: percentage(0.5),
                         y: percentage(0.5),
                     },
@@ -642,6 +647,11 @@ type Entries = Vec<(Variant, Declaration)>;
 
 crate::static_reactive!(AdaptiveColor: AdaptiveColor, Hsla, Rgba, Color);
 crate::static_reactive!(Length: Length, Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
+crate::static_reactive!(DefiniteLength: Points, Rems, AbsoluteLength, DefiniteLength, Percentage);
+crate::static_reactive!(AbsoluteLength: Points, Rems, AbsoluteLength);
+crate::static_reactive!(Points: Points);
+crate::static_reactive!(Radians: Radians);
+crate::static_reactive!(Percentage: Percentage);
 crate::static_reactive!(u16: u16);
 crate::static_reactive!(i16: i16);
 
@@ -1428,21 +1438,21 @@ pub trait Styled: Sized {
     }
 
     /// The border width on all sides.
-    fn border(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderWidth, width);
+    fn border(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderWidth, points(width));
         });
         self
     }
 
     /// A 1pt border.
     fn border_1(self) -> Self {
-        self.border(1.0)
+        self.border(px(1.0))
     }
 
     /// A 2pt border.
     fn border_2(self) -> Self {
-        self.border(2.0)
+        self.border(px(2.0))
     }
 
     /// A 1pt top border.
@@ -1478,71 +1488,71 @@ pub trait Styled: Sized {
     }
 
     /// The top border's width.
-    fn border_t(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderTopWidth, width);
+    fn border_t(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderTopWidth, points(width));
         });
         self
     }
 
     /// The right border's width.
-    fn border_r(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderRightWidth, width);
+    fn border_r(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderRightWidth, points(width));
         });
         self
     }
 
     /// The bottom border's width.
-    fn border_b(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderBottomWidth, width);
+    fn border_b(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderBottomWidth, points(width));
         });
         self
     }
 
     /// The left border's width.
-    fn border_l(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderLeftWidth, width);
+    fn border_l(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderLeftWidth, points(width));
         });
         self
     }
 
     /// The left and right borders' width.
-    fn border_x(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
+    fn border_x(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
             s.numbers(
                 &[StyleKey::BorderLeftWidth, StyleKey::BorderRightWidth],
-                width,
+                points(width),
             );
         });
         self
     }
 
     /// The top and bottom borders' width.
-    fn border_y(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
+    fn border_y(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
             s.numbers(
                 &[StyleKey::BorderTopWidth, StyleKey::BorderBottomWidth],
-                width,
+                points(width),
             );
         });
         self
     }
 
     /// The leading border's width (left in left-to-right layouts).
-    fn border_s(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderStartWidth, width);
+    fn border_s(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderStartWidth, points(width));
         });
         self
     }
 
     /// The trailing border's width.
-    fn border_e(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.number(StyleKey::BorderEndWidth, width);
+    fn border_e(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.number(StyleKey::BorderEndWidth, points(width));
         });
         self
     }
@@ -1768,11 +1778,10 @@ pub trait Styled: Sized {
         self
     }
 
-    /// An outline `width` points wide, outside the border; it takes no
-    /// space.
-    fn outline(mut self, width: f32) -> Self {
+    /// An outline `width` wide, outside the border; it takes no space.
+    fn outline(mut self, width: impl Into<AbsoluteLength>) -> Self {
         let s = self.style();
-        s.number(StyleKey::OutlineWidth, width);
+        s.number(StyleKey::OutlineWidth, points(width.into()));
         s.keyword(StyleKey::OutlineStyle, "solid");
         self
     }
@@ -1786,10 +1795,11 @@ pub trait Styled: Sized {
     }
 
     /// The outline's distance from the border (negative: inside it).
-    fn outline_offset(mut self, points: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(points, |s, points: f32| {
-            s.number(StyleKey::OutlineOffset, points);
-        });
+    fn outline_offset(mut self, offset: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style()
+            .bind_value(offset, |s, offset: AbsoluteLength| {
+                s.number(StyleKey::OutlineOffset, points(offset));
+            });
         self
     }
 
@@ -1890,19 +1900,20 @@ pub trait Styled: Sized {
         self
     }
 
-    /// The shadow's blur radius, in points (3 by default).
-    fn shadow_radius(mut self, radius: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(radius, |s, radius: f32| {
-            s.number(StyleKey::ShadowRadius, radius);
+    /// The shadow's blur radius (3 points by default).
+    fn shadow_radius(mut self, radius: impl IntoReactive<Points>) -> Self {
+        self.style().bind_value(radius, |s, radius: Points| {
+            s.number(StyleKey::ShadowRadius, radius.0);
         });
         self
     }
 
-    /// The shadow's offset, in points (right and down; `(0, -3)` by
-    /// default).
-    fn shadow_offset(mut self, x: f32, y: f32) -> Self {
-        self.style()
-            .push(Declaration::ShadowOffset(Bits(x), Bits(y)));
+    /// The shadow's offset (right and down; `(0, -3)` points by default).
+    fn shadow_offset(mut self, offset: Point<Points>) -> Self {
+        self.style().push(Declaration::ShadowOffset(
+            Bits(offset.x.0),
+            Bits(offset.y.0),
+        ));
         self
     }
 
@@ -1939,11 +1950,11 @@ pub trait Styled: Sized {
         self
     }
 
-    /// A ring `width` points wide around the border (a solid shadow; it
-    /// takes no space), in the text color unless [`Styled::ring_color`].
-    fn ring(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.push(Declaration::Ring(Bits(width)));
+    /// A ring `width` wide around the border (a solid shadow; it takes no
+    /// space), in the text color unless [`Styled::ring_color`].
+    fn ring(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.push(Declaration::Ring(Bits(points(width))));
         });
         self
     }
@@ -1956,10 +1967,10 @@ pub trait Styled: Sized {
         self
     }
 
-    /// A gap of `width` points between the border and the ring.
-    fn ring_offset(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.push(Declaration::RingOffset(Bits(width)));
+    /// A gap of `width` between the border and the ring.
+    fn ring_offset(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.push(Declaration::RingOffset(Bits(points(width))));
         });
         self
     }
@@ -1978,10 +1989,10 @@ pub trait Styled: Sized {
         self
     }
 
-    /// A second ring `width` points wide, inside the border.
-    fn inset_ring(mut self, width: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(width, |s, width: f32| {
-            s.push(Declaration::InsetRing(Bits(width)));
+    /// A second ring `width` wide, inside the border.
+    fn inset_ring(mut self, width: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style().bind_value(width, |s, width: AbsoluteLength| {
+            s.push(Declaration::InsetRing(Bits(points(width))));
         });
         self
     }
@@ -1994,34 +2005,34 @@ pub trait Styled: Sized {
         self
     }
 
-    /// A linear gradient over the background, along `degrees` (0 up, 90
-    /// right), from [`Styled::gradient_from`] through
+    /// A linear gradient over the background, along `angle` (0 up,
+    /// `deg(90.0)` right), from [`Styled::gradient_from`] through
     /// [`Styled::gradient_via`] to [`Styled::gradient_to`].
-    fn bg_linear(mut self, degrees: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(degrees, |s, degrees: f32| {
-            s.push(Declaration::Gradient(GradientShape::Linear(Bits(degrees))));
+    fn bg_linear(mut self, angle: impl IntoReactive<Radians>) -> Self {
+        self.style().bind_value(angle, |s, angle: Radians| {
+            s.push(Declaration::Gradient(GradientShape::Linear(Bits(angle.0))));
         });
         self
     }
 
     /// A linear gradient towards the top.
     fn bg_linear_to_t(self) -> Self {
-        self.bg_linear(0.0)
+        self.bg_linear(deg(0.0))
     }
 
     /// A linear gradient towards the right.
     fn bg_linear_to_r(self) -> Self {
-        self.bg_linear(90.0)
+        self.bg_linear(deg(90.0))
     }
 
     /// A linear gradient towards the bottom.
     fn bg_linear_to_b(self) -> Self {
-        self.bg_linear(180.0)
+        self.bg_linear(deg(180.0))
     }
 
     /// A linear gradient towards the left.
     fn bg_linear_to_l(self) -> Self {
-        self.bg_linear(270.0)
+        self.bg_linear(deg(270.0))
     }
 
     /// A linear gradient towards the top right corner.
@@ -2071,10 +2082,10 @@ pub trait Styled: Sized {
         self
     }
 
-    /// A conic gradient around the center, starting at `degrees` (0 up).
-    fn bg_conic(mut self, degrees: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(degrees, |s, degrees: f32| {
-            s.push(Declaration::Gradient(GradientShape::Conic(Bits(degrees))));
+    /// A conic gradient around the center, starting at `angle` (0 up).
+    fn bg_conic(mut self, angle: impl IntoReactive<Radians>) -> Self {
+        self.style().bind_value(angle, |s, angle: Radians| {
+            s.push(Declaration::Gradient(GradientShape::Conic(Bits(angle.0))));
         });
         self
     }
@@ -2109,35 +2120,34 @@ pub trait Styled: Sized {
         self
     }
 
-    /// Where the first color is, a fraction of the gradient (0 by
-    /// default).
-    fn gradient_from_position(mut self, at: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(at, |s, at: f32| {
-            s.push(Declaration::StopPosition(0, Bits(at)));
+    /// Where the first color is along the gradient (0% by default).
+    fn gradient_from_position(mut self, at: impl IntoReactive<Percentage>) -> Self {
+        self.style().bind_value(at, |s, at: Percentage| {
+            s.push(Declaration::StopPosition(0, Bits(at.0)));
         });
         self
     }
 
-    /// Where the middle color is (0.5 by default).
-    fn gradient_via_position(mut self, at: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(at, |s, at: f32| {
-            s.push(Declaration::StopPosition(1, Bits(at)));
+    /// Where the middle color is (50% by default).
+    fn gradient_via_position(mut self, at: impl IntoReactive<Percentage>) -> Self {
+        self.style().bind_value(at, |s, at: Percentage| {
+            s.push(Declaration::StopPosition(1, Bits(at.0)));
         });
         self
     }
 
-    /// Where the last color is (1 by default).
-    fn gradient_to_position(mut self, at: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(at, |s, at: f32| {
-            s.push(Declaration::StopPosition(2, Bits(at)));
+    /// Where the last color is (100% by default).
+    fn gradient_to_position(mut self, at: impl IntoReactive<Percentage>) -> Self {
+        self.style().bind_value(at, |s, at: Percentage| {
+            s.push(Declaration::StopPosition(2, Bits(at.0)));
         });
         self
     }
 
-    /// Blurs it and its content by `radius` points (Tailwind's `blur-sm`
-    /// is 8).
-    fn blur(self, radius: f32) -> Self {
-        filter(self, false, FilterFn::Blur, radius)
+    /// Blurs it and its content by `radius` (Tailwind's `blur-sm` is 8
+    /// points).
+    fn blur(self, radius: impl Into<Points>) -> Self {
+        filter(self, false, FilterFn::Blur, radius.into().0)
     }
 
     /// Brightens (> 1) or darkens (< 1) it.
@@ -2155,9 +2165,9 @@ pub trait Styled: Sized {
         filter(self, false, FilterFn::Grayscale, amount)
     }
 
-    /// Turns its hues by `degrees`.
-    fn hue_rotate(self, degrees: f32) -> Self {
-        filter(self, false, FilterFn::HueRotate, degrees)
+    /// Turns its hues by `angle`.
+    fn hue_rotate(self, angle: impl Into<Radians>) -> Self {
+        filter(self, false, FilterFn::HueRotate, angle.into().to_degrees())
     }
 
     /// Inverts its colors (1: fully).
@@ -2181,10 +2191,10 @@ pub trait Styled: Sized {
         self
     }
 
-    /// Blurs what is behind it by `radius` points (frosted glass; give it a
+    /// Blurs what is behind it by `radius` (frosted glass; give it a
     /// translucent background).
-    fn backdrop_blur(self, radius: f32) -> Self {
-        filter(self, true, FilterFn::Blur, radius)
+    fn backdrop_blur(self, radius: impl Into<Points>) -> Self {
+        filter(self, true, FilterFn::Blur, radius.into().0)
     }
 
     /// Brightens or darkens what is behind it.
@@ -2203,8 +2213,8 @@ pub trait Styled: Sized {
     }
 
     /// Turns the hues of what is behind it.
-    fn backdrop_hue_rotate(self, degrees: f32) -> Self {
-        filter(self, true, FilterFn::HueRotate, degrees)
+    fn backdrop_hue_rotate(self, angle: impl Into<Radians>) -> Self {
+        filter(self, true, FilterFn::HueRotate, angle.into().to_degrees())
     }
 
     /// Inverts what is behind it.
@@ -2406,63 +2416,78 @@ pub trait Styled: Sized {
         self.transform_step(TransformKind::ScaleY, scale)
     }
 
-    /// Moves horizontally by `points` (after layout).
-    fn translate_x(self, points: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::TranslateX, points)
+    /// Moves horizontally by `offset` (after layout): points, or a
+    /// fraction of its own width (`relative(-0.5)`).
+    fn translate_x(self, offset: impl IntoReactive<DefiniteLength>) -> Self {
+        transform_with(self, offset, |offset| {
+            translation(
+                offset,
+                TransformKind::TranslateX,
+                TransformKind::TranslateXFraction,
+            )
+        })
     }
 
-    /// Moves vertically by `points` (after layout).
-    fn translate_y(self, points: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::TranslateY, points)
+    /// Moves vertically by `offset` (after layout): points, or a fraction
+    /// of its own height.
+    fn translate_y(self, offset: impl IntoReactive<DefiniteLength>) -> Self {
+        transform_with(self, offset, |offset| {
+            translation(
+                offset,
+                TransformKind::TranslateY,
+                TransformKind::TranslateYFraction,
+            )
+        })
     }
 
-    /// Rotates by `degrees`, clockwise.
-    fn rotate(self, degrees: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::Rotate, degrees)
+    /// Rotates by `angle`, clockwise.
+    fn rotate(self, angle: impl IntoReactive<Radians>) -> Self {
+        transform_with(self, angle, |a: Radians| {
+            (TransformKind::Rotate, a.to_degrees())
+        })
     }
 
-    /// Rotates by `degrees` around the horizontal axis (3D; with
+    /// Rotates by `angle` around the horizontal axis (3D; with
     /// [`Styled::perspective`] it tilts towards the viewer).
-    fn rotate_x(self, degrees: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::RotateX, degrees)
+    fn rotate_x(self, angle: impl IntoReactive<Radians>) -> Self {
+        transform_with(self, angle, |a: Radians| {
+            (TransformKind::RotateX, a.to_degrees())
+        })
     }
 
-    /// Rotates by `degrees` around the vertical axis (3D).
-    fn rotate_y(self, degrees: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::RotateY, degrees)
+    /// Rotates by `angle` around the vertical axis (3D).
+    fn rotate_y(self, angle: impl IntoReactive<Radians>) -> Self {
+        transform_with(self, angle, |a: Radians| {
+            (TransformKind::RotateY, a.to_degrees())
+        })
     }
 
-    /// Slants vertical edges by `degrees` (iOS; Android has no skew).
-    fn skew_x(self, degrees: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::SkewX, degrees)
+    /// Slants vertical edges by `angle` (iOS; Android has no skew).
+    fn skew_x(self, angle: impl IntoReactive<Radians>) -> Self {
+        transform_with(self, angle, |a: Radians| {
+            (TransformKind::SkewX, a.to_degrees())
+        })
     }
 
-    /// Slants horizontal edges by `degrees` (iOS).
-    fn skew_y(self, degrees: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::SkewY, degrees)
+    /// Slants horizontal edges by `angle` (iOS).
+    fn skew_y(self, angle: impl IntoReactive<Radians>) -> Self {
+        transform_with(self, angle, |a: Radians| {
+            (TransformKind::SkewY, a.to_degrees())
+        })
     }
 
-    /// Looks at its 3D rotations from `points` away (smaller: stronger).
-    fn perspective(self, points: impl IntoReactive<f32>) -> Self {
-        self.transform_step(TransformKind::Perspective, points)
+    /// Looks at its 3D rotations from `distance` away (smaller: stronger).
+    fn perspective(self, distance: impl IntoReactive<AbsoluteLength>) -> Self {
+        transform_with(self, distance, |d: AbsoluteLength| {
+            (TransformKind::Perspective, points(d))
+        })
     }
 
     /// The step `kind` of its transform, by `amount`. The steps compose in
     /// CSS's order, whatever the order of the calls: perspective,
     /// translate, rotate, scale, then the 3D rotations and the skews.
-    fn transform_step(mut self, kind: TransformKind, amount: impl IntoReactive<f32>) -> Self {
-        // Steps compose in order: after a bound part, a static step is
-        // applied with the bound ones too.
-        let style = self.style();
-        match amount.into_reactive() {
-            Reactive::Static(amount) if !style.is_bound() => {
-                style.push(Declaration::Transform(kind, Bits(amount)));
-            }
-            amount => style.bind(move |s| {
-                s.push(Declaration::Transform(kind, Bits(amount.get())));
-            }),
-        }
-        self
+    fn transform_step(self, kind: TransformKind, amount: impl IntoReactive<f32>) -> Self {
+        transform_with(self, amount, move |amount| (kind, amount))
     }
 
     /// No transform (also none of the steps set before).
@@ -2741,18 +2766,18 @@ pub trait Styled: Sized {
         self
     }
 
-    /// The decoration lines' thickness, in points.
-    fn text_decoration_thickness(mut self, points: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(points, |s, points: f32| {
-            s.number(StyleKey::TextDecorationThickness, points);
+    /// The decoration lines' thickness.
+    fn text_decoration_thickness(mut self, thickness: impl IntoReactive<Points>) -> Self {
+        self.style().bind_value(thickness, |s, thickness: Points| {
+            s.number(StyleKey::TextDecorationThickness, thickness.0);
         });
         self
     }
 
-    /// The underline's distance below the baseline, in points.
-    fn underline_offset(mut self, points: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(points, |s, points: f32| {
-            s.number(StyleKey::TextUnderlineOffset, points);
+    /// The underline's distance below the baseline.
+    fn underline_offset(mut self, offset: impl IntoReactive<Points>) -> Self {
+        self.style().bind_value(offset, |s, offset: Points| {
+            s.number(StyleKey::TextUnderlineOffset, offset.0);
         });
         self
     }
@@ -2885,18 +2910,20 @@ pub trait Styled: Sized {
         self
     }
 
-    /// The text shadow's blur radius, in points.
-    fn text_shadow_radius(mut self, radius: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(radius, |s, radius: f32| {
-            s.number(StyleKey::TextShadowRadius, radius);
+    /// The text shadow's blur radius.
+    fn text_shadow_radius(mut self, radius: impl IntoReactive<Points>) -> Self {
+        self.style().bind_value(radius, |s, radius: Points| {
+            s.number(StyleKey::TextShadowRadius, radius.0);
         });
         self
     }
 
-    /// The text shadow's offset, in points (right and down).
-    fn text_shadow_offset(mut self, x: f32, y: f32) -> Self {
-        self.style()
-            .push(Declaration::TextShadowOffset(Bits(x), Bits(y)));
+    /// The text shadow's offset (right and down).
+    fn text_shadow_offset(mut self, offset: Point<Points>) -> Self {
+        self.style().push(Declaration::TextShadowOffset(
+            Bits(offset.x.0),
+            Bits(offset.y.0),
+        ));
         self
     }
 
@@ -2918,11 +2945,12 @@ pub trait Styled: Sized {
         self
     }
 
-    /// Extra space between letters, in points.
-    fn letter_spacing(mut self, points: impl IntoReactive<f32>) -> Self {
-        self.style().bind_value(points, |s, points: f32| {
-            s.number(StyleKey::LetterSpacing, points);
-        });
+    /// Extra space between letters.
+    fn letter_spacing(mut self, spacing: impl IntoReactive<AbsoluteLength>) -> Self {
+        self.style()
+            .bind_value(spacing, |s, spacing: AbsoluteLength| {
+                s.number(StyleKey::LetterSpacing, points(spacing));
+            });
         self
     }
 
@@ -3029,6 +3057,42 @@ pub trait Styled: Sized {
 }
 
 /// `s` with filter `f` by `amount` (of what is behind it when `backdrop`).
+/// `s` with the transform step `step` makes of `value` (its kind and
+/// operand).
+fn transform_with<S: Styled, T: Clone + 'static>(
+    mut s: S,
+    value: impl IntoReactive<T>,
+    step: impl Fn(T) -> (TransformKind, f32) + 'static,
+) -> S {
+    // Steps compose in order: after a bound part, a static step is
+    // applied with the bound ones too.
+    let style = s.style();
+    match value.into_reactive() {
+        Reactive::Static(value) if !style.is_bound() => {
+            let (kind, amount) = step(value);
+            style.push(Declaration::Transform(kind, Bits(amount)));
+        }
+        value => style.bind(move |st| {
+            let (kind, amount) = step(value.get());
+            st.push(Declaration::Transform(kind, Bits(amount)));
+        }),
+    }
+    s
+}
+
+/// A translation's step: points (a rem at [`REM_SIZE`]) or a fraction of
+/// the size.
+fn translation(
+    offset: DefiniteLength,
+    points_kind: TransformKind,
+    fraction_kind: TransformKind,
+) -> (TransformKind, f32) {
+    match offset {
+        DefiniteLength::Absolute(a) => (points_kind, points(a)),
+        DefiniteLength::Fraction(f) => (fraction_kind, f.0),
+    }
+}
+
 fn filter<S: Styled>(mut s: S, backdrop: bool, f: FilterFn, amount: f32) -> S {
     s.style()
         .push(Declaration::Filter(backdrop, f, Bits(amount)));
@@ -3074,6 +3138,7 @@ mod tests {
     use crate::{
         Style,
         color::{rgb, rgba},
+        geometry::point,
         tailwind::{ClassEnvironment, ClassProps, Context},
         ui::palette::{EMERALD, PINK, RED, SKY, VIOLET},
     };
@@ -3144,22 +3209,25 @@ mod tests {
     #[test]
     fn borders_and_corners_are_tailwinds() {
         same(
-            s().border_t(6.0)
+            s().border_t(px(6.0))
                 .border_t_color(RED.shade(600))
-                .border_r(2.0)
-                .border_b(4.0)
-                .border_l(1.0)
+                .border_r(px(2.0))
+                .border_b(px(4.0))
+                .border_l(px(1.0))
                 .border_x_color(SKY.shade(500)),
             "border-t-6 border-t-red-600 border-r-2 border-b-4 border-l border-x-sky-500",
         );
         same(
-            s().border_y(3.0)
-                .border_s(1.0)
-                .border_e(2.0)
+            s().border_y(px(3.0))
+                .border_s(px(1.0))
+                .border_e(px(2.0))
                 .border_dashed(),
             "border-y-3 border-s border-e-2 border-dashed",
         );
-        same(s().border(3.0).border_dotted(), "border-3 border-dotted");
+        same(
+            s().border(px(3.0)).border_dotted(),
+            "border-3 border-dotted",
+        );
         same(
             s().rounded_tl(px(44.0))
                 .rounded_tr(px(6.0))
@@ -3174,8 +3242,8 @@ mod tests {
             "rounded-ss-[22px] rounded-ee-[8px] rounded-l-[4px]",
         );
         same(
-            s().outline(2.0)
-                .outline_offset(2.0)
+            s().outline(px(2.0))
+                .outline_offset(px(2.0))
                 .outline_dashed()
                 .outline_color(PINK.shade(500)),
             "outline-2 outline-offset-2 outline-dashed outline-pink-500",
@@ -3206,11 +3274,13 @@ mod tests {
         );
         same(s().inset_shadow_sm(), "inset-shadow-sm");
         same(
-            s().ring(2.0).ring_color(SKY.shade(500)).ring_offset(2.0),
+            s().ring(px(2.0))
+                .ring_color(SKY.shade(500))
+                .ring_offset(px(2.0)),
             "ring-2 ring-sky-500 ring-offset-2",
         );
         same(
-            s().ring(1.0).ring_color(rgba(0x0000_000d)).ring_inset(),
+            s().ring(px(1.0)).ring_color(rgba(0x0000_000d)).ring_inset(),
             "ring-1 ring-black/5 ring-inset",
         );
         same(s().text_shadow_md(), "text-shadow-md");
@@ -3236,11 +3306,11 @@ mod tests {
         let list = s()
             .shadow_color(rgb(0x0969da))
             .shadow_opacity(0.35)
-            .shadow_radius(10.0)
-            .shadow_offset(4.0, 8.0)
+            .shadow_radius(px(10.0))
+            .shadow_offset(point(px(4.0), px(8.0)))
             .text_shadow_color(rgba(0x0000_0099))
-            .text_shadow_radius(4.0)
-            .text_shadow_offset(2.0, 2.0)
+            .text_shadow_radius(px(4.0))
+            .text_shadow_offset(point(px(2.0), px(2.0)))
             .lower();
         let mut style = Style::default();
         list.apply(
@@ -3291,10 +3361,10 @@ mod tests {
             "bg-linear-to-br from-violet-500 via-pink-500 to-red-400",
         );
         same(
-            s().bg_linear(45.0)
+            s().bg_linear(deg(45.0))
                 .gradient_from(SKY.shade(400))
                 .gradient_to(VIOLET.shade(600))
-                .gradient_to_position(0.8),
+                .gradient_to_position(percentage(0.8)),
             "bg-linear-45 from-sky-400 to-violet-600 to-80%",
         );
         same(
@@ -3302,17 +3372,17 @@ mod tests {
             "bg-radial from-sky-200",
         );
         same(
-            s().bg_conic(0.0).gradient_from(RED.shade(500)),
+            s().bg_conic(deg(0.0)).gradient_from(RED.shade(500)),
             "bg-conic from-red-500",
         );
         same(s().grayscale(1.0).sepia(1.0), "grayscale sepia");
-        same(s().blur(8.0).brightness(0.5), "blur-sm brightness-50");
+        same(s().blur(px(8.0)).brightness(0.5), "blur-sm brightness-50");
         same(
-            s().saturate(1.5).hue_rotate(90.0),
+            s().saturate(1.5).hue_rotate(deg(90.0)),
             "saturate-150 hue-rotate-90",
         );
         same(
-            s().backdrop_blur(12.0)
+            s().backdrop_blur(px(12.0))
                 .backdrop_saturate(1.5)
                 .backdrop_sepia(1.0),
             "backdrop-blur-md backdrop-saturate-150 backdrop-sepia",
@@ -3391,14 +3461,16 @@ mod tests {
     #[test]
     fn transforms_are_tailwinds() {
         same(
-            s().rotate(12.0).skew_x(6.0).scale(0.9),
+            s().rotate(deg(12.0)).skew_x(deg(6.0)).scale(0.9),
             "rotate-12 skew-x-6 scale-90",
         );
         same(
-            s().perspective(400.0).rotate_y(35.0).rotate_x(40.0),
+            s().perspective(px(400.0))
+                .rotate_y(deg(35.0))
+                .rotate_x(deg(40.0)),
             "perspective-[400px] rotate-y-35 rotate-x-40",
         );
-        same(s().scale_x(1.5).skew_y(-3.0), "scale-x-150 -skew-y-3");
+        same(s().scale_x(1.5).skew_y(deg(-3.0)), "scale-x-150 -skew-y-3");
         same(
             s().origin_top_left().backface_hidden(),
             "origin-top-left backface-hidden",
@@ -3419,8 +3491,8 @@ mod tests {
             s().underline()
                 .text_decoration_wavy()
                 .text_decoration_color(RED.shade(500))
-                .text_decoration_thickness(2.0)
-                .underline_offset(4.0),
+                .text_decoration_thickness(px(2.0))
+                .underline_offset(px(4.0)),
             "underline decoration-wavy decoration-red-500 decoration-2 underline-offset-4",
         );
         same(s().uppercase().tabular_nums(), "uppercase tabular-nums");
@@ -3465,7 +3537,7 @@ mod tests {
     #[test]
     fn variants_are_tailwinds() {
         same(
-            s().group_active(|s| s.text_color(VIOLET.shade(600)).translate_x(4.0)),
+            s().group_active(|s| s.text_color(VIOLET.shade(600)).translate_x(px(4.0))),
             "group-active:text-violet-600 group-active:translate-x-1",
         );
         same(s().group(), "group");

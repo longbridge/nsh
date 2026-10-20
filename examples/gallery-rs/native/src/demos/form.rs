@@ -247,7 +247,7 @@ impl Field {
                             .bottom(px(-1.0))
                             .rounded(px(radius::CONTROL))
                             .border_curve(BorderCurve::Continuous)
-                            .border(1.5)
+                            .border(px(1.5))
                             .border_color(move || {
                                 if failed() {
                                     colors::DANGER
@@ -497,8 +497,8 @@ pub(crate) fn Form() -> impl IntoElement {
             .title("Keyboard")
             .subtitle("keyboardDismissMode while dragging")
             .right(
-                Badge::new(move || format!("{} pt", keyboard_height().round())).tone(move || {
-                    if keyboard_height() > 0.0 {
+                Badge::new(move || format!("{} pt", keyboard_height().0.round())).tone(move || {
+                    if keyboard_height() > px(0.0) {
                         Tone::Accent
                     } else {
                         Tone::Neutral
@@ -661,7 +661,7 @@ pub(crate) fn Form() -> impl IntoElement {
                             .keyboard_type(KeyboardType::Number)
                             .max_length(6)
                             .placeholder("······")
-                            .letter_spacing(10.0)
+                            .letter_spacing(px(10.0))
                             .text_size(px(22.0))
                             .font_weight(FontWeight::MEDIUM)
                             .tabular_nums()
@@ -922,7 +922,7 @@ fn sheet_view(open: Signal<bool>, fx: &[FieldFx]) -> Modal {
                                                     text("A sheet")
                                                         .text_size(px(24.0))
                                                         .font_weight(FontWeight::BOLD)
-                                                        .letter_spacing(-0.4)
+                                                        .letter_spacing(px(-0.4))
                                                         .text_color(colors::TEXT),
                                                 )
                                                 .child(
@@ -1186,7 +1186,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
                     // it.
                     .pb(move || {
                         px(8.0
-                            + if keyboard_height() > 0.0 {
+                            + if keyboard_height() > px(0.0) {
                                 0.0
                             } else {
                                 cx.insets().bottom

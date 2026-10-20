@@ -403,7 +403,11 @@ impl ClipboardAnswer {
         // can hold (the web's player encodes its own).
         answer.image = uri
             .filter(|u| u.starts_with("data:") && crate::platform::clipboard::uri_within_limit(u))
-            .map(|uri| crate::ui::ClipboardImage { uri, width, height });
+            .map(|uri| crate::ui::ClipboardImage {
+                uri,
+                width: pixels(width),
+                height: pixels(height),
+            });
         answer
     }
 }
@@ -4430,7 +4434,10 @@ impl<M: TextEngine> Core<M> {
                     _ => None,
                 };
                 let size = match (number("width"), number("height"), error) {
-                    (Some(width), Some(height), None) => Ok(ImageSize { width, height }),
+                    (Some(width), Some(height), None) => Ok(ImageSize {
+                        width: pixels(width),
+                        height: pixels(height),
+                    }),
                     (_, _, error) => Err(error.unwrap_or_else(|| "no size".into())),
                 };
                 self.answer_image_info(request as u32, size);
@@ -4661,4 +4668,10 @@ fn row_position(
         }
         None => Position::fixed(index, count),
     }
+}
+
+/// A pixel count a platform reports as a number (whole for what it
+/// decodes).
+fn pixels(n: f64) -> crate::geometry::DevicePixels {
+    crate::geometry::DevicePixels(n.round() as i32)
 }

@@ -751,8 +751,8 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                         // scroll the page.
                         .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(6.0, 8.0)))
                         .keep_touches(true)
-                        .on_responder_grant(move |e: &ResponderEvent| pick(Some(e.location_x)))
-                        .on_responder_move(move |e: &ResponderEvent| pick(Some(e.location_x)))
+                        .on_responder_grant(move |e: &ResponderEvent| pick(Some(e.location.x.0)))
+                        .on_responder_move(move |e: &ResponderEvent| pick(Some(e.location.x.0)))
                         .on_responder_release(move |_: &ResponderEvent| pick(None))
                         .on_responder_terminate(move |_: &ResponderEvent| pick(None)),
                 )
