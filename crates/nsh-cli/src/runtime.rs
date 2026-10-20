@@ -355,16 +355,9 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         let manifest = manifest.to_string_lossy();
         let target_dir = root.join("target");
         let target_dir = target_dir.to_string_lossy();
-        let features = format!("{name}/runtime-shaders");
         if matches!(platform, Platform::Gpui) {
             args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
-            if metal_toolchain_missing() {
-                crate::ui::note(
-                    "no Metal Toolchain: GPUI compiles its shaders at run time \
-                     (install one with `xcodebuild -downloadComponent MetalToolchain` to precompile them)",
-                );
-                args.extend(["--features", &features]);
-            }
+            args.extend(gpui_features());
         }
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
@@ -396,9 +389,25 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     existing(built, platform, name)
 }
 
-/// Whether this is a Mac where Xcode cannot run `metal`: GPUI's build script
-/// precompiles its shaders with it, so the build needs the `runtime-shaders`
-/// feature instead.
+/// The cargo arguments a build of a GPUI host or runner adds: on a Mac
+/// where Xcode cannot run `metal`, which GPUI's build script precompiles
+/// its shaders with, `nsh-platform-gpui`'s `runtime-shaders` feature, so
+/// GPUI compiles them when the app starts. Every GPUI host and runner,
+/// the checkout's and those of apps with Rust crates, depends on
+/// `nsh-platform-gpui`.
+pub(crate) fn gpui_features() -> &'static [&'static str] {
+    if !metal_toolchain_missing() {
+        return &[];
+    }
+    crate::ui::note(
+        "no Metal Toolchain: GPUI compiles its shaders when the app starts \
+         (`xcodebuild -downloadComponent MetalToolchain` installs one to precompile them)",
+    );
+    &["--features", "nsh-platform-gpui/runtime-shaders"]
+}
+
+/// Whether this is a Mac where Xcode cannot run `metal` (no Metal
+/// Toolchain).
 fn metal_toolchain_missing() -> bool {
     cfg!(target_os = "macos")
         && !Command::new("xcrun")

@@ -1510,12 +1510,19 @@ opt-level = 3
             (_, true) => "ios-app",
         };
         let what = platform.host(runner);
-        let workspace = match platform {
-            Platform::Gpui => self.gpui_workspace()?,
-            _ => self.workspace.clone(),
+        let (workspace, features) = match platform {
+            Platform::Gpui => (self.gpui_workspace()?, crate::runtime::gpui_features()),
+            _ => (self.workspace.clone(), &[][..]),
         };
         let package = self.bin(name);
-        self.build(&workspace, &package, platform.triple(), runner, &[], &what)
+        self.build(
+            &workspace,
+            &package,
+            platform.triple(),
+            runner,
+            features,
+            &what,
+        )
     }
 
     /// A Rust app's runner for `platform` (`rust-<platform>`): a release
@@ -1545,12 +1552,16 @@ opt-level = 3
             self.packages(),
             if release { "" } else { " (debug)" }
         );
+        let features = match platform {
+            Platform::Gpui => crate::runtime::gpui_features(),
+            _ => &[],
+        };
         self.build(
             &workspace,
             &self.bin(dir),
             platform.triple(),
             release,
-            &[],
+            features,
             &what,
         )
     }
