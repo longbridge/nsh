@@ -187,13 +187,18 @@ The [modules reference](../modules/index.md) documents each one. Importing a mod
 
 NSH needs nothing from npm, but the bundler resolves bare imports from a `node_modules` directory if you install packages with a package manager. Packages resolve their browser builds, because the runtime provides web APIs (`fetch`, streams, `URL`, `TextEncoder`, ...) and not Node's (`fs`, `Buffer`, `process`). Packages that touch the DOM do not work: there is none.
 
-A package whose browser build uses the DOM often has another build for workers or React Native. `resolve.conditions` picks the export conditions packages resolve with, in place of the default `["browser"]` (`import`, `require`, `module` and `default` always apply; without `browser`, the package's `browser` field is not used either). `resolve.alias` replaces an import: by a path relative to `nsh.json` (`./` or `../`), another module, or `false` for an empty module.
+A package whose browser build uses the DOM often has another build for workers or React Native. `resolve.conditions` picks the export conditions packages resolve with, in place of the default `["browser"]`: `import`, `require`, `module` and `default` always apply, and without `browser` packages resolve through their `module` and `main` fields. `resolve.alias` replaces an import: by a path relative to `nsh.json` (`./` or `../`), another package, or `false` for an empty module. TypeScript (`nsh check`, editors) types the import as written: a name that is not an installed package gets its types from a `.d.ts` file of the app.
 
 ```json
 "resolve": {
   "conditions": ["worker"],
   "alias": { "dom-only-helper": "./shims/helper.ts", "node-polyfill": false }
 }
+```
+
+```ts
+// shims/aliases.d.ts
+declare module "node-polyfill";
 ```
 
 `solid-js` cannot be imported: the bundler refuses it and points to `nsh`'s own `signal`, `computed` and `effect`, which replace it.
