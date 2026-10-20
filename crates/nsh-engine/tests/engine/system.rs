@@ -199,3 +199,59 @@ fn process_exit_requests_the_platform_to_close_the_app() {
         "process.exit did not reach the platform command path"
     );
 }
+
+#[test]
+fn headless_trace_preserves_environment_and_data_and_stops_on_process_exit() {
+    use std::sync::Arc;
+
+    use nsh_engine::headless::{DirectoryAssets, TraceOptions};
+
+    let root = crate::temporary_root().join(format!("nsh-trace-exit-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let expected = root.join("com.example.trace-exit");
+    let source = format!(
+        "import process from 'process'; import {{Platform}} from 'nsh/device';\n\
+         if (Platform.OS !== 'macos') throw new Error('trace OS was lost');\n\
+         if (process.dataDir !== {}) throw new Error('trace data directory was lost: ' + process.dataDir);\n\
+         process.exit(0);",
+        serde_json::to_string(&expected.to_string_lossy()).unwrap(),
+    );
+    let bundle = Bundle::source(source)
+        .with_app_id(Some("com.example.trace-exit"))
+        .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))
+        .unwrap();
+    let options = TraceOptions {
+        taps: 3,
+        tap: Vec::new(),
+        idle_ms: 10_000,
+        wait: Some(10_000),
+        duration: 10_000,
+        scroll: None,
+        width: 390.0,
+        height: 844.0,
+        safe_area: Default::default(),
+        data_dir: Some(root.clone()),
+        os: Some(Os::MacOs),
+    };
+    let output = root.join("trace.txt");
+    let mut warnings = Vec::new();
+    let started = Instant::now();
+    let result = nsh_engine::headless::trace(
+        nsh_engine::App::Js(bundle),
+        Vec::new(),
+        Arc::new(DirectoryAssets::new(root.clone(), Vec::new())),
+        &options,
+        Box::new(std::fs::File::create(&output).unwrap()),
+        &mut |warning| warnings.push(warning.to_owned()),
+    );
+    let elapsed = started.elapsed();
+    let output = std::fs::read_to_string(output).unwrap();
+    let _ = std::fs::remove_dir_all(root);
+    result.unwrap();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "trace ignored exit: {elapsed:?}"
+    );
+    assert!(output.contains("ExitApp"), "{output}");
+    assert!(warnings.is_empty(), "{warnings:?}");
+}

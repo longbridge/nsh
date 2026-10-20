@@ -6,9 +6,9 @@
 //! ```ignore
 //! let sets = vec![nsh_ui_mobile::registry(), my_app_native::registry()];
 //! let mut app = nsh_testing::tsx("../App.tsx", sets).unwrap();
-//! app.wait_for("Ready");
-//! app.press("Save");
-//! app.wait_for("Saved");
+//! app.wait_for("Ready")?;
+//! app.press("Save")?;
+//! app.wait_for("Saved")?;
 //! ```
 //!
 //! A Rust app's root needs no build: its tests run it on
