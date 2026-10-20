@@ -219,10 +219,8 @@ fn hsl(args: &str) -> Option<Color> {
         number(s.strip_suffix('%').unwrap_or(s)).map(|v| (v / 100.0).clamp(0.0, 1.0))
     };
     let (s, l) = (pct(c[1])?, pct(c[2])?);
-    let k = |n: f32| (n + h / 30.0) % 12.0;
-    let q = s * l.min(1.0 - l);
-    let f = |n: f32| l - q * (k(n) - 3.0).min(9.0 - k(n)).clamp(-1.0, 1.0);
-    Some(from_unit(f(0.0), f(8.0), f(4.0), a))
+    let (r, g, b) = crate::color::hsl_to_rgb(h, s, l);
+    Some(from_unit(r, g, b, a))
 }
 
 /// `oklch(L C H)` (`polar`) or `oklab(L a b)`, to sRGB with clamped
@@ -257,26 +255,12 @@ fn oklab(args: &str, polar: bool) -> Option<Color> {
 
 /// OKLab to sRGB (Björn Ottosson's matrices).
 pub(crate) fn oklab_to_color(l: f32, a: f32, b: f32, alpha: f32) -> Color {
-    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
-    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
-    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
-    let (l3, m3, s3) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
-    let r = 4.076_741_7 * l3 - 3.307_711_6 * m3 + 0.230_969_94 * s3;
-    let g = -1.268_438 * l3 + 2.609_757_4 * m3 - 0.341_319_38 * s3;
-    let bl = -0.004_196_086_3 * l3 - 0.703_418_6 * m3 + 1.707_614_7 * s3;
-    let gamma = |x: f32| {
-        let x = x.clamp(0.0, 1.0);
-        if x <= 0.003_130_8 {
-            12.92 * x
-        } else {
-            1.055 * x.powf(1.0 / 2.4) - 0.055
-        }
-    };
-    from_unit(gamma(r), gamma(g), gamma(bl), alpha)
+    let (r, g, b) = crate::color::oklab_to_rgb(l, a, b);
+    from_unit(r, g, b, alpha)
 }
 
 fn from_unit(r: f32, g: f32, b: f32, a: f32) -> Color {
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    use crate::color::byte;
     Color::rgba(byte(r), byte(g), byte(b), byte(a))
 }
 
@@ -614,6 +598,53 @@ fn filter(s: &str) -> Option<Filter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The packed values CSS colors had before the Rust API took `Hsla`
+    /// (`crate::color`): TSX apps render as they did.
+    #[test]
+    fn css_colors_keep_their_packed_values() {
+        for (css, packed) in [
+            ("#fff", 0xffffffff),
+            ("#0000", 0x00000000),
+            ("#1a2b3c", 0x1a2b3cff),
+            ("#1a2b3c80", 0x1a2b3c80),
+            ("rgb(255, 0, 10)", 0xff000aff),
+            ("rgb(0 0 0 / 0.1)", 0x0000001a),
+            ("rgba(0,0,0,0.5)", 0x00000080),
+            ("rgb(50% 25% 12.5%)", 0x804020ff),
+            ("rgb(12.7 200.4 99.5)", 0x0dc864ff),
+            ("hsl(0 100% 50%)", 0xff0000ff),
+            ("hsl(120, 100%, 25%)", 0x008000ff),
+            ("hsl(240 100% 50%)", 0x0000ffff),
+            ("hsl(200 50% 50%)", 0x4095bfff),
+            ("hsl(30 80% 60% / 0.4)", 0xeb994766),
+            ("hsl(-30 80% 60%)", 0xeb4799ff),
+            ("hsl(390 80% 60%)", 0xeb9947ff),
+            ("hsl(0.5turn 33% 77%)", 0xb1d8d8ff),
+            ("hsl(1rad 20% 30%)", 0x5c5a3dff),
+            ("hsla(210, 40%, 96%, 0.85)", 0xf1f5f9d9),
+            ("hsl(359.9 100% 50%)", 0xff0000ff),
+            ("hsl(17 3% 97%)", 0xf8f7f7ff),
+            ("hsl(222.2 84% 4.9%)", 0x020817ff),
+            ("hsl(217.2 91.2% 59.8%)", 0x3b82f6ff),
+            ("hsl(0 0% 50%)", 0x808080ff),
+            ("hsl(60 100% 100%)", 0xffffffff),
+            ("hsl(300 76% 72%)", 0xee81eeff),
+            ("hsl(45deg 93% 47%)", 0xe7b008ff),
+            ("hsl(160 84% 39% / 50%)", 0x10b77f80),
+            ("oklch(62.3% 0.214 259.815)", 0x2b7fffff),
+            ("oklab(1 0 0)", 0xffffffff),
+            ("oklch(0.7 0.1 30 / 0.5)", 0xd5867980),
+            ("RebeccaPurple", 0x663399ff),
+            ("transparent", 0x00000000),
+            ("teal", 0x008080ff),
+        ] {
+            assert_eq!(color(css), Some(Color(packed)), "{css}");
+            // And through the Rust API's colors.
+            let hsla: crate::Hsla = css.parse().unwrap();
+            assert_eq!(Color::from(hsla), Color(packed), "{css}");
+        }
+    }
 
     #[test]
     fn colors() {

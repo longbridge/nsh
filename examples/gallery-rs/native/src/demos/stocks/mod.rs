@@ -625,7 +625,7 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
     let fade_to = left + (right - left) * 0.2;
     let fade = CanvasGradient::linear(left, 0.0, fade_to, 0.0)
         .add_color_stop(0.0, rgb(0x000000))
-        .add_color_stop(1.0, Color(0));
+        .add_color_stop(1.0, transparent_black());
     let p = p
         .composite(Composite::DestinationOut)
         .fill_style(fade)

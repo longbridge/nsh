@@ -210,10 +210,10 @@ impl CanvasGradient {
 
     /// Adds `color` at `offset` (0..1, clamped; `addColorStop`): stops
     /// apply in offset order, equal ones in the order added.
-    pub fn add_color_stop(mut self, offset: f32, color: Color) -> Self {
+    pub fn add_color_stop(mut self, offset: f32, color: impl Into<crate::Hsla>) -> Self {
         let offset = offset.clamp(0.0, 1.0);
         let at = self.stops.partition_point(|(o, _)| *o <= offset);
-        self.stops.insert(at, (offset, color));
+        self.stops.insert(at, (offset, Color::from(color.into())));
         self
     }
 }

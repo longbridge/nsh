@@ -113,9 +113,9 @@ fn theme_tokens() {
         ..Default::default()
     };
     let s = styled("bg-primary text-muted-foreground border border-border rounded-(--radius)");
-    assert_eq!(s.view.background_color, ui.primary.light);
-    assert_eq!(s.text.color, Some(ui.muted_foreground.light));
-    assert_eq!(s.view.borders.colors[0], ui.border.light);
+    assert_eq!(s.view.background_color, Color::from(ui.primary.light));
+    assert_eq!(s.text.color, Some(Color::from(ui.muted_foreground.light)));
+    assert_eq!(s.view.borders.colors[0], Color::from(ui.border.light));
     assert_eq!(s.view.border_radius, ui.radius);
     let (s, _) = styled_with(
         "bg-primary text-(--muted-foreground)",
@@ -123,12 +123,15 @@ fn theme_tokens() {
         (390.0, 844.0),
         0,
     );
-    assert_eq!(s.view.background_color, ui.primary.dark);
-    assert_eq!(s.text.color, Some(ui.muted_foreground.dark));
+    assert_eq!(s.view.background_color, Color::from(ui.primary.dark));
+    assert_eq!(s.text.color, Some(Color::from(ui.muted_foreground.dark)));
     // Opacity modifiers, longer prefixes, variants, the long form.
     let s = styled("bg-primary-background/50 border-t-2 border-t-ring");
-    assert_eq!(s.view.background_color, ui.primary.light.with_alpha(0.5));
-    assert_eq!(s.view.borders.colors[0], ui.ring.light);
+    assert_eq!(
+        s.view.background_color,
+        Color::from(ui.primary.light).with_alpha(0.5)
+    );
+    assert_eq!(s.view.borders.colors[0], Color::from(ui.ring.light));
     // Parts and props: shadows, rings, gradients, the caret, placeholders.
     let (s, props) = styled_with(
         "shadow-md shadow-primary ring-2 ring-ring bg-linear-to-r from-primary to-accent caret-primary placeholder:text-muted-foreground",
@@ -136,21 +139,28 @@ fn theme_tokens() {
         (390.0, 844.0),
         0,
     );
-    assert_eq!(props.caret_color, Some(ui.primary.light));
-    assert_eq!(props.placeholder_color, Some(ui.muted_foreground.light));
+    assert_eq!(props.caret_color, Some(Color::from(ui.primary.light)));
+    assert_eq!(
+        props.placeholder_color,
+        Some(Color::from(ui.muted_foreground.light))
+    );
     let e = s.view.effects.as_ref().unwrap();
-    assert!(e.box_shadows.iter().any(|l| l.color == ui.ring.light));
+    assert!(
+        e.box_shadows
+            .iter()
+            .any(|l| l.color == Color::from(ui.ring.light))
+    );
     // The shadow's color keeps each layer's alpha.
     assert!(
         e.box_shadows
             .iter()
-            .any(|l| l.color.0 >> 8 == ui.primary.light.0 >> 8)
+            .any(|l| l.color.0 >> 8 == Color::from(ui.primary.light).0 >> 8)
     );
     let g = &e.background_images[0];
-    assert_eq!(g.stops[0].color, ui.primary.light);
-    assert_eq!(g.stops.last().unwrap().color, ui.accent.light);
+    assert_eq!(g.stops[0].color, Color::from(ui.primary.light));
+    assert_eq!(g.stops.last().unwrap().color, Color::from(ui.accent.light));
     let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
-    assert_eq!(s.view.background_color, ui.accent.dark);
+    assert_eq!(s.view.background_color, Color::from(ui.accent.dark));
     let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
     assert_eq!(s.text.font_size, Some(ui.font_size));
     assert_eq!(s.view.border_radius, ui.radius_lg);

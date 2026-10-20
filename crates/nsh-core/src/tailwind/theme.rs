@@ -123,7 +123,7 @@ impl Tokens {
     pub(crate) fn substitute(&self, utility: &str, dark: bool) -> Option<String> {
         let hex = |out: &mut String, c: &AdaptiveColor| {
             let c = if dark { c.dark } else { c.light };
-            let _ = write!(out, "#{:08x}", c.0);
+            let _ = write!(out, "#{:08x}", Color::from(c).0);
         };
         if utility.contains('(') {
             // `(--name)` and `(hint:--name)`, Tailwind 4's shorthand of

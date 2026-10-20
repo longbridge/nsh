@@ -296,6 +296,10 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   - Every public API has a doc comment.
   - Items in private modules are `pub(crate)`, never `pub`.
 - Everything is written in English: code comments, docs, logs and this file. Comments explain why, not what the code says.
+- Colors in Rust are GPUI's: `Hsla` (`nsh_core::color`) is the color code holds, passes and computes with (theme
+  colors, typed styles, props, every new signature: `impl Into<Hsla>` or `AdaptiveColor`), `Rgba` is only for
+  conversions; the packed `Color` (`0xRRGGBBAA`) is only the storage and wire form (styles, mount items, the
+  platforms) (`docs/dev/styles.md` "Colors").
 - Library crates only log through the `log` facade (no `eprintln!`); performance logs use target `nsh::perf`, JS logs target `js`. Binaries install the logger.
   The CLI prints through `nsh-cli`'s `ui.rs` (steps, captured tools, `error` reports), xtask through `term.rs`.
 - Dependencies are declared once in the root `Cargo.toml` `[workspace.dependencies]` (the GPUI backend's in `crates/gpui/Cargo.toml`); crates only write `.workspace = true`.

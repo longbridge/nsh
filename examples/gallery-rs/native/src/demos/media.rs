@@ -18,8 +18,8 @@ const SITE: &str = "https://nsh.dev";
 const FLOWER: &str = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4";
 
 /// `color` as CSS's `#rrggbb`.
-fn css(color: Color) -> String {
-    format!("#{:06x}", color.0 >> 8)
+fn css(color: Hsla) -> String {
+    color.alpha(1.0).to_hex().to_ascii_lowercase()
 }
 
 /// The inline page in the gallery's colors for the appearance shown (the

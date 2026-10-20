@@ -14,7 +14,10 @@ use crate::ui::{Finish, Finished, IconName, PressProps, Tint, colors, icon, pres
 
 /// Grid lines of charts: the hairline color, a step darker on the light
 /// page.
-pub(crate) const GRID: AdaptiveColor = AdaptiveColor::new(colors::BORDER.light, colors::LINE.dark);
+pub(crate) const GRID: AdaptiveColor = AdaptiveColor {
+    light: colors::BORDER.light,
+    dark: colors::LINE.dark,
+};
 
 /// The props of [`SpringBar`].
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
@@ -263,7 +266,7 @@ impl Calm {
 
 /// Diagonal stripes over a rectangle (projections, zones).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Color, gap: f32) -> Painter {
+pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Hsla, gap: f32) -> Painter {
     if w <= 0.0 || h <= 0.0 {
         return p;
     }
@@ -284,7 +287,7 @@ pub(crate) fn hatch(p: Painter, x: f32, y: f32, w: f32, h: f32, color: Color, ga
 }
 
 /// A dashed horizontal line.
-pub(crate) fn dashed(p: Painter, x0: f32, x1: f32, y: f32, color: Color, dash: &[f32]) -> Painter {
+pub(crate) fn dashed(p: Painter, x0: f32, x1: f32, y: f32, color: Hsla, dash: &[f32]) -> Painter {
     p.stroke_color(color)
         .line_width(1.0)
         .line_dash(dash)

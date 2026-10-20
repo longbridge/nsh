@@ -105,7 +105,7 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
                             offset_y: 1.0,
                             blur: 3.0,
                             spread: 0.0,
-                            color: rgb_a(0x000000, 0.4),
+                            color: rgb_a(0x000000, 0.4).to_packed(),
                             inset: false,
                         },
                     ],

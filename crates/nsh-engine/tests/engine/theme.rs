@@ -136,10 +136,16 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         storage: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
-    assert_eq!(backgrounds(&rx), vec![Theme::default().primary.light]);
+    assert_eq!(
+        backgrounds(&rx),
+        vec![Color::from(Theme::default().primary.light)]
+    );
     engine.control().set_theme(Some(themed("#00ff00")));
     assert_eq!(backgrounds(&rx), vec![Color(0x00ff00ff)]);
     engine.control().set_theme(None);
-    assert_eq!(backgrounds(&rx), vec![Theme::default().primary.light]);
+    assert_eq!(
+        backgrounds(&rx),
+        vec![Color::from(Theme::default().primary.light)]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

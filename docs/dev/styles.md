@@ -84,6 +84,55 @@
   On Apple everything is drawn by Core Animation, escalating only as needed (`crates/nsh-platform-ios/src/decor.rs`
   describes the paths and their limits); Android draws in `Decor.java`.
 
+## Colors
+
+Colors in Rust follow GPUI's design (`nsh_core::color`; GPUI is a reference, not a dependency). **`Hsla`** is the
+color Rust code holds, passes and computes with: theme colors (`AdaptiveColor { light: Hsla, dark: Hsla }`), the
+`Styled` color methods (`.bg(..)`, `.text_color(..)`: anything `Into<AdaptiveColor>`, so an `Hsla`, an `Rgba` or a
+theme color), host element setters (`.placeholder_color(..)`, `.header_tint_color(..)`), the canvas painter, the
+palette (`palette::SKY.shade(500)`), `color(..)` (an adaptive color for the appearance now) and Rust components'
+props (decoded from the same CSS strings as `Color`, so their TypeScript is unchanged). **`Rgba`** is for conversions,
+as in GPUI; `rgb(0x2563eb)` and `rgba(0x2563eb80)` build one, `hsla(h, s, l, a)` (each `0..=1`, the hue in turns) and
+`hsl(deg, %, %)` (gpui-kit's) build an `Hsla`, and `black()`, `white()`, `transparent_black()`, `opaque_grey(l, a)` are
+GPUI's constants. `Rgba::to_hsla` and `Rgba::to_packed` are `const`, for colors in `const`s.
+
+The packed **`Color`** (`0xRRGGBBAA`) is only the storage and wire form: what the style pipeline diffs and caches
+(`Style`, `BoxShadow`, gradient stops, `Prop` values), mount items, the Android and web encodings and the fixtures'
+`#rrggbbaa`. A color becomes packed where it enters a style, a prop or an operation (`Declaration::lower`, the host
+setters), and nowhere earlier.
+
+Adjusting a color is a method of `Hsla`, so state colors are derived rather than picked (the theme's pressed shades
+are `c.blend(opaque_grey(0.0, 0.12))` in light appearance and `opaque_grey(1.0, 0.12)` in dark,
+`ui/theme.rs` `pressed`):
+
+| Method | Does |
+|---|---|
+| `opacity(f)`, `alpha(a)`, `fade_out(f)` | alpha times `f`; set to `a`; times `1 - f` (in place) |
+| `lighten(f)`, `darken(f)` | lightness times `1 + f` (at most 1), times `1 - f` (gpui-kit's) |
+| `saturate(f)`, `desaturate(f)`, `grayscale()` | the same for the saturation; no saturation |
+| `spin(deg)`, `hue(h)`, `saturation(s)`, `lightness(l)`, `apply(base)` | rotate the hue; set one channel; take `base`'s hue and saturation |
+| `invert()`, `invert_l()` | `1 - x` for hue, saturation and lightness; for the lightness only |
+| `blend(over)` | `over` drawn on top by its alpha (source over, sRGB), keeping this alpha |
+| `mix(other, f)`, `mix_oklab(other, f)` | `f` of this color, in HSL (the hue the short way) or in Oklab (CSS `color-mix(in oklab, …)`) |
+| `luminance()`, `contrast_ratio(other)`, `readable_text()` | WCAG's relative luminance and contrast ratio; white or black, whichever reads better on it |
+| `to_hex()`, `Hsla::parse_hex(..)`, `"…".parse::<Hsla>()` | `#RRGGBB(AA)`; hex; any CSS color NSH reads |
+
+`AdaptiveColor::opacity(f)` and `AdaptiveColor::map(|c| ..)` apply one to both appearances.
+
+**Rounding** is fixed so that TSX apps render exactly as before and every packed color survives a round trip: packed
+to float is `byte / 255`; float to packed clamps to `0..=1`, scales by 255 and rounds halves away from zero (the rule
+`rgb()`, `hsl()` and `oklch()` in CSS pack with); HSL to RGB is CSS Color 4's formula (`color::hsl_to_rgb`, shared
+with `hsl()`), so `hsla(h, s, l, a)` packs as `hsl(h·360 s·100% l·100% / a)` does. Tests hold all of it: every 24-bit
+color through `Hsla` and back, a table of CSS color strings with their packed values (`css.rs`), the theme's pressed
+shades against the per-channel mix they replaced, `opacity` against the packed alpha scaling it replaced (the same for
+opaque colors; for translucent ones within one alpha step, where `alpha · factor` is exactly a half).
+
+**Deviations from GPUI**, on purpose: packing rounds (GPUI's `From<Rgba> for u32` truncates, which loses colors on a
+round trip); parsing takes every CSS color, not only hex, and fails with `ColorParseError` instead of `anyhow`;
+gpui-kit's `Colorize` methods are inherent methods of `Hsla` (no trait to import), without `divide` (it sets the alpha:
+`alpha`), and `lighten` clamps the lightness to 1; `saturate`, `desaturate`, `spin`, `luminance`, `contrast_ratio`,
+`readable_text` and the `const` conversions are NSH's; no serde, schemars or proptest implementations.
+
 ## Android differences
 
 - **Android differences**: shadows need a background (no content shadows, e.g. text with a transparent background); odd corner

@@ -313,9 +313,9 @@ impl IconName {
 #[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
 pub(crate) struct Tint {
     /// In light appearance.
-    pub(crate) light: Color,
+    pub(crate) light: Hsla,
     /// In dark appearance.
-    pub(crate) dark: Color,
+    pub(crate) dark: Hsla,
 }
 
 impl From<AdaptiveColor> for Tint {

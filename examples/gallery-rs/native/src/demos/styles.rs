@@ -162,7 +162,7 @@ fn face(
                     offset_y: 8.0,
                     blur: 20.0,
                     spread: 0.0,
-                    color: rgb_a(0x14140a, 0.10),
+                    color: rgb_a(0x14140a, 0.10).to_packed(),
                     inset: false,
                 },
             ],
@@ -173,7 +173,7 @@ fn face(
                     offset_y: 10.0,
                     blur: 24.0,
                     spread: 0.0,
-                    color: rgb_a(0x000000, 0.4),
+                    color: rgb_a(0x000000, 0.4).to_packed(),
                     inset: false,
                 },
             ],
@@ -474,7 +474,7 @@ fn shadows() -> Card {
                     some("Shadow of the content"),
                     None,
                     specimen_box()
-                        .bg(Color::TRANSPARENT)
+                        .bg(transparent_black())
                         .shadow_color(colors::DANGER)
                         .shadow_opacity(0.9)
                         .shadow_radius(8.0)

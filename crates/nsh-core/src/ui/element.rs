@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, ContextMenuEvent, EdgeInsets,
-    EventKind, EventPayload, HoverEvent, ImageSource, ListContentStyle, NativeProp, NodeId,
+    EventKind, EventPayload, HoverEvent, Hsla, ImageSource, ListContentStyle, NativeProp, NodeId,
     PointerEvents, Prop, Rect, Size, Tag, TouchEvent, style::Color,
 };
 
@@ -1269,8 +1269,10 @@ pub trait Interactive: Element {
 
     /// Shows `color` as the background while pressed, fading the children
     /// to `opacity`.
-    fn underlay(mut self, color: impl IntoReactive<Color>, opacity: f32) -> Self {
-        super::host::bind_prop(self.node(), color, |c| Prop::UnderlayColor(Some(c)));
+    fn underlay(mut self, color: impl IntoReactive<Hsla>, opacity: f32) -> Self {
+        super::host::bind_prop(self.node(), color, |c: Hsla| {
+            Prop::UnderlayColor(Some(c.into()))
+        });
         super::host::set(self.node(), Prop::UnderlayOpacity(opacity));
         self
     }
@@ -1484,8 +1486,11 @@ impl Text {
     }
 
     /// The highlight of its selection, when it is selectable.
-    pub fn selection_color(mut self, color: Color) -> Self {
-        super::host::set(&mut self.0, Prop::SelectionColor(Some(color)));
+    pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
+        super::host::set(
+            &mut self.0,
+            Prop::SelectionColor(Some(Color::from(color.into()))),
+        );
         self
     }
 

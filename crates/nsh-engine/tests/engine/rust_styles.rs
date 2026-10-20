@@ -36,7 +36,7 @@ fn Card() -> impl IntoElement {
                 .gradient_from(SKY.shade(400))
                 .gradient_to(VIOLET.shade(600))
                 .shadow_lg()
-                .shadow_color(SKY.shade(500).with_alpha(0.5))
+                .shadow_color(SKY.shade(500).opacity(0.5))
                 .ring(2.0)
                 .ring_color(SKY.shade(500))
                 .perspective(400.0)
@@ -158,7 +158,7 @@ fn a_rust_apps_typed_styles_and_spans_reach_the_platform() {
         .iter()
         .find(|(_, t)| t.text == "In the group")
         .expect("restyled");
-    assert_eq!(inside.1.spans[0].style.color, VIOLET.shade(600));
+    assert_eq!(inside.1.spans[0].style.color, VIOLET.shade(600).into());
 
     // The link takes the press, not the sentence.
     engine

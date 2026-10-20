@@ -295,7 +295,7 @@ impl AnimatedNode {
                 Output::Colors(
                     colors
                         .iter()
-                        .map(|c| if dark { c.dark.0 } else { c.light.0 })
+                        .map(|c| crate::style::Color::from(if dark { c.dark } else { c.light }).0)
                         .collect(),
                 )
             }

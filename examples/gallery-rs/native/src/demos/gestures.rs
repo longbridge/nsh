@@ -72,7 +72,7 @@ fn knob<E: Finished>(element: E) -> E {
                 offset_y: 3.0,
                 blur: 10.0,
                 spread: 0.0,
-                color: rgb_a(0x000000, 0.45),
+                color: rgb_a(0x000000, 0.45).to_packed(),
                 inset: false,
             },
         ],
@@ -498,7 +498,7 @@ fn PressEvents() -> impl IntoElement {
         .long_press_delay(250.0)
         .underlay(|| color(colors::BORDER), UNDERLAY_OPACITY)
         .ripple(Ripple {
-            color: Some(rgb_a(0xc8f26d, 0.25)),
+            color: Some(rgb_a(0xc8f26d, 0.25).to_packed()),
             ..Ripple::default()
         })
         .flex_1()

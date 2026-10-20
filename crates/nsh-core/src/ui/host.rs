@@ -13,9 +13,10 @@ use super::{
     events::{self, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
 };
 use crate::{
-    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, JsonValue, KeyboardAppearance,
+    AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
     KeyboardType, ModalAnimation, ModalPresentation, ModalProp, NativeProp, Prop, ResizeMode,
-    ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, Size, SubmitBehavior, Tag, WebSource,
+    ReturnKeyType, Rgba, ScreenAnimation, ScreenProp, ScrollProp, Size, SubmitBehavior, Tag,
+    WebSource,
     canvas::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp,
@@ -48,6 +49,7 @@ pub(crate) fn set(node: &mut ElNode, prop: Prop) {
 }
 
 crate::static_reactive!(Color: Color);
+crate::static_reactive!(Hsla: Hsla, Rgba, Color);
 crate::static_reactive!(AutoCapitalize: AutoCapitalize);
 crate::static_reactive!(AutoFill: AutoFill);
 crate::static_reactive!(KeyboardAppearance: KeyboardAppearance);
@@ -331,13 +333,17 @@ impl Input {
     }
 
     /// The placeholder's color (`cx.color(theme.muted_foreground)`).
-    pub fn placeholder_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |color: Color| Prop::PlaceholderColor(Some(color)))
+    pub fn placeholder_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |color: Hsla| {
+            Prop::PlaceholderColor(Some(color.into()))
+        })
     }
 
     /// The caret's and the selection's color.
-    pub fn selection_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |color: Color| Prop::SelectionColor(Some(color)))
+    pub fn selection_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |color: Hsla| {
+            Prop::SelectionColor(Some(color.into()))
+        })
     }
 
     /// Hides what is typed (passwords).
@@ -568,23 +574,23 @@ impl Screen {
     }
 
     /// The back button's and bar buttons' color.
-    pub fn header_tint_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |c| {
-            Prop::Screen(ScreenProp::HeaderTintColor(Some(c)))
+    pub fn header_tint_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |c: Hsla| {
+            Prop::Screen(ScreenProp::HeaderTintColor(Some(c.into())))
         })
     }
 
     /// The header's background.
-    pub fn header_background_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |c| {
-            Prop::Screen(ScreenProp::HeaderBackgroundColor(Some(c)))
+    pub fn header_background_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |c: Hsla| {
+            Prop::Screen(ScreenProp::HeaderBackgroundColor(Some(c.into())))
         })
     }
 
     /// The title's color.
-    pub fn header_title_color(self, color: impl IntoReactive<Color>) -> Self {
-        self.bind_prop(color, |c| {
-            Prop::Screen(ScreenProp::HeaderTitleColor(Some(c)))
+    pub fn header_title_color(self, color: impl IntoReactive<Hsla>) -> Self {
+        self.bind_prop(color, |c: Hsla| {
+            Prop::Screen(ScreenProp::HeaderTitleColor(Some(c.into())))
         })
     }
 
@@ -995,6 +1001,18 @@ impl From<Color> for CanvasPaint {
     }
 }
 
+impl From<Hsla> for CanvasPaint {
+    fn from(color: Hsla) -> Self {
+        Color::from(color).into()
+    }
+}
+
+impl From<Rgba> for CanvasPaint {
+    fn from(color: Rgba) -> Self {
+        Color::from(color).into()
+    }
+}
+
 impl From<CanvasGradient> for CanvasPaint {
     fn from(gradient: CanvasGradient) -> Self {
         Self(CanvasPaintKind::Gradient(Arc::new(gradient)))
@@ -1381,13 +1399,13 @@ impl Painter {
     }
 
     /// Fills with `color`.
-    pub fn fill_color(self, color: Color) -> Self {
-        self.fill_style(color)
+    pub fn fill_color(self, color: impl Into<Hsla>) -> Self {
+        self.fill_style(color.into())
     }
 
     /// Strokes with `color`.
-    pub fn stroke_color(self, color: Color) -> Self {
-        self.stroke_style(color)
+    pub fn stroke_color(self, color: impl Into<Hsla>) -> Self {
+        self.stroke_style(color.into())
     }
 
     /// Fills with `paint`: a color, a gradient or an animated value of colors
@@ -1449,8 +1467,8 @@ impl Painter {
     }
 
     /// Shadows of what is drawn next.
-    pub fn shadow(self, color: Color, blur: f32, offset: (f32, f32)) -> Self {
-        self.op(CanvasOp::ShadowColor(color))
+    pub fn shadow(self, color: impl Into<Hsla>, blur: f32, offset: (f32, f32)) -> Self {
+        self.op(CanvasOp::ShadowColor(Color::from(color.into())))
             .op(CanvasOp::ShadowBlur(blur.max(0.0)))
             .op(CanvasOp::ShadowOffset(offset.0, offset.1))
     }

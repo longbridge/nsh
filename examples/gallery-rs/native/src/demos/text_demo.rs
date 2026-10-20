@@ -247,8 +247,8 @@ fn fonts() -> Card {
                         .font_weight(FontWeight::EXTRA_BOLD)
                         .text_color(colors::ACCENT)
                         .text_shadow_color(AdaptiveColor::new(
-                            colors::ACCENT.light.with_alpha(0.3),
-                            colors::ACCENT.dark.with_alpha(0.6),
+                            colors::ACCENT.light.opacity(0.3),
+                            colors::ACCENT.dark.opacity(0.6),
                         ))
                         .text_shadow_offset(0.0, 0.0)
                         .text_shadow_radius(10.0),

@@ -42,7 +42,7 @@ const SHADES: [u16; 5] = [100, 300, 500, 700, 900];
 const CARDS: usize = 13;
 
 /// `light`, and `dark` in dark appearance (Tailwind's `dark:`).
-fn adaptive(light: Color, dark: Color) -> AdaptiveColor {
+fn adaptive(light: impl Into<Hsla>, dark: impl Into<Hsla>) -> AdaptiveColor {
     AdaptiveColor::new(light, dark)
 }
 
@@ -52,13 +52,13 @@ fn zinc(light: u16, dark: u16) -> AdaptiveColor {
 }
 
 /// A box shadow outside the box (`shadow-[0_{y}px_{blur}px_{color}]`).
-fn drop(y: f32, blur: f32, color: Color) -> BoxShadow {
+fn drop(y: f32, blur: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
         offset_x: 0.0,
         offset_y: y,
         blur,
         spread: 0.0,
-        color,
+        color: color.to_packed(),
         inset: false,
     }
 }
@@ -177,7 +177,7 @@ fn hero() -> AnyElement {
         .p_5()
         .adaptive_shadow(
             [
-                inset_shadow(1.0, 0.0, WHITE),
+                inset_shadow(1.0, 0.0, rgb(0xffffff)),
                 drop(6.0, 20.0, rgb_a(0x14140a, 0.08)),
             ],
             [
@@ -210,11 +210,11 @@ fn hero() -> AnyElement {
                         .items_center()
                         .gap_1p5()
                         .rounded_full()
-                        .bg(adaptive(BLACK.with_alpha(0.05), WHITE.with_alpha(0.1)))
+                        .bg(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.1)))
                         .px_2p5()
                         .ring(1.0)
                         .ring_inset()
-                        .ring_color(adaptive(BLACK.with_alpha(0.1), WHITE.with_alpha(0.1)))
+                        .ring_color(adaptive(BLACK.opacity(0.1), WHITE.opacity(0.1)))
                         .child(
                             view()
                                 .size_2()
@@ -242,7 +242,7 @@ fn hero() -> AnyElement {
                         .h(px(26.0))
                         .justify_center()
                         .rounded_full()
-                        .bg(adaptive(ZINC.shade(200), WHITE.with_alpha(0.1)))
+                        .bg(adaptive(ZINC.shade(200), WHITE.opacity(0.1)))
                         .px_2p5()
                         .child(
                             text(".dark(..)")
@@ -321,7 +321,7 @@ fn stats() -> AnyElement {
             .finish_fill(Finish::Card)
             .p_3()
             .adaptive_shadow(
-                [inset_shadow(1.0, 0.0, WHITE)],
+                [inset_shadow(1.0, 0.0, rgb(0xffffff))],
                 [inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.05))],
             )
             .child(text(label).text_xs().text_color(ZINC.shade(500)))
@@ -445,7 +445,7 @@ fn buttons() -> AnyElement {
         .self_start()
         .rounded_lg()
         .px_1()
-        .active(|s| s.bg(adaptive(BLACK.with_alpha(0.05), WHITE.with_alpha(0.05))))
+        .active(|s| s.bg(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.05))))
         .on_press(move |_: &()| busy.set(false))
         .child(
             text("Enable again")
@@ -483,10 +483,10 @@ fn cards() -> AnyElement {
         .finish_fill(Finish::Raised)
         .p_3()
         .shadow_md()
-        .shadow_color(adaptive(BLACK.with_alpha(0.1), BLACK.with_alpha(0.4)))
+        .shadow_color(adaptive(BLACK.opacity(0.1), BLACK.opacity(0.4)))
         .ring(1.0)
         .ring_inset()
-        .ring_color(adaptive(BLACK.with_alpha(0.05), WHITE.with_alpha(0.1)))
+        .ring_color(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.1)))
         .transition_transform()
         .duration(200.0)
         .active(|s| s.scale(0.98))
@@ -522,8 +522,8 @@ fn cards() -> AnyElement {
             .rounded_full()
             .px_2p5()
             .bg(adaptive(
-                hue.shade(500).with_alpha(0.15),
-                hue.shade(400).with_alpha(0.15),
+                hue.shade(500).opacity(0.15),
+                hue.shade(400).opacity(0.15),
             ))
             .child(
                 text(label)
@@ -570,7 +570,7 @@ fn layout() -> AnyElement {
         view()
             .h_12()
             .rounded_lg()
-            .bg(VIOLET.shade(500).with_alpha(alpha))
+            .bg(VIOLET.shade(500).opacity(alpha))
     };
     card(
         IconName::Lists,
@@ -585,7 +585,7 @@ fn layout() -> AnyElement {
                         .h_10()
                         .flex_1()
                         .rounded_lg()
-                        .bg(SKY.shade(400).with_alpha(0.2)),
+                        .bg(SKY.shade(400).opacity(0.2)),
                 )
                 .child(
                     view()
@@ -593,7 +593,7 @@ fn layout() -> AnyElement {
                         .flex_1()
                         .flex_grow(2.0)
                         .rounded_lg()
-                        .bg(SKY.shade(400).with_alpha(0.5)),
+                        .bg(SKY.shade(400).opacity(0.5)),
                 )
                 .child(view().size_10().rounded_lg().bg(SKY.shade(400)))
                 .into_element(),
@@ -609,8 +609,8 @@ fn layout() -> AnyElement {
                         .justify_center()
                         .rounded_lg()
                         .border_1()
-                        .border_color(VIOLET.shade(400).with_alpha(0.4))
-                        .bg(VIOLET.shade(500).with_alpha(0.15))
+                        .border_color(VIOLET.shade(400).opacity(0.4))
+                        .bg(VIOLET.shade(500).opacity(0.15))
                         .child(
                             text("col-span-2")
                                 .font_family(MONO)
@@ -647,14 +647,14 @@ fn layout() -> AnyElement {
                         .h_8()
                         .flex_1()
                         .rounded_lg()
-                        .bg(AMBER.shade(400).with_alpha(0.3)),
+                        .bg(AMBER.shade(400).opacity(0.3)),
                 )
                 .child(
                     view()
                         .h_8()
                         .flex_1()
                         .rounded_lg()
-                        .bg(AMBER.shade(400).with_alpha(0.6)),
+                        .bg(AMBER.shade(400).opacity(0.6)),
                 )
                 .into_element(),
             label("The last row is a column on phones and a row from 640 pt up (sm:)."),
@@ -701,10 +701,10 @@ fn shadows() -> AnyElement {
                     tile()
                         .bg(adaptive(rgb(0xf0f0ec), BLACK))
                         .inset_shadow_sm()
-                        .inset_shadow_color(adaptive(BLACK.with_alpha(0.1), WHITE.with_alpha(0.1)))
+                        .inset_shadow_color(adaptive(BLACK.opacity(0.1), WHITE.opacity(0.1)))
                         .ring(1.0)
                         .ring_inset()
-                        .ring_color(adaptive(BLACK.with_alpha(0.05), WHITE.with_alpha(0.1))),
+                        .ring_color(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.1))),
                     "Inset",
                 ))
                 .child(captioned(
@@ -733,7 +733,7 @@ fn shadows() -> AnyElement {
                     tile()
                         .bg(EMERALD.shade(400))
                         .shadow_lg()
-                        .shadow_color(EMERALD.shade(400).with_alpha(0.5)),
+                        .shadow_color(EMERALD.shade(400).opacity(0.5)),
                     "Glow",
                 ))
                 .into_element(),
@@ -929,8 +929,8 @@ fn effects() -> AnyElement {
                         .bottom_3()
                         .rounded_lg()
                         .border_1()
-                        .border_color(WHITE.with_alpha(0.1))
-                        .bg(BLACK.with_alpha(0.4))
+                        .border_color(WHITE.opacity(0.1))
+                        .bg(BLACK.opacity(0.4))
                         .px_3()
                         .py_2()
                         .backdrop_blur(12.0)
@@ -1052,9 +1052,9 @@ fn lists() -> AnyElement {
                     .when(!first, |v| v.border_t_1().border_t_color(colors::LINE))
                     .px_3p5()
                     .when(even, |v| {
-                        v.bg(adaptive(BLACK.with_alpha(0.03), WHITE.with_alpha(0.05)))
+                        v.bg(adaptive(BLACK.opacity(0.03), WHITE.opacity(0.05)))
                     })
-                    .when(last, |v| v.bg(ROSE.shade(500).with_alpha(0.1)))
+                    .when(last, |v| v.bg(ROSE.shade(500).opacity(0.1)))
                     .active(|s| s.bg(rgb_a(CITRUS, 0.1)))
                     .child(text(*item).text_size(px(15.0)).text_color(if last {
                         adaptive(ROSE.shade(600), ROSE.shade(300))

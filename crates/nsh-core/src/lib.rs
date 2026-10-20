@@ -10,6 +10,7 @@
 
 pub mod access;
 pub mod canvas;
+pub mod color;
 mod core;
 mod css;
 mod css_named;
@@ -44,6 +45,7 @@ pub use nsh_animation;
 pub use serde_json::Value as JsonValue;
 
 pub use crate::{
+    color::{Hsla, Rgba},
     core::{ApplyError, Core, ListBind, Measurement},
     effects::{
         BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, Gradient, GradientKind,

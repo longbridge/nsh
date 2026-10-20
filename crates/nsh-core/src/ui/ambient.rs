@@ -27,8 +27,8 @@ use super::{
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Size, StatusBarSetting,
     canvas::CanvasFont,
+    color::Hsla,
     platform::{Appearance, Idiom, Locale, Os},
-    style::Color,
     time::Instant,
 };
 
@@ -218,9 +218,9 @@ pub fn dark() -> bool {
     env(|e| e.dark)
 }
 
-/// `color` for the appearance now (props that take a [`Color`], such as an
+/// `color` for the appearance now (props that take one color, such as an
 /// input's placeholder color; styles take theme colors as they are).
-pub fn color(color: impl Into<AdaptiveColor>) -> Color {
+pub fn color(color: impl Into<AdaptiveColor>) -> Hsla {
     let color = color.into();
     if dark() { color.dark } else { color.light }
 }

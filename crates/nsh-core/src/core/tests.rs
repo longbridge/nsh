@@ -4713,7 +4713,7 @@ mod components {
         };
         let theme = crate::ui::Theme::default();
         let batch = c.commit().unwrap();
-        assert_eq!(background(&batch), Some(theme.primary.light));
+        assert_eq!(background(&batch), Some(Color::from(theme.primary.light)));
         assert_eq!(frame_of(&batch, 2).map(|f| f.width), Some(40.0));
         // The platform reports presses on it (`active`).
         assert!(batch.items.iter().any(|i| matches!(
@@ -4726,7 +4726,7 @@ mod components {
             ..Default::default()
         });
         let batch = c.commit().unwrap();
-        assert_eq!(background(&batch), Some(theme.primary.dark));
+        assert_eq!(background(&batch), Some(Color::from(theme.primary.dark)));
         c.set_states(2, crate::tailwind::state::PRESSED);
         let batch = c.commit().unwrap();
         assert_eq!(background(&batch), Some(Color(0xff0000ff)));
@@ -4772,7 +4772,7 @@ mod components {
         c.set_host_theme(Some(themed("#00ff00")));
         assert_eq!(
             c.commit().as_ref().and_then(background),
-            Some(rgb(0x00ff00))
+            Some(Color::from(rgb(0x00ff00)))
         );
         // The app's own theme (`uiTheme`) waits behind the host's.
         apply(
@@ -4788,7 +4788,7 @@ mod components {
         c.set_host_theme(None);
         assert_eq!(
             c.commit().as_ref().and_then(background),
-            Some(rgb(0x0000ff))
+            Some(Color::from(rgb(0x0000ff)))
         );
         // Setting the same theme again renders nothing.
         c.set_theme(themed("#0000ff"));
@@ -4805,7 +4805,7 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            default.primary.light
+            Color::from(default.primary.light)
         );
         // Not a token of the app's theme.
         assert!(view_style_of(&batch, 4).is_none());
@@ -4820,11 +4820,11 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            rgb(0x00ff00)
+            Color::from(rgb(0x00ff00))
         );
         assert_eq!(
             view_style_of(&batch, 4).unwrap().background_color,
-            rgb(0x0000ff)
+            Color::from(rgb(0x0000ff))
         );
         assert!(view_style_of(&batch, 6).is_none());
         c.set_class_environment(crate::tailwind::ClassEnvironment {
@@ -4834,7 +4834,7 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            rgb(0x004400)
+            Color::from(rgb(0x004400))
         );
         // New values of the same tokens: only their classes are resolved.
         let mut changed = host;
@@ -4843,7 +4843,7 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            rgb(0xff00ff)
+            Color::from(rgb(0xff00ff))
         );
         assert!(view_style_of(&batch, 4).is_none());
         assert!(view_style_of(&batch, 6).is_none());
@@ -4887,7 +4887,7 @@ mod components {
         // The app's class wins over the component's own background.
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            rgb(0x0000ff)
+            Color::from(rgb(0x0000ff))
         );
     }
 
@@ -4908,7 +4908,7 @@ mod components {
         let batch = c.commit().unwrap();
         assert_eq!(
             view_style_of(&batch, 2).unwrap().background_color,
-            rgb(0x0000ff)
+            Color::from(rgb(0x0000ff))
         );
     }
 
@@ -5801,8 +5801,8 @@ mod components {
         let v = animated_value(0.0);
         let presses = signal(0);
         let colors = [AdaptiveColor {
-            light: Color::BLACK,
-            dark: Color::TRANSPARENT,
+            light: Color::BLACK.into(),
+            dark: Color::TRANSPARENT.into(),
         }; 2];
         view()
             .bind_opacity(&v)
@@ -6944,7 +6944,7 @@ mod painter {
             ring.shape,
             GradientShape::Conic([0.0, 50.0, 50.0])
         ));
-        assert_eq!(ring.stops[0], (0.0, rgb(0x22d3ee)));
+        assert_eq!(ring.stops[0], (0.0, Color::from(rgb(0x22d3ee))));
         assert!(matches!(&ops[1], CanvasOp::Stroke(Some(path)) if path.len() == 3));
         assert!(matches!(
             &ops[2],
@@ -7775,8 +7775,8 @@ mod views {
     fn Track() -> impl IntoElement {
         let on = animated_value(0.0);
         let off_color = AdaptiveColor {
-            light: rgb(0xeeeeee),
-            dark: rgb(0x222222),
+            light: rgb(0xeeeeee).into(),
+            dark: rgb(0x222222).into(),
         };
         view().size_10().bind_background(&on.interpolate_colors(
             &[0.0, 1.0],
@@ -7825,7 +7825,7 @@ mod views {
         let green = AdaptiveColor::from(rgb(0x00ff00));
         let track = |dark| {
             let off = AdaptiveColor {
-                light: rgb(0x000000),
+                light: rgb(0x000000).into(),
                 dark,
             };
             view()
@@ -7833,9 +7833,9 @@ mod views {
                 .bind_background(&on.interpolate_colors(&[0.0, 1.0], &[off, green]))
         };
         view()
-            .child(track(rgb(0xffffff)))
-            .child(track(rgb(0x808080)))
-            .child(track(rgb(0x000000)))
+            .child(track(rgb(0xffffff).into()))
+            .child(track(rgb(0x808080).into()))
+            .child(track(rgb(0x000000).into()))
     }
 
     #[test]

@@ -24,7 +24,7 @@ pub struct StatusBarProps {
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 pub struct StatusBarAndroid {
     /// The bar's color (before edge-to-edge, API 35).
-    pub background_color: Option<Color>,
+    pub background_color: Option<Hsla>,
 }
 
 /// The props of a [`StatusBar`] only the web has.
@@ -32,7 +32,7 @@ pub struct StatusBarAndroid {
 pub struct StatusBarWeb {
     /// The color the browser gives its own bars around the page (the
     /// page's `<meta name="theme-color">`).
-    pub theme_color: Option<Color>,
+    pub theme_color: Option<Hsla>,
 }
 
 /// The color of the status bar's content.
@@ -82,7 +82,7 @@ fn setting(props: &StatusBarProps) -> StatusBarSetting {
         style: props.bar_style.get().map(Into::into),
         hidden: props.hidden.get(),
         animated: props.animated.get(),
-        background,
+        background: background.map(Into::into),
     }
 }
 

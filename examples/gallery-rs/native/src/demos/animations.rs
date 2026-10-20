@@ -34,7 +34,7 @@ const TONES: [AdaptiveColor; 5] = [
 ];
 
 /// Text on a tone's fill.
-const ON_TONE: AdaptiveColor = AdaptiveColor::new(rgb(0xffffff), rgb(0x13160c));
+const ON_TONE: AdaptiveColor = AdaptiveColor::rgb(0xffffff, 0x13160c);
 
 /// `Easing.inOut(Easing.cubic)`.
 const CUBIC_IN_OUT: Easing = Easing::Curve(Curve::Cubic, EaseMode::InOut);
@@ -281,7 +281,7 @@ fn Hero() -> impl IntoElement {
 // --- Easing -----------------------------------------------------------------
 
 /// Diagonal hatching inside a rectangle.
-fn hatch(p: Painter, color: Color, (x, y, w, h): (f32, f32, f32, f32)) -> Painter {
+fn hatch(p: Painter, color: Hsla, (x, y, w, h): (f32, f32, f32, f32)) -> Painter {
     let mut p = p
         .save()
         .begin_path()

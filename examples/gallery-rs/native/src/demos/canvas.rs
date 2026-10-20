@@ -68,19 +68,19 @@ fn round(x: f64) -> f64 {
 #[derive(Clone, Copy)]
 struct Palette {
     dark: bool,
-    surface: Color,
-    inset: Color,
-    raised: Color,
-    border: Color,
-    line: Color,
-    text: Color,
-    muted: Color,
-    faint: Color,
-    accent: Color,
-    accent_fill: Color,
-    info: Color,
-    warn: Color,
-    danger: Color,
+    surface: Hsla,
+    inset: Hsla,
+    raised: Hsla,
+    border: Hsla,
+    line: Hsla,
+    text: Hsla,
+    muted: Hsla,
+    faint: Hsla,
+    accent: Hsla,
+    accent_fill: Hsla,
+    info: Hsla,
+    warn: Hsla,
+    danger: Hsla,
 }
 
 impl Palette {
@@ -108,12 +108,12 @@ impl Palette {
 
 /// `color` at alpha `a` (TS `alpha(color, a)`; the palette's colors are
 /// opaque).
-fn alpha(color: Color, a: f32) -> Color {
-    color.with_alpha(a)
+fn alpha(color: impl Into<Hsla>, a: f32) -> Hsla {
+    color.into().opacity(a)
 }
 
 /// Diagonal hatching over the current clip (inside save / clip / restore).
-fn hatch(mut p: Painter, (x, y, w, h): (f32, f32, f32, f32), color: Color, gap: f32) -> Painter {
+fn hatch(mut p: Painter, (x, y, w, h): (f32, f32, f32, f32), color: Hsla, gap: f32) -> Painter {
     p = p.stroke_color(color).line_width(1.0).begin_path();
     let mut i = -h;
     while i < w {
@@ -124,7 +124,7 @@ fn hatch(mut p: Painter, (x, y, w, h): (f32, f32, f32, f32), color: Color, gap: 
 }
 
 /// A dashed horizontal or vertical reference line.
-fn dashed(p: Painter, (x0, y0): (f32, f32), (x1, y1): (f32, f32), color: Color) -> Painter {
+fn dashed(p: Painter, (x0, y0): (f32, f32), (x1, y1): (f32, f32), color: Hsla) -> Painter {
     p.save()
         .line_dash(&[3.0, 4.0])
         .stroke_color(color)
@@ -285,7 +285,7 @@ fn draw_dial(c: Palette, width: f32, height: f32, needle: &AnimatedValue, load: 
         .fill_text("% load", cx, cy + r * 0.62 + 18.0);
     // The needle, rotated natively.
     let shade = if c.dark {
-        rgba(0x0000_0099)
+        rgba(0x0000_0099).into()
     } else {
         alpha(rgb(0x14140a), 0.3)
     };
@@ -1047,7 +1047,7 @@ fn draw_compositing(c: Palette, width: f32, height: f32) -> Painter {
     // A shadowed card with a hole punched through (destination-out).
     let cx = width / 2.0;
     let shade = if c.dark {
-        rgba(0x0000_00b3)
+        rgba(0x0000_00b3).into()
     } else {
         alpha(rgb(0x14140a), 0.25)
     };

@@ -61,7 +61,7 @@ mod tests;
 pub use gpui;
 pub use nsh_core::{
     platform::{Appearance, Locale},
-    ui::{AdaptiveColor, Color, Theme, ThemeColors, ThemeError},
+    ui::{AdaptiveColor, Color, Hsla, Rgba, Theme, ThemeColors, ThemeError},
 };
 pub use nsh_engine::{App, AppError, AppErrorKind, Bundle, Limits, PackageInfo, Root};
 /// Signed packages: verifying, unpacking and accepting them

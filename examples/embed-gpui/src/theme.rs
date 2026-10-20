@@ -11,13 +11,16 @@ use gpui_kit::{
     Hsla,
     component::{Theme, ThemeMode},
 };
-use nsh_platform_gpui::{AdaptiveColor, Appearance, Color};
+use nsh_platform_gpui::{AdaptiveColor, Appearance};
 
-/// A GPUI color as nsh's (`0xRRGGBBAA`).
-fn color(c: Hsla) -> Color {
-    let rgba = c.to_rgb();
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
-    Color(byte(rgba.r) << 24 | byte(rgba.g) << 16 | byte(rgba.b) << 8 | byte(rgba.a))
+/// A GPUI color as NSH's: the same `Hsla`, channel for channel.
+fn color(c: Hsla) -> nsh_platform_gpui::Hsla {
+    nsh_platform_gpui::Hsla {
+        h: c.h,
+        s: c.s,
+        l: c.l,
+        a: c.a,
+    }
 }
 
 /// The host's light or dark mode, for [`nsh_platform_gpui::AppView::set_appearance`].
@@ -117,12 +120,20 @@ pub fn nsh_theme(theme: &Theme) -> nsh_platform_gpui::Theme {
 
 #[cfg(test)]
 mod tests {
+    use nsh_platform_gpui::Color;
+
     use super::*;
 
     #[test]
     fn colors_convert_to_rgba() {
-        assert_eq!(color(gpui_kit::rgb(0x336699).into()), Color(0x336699ff));
-        assert_eq!(color(gpui_kit::transparent_black()), Color(0x0000_0000));
+        assert_eq!(
+            Color::from(color(gpui_kit::rgb(0x336699).into())),
+            Color(0x336699ff)
+        );
+        assert_eq!(
+            Color::from(color(gpui_kit::transparent_black())),
+            Color(0x0000_0000)
+        );
     }
 
     #[test]
@@ -134,7 +145,7 @@ mod tests {
         };
         theme.colors.primary = gpui_kit::rgb(0x7c3aed).into();
         let nsh = nsh_theme(&theme);
-        assert_eq!(nsh.primary.dark, Color(0x7c3aedff));
+        assert_eq!(Color::from(nsh.primary.dark), Color(0x7c3aedff));
         // The other mode keeps nsh's (the configs set nothing here).
         assert_eq!(
             nsh.primary.light,

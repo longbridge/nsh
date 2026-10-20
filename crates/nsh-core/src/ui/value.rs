@@ -327,6 +327,22 @@ impl JsValue for String {
     }
 }
 
+/// A CSS color string from JS (`"#2563eb"`, `"rgb(0 0 0 / 0.5)"`), as
+/// [`Color`] takes it: the color of Rust components' props.
+impl JsValue for crate::Hsla {
+    fn ts_type(types: &mut TsTypes) -> String {
+        Color::ts_type(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        Color::from_js(value).map(Into::into)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Color::from(*self).to_js(host)
+    }
+}
+
 /// A CSS color string from JS (`"#2563eb"`, `"rgb(0 0 0 / 0.5)"`).
 impl JsValue for Color {
     fn ts_type(_types: &mut TsTypes) -> String {

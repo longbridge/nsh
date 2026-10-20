@@ -22,6 +22,7 @@ use std::{
 use super::{IntoReactive, Reactive, SharedString};
 use crate::{
     BlendMode, BoxShadow, Cursor, FontVariant, TransformOrigin, TransitionProps,
+    color::{Hsla, Rgba, transparent_black},
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     style::{Color, OriginLen, PatchValue, StyleDecl, StyleKey},
     tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
@@ -96,55 +97,70 @@ impl FontWeight {
     pub const BLACK: Self = Self(900);
 }
 
-/// `0xRRGGBB`, opaque.
-pub const fn rgb(hex: u32) -> Color {
-    Color(hex << 8 | 0xff)
-}
-
-/// `0xRRGGBBAA`.
-pub const fn rgba(hex: u32) -> Color {
-    Color(hex)
-}
-
 /// A color for each appearance: the platform switches between them
-/// with nothing running. Theme colors are adaptive; a plain [`Color`] is the
-/// same in both.
+/// with nothing running. Theme colors are adaptive; an [`Hsla`] (or anything
+/// that converts to one) is the same in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct AdaptiveColor {
     /// In light appearance.
-    pub light: Color,
+    pub light: Hsla,
     /// In dark appearance.
-    pub dark: Color,
+    pub dark: Hsla,
 }
 
 impl AdaptiveColor {
     /// Transparent in both.
     pub const TRANSPARENT: Self = Self {
-        light: Color::TRANSPARENT,
-        dark: Color::TRANSPARENT,
+        light: transparent_black(),
+        dark: transparent_black(),
     };
 
     /// `light` and `dark`.
-    pub const fn new(light: Color, dark: Color) -> Self {
-        Self { light, dark }
+    pub fn new(light: impl Into<Hsla>, dark: impl Into<Hsla>) -> Self {
+        Self {
+            light: light.into(),
+            dark: dark.into(),
+        }
+    }
+
+    /// `0xRRGGBB` in light appearance and in dark, opaque (`const`s:
+    /// `AdaptiveColor::rgb(0xffffff, 0x101113)`).
+    pub const fn rgb(light: u32, dark: u32) -> Self {
+        Self {
+            light: crate::color::rgb(light).to_hsla(),
+            dark: crate::color::rgb(dark).to_hsla(),
+        }
     }
 
     /// Both with their alpha multiplied by `opacity`.
     pub fn opacity(self, opacity: f32) -> Self {
-        let fade = |c: Color| {
-            let a = ((c.0 & 0xff) as f32 * opacity.clamp(0.0, 1.0)).round() as u32;
-            Color(c.0 & !0xff | a)
-        };
+        self.map(|c| c.opacity(opacity))
+    }
+
+    /// Both through `f` (`theme.primary.map(|c| c.darken(0.1))`).
+    pub fn map(self, f: impl Fn(Hsla) -> Hsla) -> Self {
         Self {
-            light: fade(self.light),
-            dark: fade(self.dark),
+            light: f(self.light),
+            dark: f(self.dark),
         }
+    }
+}
+
+impl From<Hsla> for AdaptiveColor {
+    fn from(c: Hsla) -> Self {
+        Self { light: c, dark: c }
+    }
+}
+
+impl From<Rgba> for AdaptiveColor {
+    fn from(c: Rgba) -> Self {
+        Hsla::from(c).into()
     }
 }
 
 impl From<Color> for AdaptiveColor {
     fn from(c: Color) -> Self {
-        Self { light: c, dark: c }
+        Hsla::from(c).into()
     }
 }
 
@@ -264,7 +280,8 @@ pub(crate) enum ColorPart {
 }
 
 impl ColorPart {
-    fn part(self, c: Color) -> Part {
+    fn part(self, c: Hsla) -> Part {
+        let c = Color::from(c);
         // A color with its own alpha replaces the layers' alpha (as
         // Tailwind's `shadow-black/50`); an opaque one keeps theirs.
         let own = c.0 & 0xff != 0xff;
@@ -443,8 +460,9 @@ pub(crate) enum Declaration {
 /// Tailwind's default theme: the presets typed styles name.
 static PRESETS: LazyLock<tailwind::Theme> = LazyLock::new(tailwind::Theme::default);
 
-fn color_patch(c: Color) -> PatchValue {
-    PatchValue::Str(format!("#{:08x}", c.0).into())
+/// A color enters styles packed (`crate::color`'s rounding).
+fn color_patch(c: Hsla) -> PatchValue {
+    PatchValue::Str(format!("#{:08x}", Color::from(c).0).into())
 }
 
 fn shadow_preset(layers: Option<&Vec<BoxShadow>>) -> Arc<[BoxShadow]> {
@@ -646,7 +664,7 @@ impl Declaration {
 
 type Entries = Vec<(Variant, Declaration)>;
 
-crate::static_reactive!(AdaptiveColor: AdaptiveColor, Color);
+crate::static_reactive!(AdaptiveColor: AdaptiveColor, Hsla, Rgba, Color);
 crate::static_reactive!(Length: Length);
 crate::static_reactive!(u16: u16);
 crate::static_reactive!(i16: i16);
@@ -3078,6 +3096,7 @@ mod tests {
     use super::*;
     use crate::{
         Style,
+        color::{rgb, rgba},
         tailwind::{ClassEnvironment, ClassProps, Context},
         ui::palette::{EMERALD, PINK, RED, SKY, VIOLET},
     };
@@ -3197,16 +3216,16 @@ mod tests {
     fn shadows_and_rings_are_tailwinds() {
         // The color is React Native's shadow's too (invisible at its
         // default opacity 0).
-        let emerald = EMERALD.shade(500).with_alpha(0.5);
+        let emerald = EMERALD.shade(500).opacity(0.5);
         same_with(
             s().shadow_lg().shadow_color(emerald),
             "shadow-lg shadow-emerald-500/50",
-            &|s| s.view.shadow.color = emerald,
+            &|s| s.view.shadow.color = emerald.into(),
         );
         same_with(
             s().shadow_xl().shadow_color(SKY.shade(500)),
             "shadow-xl shadow-sky-500",
-            &|s| s.view.shadow.color = SKY.shade(500),
+            &|s| s.view.shadow.color = SKY.shade(500).into(),
         );
         same(s().inset_shadow_sm(), "inset-shadow-sm");
         same(
@@ -3229,7 +3248,7 @@ mod tests {
             assert_eq!(
                 resolve(&adaptive, dark, 0, 0),
                 resolve_with(&tailwind::parse(&PRESETS, &classes), dark, 0, 0, &|s| {
-                    s.view.shadow.color = hue.shade(500)
+                    s.view.shadow.color = hue.shade(500).into()
                 })
             );
         }
@@ -3261,14 +3280,14 @@ mod tests {
             &mut ClassProps::default(),
             |_| {},
         );
-        assert_eq!(style.view.shadow.color, rgb(0x0969da));
+        assert_eq!(style.view.shadow.color, rgb(0x0969da).into());
         assert_eq!(style.view.shadow.opacity, 0.35);
         assert_eq!(style.view.shadow.radius, 10.0);
         assert_eq!(
             (style.view.shadow.offset_x, style.view.shadow.offset_y),
             (4.0, 8.0)
         );
-        assert_eq!(style.text.shadow_color, Some(rgba(0x0000_0099)));
+        assert_eq!(style.text.shadow_color, Some(rgba(0x0000_0099).into()));
         assert_eq!(style.text.shadow_radius, Some(4.0));
         assert_eq!(style.text.shadow_offset, Some((2.0, 2.0)));
         let layer = BoxShadow {
@@ -3276,7 +3295,7 @@ mod tests {
             offset_y: 2.0,
             blur: 4.0,
             spread: 0.0,
-            color: rgba(0x0000_000d),
+            color: rgba(0x0000_000d).into(),
             inset: true,
         };
         same(
