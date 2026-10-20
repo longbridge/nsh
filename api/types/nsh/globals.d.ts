@@ -36,7 +36,14 @@ declare function atob(data: string): string;
 declare function btoa(data: string): string;
 
 /** `<If when={…} else={…}>…</If>`: renders its children while `when` is
- * truthy, else `else`. A global (no import), like `Each`. */
+ * truthy, else `else`. A function child gets an accessor of `when`'s value,
+ * which is set while it shows: `<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>`.
+ * A global (no import), like `Each`. */
+declare function If<T>(props: {
+  when: T;
+  else?: import("./types").JSX.Element;
+  children?: import("./types").JSX.Element | ((value: () => NonNullable<T>) => import("./types").JSX.Element);
+}): import("./types").JSX.Element;
 declare function If(props: {
   when: unknown;
   else?: import("./types").JSX.Element;

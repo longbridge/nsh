@@ -1272,7 +1272,14 @@ declare function atob(data: string): string;
 declare function btoa(data: string): string;
 
 /** `<If when={…} else={…}>…</If>`: renders its children while `when` is
- * truthy, else `else`. A global (no import), like `Each`. */
+ * truthy, else `else`. A function child gets an accessor of `when`'s value,
+ * which is set while it shows: `<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>`.
+ * A global (no import), like `Each`. */
+declare function If<T>(props: {
+  when: T;
+  else?: import("./types").JSX.Element;
+  children?: import("./types").JSX.Element | ((value: () => NonNullable<T>) => import("./types").JSX.Element);
+}): import("./types").JSX.Element;
 declare function If(props: {
   when: unknown;
   else?: import("./types").JSX.Element;
@@ -1561,6 +1568,38 @@ insert(root, cond(() => shown(), () => component(Card, {{}})));"#
         // Its load ending later finds nothing to change.
         host.eval_source(r#"later("late");"#).unwrap();
         assert!(reported(&host).is_empty());
+    }
+
+    #[test]
+    fn a_function_an_effect_returns_is_its_cleanup() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ cond, component, element, insert }} from "nsh:rt";
+import {{ effect, signal }} from "nsh";
+const n = signal(0);
+const shown = signal(true);
+globalThis.n = n;
+globalThis.shown = shown;
+function Ticker() {{
+  effect(() => {{
+    const v = n();
+    report(`run ${{v}}`);
+    return () => report(`cleanup ${{v}}`);
+  }});
+  // An async effect's promise is not a cleanup.
+  effect(async () => {{ n(); }});
+  return element("view");
+}}
+const root = element("view");
+insert(root, cond(() => shown(), () => component(Ticker, {{}})));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["run 0"]);
+        host.eval_source("n.set(1);").unwrap();
+        assert_eq!(reported(&host), ["cleanup 0", "run 1"]);
+        host.eval_source("shown.set(false);").unwrap();
+        assert_eq!(reported(&host), ["cleanup 1"]);
     }
 
     fn ops(host: &Host) -> Vec<Op> {

@@ -129,8 +129,8 @@ const NSH: &[Item] = &[
         "effect",
         Export::Function(reactive::effect, 1),
         Ts::function(
-            "Runs `fn` after rendering, and again when what it read changes.",
-            &["(fn: () => void): void"],
+            "Runs `fn` after rendering, and again when what it read changes. A function `fn`\nreturns is its cleanup (`cleanup(f)`): it runs before `fn` runs again, or when the\neffect goes away.",
+            &["(fn: () => void | (() => void)): void"],
         ),
     ),
     (

@@ -1227,13 +1227,32 @@ impl<'a> Compiler<'a, '_> {
             self.error("<If> needs `when`", span);
             return "undefined".to_owned();
         };
+        let cond = self.use_helper("cond");
+        // `{(user) => …}`: the child is called with an accessor of `when`'s
+        // value, truthy while the branch shows (Solid's `<Show>`); `when`
+        // is read through it, once per read.
+        if lone_function_child(&el.children) {
+            let mut render = String::new();
+            for child in el.children {
+                if let JSXChild::ExpressionContainer(c) = child
+                    && let Some(e) = self.expression(c.unbox().expression)
+                {
+                    render = g.hole(e);
+                }
+            }
+            let then = format!("() => ({render})({HOLE}w)");
+            let branches = match get("else") {
+                Some(otherwise) => format!("{then}, () => {otherwise}"),
+                None => then,
+            };
+            return format!("(({HOLE}w) => {cond}({HOLE}w, {branches}))(() => {when})");
+        }
         let values = self.children(el.children, g, Mode::Value);
         let then = match values.as_slice() {
             [] => "undefined".to_owned(),
             [one] => one.clone(),
             many => format!("[{}]", many.join(", ")),
         };
-        let cond = self.use_helper("cond");
         match get("else") {
             Some(otherwise) => {
                 format!("{cond}(() => {when}, () => {then}, () => {otherwise})")
@@ -1287,6 +1306,21 @@ impl<'a> Compiler<'a, '_> {
             Some(key) => format!("{each}(() => {of}, {render}, {key})"),
             None => format!("{each}(() => {of}, {render})"),
         }
+    }
+}
+
+/// Whether `children` are one function written in place, whitespace aside
+/// (`<If>`'s `{(value) => …}`).
+fn lone_function_child(children: &[JSXChild<'_>]) -> bool {
+    let mut meaningful = children
+        .iter()
+        .filter(|c| !matches!(c, JSXChild::Text(t) if clean_text(&t.value).is_none()));
+    match (meaningful.next(), meaningful.next()) {
+        (Some(JSXChild::ExpressionContainer(c)), None) => matches!(
+            c.expression,
+            JSXExpression::ArrowFunctionExpression(_) | JSXExpression::FunctionExpression(_)
+        ),
+        _ => false,
     }
 }
 
@@ -1678,6 +1712,27 @@ mod tests {
             </View>;"#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn an_if_with_a_function_child_hands_it_an_accessor_of_when() {
+        let code = flat(
+            &compile(
+                r#"import { Text } from "nsh";
+            declare const user: () => { name: string } | null;
+            export const a = <If when={user()} else={<Text>out</Text>}>
+              {(u) => <Text>{u().name}</Text>}
+            </If>;"#,
+            )
+            .unwrap(),
+        );
+        assert!(
+            code.contains("((__nsh_hw) => _$cond(__nsh_hw, () => ((u) => (() => {"),
+            "{code}"
+        );
+        // Called with the accessor; `else` as it was; `when` read through it.
+        assert!(code.contains("})())(__nsh_hw), () => (() => {"), "{code}");
+        assert!(code.contains("))(() => user());"), "{code}");
     }
 
     #[test]

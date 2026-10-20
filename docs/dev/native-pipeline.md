@@ -131,7 +131,9 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - `each` keys rows (`key(item, index)`, the index for `key="index"`, else the item; objects by identity, primitives by
   value) and updates the item and index signals of kept rows (rows get accessors: `item()`, `index()`); each row has
   its own owner. `cond` renders a
-  branch per change of truthiness.
+  branch per change of truthiness. An `<If>` whose child is a function written in place compiles to
+  `((w) => cond(w, () => (fn)(w), …))(() => when)`: the function gets an accessor of `when`'s value (Solid's `<Show>`),
+  read through the same thunk the condition is.
 - Platform-only props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`): only the current platform's object is sent, each
   key as a prop of its own (`platform_props`).
 - The reactive graph and the renderer share one per-context state (`state.rs`); natives reach each part by shared or

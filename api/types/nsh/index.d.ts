@@ -73,8 +73,12 @@ export declare function signal<T = undefined>(): Signal<T | undefined>;
 /** A value derived from signals, computed again when they change (and read). */
 export declare function computed<T>(fn: (previous: T | undefined) => T, options?: SignalOptions<T>): Accessor<T>;
 
-/** Runs `fn` after rendering, and again when what it read changes. */
-export declare function effect(fn: () => void): void;
+/**
+ * Runs `fn` after rendering, and again when what it read changes. A function `fn`
+ * returns is its cleanup (`cleanup(f)`): it runs before `fn` runs again, or when the
+ * effect goes away.
+ */
+export declare function effect(fn: () => void | (() => void)): void;
 
 /** Runs `fn`, applying its writes together at the end. */
 export declare function batch<T>(fn: () => T): T;

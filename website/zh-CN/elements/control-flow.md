@@ -12,7 +12,7 @@ demo: el-control-flow
 ```tsx
 <View>
   <If when={user()} else={<Text>Signed out</Text>}>
-    <Text>Hello, {user()!.name}</Text>
+    {(u) => <Text>Hello, {u().name}</Text>}
   </If>
   <Each of={todos()}>{(todo) => <Text>{todo().title}</Text>}</Each>
 </View>
@@ -26,9 +26,9 @@ demo: el-control-flow
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `when` | `unknown` | 条件。只看它的真假。 |
+| `when` | `T` | 条件。只看它的真假。 |
 | `else` | `JSX.Element` | `when` 为假值时渲染。 |
-| `children` | `JSX.Element` | `when` 为真值时渲染。 |
+| `children` | `JSX.Element` \| `(value: () => NonNullable<T>) => JSX.Element` | `when` 为真值时渲染。写成函数时，会收到 `when` 值的访问器。 |
 
 只有 `when` 的真假变化时才会重新创建分支。如果 `when` 从一个真值变成另一个真值（例如 `user()` 从一个对象变成另一个对象），分支会保留，其中的表达式各自更新。
 
@@ -38,6 +38,14 @@ const loading = signal(true);
 <If when={!loading()} else={<Text style={{ color: "#6e7781" }}>Loading…</Text>}>
   <Profile />
 </If>;
+```
+
+函数形式的子元素读取的是 `when` 给出的值，类型中不含 `null` 和 `undefined`，所以分支里不需要写 `!`：
+
+```tsx
+const user = signal<User | null>(null);
+
+<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>;
 ```
 
 ## `<Each>`

@@ -3416,6 +3416,83 @@ fn inputs_report_their_content_size() {
 }
 
 #[test]
+fn fixed_size_inputs_report_their_content_size() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Input,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Placeholder("A much longer placeholder".into()),
+            },
+            Op::SetStyle {
+                id: 2,
+                style: style(&[
+                    ("width", StyleValue::Number(200.0)),
+                    ("height", StyleValue::Number(40.0)),
+                ]),
+                patch: Default::default(),
+            },
+            Op::Listen {
+                id: 2,
+                event: EventKind::ContentSizeChange,
+                enabled: true,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let sizes = |c: &mut Core<FakeEngine>| {
+        js_events(c)
+            .into_iter()
+            .filter(|(id, kind, _)| *id == 2 && *kind == EventKind::ContentSizeChange)
+            .map(|(_, _, p)| p)
+            .collect::<Vec<_>>()
+    };
+    let size = |width: f64, height: f64| {
+        vec![EventPayload::Map(vec![
+            ("width", PayloadValue::Number(width)),
+            ("height", PayloadValue::Number(height)),
+        ])]
+    };
+    let frame = |batch: &MountBatch| {
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Frame { id: 2, .. }))
+    };
+    // Sized by its placeholder, an empty input reports an empty line (the
+    // fake engine gives its zero-width space a width).
+    let batch = c.commit().unwrap();
+    assert!(frame(&batch));
+    assert_eq!(sizes(&mut c), size(8.0, 16.0));
+    // Its frame stays as the user types; its text's size is reported.
+    for (count, (text, width)) in [("ab", 16.0), ("abc", 24.0)].into_iter().enumerate() {
+        c.input_changed(2, text, count as u32 + 1);
+        assert!(c.commit().is_none_or(|b| !frame(&b)));
+        assert_eq!(sizes(&mut c), size(width, 16.0), "{text:?}");
+    }
+    // A value that reads as the placeholder: its own size.
+    c.input_changed(2, "A much longer placeholder", 3);
+    c.commit();
+    assert_eq!(sizes(&mut c), size(200.0, 16.0));
+    c.input_changed(2, "", 4);
+    c.commit();
+    assert_eq!(sizes(&mut c), size(8.0, 16.0));
+    // Nothing changed: nothing reported, nothing measured or mounted.
+    c.input_changed(2, "", 5);
+    assert!(c.commit().is_none());
+    assert_eq!(sizes(&mut c), Vec::new());
+}
+
+#[test]
 fn text_shrinks_to_fit_its_lines() {
     let mut c = Core::new(crate::text::ApproxTextEngine, Size::new(320.0, 480.0));
     let ops = vec![
