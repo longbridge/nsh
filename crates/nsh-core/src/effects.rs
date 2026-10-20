@@ -4,7 +4,10 @@
 
 use std::sync::Arc;
 
-use crate::style::{BorderStyle, Color};
+use crate::{
+    geometry::{DefiniteLength, Percentage, Points, REM_SIZE, Radians, Size, deg},
+    style::{BorderStyle, Color},
+};
 
 /// One layer of `boxShadow` (CSS `box-shadow`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -46,10 +49,10 @@ pub enum GradientSize {
 /// The geometry of a gradient.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GradientKind {
-    /// Along a line at `angle` degrees (CSS: 0 points up, 90 right).
+    /// Along a line at `angle` (CSS: 0 points up, a quarter turn right).
     Linear {
-        /// Direction in degrees.
-        angle: f32,
+        /// Direction.
+        angle: Radians,
     },
     /// Toward a corner (`to top right`): the angle follows the box's
     /// shape (see [`GradientKind::linear_angle`]).
@@ -65,67 +68,61 @@ pub enum GradientKind {
         circle: bool,
         /// Ending shape size.
         size: GradientSize,
-        /// Center, as fractions of the width.
-        x: f32,
-        /// Center, as fractions of the height.
-        y: f32,
+        /// Center, as a fraction of the width.
+        x: Percentage,
+        /// Center, as a fraction of the height.
+        y: Percentage,
     },
-    /// Around a center, starting at `from` degrees.
+    /// Around a center, starting at `from`.
     Conic {
-        /// Start angle in degrees (0 is up, clockwise).
-        from: f32,
-        /// Center, as fractions of the width.
-        x: f32,
-        /// Center, as fractions of the height.
-        y: f32,
+        /// Start angle (0 is up, clockwise).
+        from: Radians,
+        /// Center, as a fraction of the width.
+        x: Percentage,
+        /// Center, as a fraction of the height.
+        y: Percentage,
     },
 }
 
 impl GradientKind {
-    /// The CSS angle (degrees) of a linear gradient over a `w` × `h` box.
-    pub fn linear_angle(&self, w: f32, h: f32) -> Option<f32> {
+    /// The CSS angle of a linear gradient over a box of `size`.
+    pub fn linear_angle(&self, size: Size<Points>) -> Option<Radians> {
         match *self {
             GradientKind::Linear { angle } => Some(angle),
             GradientKind::LinearCorner { right, bottom } => {
                 // Perpendicular to the diagonal between the other two
                 // corners (CSS Images 3).
-                let a = (h.max(f32::EPSILON) / w.max(f32::EPSILON))
+                let a = (size.height.0.max(f32::EPSILON) / size.width.0.max(f32::EPSILON))
                     .atan()
                     .to_degrees();
-                Some(match (right, bottom) {
+                Some(deg(match (right, bottom) {
                     (true, false) => 90.0 - a,
                     (true, true) => 90.0 + a,
                     (false, true) => 270.0 - a,
                     (false, false) => 270.0 + a,
-                })
+                }))
             }
             _ => None,
         }
     }
 }
 
-/// Where a color stop sits along the gradient line.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum StopPosition {
-    /// A fraction of the line (`50%`; a conic gradient's angles as
-    /// fractions of a turn: `90deg` is 0.25).
-    Fraction(f32),
-    /// Points from the line's start (`10px`), resolved against the
-    /// length of the line ([`Gradient::line_length`]) where the box is
-    /// known.
-    Points(f32),
-}
-
-impl StopPosition {
-    /// The position as a fraction of a `line` points long.
-    pub fn fraction(self, line: f32) -> f32 {
-        match self {
-            StopPosition::Fraction(f) => f,
-            StopPosition::Points(p) if line > 0.0 => p / line,
-            // A line of no length (an empty box) draws nothing: lengths
-            // only need to stay in order and finite.
-            StopPosition::Points(p) if p > 0.0 => 1.0,
-            StopPosition::Points(_) => 0.0,
+/// A stop's position as a fraction of a `line` long: a fraction as it
+/// is, a length (rems at [`REM_SIZE`]) against the line.
+fn stop_fraction(position: DefiniteLength, line: Points) -> f32 {
+    match position {
+        DefiniteLength::Fraction(f) => f.0,
+        DefiniteLength::Absolute(a) => {
+            let p = a.to_points(REM_SIZE);
+            if line.0 > 0.0 {
+                p / line
+            } else if p.0 > 0.0 {
+                // A line of no length (an empty box) draws nothing:
+                // lengths only need to stay in order and finite.
+                1.0
+            } else {
+                0.0
+            }
         }
     }
 }
@@ -135,9 +132,12 @@ impl StopPosition {
 pub struct ColorStop {
     /// Color.
     pub color: Color,
-    /// Position along the gradient; `None` is spread evenly between its
-    /// neighbors.
-    pub position: Option<StopPosition>,
+    /// Position along the gradient line: a fraction of it (`50%`; a
+    /// conic gradient's angles as fractions of a turn: `90deg` is 0.25),
+    /// or a length from its start (`10px`), resolved against its length
+    /// ([`Gradient::line_length`]) where the box is known. `None` is
+    /// spread evenly between its neighbors.
+    pub position: Option<DefiniteLength>,
 }
 
 /// A gradient image (`backgroundImage`).
@@ -157,64 +157,67 @@ impl Gradient {
     pub fn has_lengths(&self) -> bool {
         self.stops
             .iter()
-            .any(|s| matches!(s.position, Some(StopPosition::Points(_))))
+            .any(|s| matches!(s.position, Some(DefiniteLength::Absolute(_))))
     }
 
-    /// The length in points of the gradient line over a `w` × `h` box,
-    /// what lengths of stops are fractions of (CSS Images 3): a linear
+    /// The length of the gradient line over a box of `size`, what
+    /// lengths of stops are fractions of (CSS Images 3): a linear
     /// gradient's line through the center, long enough that the corners
     /// get the end colors; a radial gradient's ray to the right, from the
     /// center to the ending shape; 0 for a conic gradient, whose stops
     /// are angles.
-    pub fn line_length(&self, w: f32, h: f32) -> f32 {
-        match self.kind {
-            GradientKind::Radial { circle, size, x, y } => {
-                radial_radii(circle, size, x * w, y * h, w, h).0
-            }
+    pub fn line_length(&self, size: Size<Points>) -> Points {
+        let (w, h) = (size.width.0, size.height.0);
+        Points(match self.kind {
+            GradientKind::Radial {
+                circle,
+                size: shape,
+                x,
+                y,
+            } => radial_radii(circle, shape, x.0 * w, y.0 * h, w, h).0,
             GradientKind::Conic { .. } => 0.0,
             kind => {
-                let angle = kind.linear_angle(w, h).unwrap_or(180.0);
-                let (s, c) = angle.to_radians().sin_cos();
+                let angle = kind.linear_angle(size).unwrap_or(deg(180.0));
+                let (s, c) = angle.sin_cos();
                 (w * s).abs() + (h * c).abs()
             }
-        }
+        })
     }
 
-    /// Stop positions over a `w` × `h` box as fractions of the gradient
+    /// Stop positions over a box of `size` as fractions of the gradient
     /// line, resolved as CSS does: lengths against the line's length,
     /// missing ones spread evenly, each at least the one before it.
-    pub fn resolved_stops(&self, w: f32, h: f32) -> Vec<(Color, f32)> {
+    pub fn resolved_stops(&self, size: Size<Points>) -> Vec<(Color, Percentage)> {
         let mut out = Vec::with_capacity(self.stops.len());
-        self.resolve_stops(w, h, &mut out);
+        self.resolve_stops(size, &mut out);
         out
     }
 
     /// [`Gradient::resolved_stops`] into a reused buffer.
-    pub fn resolve_stops(&self, w: f32, h: f32, out: &mut Vec<(Color, f32)>) {
+    pub fn resolve_stops(&self, size: Size<Points>, out: &mut Vec<(Color, Percentage)>) {
         let line = if self.has_lengths() {
-            self.line_length(w, h)
+            self.line_length(size)
         } else {
-            0.0
+            Points::ZERO
         };
         out.clear();
-        out.extend(
-            self.stops
-                .iter()
-                .map(|s| (s.color, s.position.map_or(f32::NAN, |p| p.fraction(line)))),
-        );
+        out.extend(self.stops.iter().map(|s| {
+            let at = s.position.map_or(f32::NAN, |p| stop_fraction(p, line));
+            (s.color, Percentage(at))
+        }));
         let n = out.len();
         if n == 0 {
             return;
         }
         if out[0].1.is_nan() {
-            out[0].1 = 0.0;
+            out[0].1 = Percentage(0.0);
         }
         if out[n - 1].1.is_nan() {
-            out[n - 1].1 = 1.0;
+            out[n - 1].1 = Percentage(1.0);
         }
         // From 0, not -∞: released apps' negative stops resolve to 0, as
         // they always have (docs/dev/compatibility.md, rule 4).
-        let mut max = 0.0f32;
+        let mut max = Percentage(0.0);
         for s in out.iter_mut().filter(|s| !s.1.is_nan()) {
             max = max.max(s.1);
             s.1 = max;
@@ -232,7 +235,7 @@ impl Gradient {
             }
             let (a, b) = (out[start].1, out[end].1);
             for (k, s) in out[i..end].iter_mut().enumerate() {
-                s.1 = a + (b - a) * (k + 1) as f32 / (end - start) as f32;
+                s.1 = Percentage(a.0 + (b.0 - a.0) * (k + 1) as f32 / (end - start) as f32);
             }
             i = end;
         }
@@ -750,12 +753,13 @@ pub(crate) fn shared(effects: Effects) -> Option<Arc<Effects>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::{percentage, px, size};
 
     #[test]
     fn stops_spread_evenly() {
         let c = Color::BLACK;
         let g = Gradient {
-            kind: GradientKind::Linear { angle: 90.0 },
+            kind: GradientKind::Linear { angle: deg(90.0) },
             stops: vec![
                 ColorStop {
                     color: c,
@@ -767,19 +771,19 @@ mod tests {
                 },
                 ColorStop {
                     color: c,
-                    position: Some(StopPosition::Fraction(0.8)),
+                    position: Some(DefiniteLength::from(percentage(0.8))),
                 },
                 ColorStop {
                     color: c,
-                    position: Some(StopPosition::Fraction(0.5)),
+                    position: Some(DefiniteLength::from(percentage(0.5))),
                 },
             ],
             repeating: false,
         };
         let p: Vec<f32> = g
-            .resolved_stops(100.0, 100.0)
+            .resolved_stops(size(px(100.0), px(100.0)))
             .into_iter()
-            .map(|(_, p)| p)
+            .map(|(_, p)| p.0)
             .collect();
         assert_eq!(p, [0.0, 0.4, 0.8, 0.8]);
     }
@@ -788,17 +792,17 @@ mod tests {
     fn negative_stops_resolve_to_zero() {
         let stop = |p: f32| ColorStop {
             color: Color::BLACK,
-            position: Some(StopPosition::Fraction(p)),
+            position: Some(DefiniteLength::from(percentage(p))),
         };
         let mut g = Gradient {
-            kind: GradientKind::Linear { angle: 180.0 },
+            kind: GradientKind::Linear { angle: deg(180.0) },
             stops: vec![stop(-0.5), stop(1.0)],
             repeating: false,
         };
         let positions = |g: &Gradient| -> Vec<f32> {
-            g.resolved_stops(100.0, 40.0)
+            g.resolved_stops(size(px(100.0), px(40.0)))
                 .into_iter()
-                .map(|(_, p)| p)
+                .map(|(_, p)| p.0)
                 .collect()
         };
         assert_eq!(positions(&g), [0.0, 1.0]);
@@ -806,7 +810,7 @@ mod tests {
             stop(-0.5),
             ColorStop {
                 color: Color::BLACK,
-                position: Some(StopPosition::Points(-20.0)),
+                position: Some(DefiniteLength::from(px(-20.0))),
             },
             stop(1.0),
         ];
@@ -816,52 +820,52 @@ mod tests {
     #[test]
     fn lengths_resolve_against_the_line() {
         let c = Color::BLACK;
-        let stop = |p: Option<StopPosition>| ColorStop {
+        let stop = |p: Option<DefiniteLength>| ColorStop {
             color: c,
             position: p,
         };
         let mut g = Gradient {
-            kind: GradientKind::Linear { angle: 90.0 },
+            kind: GradientKind::Linear { angle: deg(90.0) },
             stops: vec![
-                stop(Some(StopPosition::Points(0.0))),
-                stop(Some(StopPosition::Points(10.0))),
+                stop(Some(DefiniteLength::from(px(0.0)))),
+                stop(Some(DefiniteLength::from(px(10.0)))),
                 stop(None),
-                stop(Some(StopPosition::Fraction(0.5))),
+                stop(Some(DefiniteLength::from(percentage(0.5)))),
             ],
             repeating: true,
         };
         assert!(g.has_lengths());
         // Across a 200 × 50 box: the line is the width.
         let p: Vec<f32> = g
-            .resolved_stops(200.0, 50.0)
+            .resolved_stops(size(px(200.0), px(50.0)))
             .into_iter()
-            .map(|(_, p)| p)
+            .map(|(_, p)| p.0)
             .collect();
         assert_eq!(p, [0.0, 0.05, 0.275, 0.5]);
         // Down: the height.
-        g.kind = GradientKind::Linear { angle: 180.0 };
-        assert!((g.resolved_stops(200.0, 50.0)[1].1 - 0.2).abs() < 1e-6);
+        g.kind = GradientKind::Linear { angle: deg(180.0) };
+        assert!((g.resolved_stops(size(px(200.0), px(50.0)))[1].1.0 - 0.2).abs() < 1e-6);
         // Diagonal over a square: the diagonal.
-        g.kind = GradientKind::Linear { angle: 45.0 };
-        let line = g.line_length(100.0, 100.0);
-        assert!((line - 100.0 * std::f32::consts::SQRT_2).abs() < 1e-3);
+        g.kind = GradientKind::Linear { angle: deg(45.0) };
+        let line = g.line_length(size(px(100.0), px(100.0)));
+        assert!((line.0 - 100.0 * std::f32::consts::SQRT_2).abs() < 1e-3);
         // Radial: the ray to the ending shape (a circle to the farthest
         // side of a 200 × 100 box from its center is 100 points).
         g.kind = GradientKind::Radial {
             circle: true,
             size: GradientSize::FarthestSide,
-            x: 0.5,
-            y: 0.5,
+            x: percentage(0.5),
+            y: percentage(0.5),
         };
-        assert!((g.line_length(200.0, 100.0) - 100.0).abs() < 1e-4);
-        assert!((g.resolved_stops(200.0, 100.0)[1].1 - 0.1).abs() < 1e-6);
+        assert!((g.line_length(size(px(200.0), px(100.0))).0 - 100.0).abs() < 1e-4);
+        assert!((g.resolved_stops(size(px(200.0), px(100.0)))[1].1.0 - 0.1).abs() < 1e-6);
         // An empty box puts lengths at the start or past the end, still
         // in order.
-        g.kind = GradientKind::Linear { angle: 90.0 };
+        g.kind = GradientKind::Linear { angle: deg(90.0) };
         let p: Vec<f32> = g
-            .resolved_stops(0.0, 0.0)
+            .resolved_stops(size(px(0.0), px(0.0)))
             .into_iter()
-            .map(|(_, p)| p)
+            .map(|(_, p)| p.0)
             .collect();
         assert_eq!(p[0], 0.0);
         assert!(p.windows(2).all(|w| w[0] <= w[1]));
@@ -883,11 +887,25 @@ mod tests {
             right: true,
             bottom: false,
         };
-        assert!((k.linear_angle(100.0, 100.0).unwrap() - 45.0).abs() < 1e-4);
+        assert!(
+            (k.linear_angle(size(px(100.0), px(100.0)))
+                .unwrap()
+                .to_degrees()
+                - 45.0)
+                .abs()
+                < 1e-4
+        );
         let k = GradientKind::LinearCorner {
             right: true,
             bottom: true,
         };
-        assert!((k.linear_angle(100.0, 100.0).unwrap() - 135.0).abs() < 1e-4);
+        assert!(
+            (k.linear_angle(size(px(100.0), px(100.0)))
+                .unwrap()
+                .to_degrees()
+                - 135.0)
+                .abs()
+                < 1e-4
+        );
     }
 }

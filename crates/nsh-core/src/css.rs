@@ -74,11 +74,11 @@ pub(crate) fn length(s: &str) -> Option<f32> {
     number(s)
 }
 
-/// A length or a percentage: `Ok(points)` or `Err(fraction)`.
-pub(crate) fn length_or_percent(s: &str) -> Option<Result<f32, f32>> {
+/// A length (in points) or a percentage (a fraction).
+pub(crate) fn length_or_percent(s: &str) -> Option<DefiniteLength> {
     match s.trim().strip_suffix('%') {
-        Some(p) => number(p).map(|p| Err(p / 100.0)),
-        None => length(s).map(Ok),
+        Some(p) => number(p).map(|p| percentage(p / 100.0).into()),
+        None => length(s).map(|l| px(l).into()),
     }
 }
 
@@ -274,8 +274,9 @@ impl Color {
 
 // --- Shadows, gradients, filters --------------------------------------------
 
-use crate::effects::{
-    BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, StopPosition,
+use crate::{
+    effects::{BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize},
+    geometry::{DefiniteLength, Percentage, deg, percentage, px},
 };
 
 /// A `box-shadow` list (`none` is empty).
@@ -343,17 +344,17 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     let parts = split_top(args, ',');
     let mut parts = parts.as_slice();
     let mut kind = match base {
-        "linear-gradient" => GradientKind::Linear { angle: 180.0 },
+        "linear-gradient" => GradientKind::Linear { angle: deg(180.0) },
         "radial-gradient" => GradientKind::Radial {
             circle: false,
             size: GradientSize::FarthestCorner,
-            x: 0.5,
-            y: 0.5,
+            x: percentage(0.5),
+            y: percentage(0.5),
         },
         "conic-gradient" => GradientKind::Conic {
-            from: 0.0,
-            x: 0.5,
-            y: 0.5,
+            from: deg(0.0),
+            x: percentage(0.5),
+            y: percentage(0.5),
         },
         _ => return None,
     };
@@ -405,21 +406,21 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
 /// gradient's line (`10px`, `1rem`; resolved against the box when it is
 /// drawn), or an angle around a conic one (`90deg`, `0.25turn`, as a
 /// fraction of a turn).
-fn stop_position(s: &str, conic: bool) -> Option<StopPosition> {
+fn stop_position(s: &str, conic: bool) -> Option<DefiniteLength> {
     let s = s.trim();
     if let Some(p) = s.strip_suffix('%') {
-        return number(p).map(|p| StopPosition::Fraction(p / 100.0));
+        return number(p).map(|p| percentage(p / 100.0).into());
     }
     if conic {
-        angle(s).map(|a| StopPosition::Fraction(a / 360.0))
+        angle(s).map(|a| percentage(a / 360.0).into())
     } else {
         // A zero length is the line's start whatever its length, as
         // before lengths were taken.
         length(s).map(|l| {
             if l == 0.0 {
-                StopPosition::Fraction(0.0)
+                percentage(0.0).into()
             } else {
-                StopPosition::Points(l)
+                px(l).into()
             }
         })
     }
@@ -457,10 +458,10 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                     }
                 }
                 *kind = match (h as i8, v as i8) {
-                    (0, -1) => GradientKind::Linear { angle: 0.0 },
-                    (1, 0) => GradientKind::Linear { angle: 90.0 },
-                    (0, 1) => GradientKind::Linear { angle: 180.0 },
-                    (-1, 0) => GradientKind::Linear { angle: 270.0 },
+                    (0, -1) => GradientKind::Linear { angle: deg(0.0) },
+                    (1, 0) => GradientKind::Linear { angle: deg(90.0) },
+                    (0, 1) => GradientKind::Linear { angle: deg(180.0) },
+                    (-1, 0) => GradientKind::Linear { angle: deg(270.0) },
                     (0, 0) => return false,
                     // A corner: the angle depends on the box's shape.
                     (h, v) => GradientKind::LinearCorner {
@@ -469,8 +470,8 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                     },
                 };
                 true
-            } else if let Some(deg) = angle(w[0]) {
-                *kind = GradientKind::Linear { angle: deg };
+            } else if let Some(a) = angle(w[0]) {
+                *kind = GradientKind::Linear { angle: deg(a) };
                 true
             } else {
                 false
@@ -491,7 +492,7 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                         let Some((px, py)) = position(&w[i + 1..]) else {
                             return false;
                         };
-                        (*x, *y) = (px, py);
+                        (*x, *y) = (Percentage(px), Percentage(py));
                         return true;
                     }
                     _ => return any,
@@ -510,14 +511,14 @@ fn configure(kind: &mut GradientKind, arg: &str) -> bool {
                         let Some(a) = w.get(i + 1).and_then(|s| angle(s)) else {
                             return false;
                         };
-                        *from = a;
+                        *from = deg(a);
                         i += 2;
                     }
                     "at" => {
                         let Some((px, py)) = position(&w[i + 1..]) else {
                             return false;
                         };
-                        (*x, *y) = (px, py);
+                        (*x, *y) = (Percentage(px), Percentage(py));
                         return true;
                     }
                     _ => return any,
@@ -681,18 +682,18 @@ mod tests {
     #[test]
     fn gradient_syntax() {
         let g = gradient("linear-gradient(to right, #f00, rgb(0 0 255) 80%)").unwrap();
-        assert_eq!(g.kind, GradientKind::Linear { angle: 90.0 });
-        assert_eq!(g.stops[1].position, Some(StopPosition::Fraction(0.8)));
+        assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) });
+        assert_eq!(g.stops[1].position, Some(percentage(0.8).into()));
         let g = gradient("linear-gradient(45deg in oklab, red, blue)").unwrap();
-        assert_eq!(g.kind, GradientKind::Linear { angle: 45.0 });
+        assert_eq!(g.kind, GradientKind::Linear { angle: deg(45.0) });
         let g = gradient("radial-gradient(circle at 25% 75%, red, blue)").unwrap();
         assert_eq!(
             g.kind,
             GradientKind::Radial {
                 circle: true,
                 size: GradientSize::FarthestCorner,
-                x: 0.25,
-                y: 0.75
+                x: percentage(0.25),
+                y: percentage(0.75)
             }
         );
         let g = gradient("conic-gradient(from 90deg, red, blue, red)").unwrap();
@@ -703,33 +704,34 @@ mod tests {
     #[test]
     fn gradient_stop_positions() {
         let at = |g: &Gradient| g.stops.iter().map(|s| s.position).collect::<Vec<_>>();
-        use StopPosition::{Fraction, Points};
+        let fraction = |f: f32| DefiniteLength::from(percentage(f));
+        let points = |p: f32| DefiniteLength::from(px(p));
         let g = gradient("repeating-linear-gradient(90deg, red 0px, blue 10px)").unwrap();
         assert!(g.repeating);
-        assert_eq!(at(&g), [Some(Fraction(0.0)), Some(Points(10.0))]);
+        assert_eq!(at(&g), [Some(fraction(0.0)), Some(points(10.0))]);
         // Lengths in every unit, mixed with percentages; two positions
         // make a band.
         let g = gradient("linear-gradient(red 0 1rem, blue 50%, green 2pt)").unwrap();
         assert_eq!(
             at(&g),
             [
-                Some(Fraction(0.0)),
-                Some(Points(16.0)),
-                Some(Fraction(0.5)),
-                Some(Points(2.0))
+                Some(fraction(0.0)),
+                Some(points(16.0)),
+                Some(fraction(0.5)),
+                Some(points(2.0))
             ]
         );
         let g = gradient("radial-gradient(circle, red 4px, blue 20px)").unwrap();
-        assert_eq!(at(&g), [Some(Points(4.0)), Some(Points(20.0))]);
+        assert_eq!(at(&g), [Some(points(4.0)), Some(points(20.0))]);
         // Conic stops are angles (as fractions of a turn) or percentages.
         let g = gradient("conic-gradient(red 0deg 90deg, blue 0.5turn, green 75%)").unwrap();
         assert_eq!(
             at(&g),
             [
-                Some(Fraction(0.0)),
-                Some(Fraction(0.25)),
-                Some(Fraction(0.5)),
-                Some(Fraction(0.75))
+                Some(fraction(0.0)),
+                Some(fraction(0.25)),
+                Some(fraction(0.5)),
+                Some(fraction(0.75))
             ]
         );
         assert!(gradient("conic-gradient(red 10px, blue)").is_none());

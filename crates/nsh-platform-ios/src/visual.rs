@@ -533,7 +533,10 @@ fn add_reversed(path: &CFRetained<CGMutablePath>, rect: CGRect, radii: CornerRad
 /// Configures `g` to draw `gradient` over a `size` box.
 fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
     let (w, h) = (size.width.max(1.0), size.height.max(1.0));
-    let stops = gradient.resolved_stops(w as f32, h as f32);
+    let stops = gradient.resolved_stops(nsh_core::Size::new(
+        nsh_core::Points(w as f32),
+        nsh_core::Points(h as f32),
+    ));
     // A transparent stop takes its neighbor's hue (as CSS's premultiplied
     // mixing does), so fades to transparent do not darken.
     let colors: Vec<Retained<objc2::runtime::AnyObject>> = (0..stops.len())
@@ -559,7 +562,7 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
         .collect();
     let locations: Vec<Retained<NSNumber>> = stops
         .iter()
-        .map(|(_, p)| NSNumber::new_f64(*p as f64))
+        .map(|(_, p)| NSNumber::new_f64(p.0 as f64))
         .collect();
     // SAFETY: an array of CGColors, as `colors` documents.
     unsafe { g.setColors(Some(&NSArray::from_retained_slice(&colors))) };
@@ -573,7 +576,7 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
         } => {
             // SAFETY: an immutable Core Animation constant.
             g.setType(unsafe { kCAGradientLayerRadial });
-            let (cx, cy) = (x as CGFloat * w, y as CGFloat * h);
+            let (cx, cy) = (x.0 as CGFloat * w, y.0 as CGFloat * h);
             let (dx, dy) = match extent {
                 GradientSize::ClosestSide => (cx.min(w - cx), cy.min(h - cy)),
                 GradientSize::FarthestSide => (cx.max(w - cx), cy.max(h - cy)),
@@ -605,22 +608,24 @@ fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
         GradientKind::Conic { from, x, y } => {
             // SAFETY: an immutable Core Animation constant.
             g.setType(unsafe { kCAGradientLayerConic });
-            g.setStartPoint(CGPoint::new(x as CGFloat, y as CGFloat));
+            let (x, y) = (x.0 as CGFloat, y.0 as CGFloat);
+            g.setStartPoint(CGPoint::new(x, y));
             // Core Animation starts at the end point's direction, clockwise
             // from the right; CSS starts up.
-            let a = ((from as f64) - 90.0).to_radians();
-            g.setEndPoint(CGPoint::new(
-                x as CGFloat + a.cos() / 2.0,
-                y as CGFloat + a.sin() / 2.0,
-            ));
+            let a = from.0 as f64 - std::f64::consts::FRAC_PI_2;
+            g.setEndPoint(CGPoint::new(x + a.cos() / 2.0, y + a.sin() / 2.0));
         }
         kind => {
             // SAFETY: an immutable Core Animation constant.
             g.setType(unsafe { kCAGradientLayerAxial });
-            let angle = kind.linear_angle(w as f32, h as f32).unwrap_or(180.0) as f64;
+            let box_size =
+                nsh_core::Size::new(nsh_core::Points(w as f32), nsh_core::Points(h as f32));
+            let angle = kind
+                .linear_angle(box_size)
+                .unwrap_or(nsh_core::geometry::deg(180.0));
             // CSS: the gradient line through the center at `angle` (0 up,
             // clockwise), long enough that corners get the end colors.
-            let (s, c) = angle.to_radians().sin_cos();
+            let (s, c) = (angle.0 as f64).sin_cos();
             let len = (w * s).abs() + (h * c).abs();
             let (dx, dy) = (s * len / 2.0, -c * len / 2.0);
             let (cx, cy) = (w / 2.0, h / 2.0);

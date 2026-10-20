@@ -28,7 +28,10 @@
 use std::cell::RefCell;
 
 use gtk4::{self as gtk, gdk, graphene, gsk, prelude::*};
-use nsh_core::{BorderStyle, Color, Filter, Gradient, GradientKind, GradientSize};
+use nsh_core::{
+    BorderStyle, Color, Filter, Gradient, GradientKind, GradientSize,
+    geometry::{Percentage, Points, Radians, Size, deg},
+};
 
 use crate::view::{ViewState, rounded};
 
@@ -460,6 +463,7 @@ fn gsk_color_matrix(m: &[f32; 20]) -> ([f32; 16], [f32; 4]) {
 /// Reused stop buffers: resolved stops, the tiles of a repeating conic
 /// gradient, the stops fitted to `0..=1`, and GSK's.
 struct Stops {
+    typed: Vec<(Color, Percentage)>,
     resolved: Vec<(Color, f32)>,
     tiled: Vec<(Color, f32)>,
     fitted: Vec<(Color, f32)>,
@@ -469,6 +473,7 @@ struct Stops {
 thread_local! {
     static STOPS: RefCell<Stops> = const {
         RefCell::new(Stops {
+            typed: Vec::new(),
             resolved: Vec::new(),
             tiled: Vec::new(),
             fitted: Vec::new(),
@@ -487,21 +492,30 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
             return;
         };
         let Stops {
+            typed,
             resolved,
             tiled,
             fitted,
             gsk: out,
         } = &mut *stops;
-        g.resolve_stops(w, h, resolved);
+        let size = Size::new(Points(w), Points(h));
+        g.resolve_stops(size, typed);
+        resolved.clear();
+        resolved.extend(typed.iter().map(|&(c, p)| (c, p.0)));
         dehue(resolved);
         let first = resolved[0].1;
         let last = resolved[resolved.len() - 1].1;
         let repeating = g.repeating && last - first > 1e-4;
         let bounds = graphene::Rect::new(0.0, 0.0, w, h);
         match g.kind {
-            GradientKind::Radial { circle, size, x, y } => {
-                let (cx, cy) = (x * w, y * h);
-                let (rx, ry) = radial_radii(circle, size, cx, cy, w, h);
+            GradientKind::Radial {
+                circle,
+                size: shape,
+                x,
+                y,
+            } => {
+                let (cx, cy) = (x.0 * w, y.0 * h);
+                let (rx, ry) = radial_radii(circle, shape, cx, cy, w, h);
                 // GSK's ray starts at the center or beyond.
                 let (lo, hi) = if repeating {
                     (first.max(0.0), last)
@@ -538,11 +552,12 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
                     fit_stops(resolved, 0.0, 1.0, fitted);
                 }
                 gsk_stops(fitted, out);
-                let center = graphene::Point::new(x * w, y * h);
-                snapshot.append_conic_gradient(&bounds, &center, from, out);
+                let center = graphene::Point::new(x.0 * w, y.0 * h);
+                // GSK takes the start angle in degrees.
+                snapshot.append_conic_gradient(&bounds, &center, from.to_degrees(), out);
             }
             kind => {
-                let angle = kind.linear_angle(w, h).unwrap_or(180.0);
+                let angle = kind.linear_angle(size).unwrap_or(deg(180.0));
                 let (a, b) = linear_line(angle, w, h);
                 // GSK's stops lie in `0..=1`: the line is stretched to
                 // cover stops outside it (and, repeating, cut to one
@@ -678,8 +693,8 @@ fn tile_stops(stops: &[(Color, f32)], out: &mut Vec<(Color, f32)>) {
 /// The ends of a CSS linear gradient line at `angle` degrees (0 up,
 /// clockwise) through the center of a `w` × `h` box: long enough that the
 /// corners get the end colors.
-fn linear_line(angle: f32, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
-    let (s, c) = angle.to_radians().sin_cos();
+fn linear_line(angle: Radians, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
+    let (s, c) = angle.sin_cos();
     let len = (w * s).abs() + (h * c).abs();
     let (dx, dy) = (s * len / 2.0, -c * len / 2.0);
     let (cx, cy) = (w / 2.0, h / 2.0);
@@ -724,15 +739,15 @@ mod tests {
     #[test]
     fn linear_lines() {
         // `to right` over a wide box spans its width.
-        let (a, b) = linear_line(90.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(90.0), 200.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 50.0));
         assert!(close(b.0, 200.0) && close(b.1, 50.0));
         // 180° (the default) runs top to bottom.
-        let (a, b) = linear_line(180.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(180.0), 200.0, 100.0);
         assert!(close(a.0, 100.0) && close(a.1, 0.0));
         assert!(close(b.0, 100.0) && close(b.1, 100.0));
         // 45° over a square runs corner to corner.
-        let (a, b) = linear_line(45.0, 100.0, 100.0);
+        let (a, b) = linear_line(deg(45.0), 100.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 100.0));
         assert!(close(b.0, 100.0) && close(b.1, 0.0));
     }

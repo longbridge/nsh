@@ -13,7 +13,10 @@ use taffy::{
 type Max = MaxTrackSizingFunction;
 type Min = MinTrackSizingFunction;
 
-use crate::css::{self, split_top, words};
+use crate::{
+    css::{self, split_top, words},
+    geometry::{DefiniteLength, REM_SIZE},
+};
 
 /// A template track list (`grid-template-columns`) and the names of its
 /// lines, as taffy takes them (`grid_template_column_names`): one set per
@@ -133,8 +136,8 @@ fn track(s: &str) -> Option<TrackSizingFunction> {
     }
     if let Some(arg) = s.strip_prefix("fit-content(") {
         let max = match css::length_or_percent(arg.strip_suffix(')')?)? {
-            Ok(points) => Max::fit_content_px(points),
-            Err(fraction) => Max::fit_content_percent(fraction),
+            DefiniteLength::Absolute(a) => Max::fit_content_px(a.to_points(REM_SIZE).0),
+            DefiniteLength::Fraction(f) => Max::fit_content_percent(f.0),
         };
         return Some(TrackSizingFunction {
             min: Min::auto(),
@@ -158,8 +161,8 @@ fn min_track(s: &str) -> Option<Min> {
         "min-content" => Min::min_content(),
         "max-content" => Min::max_content(),
         s => match css::length_or_percent(s)? {
-            Ok(points) => Min::length(points),
-            Err(fraction) => Min::percent(fraction),
+            DefiniteLength::Absolute(a) => Min::length(a.to_points(REM_SIZE).0),
+            DefiniteLength::Fraction(f) => Min::percent(f.0),
         },
     })
 }
@@ -174,8 +177,8 @@ fn max_track(s: &str) -> Option<Max> {
         "min-content" => Max::min_content(),
         "max-content" => Max::max_content(),
         s => match css::length_or_percent(s)? {
-            Ok(points) => Max::length(points),
-            Err(fraction) => Max::percent(fraction),
+            DefiniteLength::Absolute(a) => Max::length(a.to_points(REM_SIZE).0),
+            DefiniteLength::Fraction(f) => Max::percent(f.0),
         },
     })
 }

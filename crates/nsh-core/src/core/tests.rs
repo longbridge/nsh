@@ -1500,7 +1500,9 @@ fn animated_background_colors_replace_gradients() {
     let mut c = core();
     let mut s = Style::default();
     s.set_background_images(vec![crate::effects::Gradient {
-        kind: crate::effects::GradientKind::Linear { angle: 180.0 },
+        kind: crate::effects::GradientKind::Linear {
+            angle: crate::geometry::deg(180.0),
+        },
         stops: Vec::new(),
         repeating: false,
     }]);

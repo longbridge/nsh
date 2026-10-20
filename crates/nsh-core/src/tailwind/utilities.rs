@@ -9,8 +9,9 @@ use crate::{
     css,
     effects::{
         BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation,
-        Keyframes, StopPosition, Transition, TransitionProps,
+        Keyframes, Transition, TransitionProps,
     },
+    geometry::{DefiniteLength, REM_SIZE, deg, percentage},
     ops::ResizeMode,
     props::PointerEvents,
     style::{
@@ -507,17 +508,17 @@ impl Parts {
                     let [fp, vp, tp] = self.stop_positions;
                     let mut stops = vec![ColorStop {
                         color: from.unwrap_or(Color::TRANSPARENT),
-                        position: Some(StopPosition::Fraction(fp.unwrap_or(0.0))),
+                        position: Some(percentage(fp.unwrap_or(0.0)).into()),
                     }];
                     if let Some(via) = via {
                         stops.push(ColorStop {
                             color: via,
-                            position: Some(StopPosition::Fraction(vp.unwrap_or(0.5))),
+                            position: Some(percentage(vp.unwrap_or(0.5)).into()),
                         });
                     }
                     stops.push(ColorStop {
                         color: to.unwrap_or(Color::TRANSPARENT),
-                        position: Some(StopPosition::Fraction(tp.unwrap_or(1.0))),
+                        position: Some(percentage(tp.unwrap_or(1.0)).into()),
                     });
                     style.set_background_images(vec![Gradient {
                         kind,
@@ -653,8 +654,10 @@ fn length_value(theme: &Theme, v: &str, neg: bool, auto: bool) -> Option<PatchVa
             let a = arbitrary(v)?;
             let a = arbitrary_hinted(&a, "length").unwrap_or(&a).to_string();
             match css::length_or_percent(&a)? {
-                Ok(points) => PatchValue::Number(sign * points),
-                Err(f) => PatchValue::Str(format!("{}%", sign * f * 100.0).into()),
+                DefiniteLength::Absolute(l) => PatchValue::Number(sign * l.to_points(REM_SIZE).0),
+                DefiniteLength::Fraction(f) => {
+                    PatchValue::Str(format!("{}%", sign * f.0 * 100.0).into())
+                }
             }
         }
     })
@@ -1058,16 +1061,16 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         // Backgrounds.
         "bg-none" => Decl::Part(Part::GradientNone),
         "bg-linear-to-t" | "bg-gradient-to-t" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 0.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(0.0) }))
         }
         "bg-linear-to-r" | "bg-gradient-to-r" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 90.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(90.0) }))
         }
         "bg-linear-to-b" | "bg-gradient-to-b" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 180.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(180.0) }))
         }
         "bg-linear-to-l" | "bg-gradient-to-l" => {
-            Decl::Part(Part::Gradient(GradientKind::Linear { angle: 270.0 }))
+            Decl::Part(Part::Gradient(GradientKind::Linear { angle: deg(270.0) }))
         }
         "bg-linear-to-tr" | "bg-gradient-to-tr" => {
             Decl::Part(Part::Gradient(GradientKind::LinearCorner {
@@ -1096,13 +1099,13 @@ fn keyword(u: &str) -> Option<Vec<Decl>> {
         "bg-radial" => Decl::Part(Part::Gradient(GradientKind::Radial {
             circle: false,
             size: GradientSize::FarthestCorner,
-            x: 0.5,
-            y: 0.5,
+            x: percentage(0.5),
+            y: percentage(0.5),
         })),
         "bg-conic" => Decl::Part(Part::Gradient(GradientKind::Conic {
-            from: 0.0,
-            x: 0.5,
-            y: 0.5,
+            from: deg(0.0),
+            x: percentage(0.5),
+            y: percentage(0.5),
         })),
         // Borders and outlines.
         "border-solid" | "border-double" => sets(K::BorderStyle, "solid"),
@@ -1489,15 +1492,15 @@ static PREFIXES: &[(&str, Handler)] = &[
     ("bg-linear", |_, v, n| {
         let a = degrees(v)?;
         part(Part::Gradient(GradientKind::Linear {
-            angle: if n { -a } else { a },
+            angle: deg(if n { -a } else { a }),
         }))
     }),
     ("bg-conic", |_, v, n| {
         let a = degrees(v)?;
         part(Part::Gradient(GradientKind::Conic {
-            from: if n { -a } else { a },
-            x: 0.5,
-            y: 0.5,
+            from: deg(if n { -a } else { a }),
+            x: percentage(0.5),
+            y: percentage(0.5),
         }))
     }),
     ("bg", |t, v, _| {

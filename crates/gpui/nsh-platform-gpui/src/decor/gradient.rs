@@ -19,7 +19,10 @@
 use std::{cell::RefCell, hash::Hasher, sync::Arc};
 
 use gpui::RenderImage;
-use nsh_core::{Color, Gradient, GradientKind, GradientSize};
+use nsh_core::{
+    Color, Gradient, GradientKind, GradientSize,
+    geometry::{Points, Radians, Size, deg},
+};
 use rustc_hash::{FxHashMap, FxHasher};
 
 use super::shape::{self, Pt, circular, clip_convex};
@@ -97,7 +100,7 @@ impl Geometry {
     fn of(kind: GradientKind, w: f32, h: f32) -> Geometry {
         match kind {
             GradientKind::Radial { circle, size, x, y } => {
-                let c = (x * w, y * h);
+                let c = (x.0 * w, y.0 * h);
                 let (rx, ry) = radial_radii(circle, size, c.0, c.1, w, h);
                 Geometry::Radial {
                     c,
@@ -105,11 +108,13 @@ impl Geometry {
                 }
             }
             GradientKind::Conic { from, x, y } => Geometry::Conic {
-                c: (x * w, y * h),
-                from,
+                c: (x.0 * w, y.0 * h),
+                from: from.to_degrees(),
             },
             kind => {
-                let angle = kind.linear_angle(w, h).unwrap_or(180.0);
+                let angle = kind
+                    .linear_angle(Size::new(Points(w), Points(h)))
+                    .unwrap_or(deg(180.0));
                 let (a, b) = linear_line(angle, w, h);
                 Geometry::Linear { a, b }
             }
@@ -143,12 +148,12 @@ impl Ramp {
     /// The ramp of `g` over a `w` x `h` box, its colors passed through
     /// `color` (the pass's filters and opacity, as straight RGBA).
     fn new(g: &Gradient, w: f32, h: f32, color: impl Fn(Color) -> [f32; 4]) -> Ramp {
-        let resolved = g.resolved_stops(w, h);
+        let resolved = g.resolved_stops(Size::new(Points(w), Points(h)));
         let stops: Vec<([f32; 4], f32)> = resolved
             .iter()
             .map(|&(c, p)| {
                 let [r, g, b, a] = color(c);
-                ([r * a, g * a, b * a, a], p)
+                ([r * a, g * a, b * a, a], p.0)
             })
             .collect();
         let period = match (stops.first(), stops.last()) {
@@ -439,11 +444,11 @@ fn conic_t(dx: f32, dy: f32, from: f32) -> f32 {
     ((deg - from) / 360.0).rem_euclid(1.0)
 }
 
-/// The ends of a CSS linear gradient line at `angle` degrees (0 up,
-/// clockwise) through the center of a `w` x `h` box: long enough that the
-/// corners get the end colors.
-fn linear_line(angle: f32, w: f32, h: f32) -> (Pt, Pt) {
-    let (s, c) = angle.to_radians().sin_cos();
+/// The ends of a CSS linear gradient line at `angle` (0 up, clockwise)
+/// through the center of a `w` x `h` box: long enough that the corners
+/// get the end colors.
+fn linear_line(angle: Radians, w: f32, h: f32) -> (Pt, Pt) {
+    let (s, c) = angle.sin_cos();
     let len = (w * s).abs() + (h * c).abs();
     let (dx, dy) = (s * len / 2.0, -c * len / 2.0);
     let (cx, cy) = (w / 2.0, h / 2.0);
@@ -476,7 +481,10 @@ fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{ColorStop, StopPosition};
+    use nsh_core::{
+        ColorStop,
+        geometry::{DefiniteLength, percentage, px},
+    };
 
     use super::*;
 
@@ -499,7 +507,7 @@ mod tests {
                 .iter()
                 .map(|&(color, position)| ColorStop {
                     color,
-                    position: position.map(StopPosition::Fraction),
+                    position: position.map(|p| DefiniteLength::from(percentage(p))),
                 })
                 .collect(),
             repeating,
@@ -508,13 +516,13 @@ mod tests {
 
     #[test]
     fn linear_lines() {
-        let (a, b) = linear_line(90.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(90.0), 200.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 50.0));
         assert!(close(b.0, 200.0) && close(b.1, 50.0));
-        let (a, b) = linear_line(180.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(180.0), 200.0, 100.0);
         assert!(close(a.0, 100.0) && close(a.1, 0.0));
         assert!(close(b.0, 100.0) && close(b.1, 100.0));
-        let (a, b) = linear_line(45.0, 100.0, 100.0);
+        let (a, b) = linear_line(deg(45.0), 100.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 100.0));
         assert!(close(b.0, 100.0) && close(b.1, 0.0));
     }
@@ -537,14 +545,14 @@ mod tests {
 
     #[test]
     fn geometry_places_points() {
-        let g = Geometry::of(GradientKind::Linear { angle: 90.0 }, 200.0, 100.0);
+        let g = Geometry::of(GradientKind::Linear { angle: deg(90.0) }, 200.0, 100.0);
         assert!(close(g.t((0.0, 50.0)), 0.0) && close(g.t((100.0, 0.0)), 0.5));
         let g = Geometry::of(
             GradientKind::Radial {
                 circle: true,
                 size: GradientSize::ClosestSide,
-                x: 0.5,
-                y: 0.5,
+                x: percentage(0.5),
+                y: percentage(0.5),
             },
             100.0,
             100.0,
@@ -555,7 +563,7 @@ mod tests {
     #[test]
     fn ramps_interpolate_premultiplied() {
         let g = gradient(
-            GradientKind::Linear { angle: 90.0 },
+            GradientKind::Linear { angle: deg(90.0) },
             &[(RED, None), (Color::TRANSPARENT, None)],
             false,
         );
@@ -572,7 +580,7 @@ mod tests {
     #[test]
     fn repeating_ramps_wrap() {
         let g = gradient(
-            GradientKind::Linear { angle: 90.0 },
+            GradientKind::Linear { angle: deg(90.0) },
             &[(RED, Some(0.0)), (BLUE, Some(0.25))],
             true,
         );
@@ -585,15 +593,15 @@ mod tests {
     fn length_stops_follow_the_box() {
         // `repeating-linear-gradient(90deg, red 0px, blue 10px)`.
         let g = Gradient {
-            kind: GradientKind::Linear { angle: 90.0 },
+            kind: GradientKind::Linear { angle: deg(90.0) },
             stops: vec![
                 ColorStop {
                     color: RED,
-                    position: Some(StopPosition::Points(0.0)),
+                    position: Some(DefiniteLength::from(px(0.0))),
                 },
                 ColorStop {
                     color: BLUE,
-                    position: Some(StopPosition::Points(10.0)),
+                    position: Some(DefiniteLength::from(px(10.0))),
                 },
             ],
             repeating: true,
@@ -632,7 +640,7 @@ mod tests {
     #[test]
     fn images_hold_the_gradient() {
         let g = gradient(
-            GradientKind::Linear { angle: 90.0 },
+            GradientKind::Linear { angle: deg(90.0) },
             &[(RED, None), (BLUE, None)],
             false,
         );

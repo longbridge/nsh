@@ -14,8 +14,10 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, StopPosition, Transform, TransformKind,
-    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource, ui::PropEnum,
+    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
+    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
+    geometry::{DefiniteLength, REM_SIZE, Radians, Size},
+    ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
 
@@ -333,24 +335,26 @@ fn gradient(g: &Gradient) -> String {
         g.stops
             .iter()
             .map(|s| match s.position {
-                Some(StopPosition::Fraction(p)) => {
-                    format!("{} {}%", css_color(s.color), p * 100.0)
+                Some(DefiniteLength::Fraction(p)) => {
+                    format!("{} {}%", css_color(s.color), p.0 * 100.0)
                 }
-                Some(StopPosition::Points(p)) => format!("{} {p}px", css_color(s.color)),
+                Some(DefiniteLength::Absolute(a)) => {
+                    format!("{} {}px", css_color(s.color), a.to_points(REM_SIZE).0)
+                }
                 None => css_color(s.color),
             })
             .collect()
     } else {
-        g.resolved_stops(0.0, 0.0)
+        g.resolved_stops(Size::default())
             .iter()
-            .map(|(c, p)| format!("{} {}%", css_color(*c), p * 100.0))
+            .map(|(c, p)| format!("{} {}%", css_color(*c), p.0 * 100.0))
             .collect()
     };
     let stops = stops.join(", ");
     let repeating = if g.repeating { "repeating-" } else { "" };
     match g.kind {
         GradientKind::Linear { angle } => {
-            format!("{repeating}linear-gradient({angle}deg, {stops})")
+            format!("{repeating}linear-gradient({}deg, {stops})", degrees(angle))
         }
         GradientKind::LinearCorner { right, bottom } => format!(
             "{repeating}linear-gradient(to {} {}, {stops})",
@@ -367,16 +371,24 @@ fn gradient(g: &Gradient) -> String {
             format!(
                 "{repeating}radial-gradient({} {size} at {}% {}%, {stops})",
                 if circle { "circle" } else { "ellipse" },
-                x * 100.0,
-                y * 100.0
+                x.0 * 100.0,
+                y.0 * 100.0
             )
         }
         GradientKind::Conic { from, x, y } => format!(
-            "{repeating}conic-gradient(from {from}deg at {}% {}%, {stops})",
-            x * 100.0,
-            y * 100.0
+            "{repeating}conic-gradient(from {}deg at {}% {}%, {stops})",
+            degrees(from),
+            x.0 * 100.0,
+            y.0 * 100.0
         ),
     }
+}
+
+/// An angle in CSS degrees, rounded to 1e-4 so that whole degrees are
+/// written as the style wrote them (radians to degrees in `f32` can be an
+/// ulp off).
+fn degrees(a: Radians) -> f32 {
+    (a.to_degrees() * 1e4).round() / 1e4
 }
 
 fn filters(list: &[Filter]) -> String {

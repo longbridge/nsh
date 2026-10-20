@@ -13,9 +13,15 @@
 //! resolved into thread-local buffers, stop collections are kept by their
 //! content (the brush that holds one is cheap to make).
 
-use std::{cell::RefCell, hash::Hasher};
+use std::{
+    cell::RefCell,
+    hash::{Hash, Hasher},
+};
 
-use nsh_core::{Color, Gradient, GradientKind, GradientSize};
+use nsh_core::{
+    Color, Gradient, GradientKind, GradientSize,
+    geometry::{Percentage, Points, Radians, Size, deg},
+};
 use rustc_hash::{FxHashMap, FxHasher};
 use windows::{
     Win32::Graphics::{
@@ -40,6 +46,7 @@ use crate::render::{DrawCx, color_f};
 /// Reused buffers: resolved stops, the tiles of a repeating gradient, the
 /// stops fitted to `0..=1`, and Direct2D's.
 struct Stops {
+    typed: Vec<(Color, Percentage)>,
     resolved: Vec<(Color, f32)>,
     tiled: Vec<(Color, f32)>,
     fitted: Vec<(Color, f32)>,
@@ -58,6 +65,7 @@ const MAX_COLLECTIONS: usize = 256;
 thread_local! {
     static STOPS: RefCell<Stops> = const {
         RefCell::new(Stops {
+            typed: Vec::new(),
             resolved: Vec::new(),
             tiled: Vec::new(),
             fitted: Vec::new(),
@@ -85,19 +93,28 @@ pub(crate) fn paint(cx: &DrawCx<'_>, g: &Gradient, w: f32, h: f32) -> Option<Pai
     STOPS.with(|stops| {
         let mut stops = stops.try_borrow_mut().ok()?;
         let Stops {
+            typed,
             resolved,
             tiled,
             fitted,
             d2d,
         } = &mut *stops;
-        g.resolve_stops(w, h, resolved);
+        let size = Size::new(Points(w), Points(h));
+        g.resolve_stops(size, typed);
+        resolved.clear();
+        resolved.extend(typed.iter().map(|&(c, p)| (c, p.0)));
         let first = resolved[0].1;
         let last = resolved[resolved.len() - 1].1;
         let repeating = g.repeating && last - first > 1e-4;
         match g.kind {
-            GradientKind::Radial { circle, size, x, y } => {
-                let (cx0, cy0) = (x * w, y * h);
-                let (rx, ry) = radial_radii(circle, size, cx0, cy0, w, h);
+            GradientKind::Radial {
+                circle,
+                size: shape,
+                x,
+                y,
+            } => {
+                let (cx0, cy0) = (x.0 * w, y.0 * h);
+                let (rx, ry) = radial_radii(circle, shape, cx0, cy0, w, h);
                 let (rx, ry, extend) = if repeating {
                     // One period (`first..last` of the radii) becomes the
                     // brush's `0..1`, the stops tiled into it so that its
@@ -129,7 +146,7 @@ pub(crate) fn paint(cx: &DrawCx<'_>, g: &Gradient, w: f32, h: f32) -> Option<Pai
             }
             GradientKind::Conic { .. } => conic(cx, g, w, h).map(Paint::Bitmap),
             kind => {
-                let angle = kind.linear_angle(w, h).unwrap_or(180.0);
+                let angle = kind.linear_angle(size).unwrap_or(deg(180.0));
                 let (a, b) = linear_line(angle, w, h);
                 // The line is stretched to cover stops outside `0..=1`
                 // (and, repeating, cut to one period, which the brush
@@ -233,15 +250,14 @@ fn conic(cx: &DrawCx<'_>, g: &Gradient, w: f32, h: f32) -> Option<Baked> {
     );
     let mut hasher = FxHasher::default();
     hasher.write_u8(b'c');
-    hasher.write_u32(from.to_bits());
-    hasher.write_u32(x.to_bits());
-    hasher.write_u32(y.to_bits());
+    hasher.write_u32(from.0.to_bits());
+    hasher.write_u32(x.0.to_bits());
+    hasher.write_u32(y.0.to_bits());
     hasher.write_u8(g.repeating as u8);
     for s in &g.stops {
         hasher.write_u32(s.color.0);
         // Conic stops are angles: fractions, never lengths.
-        let p = s.position.map_or(f32::NAN, |p| p.fraction(0.0));
-        hasher.write_u32(p.to_bits());
+        s.position.hash(&mut hasher);
     }
     hasher.write_u32(px.0);
     hasher.write_u32(px.1);
@@ -249,8 +265,11 @@ fn conic(cx: &DrawCx<'_>, g: &Gradient, w: f32, h: f32) -> Option<Baked> {
     hasher.write_u32(h.to_bits());
     let key = hasher.finish();
     cache::get_or_make(key, || {
-        let mut resolved = Vec::new();
-        g.resolve_stops(w, h, &mut resolved);
+        let resolved: Vec<(Color, f32)> = g
+            .resolved_stops(Size::new(Points(w), Points(h)))
+            .into_iter()
+            .map(|(c, p)| (c, p.0))
+            .collect();
         let (first, last) = (resolved[0].1, resolved[resolved.len() - 1].1);
         let mut fitted = Vec::new();
         if g.repeating && last - first > 1e-4 {
@@ -262,12 +281,12 @@ fn conic(cx: &DrawCx<'_>, g: &Gradient, w: f32, h: f32) -> Option<Baked> {
         }
         let premul: Vec<([f32; 4], f32)> =
             fitted.iter().map(|&(c, p)| (premultiplied(c), p)).collect();
-        let (cxp, cyp) = (x * w * scale, y * h * scale);
+        let (cxp, cyp) = (x.0 * w * scale, y.0 * h * scale);
         let mut pixels = vec![0u8; (px.0 * px.1 * 4) as usize];
         for row in 0..px.1 {
             for col in 0..px.0 {
                 let (dx, dy) = (col as f32 + 0.5 - cxp, row as f32 + 0.5 - cyp);
-                let t = conic_t(dx, dy, from);
+                let t = conic_t(dx, dy, from.to_degrees());
                 let c = sample(&premul, t);
                 let i = ((row * px.0 + col) * 4) as usize;
                 // BGRA, premultiplied.
@@ -441,8 +460,8 @@ pub(super) fn tile_stops(stops: &[(Color, f32)], out: &mut Vec<(Color, f32)>) {
 /// The ends of a CSS linear gradient line at `angle` degrees (0 up,
 /// clockwise) through the center of a `w` x `h` box: long enough that the
 /// corners get the end colors.
-pub(super) fn linear_line(angle: f32, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
-    let (s, c) = angle.to_radians().sin_cos();
+pub(super) fn linear_line(angle: Radians, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
+    let (s, c) = angle.sin_cos();
     let len = (w * s).abs() + (h * c).abs();
     let (dx, dy) = (s * len / 2.0, -c * len / 2.0);
     let (cx, cy) = (w / 2.0, h / 2.0);
@@ -494,15 +513,15 @@ mod tests {
     #[test]
     fn linear_lines() {
         // `to right` over a wide box spans its width.
-        let (a, b) = linear_line(90.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(90.0), 200.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 50.0));
         assert!(close(b.0, 200.0) && close(b.1, 50.0));
         // 180° (the default) runs top to bottom.
-        let (a, b) = linear_line(180.0, 200.0, 100.0);
+        let (a, b) = linear_line(deg(180.0), 200.0, 100.0);
         assert!(close(a.0, 100.0) && close(a.1, 0.0));
         assert!(close(b.0, 100.0) && close(b.1, 100.0));
         // 45° over a square runs corner to corner.
-        let (a, b) = linear_line(45.0, 100.0, 100.0);
+        let (a, b) = linear_line(deg(45.0), 100.0, 100.0);
         assert!(close(a.0, 0.0) && close(a.1, 100.0));
         assert!(close(b.0, 100.0) && close(b.1, 0.0));
     }
@@ -514,8 +533,13 @@ mod tests {
             right: true,
             bottom: false,
         };
-        assert!(close(k.linear_angle(100.0, 100.0).unwrap(), 45.0));
-        assert!(k.linear_angle(200.0, 100.0).unwrap() > 45.0);
+        let angle = |w: f32, h: f32| {
+            k.linear_angle(Size::new(Points(w), Points(h)))
+                .unwrap()
+                .to_degrees()
+        };
+        assert!(close(angle(100.0, 100.0), 45.0));
+        assert!(angle(200.0, 100.0) > 45.0);
     }
 
     #[test]

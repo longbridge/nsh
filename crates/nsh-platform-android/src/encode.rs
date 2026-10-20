@@ -659,11 +659,19 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     effects(e, s);
 }
 
+/// An angle in the degrees `Decor.java` takes, rounded to 1e-4 so that
+/// whole degrees go as the style wrote them (radians to degrees in `f32`
+/// can be an ulp off).
+fn degrees(a: nsh_core::geometry::Radians) -> f32 {
+    (a.to_degrees() * 1e4).round() / 1e4
+}
+
 /// The effects of `Mounter.java` `style`: shadows, gradients, filters,
 /// blend mode, outline, visibility, cursor, transition, animation.
 fn effects(e: &mut Encoded, s: &ViewStyle) {
     use nsh_core::{
-        BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes, StopPosition,
+        BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes,
+        geometry::{DefiniteLength, REM_SIZE, Size},
     };
     let fx = s.effects.as_deref();
     let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
@@ -681,7 +689,7 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         match g.kind {
             GradientKind::Linear { angle } => {
                 e.int(0);
-                e.float(angle);
+                e.float(degrees(angle));
                 e.int(0);
                 e.int(0);
             }
@@ -700,14 +708,14 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
                     GradientSize::FarthestSide => 2,
                     GradientSize::FarthestCorner => 3,
                 });
-                e.float(x);
-                e.float(y);
+                e.float(x.0);
+                e.float(y.0);
             }
             GradientKind::Conic { from, x, y } => {
                 e.int(3);
-                e.float(from);
-                e.float(x);
-                e.float(y);
+                e.float(degrees(from));
+                e.float(x.0);
+                e.float(y.0);
             }
         }
         if g.has_lengths() {
@@ -720,19 +728,19 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
                 e.int(argb(s.color));
                 let (unit, v) = match s.position {
                     None => (0, 0.0),
-                    Some(StopPosition::Fraction(f)) => (1, f),
-                    Some(StopPosition::Points(p)) => (2, p),
+                    Some(DefiniteLength::Fraction(f)) => (1, f.0),
+                    Some(DefiniteLength::Absolute(a)) => (2, a.to_points(REM_SIZE).0),
                 };
                 e.float(v);
                 e.int(unit);
             }
         } else {
             // Without lengths the box does not matter.
-            let stops = g.resolved_stops(0.0, 0.0);
+            let stops = g.resolved_stops(Size::default());
             e.int(stops.len() as i32);
             for (c, p) in stops {
                 e.int(argb(c));
-                e.float(p);
+                e.float(p.0);
             }
         }
     }

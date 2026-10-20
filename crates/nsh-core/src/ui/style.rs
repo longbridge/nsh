@@ -25,7 +25,8 @@ use crate::{
     color::{Hsla, Rgba, transparent_black},
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     geometry::{
-        AbsoluteLength, DefiniteLength, Length, Percentage, Points, REM_SIZE, Rems, px, relative,
+        AbsoluteLength, DefiniteLength, Length, Percentage, Points, REM_SIZE, Rems, deg,
+        percentage, px, relative,
     },
     style::{Color, OriginLen, PatchValue, StyleDecl, StyleKey},
     tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
@@ -548,20 +549,22 @@ impl Declaration {
             Declaration::Gradient(shape) => part(
                 out,
                 Part::Gradient(match *shape {
-                    GradientShape::Linear(angle) => GradientKind::Linear { angle: angle.0 },
+                    GradientShape::Linear(angle) => GradientKind::Linear {
+                        angle: deg(angle.0),
+                    },
                     GradientShape::Corner { right, bottom } => {
                         GradientKind::LinearCorner { right, bottom }
                     }
                     GradientShape::Radial => GradientKind::Radial {
                         circle: false,
                         size: GradientSize::FarthestCorner,
-                        x: 0.5,
-                        y: 0.5,
+                        x: percentage(0.5),
+                        y: percentage(0.5),
                     },
                     GradientShape::Conic(from) => GradientKind::Conic {
-                        from: from.0,
-                        x: 0.5,
-                        y: 0.5,
+                        from: deg(from.0),
+                        x: percentage(0.5),
+                        y: percentage(0.5),
                     },
                 }),
             ),

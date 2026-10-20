@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     effects::{BlendMode, Cursor, GradientKind, Keyframes},
+    geometry::{DefiniteLength, deg, percentage, px},
     style::{Color, Style},
     transform::TransformKind,
 };
@@ -292,11 +293,11 @@ fn shadows_and_rings() {
 fn gradients() {
     let s = styled("bg-linear-to-r from-blue-500 via-purple-500 via-40% to-pink-500");
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
-    assert_eq!(g.kind, GradientKind::Linear { angle: 90.0 });
+    assert_eq!(g.kind, GradientKind::Linear { angle: deg(90.0) });
     assert_eq!(g.stops.len(), 3);
     assert_eq!(
         g.stops[1].position,
-        Some(crate::effects::StopPosition::Fraction(0.4))
+        Some(DefiniteLength::from(percentage(0.4)))
     );
     let s = styled("bg-linear-to-br from-red-500");
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
@@ -310,14 +311,11 @@ fn gradients() {
     assert_eq!(g.stops[1].color, Color::TRANSPARENT);
     let s = styled("bg-[linear-gradient(45deg,red,blue)]");
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
-    assert_eq!(g.kind, GradientKind::Linear { angle: 45.0 });
+    assert_eq!(g.kind, GradientKind::Linear { angle: deg(45.0) });
     let s = styled("bg-[repeating-linear-gradient(90deg,red_0px,blue_10px)]");
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
     assert!(g.repeating);
-    assert_eq!(
-        g.stops[1].position,
-        Some(crate::effects::StopPosition::Points(10.0))
-    );
+    assert_eq!(g.stops[1].position, Some(DefiniteLength::from(px(10.0))));
 }
 
 #[test]
