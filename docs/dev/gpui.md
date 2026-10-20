@@ -23,11 +23,22 @@ sudo apt-get install clang libclang-dev pkg-config libfontconfig-dev libfreetype
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
 ```
 
-macOS needs Xcode and its Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`); without it, build with the
-`runtime-shaders` feature (`nsh-platform-gpui`, forwarded by `nsh-gpui-host` and `nsh-gpui-app`: `cargo build
---manifest-path crates/gpui/Cargo.toml -p nsh-gpui-host --features nsh-gpui-host/runtime-shaders`), which compiles GPUI's
-shaders when the app starts. `nsh run --target gpui` in a checkout adds it by itself when `xcrun metal` fails. Windows the MSVC toolchain and LLVM as for the Windows backend (`RUST_MIN_STACK` included).
-Off the three desktops the crates are empty.
+macOS needs Xcode and its Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`), with which GPUI's build
+script precompiles its shaders. A Mac without it builds with the feature `runtime-shaders` (`nsh-platform-gpui`'s,
+forwarded by `nsh-gpui-host` and `nsh-gpui-app`), with which GPUI compiles the shaders when it makes a window's renderer:
+
+```sh
+cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-host --features nsh-gpui-host/runtime-shaders
+(cd examples/embed-gpui && cargo run --features nsh-platform-gpui/runtime-shaders)
+```
+
+The CLI adds it by itself where `xcrun metal` fails (`runtime::gpui_features`): to the GPUI host and runner it builds
+in a checkout (`nsh run` / `nsh package --target gpui`) and to the GPUI workspace of an app with Rust crates
+(`.nsh/rust/gpui`), and says so in a note. Compiling them took 0.3 to 0.5 s on Apple silicon the first time a Mac saw
+their source (a new GPUI version); macOS caches the result, so later windows and starts took no measurable time.
+
+Windows needs the MSVC toolchain and LLVM as for the Windows backend (`RUST_MIN_STACK` included). Off the three
+desktops the crates are empty.
 
 The three crates are a workspace of their own, `crates/gpui` (its own `Cargo.toml`, `Cargo.lock` and the dependencies
 only they use: GPUI, wry, GStreamer, tiny-skia, ...), excluded from the main workspace, so the main workspace's builds,
@@ -62,6 +73,7 @@ Features:
 | `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux | Linux |
 | `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes | no |
 | `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows | no |
+| `runtime-shaders` | GPUI's Metal shaders compiled when the app starts, not by the build (`gpui_platform/runtime_shaders`): builds on a Mac without the Metal Toolchain; nothing elsewhere | the CLI's, where `xcrun metal` fails | the CLI's, where `xcrun metal` fails; never the distribution's |
 
 `shot` turns on GPUI's test support: never in the release runner. With it, the crate's tests include `tests.rs`:
 surfaces in windows of GPUI's test platform (`TestAppContext`), drawn and given GPUI's input with the engine on its

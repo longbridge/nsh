@@ -26,6 +26,9 @@ GPUI 用自己方式绘制的地方，见[差异](#差异)。
 ## 环境要求
 
 - macOS、Windows 或 Linux，以及 GPUI 能使用的 GPU（macOS 上是 Metal，Windows 上是 DirectX，Linux 上是 Vulkan）。
+- macOS 上：从源码构建运行时会用到 Xcode 的 Metal Toolchain（`xcodebuild -downloadComponent MetalToolchain`），由它提前编译
+  GPUI 的着色器。在没有它的 Mac 上，`nsh run` 和 `nsh package` 会打开 GPUI 的 `runtime-shaders` feature 构建运行时并给出提示：
+  着色器在应用启动时编译（第一次不到一秒，之后由 macOS 缓存）。
 - Linux 上：Vulkan 驱动、带 `libxkbcommon` 的 Wayland 或 X11、GTK 3 和 WebKitGTK 4.1（Web 视图），以及 GStreamer 1.20
   或更新版本及其 base 和 good 插件（视频）。Web 视图需要 X11：在 Wayland 桌面上请让应用运行在 Xwayland 下（把
   `WAYLAND_DISPLAY=` 设为空），否则显示占位内容。从源码构建运行时还需要开发包；在 Debian 和 Ubuntu 上：
