@@ -13,7 +13,7 @@ use nsh_engine::{Bundle, Engine, EngineConfig};
 use crate::ChannelSink;
 
 const APP: &str = r##"import { mount } from "nsh";
-import { Canvas, Path2D } from "nsh/canvas";
+import { Canvas, Path2D } from "nsh";
 
 mount(
   () => (
@@ -204,7 +204,7 @@ const DRAW: &str = r##"(cx, size) => {
   cx.fillText(log.join("|"), 0, 0);
 }"##;
 
-const DRAW_IMPORTS: &str = r##"import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
+const DRAW_IMPORTS: &str = r##"import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
 
 const v = createAnimatedValue(3);
@@ -252,7 +252,7 @@ mount(() => <Canvas style={{{{ width: 100, height: 50 }}}} draw={{{DRAW}}} />);
 /// Redrawn when a signal `draw` reads changes; a throwing `draw` still
 /// sends what it recorded, and the error reaches the app.
 const REDRAW: &str = r#"import { signal, mount } from "nsh";
-import { Canvas } from "nsh/canvas";
+import { Canvas } from "nsh";
 
 const n = signal(1);
 setTimeout(() => n.set(2), 30);
@@ -283,7 +283,7 @@ fn canvases_redraw_when_what_they_read_changes() {
 /// node (no new one in the graph each time), the same slot.
 const DERIVED: &str = r#"import { signal, mount } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
+import { Canvas } from "nsh";
 
 const n = signal(1);
 const v = createAnimatedValue(0);
@@ -337,6 +337,7 @@ fn redrawing_derives_the_same_nodes() {
 
 /// Hit tests answered natively while drawing and, on a kept context,
 /// afterwards; `fontVariantNumeric` records with the font kept apart.
+/// (Imported from `nsh/canvas`, where they were first: they still are.)
 const HIT: &str = r#"import { signal, mount } from "nsh";
 import { Canvas, Path2D, CanvasRenderingContext2D } from "nsh/canvas";
 

@@ -1,8 +1,6 @@
-import { Input, Scroll, type ScrollEvent, signal, Text, View, type YNode } from "nsh";
+import { Canvas, Input, List, Scroll, type ScrollEvent, signal, Text, View, type YNode } from "nsh";
 import { createAnimatedValue } from "nsh/animated";
-import { Canvas } from "nsh/canvas";
 import { windowSize } from "nsh/device";
-import { List } from "nsh/list";
 import { Badge, Button, Caption, colors, DemoPage, Figure, finish, hint, isDark, Meter, mono, Press, radius, Section, Segmented, Toggle as Switch, type Tone, toneColor, toneTint } from "../ui";
 
 const tones: Tone[] = ["accent", "info", "warn", "up", "danger"];

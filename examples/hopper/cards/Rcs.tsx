@@ -1,5 +1,4 @@
-import { signal, Text, View } from "nsh";
-import { Canvas, type CanvasRenderingContext2D, Path2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D, Path2D, signal, Text, View } from "nsh";
 import { nitrogenTank, quads } from "../store";
 import { color, mono } from "../theme";
 import { Gauge, Inset, Line, Panel, Pill, track } from "../ui";

@@ -1,5 +1,4 @@
-import { computed, signal, Text, View } from "nsh";
-import { Canvas } from "nsh/canvas";
+import { Canvas, computed, signal, Text, View } from "nsh";
 import { ago, dispersion, type Hop, hops, now, type Outcome, touchdowns } from "../store";
 import { color, mono } from "../theme";
 import { Caption, Line, Panel, Pill, track } from "../ui";

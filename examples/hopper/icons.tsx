@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D } from "nsh";
 import { color } from "./theme";
 
 /** Glyphs drawn in a 20 × 20 box with the tint as stroke. */

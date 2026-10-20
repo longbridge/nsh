@@ -1,5 +1,4 @@
-import { Text, View } from "nsh";
-import { Canvas, type CanvasRenderingContext2D, Path2D } from "nsh/canvas";
+import { Canvas, type CanvasRenderingContext2D, Path2D, Text, View } from "nsh";
 import { cgHeight, load, vehicle, wetMass } from "../store";
 import { color, mono } from "../theme";
 import { Caption, Gauge, Inset, Line, Panel, track } from "../ui";
