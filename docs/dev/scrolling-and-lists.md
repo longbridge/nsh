@@ -37,7 +37,9 @@
   `refreshing` / `onRefresh`, `scrollValue`. Every other prop (`testID`, accessibility, `class`, `onLayout`, touch
   props, ...) goes to the scroll view as on a `<Scroll>` (`list.rs` `OWN`: the names are read once, when the list is
   made; their values follow their getters). Positions, columns, sticky travel and viewability are all computed in the core; sticky cells
-  are pinned natively on every scroll (`MountItem::StickyCells`: translate by `clamp(offset - start, 0, end - start)`).
+  are pinned natively on every scroll (`MountItem::StickyCells`: translate by `clamp(offset - start, 0, end - start)`);
+  the web, whose scroll events trail the browser's scrolling by a frame, puts each in a track spanning that travel
+  instead and lets the browser's `position: sticky` keep it pinned (`nsh.js` `op_sticky`).
 - **List scroll commands**: the core resolves a list's `scrollToEnd` / `scrollToIndex` to a `ScrollTo` with the sizes it
   knows, which are estimates for rows never rendered; the target stays pinned (`ListState::follow_pin`), and as the rows
   around it are measured the list follows it (a `ScrollBy`, or a retargeted `ScrollTo` while an animated scroll is in

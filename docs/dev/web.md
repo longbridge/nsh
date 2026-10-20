@@ -549,6 +549,14 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
   as that; a mouse notch is 1.25×), Safari's touchpad pinches come as `gesture*` events. `zoomTo` and `zoomScale` animate or jump with the
   content point to the middle. Canvases inside are drawn again at the zoomed resolution when a zoom ends (up to 4×).
 
+Sticky list cells (`MountItem::StickyCells`) stick with the browser's `position: sticky`, in step with the compositor
+as the scroll bar is; a shift set from `scroll` events would trail it by a frame. Each sits in a `.nsh-track`
+(`op_sticky`, `placeTrack`) beside the other cells, in the list or its layer: a box from the cell's frame along its
+range of travel, with no breadth across it, so it takes no pointer events, at `z-index: 5` above the other cells. The
+list isolates that z-index (`nsh-sticky`): as natively, a sticky cell never covers the views after the list, such as a
+bar the content scrolls under. The next sticky cell's track starts where it pushes the cell out, the last one's ends
+with the content, and a cell no longer sticky goes back to its frame.
+
 ## Platform services
 
 - **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<app id>:<key>`

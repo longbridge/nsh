@@ -134,7 +134,12 @@ const KEYFRAMES = `
 .nsh-gone { display: none; }
 .nsh-inert { pointer-events: none; }
 .nsh-clip { overflow: clip; }
-.nsh-stuck { z-index: 5; }
+/* A sticky list cell's range of travel (op_sticky): it lifts the cell above the other cells, and with no breadth
+   across it takes no pointer events. The cell sticks inside it, at its left in either direction. */
+.nsh-track { position: absolute; z-index: 5; }
+.nsh-track > .nsh-v { position: sticky; margin-right: auto; }
+/* A list with sticky cells keeps their z-index to itself: above its other cells, never over the views after it. */
+.nsh-sticky { isolation: isolate; }
 .nsh-fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
 img.nsh-fill { pointer-events: none; }
 .nsh-fit-cover { object-fit: cover; }
@@ -1409,9 +1414,10 @@ class Player {
     // card inside the root): the core lays it out at the size reported.
     if (!el || el._kind === "modal") return;
     // A view that had a frame moves from where it shows (a running
-    // animation's frame); a new one's first frame does not animate.
+    // animation's frame); a new one's first frame does not animate, nor
+    // does a sticky cell's (the browser keeps it in its track).
     const update = this.layoutAnimation?.update;
-    const from = update && el._frame && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
+    const from = update && el._frame && !el._track && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
     el._frame = [x, y, w, h];
@@ -1429,6 +1435,10 @@ class Player {
   placeFrame(el) {
     const f = el._frame;
     if (!f) return;
+    if (el._track) {
+      this.placeTrack(el);
+      return;
+    }
     const s = el.style;
     s.left = `${f[0]}px`;
     s.top = `${f[1]}px`;
@@ -1901,6 +1911,8 @@ class Player {
     el._content = [w, h];
     this.placeLayer(el);
     this.snapMarkers(el);
+    // The last sticky cell travels to the end of the content.
+    for (const cell of el._tracks?.values() ?? []) this.placeTrack(cell);
   }
 
   op_sb([, id, dx, dy]) {
@@ -1970,24 +1982,79 @@ class Player {
     }
   }
 
+  // Sticky list cells stick with the browser's `position: sticky`, so they
+  // move with its scrolling, in step with the compositor; a shift set from
+  // the page's scroll events trails it by a frame. Each sits in a track
+  // spanning its range of travel, from its frame to the scroll offset
+  // `end` plus its size, out of which the next sticky cell pushes it.
+
   op_sticky([, id, cells]) {
     const el = this.view(id);
     if (!el) return;
-    el._stickyCells = cells;
-    this.updateSticky(el);
-  }
-
-  updateSticky(el) {
-    if (!el._stickyCells) return;
-    const offset = el._horizontal ? el.scrollLeft : el.scrollTop;
-    for (const [cellId, start, end] of el._stickyCells) {
+    const tracks = (el._tracks ??= new Map());
+    const ranges = new Map(cells.map(([cellId, start, end]) => [cellId, [start, end]]));
+    el.classList.toggle("nsh-sticky", ranges.size > 0);
+    // Cells no longer sticky go back to their frames: a recycled cell
+    // shows another item now. Removed ones take their tracks along.
+    for (const [cellId, cell] of tracks) {
+      if (ranges.has(cellId) && this.view(cellId) === cell) continue;
+      tracks.delete(cellId);
+      this.unstick(cell);
+    }
+    for (const [cellId, range] of ranges) {
       const cell = this.view(cellId);
       if (!cell) continue;
-      const shift = Math.min(Math.max(offset - start, 0), end - start);
-      cell._sticky = el._horizontal ? `${shift}px 0` : `0 ${shift}px`;
-      cell.style.translate = cell._sticky;
-      cell.classList.toggle("nsh-stuck", shift > 0);
+      if (!cell._track) {
+        const track = document.createElement("div");
+        track.className = "nsh-track";
+        track._list = el;
+        // Where the list's cells are: in it, or in its content layer.
+        const host = el._layer ?? el;
+        host.insertBefore(track, cell.parentNode === host ? cell : null);
+        track.append(cell);
+        cell._track = track;
+        tracks.set(cellId, cell);
+      }
+      cell._range = range;
+      this.placeTrack(cell);
     }
+  }
+
+  /** `cell` leaves its track for its place among the list's cells. */
+  unstick(cell) {
+    const track = cell._track;
+    cell._track = null;
+    cell._range = null;
+    if (cell.parentNode === track) track.replaceWith(cell);
+    else track.remove();
+    this.placeFrame(cell);
+  }
+
+  /** Places `cell`'s track along its range of travel and the cell in it:
+   * it sticks the distance from its range's start to its frame's from the
+   * scroll view's start. */
+  placeTrack(cell) {
+    const f = cell._frame;
+    const range = cell._range;
+    if (!f || !range) return;
+    const list = cell._track._list;
+    const horizontal = !!list._horizontal;
+    const [at, size] = horizontal ? [f[0], f[2]] : [f[1], f[3]];
+    // The last one's range ends past the content: it travels to its end
+    // (not at all before the list's content size arrives).
+    const content = list._content?.[horizontal ? 0 : 1] ?? 0;
+    const length = size + Math.max(0, Math.min(range[1] - range[0], content - at - size));
+    const t = cell._track.style;
+    t.left = `${f[0]}px`;
+    t.top = `${f[1]}px`;
+    t.width = `${horizontal ? length : 0}px`;
+    t.height = `${horizontal ? 0 : length}px`;
+    const s = cell.style;
+    const inset = `${at - range[0]}px`;
+    s.left = horizontal ? inset : "auto";
+    s.top = horizontal ? "auto" : inset;
+    s.width = `${f[2]}px`;
+    s.height = `${f[3]}px`;
   }
 
   // Desktop scroll bars (the desktop idiom): nsh's own, thin, over the
@@ -2103,7 +2170,6 @@ class Player {
   }
 
   scrolled(el) {
-    this.updateSticky(el);
     if (this.desktopUI) this.showBar(el);
     // Still moving after the finger left (touch scrolling is the
     // browser's): a glide.
@@ -2143,7 +2209,8 @@ class Player {
     if (el._layer) return el._layer;
     const layer = document.createElement("div");
     layer.className = "nsh-layer";
-    for (const child of [...el.children]) if (child._id !== undefined) layer.append(child);
+    // Its views, and the tracks its sticky cells sit in.
+    for (const child of [...el.children]) if (child._id !== undefined || child._list) layer.append(child);
     el.insertBefore(layer, el._spacer.nextSibling);
     el._layer = layer;
     el._zoom = 1;
