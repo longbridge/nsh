@@ -1418,9 +1418,14 @@ opt-level = 3
     fn write_workspace_manifest(&self, ws: &Path, base: &str, gpui: bool) -> anyhow::Result<()> {
         let path = ws.join("Cargo.toml");
         let mut manifest = base.to_owned();
-        // Match nsh's own debug builds: the interpreter and layout run
-        // on every interaction, while app Rust code stays easy to debug.
-        manifest.push_str("\n[profile.dev.package.quickjs-jit-sys]\nopt-level = 3\n[profile.dev.package.taffy]\nopt-level = 3\n");
+        // These run on every interaction. Keep Objective-C signature
+        // checks enabled, but optimize their parser as well as the bridge.
+        // App Rust code stays easy to debug.
+        for package in ["quickjs-jit-sys", "taffy", "objc2", "objc2-encode"] {
+            manifest.push_str(&format!(
+                "\n[profile.dev.package.{package}]\nopt-level = 3\n"
+            ));
+        }
         if let Some(source) = self.nsh.source() {
             manifest.push_str("\n[patch.crates-io]\n");
             let mut patches = String::new();
@@ -2506,7 +2511,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_hosts_optimize_interpreter_and_layout_in_debug() {
+    fn generated_hosts_optimize_interaction_dependencies_in_debug() {
         let dir =
             std::env::temp_dir().join(format!("nsh-rust-debug-profile-{}", std::process::id()));
         let app = app(&dir, &[("app-native", dir.join("native"))], None);
@@ -2514,7 +2519,7 @@ mod tests {
         app.gpui_workspace().unwrap();
         for file in ["Cargo.toml", "gpui/Cargo.toml"] {
             let manifest = std::fs::read_to_string(app.workspace.join(file)).unwrap();
-            for package in ["quickjs-jit-sys", "taffy"] {
+            for package in ["quickjs-jit-sys", "taffy", "objc2", "objc2-encode"] {
                 assert!(
                     manifest.contains(&format!("[profile.dev.package.{package}]\nopt-level = 3")),
                     "{file} must keep {package} fast in debug builds"

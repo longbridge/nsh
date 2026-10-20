@@ -422,6 +422,10 @@ codegen-units = 1
 opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3
+[profile.dev.package.objc2]
+opt-level = 3
+[profile.dev.package.objc2-encode]
+opt-level = 3
 
 # The web runtime (`nsh.wasm`): what pages download, so Rust is optimized for
 # size (3.7 MB instead of 5.0, 1.0 MB with brotli); QuickJS keeps `-O3`, as
