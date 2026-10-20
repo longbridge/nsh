@@ -510,9 +510,13 @@ fn has_press(events: EventMask) -> bool {
 fn update_cursor(view: &NshView) {
     let name = {
         let s = view.state();
-        // Selectable text shows the I-beam (a press target its pointer).
-        cursor_name(s.style.cursor, has_press(s.events))
-            .or_else(|| crate::text::selectable(&s).then_some("text"))
+        // Selectable text and the texts of selection areas show the
+        // I-beam (a press target its pointer).
+        cursor_name(s.style.cursor, has_press(s.events)).or_else(|| {
+            let selects = crate::text::selectable(&s)
+                || (s.text.is_some() && crate::selection_area::takes_part(view));
+            selects.then_some("text")
+        })
     };
     let current = view.cursor().and_then(|c| c.name());
     if current.as_deref() != name {
@@ -618,7 +622,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
-            down(surface, Key::Mouse, x, y, time)
+            down(surface, Key::Mouse, x, y, time, event.modifier_state())
         }
         T::ButtonPress
             if button() == Some(gdk::BUTTON_SECONDARY)
@@ -639,7 +643,14 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
                 hover_moved(surface, x, y, state);
             }
         }
-        T::TouchBegin => down(surface, touch_key(event), x, y, time),
+        T::TouchBegin => down(
+            surface,
+            touch_key(event),
+            x,
+            y,
+            time,
+            event.modifier_state(),
+        ),
         T::TouchUpdate => motion(surface, touch_key(event), x, y, time),
         T::TouchEnd => up(surface, touch_key(event), x, y, time, false),
         T::TouchCancel => up(surface, touch_key(event), x, y, time, true),
@@ -804,7 +815,9 @@ pub(crate) enum Simulated {
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
     match action {
-        Simulated::Down(x, y) => down(surface, Key::Mouse, x, y, time),
+        Simulated::Down(x, y) => {
+            down(surface, Key::Mouse, x, y, time, gdk::ModifierType::empty())
+        }
         Simulated::Up(x, y) => {
             up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
@@ -1020,7 +1033,7 @@ fn put(surface: &Surface, p: Pointer) {
     surface.input.pointers.borrow_mut().push(p);
 }
 
-fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
+fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64, modifiers: gdk::ModifierType) {
     // A release we never saw (the window lost the grab).
     if let Some(stale) = take(surface, key) {
         finish(surface, stale, true);
@@ -1034,9 +1047,6 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     }
     let touch = key != Key::Mouse;
     let native = hit.native.is_some();
-    // Mouse drags over selectable text select it (`text.rs`) rather than
-    // pan.
-    let selects = !touch && !native && crate::text::selectable(&hit.view.state());
     let views = chain(&hit.view);
     // The mouse drags an indicator as a scroll bar: its thumb follows the
     // pointer, where a drag on the content moves the content with it.
@@ -1076,6 +1086,13 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
         put(surface, p);
         return;
     }
+    // A press clears a selection anywhere else; the mouse selects in the
+    // selection area it presses in (`selection_area.rs`).
+    let area = crate::selection_area::pressed(surface, &hit.view, !touch, native);
+    // Mouse drags over selectable text or in a selection area select it
+    // (`text.rs`) rather than pan.
+    let selects =
+        area.is_some() || (!touch && !native && crate::text::selectable(&hit.view.state()));
     let mut path = Vec::new();
     let mut candidates = Vec::new();
     let mut pinch = None;
@@ -1139,6 +1156,14 @@ fn down(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     } else {
         find_press(surface, &hit.view, &views, x, y)
     };
+    if let Some(area) = &area {
+        // Over a press target in the area a drag selects only once the
+        // press is over.
+        let over_press = press
+            .as_ref()
+            .is_some_and(|p| p.view == *area || p.view.is_ancestor(area));
+        crate::selection_area::begin(surface, area, (x, y), time, modifiers, over_press);
+    }
     let id = input.next_id.get();
     input.next_id.set(id.wrapping_add(1));
     let mut p = Pointer {
@@ -1218,6 +1243,10 @@ fn motion(surface: &Rc<Surface>, key: Key, x: f32, y: f32, time: f64) {
     p.time = time;
     p.velocity.add(time, x, y);
     let moved = std::mem::replace(&mut p.moved, true);
+    if key == Key::Mouse && crate::selection_area::dragged(surface, x, y) {
+        cancel_press(surface, &mut p);
+        release_pressed(surface, &mut p);
+    }
     let (tx, ty) = (x - p.start.0, y - p.start.1);
     let mut activated = None;
     if let Some(gate) = p.gate.take() {
@@ -1324,6 +1353,9 @@ fn finish(surface: &Rc<Surface>, mut p: Pointer, cancelled: bool) {
         report(surface, phase, &p, None);
     }
     release_pressed(surface, &mut p);
+    if p.key == Key::Mouse {
+        crate::selection_area::released(surface);
+    }
     let mode = std::mem::replace(&mut p.mode, Mode::Free);
     match mode {
         Mode::TwoFinger => end_two_finger(surface),

@@ -125,6 +125,9 @@ pub(crate) struct ViewState {
     pub(crate) scroll: Option<ScrollState>,
     /// Text content (text views).
     pub(crate) text: Option<crate::text::DrawnText>,
+    /// The part of its selection area's selection its text draws (UTF-16,
+    /// `start < end`; [`crate::selection_area`]).
+    pub(crate) area_selection: Option<(u32, u32)>,
     /// Image content (image views).
     pub(crate) image: Option<crate::image::ImageState>,
     /// Canvas content.
@@ -158,6 +161,7 @@ impl ViewState {
             fade: 1.0,
             scroll: matches!(kind, ViewKind::Scroll).then(ScrollState::default),
             text: None,
+            area_selection: None,
             image: None,
             canvas: None,
             input: None,

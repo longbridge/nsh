@@ -129,6 +129,9 @@ pub(crate) struct Surface {
     pub(crate) keymap: crate::keymap::KeymapState,
     /// The window's chrome: title bar, menus ([`crate::chrome`]).
     pub(crate) chrome: crate::chrome::Chrome,
+    /// Selections across the texts of selection areas
+    /// ([`crate::selection_area`]).
+    pub(crate) selection: crate::selection_area::State,
 }
 
 impl Surface {
@@ -164,6 +167,7 @@ impl Surface {
             native: Default::default(),
             keymap: Default::default(),
             chrome: Default::default(),
+            selection: Default::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -249,6 +253,7 @@ impl Surface {
         *self.anim.borrow_mut() = UiAnimation::default();
         self.nav.borrow_mut().reset();
         crate::input::reset(self);
+        crate::selection_area::reset(self);
         crate::keymap::clear(self);
         self.js_frame.set(false);
     }
