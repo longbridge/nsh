@@ -274,6 +274,39 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The components' theme changed: classes naming its tokens
+    /// (`bg-primary`) are resolved again, on nodes and on Rust components.
+    pub(super) fn theme_tokens_changed(&mut self) {
+        let theme = self.components.theme.clone();
+        let Some(changed) = self.tailwind.set_tokens(&theme) else {
+            return;
+        };
+        let reads =
+            |c: &Option<Arc<ClassList>>| c.as_ref().is_some_and(|c| c.deps() & changed != 0);
+        let keys: Vec<Key> = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.class_names.is_some() && (changed == u16::MAX || reads(&n.classes)))
+            .map(|(k, _)| k as Key)
+            .collect();
+        for key in keys {
+            self.set_classes(key, None, None);
+        }
+        let hosts: Vec<NodeId> = self
+            .components
+            .instances
+            .iter()
+            .filter(|(_, inst)| {
+                (!inst.class.is_empty() || !inst.class_list.is_empty())
+                    && (changed == u16::MAX || reads(&inst.user))
+            })
+            .map(|(host, _)| *host)
+            .collect();
+        for host in hosts {
+            self.update_user_class(host);
+        }
+    }
+
     /// Tells the platform which states of `key` to report.
     pub(super) fn update_tracking(&mut self, key: Key) {
         let node = &mut self.nodes[key as usize];

@@ -106,6 +106,124 @@ fn colors_and_opacity() {
 }
 
 #[test]
+fn theme_tokens() {
+    let ui = crate::ui::Theme::default();
+    let dark = ClassEnvironment {
+        dark: true,
+        ..Default::default()
+    };
+    let s = styled("bg-primary text-muted-foreground border border-border rounded-(--radius)");
+    assert_eq!(s.view.background_color, ui.primary.light);
+    assert_eq!(s.text.color, Some(ui.muted_foreground.light));
+    assert_eq!(s.view.borders.colors[0], ui.border.light);
+    assert_eq!(s.view.border_radius, ui.radius);
+    let (s, _) = styled_with(
+        "bg-primary text-(--muted-foreground)",
+        dark,
+        (390.0, 844.0),
+        0,
+    );
+    assert_eq!(s.view.background_color, ui.primary.dark);
+    assert_eq!(s.text.color, Some(ui.muted_foreground.dark));
+    // Opacity modifiers, longer prefixes, variants, the long form.
+    let s = styled("bg-primary-background/50 border-t-2 border-t-ring");
+    assert_eq!(s.view.background_color, ui.primary.light.with_alpha(0.5));
+    assert_eq!(s.view.borders.colors[0], ui.ring.light);
+    // Parts and props: shadows, rings, gradients, the caret, placeholders.
+    let (s, props) = styled_with(
+        "shadow-md shadow-primary ring-2 ring-ring bg-linear-to-r from-primary to-accent caret-primary placeholder:text-muted-foreground",
+        ClassEnvironment::default(),
+        (390.0, 844.0),
+        0,
+    );
+    assert_eq!(props.caret_color, Some(ui.primary.light));
+    assert_eq!(props.placeholder_color, Some(ui.muted_foreground.light));
+    let e = s.view.effects.as_ref().unwrap();
+    assert!(e.box_shadows.iter().any(|l| l.color == ui.ring.light));
+    // The shadow's color keeps each layer's alpha.
+    assert!(
+        e.box_shadows
+            .iter()
+            .any(|l| l.color.0 >> 8 == ui.primary.light.0 >> 8)
+    );
+    let g = &e.background_images[0];
+    assert_eq!(g.stops[0].color, ui.primary.light);
+    assert_eq!(g.stops.last().unwrap().color, ui.accent.light);
+    let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
+    assert_eq!(s.view.background_color, ui.accent.dark);
+    let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
+    assert_eq!(s.text.font_size, Some(ui.font_size));
+    assert_eq!(s.view.border_radius, ui.radius_lg);
+    // Later utilities still win, in both appearances.
+    let (s, _) = styled_with("bg-primary bg-red-500", dark, (390.0, 844.0), 0);
+    assert_eq!(s.view.background_color, Color(0xfb2c_36ff));
+    let list = parse(&Theme::default(), "bg-primary p-4");
+    assert_ne!(list.deps() & deps::THEME, 0);
+    assert_ne!(list.deps() & deps::DARK, 0);
+    assert_eq!(
+        parse(&Theme::default(), "bg-red-500").deps() & deps::THEME,
+        0
+    );
+    // Names that are no token, and variables there are not.
+    let list = parse(&Theme::default(), "bg-nope text-(--nope) w-primary");
+    assert_eq!(list.unknown().len(), 3);
+}
+
+#[test]
+fn tailwind_colors_win_over_tokens_and_tokens_come_from_the_theme() {
+    let mut theme = Theme::from_json(r##"{ "colors": { "primary": "#ff0000" } }"##).unwrap();
+    let ui = crate::ui::Theme::from_json(
+        r##"{ "themes": [
+            { "mode": "light", "radius.card": 10, "colors": { "chart.up": "#00ff00", "chart.grid": "#0000ff" } },
+            { "mode": "dark", "colors": { "chart.up": "#008800" } }
+        ] }"##,
+    )
+    .unwrap();
+    theme.set_tokens(&ui);
+    let group = |_: &str| 0;
+    let apply = |classes: &str, dark: bool| {
+        let list = parse(&theme, classes);
+        assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+        let mut style = Style::default();
+        let context = Context {
+            env: ClassEnvironment {
+                dark,
+                ..Default::default()
+            },
+            window: (390.0, 844.0),
+            rtl: false,
+            states: 0,
+            position: 0,
+            group: &group,
+        };
+        list.apply(
+            &context,
+            &theme,
+            &mut style,
+            &mut ClassProps::default(),
+            |_| {},
+        );
+        style
+    };
+    assert_eq!(
+        apply("bg-primary", false).view.background_color,
+        Color(0xff00_00ff)
+    );
+    assert_eq!(
+        apply("bg-chart-up", false).view.background_color,
+        Color(0x00ff_00ff)
+    );
+    assert_eq!(
+        apply("bg-chart-up", true).view.background_color,
+        Color(0x0088_00ff)
+    );
+    // A color set in one mode only is used in both.
+    let s = apply("border border-chart-grid rounded-(--radius-card)", true);
+    assert_eq!(s.view.borders.colors[0], Color(0x0000_ffff));
+    assert_eq!(s.view.border_radius, 10.0);
+}
+
+#[test]
 fn typography() {
     let s = styled(
         "text-lg font-semibold italic tracking-wide leading-tight underline decoration-wavy decoration-red-500 uppercase text-center tabular-nums",

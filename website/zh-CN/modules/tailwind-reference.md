@@ -534,7 +534,7 @@ Tailwind 的文字阴影有多层；原生只绘制一层，即最宽的那层�
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> Tailwind 主题只影响应用自己的类。`nsh/ui/mobile` 的组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见 [组件](../components/index.md)。
+> Tailwind 主题只影响应用自己的类。`nsh/ui/mobile` 的组件从组件主题（`nsh.json` 的 `"theme"` 键）取颜色，见 [组件](../components/index.md)。类名也可以引用这套主题的颜色和数值（`bg-primary`、`rounded-(--radius)`）：见[主题 token](../docs/tailwind.md#主题-token)。
 
 ## 相关
 

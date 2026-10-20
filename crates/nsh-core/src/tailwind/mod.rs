@@ -32,7 +32,10 @@ use rustc_hash::FxHashMap;
 
 pub use self::theme::{Theme, ThemeError};
 pub(crate) use self::utilities::{Decl, Len, Part};
-use self::utilities::{Parts, touched};
+use self::{
+    theme::Tokens,
+    utilities::{Parts, touched},
+};
 use crate::{
     ops::ResizeMode,
     props::PointerEvents,
@@ -86,6 +89,9 @@ pub mod deps {
     pub const POSITION: u16 = 64;
     /// The reduce-motion setting.
     pub const MOTION: u16 = 128;
+    /// The component theme's tokens (`bg-primary`): parsed again when they
+    /// change.
+    pub const THEME: u16 = 256;
 }
 
 /// The platform classes run on (`ios:`, `android:`, `web:`).
@@ -227,6 +233,8 @@ pub(crate) struct Rule {
     rank: u16,
     /// `!`: applied after everything else.
     important: bool,
+    /// Names theme tokens ([`deps::THEME`]).
+    theme: bool,
 }
 
 /// Ranks of the variants Rust components use (Tailwind's order, as
@@ -252,6 +260,7 @@ impl Rule {
             decls,
             rank,
             important: false,
+            theme: false,
         }
     }
 
@@ -448,6 +457,9 @@ impl ClassList {
         for d in &rule.decls {
             self.deps |= d.deps();
         }
+        if rule.theme {
+            self.deps |= deps::THEME;
+        }
         self.rules.push(rule);
     }
 
@@ -479,10 +491,33 @@ impl Tailwind {
         Self::default()
     }
 
-    /// Replaces the theme (cached classes are parsed again).
-    pub fn set_theme(&mut self, theme: Theme) {
+    /// Replaces the theme (cached classes are parsed again); the tokens
+    /// stay.
+    pub fn set_theme(&mut self, mut theme: Theme) {
+        theme.share_tokens(&self.theme);
         self.theme = theme;
         self.cache.clear();
+    }
+
+    /// Takes the tokens of component theme `theme`. Returns which classes
+    /// to resolve again: none ([`None`]) when the tokens did not change,
+    /// those that name tokens ([`deps::THEME`]) when only their values
+    /// did, else all (`u16::MAX`: unknown classes may name new ones).
+    pub(crate) fn set_tokens(&mut self, theme: &crate::ui::Theme) -> Option<u16> {
+        let tokens = Tokens::new(theme);
+        let current = self.theme.tokens();
+        if *current == tokens {
+            return None;
+        }
+        let changed = if current.same_names(&tokens) {
+            self.cache.retain(|_, list| list.deps & deps::THEME == 0);
+            deps::THEME
+        } else {
+            self.cache.clear();
+            u16::MAX
+        };
+        self.theme.replace_tokens(Arc::new(tokens));
+        Some(changed)
     }
 
     /// The theme.
@@ -518,6 +553,12 @@ pub fn parse(theme: &Theme, classes: &str) -> ClassList {
     for token in classes.split_ascii_whitespace() {
         match parse_token(theme, token) {
             Some(Token::Rule(rule)) => list.add(rule),
+            Some(Token::Themed(rule, dark)) => {
+                list.add(rule);
+                if let Some(dark) = dark {
+                    list.add(*dark);
+                }
+            }
             Some(Token::Group(name)) => {
                 list.tracked |= state::PRESSED | state::HOVERED | state::FOCUS_WITHIN;
                 list.groups.push(name);
@@ -533,6 +574,8 @@ pub fn parse(theme: &Theme, classes: &str) -> ClassList {
 
 enum Token {
     Rule(Rule),
+    /// A utility naming theme tokens: one rule, or one per appearance.
+    Themed(Rule, Option<Box<Rule>>),
     Group(Box<str>),
     /// Accepted, but has no effect natively (`antialiased`).
     Ignored,
@@ -606,13 +649,53 @@ fn parse_token(theme: &Theme, token: &str) -> Option<Token> {
     for v in variants {
         rank = rank.max(variant(theme, v, &mut cond)?);
     }
-    let decls = utilities::parse(theme, utility)?;
+    let Some(decls) = utilities::parse(theme, utility) else {
+        return themed(theme, cond, rank, important, utility);
+    };
     Some(Token::Rule(Rule {
         cond,
         decls,
         rank,
         important,
+        theme: false,
     }))
+}
+
+/// `utility` naming theme tokens (`bg-primary`, `rounded-(--radius)`):
+/// parsed with their light and their dark values; two rules of the same
+/// rank when those differ, so later utilities still win in both.
+fn themed(
+    theme: &Theme,
+    cond: Condition,
+    rank: u16,
+    important: bool,
+    utility: &str,
+) -> Option<Token> {
+    let tokens = theme.tokens();
+    let parse = |dark: bool| utilities::parse(theme, &tokens.substitute(utility, dark)?);
+    let rule = |cond: Condition, decls: Vec<Decl>| Rule {
+        cond,
+        decls,
+        rank,
+        important,
+        theme: true,
+    };
+    // `dark:bg-primary` only needs the dark values.
+    if cond.dark == Some(true) {
+        return Some(Token::Themed(rule(cond, parse(true)?), None));
+    }
+    let (light, dark) = (parse(false)?, parse(true)?);
+    if light == dark {
+        return Some(Token::Themed(rule(cond, light), None));
+    }
+    let mut dark_cond = cond.clone();
+    dark_cond.dark = Some(true);
+    let mut light_cond = cond;
+    light_cond.dark = Some(false);
+    Some(Token::Themed(
+        rule(light_cond, light),
+        Some(Box::new(rule(dark_cond, dark))),
+    ))
 }
 
 /// Applies variant `v` to `cond`; returns its rank (Tailwind's order).

@@ -277,8 +277,10 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
                 .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
             v => v.to_string(),
         };
-        nsh_core::ui::Theme::from_json(&json)
+        let ui = nsh_core::ui::Theme::from_json(&json)
             .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?;
+        // Its tokens are classes too (`bg-primary`).
+        setup.theme.set_tokens(&ui);
         setup.ui = Some(json);
     }
     if let Some(appearance) = config.get("appearance") {

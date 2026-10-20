@@ -166,4 +166,21 @@ export function A(p: { on: boolean }) {
         assert_eq!(names, ["bg-blu-500", "txt-black", "nope", "wat"]);
         assert_eq!((found[0].line, found[0].column), (5, 22));
     }
+
+    #[test]
+    fn theme_tokens_are_classes() {
+        let source = r#"<View class="bg-primary text-muted-foreground bg-chart-up rounded-(--radius-card)" />"#;
+        let found = check(source, SourceType::tsx(), &Theme::default());
+        let names: Vec<&str> = found.iter().map(|u| u.class.as_str()).collect();
+        assert_eq!(names, ["bg-chart-up", "rounded-(--radius-card)"]);
+        // The app's own theme (`nsh.json` `"theme"`) adds its keys.
+        let mut theme = Theme::default();
+        theme.set_tokens(
+            &nsh_core::ui::Theme::from_json(
+                r##"{ "themes": [{ "radius.card": 10, "colors": { "chart.up": "#00ff00" } }] }"##,
+            )
+            .unwrap(),
+        );
+        assert!(check(source, SourceType::tsx(), &theme).is_empty());
+    }
 }

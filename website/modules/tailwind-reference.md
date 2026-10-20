@@ -534,7 +534,7 @@ With this theme, `bg-brand-500`, `bg-brand` (the `DEFAULT` shade), `text-accent`
 | `ease` | `{ name: [x1, y1, x2, y2] }` | `ease-*` |
 
 > [!NOTE]
-> The Tailwind theme shapes only your app's classes. The components of `nsh/ui/mobile` take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Components](../components/index.md).
+> The Tailwind theme shapes only your app's classes. The components of `nsh/ui/mobile` take their colors from the component theme, the `"theme"` key of `nsh.json`; see [Components](../components/index.md). Classes can name that theme's colors and numbers too (`bg-primary`, `rounded-(--radius)`): see [Theme tokens](../docs/tailwind.md#theme-tokens).
 
 ## Related
 

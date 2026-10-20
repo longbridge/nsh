@@ -4593,6 +4593,123 @@ mod components {
         assert_eq!(c.commit().as_ref().and_then(background), None);
     }
 
+    #[test]
+    fn classes_naming_theme_tokens_follow_the_theme() {
+        let mut c = core();
+        view_with_classes(&mut c, 2, "w-10 h-10 bg-primary");
+        view_with_classes(&mut c, 4, "w-10 h-10 bg-chart-up");
+        view_with_classes(&mut c, 6, "w-10 h-10 bg-red-500");
+        let default = crate::ui::Theme::default();
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            default.primary.light
+        );
+        // Not a token of the app's theme.
+        assert!(view_style_of(&batch, 4).is_none());
+        let host = crate::ui::Theme::from_json(
+            r##"{ "themes": [
+                { "mode": "light", "colors": { "primary.background": "#00ff00", "chart.up": "#0000ff" } },
+                { "mode": "dark", "colors": { "primary.background": "#004400" } }
+            ] }"##,
+        )
+        .unwrap();
+        c.set_host_theme(Some(host.clone()));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            rgb(0x00ff00)
+        );
+        assert_eq!(
+            view_style_of(&batch, 4).unwrap().background_color,
+            rgb(0x0000ff)
+        );
+        assert!(view_style_of(&batch, 6).is_none());
+        c.set_class_environment(crate::tailwind::ClassEnvironment {
+            dark: true,
+            ..Default::default()
+        });
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            rgb(0x004400)
+        );
+        // New values of the same tokens: only their classes are resolved.
+        let mut changed = host;
+        changed.set_color("primary.background", rgb(0xff00ff).into());
+        c.set_host_theme(Some(changed));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            rgb(0xff00ff)
+        );
+        assert!(view_style_of(&batch, 4).is_none());
+        assert!(view_style_of(&batch, 6).is_none());
+    }
+
+    #[test]
+    fn the_apps_token_classes_on_a_component_follow_the_theme() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Swatch>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Swatch>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Class("bg-chart-up".into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        let host = crate::ui::Theme::from_json(
+            r##"{ "themes": [{ "colors": { "chart.up": "#0000ff" } }] }"##,
+        )
+        .unwrap();
+        c.set_host_theme(Some(host));
+        let batch = c.commit().unwrap();
+        // The app's class wins over the component's own background.
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            rgb(0x0000ff)
+        );
+    }
+
+    #[test]
+    fn a_host_theme_keeps_the_apps_own_tokens() {
+        let mut c = core();
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: ROOT_ID,
+                prop: Prop::UiTheme(
+                    r##"{ "themes": [{ "colors": { "chart.up": "#0000ff" } }] }"##.into(),
+                ),
+            }],
+        );
+        view_with_classes(&mut c, 2, "w-10 h-10 bg-chart-up");
+        c.set_host_theme(Some(crate::ui::Theme::default()));
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, 2).unwrap().background_color,
+            rgb(0x0000ff)
+        );
+    }
+
     /// Wraps each JS child in a padded row.
     #[derive(Clone, PartialEq, Props)]
     struct RowsProps {

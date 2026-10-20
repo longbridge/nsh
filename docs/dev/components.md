@@ -452,8 +452,9 @@ is no string to parse and no `.class()`.
 `secondary`, `danger`, `muted`, `border`, `group_box`, `list_*`, `switch*`, `tab*`, ...: the fields mobile components
 use) plus `radius`, `radius_lg` and `font_size`, and derefs to its colors (`theme.primary`). The default
 (`default-theme.json`) is gpui-kit's default theme with mobile radii. An app sets its own in `nsh.json`: `"theme":
-"brand.json"` (a gpui-kit theme file, relative to `nsh.json`) or the same JSON inline. Keys only desktop components
-use are ignored; a pressed color the theme leaves out is derived from its base; null colors (gpui-kit serializes unset
+"brand.json"` (a gpui-kit theme file, relative to `nsh.json`) or the same JSON inline. Keys no field has (desktop
+components', the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` /
+`set_number`): tokens of the app's classes (`styles.md`), a host's theme inheriting the app's it lacks; a pressed color the theme leaves out is derived from its base; null colors (gpui-kit serializes unset
 ones so) are left as they are; colors are CSS colors or Tailwind palette names. The bundler checks the theme; the entry
 hands it to the renderer (`nsh:rt` `setup`), which sends it to the root (`uiTheme`) before any view is made.
 `theme()` reads it from a signal of the surface: a new theme runs again the bindings that read it. An embedding app

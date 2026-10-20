@@ -117,8 +117,8 @@ pub(super) struct Instance {
     inner: Inner,
     spec: Option<Arc<ComponentSpec>>,
     /// The app's `class` and `classList` on the host.
-    class: Box<str>,
-    class_list: Vec<Box<str>>,
+    pub(super) class: Box<str>,
+    pub(super) class_list: Vec<Box<str>>,
     /// The app's classes, or the styles the view this one is in gives it:
     /// applied after the root's own.
     pub(super) user: Option<Arc<ClassList>>,
@@ -421,7 +421,7 @@ pub(super) struct Components {
     /// The specs of the components made by type (not by name from the
     /// registry), one per type.
     specs: FxHashMap<&'static str, Arc<ComponentSpec>>,
-    theme: Arc<Theme>,
+    pub(super) theme: Arc<Theme>,
     /// The app's theme (`nsh.json`, a Rust app's root): drawn with while
     /// the embedding app sets none ([`Core::set_host_theme`]).
     app_theme: Arc<Theme>,
@@ -676,20 +676,27 @@ impl<M: TextEngine> Core<M> {
     /// so only the bindings that read it run again, and only when it
     /// changed.
     fn theme_changed(&mut self) {
-        let theme = self
-            .components
-            .host_theme
-            .clone()
-            .unwrap_or_else(|| self.components.app_theme.clone());
+        let theme = match &self.components.host_theme {
+            // The app's own tokens the host's theme does not have stay.
+            Some(host) => {
+                let mut theme = (**host).clone();
+                theme.inherit(&self.components.app_theme);
+                Arc::new(theme)
+            }
+            None => self.components.app_theme.clone(),
+        };
         if *theme == *self.components.theme {
             self.components.theme = theme;
             return;
         }
-        let _entered = self.components.runtime.enter();
-        self.components.theme = theme;
-        self.components
-            .runtime
-            .set_theme(self.components.theme.clone());
+        {
+            let _entered = self.components.runtime.enter();
+            self.components.theme = theme;
+            self.components
+                .runtime
+                .set_theme(self.components.theme.clone());
+        }
+        self.theme_tokens_changed();
     }
 
     /// Mounts a Rust app's root component as the content of the root view;
@@ -1251,7 +1258,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The app's classes on `host` changed.
-    fn update_user_class(&mut self, host: NodeId) {
+    pub(super) fn update_user_class(&mut self, host: NodeId) {
         let inst = &self.components.instances[&host];
         let mut combined = String::with_capacity(inst.class.len() + 16 * inst.class_list.len());
         combined.push_str(&inst.class);
