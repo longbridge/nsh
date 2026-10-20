@@ -106,6 +106,9 @@ struct View {
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
+    /// A selection area (`SelectionArea` of `nsh/base`): its texts share
+    /// one selection.
+    selection_area: bool,
 }
 
 /// Which views a selector matched, for a step that acts on one.
@@ -208,6 +211,7 @@ impl Screen {
                 view.role = props.accessibility.role;
                 view.disabled = props.accessibility.state.disabled;
                 view.long_press_delay = props.long_press_delay;
+                view.selection_area = props.selection_area;
             }
             MountItem::AccessibilityLabel { id, label } => {
                 self.nodes.entry(*id).or_default().label = label.clone();
@@ -573,6 +577,29 @@ impl Screen {
                 Ok(!self.disabled_from(id, None)
                     && self.input(id).is_none_or(|i| i.config.editable))
             }
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// Whether the view `selector` names is in a selection area (it or a
+    /// view around it is one: `SelectionArea` of `nsh/base`, a selectable
+    /// `TextView`); an error when none or several match.
+    pub fn in_selection_area(&self, selector: &str) -> Result<bool, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [mut id] => loop {
+                let Some(view) = self.nodes.get(&id) else {
+                    return Ok(false);
+                };
+                if view.selection_area {
+                    return Ok(true);
+                }
+                match view.parent {
+                    Some(parent) => id = parent,
+                    None => return Ok(false),
+                }
+            },
             [] => Err(format!("no view matches `{selector}`")),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }

@@ -75,6 +75,13 @@ pub(crate) fn event_data(event: &dyn super::EventToJs) -> Option<JsonValue> {
     host.read(data)
 }
 
+/// The value JS renders with (`None`: `undefined`).
+pub(crate) fn render_value(value: &dyn super::RenderValue) -> Option<JsonValue> {
+    let host = JsonHost::default();
+    let data = value.render_js(&host).expect("the value converts");
+    host.read(data)
+}
+
 /// The value a call's result settles its promise with (`None`:
 /// `undefined`), or the rejection's message.
 pub(crate) fn result(result: JsResult) -> Result<Option<JsonValue>, String> {

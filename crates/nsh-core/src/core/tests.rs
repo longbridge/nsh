@@ -84,6 +84,25 @@ fn js_events<M: TextEngine>(c: &mut Core<M>) -> Vec<(NodeId, EventKind, EventPay
             JsEvent::Children { host, wanted } => {
                 native(host, "$children", crate::JsonValue::Bool(wanted))
             }
+            JsEvent::Render {
+                host,
+                prop,
+                key,
+                value,
+            } => native(
+                host,
+                "$render",
+                serde_json::json!({
+                    "prop": prop,
+                    "key": key.as_str(),
+                    "value": json_host::render_value(&*value),
+                }),
+            ),
+            JsEvent::Unrender { host, prop, key } => native(
+                host,
+                "$unrender",
+                serde_json::json!({ "prop": prop, "key": key.as_str() }),
+            ),
             JsEvent::Reply { call, result } => native(
                 ROOT_ID,
                 "$return",
@@ -10846,5 +10865,456 @@ mod builders {
         assert_eq!(run::<ChildrenTogether>(|| (), &[]), one_by_one);
         assert!(one_by_one[0].contains("\"row 1\""));
         assert!(one_by_one[0].contains("\"right\""));
+    }
+}
+
+/// Render functions (`Option<Renderer<T>>` props) and the app's classes on
+/// a view's elements (`app_class`).
+mod renders {
+    use serde_json::json;
+
+    use super::*;
+    use crate::{
+        Prop,
+        ui::{AnyValue, Each, Props, Registry, Rendered, Renderer, Root, dynamic, prelude::*},
+    };
+
+    /// Renders each item (`key:label`) with the app's function, keyed by
+    /// its key; in one paragraph when `inline`.
+    #[derive(Clone, PartialEq, Props)]
+    struct ShelfProps {
+        #[prop(default)]
+        items: crate::ui::Prop<Vec<String>>,
+        #[prop(default)]
+        inline: bool,
+        render_item: crate::ui::Prop<Option<Renderer<String>>>,
+    }
+
+    fn split(item: &str) -> (String, String) {
+        let (key, label) = item.split_once(':').unwrap_or((item, item));
+        (key.to_owned(), label.to_owned())
+    }
+
+    #[component]
+    fn Shelf(props: ShelfProps) -> impl IntoElement {
+        let rows = Each::new(
+            props.items,
+            |item: &String| split(item).0,
+            move |item, _| {
+                // (A row's root is a node: an `Each` keeps rows by it.)
+                view().child(dynamic(move || -> Option<Rendered> {
+                    let (key, label) = split(&item.get());
+                    props.render_item.get().map(|r| r.render(key, label))
+                }))
+            },
+        );
+        if props.inline {
+            text("on the shelf: ").child(rows).into_element()
+        } else {
+            view().child(rows).into_element()
+        }
+    }
+
+    fn core_with_shelf(inline: bool) -> Core<FakeEngine> {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Shelf>();
+        c.set_components(registry);
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component(std::any::type_name::<Shelf>().into()),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::RustProp(
+                    "renderItem",
+                    Some(AnyValue::new(Some(Renderer::<String>::__js_of(
+                        "renderItem",
+                        2,
+                    )))),
+                ),
+            },
+            items(&["a:Apple", "b:Banana"]),
+        ];
+        if inline {
+            ops.push(Op::SetProp {
+                id: 2,
+                prop: rust_prop::<ShelfProps>("inline", Some(json!(true))),
+            });
+        }
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        apply(&mut c, ops);
+        c
+    }
+
+    fn items(items: &[&str]) -> Op {
+        Op::SetProp {
+            id: 2,
+            prop: rust_prop::<ShelfProps>("items", Some(json!(items))),
+        }
+    }
+
+    /// What the core asked JS: `$render key value` / `$unrender key`.
+    fn asked(c: &mut Core<FakeEngine>) -> Vec<String> {
+        js_events(c)
+            .into_iter()
+            .filter_map(|(host, _, payload)| match payload {
+                EventPayload::Native { name, data } if name.starts_with("$") => {
+                    assert_eq!(host, 2);
+                    assert_eq!(data["prop"], "renderItem");
+                    let key = data["key"].as_str().unwrap().to_owned();
+                    Some(match data.get("value") {
+                        Some(v) => format!("{name} {key} {}", v.as_str().unwrap()),
+                        None => format!("{name} {key}"),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// JS's answer to `$render key`: holder `holder` with a text of
+    /// `label`, inserted into the host.
+    fn holder(holder: NodeId, key: &str, label: &str) -> Vec<Op> {
+        vec![
+            Op::Create {
+                id: holder,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: holder,
+                prop: Prop::ComponentRender(format!("renderItem\u{1f}{key}").into()),
+            },
+            Op::Create {
+                id: holder + 2,
+                tag: Tag::Text,
+            },
+            Op::CreateText {
+                id: holder + 4,
+                text: label.into(),
+            },
+            Op::Insert {
+                parent: holder + 2,
+                child: holder + 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: holder,
+                child: holder + 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: 2,
+                child: holder,
+                before: None,
+            },
+        ]
+    }
+
+    fn parent_of(c: &Core<FakeEngine>, id: NodeId) -> Option<NodeId> {
+        let key = c.key(id).ok()?;
+        let parent = c.nodes[key as usize].parent;
+        (parent != NO_KEY).then(|| c.nodes[parent as usize].id)
+    }
+
+    #[test]
+    fn js_renders_each_key_once_per_value_and_releases_it() {
+        let mut c = core_with_shelf(false);
+        c.commit().unwrap();
+        assert_eq!(asked(&mut c), ["$render a Apple", "$render b Banana"]);
+        apply(&mut c, holder(10, "a", "Apple"));
+        apply(&mut c, holder(20, "b", "Banana"));
+        c.commit().unwrap();
+        // Each holder is the only child of its placeholder, a view of the
+        // core's in the component's view.
+        let (a, b) = (parent_of(&c, 10).unwrap(), parent_of(&c, 20).unwrap());
+        assert_eq!((a % 2, b % 2), (1, 1));
+        assert_ne!(a, b);
+        // In their rows.
+        let row = |p| parent_of(&c, p).and_then(|r| parent_of(&c, r));
+        assert_eq!(row(a), row(b));
+        assert!(asked(&mut c).is_empty());
+        // An equal value asks nothing; a new one asks again; the holder of
+        // the new render replaces the old one.
+        apply(&mut c, vec![items(&["a:Apple", "b:Banana"])]);
+        let _ = c.commit();
+        assert!(asked(&mut c).is_empty());
+        apply(&mut c, vec![items(&["a:Avocado", "b:Banana"])]);
+        let _ = c.commit();
+        assert_eq!(asked(&mut c), ["$render a Avocado"]);
+        apply(&mut c, holder(30, "a", "Avocado"));
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: 2,
+                    child: 10,
+                },
+                Op::Release { id: 10 },
+            ],
+        );
+        c.commit().unwrap();
+        assert_eq!(parent_of(&c, 30), Some(a));
+        // A key that leaves is released once.
+        apply(&mut c, vec![items(&["b:Banana"])]);
+        let _ = c.commit();
+        assert_eq!(asked(&mut c), ["$unrender a"]);
+        assert_eq!(parent_of(&c, 30), None, "out of the tree");
+        assert!(c.key(a).is_err(), "the placeholder went");
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: 2,
+                    child: 30,
+                },
+                Op::Release { id: 30 },
+            ],
+        );
+        let _ = c.commit();
+        assert!(asked(&mut c).is_empty());
+        // Back: rendered again.
+        apply(&mut c, vec![items(&["a:Apple", "b:Banana"])]);
+        let _ = c.commit();
+        assert_eq!(asked(&mut c), ["$render a Apple"]);
+        // The host goes: nothing is left of its renders.
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        let _ = c.commit();
+        assert!(c.components.renders.is_empty());
+    }
+
+    #[test]
+    fn a_holder_coming_after_its_key_left_stays_out_of_the_tree() {
+        let mut c = core_with_shelf(false);
+        c.commit().unwrap();
+        asked(&mut c);
+        apply(&mut c, vec![items(&["b:Banana"])]);
+        let _ = c.commit();
+        assert_eq!(asked(&mut c), ["$unrender a"]);
+        // JS answers the first ask after the core moved on.
+        apply(&mut c, holder(10, "a", "Apple"));
+        let _ = c.commit();
+        assert_eq!(parent_of(&c, 10), None);
+    }
+
+    #[test]
+    fn renders_in_a_paragraph_are_inline_views() {
+        let mut c = core_with_shelf(true);
+        c.commit().unwrap();
+        assert_eq!(asked(&mut c), ["$render a Apple", "$render b Banana"]);
+        apply(&mut c, holder(10, "a", "Apple"));
+        let batch = c.commit().unwrap();
+        let place = parent_of(&c, 10).unwrap();
+        // The row is an inline view of the paragraph.
+        let paragraph = parent_of(&c, parent_of(&c, place).unwrap()).unwrap();
+        let key = c.key(paragraph).unwrap();
+        assert_eq!(c.nodes[key as usize].kind, Kind::Text);
+        // Laid out as an attachment of the paragraph: it has a frame.
+        assert!(frame_of(&batch, place).is_some(), "{:?}", batch.items);
+    }
+
+    /// A Rust view passing a closure: rendered on the spot.
+    #[derive(Clone, PartialEq, Props)]
+    struct ShelvesProps {}
+
+    #[component]
+    fn Shelves(_props: ShelvesProps) -> impl IntoElement {
+        Shelf::element(ShelfProps {
+            items: vec!["a:Apple".to_owned(), "b:Banana".to_owned()].into(),
+            render_item: Some(Renderer::new(|label: &String| text(format!("[{label}]")))).into(),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn a_rust_renderer_renders_in_place() {
+        let mut c = core();
+        c.mount_root(&Root::new::<Shelves>(|| ShelvesProps {}));
+        let batch = c.commit().unwrap();
+        let texts: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Text { text, .. } => Some(text.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["[Apple]", "[Banana]"]);
+        assert!(js_events(&mut c).is_empty());
+    }
+
+    /// A view styling a part with the app's classes.
+    #[derive(Clone, PartialEq, Props)]
+    struct CardProps {
+        #[prop(default)]
+        heading_class: crate::ui::Prop<Option<SharedString>>,
+    }
+
+    #[component]
+    fn Card(props: CardProps) -> impl IntoElement {
+        view().child(
+            view()
+                .bg(crate::ui::palette::RED.shade(500))
+                .border_2()
+                .app_class(props.heading_class),
+        )
+    }
+
+    fn core_with_card(class: &str) -> Core<FakeEngine> {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Card>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Card>().into()),
+                },
+                card_class(class),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c
+    }
+
+    fn card_class(class: &str) -> Op {
+        Op::SetProp {
+            id: 2,
+            prop: rust_prop::<CardProps>("headingClass", Some(json!(class))),
+        }
+    }
+
+    /// The heading's view: the host's only child.
+    fn heading(c: &Core<FakeEngine>) -> NodeId {
+        let key = c.key(2).unwrap();
+        let child = c.nodes[key as usize].children[0];
+        c.nodes[child as usize].id
+    }
+
+    #[test]
+    fn the_apps_classes_go_after_an_elements_own_styles() {
+        let mut c = core_with_card("bg-white dark:bg-black");
+        let batch = c.commit().unwrap();
+        let id = heading(&c);
+        let style = view_style_of(&batch, id).unwrap();
+        // The app's background wins; the view's own border stays.
+        assert_eq!(style.background_color, Color(0xffff_ffff));
+        assert_eq!(style.borders.widths.to_array().map(|w| w.0), [2.0; 4]);
+        // Dark: the app's dark variant.
+        c.set_class_environment(crate::tailwind::ClassEnvironment {
+            dark: true,
+            ..Default::default()
+        });
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, id).unwrap().background_color,
+            Color(0x0000_00ff)
+        );
+        // Another class from the app: applied again, on the same node.
+        apply(&mut c, vec![card_class("bg-red-500 dark:bg-white")]);
+        let batch = c.commit().unwrap();
+        assert_eq!(heading(&c), id);
+        assert_eq!(
+            view_style_of(&batch, id).unwrap().background_color,
+            Color(0xffff_ffff)
+        );
+        // None: the view's own.
+        apply(
+            &mut c,
+            vec![Op::SetProp {
+                id: 2,
+                prop: rust_prop::<CardProps>("headingClass", None),
+            }],
+        );
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            view_style_of(&batch, id).unwrap().background_color,
+            Color::from(crate::ui::palette::RED.shade(500))
+        );
+    }
+}
+
+mod rust_selection_area {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::ui::{Root, prelude::*};
+
+    thread_local! {
+        static AREA: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn Area() -> impl IntoElement {
+        let area = signal(true);
+        AREA.set(Some(area));
+        view()
+            .child(
+                view()
+                    .selection_area(move || area.get())
+                    .child(text("inside")),
+            )
+            .child(view().child(text("outside")))
+    }
+
+    /// `Element::selection_area` reaches the platform in the view's props,
+    /// follows its signal, and views without it get no props for it.
+    #[test]
+    fn a_selection_area_is_a_view_prop() {
+        let mut c = core();
+        c.mount_root(&Root::of::<Area>());
+        let batch = c.commit().unwrap();
+        let areas: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.selection_area => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(areas.len(), 1, "{:?}", batch.items);
+        assert!(
+            !batch.items.iter().any(
+                |item| matches!(item, MountItem::ViewProps { props, .. } if !props.selection_area)
+            ),
+            "views without the flag get no props: {:?}",
+            batch.items
+        );
+        {
+            let _entered = c.components.runtime.enter();
+            AREA.get().unwrap().set(false);
+        }
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(
+            |item| matches!(item, MountItem::ViewProps { id, props } if *id == areas[0] && !props.selection_area)
+        ));
     }
 }

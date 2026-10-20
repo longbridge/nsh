@@ -535,6 +535,24 @@ impl<M: TextEngine> Core<M> {
         for host in hosts {
             self.update_user_class(host);
         }
+        // The app's classes on the views' elements (`app_class`).
+        let nodes: Vec<_> = self
+            .components
+            .app_classes
+            .iter()
+            .map(|(&id, entry)| (id, entry.clone()))
+            .collect();
+        for (id, (own, class, outer)) in nodes {
+            let app = self.app_class_list(&class);
+            let user = self.merge_user(Some(app), outer);
+            let list = match (own, user) {
+                (Some(a), Some(b)) => Some(Arc::new(a.merged(&b))),
+                (a, b) => a.or(b),
+            };
+            if let Ok(key) = self.key(id) {
+                self.set_class_list(key, list);
+            }
+        }
     }
 
     /// Tells the platform which states of `key` to report.

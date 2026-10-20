@@ -2,6 +2,7 @@ mod classes;
 mod components;
 mod list;
 mod measure;
+mod renders;
 mod services;
 #[cfg(test)]
 mod tests;
@@ -1844,6 +1845,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_slot_name(id, name);
                 return Ok(());
             }
+            Prop::ComponentRender(slot) => {
+                self.set_render_holder(id, slot);
+                return Ok(());
+            }
             Prop::RustProp(name, value) => {
                 if !self.set_component_prop(id, name, value) {
                     log::warn!(target: "js", "a Rust component's prop on node {id}, which hosts none");
@@ -2264,6 +2269,13 @@ impl<M: TextEngine> Core<M> {
                 let props = node.props.get_or_insert_default();
                 if props.focusable != value {
                     props.focusable = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
+            Prop::SelectionArea(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.selection_area != value {
+                    props.selection_area = value;
                     flags |= dirty::VIEW_PROPS;
                 }
             }

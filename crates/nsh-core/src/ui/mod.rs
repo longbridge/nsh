@@ -55,6 +55,7 @@ mod once;
 pub mod palette;
 mod prop;
 pub mod reactive;
+pub(crate) mod renderer;
 mod resource;
 pub(crate) mod responder;
 mod scrollable;
@@ -155,6 +156,7 @@ pub use self::{
         batch, cleanup, computed, create_root, effect, provide_context, signal, signal_with,
         stored, untracked, use_context,
     },
+    renderer::{__decoding_props_of, RenderValue, Rendered, Renderer},
     resource::{Resource, ResourceInfo, ResourceState, resource, resource_with_value},
     responder::{ClaimRequest, PanGesture, ResponderEvent, TouchClaim},
     scrollable::Scrollable,
@@ -307,6 +309,8 @@ pub mod prelude {
         Radians,
         Registry,
         Rems,
+        Rendered,
+        Renderer,
         ResizeMode,
         ResponderEvent,
         ReturnKeyType,
