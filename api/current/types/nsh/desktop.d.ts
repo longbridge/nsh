@@ -99,6 +99,8 @@ export interface WindowFrame {
   height?: number | null;
   /** Animates the change on macOS (false by default). */
   animated?: boolean | null;
+  /** The top edge keeps its place when `height` changes without a `y`: the window grows and shrinks at its bottom edge (a content-sized window's title area stays put). Elsewhere, where `y` already is the top edge, this is the default. */
+  anchorTop?: boolean | null;
 }
 
 /** How high a window floats (`Window.setLevel`). */
@@ -120,6 +122,8 @@ export interface WindowModule {
   setFrame(frame: WindowFrame): void;
   /** Sets the window's level on macOS and Windows: `"normal"` restores the normal level; `"floating"` stays above normal windows. `"desktopIcon"` selects macOS's desktop icon level or moves a Windows window to the bottom of the current z-order, where later activation can raise it. Elsewhere the level is left to the host and the window manager. */
   setLevel(level: WindowLevel): void;
+  /** Brings the window to the front of its level and focuses it (the app activates). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. */
+  orderFront(): void;
   /** Closes the window; the app ends with it. */
   close(): void;
 }

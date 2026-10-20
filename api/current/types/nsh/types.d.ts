@@ -497,6 +497,8 @@ export interface HostProps {
   accessibilityActions?: { name: string; label?: string }[];
   /** An identifier for UI tests. */
   testID?: string;
+  /** Whether a view that takes presses is a stop of the keyboard focus (Tab, on the platforms that move it between pressables); `false` leaves it to the pointer (a backdrop that closes a popover). Default true. */
+  focusable?: boolean;
   /** Two-finger pinches drive `scale` natively. */
   pinch?: { scale?: AnimatedValue };
   /** Two-finger rotations drive `angle` (degrees) natively. */
