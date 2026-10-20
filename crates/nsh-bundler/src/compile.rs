@@ -126,10 +126,16 @@ pub(crate) fn compile_native(
         prologue,
         modules,
     )?;
-    if let Some(err) = check_named_imports(&program, modules) {
+    // The scopes once TypeScript and the JSX are compiled, for the checks
+    // and the elision of imports.
+    let scoping = SemanticBuilder::new()
+        .build(&program)
+        .semantic
+        .into_scoping();
+    if let Some(err) = check_named_imports(&program, &scoping, modules) {
         return Err(err.render_with_source_code(source.to_owned()));
     }
-    elide_unused_imports(&mut program);
+    elide_unused_imports(&mut program, &scoping);
     let out = Codegen::new()
         .with_options(CodegenOptions {
             source_map_path: Some(path.to_path_buf()),
@@ -154,11 +160,12 @@ pub(crate) fn position(source: &str, offset: u32) -> (usize, usize) {
 /// The first named import of a native module that it does not export:
 /// `import { createNativeValue } from "nsh/animated"` bundles fine and only
 /// fails when the app runs, so it is reported with its place in the source.
-/// Only names the code uses as values count (run after TypeScript and JSX
-/// are compiled, which rebuilds the scopes): the declarations also name
-/// types, which need no `type`.
+/// Only names the code uses as values count (`scoping` is that of the
+/// program once TypeScript and the JSX are compiled): the declarations also
+/// name types, which need no `type`.
 fn check_named_imports(
     program: &oxc::ast::ast::Program<'_>,
+    scoping: &oxc::semantic::Scoping,
     modules: &NativeModules,
 ) -> Option<oxc::diagnostics::OxcDiagnostic> {
     use oxc::{
@@ -168,10 +175,6 @@ fn check_named_imports(
     if modules.exports.is_empty() {
         return None;
     }
-    let scoping = SemanticBuilder::new()
-        .build(program)
-        .semantic
-        .into_scoping();
     for statement in &program.body {
         let Statement::ImportDeclaration(import) = statement else {
             continue;
@@ -210,7 +213,7 @@ fn check_named_imports(
 
 /// The name in `names` closest to `name` (a typo or a rename), if any is
 /// close enough to suggest.
-pub(crate) fn closest_name<'a>(name: &str, names: &'a [String]) -> Option<&'a str> {
+fn closest_name<'a>(name: &str, names: &'a [String]) -> Option<&'a str> {
     let name = name.to_lowercase();
     let limit = (name.chars().count() / 3).clamp(1, 3);
     names
@@ -243,12 +246,12 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// tag made in place no longer references its import): import specifiers
 /// nothing references go (an import of types only, without `type`, or of a
 /// primitive only its tags use), and declarations left without any.
-fn elide_unused_imports(program: &mut oxc::ast::ast::Program<'_>) {
+/// `scoping` is the program's.
+fn elide_unused_imports(
+    program: &mut oxc::ast::ast::Program<'_>,
+    scoping: &oxc::semantic::Scoping,
+) {
     use oxc::ast::ast::{ImportDeclarationSpecifier as S, Statement};
-    let scoping = SemanticBuilder::new()
-        .build(program)
-        .semantic
-        .into_scoping();
     let used = |local: &oxc::ast::ast::BindingIdentifier<'_>| {
         local
             .symbol_id
@@ -291,4 +294,17 @@ pub(crate) fn strip_ansi(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn closest_names_are_only_suggested_when_near() {
+        let names = ["AnimatedValue".to_owned(), "interpolate".to_owned()];
+        assert_eq!(
+            super::closest_name("animatedvalu", &names),
+            Some("AnimatedValue")
+        );
+        assert_eq!(super::closest_name("createNative", &names), None);
+    }
 }

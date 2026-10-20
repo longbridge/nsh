@@ -999,17 +999,4 @@ mod tests {
         bundling(&dir).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
-
-    #[test]
-    fn closest_names_are_only_suggested_when_near() {
-        let names = ["AnimatedValue".to_owned(), "interpolate".to_owned()];
-        assert_eq!(
-            super::super::compile::closest_name("animatedvalu", &names),
-            Some("AnimatedValue")
-        );
-        assert_eq!(
-            super::super::compile::closest_name("createNative", &names),
-            None
-        );
-    }
 }
