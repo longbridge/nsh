@@ -21,7 +21,7 @@ use nsh_core::{
 use crate::ui::{
     Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, MONO, PressProps,
     PressRole, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, Tone, caption,
-    colors, icon, legend, press_with, radius, segmented, tints,
+    colors, icon, legend, lengths, press_with, radius, rect, segmented, tints,
 };
 
 /// The tones of the demos' dots and tiles.
@@ -285,7 +285,7 @@ fn hatch(p: Painter, color: Hsla, (x, y, w, h): (f32, f32, f32, f32)) -> Painter
     let mut p = p
         .save()
         .begin_path()
-        .rect(x, y, w, h)
+        .rect(rect(x, y, w, h))
         .clip()
         .stroke_color(color)
         .line_width(1.0)
@@ -318,7 +318,9 @@ fn draw_plot(width: f32, selected: usize, px: &AnimatedValue, py: &AnimatedValue
     for q in [0.25, 0.5, 0.75] {
         p = p.begin_path().move_to(x(q), t).line_to(x(q), b).stroke();
     }
-    p = p.line_dash(&[3.0, 4.0]).stroke_color(color(colors::FAINT));
+    p = p
+        .line_dash(&lengths([3.0, 4.0]))
+        .stroke_color(color(colors::FAINT));
     for v in [0.0, 1.0] {
         p = p.begin_path().move_to(l, y(v)).line_to(r, y(v)).stroke();
     }
@@ -367,7 +369,7 @@ fn draw_plot(width: f32, selected: usize, px: &AnimatedValue, py: &AnimatedValue
         .begin_path()
         .move_to(l, &hy)
         .line_to(&hx, &hy)
-        .line_dash(&[2.0, 3.0])
+        .line_dash(&lengths([2.0, 3.0]))
         .stroke()
         .line_dash(&[])
         .fill_color(color(colors::LIGHT))
@@ -725,7 +727,7 @@ fn draw_springs(
         gx += 12.0;
     }
     p = p
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .stroke_color(color(colors::FAINT))
         .begin_path()
         .move_to(l, y(1.0))

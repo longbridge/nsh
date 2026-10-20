@@ -1048,10 +1048,11 @@ fn point_in(ctx: *mut JsContext, this: JsValue, a: &[JsValue], stroke: bool) -> 
     };
     // JS does not see animated values' current values: they count as 0.
     let slot = |_| 0.0;
+    let point = nsh_core::geometry::point(nsh_core::Points(x), nsh_core::Points(y));
     let hit = if stroke {
-        point_in_stroke(&drawing.ops, path.as_deref(), x, y, slot)
+        point_in_stroke(&drawing.ops, path.as_deref(), point, slot)
     } else {
-        point_in_path(&drawing.ops, path.as_deref(), rule, x, y, slot)
+        point_in_path(&drawing.ops, path.as_deref(), rule, point, slot)
     };
     if hit { qjs::JS_TRUE } else { qjs::JS_FALSE }
 }

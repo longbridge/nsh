@@ -103,12 +103,12 @@ impl TextEngine for AndroidTextEngine {
                 s.background.map_or(0, |b| b.node as i32),
             ]);
             floats.extend_from_slice(&[
-                s.font_size,
-                s.line_height,
-                s.letter_spacing,
-                s.decoration_thickness.unwrap_or(0.0),
-                s.underline_offset.unwrap_or(f32::NAN),
-                s.background.map_or(0.0, |b| b.radius),
+                s.font_size.0,
+                s.line_height.0,
+                s.letter_spacing.0,
+                s.decoration_thickness.map_or(0.0, |t| t.0),
+                s.underline_offset.map_or(f32::NAN, |o| o.0),
+                s.background.map_or(0.0, |b| b.radius.0),
             ]);
         }
         // Alignment, writing direction (0 from the content, 1 left to
@@ -136,7 +136,7 @@ impl TextEngine for AndroidTextEngine {
         let attachments: Vec<f32> = text
             .attachments
             .iter()
-            .flat_map(|a| [a.index as f32, a.width, a.height])
+            .flat_map(|a| [a.index as f32, a.width.0, a.height.0])
             .collect();
         Prepared(with_env(|env| {
             let j = java();
@@ -184,7 +184,7 @@ impl TextEngine for AndroidTextEngine {
         }))
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
+    fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
         let Some(obj) = &prepared.0 else {
             return Size::new(px(0.0), px(0.0));
         };
@@ -192,7 +192,7 @@ impl TextEngine for AndroidTextEngine {
             let j = java();
             let args: [jvalue; 2] = [
                 JValue::Object(obj.as_obj()).as_jni(),
-                JValue::Float(max_width.unwrap_or(f32::NAN)).as_jni(),
+                JValue::Float(max_width.map_or(f32::NAN, |m| m.0)).as_jni(),
             ];
             // SAFETY: matches the signature checked in `java::init`.
             unsafe {
@@ -273,19 +273,19 @@ impl TextEngine for AndroidTextEngine {
                 text: String::new(),
                 start: v[0] as u32,
                 end: v[1] as u32,
-                x: v[2],
-                y: v[3],
-                width: v[4],
-                height: v[5],
-                ascender: v[6],
-                descender: v[7],
-                cap_height: v[8],
-                x_height: v[9],
+                x: px(v[2]),
+                y: px(v[3]),
+                width: px(v[4]),
+                height: px(v[5]),
+                ascender: px(v[6]),
+                descender: px(v[7]),
+                cap_height: px(v[8]),
+                x_height: px(v[9]),
             })
             .collect()
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<nsh_core::Point<Points>>> {
         let Some(AndroidLayout(obj)) = layout.downcast::<AndroidLayout>() else {
             return Vec::new();
         };
@@ -315,7 +315,7 @@ impl TextEngine for AndroidTextEngine {
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|&[x, y]| (!x.is_nan()).then_some((x, y)))
+            .map(|&[x, y]| (!x.is_nan()).then_some(nsh_core::geometry::point(px(x), px(y))))
             .collect()
     }
 

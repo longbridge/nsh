@@ -17,7 +17,7 @@ use super::{
     market::{self, BLOCK, BUCKETS, TAPE, TAPE_HELD, Trade, compact, price, time},
     parts::{Block, Col, GRID, SpringBar, SpringBarProps, head, spring_bar},
 };
-use crate::ui::{colors, legend, tints};
+use crate::ui::{colors, legend, rect, tints};
 
 /// Rows shown.
 const SHOWN: usize = 8;
@@ -30,7 +30,7 @@ fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &AnimatedValue)
     let mut p = Painter::new()
         .save()
         .begin_path()
-        .rect(0.0, 0.0, width, height)
+        .rect(rect(0.0, 0.0, width, height))
         .clip()
         .translate(0.0, offset)
         .text_baseline(CanvasTextBaseline::Middle);
@@ -47,7 +47,7 @@ fn draw_tape(shown: &[Trade], width: f32, decimals: u32, offset: &AnimatedValue)
             p = p
                 .fill_color(color(tints::ACCENT))
                 .begin_path()
-                .round_rect(0.0, top + 2.0, width, ROW - 4.0, 8.0)
+                .round_rect(rect(0.0, top + 2.0, width, ROW - 4.0), px(8.0))
                 .fill();
         } else if i > 0 {
             p = p

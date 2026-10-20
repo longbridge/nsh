@@ -11,7 +11,7 @@ use nsh_core::{
 use crate::ui::{
     Badge, Button, ButtonVariant, DemoPage, Figure, Finish, Finished, IconName, Meter, PressProps,
     Section, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, Tone,
-    caption, code, colors, hint, press_with, radius, toggle,
+    caption, code, colors, hint, lengths, press_with, radius, toggle,
 };
 
 /// The tones cards, tiles and posts cycle through.
@@ -133,7 +133,7 @@ fn backdrop(size: (f32, f32), tone: Tone, seed: f32) -> Painter {
     p.stroke_style(color(tone.color()))
         .line_width(1.5)
         .stroke()
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .stroke_style(color(colors::FAINT))
         .line_width(1.0)
         .begin_path()

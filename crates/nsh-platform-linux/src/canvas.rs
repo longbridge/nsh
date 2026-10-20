@@ -34,6 +34,7 @@ use nsh_core::{
         Drawing, FillRule, GradientShape, LineCap, LineJoin, Num, Paint, PathOp, arc_sweep,
         fit_radii,
     },
+    geometry::{Corners, Points, Radians, size},
 };
 use rustc_hash::FxHashMap;
 
@@ -204,7 +205,7 @@ struct FontKey {
 impl FontKey {
     fn new(font: &CanvasFont) -> Self {
         FontKey {
-            size: font.size.to_bits(),
+            size: font.size.0.to_bits(),
             weight: font.weight,
             italic: font.italic,
             family: font.family.clone(),
@@ -270,7 +271,7 @@ struct State {
     cap: LineCap,
     join: LineJoin,
     miter: f64,
-    dash: Arc<[f32]>,
+    dash: Arc<[Points]>,
     dash_offset: f64,
     alpha: f64,
     composite: Composite,
@@ -475,10 +476,10 @@ impl Replay<'_> {
             }
             CanvasOp::Composite(m) => self.state.composite = *m,
             CanvasOp::ShadowColor(color) => self.state.shadow.0 = *color,
-            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = *b as f64,
-            CanvasOp::ShadowOffset(x, y) => {
-                self.state.shadow.2 = *x as f64;
-                self.state.shadow.3 = *y as f64;
+            CanvasOp::ShadowBlur(b) => self.state.shadow.1 = b.0 as f64,
+            CanvasOp::ShadowOffset(offset) => {
+                self.state.shadow.2 = offset.x.0 as f64;
+                self.state.shadow.3 = offset.y.0 as f64;
             }
             CanvasOp::Font(f) => {
                 // The shorthand keeps the numeric variant, as in browsers.
@@ -496,19 +497,29 @@ impl Replay<'_> {
                 max_width,
             } => {
                 let mode = Mode::Fill(FillRule::NonZero);
-                self.text(text, self.n(*x), self.n(*y), *max_width, mode)
+                self.text(text, self.n(*x), self.n(*y), max_width.map(|m| m.0), mode)
             }
             CanvasOp::StrokeText {
                 text,
                 x,
                 y,
                 max_width,
-            } => self.text(text, self.n(*x), self.n(*y), *max_width, Mode::Stroke),
+            } => self.text(
+                text,
+                self.n(*x),
+                self.n(*y),
+                max_width.map(|m| m.0),
+                Mode::Stroke,
+            ),
             CanvasOp::DrawImage {
                 image,
                 source,
                 dest,
-            } => self.image(&image.uri, *source, dest),
+            } => self.image(
+                &image.uri,
+                source.map(|s| [s.origin.x.0, s.origin.y.0, s.size.width.0, s.size.height.0]),
+                dest,
+            ),
         }
     }
 
@@ -573,7 +584,8 @@ impl Replay<'_> {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                let sweep =
+                    arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                 arc(cr, n(*x), n(*y), r, start, sweep);
             }
             PathOp::ArcTo(v) => {
@@ -591,7 +603,8 @@ impl Replay<'_> {
                     return;
                 }
                 let start = n(*start);
-                let sweep = arc_sweep(start as f32, n(*end) as f32, *ccw) as f64;
+                let sweep =
+                    arc_sweep(Radians(start as f32), Radians(n(*end) as f32), *ccw).0 as f64;
                 // The unit circle, scaled, rotated and moved; radii stay
                 // above zero so the matrix stays invertible.
                 let m = cr.matrix();
@@ -607,8 +620,23 @@ impl Replay<'_> {
             }
             PathOp::RoundRect(rect, radii) => {
                 let [x, y, w, h] = rect.map(n);
-                let [tl, tr, br, bl] =
-                    fit_radii(w as f32, h as f32, radii.map(|r| n(r) as f32)).map(f64::from);
+                let [r0, r1, r2, r3] = radii.map(|r| Points(n(r) as f32));
+                let fit = fit_radii(
+                    size(Points(w as f32), Points(h as f32)),
+                    Corners {
+                        top_left: r0,
+                        top_right: r1,
+                        bottom_right: r2,
+                        bottom_left: r3,
+                    },
+                );
+                let [tl, tr, br, bl] = [
+                    fit.top_left,
+                    fit.top_right,
+                    fit.bottom_right,
+                    fit.bottom_left,
+                ]
+                .map(|r| f64::from(r.0));
                 cr.move_to(x + tl, y);
                 self.arc_to(x + w, y, x + w, y + h, tr);
                 self.arc_to(x + w, y + h, x, y + h, br);
@@ -701,8 +729,8 @@ impl Replay<'_> {
                 });
                 c.set_miter_limit(s.miter);
                 // Cairo refuses all-zero patterns; canvas draws solid.
-                if s.dash.iter().any(|d| *d > 0.0) {
-                    let d: Vec<f64> = s.dash.iter().map(|&d| d as f64).collect();
+                if s.dash.iter().any(|d| d.0 > 0.0) {
+                    let d: Vec<f64> = s.dash.iter().map(|&d| d.0 as f64).collect();
                     c.set_dash(&d, s.dash_offset);
                 }
                 let _ = c.stroke_preserve();
@@ -745,25 +773,37 @@ impl Replay<'_> {
         let add_stops = |p: &cairo::Gradient| {
             for (offset, color) in &g.stops {
                 let (r, gr, b, a) = color.to_f64();
-                p.add_color_stop_rgba(*offset as f64, r, gr, b, a * alpha);
+                p.add_color_stop_rgba(offset.0 as f64, r, gr, b, a * alpha);
             }
             p.set_extend(cairo::Extend::Pad);
         };
         Some(match g.shape {
-            GradientShape::Linear([x0, y0, x1, y1]) => {
+            GradientShape::Linear { start, end } => {
+                let (x0, y0, x1, y1) = (start.x.0, start.y.0, end.x.0, end.y.0);
                 let p = cairo::LinearGradient::new(x0 as f64, y0 as f64, x1 as f64, y1 as f64);
                 add_stops(&p);
                 (**p).clone()
             }
-            GradientShape::Radial([x0, y0, r0, x1, y1, r1]) => {
+            GradientShape::Radial {
+                start,
+                start_radius,
+                end,
+                end_radius,
+            } => {
+                let (x0, y0, r0) = (start.x.0, start.y.0, start_radius.0);
+                let (x1, y1, r1) = (end.x.0, end.y.0, end_radius.0);
                 let p = cairo::RadialGradient::new(
                     x0 as f64, y0 as f64, r0 as f64, x1 as f64, y1 as f64, r1 as f64,
                 );
                 add_stops(&p);
                 (**p).clone()
             }
-            GradientShape::Conic([angle, x, y]) => {
-                let (x, y) = (x as f64, y as f64);
+            GradientShape::Conic {
+                start_angle,
+                center,
+            } => {
+                let angle = start_angle.0;
+                let (x, y) = (center.x.0 as f64, center.y.0 as f64);
                 // Far enough to cover what is visible.
                 let (x0, y0, x1, y1) = self.cr.clip_extents().ok()?;
                 let radius = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
@@ -1090,11 +1130,12 @@ const CONIC_WEDGES: usize = 64;
 fn stop_color(g: &CanvasGradient, t: f32, after: bool) -> Color {
     let stops = &g.stops;
     let (first, last) = (stops[0], stops[stops.len() - 1]);
-    if t < first.0 || (t == first.0 && !after) {
+    if t < first.0.0 || (t == first.0.0 && !after) {
         return first.1;
     }
     for w in stops.windows(2) {
         let ((o0, c0), (o1, c1)) = (w[0], w[1]);
+        let (o0, o1) = (o0.0, o1.0);
         if t < o1 || (t == o1 && !after) {
             let f = if o1 > o0 { (t - o0) / (o1 - o0) } else { 1.0 };
             return lerp(c0, c1, f);
@@ -1120,7 +1161,7 @@ fn lerp(a: Color, b: Color, t: f32) -> Color {
 fn conic_steps(g: &CanvasGradient) -> Vec<f32> {
     let mut steps: Vec<f32> = (0..=CONIC_WEDGES)
         .map(|i| i as f32 / CONIC_WEDGES as f32)
-        .chain(g.stops.iter().map(|(o, _)| *o))
+        .chain(g.stops.iter().map(|(o, _)| o.0))
         .collect();
     steps.sort_by(f32::total_cmp);
     steps.dedup();
@@ -1222,11 +1263,10 @@ mod tests {
     use super::*;
 
     fn gradient(stops: &[(f32, u32)]) -> CanvasGradient {
-        stops
-            .iter()
-            .fold(CanvasGradient::conic(0.0, 0.0, 0.0), |g, (o, c)| {
-                g.add_color_stop(*o, Color(*c))
-            })
+        stops.iter().fold(
+            CanvasGradient::conic(Radians(0.0), nsh_core::Point::default()),
+            |g, (o, c)| g.add_color_stop(nsh_core::geometry::Percentage(*o), Color(*c)),
+        )
     }
 
     #[test]

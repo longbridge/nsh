@@ -4,8 +4,8 @@
 use std::{cell::RefCell, ffi::c_void, ptr::NonNull};
 
 use nsh_core::{
-    AttributedText, Color, EllipsizeMode, FontFamily, Points, ResolvedTextStyle, Size, TextAlign,
-    TextEngine, TextLayout,
+    AttributedText, Color, EllipsizeMode, FontFamily, Point, Points, ResolvedTextStyle, Size,
+    TextAlign, TextEngine, TextLayout,
 };
 use objc2::rc::Retained;
 use objc2_core_foundation::{
@@ -85,7 +85,7 @@ impl FontCache {
 
     fn get(&self, style: &ResolvedTextStyle) -> CFRetained<CTFont> {
         let key = (
-            style.font_size.to_bits(),
+            style.font_size.0.to_bits(),
             style.font_weight,
             style.font_family,
             style.italic,
@@ -109,7 +109,7 @@ impl FontCache {
 }
 
 pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
-    let size = style.font_size as CGFloat;
+    let size = style.font_size.0 as CGFloat;
     let font = style
         .font_family
         .and_then(|family| {
@@ -381,8 +381,8 @@ impl CoreTextEngine {
                 unsafe { kCTForegroundColorAttributeName },
                 cg_color(style.color).as_ref(),
             );
-            if style.letter_spacing != 0.0 {
-                let kern = CFNumber::new_cgfloat(style.letter_spacing as CGFloat);
+            if style.letter_spacing != Points::ZERO {
+                let kern = CFNumber::new_cgfloat(style.letter_spacing.0 as CGFloat);
                 set(range, unsafe { kCTKernAttributeName }, kern.as_ref());
             }
             let decoration = cg_color(style.decoration_color.unwrap_or(style.color));
@@ -399,11 +399,13 @@ impl CoreTextEngine {
                 };
                 let numbers = [
                     CFNumber::new_i32(code),
-                    CFNumber::new_cgfloat(style.decoration_thickness.unwrap_or(0.0) as CGFloat),
+                    CFNumber::new_cgfloat(
+                        style.decoration_thickness.unwrap_or(Points::ZERO).0 as CGFloat,
+                    ),
                     CFNumber::new_cgfloat(
                         style
                             .underline_offset
-                            .map_or(CGFloat::NAN, |o| o as CGFloat),
+                            .map_or(CGFloat::NAN, |o| o.0 as CGFloat),
                     ),
                 ];
                 let array = CFArray::from_retained_objects(&numbers);
@@ -441,7 +443,7 @@ impl CoreTextEngine {
                 location: a.index as CFIndex,
                 length: 1,
             };
-            if let Some(delegate) = run_delegate(a.width as CGFloat, a.height as CGFloat) {
+            if let Some(delegate) = run_delegate(a.width.0 as CGFloat, a.height.0 as CGFloat) {
                 set(
                     range,
                     unsafe { kCTRunDelegateAttributeName },
@@ -555,7 +557,7 @@ fn paragraph_style(text: &AttributedText) -> CFRetained<CTParagraphStyle> {
         TextAlign::Right => CTTextAlignment::Right,
         TextAlign::Justify => CTTextAlignment::Justified,
     };
-    let line_height = text.spans.first().map_or(0.0, |s| s.style.line_height) as CGFloat;
+    let line_height = text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat;
     let setting = |spec, value: *const c_void, size| CTParagraphStyleSetting {
         spec,
         valueSize: size,
@@ -702,13 +704,13 @@ impl TextEngine for CoreTextEngine {
             attachments: text
                 .attachments
                 .iter()
-                .map(|a| (a.index as CFIndex, a.height as CGFloat))
+                .map(|a| (a.index as CFIndex, a.height.0 as CGFloat))
                 .collect(),
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
-        let width = max_width.map_or(CGFloat::MAX, |w| w as CGFloat);
+    fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
+        let width = max_width.map_or(CGFloat::MAX, |w| w.0 as CGFloat);
         let range = if prepared.max_lines > 0 {
             CFRange {
                 location: 0,
@@ -791,10 +793,15 @@ impl TextEngine for CoreTextEngine {
         }))
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<Point<Points>>> {
         layout
             .downcast::<CoreTextLayout>()
-            .map_or_else(Vec::new, |l| l.attachments.clone())
+            .map_or_else(Vec::new, |l| {
+                l.attachments
+                    .iter()
+                    .map(|a| a.map(|(x, y)| Point::new(Points(x), Points(y))))
+                    .collect()
+            })
     }
 
     fn lines(&self, layout: &TextLayout) -> Vec<nsh_core::TextLine> {
@@ -820,14 +827,14 @@ impl TextEngine for CoreTextEngine {
                     text: String::new(),
                     start: l.range.location as u32,
                     end: (l.range.location + l.range.length) as u32,
-                    x: l.origin.x as f32,
-                    y: (layout.height - l.origin.y - ascent) as f32,
-                    width: width as f32,
-                    height: (ascent + descent + leading) as f32,
-                    ascender: ascent as f32,
-                    descender: descent as f32,
-                    cap_height: cap as f32,
-                    x_height: x_height as f32,
+                    x: Points(l.origin.x as f32),
+                    y: Points((layout.height - l.origin.y - ascent) as f32),
+                    width: Points(width as f32),
+                    height: Points((ascent + descent + leading) as f32),
+                    ascender: Points(ascent as f32),
+                    descender: Points(descent as f32),
+                    cap_height: Points(cap as f32),
+                    x_height: Points(x_height as f32),
                 }
             })
             .collect()
@@ -917,13 +924,13 @@ pub(crate) fn prewarm() {
     for (size, weight) in [(14.0, 400), (17.0, 400), (17.0, 700)] {
         let mut text = AttributedText::default();
         let style = ResolvedTextStyle {
-            font_size: size,
+            font_size: Points(size),
             font_weight: weight,
             ..Default::default()
         };
         text.push("Hg 0123 ab", style);
         let prepared = engine.prepare(&text);
-        let measured = engine.measure(&prepared, Some(100.0));
+        let measured = engine.measure(&prepared, Some(Points(100.0)));
         let _ = engine.layout(&prepared, measured);
     }
 }
@@ -970,11 +977,11 @@ pub(crate) fn draw_backgrounds(
                     (ascent, descent) = (0.0, 0.0);
                 }
                 pieces.push(nsh_core::LinePiece {
-                    x: (line.origin.x + first.x) as f32,
-                    width: width as f32,
+                    x: Points((line.origin.x + first.x) as f32),
+                    width: Points(width as f32),
                     background: text.background_at(index),
-                    ascent: ascent as f32,
-                    descent: descent as f32,
+                    ascent: Points(ascent as f32),
+                    descent: Points(descent as f32),
                 });
             }
             (
@@ -986,7 +993,7 @@ pub(crate) fn draw_backgrounds(
                 line.line.trailing_whitespace_width(),
             )
         };
-        pieces.sort_by(|a, b| a.x.total_cmp(&b.x));
+        pieces.sort_by(|a, b| a.x.0.total_cmp(&b.x.0));
         // Whitespace hanging past the line's end: on its left right to left.
         let x = line.origin.x as f32;
         let (left, right) = if text.rtl {
@@ -995,15 +1002,15 @@ pub(crate) fn draw_backgrounds(
             (x, x + (width - trailing) as f32)
         };
         let baseline = bottom - line.origin.y;
-        nsh_core::BackgroundBox::join(pieces.iter().copied(), (left, right), |b| {
+        nsh_core::BackgroundBox::join(pieces.iter().copied(), (Points(left), Points(right)), |b| {
             let rect = CGRect::new(
                 CGPoint::new(
-                    content.origin.x.0 as CGFloat + b.x as CGFloat,
-                    baseline - b.ascent as CGFloat,
+                    content.origin.x.0 as CGFloat + b.x.0 as CGFloat,
+                    baseline - b.ascent.0 as CGFloat,
                 ),
-                CGSize::new(b.width as CGFloat, (b.ascent + b.descent) as CGFloat),
+                CGSize::new(b.width.0 as CGFloat, (b.ascent + b.descent).0 as CGFloat),
             );
-            let r = b.radius();
+            let r = b.radius().0;
             let path = crate::decor::rounded(
                 rect,
                 nsh_core::CornerRadii {

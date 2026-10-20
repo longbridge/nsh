@@ -44,7 +44,7 @@ use crate::{
     nav,
     ui::{
         IconName, Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, colors,
-        desktop, header, icon, motion, pane_width,
+        desktop, header, icon, lengths, motion, pane_width, pt,
     },
 };
 
@@ -600,8 +600,8 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
         let mut p = p.move_to(x_of(0), y_of(ys[0]));
         for k in 1..n.saturating_sub(1) {
             p = p.quadratic_curve_to(
-                (x_of(k), y_of(ys[k])),
-                (
+                pt(x_of(k), y_of(ys[k])),
+                pt(
                     (x_of(k) + x_of(k + 1)) / 2.0,
                     (y_of(ys[k]) + y_of(ys[k + 1])) / 2.0,
                 ),
@@ -612,9 +612,9 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
 
     // The fill: down from the line's top, strictly under the curve...
     let top = ys.iter().fold(bottom, |t, &v| t.min(y_of(v)));
-    let fill = CanvasGradient::linear(0.0, top, 0.0, bottom)
-        .add_color_stop(0.0, color(tone.opacity(0.22)))
-        .add_color_stop(1.0, color(tone.opacity(0.0)));
+    let fill = CanvasGradient::linear(pt(0.0, top), pt(0.0, bottom))
+        .add_color_stop(percentage(0.0), color(tone.opacity(0.22)))
+        .add_color_stop(percentage(1.0), color(tone.opacity(0.0)));
     let p = curve(Painter::new().begin_path())
         .line_to(x_of(n - 1), bottom)
         .line_to(x_of(0), bottom)
@@ -623,9 +623,9 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
         .fill();
     // ...and faded in over the first fifth (erased, not overdrawn).
     let fade_to = left + (right - left) * 0.2;
-    let fade = CanvasGradient::linear(left, 0.0, fade_to, 0.0)
-        .add_color_stop(0.0, rgb(0x000000))
-        .add_color_stop(1.0, transparent_black());
+    let fade = CanvasGradient::linear(pt(left, 0.0), pt(fade_to, 0.0))
+        .add_color_stop(percentage(0.0), rgb(0x000000))
+        .add_color_stop(percentage(1.0), transparent_black());
     let p = p
         .composite(Composite::DestinationOut)
         .fill_style(fade)
@@ -636,7 +636,7 @@ fn sparkline(ys: &[f64], q: Quote, (lo, hi): (f64, f64), ring: &Ring) -> Painter
     let p = p
         .stroke_color(color(colors::MUTED.opacity(0.4)))
         .line_width(1.0)
-        .line_dash(&[1.0, 3.0])
+        .line_dash(&lengths([1.0, 3.0]))
         .begin_path()
         .move_to(left, y_of(q.prev_close))
         .line_to(right, y_of(q.prev_close))

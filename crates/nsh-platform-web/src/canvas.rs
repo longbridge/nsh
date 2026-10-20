@@ -127,9 +127,29 @@ fn paint(w: &mut W, p: &Paint) {
         Paint::Slot(s) => w.raw(&format!("[\"$\",{s}]")),
         Paint::Gradient(g) => {
             let (kind, args): (&str, Vec<f32>) = match &g.shape {
-                GradientShape::Linear(a) => ("linear", a.to_vec()),
-                GradientShape::Radial(a) => ("radial", a.to_vec()),
-                GradientShape::Conic(a) => ("conic", a.to_vec()),
+                GradientShape::Linear { start, end } => {
+                    ("linear", vec![start.x.0, start.y.0, end.x.0, end.y.0])
+                }
+                GradientShape::Radial {
+                    start,
+                    start_radius,
+                    end,
+                    end_radius,
+                } => (
+                    "radial",
+                    vec![
+                        start.x.0,
+                        start.y.0,
+                        start_radius.0,
+                        end.x.0,
+                        end.y.0,
+                        end_radius.0,
+                    ],
+                ),
+                GradientShape::Conic {
+                    start_angle,
+                    center,
+                } => ("conic", vec![start_angle.0, center.x.0, center.y.0]),
             };
             w.sep();
             w.0.push_str("{\"g\":");
@@ -141,7 +161,7 @@ fn paint(w: &mut W, p: &Paint) {
             w.0.push_str("],\"stops\":[");
             for &(offset, color) in &g.stops {
                 w.sep();
-                let _ = write!(w.0, "[{offset},\"{}\"]", css_color(color));
+                let _ = write!(w.0, "[{},\"{}\"]", offset.0, css_color(color));
             }
             w.0.push_str("]}");
         }
@@ -169,7 +189,7 @@ fn font(f: &CanvasFont) -> String {
             ""
         },
         f.weight,
-        f.size
+        f.size.0
     )
 }
 
@@ -225,7 +245,7 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
                 w.sep();
                 w.0.push('[');
                 for &v in d.iter() {
-                    w.f(v);
+                    w.f(v.0);
                 }
                 w.0.push(']');
             }),
@@ -235,10 +255,10 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
                 w.str(&composite(*c));
             }),
             CanvasOp::ShadowColor(c) => w.op("=shadowColor", |w| w.str(&css_color(*c))),
-            CanvasOp::ShadowBlur(v) => w.op("=shadowBlur", |w| w.f(*v)),
-            CanvasOp::ShadowOffset(x, y) => w.op("shadowOffset", |w| {
-                w.f(*x);
-                w.f(*y);
+            CanvasOp::ShadowBlur(v) => w.op("=shadowBlur", |w| w.f(v.0)),
+            CanvasOp::ShadowOffset(offset) => w.op("shadowOffset", |w| {
+                w.f(offset.x.0);
+                w.f(offset.y.0);
             }),
             CanvasOp::Font(f) => w.op("=font", |w| w.str(&font(f))),
             // Browsers' canvases draw no number forms (the shorthand only
@@ -255,7 +275,7 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
                 w.str(text);
                 w.nums(&[*x, *y]);
                 if let Some(m) = max_width {
-                    w.f(*m);
+                    w.f(m.0);
                 }
             }),
             CanvasOp::StrokeText {
@@ -267,7 +287,7 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
                 w.str(text);
                 w.nums(&[*x, *y]);
                 if let Some(m) = max_width {
-                    w.f(*m);
+                    w.f(m.0);
                 }
             }),
             CanvasOp::DrawImage {
@@ -280,8 +300,8 @@ pub(crate) fn encode(drawing: &Drawing) -> String {
                 match source {
                     Some(s) => {
                         w.0.push('[');
-                        for &v in s {
-                            w.f(v);
+                        for v in [s.origin.x, s.origin.y, s.size.width, s.size.height] {
+                            w.f(v.0);
                         }
                         w.0.push(']');
                     }

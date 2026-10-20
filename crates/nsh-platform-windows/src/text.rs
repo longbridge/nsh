@@ -1010,7 +1010,7 @@ impl DWriteTextEngine {
                     DWRITE_FONT_WEIGHT(i32::from(base.font_weight)),
                     font_style(base.italic),
                     DWRITE_FONT_STRETCH_NORMAL,
-                    base.font_size.max(0.1),
+                    base.font_size.0.max(0.1),
                     &HSTRING::new(),
                 )
                 .ok()?;
@@ -1088,13 +1088,13 @@ impl DWriteTextEngine {
                 if face.custom {
                     let _ = layout.SetFontCollection(self.custom().as_ref(), r);
                 }
-                let _ = layout.SetFontSize(style.font_size.max(0.1), r);
+                let _ = layout.SetFontSize(style.font_size.0.max(0.1), r);
                 let _ = layout.SetFontWeight(DWRITE_FONT_WEIGHT(i32::from(style.font_weight)), r);
                 let _ = layout.SetFontStyle(font_style(style.italic), r);
-                if style.letter_spacing != 0.0
+                if style.letter_spacing.0 != 0.0
                     && let Some(s) = &spacing
                 {
-                    let _ = s.SetCharacterSpacing(0.0, style.letter_spacing, 0.0, r);
+                    let _ = s.SetCharacterSpacing(0.0, style.letter_spacing.0, 0.0, r);
                 }
                 if style.font_variant.0 != 0
                     && let Some(typography) = self.typography(style.font_variant)
@@ -1400,8 +1400,8 @@ impl DWriteTextEngine {
             .iter()
             .map(|a| {
                 Placeholder {
-                    width: a.width,
-                    height: a.height,
+                    width: a.width.0,
+                    height: a.height.0,
                 }
                 .into()
             })
@@ -1464,8 +1464,8 @@ impl DWriteTextEngine {
                 .iter()
                 .map(|a| {
                     Placeholder {
-                        width: a.width,
-                        height: a.height,
+                        width: a.width.0,
+                        height: a.height.0,
                     }
                     .into()
                 })
@@ -1530,13 +1530,13 @@ impl TextEngine for DWriteTextEngine {
             .iter()
             .map(|s| {
                 let m = self.face(&s.style).metrics;
-                let size = s.style.font_size;
+                let size = s.style.font_size.0;
                 SpanBox {
                     start: s.start,
                     end: s.end,
                     ascent: m.ascent * size,
                     descent: m.descent * size,
-                    line_height: s.style.line_height,
+                    line_height: s.style.line_height.0,
                 }
             })
             .collect();
@@ -1548,8 +1548,8 @@ impl TextEngine for DWriteTextEngine {
             || {
                 let m = self.face(&base_style).metrics;
                 (
-                    m.ascent * base_style.font_size,
-                    m.descent * base_style.font_size,
+                    m.ascent * base_style.font_size.0,
+                    m.descent * base_style.font_size.0,
                 )
             },
             SpanBox::extents,
@@ -1559,8 +1559,8 @@ impl TextEngine for DWriteTextEngine {
             .iter()
             .map(|a| {
                 Placeholder {
-                    width: a.width,
-                    height: a.height,
+                    width: a.width.0,
+                    height: a.height.0,
                 }
                 .into()
             })
@@ -1590,19 +1590,20 @@ impl TextEngine for DWriteTextEngine {
             attachments: t
                 .attachments
                 .iter()
-                .map(|a| (a.index, a.width, a.height))
+                .map(|a| (a.index, a.width.0, a.height.0))
                 .collect(),
             no_wrap: t.no_wrap,
             max_lines: t.max_lines,
             cut,
             attributed: (cut || ellipsis && paragraphs).then(|| Box::new(t.clone())),
             lines: RefCell::default(),
-            base_size: base_style.font_size,
+            base_size: base_style.font_size.0,
             ellipsis_width,
         }
     }
 
-    fn measure(&self, p: &Prepared, max_width: Option<f32>) -> Size<Points> {
+    fn measure(&self, p: &Prepared, max_width: Option<Points>) -> Size<Points> {
+        let max_width = max_width.map(|m| m.0);
         let shown = self.configure(p, max_width);
         let Some(layout) = &p.layout else {
             return Size::new(px(0.0), px(0.0));
@@ -1824,14 +1825,14 @@ impl TextEngine for DWriteTextEngine {
                     text: String::new(),
                     start,
                     end,
-                    x: left,
-                    y: top,
-                    width: right - left,
-                    height: ascent + descent,
-                    ascender: ascent,
-                    descender: descent,
-                    cap_height,
-                    x_height,
+                    x: Points(left),
+                    y: Points(top),
+                    width: Points(right - left),
+                    height: Points(ascent + descent),
+                    ascender: Points(ascent),
+                    descender: Points(descent),
+                    cap_height: Points(cap_height),
+                    x_height: Points(x_height),
                 },
                 runs: first..out.runs.len(),
             });
@@ -1845,10 +1846,13 @@ impl TextEngine for DWriteTextEngine {
         })
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
-        layout
-            .downcast::<WinLayout>()
-            .map_or_else(Vec::new, |l| l.attachments.clone())
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<nsh_core::Point<Points>>> {
+        layout.downcast::<WinLayout>().map_or_else(Vec::new, |l| {
+            l.attachments
+                .iter()
+                .map(|a| a.map(|(x, y)| nsh_core::geometry::point(Points(x), Points(y))))
+                .collect()
+        })
     }
 
     fn register_font(&self, data: &[u8]) -> Result<(), String> {
@@ -2148,7 +2152,7 @@ impl Painter<'_> {
             return;
         }
         let line = |top: f32, thickness: f32| {
-            let t = pixels(style.decoration_thickness.unwrap_or(thickness));
+            let t = pixels(style.decoration_thickness.map_or(thickness, |t| t.0));
             let top = (top / px).round() * px;
             let mid = top + t / 2.0;
             let brush = self.color(color);
@@ -2214,7 +2218,7 @@ impl Painter<'_> {
         };
         if d.underline {
             let top = match style.underline_offset {
-                Some(offset) => baseline + offset,
+                Some(offset) => baseline + offset.0,
                 None => baseline - font.underline.0,
             };
             line(top, font.underline.1);
@@ -2808,7 +2812,7 @@ impl WinLayout {
     fn line_at(&self, y: f32) -> Option<&Line> {
         self.lines
             .iter()
-            .find(|l| y >= l.info.y && y < l.info.y + l.info.height)
+            .find(|l| y >= l.info.y.0 && y < (l.info.y + l.info.height).0)
     }
 
     /// The UTF-16 offset of the character at `(x, y)` (content
@@ -2827,7 +2831,7 @@ impl WinLayout {
         let Some(line) = self
             .lines
             .iter()
-            .find(|l| y < l.info.y + l.info.height)
+            .find(|l| y < (l.info.y + l.info.height).0)
             .or(self.lines.last())
         else {
             return 0;
@@ -2871,22 +2875,22 @@ impl WinLayout {
             for run in runs {
                 let (ascent, descent) = run.font.extents;
                 pieces.extend(run.boxes().map(|(x, width, index)| nsh_core::LinePiece {
-                    x,
-                    width,
+                    x: Points(x),
+                    width: Points(width),
                     background: text.background_at(index),
-                    ascent,
-                    descent,
+                    ascent: Points(ascent),
+                    descent: Points(descent),
                 }));
             }
-            pieces.sort_by(|a, b| a.x.total_cmp(&b.x));
+            pieces.sort_by(|a, b| a.x.0.total_cmp(&b.x.0));
             let clip = (line.info.x, line.info.x + line.info.width);
             nsh_core::BackgroundBox::join(pieces.iter().copied(), clip, |b| {
                 f(
-                    b.x,
-                    baseline - b.ascent,
-                    b.width,
-                    b.ascent + b.descent,
-                    b.radius(),
+                    b.x.0,
+                    baseline - b.ascent.0,
+                    b.width.0,
+                    (b.ascent + b.descent).0,
+                    b.radius().0,
                     b.background.color,
                 );
             });
@@ -2904,7 +2908,7 @@ impl WinLayout {
     ) {
         let mut spans: Vec<(f32, f32)> = Vec::new();
         for line in &self.lines {
-            let (y, h) = (line.info.y, line.info.height);
+            let (y, h) = (line.info.y.0, line.info.height.0);
             spans.clear();
             for (gx, w, index, _) in self.line_glyphs(line) {
                 if index >= a && index < b {
@@ -2918,7 +2922,7 @@ impl WinLayout {
                     && attachment.index >= line.info.start
                     && attachment.index < line.info.end
                 {
-                    spans.push((*x, *x + attachment.width));
+                    spans.push((*x, *x + attachment.width.0));
                 }
             }
             spans.sort_by(|p, q| p.0.total_cmp(&q.0));
@@ -2958,7 +2962,7 @@ mod tests {
 
     fn plain(size: f32) -> ResolvedTextStyle {
         ResolvedTextStyle {
-            font_size: size,
+            font_size: px(size),
             ..Default::default()
         }
     }
@@ -2969,7 +2973,7 @@ mod tests {
         width: Option<f32>,
     ) -> (Size<Points>, TextLayout) {
         let prepared = engine.prepare(t);
-        let size = engine.measure(&prepared, width);
+        let size = engine.measure(&prepared, width.map(px));
         (size, engine.layout(&prepared, size))
     }
 
@@ -3043,7 +3047,7 @@ mod tests {
                 (
                     "Spaced letters ",
                     ResolvedTextStyle {
-                        letter_spacing: 1.3,
+                        letter_spacing: px(1.3),
                         ..plain
                     },
                 ),
@@ -3058,8 +3062,8 @@ mod tests {
                 (
                     " mixed with big text",
                     ResolvedTextStyle {
-                        font_size: 31.0,
-                        line_height: 40.0,
+                        font_size: px(31.0),
+                        line_height: px(40.0),
                         ..plain
                     },
                 ),
@@ -3085,11 +3089,11 @@ mod tests {
                 t.text
             );
             for width in (40..400).step_by(7) {
-                let size = engine.measure(&prepared, Some(width as f32));
+                let size = engine.measure(&prepared, Some(px(width as f32)));
                 let measured_lines = engine.configure(&prepared, Some(width as f32));
                 let lines = engine.lines(&engine.layout(&prepared, size));
                 assert_eq!(lines.len(), measured_lines, "{:?} at {width}", t.text);
-                let bottom = lines.last().map_or(0.0, |l| l.y + l.height);
+                let bottom = lines.last().map_or(0.0, |l| (l.y + l.height).0);
                 assert!(
                     bottom <= size.height.0,
                     "{:?} at {width}: {bottom} > {size:?}",
@@ -3097,7 +3101,7 @@ mod tests {
                 );
                 for line in &lines {
                     assert!(
-                        line.x >= -0.01 && line.x + line.width <= (size.width + px(2.0)).0,
+                        line.x.0 >= -0.01 && line.x + line.width <= size.width + px(2.0),
                         "{:?} at {width}: {line:?} in {size:?}",
                         t.text
                     );
@@ -3112,14 +3116,14 @@ mod tests {
         let t = text(&[("The quick brown fox jumps over the lazy dog", plain(15.0))]);
         let prepared = engine.prepare(&t);
         let one = engine.measure(&prepared, None);
-        let wrapped = engine.measure(&prepared, Some((one.width / 2.0).0));
+        let wrapped = engine.measure(&prepared, Some(one.width / 2.0));
         assert!(wrapped.width <= (one.width / 2.0).ceil(), "{wrapped:?}");
         assert!(wrapped.height >= one.height * 2.0, "{wrapped:?} vs {one:?}");
         // No wrapping: as wide as the text, past the width.
         let mut t = t.clone();
         t.no_wrap = true;
         let prepared = engine.prepare(&t);
-        assert_eq!(engine.measure(&prepared, Some(50.0)), one);
+        assert_eq!(engine.measure(&prepared, Some(px(50.0))), one);
     }
 
     #[test]
@@ -3128,8 +3132,8 @@ mod tests {
         let t = text(&[(
             "Line height on every line of a paragraph that wraps a few times",
             ResolvedTextStyle {
-                font_size: 16.0,
-                line_height: 30.0,
+                font_size: px(16.0),
+                line_height: px(30.0),
                 ..Default::default()
             },
         )]);
@@ -3137,8 +3141,8 @@ mod tests {
         let lines = engine.lines(&layout);
         assert!(lines.len() > 2);
         for (i, l) in lines.iter().enumerate() {
-            assert!((l.height - 30.0).abs() < 0.01, "{l:?}");
-            assert!((l.y - 30.0 * i as f32).abs() < 0.01, "{l:?}");
+            assert!((l.height.0 - 30.0).abs() < 0.01, "{l:?}");
+            assert!((l.y.0 - 30.0 * i as f32).abs() < 0.01, "{l:?}");
         }
         assert_eq!(size.height, Points((30.0 * lines.len() as f32).ceil()));
         // A bigger span only grows its own line.
@@ -3153,7 +3157,7 @@ mod tests {
         assert!(lines.len() > 2);
         assert!(lines[0].height > lines[1].height * 1.5, "{lines:?}");
         assert!(
-            (lines[1].height - lines[2].height).abs() < 0.01,
+            (lines[1].height - lines[2].height).0.abs() < 0.01,
             "{lines:?}"
         );
     }
@@ -3165,7 +3169,7 @@ mod tests {
         let spaced = text(&[(
             "Spacing",
             ResolvedTextStyle {
-                letter_spacing: 4.0,
+                letter_spacing: px(4.0),
                 ..plain(15.0)
             },
         )]);
@@ -3207,23 +3211,24 @@ mod tests {
         let engine = engine();
         let style = ResolvedTextStyle::default();
         let mut t = text(&[("Before ", style)]);
-        t.push_attachment(20.0, 30.0, style);
+        t.push_attachment(nsh_core::geometry::size(px(20.0), px(30.0)), style);
         t.push(
             " after the attachment, and long enough to wrap a few times here.",
             style,
         );
         let prepared = engine.prepare(&t);
-        let size = engine.measure(&prepared, Some(120.0));
+        let size = engine.measure(&prepared, Some(px(120.0)));
         let layout = engine.layout(&prepared, size);
         let points = engine.attachments(&layout);
         assert_eq!(points.len(), 1);
-        let (x, y) = points[0].expect("attachment shown");
+        let nsh_core::Point { x, y } = points[0].expect("attachment shown");
+        let (x, y) = (x.0, y.0);
         assert!(x > 0.0 && y >= 0.0, "{x}, {y}");
         let lines = engine.lines(&layout);
-        assert!(lines[0].height >= 30.0, "{:?}", lines[0]);
+        assert!(lines[0].height.0 >= 30.0, "{:?}", lines[0]);
         // On the baseline.
         assert!(
-            (y + 30.0 - lines[0].ascender).abs() < 0.01,
+            (y + 30.0 - lines[0].ascender.0).abs() < 0.01,
             "{y} {:?}",
             lines[0]
         );
@@ -3231,7 +3236,7 @@ mod tests {
         t.max_lines = 2;
         t.ellipsize = EllipsizeMode::Tail;
         let prepared = engine.prepare(&t);
-        let two = engine.measure(&prepared, Some(120.0));
+        let two = engine.measure(&prepared, Some(px(120.0)));
         assert!(two.height < size.height);
         let layout = engine.layout(&prepared, two);
         assert_eq!(engine.lines(&layout).len(), 2);
@@ -3242,7 +3247,7 @@ mod tests {
         t.max_lines = 2;
         t.ellipsize = EllipsizeMode::Tail;
         let prepared = engine.prepare(&t);
-        let size = engine.measure(&prepared, Some(200.0));
+        let size = engine.measure(&prepared, Some(px(200.0)));
         let layout = engine.layout(&prepared, size);
         let lines = engine.lines(&layout);
         assert_eq!(lines.len(), 2);
@@ -3273,12 +3278,12 @@ mod tests {
             t.max_lines = 1;
             t.ellipsize = mode;
             let prepared = engine.prepare(&t);
-            let size = engine.measure(&prepared, Some(160.0));
+            let size = engine.measure(&prepared, Some(px(160.0)));
             let layout = engine.layout(&prepared, size);
             let lines = engine.lines(&layout);
             assert_eq!(lines.len(), 1, "{mode:?}");
             assert!(
-                lines[0].x + lines[0].width <= 161.0,
+                (lines[0].x + lines[0].width).0 <= 161.0,
                 "{mode:?} {:?}",
                 lines[0]
             );
@@ -3298,11 +3303,14 @@ mod tests {
         let (first, second) = (&lines[0], &lines[1]);
         assert_eq!((first.start, first.end), (0, 2));
         assert_eq!((second.start, second.end), (3, 14));
-        assert_eq!(first.y, 0.0);
-        assert!((second.y - first.height).abs() < 0.01);
-        assert!((first.ascender + first.descender - first.height).abs() < 0.01);
-        assert!(first.ascender > 15.0 && first.descender > 3.0, "{first:?}");
-        let (cap, x) = (first.cap_height, first.x_height);
+        assert_eq!(first.y, px(0.0));
+        assert!((second.y - first.height).0.abs() < 0.01);
+        assert!((first.ascender + first.descender - first.height).0.abs() < 0.01);
+        assert!(
+            first.ascender.0 > 15.0 && first.descender.0 > 3.0,
+            "{first:?}"
+        );
+        let (cap, x) = (first.cap_height.0, first.x_height.0);
         assert!(cap > 11.0 && cap < 16.0 && x > 8.0 && x < cap, "{cap} {x}");
         assert!(second.width > first.width);
     }
@@ -3314,7 +3322,7 @@ mod tests {
         let size = Size::new(px(300.0), px(30.0));
         let x = |t: &AttributedText| {
             let p = engine.prepare(t);
-            engine.lines(&engine.layout(&p, size))[0].x
+            engine.lines(&engine.layout(&p, size))[0].x.0
         };
         assert!(x(&t) < 1.0);
         t.align = TextAlign::Right;
@@ -3337,7 +3345,7 @@ mod tests {
         let data = include_bytes!("../../../examples/gallery/fonts/Pacifico-Regular.ttf");
         let style = ResolvedTextStyle {
             font_family: Some(nsh_core::FontFamily::new("Pacifico")),
-            font_size: 20.0,
+            font_size: px(20.0),
             ..Default::default()
         };
         let t = text(&[("Custom fonts", style)]);
@@ -3442,10 +3450,10 @@ mod tests {
         let engine = engine();
         let style = plain(15.0);
         let code = ResolvedTextStyle {
-            font_size: 13.0,
+            font_size: px(13.0),
             background: Some(nsh_core::TextBackground {
                 color: Color(0xeeee_eeff),
-                radius: 4.0,
+                radius: px(4.0),
                 node: 4,
             }),
             ..style

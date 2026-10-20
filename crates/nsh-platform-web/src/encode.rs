@@ -647,8 +647,8 @@ fn resize_mode(m: ResizeMode) -> &'static str {
 
 fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextShadow>) -> String {
     let mut css = format!("font:{};color:{};", css_font(style), css_color(style.color));
-    if style.letter_spacing != 0.0 {
-        let _ = write!(css, "letter-spacing:{}px;", style.letter_spacing);
+    if style.letter_spacing.0 != 0.0 {
+        let _ = write!(css, "letter-spacing:{}px;", style.letter_spacing.0);
     }
     let d = style.decoration;
     if !d.is_none() {
@@ -665,10 +665,10 @@ fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextS
         if let Some(c) = style.decoration_color {
             let _ = write!(css, "text-decoration-color:{};", css_color(c));
         }
-        if let Some(t) = style.decoration_thickness {
+        if let Some(t) = style.decoration_thickness.map(|t| t.0) {
             let _ = write!(css, "text-decoration-thickness:{t}px;");
         }
-        if let Some(o) = style.underline_offset {
+        if let Some(o) = style.underline_offset.map(|o| o.0) {
             let _ = write!(css, "text-underline-offset:{o}px;");
         }
     }
@@ -828,8 +828,8 @@ fn field_css(c: &InputConfig) -> String {
         nsh_core::TextAlign::Right => css.push_str("text-align:right;"),
         _ => css.push_str("text-align:left;"),
     }
-    if c.style.line_height > 0.0 {
-        let _ = write!(css, "line-height:{}px;", c.style.line_height);
+    if c.style.line_height.0 > 0.0 {
+        let _ = write!(css, "line-height:{}px;", c.style.line_height.0);
     }
     if let Some(c) = c.placeholder_color {
         let _ = write!(css, "--ph:{};", css_color(c));

@@ -858,14 +858,14 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
             for (i, l) in lines.iter().enumerate() {
                 let line = rquickjs::Object::new(ctx.clone())?;
                 line.set("text", l.text.as_str())?;
-                line.set("x", l.x)?;
-                line.set("y", l.y)?;
-                line.set("width", l.width)?;
-                line.set("height", l.height)?;
-                line.set("ascender", l.ascender)?;
-                line.set("descender", l.descender)?;
-                line.set("capHeight", l.cap_height)?;
-                line.set("xHeight", l.x_height)?;
+                line.set("x", l.x.0)?;
+                line.set("y", l.y.0)?;
+                line.set("width", l.width.0)?;
+                line.set("height", l.height.0)?;
+                line.set("ascender", l.ascender.0)?;
+                line.set("descender", l.descender.0)?;
+                line.set("capHeight", l.cap_height.0)?;
+                line.set("xHeight", l.x_height.0)?;
                 list.set(i, line)?;
             }
             obj.set("lines", list)?;

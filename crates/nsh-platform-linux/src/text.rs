@@ -125,7 +125,7 @@ pub(crate) fn font_description(
     if style.italic {
         desc.set_style(pango::Style::Italic);
     }
-    desc.set_absolute_size(f64::from(style.font_size) * f64::from(pango::SCALE));
+    desc.set_absolute_size(f64::from(style.font_size.0) * f64::from(pango::SCALE));
     desc
 }
 
@@ -628,7 +628,7 @@ impl TextEngine for PangoTextEngine {
             let start = utf16_to_byte(s, at, span.start);
             let end = utf16_to_byte(s, (start, span.start), span.end);
             at = (end, span.end);
-            sizes.push((end as u32, span.style.font_size));
+            sizes.push((end as u32, span.style.font_size.0));
             if start >= end {
                 continue;
             }
@@ -641,16 +641,16 @@ impl TextEngine for PangoTextEngine {
             };
             let desc = font_description(style, &self.ui_family);
             insert(pango::AttrFontDesc::new(&desc).into());
-            if style.letter_spacing != 0.0 {
-                insert(pango::AttrInt::new_letter_spacing(to_pango(style.letter_spacing)).into());
+            if style.letter_spacing.0 != 0.0 {
+                insert(pango::AttrInt::new_letter_spacing(to_pango(style.letter_spacing.0)).into());
             }
             // Lines are as tall as the span's own font
             // ([`natural_line_heights`]): a fallback font (CJK, emoji) must
             // not grow them, or an input grows when the user types Chinese
             // (UIKit keeps the font's line height too).
-            if style.line_height > 0.0 {
+            if style.line_height.0 > 0.0 {
                 insert(
-                    pango::AttrInt::new_line_height_absolute(to_pango(style.line_height)).into(),
+                    pango::AttrInt::new_line_height_absolute(to_pango(style.line_height.0)).into(),
                 );
             } else {
                 let (ascent, descent) = self.natural_metrics(context, &desc);
@@ -674,15 +674,15 @@ impl TextEngine for PangoTextEngine {
             // All above the baseline, as the other platforms place them.
             let rect = pango::Rectangle::new(
                 0,
-                -to_pango(a.height),
-                to_pango(a.width),
-                to_pango(a.height),
+                -to_pango(a.height.0),
+                to_pango(a.width.0),
+                to_pango(a.height.0),
             );
             let mut shape = pango::AttrShape::new(&rect, &rect);
             shape.set_start_index(start as u32);
             shape.set_end_index(end as u32);
             attrs.insert(shape);
-            attachments.push((start as u32, a.height));
+            attachments.push((start as u32, a.height.0));
         }
         layout.set_attributes(Some(&attrs));
         natural_line_heights(&layout, &attrs, s, &natural, &placeholders);
@@ -712,14 +712,15 @@ impl TextEngine for PangoTextEngine {
             slack: text
                 .spans
                 .iter()
-                .map(|s| to_pango(s.style.letter_spacing.abs()))
+                .map(|s| to_pango(s.style.letter_spacing.0.abs()))
                 .max()
                 .unwrap_or(0),
             flush,
         }
     }
 
-    fn measure(&self, prepared: &Prepared, max_width: Option<f32>) -> Size<Points> {
+    fn measure(&self, prepared: &Prepared, max_width: Option<Points>) -> Size<Points> {
+        let max_width = max_width.map(|m| m.0);
         let shown = self.configure(prepared, max_width);
         let mut iter = prepared.layout.iter();
         let mut width = 0i32;
@@ -857,14 +858,14 @@ impl TextEngine for PangoTextEngine {
                     text: String::new(),
                     start: at(start),
                     end: at(start + line.length()),
-                    x: from_pango(logical.x()) + dx,
-                    y: top,
-                    width: from_pango(logical.width()),
-                    height: bottom - top,
-                    ascender: baseline - from_pango(logical.y()),
-                    descender: from_pango(logical.y() + logical.height()) - baseline,
-                    cap_height,
-                    x_height,
+                    x: Points(from_pango(logical.x()) + dx),
+                    y: Points(top),
+                    width: Points(from_pango(logical.width())),
+                    height: Points(bottom - top),
+                    ascender: Points(baseline - from_pango(logical.y())),
+                    descender: Points(from_pango(logical.y() + logical.height()) - baseline),
+                    cap_height: Points(cap_height),
+                    x_height: Points(x_height),
                 },
                 runs: first..out.runs.len(),
             });
@@ -878,10 +879,13 @@ impl TextEngine for PangoTextEngine {
         })
     }
 
-    fn attachments(&self, layout: &TextLayout) -> Vec<Option<(f32, f32)>> {
-        layout
-            .downcast::<LinuxLayout>()
-            .map_or_else(Vec::new, |l| l.attachments.clone())
+    fn attachments(&self, layout: &TextLayout) -> Vec<Option<nsh_core::Point<Points>>> {
+        layout.downcast::<LinuxLayout>().map_or_else(Vec::new, |l| {
+            l.attachments
+                .iter()
+                .map(|a| a.map(|(x, y)| nsh_core::geometry::point(Points(x), Points(y))))
+                .collect()
+        })
     }
 
     fn register_font(&self, data: &[u8]) -> Result<(), String> {
@@ -1269,7 +1273,7 @@ fn decorate(
     let pixels = |v: f32| (v / px).round().max(1.0) * px;
     let color = crate::decor::rgba(style.decoration_color.unwrap_or(style.color));
     let line = |top: f32, thickness: f32| {
-        let thickness = pixels(style.decoration_thickness.unwrap_or(thickness));
+        let thickness = pixels(style.decoration_thickness.map_or(thickness, |t| t.0));
         let top = (top / px).round() * px;
         let mid = top + thickness / 2.0;
         match style.decoration_style {
@@ -1321,7 +1325,7 @@ fn decorate(
     };
     if d.underline {
         let top = match style.underline_offset {
-            Some(offset) => baseline + offset,
+            Some(offset) => baseline + offset.0,
             None => baseline - font.underline.0,
         };
         line(top, font.underline.1);
@@ -1340,7 +1344,7 @@ pub(crate) fn char_at(state: &ViewState, x: f32, y: f32) -> Option<u32> {
     let line = layout
         .lines
         .iter()
-        .find(|l| y >= l.info.y && y < l.info.y + l.info.height)?;
+        .find(|l| y >= l.info.y.0 && y < (l.info.y + l.info.height).0)?;
     for run in &layout.runs[line.runs.clone()] {
         let mut gx = run.x;
         for g in &run.glyphs {
@@ -1799,7 +1803,7 @@ impl LinuxLayout {
         let Some(line) = self
             .lines
             .iter()
-            .find(|l| y < l.info.y + l.info.height)
+            .find(|l| y < (l.info.y + l.info.height).0)
             .or(self.lines.last())
         else {
             return 0;
@@ -1846,22 +1850,22 @@ impl LinuxLayout {
                     let width = from_pango(g.width);
                     gx += width;
                     nsh_core::LinePiece {
-                        x,
-                        width,
+                        x: Points(x),
+                        width: Points(width),
                         background: text.background_at(g.index),
-                        ascent,
-                        descent,
+                        ascent: Points(ascent),
+                        descent: Points(descent),
                     }
                 })
             });
             let clip = (line.info.x, line.info.x + line.info.width);
             nsh_core::BackgroundBox::join(pieces, clip, |b| {
                 f(
-                    b.x,
-                    baseline - b.ascent,
-                    b.width,
-                    b.ascent + b.descent,
-                    b.radius(),
+                    b.x.0,
+                    baseline - b.ascent.0,
+                    b.width.0,
+                    (b.ascent + b.descent).0,
+                    b.radius().0,
                     b.background.color,
                 );
             });
@@ -1878,7 +1882,7 @@ impl LinuxLayout {
         mut f: impl FnMut(f32, f32, f32, f32),
     ) {
         for line in &self.lines {
-            let (y, h) = (line.info.y, line.info.height);
+            let (y, h) = (line.info.y.0, line.info.height.0);
             let mut span: Option<(f32, f32)> = None;
             for (gx, w, g, _) in self.line_glyphs(line) {
                 if g.index >= a && g.index < b {
@@ -1904,7 +1908,7 @@ impl LinuxLayout {
                     && attachment.index >= line.info.start
                     && attachment.index < line.info.end
                 {
-                    f(*x, y, attachment.width, h);
+                    f(*x, y, attachment.width.0, h);
                 }
             }
         }
@@ -1974,7 +1978,7 @@ mod tests {
     fn layout_matches_measure() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let plain = ResolvedTextStyle {
-            font_size: 15.0,
+            font_size: Points(15.0),
             ..Default::default()
         };
         let texts = [
@@ -1986,7 +1990,7 @@ mod tests {
                 (
                     "Spaced letters ",
                     ResolvedTextStyle {
-                        letter_spacing: 1.3,
+                        letter_spacing: Points(1.3),
                         ..plain
                     },
                 ),
@@ -2001,8 +2005,8 @@ mod tests {
                 (
                     " mixed with big text",
                     ResolvedTextStyle {
-                        font_size: 31.0,
-                        line_height: 40.0,
+                        font_size: Points(31.0),
+                        line_height: Points(40.0),
                         ..plain
                     },
                 ),
@@ -2028,7 +2032,7 @@ mod tests {
                 t.text
             );
             for width in (40..400).step_by(7) {
-                let size = engine.measure(&prepared, Some(width as f32));
+                let size = engine.measure(&prepared, Some(Points(width as f32)));
                 // The core rounds measurements up.
                 let size = Size::new(size.width.ceil(), size.height.ceil());
                 let measured_lines = {
@@ -2037,7 +2041,7 @@ mod tests {
                 };
                 let lines = engine.lines(&engine.layout(&prepared, size));
                 assert_eq!(lines.len(), measured_lines, "{:?} at {width}", t.text);
-                let bottom = lines.last().map_or(0.0, |l| l.y + l.height);
+                let bottom = lines.last().map_or(0.0, |l| (l.y + l.height).0);
                 assert!(
                     bottom <= size.height.0,
                     "{:?} at {width}: {bottom} > {size:?}",
@@ -2047,7 +2051,7 @@ mod tests {
                 let slack = from_pango(prepared.slack) + 0.01;
                 for line in &lines {
                     assert!(
-                        line.x + line.width <= size.width.0 + slack,
+                        (line.x + line.width).0 <= size.width.0 + slack,
                         "{:?} at {width}: {line:?}",
                         t.text
                     );
@@ -2061,25 +2065,26 @@ mod tests {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle::default();
         let mut t = text(&[("Before ", style)]);
-        t.push_attachment(20.0, 30.0, style);
+        t.push_attachment(Size::new(Points(20.0), Points(30.0)), style);
         t.push(
             " after the attachment, and long enough to wrap a few times here.",
             style,
         );
         let prepared = engine.prepare(&t);
-        let size = engine.measure(&prepared, Some(120.0));
+        let size = engine.measure(&prepared, Some(Points(120.0)));
         let layout = engine.layout(&prepared, size);
         let points = engine.attachments(&layout);
         assert_eq!(points.len(), 1);
-        let (x, y) = points[0].expect("attachment shown");
+        let at = points[0].expect("attachment shown");
+        let (x, y) = (at.x.0, at.y.0);
         assert!(x > 0.0 && y >= 0.0, "{x}, {y}");
         let lines = engine.lines(&layout);
-        assert!(lines[0].height >= 30.0, "{:?}", lines[0]);
+        assert!(lines[0].height.0 >= 30.0, "{:?}", lines[0]);
 
         t.max_lines = 2;
         t.ellipsize = EllipsizeMode::Tail;
         let prepared = engine.prepare(&t);
-        let two = engine.measure(&prepared, Some(120.0));
+        let two = engine.measure(&prepared, Some(Points(120.0)));
         assert!(two.height < size.height);
         assert_eq!(engine.lines(&engine.layout(&prepared, two)).len(), 2);
 
@@ -2087,7 +2092,7 @@ mod tests {
         t.max_lines = 2;
         t.ellipsize = EllipsizeMode::Tail;
         let prepared = engine.prepare(&t);
-        let size = engine.measure(&prepared, Some(200.0));
+        let size = engine.measure(&prepared, Some(Points(200.0)));
         let layout = engine.layout(&prepared, size);
         let lines = engine.lines(&layout);
         assert_eq!(lines.len(), 2);
@@ -2171,14 +2176,14 @@ mod tests {
     fn cap_and_x_heights() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle {
-            font_size: 20.0,
+            font_size: Points(20.0),
             ..Default::default()
         };
         let t = text(&[("Hx", style)]);
         let prepared = engine.prepare(&t);
         let size = engine.measure(&prepared, None);
         let lines = engine.lines(&engine.layout(&prepared, size));
-        let (cap, x) = (lines[0].cap_height, lines[0].x_height);
+        let (cap, x) = (lines[0].cap_height.0, lines[0].x_height.0);
         assert!(cap > 11.0 && cap < 16.0 && x > 8.0 && x < cap, "{cap} {x}");
     }
 
@@ -2216,14 +2221,14 @@ mod tests {
     fn span_backgrounds_box_each_line() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle {
-            font_size: 15.0,
+            font_size: Points(15.0),
             ..Default::default()
         };
         let code = ResolvedTextStyle {
-            font_size: 13.0,
+            font_size: Points(13.0),
             background: Some(nsh_core::TextBackground {
                 color: nsh_core::Color(0xeeee_eeff),
-                radius: 4.0,
+                radius: Points(4.0),
                 node: 4,
             }),
             ..style
@@ -2231,7 +2236,7 @@ mod tests {
         let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
         let boxes = |width: Option<f32>| {
             let prepared = engine.prepare(&t);
-            let size = engine.measure(&prepared, width);
+            let size = engine.measure(&prepared, width.map(Points));
             let layout = engine.layout(&prepared, size);
             let l = layout.downcast::<LinuxLayout>().unwrap();
             let mut rects = Vec::new();
@@ -2256,7 +2261,7 @@ mod tests {
     fn carets_and_highlights() {
         let engine = PangoTextEngine::new("sans-serif".into());
         let style = ResolvedTextStyle {
-            font_size: 15.0,
+            font_size: Points(15.0),
             ..Default::default()
         };
         let t = text(&[("First line here\nsecond", style)]);
@@ -2305,7 +2310,7 @@ mod fallback_tests {
         t.push(
             s,
             ResolvedTextStyle {
-                font_size: 16.0,
+                font_size: Points(16.0),
                 ..Default::default()
             },
         );

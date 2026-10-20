@@ -21,7 +21,7 @@ use nsh_core::{
 
 use crate::ui::{
     Button, ButtonVariant, Card, DemoPage, Figure, Finish, Finished, IconName, Segment,
-    SegmentedEvent, Stat, Tone, caption, colors, hint, legend, segmented,
+    SegmentedEvent, Stat, Tone, caption, colors, hint, legend, lengths, pt, rect, segmented,
 };
 
 /// A canvas font of the system family (TS `SANS(size, weight)`).
@@ -126,7 +126,7 @@ fn hatch(mut p: Painter, (x, y, w, h): (f32, f32, f32, f32), color: Hsla, gap: f
 /// A dashed horizontal or vertical reference line.
 fn dashed(p: Painter, (x0, y0): (f32, f32), (x1, y1): (f32, f32), color: Hsla) -> Painter {
     p.save()
-        .line_dash(&[3.0, 4.0])
+        .line_dash(&lengths([3.0, 4.0]))
         .stroke_color(color)
         .line_width(1.0)
         .begin_path()
@@ -264,11 +264,11 @@ fn draw_dial(c: Palette, width: f32, height: f32, needle: &AnimatedValue, load: 
         .arc(cx, cy, sr, a0, a1)
         .stroke()
         .stroke_style(
-            CanvasGradient::conic(a0 - 0.2, cx, cy)
-                .add_color_stop(0.0, c.info)
-                .add_color_stop(0.45, c.accent)
-                .add_color_stop(0.75, c.warn)
-                .add_color_stop(0.8, c.danger),
+            CanvasGradient::conic(Radians(a0 - 0.2), pt(cx, cy))
+                .add_color_stop(percentage(0.0), c.info)
+                .add_color_stop(percentage(0.45), c.accent)
+                .add_color_stop(percentage(0.75), c.warn)
+                .add_color_stop(percentage(0.8), c.danger),
         )
         .begin_path()
         .arc(cx, cy, sr, a0, &angle)
@@ -292,7 +292,7 @@ fn draw_dial(c: Palette, width: f32, height: f32, needle: &AnimatedValue, load: 
     p.save()
         .translate(cx, cy)
         .rotate(&angle)
-        .shadow(shade, 6.0, (0.0, 0.0))
+        .shadow(shade, px(6.0), pt(0.0, 0.0))
         .fill_color(c.text)
         .begin_path()
         .move_to(-14.0, -3.0)
@@ -428,7 +428,7 @@ fn draw_area(c: Palette, width: f32, height: f32, data: &[f64], sweep: &Animated
     }
     // The deploy window: hatched.
     let (wx, ww) = (x(9), x(11) - x(9));
-    p = p.save().begin_path().rect(wx, top, ww, h).clip();
+    p = p.save().begin_path().rect(rect(wx, top, ww, h)).clip();
     p = hatch(p, (wx, top, ww, h), alpha(c.warn, 0.28), 6.0)
         .restore()
         .fill_color(c.warn)
@@ -461,9 +461,9 @@ fn draw_area(c: Palette, width: f32, height: f32, data: &[f64], sweep: &Animated
         .line_to(x(0), top + h)
         .close_path()
         .fill_style(
-            CanvasGradient::linear(0.0, top, 0.0, top + h)
-                .add_color_stop(0.0, alpha(c.accent, 0.26))
-                .add_color_stop(1.0, alpha(c.accent, 0.0)),
+            CanvasGradient::linear(pt(0.0, top), pt(0.0, top + h))
+                .add_color_stop(percentage(0.0), alpha(c.accent, 0.26))
+                .add_color_stop(percentage(1.0), alpha(c.accent, 0.0)),
         )
         .fill()
         .begin_path();
@@ -503,7 +503,7 @@ fn draw_area(c: Palette, width: f32, height: f32, data: &[f64], sweep: &Animated
     let lw = measure(&label) + 12.0;
     p.fill_color(c.raised)
         .begin_path()
-        .round_rect(width - right - lw, y(mean) - 9.0, lw, 18.0, 9.0)
+        .round_rect(rect(width - right - lw, y(mean) - 9.0, lw, 18.0), px(9.0))
         .fill()
         .fill_color(c.text)
         .text_baseline(CanvasTextBaseline::Middle)
@@ -615,8 +615,8 @@ fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Pa
         for h in 1..series.len() {
             let (x0, x1) = (x(h as f32 - 1.0), x(h as f32));
             p = p.quadratic_curve_to(
-                (x0, y(series[h - 1])),
-                ((x0 + x1) / 2.0, (y(series[h - 1]) + y(series[h])) / 2.0),
+                pt(x0, y(series[h - 1])),
+                pt((x0 + x1) / 2.0, (y(series[h - 1]) + y(series[h])) / 2.0),
             );
         }
         let weekend = d >= 5;
@@ -1037,7 +1037,7 @@ fn draw_compositing(c: Palette, width: f32, height: f32) -> Painter {
         .clip()
         .fill_color(c.raised)
         .fill_rect(0.0, 0.0, 92.0, height)
-        .draw_image(crate::assets::LOGO.uri, 10.0, cy - 36.0, 72.0, 72.0)
+        .draw_image(crate::assets::LOGO.uri, rect(10.0, cy - 36.0, 72.0, 72.0))
         .restore()
         .stroke_color(c.border)
         .line_width(1.5)
@@ -1053,14 +1053,14 @@ fn draw_compositing(c: Palette, width: f32, height: f32) -> Painter {
     };
     let p = p
         .save()
-        .shadow(shade, 14.0, (0.0, 6.0))
+        .shadow(shade, px(14.0), pt(0.0, 6.0))
         .fill_style(
-            CanvasGradient::linear(cx - 46.0, 0.0, cx + 46.0, height)
-                .add_color_stop(0.0, c.accent_fill)
-                .add_color_stop(1.0, rgb(0x7fbf3a)),
+            CanvasGradient::linear(pt(cx - 46.0, 0.0), pt(cx + 46.0, height))
+                .add_color_stop(percentage(0.0), c.accent_fill)
+                .add_color_stop(percentage(1.0), rgb(0x7fbf3a)),
         )
         .begin_path()
-        .round_rect(cx - 46.0, cy - 40.0, 92.0, 80.0, 16.0)
+        .round_rect(rect(cx - 46.0, cy - 40.0, 92.0, 80.0), px(16.0))
         .fill()
         .restore()
         .composite(Composite::DestinationOut)
@@ -1071,15 +1071,15 @@ fn draw_compositing(c: Palette, width: f32, height: f32) -> Painter {
     // A radial gradient with a dashed outline.
     let rx = width - 46.0;
     p.fill_style(
-        CanvasGradient::radial(rx - 10.0, cy - 12.0, 4.0, rx, cy, 40.0)
-            .add_color_stop(0.0, rgb(0xffe2a8))
-            .add_color_stop(0.55, c.warn)
-            .add_color_stop(1.0, alpha(c.danger, 0.2)),
+        CanvasGradient::radial(pt(rx - 10.0, cy - 12.0), px(4.0), pt(rx, cy), px(40.0))
+            .add_color_stop(percentage(0.0), rgb(0xffe2a8))
+            .add_color_stop(percentage(0.55), c.warn)
+            .add_color_stop(percentage(1.0), alpha(c.danger, 0.2)),
     )
     .begin_path()
     .arc(rx, cy, 38.0, 0.0, TAU)
     .fill()
-    .line_dash(&[5.0, 5.0])
+    .line_dash(&lengths([5.0, 5.0]))
     .stroke_color(c.warn)
     .line_width(1.5)
     .begin_path()

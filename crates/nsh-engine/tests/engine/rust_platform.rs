@@ -107,7 +107,7 @@ impl TextEngine for Fonts {
         self.0.prepare(text)
     }
 
-    fn measure(&self, prepared: &Self::Prepared, max_width: Option<f32>) -> Size<Points> {
+    fn measure(&self, prepared: &Self::Prepared, max_width: Option<Points>) -> Size<Points> {
         self.0.measure(prepared, max_width)
     }
 

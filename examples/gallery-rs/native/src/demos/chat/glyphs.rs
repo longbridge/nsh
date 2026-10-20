@@ -6,10 +6,11 @@ use std::f32::consts::PI;
 
 use nsh_core::{
     canvas::{LineCap, LineJoin},
+    geometry::size,
     ui::{PropEnum, prelude::*},
 };
 
-use crate::ui::Tint;
+use crate::ui::{Tint, pt};
 
 /// A glyph of [`Glyph`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
@@ -42,7 +43,9 @@ fn line(p: Painter, points: &[f32]) -> Painter {
 }
 
 fn rect(p: Painter, x: f32, y: f32, w: f32, h: f32, r: f32, fill: bool) -> Painter {
-    let p = p.begin_path().round_rect(x, y, w, h, r);
+    let p = p
+        .begin_path()
+        .round_rect(crate::ui::rect(x, y, w, h), px(r));
     if fill { p.fill() } else { p.stroke() }
 }
 
@@ -89,7 +92,14 @@ impl GlyphName {
             GlyphName::Globe => {
                 let c = circle(c, 10.0, 10.0, 7.0)
                     .begin_path()
-                    .ellipse(10.0, 10.0, (3.0, 7.0), 0.0, 0.0, PI * 2.0, false)
+                    .ellipse(
+                        pt(10.0, 10.0),
+                        size(px(3.0), px(7.0)),
+                        Radians(0.0),
+                        Radians(0.0),
+                        Radians(PI * 2.0),
+                        false,
+                    )
                     .stroke();
                 line(c, &[3.0, 10.0, 17.0, 10.0])
             }
@@ -138,10 +148,10 @@ impl GlyphName {
                 let c = c
                     .begin_path()
                     .move_to(10.0, 4.5)
-                    .bezier_curve_to((5.0, 2.5), (2.5, 7.0), (4.5, 10.0))
-                    .bezier_curve_to((2.5, 13.5), (6.0, 17.0), (10.0, 15.5))
-                    .bezier_curve_to((14.0, 17.0), (17.5, 13.5), (15.5, 10.0))
-                    .bezier_curve_to((17.5, 7.0), (15.0, 2.5), (10.0, 4.5))
+                    .bezier_curve_to(pt(5.0, 2.5), pt(2.5, 7.0), pt(4.5, 10.0))
+                    .bezier_curve_to(pt(2.5, 13.5), pt(6.0, 17.0), pt(10.0, 15.5))
+                    .bezier_curve_to(pt(14.0, 17.0), pt(17.5, 13.5), pt(15.5, 10.0))
+                    .bezier_curve_to(pt(17.5, 7.0), pt(15.0, 2.5), pt(10.0, 4.5))
                     .stroke();
                 line(c, &[10.0, 4.5, 10.0, 15.5])
             }
