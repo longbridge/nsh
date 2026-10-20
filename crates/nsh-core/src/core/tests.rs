@@ -7670,7 +7670,7 @@ mod views {
     use super::*;
     use crate::{
         Prop,
-        ui::{Component, Each, If, Props, Registry, Root, Scope, prelude::*},
+        ui::{Component, If, Props, Registry, Root, Scope, prelude::*},
     };
 
     fn texts(batch: &MountBatch) -> Vec<String> {
@@ -8054,7 +8054,7 @@ mod views {
         fn view(_: RowsProps, _: Scope<NoEvent>) -> impl IntoElement {
             let items = signal(vec![1, 2, 3]);
             ITEMS.with(|i| i.set(Some(items)));
-            view().child(Each::new(
+            view().child(each(
                 items,
                 |n| *n,
                 |item, index| {

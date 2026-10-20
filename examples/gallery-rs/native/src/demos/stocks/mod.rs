@@ -251,7 +251,7 @@ pub(crate) fn Stocks() -> impl IntoElement {
     let shown = signal(0_usize);
     let stocks = {
         let live = live.clone();
-        Each::new(
+        each(
             move || rows.get(),
             |i: &usize| *i,
             move |i, at| {

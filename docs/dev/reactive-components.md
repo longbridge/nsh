@@ -250,7 +250,7 @@ The TSX primitives, with the same semantics and the same keyed reconciliation:
 ```rust
 If::new(open, move || sheet_body())                 // <If when={open()}>…</If>
     .otherwise(move || text("Closed"))
-Each::new(move || rows.get(), |row| row.id, move |row, index| row_view(row, index))
+each(move || rows.get(), |row| row.id, move |row, index| row_view(row, index))
                                                     // <Each of={rows()} key="id">{(row, i) => …}</Each>
 dynamic(move || if wide.get() { two_columns() } else { one_column() })
 ```

@@ -780,7 +780,7 @@ fn Network() -> impl IntoElement {
         },
     )
     .otherwise(move || {
-        view().child(Each::new(
+        view().child(each(
             move || {
                 posts.with(|p| {
                     p.iter()

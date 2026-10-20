@@ -991,7 +991,7 @@ fn SelectionDemo() -> impl IntoElement {
                     .text_color(colors::FAINT)
             },
         ))
-        .child(Each::new(
+        .child(each(
             move || keys.with(|k| k.iter().cloned().enumerate().collect::<Vec<_>>()),
             |(i, _): &(usize, String)| *i,
             |key, _| {
@@ -1107,7 +1107,7 @@ fn MessageBar(cx: Scope<NoEvent>) -> impl IntoElement {
         });
     };
     // Messages are only added: a bubble is known by its place.
-    let bubbles = Each::new(
+    let bubbles = each(
         move || messages.with(|m| m.iter().cloned().enumerate().collect::<Vec<_>>()),
         |(i, _): &(usize, Message)| *i,
         |m, _| {

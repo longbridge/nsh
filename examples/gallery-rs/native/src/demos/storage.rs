@@ -145,7 +145,7 @@ fn keys_card(entries: ReadSignal<Vec<Entry>>, clear_all: impl Fn() + 'static) ->
                 .sum::<usize>()
         })
     };
-    let rows = Each::new(
+    let rows = each(
         move || entries.get(),
         |entry: &Entry| entry.0.clone(),
         |entry, i| {

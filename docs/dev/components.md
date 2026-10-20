@@ -64,7 +64,7 @@ come from two places:
   `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust** (`.when(cond, |v| ..)`, `match` at build time); interaction states are
   variants (`.active(..)`, `.hover(..)`, `.focus(..)`). **What comes and goes is a region**: `If::new(cond, ||
-  el).otherwise(|| el)`, `dynamic(move || ..)`, `Each::new(items, key, |item, index| row)`.
+  el).otherwise(|| el)`, `dynamic(move || ..)`, `each(items, key, |item, index| row)`.
 - **The app's content is props, placed by closures**: `header: Prop<Option<Slot>>`, `children: Children`,
   `items: Items` for virtualized rows (in JS `each` and a row renderer, like `List`); `#[prop(lazy)]` on `children`
   has JS make them only while the view places them (below).
@@ -212,7 +212,7 @@ reasons: `reactive-components.md`.
 - **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
   the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
   again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
-  `Each::new(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
+  `each(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
   `index` signals updated, while the key stays; `catch_error(|| view, |error,
   reset| fallback)` shows the fallback once something under it panicked (a binding, a listener, an effect, a
   component's view: the failed part is disposed; `reset.reset()` makes the view again; unhandled errors are logged,

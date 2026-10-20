@@ -2452,7 +2452,7 @@ impl<M: TextEngine> Core<M> {
                     // position follows it.
                     let place = place.clone();
                     let count = crate::ui::computed(move || children.with(Vec::len));
-                    let region = crate::ui::Each::new(
+                    let region = crate::ui::each(
                         children,
                         |&child: &NodeId| child,
                         move |child, index| {

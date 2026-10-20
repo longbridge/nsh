@@ -49,7 +49,7 @@ struct WasDesktop(bool);
 /// pushed and gone when it is popped.
 fn pushed() -> AnyElement {
     let routes = nav::routes();
-    Each::new(
+    each(
         move || routes.with(|r| r.0.clone()),
         |route: &Route| route.key.clone(),
         |route, depth| {

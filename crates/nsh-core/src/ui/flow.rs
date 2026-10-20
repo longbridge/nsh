@@ -1,4 +1,4 @@
-//! Elements that change: [`dynamic`], [`If`] and [`Each`] (TS:
+//! Elements that change: [`dynamic`], [`If`] and [`each`] (TS:
 //! `{() => …}`, `<If>`, `<Each>`).
 //!
 //! Each is a region of its parent's children and a binding: when what it
@@ -203,7 +203,7 @@ fn region(region: Region) -> AnyElement {
 }
 
 /// Elements made again whenever what `f` reads changes (TS: a child that is
-/// a function, `{() => …}`). Prefer [`If`] for a choice and [`Each`] for a
+/// a function, `{() => …}`). Prefer [`If`] for a choice and [`each`] for a
 /// list: they keep what did not change.
 pub fn dynamic<E: IntoElements>(f: impl Fn() -> E + 'static) -> AnyElement {
     region(Region::Dynamic(Rc::new(move || f().into_elements())))
@@ -275,14 +275,12 @@ impl IntoElement for If {
 }
 
 /// A row per item of a list, identified by key (TS: `<Each of={…}
-/// key="id">{(item, index) => …}</Each>`). A row is made when its key comes
-/// and goes with it; one that stays keeps its nodes and bindings, and gets
-/// its item and index as signals that follow it.
+/// key="id">{(item, index) => …}</Each>`), made by [`each`].
 pub struct Each;
 
 impl Each {
-    /// The rows of `items` (a value, a signal or a closure), each made by
-    /// `row(item, index)` and known by `key(item)`.
+    /// The rows of `items`, as [`each`] makes them.
+    #[deprecated(note = "use `each(items, key, row)`, as `view()` makes a view")]
     #[allow(clippy::new_ret_no_self, reason = "TS's <Each> is an element")]
     pub fn new<T, K, E>(
         items: impl IntoReactive<Vec<T>>,
@@ -294,14 +292,32 @@ impl Each {
         K: Hash + Eq + Clone + 'static,
         E: IntoElements,
     {
-        region(Region::Each(Rc::new(Rows {
-            items: items.into_reactive(),
-            key: Box::new(key),
-            row: Box::new(move |item, index| row(item, index).into_elements()),
-            state: RefCell::new(Vec::new()),
-            next: Cell::new(0),
-        })))
+        each(items, key, row)
     }
+}
+
+/// A row per item of `items` (a value, a signal or a closure), each made by
+/// `row(item, index)` and known by `key(item)` (TS: `<Each of={…}
+/// key="id">{(item, index) => …}</Each>`). A row is made when its key comes
+/// and goes with it; one that stays keeps its nodes and bindings, and gets
+/// its item and index as signals that follow it.
+pub fn each<T, K, E>(
+    items: impl IntoReactive<Vec<T>>,
+    key: impl Fn(&T) -> K + 'static,
+    row: impl Fn(ReadSignal<T>, ReadSignal<usize>) -> E + 'static,
+) -> AnyElement
+where
+    T: Clone + PartialEq + 'static,
+    K: Hash + Eq + Clone + 'static,
+    E: IntoElements,
+{
+    region(Region::Each(Rc::new(Rows {
+        items: items.into_reactive(),
+        key: Box::new(key),
+        row: Box::new(move |item, index| row(item, index).into_elements()),
+        state: RefCell::new(Vec::new()),
+        next: Cell::new(0),
+    })))
 }
 
 /// The rows of an [`Each`], with their type erased.

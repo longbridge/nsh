@@ -308,7 +308,7 @@ fn LayoutAnimations() -> impl IntoElement {
         }
     };
     let white = 0xffffff;
-    let boxes = Each::new(
+    let boxes = each(
         items,
         |n: &u32| *n,
         move |n, _| {

@@ -410,7 +410,7 @@ fn TouchPad() -> impl IntoElement {
                         .text_color(colors::MUTED)
                     },
                 ))
-                .child(Each::new(
+                .child(each(
                     move || {
                         fingers_down.with(|f| f.iter().copied().enumerate().collect::<Vec<_>>())
                     },

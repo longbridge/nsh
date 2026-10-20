@@ -388,7 +388,7 @@ pub(crate) fn inline(source: impl Fn() -> SharedString + 'static) -> Text {
             })
             .collect::<Vec<_>>()
     };
-    text_root().child(Each::new(
+    text_root().child(each(
         pieces,
         |p: &Piece| (p.at, p.span),
         |piece, _| {
@@ -465,7 +465,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
         Kind::P => view().child(body(paragraph(text_of()))),
         kind @ (Kind::Ul | Kind::Ol) => {
             let count = computed(move || block.with(|b| b.items.len()));
-            view().gap(px(6.0)).child(Each::new(
+            view().gap(px(6.0)).child(each(
                 move || places(count.get()),
                 |i: &usize| *i,
                 move |i, _| {
@@ -619,7 +619,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
                         .flex_row()
                         .bg(colors::RAISED)
                         .finish(Finish::Raised)
-                        .child(Each::new(
+                        .child(each(
                             move || places(head.with(Vec::len)),
                             |i: &usize| *i,
                             move |i, _| {
@@ -633,7 +633,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
                             },
                         )),
                 )
-                .child(Each::new(
+                .child(each(
                     move || places(rows.with(Vec::len)),
                     |r: &usize| *r,
                     move |r, _| {
@@ -645,7 +645,7 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
                             .flex_row()
                             .border_t_1()
                             .border_t_color(colors::LINE)
-                            .child(Each::new(
+                            .child(each(
                                 move || places(row.with(Vec::len)),
                                 |c: &usize| *c,
                                 move |c, _| {
@@ -694,7 +694,7 @@ pub(crate) fn markdown(
         copied,
         on_copy,
     };
-    view().gap_3().child(Each::new(
+    view().gap_3().child(each(
         blocks,
         |b: &Block| b.key.clone(),
         move |block, index| {

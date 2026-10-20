@@ -1583,7 +1583,7 @@ impl ChatState {
                     )
                     .child(If::new(open, move || reasoning_text(reason)))
             }))
-            .child(Each::new(
+            .child(each(
                 move || {
                     if is_live.get() {
                         live.tools.get()
