@@ -23,7 +23,10 @@ sudo apt-get install clang libclang-dev pkg-config libfontconfig-dev libfreetype
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
 ```
 
-macOS needs Xcode (Metal), Windows the MSVC toolchain and LLVM as for the Windows backend (`RUST_MIN_STACK` included).
+macOS needs Xcode and its Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`); without it, build with the
+`runtime-shaders` feature (`nsh-platform-gpui`, forwarded by `nsh-gpui-host` and `nsh-gpui-app`: `cargo build
+--manifest-path crates/gpui/Cargo.toml -p nsh-gpui-host --features nsh-gpui-host/runtime-shaders`), which compiles GPUI's
+shaders when the app starts. `nsh run --target gpui` in a checkout adds it by itself when `xcrun metal` fails. Windows the MSVC toolchain and LLVM as for the Windows backend (`RUST_MIN_STACK` included).
 Off the three desktops the crates are empty.
 
 The three crates are a workspace of their own, `crates/gpui` (its own `Cargo.toml`, `Cargo.lock` and the dependencies

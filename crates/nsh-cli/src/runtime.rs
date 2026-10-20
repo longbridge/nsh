@@ -355,8 +355,16 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         let manifest = manifest.to_string_lossy();
         let target_dir = root.join("target");
         let target_dir = target_dir.to_string_lossy();
+        let features = format!("{name}/runtime-shaders");
         if matches!(platform, Platform::Gpui) {
             args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
+            if metal_toolchain_missing() {
+                crate::ui::note(
+                    "no Metal Toolchain: GPUI compiles its shaders at run time \
+                     (install one with `xcodebuild -downloadComponent MetalToolchain` to precompile them)",
+                );
+                args.extend(["--features", &features]);
+            }
         }
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
@@ -386,6 +394,17 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     built.push(profile);
     built.push(file_name);
     existing(built, platform, name)
+}
+
+/// Whether this is a Mac where Xcode cannot run `metal`: GPUI's build script
+/// precompiles its shaders with it, so the build needs the `runtime-shaders`
+/// feature instead.
+fn metal_toolchain_missing() -> bool {
+    cfg!(target_os = "macos")
+        && !Command::new("xcrun")
+            .args(["metal", "--version"])
+            .output()
+            .is_ok_and(|out| out.status.success())
 }
 
 /// The workspace of a cargo checkout of nsh this CLI was built in
