@@ -2238,6 +2238,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab",
+ "syn 2.0.119",
  "taffy",
  "tokio",
 ]

@@ -21,7 +21,7 @@ the module docs of the code (`//!`, Javadoc), which are the reference for how a 
 
 ```
 crates/
-  nsh-core/            Platform-independent core: shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
+  nsh-core/            Platform-independent core: typed units and geometry (`geometry/`, as GPUI's), shadow tree, styles (RN semantics), Taffy layout (flex + grid), text merging, list virtualization,
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host);
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, the theme;
@@ -141,6 +141,7 @@ on any platform or JS crate.
 | the native modules, where a new API goes, platform props | `docs/dev/js-modules.md` |
 | elements, touch, accessibility, the environment | `docs/dev/elements.md`, `text.md` |
 | styles, Tailwind, effects | `docs/dev/styles.md` |
+| units and geometry (`Points`, `Length`, `Bounds`, ...) | `docs/dev/geometry.md` |
 | scroll views, zooming, `List` | `docs/dev/scrolling-and-lists.md` |
 | animation, canvas, images | `docs/dev/animation.md`, `canvas.md`, `images.md` |
 | VM limits, capabilities, signed packages | `docs/dev/sandbox.md`, `signed-packages.md` |
@@ -285,6 +286,13 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 ## Code conventions
 
 - Formatting: `cargo +nightly fmt --all`, configured in `.rustfmt.toml`.
+- Units and geometry are typed, as GPUI's are (`nsh_core::geometry`): a length is `Points` (GPUI's `Pixels`), `Rems`,
+  a `Percentage` (a fraction, 0.5 is 50%) or a style length (`AbsoluteLength`, `DefiniteLength`, `Length`), an angle is
+  `Radians`, shapes are `Point` / `Size` / `Bounds` / `Edges` / `Corners` of a unit. Public API never takes or returns a
+  bare `f32` / `f64` for a length, an angle or a fraction; platform boundaries (taffy, the toolkits, JS decoding) convert.
+  Enforced: nsh-core's `unit_types` test fails on a bare float in public API that `crates/nsh-core/unitless.txt`
+  (unitless quantities, with reasons) or the shrinking `crates/nsh-core/untyped.txt` (legacy, to migrate) does not list
+  (`docs/dev/geometry.md`).
 - TSX tags are PascalCase, everywhere (examples, docs, tests): every tag names a binding in scope, only `<If>` and
   `<Each>` are globals that need no import. The primitives have one home each: `View`, `Text`, `Scroll`, `Input` from
   `nsh`, `Image` from `nsh/image`, `List` from `nsh/list`, `Canvas` from `nsh/canvas`, `WebView` from `nsh/webview`,

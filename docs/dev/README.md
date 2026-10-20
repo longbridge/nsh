@@ -12,6 +12,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [elements.md](elements.md) | Host elements and runtime components, touch, accessibility, the environment, why the main thread never waits for JS |
 | [text.md](text.md) | Text blocks, spans, inline attachments |
 | [styles.md](styles.md) | Tailwind, effects, view styles, Android differences |
+| [geometry.md](geometry.md) | Units and geometry (`nsh_core::geometry`, as GPUI's): the types, the conversion boundaries, the `unit_types` check, the migration |
 | [scrolling-and-lists.md](scrolling-and-lists.md) | Scroll views, zooming, `List` |
 | [animation.md](animation.md) | Animated values, composites, layout animation |
 | [canvas.md](canvas.md) | `Canvas` |
