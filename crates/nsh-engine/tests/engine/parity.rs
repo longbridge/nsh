@@ -120,6 +120,7 @@ mount(() => <Text>{{shown()}}</Text>);
             runtime: None,
             data_dir: Some(root.join("data")),
             storage: None,
+            clock: Default::default(),
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         Self {

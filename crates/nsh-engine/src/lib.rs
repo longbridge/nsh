@@ -773,6 +773,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("header_heights", &self.header_heights)
             .field("limits", &self.limits)
             .field("ui_sets", &self.ui_sets)
+            .field("clock", &self.clock)
             .finish()
     }
 }
