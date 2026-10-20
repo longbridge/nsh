@@ -190,6 +190,8 @@ impl<M: TextEngine> Core<M> {
             if pressable(node.events) {
                 self.mark(key, dirty::EVENTS);
             }
+            // Its accessibility state says it.
+            self.mark(key, dirty::VIEW_PROPS);
             self.states_changed(key);
         }
     }

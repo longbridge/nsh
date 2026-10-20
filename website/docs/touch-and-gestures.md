@@ -46,7 +46,7 @@ mount(App);
 | `onPressDown` | `() => void` | | The press started. |
 | `onPressUp` | `() => void` | | The press ended: lifted, slid off, or taken over by a scroll view. |
 | `delayLongPress` | `number` | `500` | Milliseconds before a press becomes a long press. |
-| `disabled` | `boolean` | `false` | Takes no presses and shows no feedback; applies `disabled:` classes. |
+| `disabled` | `boolean` | `false` | Takes no presses and shows no feedback; applies `disabled:` classes; screen readers say it is disabled. |
 
 How presses behave:
 

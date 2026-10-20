@@ -61,7 +61,7 @@ mount(App);
 | `style` | `StyleProp<ViewStyle>`（`<Text>` 和 `<Input>` 为 `TextStyle`，`<Image>` 为 `ImageStyle`） | 内联样式，或从左到右合并的样式数组（假值项会被跳过；数组可以嵌套，所以 `style={[base, props.style]}` 中的 `props.style` 本身也可以是数组）。优先级高于 `class`。参见[样式参考](../modules/style-reference.md)。 |
 | `class` | `string` | Tailwind 类名，在原生侧解析（`"flex-row gap-2 p-4 dark:bg-zinc-900"`）。后面的类覆盖前面的类。参见 [Tailwind](../docs/tailwind.md)。 |
 | `classList` | `Record<string, boolean \| null \| undefined>` | 值为真时才应用的类（`{ "opacity-50": busy() }`）。 |
-| `disabled` | `boolean` | 忽略按压（也没有按压反馈），应用 `disabled:` 类，并禁用输入框等控件。 |
+| `disabled` | `boolean` | 忽略按压（也没有按压反馈），应用 `disabled:` 类，禁用输入框等控件，屏幕阅读器也会读出它已停用（`accessibilityState.disabled`）。 |
 
 ### 按压与反馈
 

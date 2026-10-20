@@ -542,7 +542,7 @@ export interface HostProps {
   pinch?: { scale?: AnimatedValue };
   /** Two-finger rotations drive `angle` (degrees) natively. */
   rotation?: { angle?: AnimatedValue };
-  /** Ignores presses (no press feedback either), applies `disabled:` classes and disables controls. */
+  /** Ignores presses (no press feedback either), applies `disabled:` classes, disables controls, and screen readers say it is disabled (its accessibility state). */
   disabled?: boolean;
   onPress?: () => void;
   onLongPress?: () => void;

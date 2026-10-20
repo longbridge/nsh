@@ -68,7 +68,7 @@ Every host element accepts the props below (the `CommonProps` type). Element pag
 | `style` | `StyleProp<ViewStyle>` (`TextStyle` for `<Text>` and `<Input>`, `ImageStyle` for `<Image>`) | Inline style, or an array of styles merged left to right (falsy entries skipped; arrays may nest, so `style={[base, props.style]}` takes a `props.style` that is itself an array). Wins over `class`. See the [style reference](../modules/style-reference.md). |
 | `class` | `string` | Tailwind classes, resolved natively (`"flex-row gap-2 p-4 dark:bg-zinc-900"`). Later classes win over earlier ones. See [Tailwind](../docs/tailwind.md). |
 | `classList` | `Record<string, boolean \| null \| undefined>` | Classes applied while their value is truthy (`{ "opacity-50": busy() }`). |
-| `disabled` | `boolean` | Ignores presses (no press feedback either), applies `disabled:` classes and disables controls such as inputs. |
+| `disabled` | `boolean` | Ignores presses (no press feedback either), applies `disabled:` classes, disables controls such as inputs, and screen readers say it is disabled (`accessibilityState.disabled`). |
 
 ### Presses and feedback
 

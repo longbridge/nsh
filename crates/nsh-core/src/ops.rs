@@ -1604,7 +1604,8 @@ pub enum WebSource {
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum NativeProp {
     /// `disabled` (any element): ignores presses (no press feedback either),
-    /// applies `disabled:` classes and disables controls.
+    /// applies `disabled:` classes, disables controls, and screen readers
+    /// say it is disabled (its accessibility state).
     #[prop(js = "disabled")]
     Disabled(bool),
     /// `source` of a web view or video: a URL, `{ uri }`, or (web views) `{ html,

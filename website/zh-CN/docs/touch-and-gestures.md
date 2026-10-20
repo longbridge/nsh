@@ -46,7 +46,7 @@ mount(App);
 | `onPressDown` | `() => void` | | 按压开始。 |
 | `onPressUp` | `() => void` | | 按压结束：抬起、滑出，或被滚动视图接管。 |
 | `delayLongPress` | `number` | `500` | 按压变为长按前的毫秒数。 |
-| `disabled` | `boolean` | `false` | 不接受按压，也不显示反馈；应用 `disabled:` 类。 |
+| `disabled` | `boolean` | `false` | 不接受按压，也不显示反馈；应用 `disabled:` 类；屏幕阅读器会读出它已停用。 |
 
 按压的行为：
 
