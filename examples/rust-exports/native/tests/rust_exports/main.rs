@@ -42,11 +42,11 @@ fn the_class_keeps_its_state_in_rust() {
     }
     // `&mut self`, posting to the listener from inside the call.
     press(&mut app, "Deposit $25", "Deposited: $145.00");
-    app.wait_for("Heard: 145");
+    app.wait_for("Heard: 145").unwrap();
     // Another instance as an argument.
     press(&mut app, "Move $30", "Moved $30, $115.00 left");
-    app.wait_for("Checking: $70.00");
-    app.wait_for("Heard: 145, 115");
+    app.wait_for("Checking: $70.00").unwrap();
+    app.wait_for("Heard: 145, 115").unwrap();
     // The async member: the listener hears its task's post, then the
     // Promise resolves (1% without a fetched rate).
     press(&mut app, "Accrue", "Accrued: $116.15");

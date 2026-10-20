@@ -12,6 +12,7 @@ An NSH app is a directory with an entry module and an optional `nsh.json`. Every
 ```text
 my-app/
 ├── App.tsx            the entry module: calls mount()
+├── App.test.tsx       its tests (nsh test)
 ├── nsh.json           name, id, version, icon, Tailwind theme, capabilities
 ├── tsconfig.json      TypeScript settings for editors
 ├── .gitignore         .nsh/ and out/
@@ -20,7 +21,7 @@ my-app/
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
-├── .nsh/              generated: type declarations, development host builds
+├── .nsh/              generated: type declarations, development host builds, test entries
 └── out/               generated: nsh build / nsh package output
 ```
 
@@ -111,7 +112,7 @@ Without a `capabilities` key, an app may use the network, web views and the stat
 
 ## tsconfig.json and .nsh/types
 
-NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `trace`, `dev`, `run`, `package`, `publish`, `check`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and NSH's TypeScript settings into `.nsh/tsconfig.json`. The app's `tsconfig.json` extends them:
+NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `test`, `dev`, `run`, `package`, `publish`, `check`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and NSH's TypeScript settings into `.nsh/tsconfig.json`. The app's `tsconfig.json` extends them:
 
 ```json
 {
@@ -132,7 +133,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | `list.d.ts`, `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/list`, `nsh/animated`, `nsh/device`, ...) |
 | `ui/mobile.d.ts` | `nsh/ui/mobile` |
 
-`lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files in `.nsh` are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh trace App.tsx`.
+`lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files in `.nsh` are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh check`.
 
 `.nsh/tsconfig.json` adds `"ESNext.Disposable"`, which declares `using` declarations and `Symbol.dispose`, which the runtime has: `using account = new Account()` frees a [Rust class](./rust.md)'s value at the end of the block. Its `jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
 
@@ -182,7 +183,7 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/native` | Components and functions the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |
 
-The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error.
+The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/ui/mobile"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
 
 ### npm packages
 

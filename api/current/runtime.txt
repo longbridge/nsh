@@ -13,6 +13,7 @@ computed function
 context function
 effect function
 mount function
+resource function
 signal function
 split function
 untracked function

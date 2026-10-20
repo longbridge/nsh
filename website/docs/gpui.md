@@ -33,6 +33,10 @@ says how.
 ## Requirements
 
 - macOS, Windows or Linux, with a GPU GPUI can draw with (Metal on macOS, DirectX on Windows, Vulkan on Linux).
+- On macOS, building the runtime from a checkout uses Xcode's Metal Toolchain (`xcodebuild -downloadComponent
+  MetalToolchain`), which compiles GPUI's shaders ahead of time. On a Mac without it, `nsh run` and `nsh package` build
+  the runtime with GPUI's `runtime-shaders` feature and say so: the shaders are compiled when the app starts (a fraction
+  of a second the first time, cached by macOS after that).
 - On Linux: a Vulkan driver, Wayland or X11 with `libxkbcommon`, GTK 3 and WebKitGTK 4.1 (web views) and GStreamer
   1.20 or later with its base and good plug-ins (videos). Web views need X11: on a Wayland desktop run the app under
   Xwayland (`WAYLAND_DISPLAY=` empty), else they show a placeholder. Building the runtime from a checkout also needs

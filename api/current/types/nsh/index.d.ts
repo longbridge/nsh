@@ -20,6 +20,44 @@ export interface SignalOptions<T> {
   equals?: false | ((previous: T, next: T) => boolean);
 }
 
+/** Where a resource is: nothing to load, loading the first value, loaded, loading again, failed. */
+export type ResourceState = "unresolved" | "pending" | "ready" | "refreshing" | "errored";
+
+/** What a resource loads from: an accessor (tracked) or a value; `undefined`, `null` and `false` load nothing. */
+export type ResourceSource<S> = S | false | null | undefined | (() => S | false | null | undefined);
+
+/** What a load is given besides the source. */
+export interface ResourceInfo {
+  /** Aborted when the load no longer counts (another load, or the owner went away): pass it to `fetch`. */
+  signal: AbortSignal;
+  /** Started by `refetch()`, the source unchanged. */
+  refetching: boolean;
+}
+
+export interface ResourceOptions<T> {
+  /** The value until the first load ends, which is then a refresh. */
+  initialValue?: T;
+}
+
+/** What a resource does besides giving its value. */
+export interface ResourceControls<T> {
+  /** Whether a load runs. */
+  loading(): boolean;
+  /** The last load's error; `undefined` once a load gives a value. */
+  error(): unknown;
+  state(): ResourceState;
+  /** Loads again from the same source, keeping the value meanwhile (a retry, a pull to refresh). */
+  refetch(): void;
+  /** Sets the value here, with no load (an optimistic update), clearing the error. */
+  mutate(value: T): T;
+}
+
+/** A value loaded asynchronously: `user()` reads the latest one, `undefined` before the first. */
+export interface Resource<T> extends Accessor<T | undefined>, ResourceControls<T> {}
+
+/** A resource with an `initialValue`: it always has a value. */
+export interface InitializedResource<T> extends Accessor<T>, ResourceControls<T> {}
+
 /** A value components provide to what they render: `Theme()` reads the nearest one. */
 export interface Context<T> extends Accessor<T> {
   Provider: (props: { value: T; children?: JSX.Element }) => JSX.Element;
@@ -35,8 +73,12 @@ export declare function signal<T = undefined>(): Signal<T | undefined>;
 /** A value derived from signals, computed again when they change (and read). */
 export declare function computed<T>(fn: (previous: T | undefined) => T, options?: SignalOptions<T>): Accessor<T>;
 
-/** Runs `fn` after rendering, and again when what it read changes. */
-export declare function effect(fn: () => void): void;
+/**
+ * Runs `fn` after rendering, and again when what it read changes. A function `fn`
+ * returns is its cleanup (`cleanup(f)`): it runs before `fn` runs again, or when the
+ * effect goes away.
+ */
+export declare function effect(fn: () => void | (() => void)): void;
 
 /** Runs `fn`, applying its writes together at the end. */
 export declare function batch<T>(fn: () => T): T;
@@ -46,6 +88,17 @@ export declare function untracked<T>(fn: () => T): T;
 
 /** Runs `fn` before the current effect or component runs again or goes away. */
 export declare function cleanup(fn: () => void): void;
+
+/**
+ * A value loaded asynchronously by `fetcher`, again whenever `source` (an accessor) gives a
+ * new value that is set (not `undefined`, `null` or `false`) and on `refetch()`. Only the
+ * latest load counts: the one it supersedes is aborted (`info.signal`), and so is the running
+ * one when its owner goes away. The value stays while loading again and after a failure.
+ */
+export declare function resource<T>(fetcher: (info: ResourceInfo) => T | Promise<T>, options: ResourceOptions<T> & { initialValue: T }): InitializedResource<T>;
+export declare function resource<T>(fetcher: (info: ResourceInfo) => T | Promise<T>, options?: ResourceOptions<T>): Resource<T>;
+export declare function resource<S, T>(source: ResourceSource<S>, fetcher: (source: S, info: ResourceInfo) => T | Promise<T>, options: ResourceOptions<T> & { initialValue: T }): InitializedResource<T>;
+export declare function resource<S, T>(source: ResourceSource<S>, fetcher: (source: S, info: ResourceInfo) => T | Promise<T>, options?: ResourceOptions<T>): Resource<T>;
 
 /** A context with a default value. */
 export declare function context<T>(defaultValue: T): Context<T>;

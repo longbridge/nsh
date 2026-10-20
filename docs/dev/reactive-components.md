@@ -287,6 +287,9 @@ dynamic(move || if wide.get() { two_columns() } else { one_column() })
   when the owner goes. Async code writes signals directly; `WeakComponent`, `this.update(..)` and `Updated` go.
 - `set_timeout`, `set_interval`, `request_animation_frame`, `timer(..).await`, `next_frame().await`: free functions,
   owned the same way. Dropping the returned handle still cancels early.
+- `resource(source, fetcher)` (TS: `resource`): a render effect reads the source and spawns the load, whose task the
+  next run (or the owner's disposal) drops, cancelling what it awaited; the value, error and state are signals, and
+  which load counts is `nsh_core::resource::Runs`, the JS face's too.
 - Platform services (`dialog`, `toast`, `set_clipboard`, `clipboard_string`, `announce`, `image_size`, ...) become free
   functions on the current runtime, as `nsh/*` modules are free functions in TSX. `Context`, `RenderCx` and `AsyncCx`
   go; `ModuleCx` keeps only what a module call needs.

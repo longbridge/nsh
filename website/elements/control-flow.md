@@ -15,7 +15,7 @@ list.
 ```tsx
 <View>
   <If when={user()} else={<Text>Signed out</Text>}>
-    <Text>Hello, {user()!.name}</Text>
+    {(u) => <Text>Hello, {u().name}</Text>}
   </If>
   <Each of={todos()}>{(todo) => <Text>{todo().title}</Text>}</Each>
 </View>
@@ -30,9 +30,9 @@ Renders its children while `when` is truthy, else the `else` element (or nothing
 
 | Prop | Type | Description |
 |---|---|---|
-| `when` | `unknown` | The condition. Only its truthiness matters. |
+| `when` | `T` | The condition. Only its truthiness matters. |
 | `else` | `JSX.Element` | Rendered while `when` is falsy. |
-| `children` | `JSX.Element` | Rendered while `when` is truthy. |
+| `children` | `JSX.Element` \| `(value: () => NonNullable<T>) => JSX.Element` | Rendered while `when` is truthy. A function gets an accessor of `when`'s value. |
 
 The branch is created again only when the truthiness of `when` changes. A `when` that goes from one truthy value to
 another (`user()` changing from one object to another) keeps the branch, and the expressions inside it update on their
@@ -44,6 +44,14 @@ const loading = signal(true);
 <If when={!loading()} else={<Text style={{ color: "#6e7781" }}>Loading…</Text>}>
   <Profile />
 </If>;
+```
+
+A function child reads the value `when` gave, without `null` or `undefined` in its type, so the branch needs no `!`:
+
+```tsx
+const user = signal<User | null>(null);
+
+<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>;
 ```
 
 ## `<Each>`

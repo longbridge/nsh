@@ -18,6 +18,7 @@ default = ["bundle"]
 # WebAssembly (the website's playground).
 bundle = [
   "dep:anyhow",
+  "dep:nsh-js",
   "dep:rolldown",
   "dep:rolldown_common",
   "dep:rolldown_error",
@@ -43,6 +44,7 @@ imagesize = { workspace = true, optional = true }
 ttf-parser = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "sync", "fs"], optional = true }
 nsh-core.workspace = true
+nsh-js = { workspace = true, optional = true }
 serde_json.workspace = true
 log.workspace = true
 

@@ -634,7 +634,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         EventKind::ContentSizeChange,
         on::INPUT,
         "(e: { width: number; height: number }) => void",
-        "The size of the text (at the input's width when multiline): grow a multiline input with it.",
+        "The size of the text (at the input's width when multiline; one empty line's while it is empty, whatever its placeholder): grow a multiline input with it.",
     ),
     (
         EventKind::Message,

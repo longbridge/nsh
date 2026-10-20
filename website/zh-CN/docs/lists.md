@@ -352,7 +352,7 @@ import { ListView } from "nsh/ui/mobile";
 
 - 每个单元格单独排版，滚动时只重新排版有变化的单元格。行的层级保持浅一些，避免在行里读取每帧都会变化的 signal。
 - 原生端分批请求单元格，每帧可以进行多轮，合并成一次更新；快速滑动时一帧内绑定许多单元格，也不会每个单元格调用一次 JS。
-- 用 [`nsh trace --scroll`](./testing-and-trace.md) 测量行在每一帧的开销。
+- 用 [`nsh test --trace` 加上 `scroll` 步骤](./testing-and-trace.md#滚动)测量行在每一帧的开销。
 
 ## 相关内容
 

@@ -5435,6 +5435,7 @@ dependencies = [
  "imagesize 0.15.0",
  "log",
  "nsh-core",
+ "nsh-js",
  "oxc",
  "oxc_sourcemap",
  "rolldown",

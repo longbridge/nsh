@@ -75,7 +75,7 @@ step, the details only when something fails. Every command prints through it:
   and adds its time), `→` where to find something, `•` what a device did, `warn` / `error` (wrapped under their first
   word on a terminal), plain lines for the app's own output. Paths are relative to the current directory when inside
   it. Colors on terminals unless `NO_COLOR` is set; redirected, only the result lines, no ANSI. All of it is stderr:
-  stdout is the commands' results (`nsh trace`'s mount items, the signing commands' lines).
+  stdout is the commands' results (`nsh test --trace`'s mount items, the signing commands' lines).
 - Tools run captured: `ui::cargo` (every cargo build: the app's crate, the hosts, `cargo xtask android`) shows the
   crate being compiled in its spinner, counts cargo's warnings into the `✓` line and, when the build fails, returns a
   `ui::failure` whose details are cargo's whole output; `ui::report` prints `error <message>` and those details (the
@@ -187,25 +187,85 @@ Writes a split bundle (`native-pipeline.md`, "Split bundles"): `bundle.js` / `.m
 `<id>`, `<id>.map` and `<stem>.nshc` (`build::compile_split`, `Built::chunks`). Without `--split` (and for `nsh
 package`, `publish`, the dev server) the bundle holds the whole app.
 
-## `nsh trace`
+## Headless runs
 
-`nsh-engine`'s `headless` module (feature `headless`) does the run: `headless::trace` starts the app on an engine
-(`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread) and prints every batch;
-`crates/nsh-cli/src/trace.rs` bundles the app and calls it in the CLI's process. It keeps a model of the native tree from the mount items
-(inserts, removals, `ViewProps`' `testID` and `accessibilityLabel`, texts, event masks) to find what to tap:
-`--tap id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` or a bare string (testID, then label,
-then text), the first match in tree order below the root, or its nearest pressable ancestor; it is dispatched as
-`Press`. Without `--tap`, `--taps <n>` taps the first pressable view. Waits are bounded so apps with timers or
-animations end: before the taps the app must be quiet for `--idle-ms` (at most 10 s), after each tap for 100 ms (also
-at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` keeps running after the last tap.
-`--safe-area <top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
+`nsh-engine`'s `headless` module (feature `headless`) runs apps without a platform, on its driver `headless::Headless`:
+the app on an engine (`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread), its batches
+applied to a model of the native views (`headless::Screen`, `headless/screen.rs`), and steps taken on what they show.
+An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
+(`── press(id:save): 8 items`).
 
-Tests use the same pieces: `headless::start` (the engine with its frames, the batches to the caller),
-`headless::Screen` (that model of the native tree, public: texts in tree order, the commands sent, `press_target`
-with the `--tap` selectors) and `headless::Headless` (an app, its screen, `wait_for` / `wait_until` / `settle`,
-`press`). `EngineConfig::new(app)` is the phone-sized config the trace and the tests start from. `nsh-testing` adds
-what a TSX entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so
-that a Rust app's tests link neither the bundler nor QuickJS.
+The steps name views with selectors: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>` (an input's text or,
+while it is empty, its placeholder too), `view:<id>` or a bare string (testID, then label, then text), the first match
+where a user would look first: the top modal, then the rest in tree order below the root, of a stack only its top
+screen. Each step sends what a platform would, to the views that report it:
+
+- `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`;
+- `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
+  `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line
+  break in a single line is the return key;
+- `submit`: the return key as the input's `submitBehavior` resolves (`InputConfig::submit`): `KeyPress` `Enter` and
+  `SubmitEditing` (then `Blur` for blur-and-submit), or a line break;
+- `scroll`: the scroll view (the match, the nearest one around it, else the first in it) moves along its axis 10
+  points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
+  `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
+  command moved the view;
+- `wait`, `wait_for` / `wait_until` (until a selector matches), `idle` (until quiet for a while).
+
+A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
+for 100 ms (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
+(`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
+failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
+edits than were typed is dropped. `headless::StubNetwork` (responses by `"<METHOD> <URL>"`, others fail) and
+`headless::MemoryStorage` (entries given up front) stand in for the device's services.
+
+Rust tests use the driver directly: `headless::start` (the engine with its frames, the batches to the caller), `headless::Screen`
+(texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `headless::Headless`.
+`EngineConfig::new(app)` is the phone-sized config the tests start from. `nsh-testing` adds what a TSX
+entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so that a Rust
+app's tests link neither the bundler nor QuickJS.
+
+## `nsh test`
+
+Tests are TypeScript (`*.test.tsx`, `*.test.ts`) importing `nsh/test`, a UI set written in Rust in `nsh-testing`
+(`module.rs`: `test`, `open`, `expect` and the classes `App` and `Expectation`, `#[module]` / `#[class]`, so its JS face
+and `.nsh/types/nsh/test.d.ts` are generated like any set's; the CLI declares it for every app, `init::write_types`).
+Only the engine of a test file serves it: an app's bundle cannot import it (the bundler knows no such module there).
+
+`nsh_testing::run_file` runs one test file (`run.rs`):
+
+- It writes an entry for the file in `<app>/.nsh/test/` that imports it and then calls `run` of the internal set
+  `nsh/test/runner`, and builds it through `TestRun::compile` (`Entry::TestFile`: the app's sets plus
+  `nsh_testing::test_sets()`). The file's source map gets its sources relative to the current directory, so failures
+  name `App.test.tsx:12:5`.
+- The test file runs on an engine of its own (the VM). `test(name, body)` keeps the body (`Callback`) in a
+  thread-local of the VM's thread; `run`, a task, takes them and calls each in order with
+  `Callback::call_async_traced` (what was thrown with its stack), bounded by 30 s, then closes the apps the test opened
+  and reports the result over a channel to the caller, who symbolicates the stack with the test file's map.
+- The VM's calls reach the run through the process's current `Session` (one test file at a time in a process, under a
+  lock): the test file's directory, the app's sets, the compiler and the apps the running test opened.
+- `open(entry, options)` builds the entry (`Entry::App`, once per run) and starts it on a `headless::Headless` of its
+  own (`StubNetwork` from `options.network`, or `UreqNetwork` for `"live"`; `MemoryStorage` seeded with
+  `options.storage`; the viewport and safe area), on a blocking thread; `App`'s async methods are the driver's steps,
+  run there too, and its synchronous ones (`texts`, `shows`, `value`) read the screen after `catch_up`. With
+  `TestRun::trace` every app observes its batches and prints them under their step (`print_batch`).
+
+`crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
+`target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen)
+and fails when any test failed. Given an app's entry, it writes a test file in `.nsh/test` that opens the entry on the
+network, waits 1.2 s (the engine's idle collection runs first, so retention bugs show up) and runs what standard input
+holds; with `--trace` that is the headless trace of the app: every batch under its step and each commit's timings
+(the engine's `trace`, `nsh::perf` lines).
+
+An app this command line serves runs in its process (`TestRun::compile` builds with the CLI's sets). An app with Rust
+crates of its own runs in its headless runner (`.nsh/rust/test`, `nsh_testing::runner`, `runner.rs`), which links the
+app's crates and `nsh-testing` without its feature `bundle`: no bundler. `nsh` starts it with a `TestRequest` (JSON) as
+its argument, the protocol version and `BYTECODE_VERSION` checked; the runner's `TestRun::compile` asks `nsh` to build
+each entry (`RunnerMessage::Build` on its stderr, one JSON line), `nsh` writes the bytecode and source map into
+`.nsh/test/build` and answers with a `Reply` on the runner's stdin, or `Reply::Root` for a Rust app's `nsh.json` (or its
+directory): the runner then makes the app's root (`app_root()`), so `open(".")` starts a Rust app. Results, file
+failures and log records come back as `RunnerMessage`s; batches of `--trace` go to the runner's stdout, which is
+`nsh`'s.
 
 ## New apps (`nsh init --template`)
 
@@ -283,8 +343,8 @@ program that describes them, builds the hosts and runners with them, and does ev
     `"rust"`'s order its specifier, exports with their kinds, TypeScript declarations, re-exported runtime values and
     types, the values nsh-js makes for it, the files it ships and the exports TS sees without a doc comment, which
     `nsh` warns of as it writes `.nsh/types`);
-  - `trace` (nsh-engine with `js` and `headless`, the mobile UI and the app's sets): the headless runner of `nsh trace`
-    (`nsh_engine::headless::runner`);
+  - `test` (`nsh-testing` without `bundle`, the mobile UI and the app's sets, and a Rust app's root): the headless
+    runner of `nsh test` (`nsh_testing::runner`);
   - the hosts and runners, passing the sets after the mobile UI's (`vec![nsh_ui_mobile::registry(), set_app_charts(),
     set_app_storage()]`): `ios-host` / `ios-app` (the development host and the release runner:
     `nsh_platform_ios::set_ui_sets`, then `nsh_ios_host::main` / `nsh_ios_app::main`), `linux-host` / `linux-app`,
@@ -309,10 +369,10 @@ program that describes them, builds the hosts and runners with them, and does ev
   directory does (`nsh init` ignores it), or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
   CI jobs share), and Cargo resolves and keeps the workspace's own `Cargo.lock`. Every crate those workspaces depend on
   is published by `release-crate.yml`, the hosts and runners included; the binaries are named after the app
-  (`nsh-app-<package>-describe`; with several crates all their packages, `nsh-app-charts-storage-trace`), and so are
+  (`nsh-app-<package>-describe`; with several crates all their packages, `nsh-app-charts-storage-test`), and so are
   the libraries (the web runtime's, the Android `cdylib`s: `libnsh_app_charts_android.so`, installed as `libnsh.so`),
   so apps sharing a target directory never take each other's.
-- Before a command on the app (`build`, `trace`, `dev`, `run`, `package`, `publish`, `check`) `nsh` builds `describe`
+- Before a command on the app (`build`, `test`, `dev`, `run`, `package`, `publish`, `check`) `nsh` builds `describe`
   ("building the Rust crate …": Cargo decides whether the app's Rust code changed) and runs it when the program is
   new, keeping its output in `.nsh/rust/description.json` with the program's size and time (`RustApp::describe`). The
   description must be in this `nsh`'s format and of its version, with one set per crate and a specifier each that is
@@ -326,12 +386,9 @@ program that describes them, builds the hosts and runners with them, and does ev
   (iOS `--target` triples; Linux's, macOS's, Windows' and GPUI's `*-host` / `*-app` for this machine; Android: the
   prebuilt `classes.dex` with the app's `libnsh.so` for each ABI of the prebuilt runtime, cross-compiled with the NDK;
   the web: the app's `nsh.wasm` / `nsh-dev.wasm`, with nsh's `nsh.js`).
-- `nsh trace` builds the app's headless runner (`RustApp::trace_runner`), compiles the app's bytecode itself into
-  `.nsh/rust/run/trace`, and starts the runner with a `nsh_engine::headless::TraceRequest` (versioned, `PROTOCOL`:
-  the bytecode and its QuickJS build, the source map, the app's directory, `-v`, the flags) as its one argument. The
-  runner prints the batches on stdout, as `nsh trace` does in its own process for apps without crates; on stderr it
-  writes its log lines, warnings and errors as `RunnerMessage` JSON lines, which `nsh` shows as its own
-  (`logger::forward`, `ui::warn`, the error it ends with); other lines (a panic's) pass through.
+- `nsh test` builds the app's headless runner (`RustApp::test_runner`) and runs the test files in it, building the
+  entries it asks for (`nsh test`, above); the runner's log lines come back as `RunnerMessage`s, which `nsh` shows as
+  its own (`logger::forward`); other lines (a panic's) pass through.
 - `nsh dev` / `nsh run` watch the crates too, and the local crates they depend on by path (`path = "…"` in
   `[dependencies]` / `[build-dependencies]`, per target too, transitively; not NSH's own crates nor
   dev-dependencies: `RustApp::watched`): a change to their `.rs` files, `Cargo.toml` or `assets/` ends the session
@@ -344,20 +401,20 @@ program that describes them, builds the hosts and runners with them, and does ev
   `rust-macos`, `rust-windows`, `rust-ios` (each the platform's release runner library without its feature `js`, whose
   `run_rust` mounts the generated `app_root()`), `rust-android` (`nsh::ui_sets!` and `nsh::main!`,
   `nsh-platform-android` without `js`; the APK's manifest gets the `com.longbridge.nsh.RUST` meta-data `AppActivity`
-  reads), `rust-web` (`docs/dev/web.md`), `rust-trace` (the headless runner with nsh-engine without `js`, which mounts
-  `app_root()`: `nsh trace`) and `gpui/rust-gpui`. None of them, nor `describe`, links nsh-js, QuickJS, rolldown or the
-  bundler: a Rust app compiles none of them for any command. `RustApp::runtime`, `android` and `web` build those
+  reads), `rust-web` (`docs/dev/web.md`) and `gpui/rust-gpui`, and the root to `test` (`app_root()`: `open(".")` of a test
+  starts it). None of them, nor `describe`, links nsh-js, QuickJS, rolldown or the bundler: a Rust app compiles none of
+  them to build, run or package it; `nsh test` runs TypeScript tests, so its runner links QuickJS (not the bundler). `RustApp::runtime`, `android` and `web` build those
   instead; `nsh package` ships no bundle (`build::rust_root`: the crates' assets only); `nsh run` runs the desktops'
   runner in debug in place (`NSH_APP_DIR`: its `nsh` directory, and the app's logs on stderr), Catalyst's in an app
   bundle (`NSH_DEVELOPMENT`), and installs a package on the simulator and Android; on the web a dev session without
   builds serves the page. A crate change ends the command with `Restart` (`RustApp::watch`). `nsh build` writes what
-  it ships besides its runners (`app.json` and the crates' assets); neither it nor `nsh trace` writes `.nsh/types` for
+  it ships besides its runners (`app.json` and the crates' assets); neither it nor `nsh test` writes `.nsh/types` for
   it, which has no TypeScript. The other commands refuse a Rust app's entry, before building anything.
   `examples/gallery-rs` is one (`"root": "Gallery"`).
 - The files the sets' crates ship (`Registry::assets(assets!())`: a crate's `assets/` directory, published as
   `asset:/@<package>/<path>`, so each crate's are apart) go with the app's imported assets: the dev server serves them
   (`DevServer::serve_files`), `nsh build` / `package` / `publish` copy them (`build::Built::assets`: each file's path
-  and where it is, from the description), `nsh trace` reads them; the engine registers their fonts before the first
+  and where it is, from the description), `nsh test` reads them; the engine registers their fonts before the first
   render.
 
 ### What an app's Rust crates cost
@@ -372,13 +429,13 @@ crates by path from this checkout; "crates" counts cargo's `Compiling` lines. Be
 | `--template mixed` (TSX and a crate), first `nsh build` | 44.7 s, 369 crates | 9.4 s, 25 crates |
 | `examples/gallery-rs` (Rust root), first `nsh build` | 48.5 s, 386 crates | 15.6 s, 59 crates |
 | `examples/rust-exports` (TSX and a crate), first `nsh build` | 41.6 s, 369 crates | 7.2 s, 25 crates |
-| `examples/rust-exports`, then the first `nsh trace` | 3.3 s, 0 crates | 15.6 s, 118 crates (the runner, with QuickJS) |
-| `--template rust`, then the first `nsh trace` | 3.2 s, 0 crates | 13.0 s, 31 crates (`rust-trace`, no QuickJS) |
+| `examples/rust-exports`, then the first `nsh trace` (now `nsh test`) | 3.3 s, 0 crates | 15.6 s, 118 crates (the runner, with QuickJS) |
+| `--template rust`, then the first `nsh trace` (then without QuickJS) | 3.2 s, 0 crates | 13.0 s, 31 crates (`rust-trace`) |
 | One-line edit of the rust template, `nsh build` | 3.3 s, 2 crates | 1.0 s, 2 crates |
 
 A Rust app's runners were and are what they were: `nsh package --target macos` after the build compiled 60 crates
-for the release runner in both. The trace runner of a TSX app links QuickJS, so the first `nsh trace` of such an app
-builds what its `nsh build` no longer does; a Rust root's never does.
+for the release runner in both. The test runner links QuickJS, so the first `nsh test` of such an app builds what its
+`nsh build` no longer does.
 
 ## Finding the runtimes
 
@@ -386,7 +443,8 @@ The CLI finds prebuilt runtimes next to itself (`bin/../runtime`, the distributi
 `target/<triple>/<profile>` (Linux's, macOS's, Windows' and GPUI's, built for this machine, in `target/<profile>`,
 Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GPUI's in `runtime/gpui/` on each OS) and `target/android/<profile>[-dev]` with the CLI's own profile (`NSH_RUNTIME` overrides). In a checkout (`<root>/target/<profile>/nsh` next to
 `crates/nsh-ios-host`), the CLI builds what it needs with cargo first (`cargo build -p nsh-ios-host --target ...`,
-`cargo xtask android --dev`), so `nsh run` never uses a missing or stale host. The web runtimes (`runtime/web/nsh.wasm`
+`cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
+Toolchain it builds GPUI's hosts and runners with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
 the `web` profile, into `target/wasm32-unknown-unknown/web/`.
 

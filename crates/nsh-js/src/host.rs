@@ -1016,12 +1016,19 @@ declare function clearInterval(id: number | undefined): void;
 declare function queueMicrotask(callback: () => void): void;
 /** Runs `callback` at the next display frame with its time in milliseconds. */
 declare function requestAnimationFrame(callback: (time: number) => void): number;
-declare function cancelAnimationFrame(id: number): void;
+declare function cancelAnimationFrame(id: number | undefined): void;
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
 
 /** `<If when={…} else={…}>…</If>`: renders its children while `when` is
- * truthy, else `else`. A global (no import), like `Each`. */
+ * truthy, else `else`. A function child gets an accessor of `when`'s value,
+ * which is set while it shows: `<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>`.
+ * A global (no import), like `Each`. */
+declare function If<T>(props: {
+  when: T;
+  else?: import("./types").JSX.Element;
+  children?: import("./types").JSX.Element | ((value: () => NonNullable<T>) => import("./types").JSX.Element);
+}): import("./types").JSX.Element;
 declare function If(props: {
   when: unknown;
   else?: import("./types").JSX.Element;
@@ -1087,8 +1094,8 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
     let s = shared.clone();
     globals.set(
         "cancelAnimationFrame",
-        Function::new(ctx.clone(), move |id: Opt<u32>| {
-            if let Some(id) = id.0 {
+        Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+            if let Some(id) = handle_id(id) {
                 s.frames.borrow_mut().retain(|(i, _)| *i != id);
             }
         })?,
@@ -1097,14 +1104,34 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
         let s = shared.clone();
         globals.set(
             name,
-            Function::new(ctx.clone(), move |id: Opt<u32>| {
-                if let Some(id) = id.0 {
+            Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+                if let Some(id) = handle_id(id) {
                     s.timers.borrow_mut().cancel(id);
                 }
             })?,
         )?;
     }
     Ok(())
+}
+
+/// The id `clearTimeout`, `clearInterval` and `cancelAnimationFrame` were
+/// given, read as the web reads it (a number, truncated; a numeric string);
+/// anything else (`undefined`, `null`, objects) names no timer and is ignored,
+/// never thrown at: libraries call these with ids they never got.
+fn handle_id(id: Opt<Value<'_>>) -> Option<u32> {
+    let id = id.0?;
+    let n = match id.as_number() {
+        Some(n) => n,
+        None => id
+            .as_string()?
+            .to_string()
+            .ok()?
+            .trim()
+            .parse::<f64>()
+            .ok()?,
+    };
+    let n = n.trunc();
+    (n.is_finite() && n >= 1.0 && n <= f64::from(u32::MAX)).then_some(n as u32)
 }
 
 #[cfg(test)]
@@ -1141,6 +1168,137 @@ mod tests {
             .with(|ctx| crate::dom::unshown_text_tags(ctx.as_raw().as_ptr()));
         let bit = |t: nsh_core::Tag| 1u64 << t as u32;
         assert_eq!(tags, bit(nsh_core::Tag::View) | bit(nsh_core::Tag::Scroll));
+    }
+
+    #[test]
+    fn resources_follow_their_source_and_count_the_latest_load_only() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ effect, resource, signal }} from "nsh";
+const id = signal(1);
+const loads = [];
+globalThis.report = report;
+globalThis.id = id;
+globalThis.loads = loads;
+globalThis.user = resource(id, (n, info) => new Promise((resolve, reject) => {{
+  loads.push({{ n, resolve, reject, info }});
+  info.signal.addEventListener("abort", () => report(`aborted ${{n}}`));
+}}));
+effect(() => report(`${{user.state()}}|${{user() ?? ""}}|${{user.error() ?? ""}}|${{user.loading()}}`));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["pending|||true"]);
+        let step = |code: &str| {
+            host.eval_source(code).unwrap();
+            reported(&host)
+        };
+        // A new source aborts the running load; the old one ending later
+        // changes nothing.
+        assert_eq!(step("id.set(2);"), ["aborted 1"]);
+        assert_eq!(step(r#"loads[0].resolve("one");"#), Vec::<String>::new());
+        assert_eq!(step(r#"loads[1].resolve("two");"#), ["ready|two||false"]);
+        // A refetch keeps the value and says so to the fetcher.
+        assert_eq!(
+            step("user.refetch(); report(`refetching ${loads[2].info.refetching}`);"),
+            ["refreshing|two||true", "refetching true"]
+        );
+        // A failure keeps the value too.
+        assert_eq!(
+            step(r#"loads[2].reject(new Error("boom"));"#),
+            ["errored|two|Error: boom|false"]
+        );
+        // A value set here clears the error; no source loads nothing.
+        assert_eq!(step(r#"user.mutate("local");"#), ["ready|local||false"]);
+        assert!(step("id.set(null);").is_empty());
+        // Three loads in all: none for the unset source.
+        host.eval_source("if (loads.length !== 3) throw new Error(`${loads.length} loads`);")
+            .unwrap();
+    }
+
+    #[test]
+    fn resources_without_a_source_with_values_and_throws() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ effect, resource }} from "nsh";
+const now = resource(() => 42);
+const kept = resource(() => new Promise(() => {{}}), {{ initialValue: "first" }});
+const thrown = resource(() => {{ throw new Error("no"); }});
+effect(() => report(`${{now.state()}} ${{now()}} | ${{kept.state()}} ${{kept()}} | ${{thrown.state()}} ${{thrown.error()}}`));
+// The methods are bound: they work taken off their resource.
+const {{ loading, state }} = kept;
+report(`${{loading()}} ${{state()}}`);"#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [
+                "ready 42 | refreshing first | errored Error: no",
+                "true refreshing"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_resource_going_with_its_owner_aborts_its_load() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ cond, component, element, insert }} from "nsh:rt";
+import {{ effect, resource, signal }} from "nsh";
+const shown = signal(true);
+globalThis.shown = shown;
+function Card() {{
+  const r = resource((info) => new Promise((resolve) => {{
+    globalThis.later = resolve;
+    info.signal.addEventListener("abort", () => report("aborted"));
+  }}));
+  effect(() => report(r.state()));
+  return element("view");
+}}
+const root = element("view");
+insert(root, cond(() => shown(), () => component(Card, {{}})));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["pending"]);
+        host.eval_source("shown.set(false);").unwrap();
+        assert_eq!(reported(&host), ["aborted"]);
+        // Its load ending later finds nothing to change.
+        host.eval_source(r#"later("late");"#).unwrap();
+        assert!(reported(&host).is_empty());
+    }
+
+    #[test]
+    fn a_function_an_effect_returns_is_its_cleanup() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ cond, component, element, insert }} from "nsh:rt";
+import {{ effect, signal }} from "nsh";
+const n = signal(0);
+const shown = signal(true);
+globalThis.n = n;
+globalThis.shown = shown;
+function Ticker() {{
+  effect(() => {{
+    const v = n();
+    report(`run ${{v}}`);
+    return () => report(`cleanup ${{v}}`);
+  }});
+  // An async effect's promise is not a cleanup.
+  effect(async () => {{ n(); }});
+  return element("view");
+}}
+const root = element("view");
+insert(root, cond(() => shown(), () => component(Ticker, {{}})));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["run 0"]);
+        host.eval_source("n.set(1);").unwrap();
+        assert_eq!(reported(&host), ["cleanup 0", "run 1"]);
+        host.eval_source("shown.set(false);").unwrap();
+        assert_eq!(reported(&host), ["cleanup 1"]);
     }
 
     fn ops(host: &Host) -> Vec<Op> {
@@ -1381,6 +1539,39 @@ const report = (v) => text(String(v));
         host.eval_source(&format!("{REPORT}report(log.join(\",\"));"))
             .unwrap();
         assert_eq!(reported(&host), ["micro,a,b"]);
+    }
+
+    #[test]
+    fn clearing_ids_that_name_no_timer_is_ignored() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            globalThis.log = [];
+            const t = setTimeout(() => log.push("timeout"), 0);
+            const i = setInterval(() => { log.push("interval"); clearInterval(i); }, 0);
+            const f = requestAnimationFrame(() => log.push("frame"));
+            for (const clear of [clearTimeout, clearInterval, cancelAnimationFrame]) {
+                clear();
+                for (const id of [undefined, null, 0, -1, NaN, Infinity, 1e12, 0.5, 99999, "x", "", {}, [], true, Symbol()])
+                    clear(id);
+            }
+            const gone = setTimeout(() => log.push("cancelled by string"), 0);
+            clearTimeout(String(gone));
+            const gone2 = setTimeout(() => log.push("cancelled by fraction"), 0);
+            clearTimeout(gone2 + 0.7);
+            const gone3 = requestAnimationFrame(() => log.push("cancelled frame"));
+            cancelAnimationFrame(gone3);
+            "#,
+        )
+        .unwrap();
+        host.run_frame();
+        while let Some(next) = host.next_timer() {
+            std::thread::sleep(next.saturating_duration_since(Instant::now()));
+            host.run_timers(Instant::now());
+        }
+        host.eval_source(&format!("{REPORT}report(log.join(\",\"));"))
+            .unwrap();
+        assert_eq!(reported(&host), ["frame,timeout,interval"]);
     }
 
     fn sandboxed(limits: Limits) -> Host {

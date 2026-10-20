@@ -167,7 +167,7 @@ Fragments (`<>…</>`) group elements without a view.
 
 ```tsx
 <If when={user()} else={<Text>Signed out</Text>}>
-  <Text>Hello, {user()!.name}</Text>
+  {(u) => <Text>Hello, {u().name}</Text>}
 </If>
 
 <Each of={todos()} key={(t) => t.id}>
@@ -179,7 +179,7 @@ Fragments (`<>…</>`) group elements without a view.
 </Each>
 ```
 
-- **`<If when else>`** renders its children while `when` is truthy, else the `else` element. It renders a branch again only when the condition's truthiness changes, not every time `when` is re-evaluated.
+- **`<If when else>`** renders its children while `when` is truthy, else the `else` element. It renders a branch again only when the condition's truthiness changes, not every time `when` is re-evaluated. A function child gets an accessor of `when`'s value, typed without `null` and `undefined`: `u()` is the user while the branch shows, and follows it when it changes.
 - **`<Each of key>`** renders its only child, a function, once per item. Rows are kept by `key(item)` (default: the item itself; objects by identity, primitives by value): when the array changes, kept rows are moved rather than rebuilt, and new rows are made only for new keys. The function receives **accessors**, `todo()` and `index()`, because a kept row's item and position can change. `key="index"` (or `key={(item, i) => i}`; the key function gets the index too) keeps rows by position instead: a list of strings that changes in place, such as text streamed in, keeps its rows and only their `item()` changes.
 
 A ternary or `&&` in JSX also works (`{busy() ? <Spinner /> : <Content />}`), but it builds its branch again every time anything it reads changes. Prefer `<If>` when a branch is more than a few elements.

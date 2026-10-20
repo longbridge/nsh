@@ -7,8 +7,3 @@ EngineConfig.header_heights
 EngineControl::scroll(x)
 EngineControl::scroll(y)
 EngineControl::set_screen_header(height)
-
-# Headless runs (`nsh trace`)
-headless::TraceOptions.height
-headless::TraceOptions.scroll
-headless::TraceOptions.width

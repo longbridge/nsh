@@ -3,7 +3,9 @@
 An app is TSX importing NSH's modules. The bundler compiles each module with NSH's JSX compiler and rolldown bundles
 them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of NSH's modules stay imports, and `nsh-js` serves them
 natively. The reactive graph, the renderer and every API apps import are Rust; nothing of NSH is JS. Apps cannot
-import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...).
+import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...). It also refuses a named import a
+native module does not export, as the names `nsh-js` serves say (`native_module_exports`), when the code uses it as a
+value (types need no `type` keyword), with the place in the source and the closest export's name.
 
 ```tsx
 import { computed, mount, signal, Text, View } from "nsh";
@@ -125,7 +127,9 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
 - `each` keys rows (`key(item, index)`, the index for `key="index"`, else the item; objects by identity, primitives by
   value) and updates the item and index signals of kept rows (rows get accessors: `item()`, `index()`); each row has
   its own owner. `cond` renders a
-  branch per change of truthiness.
+  branch per change of truthiness. An `<If>` whose child is a function written in place compiles to
+  `((w) => cond(w, () => (fn)(w), …))(() => when)`: the function gets an accessor of `when`'s value (Solid's `<Show>`),
+  read through the same thunk the condition is.
 - Platform-only props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`): only the current platform's object is sent, each
   key as a prop of its own (`platform_props`).
 - The reactive graph and the renderer share one per-context state (`state.rs`); natives reach each part by shared or

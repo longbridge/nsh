@@ -179,7 +179,7 @@ import { Platform } from "nsh/device";
 const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
 ```
 
-`nsh trace` 以 iOS 身份无界面运行。
+`nsh test` 以 iOS 身份无界面运行。
 
 在 [Linux](./linux.md) 上，`Platform.OS` 为 `"linux"`，界面风格为 `"desktop"`，`Platform.Version` 为内核的主、次版本号（`"6.12"`）：
 各发行版给版本编号的方式无法相互比较。在那里，安全区域和键盘高度为 0，`colorScheme()` 实时跟随桌面的设置（XDG 设置门户），

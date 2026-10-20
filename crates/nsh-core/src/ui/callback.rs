@@ -35,7 +35,33 @@ pub trait CallbackHandle: std::any::Any {
 }
 
 type ArgsFn = Box<dyn for<'a> FnOnce(&'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>>;
-type ReplyFn = Box<dyn for<'a> FnOnce(Result<JsIn<'a>, String>)>;
+type ReplyFn = Box<dyn for<'a> FnOnce(Result<JsIn<'a>, Exception>)>;
+
+/// What a JS function threw ([`Callback::call_async_traced`]): its message
+/// and, for an `Error`, the stack where it was made (`    at f
+/// (bundle.js:12:5)` lines, the bundle's positions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exception {
+    /// The message (an `Error`'s `message`, else the value as a string).
+    pub message: String,
+    /// The stack, for an `Error`.
+    pub stack: Option<String>,
+}
+
+impl From<String> for Exception {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            stack: None,
+        }
+    }
+}
+
+impl fmt::Display for Exception {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
 
 /// A call of a JS function: its arguments, made when it runs, and what
 /// receives its result.
@@ -87,8 +113,8 @@ impl JsCall {
         self.settles
     }
 
-    /// Delivers the result (or the message of what the function threw).
-    pub fn reply(mut self, result: Result<JsIn<'_>, String>) {
+    /// Delivers the result (or what the function threw).
+    pub fn reply(mut self, result: Result<JsIn<'_>, Exception>) {
         if let Some(reply) = self.reply.take() {
             reply(result);
         }
@@ -98,7 +124,9 @@ impl JsCall {
 impl Drop for JsCall {
     fn drop(&mut self) {
         if let Some(reply) = self.reply.take() {
-            reply(Err("the JS function was not called (JS stopped)".to_owned()));
+            reply(Err("the JS function was not called (JS stopped)"
+                .to_owned()
+                .into()));
         }
     }
 }
@@ -167,7 +195,11 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
             self.handle.clone(),
             args,
             Some(Box::new(move |result| {
-                *slot.borrow_mut() = Some(result.and_then(|v| R::from_js(v).map_err(|e| e.0)));
+                *slot.borrow_mut() = Some(
+                    result
+                        .map_err(|e| e.message)
+                        .and_then(|v| R::from_js(v).map_err(|e| e.0)),
+                );
             })),
             false,
         );
@@ -192,7 +224,26 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
             self.handle.clone(),
             args,
             Some(Box::new(move |result| {
-                let value = result.and_then(|v| R::from_js(v).map_err(|e| e.0));
+                let value = result
+                    .map_err(|e| e.message)
+                    .and_then(|v| R::from_js(v).map_err(|e| e.0));
+                slot.borrow_mut().deliver(value);
+            })),
+            true,
+        ));
+        answer
+    }
+
+    /// [`Callback::call_async`], with what the function threw (or its
+    /// promise rejected with) whole: the message and the stack, which says
+    /// where it was thrown (a test's failing line).
+    pub fn call_async_traced(&self, args: A) -> Answer<Result<R, Exception>> {
+        let (answer, slot) = Answer::new();
+        self.handle.post(JsCall::new(
+            self.handle.clone(),
+            args,
+            Some(Box::new(move |result| {
+                let value = result.and_then(|v| R::from_js(v).map_err(|e| e.0.into()));
                 slot.borrow_mut().deliver(value);
             })),
             true,

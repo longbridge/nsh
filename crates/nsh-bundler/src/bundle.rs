@@ -947,4 +947,85 @@ mod tests {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
+
+    /// An app whose entry is `code`.
+    fn single(name: &str, code: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-import-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("App.tsx"), code).unwrap();
+        dir
+    }
+
+    fn bundling(dir: &std::path::Path) -> Result<Bundle, BundleError> {
+        bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn named_imports_the_module_does_not_export_fail_the_build() {
+        let dir = single(
+            "missing",
+            "import { mount, Text } from \"nsh\";\n\
+             import { AnimatedValu } from \"nsh/animated\";\n\
+             mount(() => <Text>{String(AnimatedValu)}</Text>);\n",
+        );
+        let error = bundling(&dir).unwrap_err().plain;
+        assert!(error.contains("App.tsx"), "{error}");
+        assert!(
+            error.contains("`nsh/animated` has no export `AnimatedValu`"),
+            "{error}"
+        );
+        assert!(error.contains("2:"), "{error}");
+        assert!(error.contains("did you mean `AnimatedValue`?"), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn named_imports_of_what_a_module_exports_and_types_bundle() {
+        let dir = single(
+            "present",
+            "import { mount, Text, type NoSuchType, NoSuchProps } from \"nsh\";\n\
+             let props: NoSuchProps | NoSuchType | undefined;\n\
+             import { AnimatedValue as V } from \"nsh/animated\";\n\
+             import type { Gone } from \"nsh/animated\";\n\
+             import * as animated from \"nsh/animated\";\n\
+             mount(() => <Text>{String(V)}{String(animated)}</Text>);\n",
+        );
+        bundling(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn development_bundles_refuse_what_a_ui_set_does_not_export() {
+        let dir = single(
+            "hot",
+            "import { mount } from \"nsh\";\n\
+             import { Buton } from \"nsh/ui/mobile\";\n\
+             mount(() => <Buton title=\"Go\" />);\n",
+        );
+        let ui_sets = [nsh_ui_mobile::registry().into()];
+        let Err(error) = bundle_hot(&dir.join("App.tsx"), &ui_sets) else {
+            panic!("bundled");
+        };
+        let error = error.plain;
+        assert!(
+            error.contains("`nsh/ui/mobile` has no export `Buton`"),
+            "{error}"
+        );
+        assert!(error.contains("did you mean `Button`?"), "{error}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount } from \"nsh\";\n\
+             import { Button } from \"nsh/ui/mobile\";\n\
+             mount(() => <Button title=\"Go\" />);\n",
+        )
+        .unwrap();
+        bundle_hot(&dir.join("App.tsx"), &ui_sets).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
