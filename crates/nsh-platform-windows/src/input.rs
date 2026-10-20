@@ -2250,7 +2250,7 @@ mod tests {
         let s = view(&root, 2, ViewKind::Scroll, rect(0.0, 0.0, 200.0, 200.0));
         view(&s, 4, ViewKind::View, rect(0.0, 300.0, 200.0, 50.0));
         assert_eq!(at(&root, 100.0, 20.0), Some(2));
-        s.state_mut().scroll.as_mut().unwrap().y = 290.0;
+        s.state_mut().scroll.as_mut().unwrap().y = Points(290.0);
         assert_eq!(at(&root, 100.0, 20.0), Some(4));
         let m = view(&root, 6, ViewKind::Scroll, rect(0.0, 250.0, 200.0, 100.0));
         view(&m, 8, ViewKind::View, rect(0.0, 0.0, 50.0, 100.0));
@@ -2314,7 +2314,7 @@ mod tests {
     fn local_points_go_through_the_chain() {
         let root = root();
         let s = view(&root, 2, ViewKind::Scroll, rect(10.0, 10.0, 200.0, 200.0));
-        s.state_mut().scroll.as_mut().unwrap().y = 40.0;
+        s.state_mut().scroll.as_mut().unwrap().y = Points(40.0);
         let c = view(&s, 4, ViewKind::View, rect(5.0, 50.0, 50.0, 50.0));
         let (x, y) = local(&c, 20.0, 30.0);
         assert!((x - 5.0).abs() < 1e-4 && (y - 10.0).abs() < 1e-4, "{x} {y}");

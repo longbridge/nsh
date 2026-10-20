@@ -34,7 +34,7 @@ crates/
                        pointer decisions (`input.rs`: what a pointer may start, presses, hover, hit areas, wheel latching),
                        navigation decisions (`navigation.rs`: stacks' screens, transitions' timing and motion, what going back
                        acts on), one view's transitions, layout animations and keyframes (`transition.rs`: curves,
-                       interpolation, timing);
+                       interpolation, timing), scroll views' state and physics (`scroll.rs`);
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, design tokens;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the

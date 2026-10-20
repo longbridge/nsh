@@ -22,51 +22,14 @@
 use std::cell::{Ref, RefCell, RefMut};
 
 use gtk4::{self as gtk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+// The scroll position, extent and motion of a `ViewKind::Scroll` view.
+pub(crate) use nsh_core::scroll::ScrollState;
 use nsh_core::{
     Bounds, EventMask, NodeId, PointerEvents, Points, TransformKind, ViewKind, ViewProps,
     ViewStyle,
     animation::AnimValues,
     geometry::{AbsoluteLength, DefiniteLength, REM_SIZE},
 };
-
-/// Scroll position and extent of a [`ViewKind::Scroll`] view.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct ScrollState {
-    /// Current offset (points; content coordinates of the viewport's top
-    /// left).
-    pub(crate) x: f32,
-    /// Vertical offset.
-    pub(crate) y: f32,
-    /// Size of the scrollable content.
-    pub(crate) content: (f32, f32),
-    /// Scrolls horizontally.
-    pub(crate) horizontal: bool,
-    /// Shows the scroll indicator.
-    pub(crate) indicator: bool,
-    /// How it scrolls (paging, snapping, insets...).
-    pub(crate) behavior: nsh_core::ScrollBehavior,
-    /// Scrolls the core asked for (`ScrollBy`, `scrollTo`) that were
-    /// applied: reported with each offset.
-    pub(crate) applied: u32,
-    /// The sticky cells: (cell, start, end).
-    pub(crate) sticky: Vec<nsh_core::StickyCell>,
-    /// A horizontal list laid out right to left: children are placed
-    /// mirrored (offsets stay left to right).
-    pub(crate) mirrored: bool,
-    /// Gestures, glides and the indicator ([`crate::scroll`]).
-    pub(crate) live: crate::scroll::Live,
-}
-
-impl ScrollState {
-    /// The largest offsets.
-    pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
-        let inset = self.behavior.content_inset.map(|v| v.0);
-        (
-            (self.content.0 + inset.left + inset.right - viewport.0).max(0.0),
-            (self.content.1 + inset.top + inset.bottom - viewport.1).max(0.0),
-        )
-    }
-}
 
 /// A native GTK widget a view hosts at `rect` (view coordinates).
 #[derive(Debug, Clone)]
@@ -419,7 +382,7 @@ mod imp {
             let (sx, sy) = match &state.scroll {
                 Some(s) => {
                     let inset = s.behavior.content_inset.map(|v| v.0);
-                    (s.x - inset.left, s.y - inset.top)
+                    (s.x.0 - inset.left, s.y.0 - inset.top)
                 }
                 None => (0.0, 0.0),
             };

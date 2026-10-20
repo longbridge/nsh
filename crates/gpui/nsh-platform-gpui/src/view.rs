@@ -22,58 +22,14 @@ use std::{
     rc::{Rc, Weak},
 };
 
+// The scroll position, extent and motion of a `ViewKind::Scroll` view.
+pub(crate) use nsh_core::scroll::ScrollState;
 use nsh_core::{
     Bounds, EventMask, NodeId, Points, TransformKind, ViewKind, ViewProps, ViewStyle,
     animation::AnimValues,
 };
 
 use crate::{geom::Mat4, render::DrawCx};
-
-/// Scroll position and extent of a [`ViewKind::Scroll`] view.
-#[derive(Default)]
-pub(crate) struct ScrollState {
-    /// Current offset (points; content coordinates of the viewport's top
-    /// left).
-    pub(crate) x: f32,
-    /// Vertical offset.
-    pub(crate) y: f32,
-    /// Size of the scrollable content.
-    pub(crate) content: (f32, f32),
-    /// Scrolls horizontally.
-    pub(crate) horizontal: bool,
-    /// Shows the scroll indicator.
-    pub(crate) indicator: bool,
-    /// How it scrolls (paging, snapping, insets...).
-    pub(crate) behavior: nsh_core::ScrollBehavior,
-    /// Scrolls the core asked for (`ScrollBy`, `scrollTo`) that were
-    /// applied: reported with each offset.
-    pub(crate) applied: u32,
-    /// The sticky cells: (cell, start, end).
-    pub(crate) sticky: Vec<nsh_core::StickyCell>,
-    /// A horizontal list laid out right to left: children are placed
-    /// mirrored (offsets stay left to right).
-    pub(crate) mirrored: bool,
-    /// Gestures, glides and the indicator ([`crate::scroll`]).
-    pub(crate) live: crate::scroll::Live,
-}
-
-impl ScrollState {
-    /// The largest offsets.
-    pub(crate) fn max(&self, viewport: (f32, f32)) -> (f32, f32) {
-        let inset = self.behavior.content_inset;
-        (
-            (self.content.0 + inset.left.0 + inset.right.0 - viewport.0).max(0.0),
-            (self.content.1 + inset.top.0 + inset.bottom.0 - viewport.1).max(0.0),
-        )
-    }
-
-    /// The offset children are drawn at: the scroll offset less the
-    /// content inset.
-    pub(crate) fn origin(&self) -> (f32, f32) {
-        let inset = self.behavior.content_inset;
-        (self.x - inset.left.0, self.y - inset.top.0)
-    }
-}
 
 /// A pointer event a hosted item gets, in its own coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -318,7 +274,10 @@ impl ViewState {
         frame: nsh_core::Bounds<Points>,
         shift: (f32, f32),
     ) -> (f32, f32) {
-        let (sx, sy) = self.scroll.as_ref().map_or((0.0, 0.0), ScrollState::origin);
+        let (sx, sy) = self.scroll.as_ref().map_or((0.0, 0.0), |s| {
+            let o = s.origin();
+            (o.x.0, o.y.0)
+        });
         let mut x = frame.origin.x.0 - sx + shift.0;
         if self.scroll.as_ref().is_some_and(|s| s.mirrored) {
             x = self.frame.size.width.0 - x - frame.size.width.0;

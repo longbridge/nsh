@@ -149,6 +149,25 @@ props::LayoutTransition.delay_ms                                 # time
 props::LayoutTransition.duration_ms                              # time
 props::LayoutTransition::new(duration_ms)                        # time
 props::ViewProps.long_press_delay                                # time
+scroll::KeyMove::Pages.0                                         # a number of viewports
+scroll::KeyMove::sign ->                                         # a direction, -1 or 1
+scroll::Live.alpha                                               # an opacity, 0..1
+scroll::ScrollHost::now ->                                       # time
+scroll::drag_end(vx)                                             # a velocity, points per second
+scroll::drag_end(vy)                                             # a velocity, points per second
+scroll::ease_out ->                                              # easing curve coordinates (unit square)
+scroll::ease_out(t)                                              # easing curve coordinates (unit square)
+scroll::frame(now)                                               # time
+scroll::indicator_alpha ->                                       # an opacity, 0..1
+scroll::indicator_alpha(since)                                   # time
+scroll::projected(rate)                                          # a deceleration factor (velocity kept per millisecond)
+scroll::projected(velocity)                                      # a velocity, points per millisecond
+scroll::rate ->                                                  # a deceleration factor (velocity kept per millisecond)
+scroll::snap_duration ->                                         # time
+scroll::snap_duration(velocity)                                  # a velocity, points per millisecond
+scroll::spokes ->                                                # an opacity per spoke, 0..1
+scroll::wheel_end(vx)                                            # a velocity, points per second
+scroll::wheel_end(vy)                                            # a velocity, points per second
 shape::SMOOTHING                                                 # a corner smoothing factor
 style::Color::to_f64 ->                                          # color components
 style::PatchValue::Number.0                                      # a generic number (a JS value, a recorded slot)
