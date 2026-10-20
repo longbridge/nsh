@@ -30,7 +30,8 @@ earlier versions made no promises.
    class object at run time), declared `@deprecated` with the new name, and kept for good. The same goes for moving an
    export between modules: the old module keeps exporting it.
 3. **Types only widen.** A union gains alternatives, a function gains overloads or trailing optional parameters, a
-   parameter becomes optional, a prop accepts more values. Nothing narrows, a return type never changes, and what apps
+   parameter becomes optional, a prop accepts more values, a function or method that returned `void` returns a value
+   (a callback an app passes in keeps returning `void`). Parameter names are not part of a type. Nothing narrows, a return type never changes, and what apps
    pass in (props, styles, options, configs) gains optional members only.
 4. **Behavior is kept.** Defaults, units, coordinate spaces, the payload of an event and when it fires stay as they
    were. New behavior is opt-in, through a new prop, option or value. A bug fix that changes what a working app sees

@@ -152,7 +152,7 @@ export interface SelectListProps extends ComponentHostProps {
   /** The index of the chosen option, when the app controls it. */
   value?: number | null;
   /** An option was chosen (its index). */
-  onSelect?: (data: number) => void;
+  onSelect?: (index: number) => void;
 }
 
 /** A scrolling list of options with a check mark on the chosen one. With `value` the app controls the choice (it updates `value` from `onSelect`); without, the list keeps its own. */
@@ -186,9 +186,9 @@ export interface StatusBarProps extends ComponentHostProps {
 /** What the status bar shows while this renders: the most recently mounted `StatusBar` wins, prop by prop, over what the functions set. In an app embedded in a native one, the host app's view controller decides on iOS. */
 export declare const StatusBar: ((props: StatusBarProps) => JSX.Element) & {
   /** Sets the color of the status bar's content. */
-  setBarStyle(barStyle: BarStyle, animated?: boolean | null): void;
+  setBarStyle(barStyle: BarStyle, animated?: boolean | null): Promise<void>;
   /** Hides or shows the status bar. */
-  setHidden(hidden: boolean, animation?: BarAnimation | null): void;
+  setHidden(hidden: boolean, animation?: BarAnimation | null): Promise<void>;
 };
 
 /** The ref of `Stepper`: its methods. */
@@ -196,7 +196,7 @@ export interface StepperRef {
   /** The component's host node. */
   readonly node: YNode;
   /** Sets the value (on the step grid, within the bounds) and reports it as a press would. */
-  setValue(value: number): void;
+  setValue(value: number): Promise<void>;
   /** The value shown. */
   value(): Promise<number>;
 }
@@ -216,7 +216,7 @@ export interface StepperProps extends Omit<ComponentHostProps, "ref"> {
   /** No presses, dimmed. */
   disabled?: boolean;
   /** The value changed (the new one). */
-  onChange?: (data: number) => void;
+  onChange?: (value: number) => void;
 }
 
 /** A number with − and + buttons, within `min`–`max`; holding a button keeps stepping. With `value` the app controls it (it updates `value` from `onChange`); without, the stepper keeps its own, starting at `defaultValue`. */
@@ -238,9 +238,9 @@ export interface TextFieldProps extends ComponentHostProps {
   /** Not editable, dimmed. */
   disabled?: boolean;
   /** The text changed (the new text). */
-  onChange?: (data: string) => void;
+  onChange?: (text: string) => void;
   /** The return key was pressed (the text). */
-  onSubmit?: (data: string) => void;
+  onSubmit?: (text: string) => void;
 }
 
 /** A labeled text input with a clear button. With `value` the app controls the text (it updates `value` from `onChange`); without, the field keeps its own, starting at `defaultValue`. */
@@ -267,7 +267,7 @@ export declare const Alert: AlertModule;
 /** The software keyboard. */
 export interface KeyboardModule {
   /** Unfocuses the focused input, hiding the keyboard. */
-  dismiss(): void;
+  dismiss(): Promise<void>;
 }
 
 /** The software keyboard. */

@@ -28,3 +28,17 @@ export interface NativeComponentSpec<P, E> {
  */
 export declare function nativeComponent<P extends object = {}, E extends object = {}>(name: string, spec: NativeComponentSpec<P, E>): (props: NativeComponentProps<P, E>) => YNode;
 
+/**
+ * The exports of the UI set the embedding app registered as `specifier`
+ * (`Registry::ui_set("host/trading")` among its engines' UI sets: Rust
+ * `set_ui_sets`, `EngineConfig::ui_sets`): its modules, classes, functions
+ * and components, as one object, the same on every call. The app declares
+ * the type `T` itself, so it builds with the stock `nsh build`:
+ * `nativeModule<{ Trading: TradingApi }>("host/trading").Trading.quote("AAPL")`.
+ * Calls work as through an import: plain functions return their value,
+ * `async` ones a promise, and callbacks can be called later by Rust. Where
+ * nothing is registered under `specifier`, it throws a `ReferenceError`
+ * naming it.
+ */
+export declare function nativeModule<T extends object>(specifier: string): T;
+

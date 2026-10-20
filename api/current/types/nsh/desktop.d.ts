@@ -99,6 +99,8 @@ export interface WindowFrame {
   height?: number | null;
   /** Animates the change on macOS (false by default). */
   animated?: boolean | null;
+  /** The top edge keeps its place when `height` changes without a `y`: the window grows and shrinks at its bottom edge (a content-sized window's title area stays put). Elsewhere, where `y` already is the top edge, this is the default. */
+  anchorTop?: boolean | null;
 }
 
 /** How high a window floats (`Window.setLevel`). */
@@ -107,21 +109,23 @@ export type WindowLevel = "normal" | "floating" | "desktopIcon";
 /** The app's window (desktops; its functions do nothing elsewhere). */
 export interface WindowModule {
   /** Sets the window's title (the title bar, the taskbar / Dock, the window switcher). */
-  setTitle(title: string): void;
+  setTitle(title: string): Promise<void>;
   /** Shows the system's title bar (`"default"`) or hides it (`"hidden"`): the app then fills the window up to its top edge and draws a title bar of its own, made draggable with `desktop={{ windowDrag: true }}`; the system's window controls stay, in the area `titleBar()` reports. `height` is the app's bar's height in points: the controls are centered in it (Windows' caption buttons fill it); the platform's own without it. On macOS, it selects compact chrome up to 44 points and regular chrome above; use `titleBar().height` to lay out the bar at AppKit's actual height. An embedding host's existing toolbar keeps its own style and height. */
-  setTitleBar(style: TitleBarStyle, height?: number | null): void;
+  setTitleBar(style: TitleBarStyle, height?: number | null): Promise<void>;
   /** Minimizes the window. */
-  minimize(): void;
+  minimize(): Promise<void>;
   /** Maximizes the window, or restores it when it is maximized. */
-  toggleMaximize(): void;
+  toggleMaximize(): Promise<void>;
   /** Enters or leaves full screen. */
-  toggleFullScreen(): void;
+  toggleFullScreen(): Promise<void>;
   /** Moves and sizes the window in points; omitted fields keep their values. macOS and Windows use the outer frame, including window decorations; Linux uses GTK's default window size. `x` and `y` are the bottom left corner in macOS screen coordinates and the top left on Windows. `animated` enables macOS's resize animation (false by default). Sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. A view embedded in another app's window leaves its bounds and level to that app. */
-  setFrame(frame: WindowFrame): void;
+  setFrame(frame: WindowFrame): Promise<void>;
   /** Sets the window's level on macOS and Windows: `"normal"` restores the normal level; `"floating"` stays above normal windows. `"desktopIcon"` selects macOS's desktop icon level or moves a Windows window to the bottom of the current z-order, where later activation can raise it. Elsewhere the level is left to the host and the window manager. */
-  setLevel(level: WindowLevel): void;
+  setLevel(level: WindowLevel): Promise<void>;
+  /** Brings the window to the front of its level and focuses it (the app activates). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. */
+  orderFront(): Promise<void>;
   /** Closes the window; the app ends with it. */
-  close(): void;
+  close(): Promise<void>;
 }
 
 /** The app's window (desktops; its functions do nothing elsewhere). */

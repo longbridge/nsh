@@ -212,6 +212,7 @@ Menu.setApplicationMenu function
 Window object
 Window.close function
 Window.minimize function
+Window.orderFront function
 Window.setFrame function
 Window.setLevel function
 Window.setTitle function
@@ -272,6 +273,7 @@ List function
 
 [nsh/native]
 nativeComponent function
+nativeModule function
 
 [nsh/storage]
 Storage object

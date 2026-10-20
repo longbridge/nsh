@@ -4,9 +4,11 @@
 //! - nothing goes: a module, an export, a member of an object, a class or
 //!   an interface, a global;
 //! - a runtime value keeps its kind (a function stays callable);
-//! - a declaration keeps its text (comments and spacing aside), or widens
-//!   it: a union gains alternatives, a function gains overloads or
-//!   trailing optional parameters, a parameter becomes optional;
+//! - a declaration keeps its text (comments, spacing and parameter names
+//!   aside), or widens it: a union gains alternatives, a function gains
+//!   overloads or trailing optional parameters, a parameter becomes
+//!   optional, a function's or method's `void` result becomes a value (a
+//!   callback an app passes in keeps its `void`);
 //! - what apps pass in (an interface named `…Props`, `…Style`, `…Options`
 //!   or `…Config`) gains optional members only.
 
@@ -143,6 +145,12 @@ fn header_compatible(old: &str, new: &str) -> bool {
 /// did: the same text, a union with more alternatives, or a signature with
 /// trailing optional parameters or parameters that widened.
 pub(crate) fn compatible(old: &str, new: &str) -> bool {
+    let (old, new) = (&erase_names(old), &erase_names(new));
+    old == new || widened(old, new) || void_returns_filled(old, new)
+}
+
+/// [`compatible`] on texts without parameter names.
+fn widened(old: &str, new: &str) -> bool {
     if old == new {
         return true;
     }
@@ -170,7 +178,7 @@ pub(crate) fn compatible(old: &str, new: &str) -> bool {
 }
 
 fn parameter_compatible(old: &str, new: &str) -> bool {
-    if compatible(old, new) {
+    if widened(old, new) {
         return true;
     }
     // `a: T` → `a?: T` (or a wider `T`).
@@ -182,6 +190,89 @@ fn parameter_compatible(old: &str, new: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// `old` with each method's or function's `): void` given a value in
+/// `new` (`): Promise<void>`), all else the same.
+fn void_returns_filled(old: &str, new: &str) -> bool {
+    const VOID: &str = "): void";
+    fn matches(parts: &[&str], new: &str) -> bool {
+        let [first, rest @ ..] = parts else {
+            return new.is_empty();
+        };
+        let Some(after) = new.strip_prefix(first) else {
+            return false;
+        };
+        if rest.is_empty() {
+            return after.is_empty();
+        }
+        let Some(after) = after.strip_prefix("): ") else {
+            return false;
+        };
+        // The result type: the shortest balanced text the rest follows.
+        (1..=after.len())
+            .filter(|&end| after.is_char_boundary(end))
+            .any(|end| balanced(&after[..end]) && matches(rest, &after[end..]))
+    }
+    let parts: Vec<&str> = old.split(VOID).collect();
+    parts.len() > 1 && matches(&parts, new)
+}
+
+fn balanced(text: &str) -> bool {
+    let mut depth = 0i32;
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            _ => {}
+        }
+        if depth < 0 {
+            return false;
+        }
+    }
+    depth == 0
+}
+
+/// `text` with every parameter named `_` (`(a?: T, ...b: U)` →
+/// `(_?: T, ..._: U)`): the names are not part of a type.
+fn erase_names(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while let Some(open) = text[at..].find('(').map(|i| at + i) {
+        out.push_str(&text[at..=open]);
+        let Some(close) = matching(text, open) else {
+            out.push_str(&text[open + 1..]);
+            return out;
+        };
+        let params: Vec<String> = split_top(&text[open + 1..close], ',')
+            .into_iter()
+            .map(|p| {
+                let (rest, spread) = match p.strip_prefix("...") {
+                    Some(r) => (r, "..."),
+                    None => (p, ""),
+                };
+                let name: String = rest.chars().take_while(|c| is_ident(*c)).collect();
+                let after = &rest[name.len()..];
+                let after = after.strip_prefix('?').map_or(after, |a| a);
+                let optional = if rest[name.len()..].starts_with('?') {
+                    "?"
+                } else {
+                    ""
+                };
+                match after.strip_prefix(": ") {
+                    Some(ty) if !name.is_empty() => {
+                        format!("{spread}_{optional}: {}", erase_names(ty))
+                    }
+                    _ => erase_names(p),
+                }
+            })
+            .collect();
+        out.push_str(&params.join(", "));
+        out.push(')');
+        at = close + 1;
+    }
+    out.push_str(&text[at..]);
+    out
 }
 
 fn optional(param: &str) -> bool {
@@ -608,8 +699,24 @@ mod tests {
             "export declare function f(a: number): void",
             "export declare function f(a: number, b: string): void"
         ));
-        assert!(!compatible("m(a: X): void", "m(a: X): string"));
+        assert!(!compatible("m(a: X): number", "m(a: X): string"));
         assert!(!compatible("m(a: X | Y): void", "m(a: X): void"));
+        // Names are not types; a void result may become a value, but not a
+        // callback's (the app's to return).
+        assert!(compatible(
+            "onSelect?: (data: number) => void",
+            "onSelect?: (index: number) => void"
+        ));
+        assert!(compatible("dismiss(): void", "dismiss(): Promise<void>"));
+        assert!(compatible(
+            "export declare const S: ((p: P) => E) & { a(x: string): void; b(): void }",
+            "export declare const S: ((props: P) => E) & { a(text: string): Promise<void>; b(): void }"
+        ));
+        assert!(!compatible(
+            "onPress?: () => void",
+            "onPress?: () => Promise<void>"
+        ));
+        assert!(!compatible("m(): number", "m(): Promise<number>"));
         // A callback's parameters are the app's to accept.
         assert!(!compatible(
             "onPress?: (e: X) => void",
