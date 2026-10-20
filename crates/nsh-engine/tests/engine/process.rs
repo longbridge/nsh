@@ -291,9 +291,11 @@ setTimeout(() => enabled.set(false), 200);"#,
 
 #[test]
 fn detached_inherited_pipes_hold_back_neither_the_exit_nor_the_engine() {
+    // The leader stays alive until its descendant has entered its own
+    // session; a fixed sleep races the supervisor on loaded hosts.
     for drop_engine in [false, true] {
         let mut app = App::start(
-            r#"const child = process.spawn("/bin/sh", ["-c", `setsid /bin/sh -c 'echo $$ > detached.pid; exec sleep 30' <&0 & printf ready; sleep 0.1`], { stdin: "pipe" });
+            r#"const child = process.spawn("/bin/sh", ["-c", `setsid /bin/sh -c 'echo $$ > detached.pid; exec sleep 30' <&0 & while [ ! -s detached.pid ]; do sleep 0.01; done; printf ready`], { stdin: "pipe" });
 child.write("x".repeat(900000));
 const out = [];
 child.on("stdout", (t) => out.push(t));
