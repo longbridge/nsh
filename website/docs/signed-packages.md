@@ -146,8 +146,8 @@ The package's identity, used for revocation, is the SHA-256 of the whole file.
 
 ### Packages from newer versions of NSH
 
-A host app runs packages that a newer `nsh publish` signed, as long as its runtime is at least the package's minimum
-runtime. What a newer version adds and the host's runtime does not know is left out, and never widens what the
+A host app runs packages that a newer `nsh publish` signed, as long as its runtime is at least the package's [minimum
+runtime](#which-runtimes-run-a-package). What a newer version adds and the host's runtime does not know is left out, and never widens what the
 package may do:
 
 - header fields and files it does not know are ignored (they are still covered by the signature and their hashes),

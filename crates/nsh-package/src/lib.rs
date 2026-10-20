@@ -38,7 +38,11 @@
 //!
 //! The signature covers every byte before it, so nothing in a package can
 //! change without invalidating it; its identity (for revocation) is the
-//! SHA-256 of the whole file.
+//! SHA-256 of the whole file. A package always carries the bundle's source;
+//! bytecode is an extra that only loads when the runtime's
+//! `BYTECODE_VERSION` matches (QuickJS bytecode is trusted input: loading
+//! crafted bytecode is memory corruption, so it is only ever loaded from a
+//! verified package or the app's own signed resources).
 //!
 //! # Format evolution
 //!
@@ -60,11 +64,9 @@
 //! Signers write `critical` only when it is not empty, and nothing else
 //! older runtimes do not read. What was ignored is in
 //! [`VerifiedPackage::ignored`]. An incompatible change bumps the format
-//! version, which runtimes require to match. A package always carries the bundle's source;
-//! bytecode is an extra that only loads when the runtime's
-//! `BYTECODE_VERSION` matches (QuickJS bytecode is trusted input: loading
-//! crafted bytecode is memory corruption, so it is only ever loaded from a
-//! verified package or the app's own signed resources).
+//! version, which runtimes require to match. All of this applies to
+//! runtimes the package's minimum runtime admits: older ones refuse it
+//! ([`Error::RuntimeTooOld`]).
 
 mod keys;
 mod package;

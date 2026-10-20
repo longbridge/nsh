@@ -268,9 +268,10 @@ pub struct VerifiedPackage {
     pub key_id: String,
     /// When it was signed (Unix seconds).
     pub created_at: u64,
-    /// What this runtime left unused, as a newer signer wrote it: header
-    /// fields it does not know, files of kinds (or with fields) it does
-    /// not know. Worth logging; the package is valid without them.
+    /// What this runtime left unused, as a newer signer wrote it: top-level
+    /// header fields it does not know, files of kinds (or with fields) it
+    /// does not know. Unknown `app` fields are ignored without a mention.
+    /// Worth logging; the package is valid without them.
     pub ignored: Vec<String>,
 }
 
