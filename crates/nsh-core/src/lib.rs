@@ -21,6 +21,7 @@ mod fenwick;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
+pub mod input;
 pub mod js;
 pub mod keymap;
 mod mount;
