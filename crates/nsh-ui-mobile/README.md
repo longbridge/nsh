@@ -22,10 +22,9 @@ state) stays native. JS only gets the events the component emits.
   what it read changes, only that part is updated. A prop is read with `props.x.get()` in a binding and
   `get_untracked()` in a listener. The root can be any element; the app's `class` (merged last, it wins) and `style`
   apply to it.
-- **Colors come from the theme** (`theme()`: gpui-kit's semantic fields, a light and a dark `Hsla` each), never
+- **Colors come from the theme** (`theme()`: gpui-kit's semantic fields, a light and a dark value each), never
   literals: apps restyle every component with their `nsh.json` theme, and dark appearance switches natively. Read
-  `theme()` inside the bindings that use it, so a new theme reaches them. A shade the theme does not name is derived
-  with `Hsla`'s methods (`theme().primary.map(|c| c.darken(0.1))`, `.opacity(0.5)`).
+  `theme()` inside the bindings that use it, so a new theme reaches them.
 - **What never changes is plain Rust**: `.when(cond, |v| ..)`, `match` at build time. Interaction states are variants:
   `.active(..)`, `.hover(..)`, `.focus(..)`.
 - **What comes and goes is a region**: `If::new(cond, || el).otherwise(|| el)`, `dynamic(move || ..)` (an element, an
