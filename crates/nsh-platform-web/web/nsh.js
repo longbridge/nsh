@@ -1803,7 +1803,7 @@ class Player {
   }
 
   // Desktop scroll bars (the desktop idiom): nsh's own, thin, over the
-  // content, shown while the view scrolls or the mouse moves over it and
+  // content, shown while the view scrolls or the mouse reaches its thumb and
   // fading after, and dragged by the mouse as a scroll bar's thumb, as on
   // the desktop backends.
 
@@ -1850,6 +1850,22 @@ class Player {
     if (!el._barHeld) el._barTimer = setTimeout(() => el._bar && (el._bar.firstChild.style.opacity = "0"), BAR_HOLD);
   }
 
+  /** Whether the pointer reaches the draggable thumb, even while faded. */
+  barHit(el, e) {
+    if (!this.barShown(el)) return false;
+    const thumb = this.barThumb(el);
+    if (!thumb) return false;
+    const r = el.getBoundingClientRect();
+    const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+    const [along, across, edge] = el._horizontal ? [x, y, el.clientHeight] : [y, x, el.clientWidth];
+    return across >= edge - BAR_GRAB && across <= edge && along >= thumb[0] - 4 && along <= thumb[0] + thumb[1] + 4;
+  }
+
+  /** Content hover leaves the bar and its fade timer unchanged. */
+  hoverBar(el, e) {
+    if (this.barHit(el, e)) this.showBar(el);
+  }
+
   /** A mouse press on the bar of a scroll view around `e`'s target grabs
    * it, faded or not: the content moves the other way, so the thumb
    * follows the pointer. */
@@ -1857,14 +1873,8 @@ class Player {
     const view = this.viewOf(e.target);
     if (!view) return false;
     for (const el of this.ancestors(view)) {
-      if (el._kind !== "scroll" || !this.barShown(el)) continue;
-      const thumb = this.barThumb(el);
-      if (!thumb) continue;
-      const r = el.getBoundingClientRect();
-      const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+      if (!this.barHit(el, e)) continue;
       const h = !!el._horizontal;
-      const [along, across, edge] = h ? [x, y, el.clientHeight] : [y, x, el.clientWidth];
-      if (across < edge - BAR_GRAB || across > edge || along < thumb[0] - 4 || along > thumb[0] + thumb[1] + 4) continue;
       e.preventDefault();
       el._barHeld = true;
       // Snapping would move the content under the thumb: back once it ends.
@@ -3733,10 +3743,10 @@ class Player {
     root.addEventListener("pointermove", (e) => {
       if (e.pointerType !== "mouse") return;
       this.hover = [e.clientX, e.clientY];
-      // The scroll views under the mouse show their bars.
+      // Reveal only a draggable thumb under the pointer.
       if (!this.desktopUI || e.buttons) return;
       const view = this.viewOf(e.target);
-      if (view) for (const el of this.ancestors(view)) if (el._kind === "scroll") this.showBar(el);
+      if (view) for (const el of this.ancestors(view)) if (el._kind === "scroll") this.hoverBar(el, e);
     });
     root.addEventListener("focusin", () => (Player.active = this));
     window.addEventListener("keydown", (e) => this.keyDown(e));
