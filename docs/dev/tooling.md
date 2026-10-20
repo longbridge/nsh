@@ -189,23 +189,47 @@ package`, `publish`, the dev server) the bundle holds the whole app.
 
 ## `nsh trace`
 
-`nsh-engine`'s `headless` module (feature `headless`) does the run: `headless::trace` starts the app on an engine
-(`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread) and prints every batch;
-`crates/nsh-cli/src/trace.rs` bundles the app and calls it in the CLI's process. It keeps a model of the native tree from the mount items
-(inserts, removals, `ViewProps`' `testID` and `accessibilityLabel`, texts, event masks) to find what to tap:
-`--tap id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` or a bare string (testID, then label,
-then text), the first match in tree order below the root, or its nearest pressable ancestor; it is dispatched as
-`Press`. Without `--tap`, `--taps <n>` taps the first pressable view. Waits are bounded so apps with timers or
-animations end: before the taps the app must be quiet for `--idle-ms` (at most 10 s), after each tap for 100 ms (also
-at most 10 s); `--wait <ms>` runs exactly that long instead, `--duration <ms>` keeps running after the last tap.
-`--safe-area <top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
+`nsh-engine`'s `headless` module (feature `headless`) does the run, on its driver `headless::Headless`: the app on an
+engine (`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread), its batches applied to a
+model of the native views (`headless::Screen`, `headless/screen.rs`), and steps taken on what they show. `headless::trace`
+is `nsh trace` on it, printing every batch under the step it came in (`── press(id:save): 8 items`, `print_batch`);
+`crates/nsh-cli/src/trace.rs` bundles the app and calls it in the CLI's process.
 
-Tests use the same pieces: `headless::start` (the engine with its frames, the batches to the caller),
-`headless::Screen` (that model of the native tree, public: texts in tree order, the commands sent, `press_target`
-with the `--tap` selectors) and `headless::Headless` (an app, its screen, `wait_for` / `wait_until` / `settle`,
-`press`). `EngineConfig::new(app)` is the phone-sized config the trace and the tests start from. `nsh-testing` adds
-what a TSX entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so
-that a Rust app's tests link neither the bundler nor QuickJS.
+The steps name views with selectors: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>` (an input's text or,
+while it is empty, its placeholder too), `view:<id>` or a bare string (testID, then label, then text), the first match
+where a user would look first: the top modal, then the rest in tree order below the root, of a stack only its top
+screen. Each step sends what a platform would, to the views that report it:
+
+- `press`: the match or its nearest pressable ancestor gets `PressIn`, `PressOut`, `Press`;
+- `type_text`: the input (the match or the first input in it) takes the focus (`Blur` to the one that had it,
+  `Focus`), then each character is a `KeyPress` and a `ChangeText` with the edit count, within `maxLength`; a line
+  break in a single line is the return key;
+- `submit`: the return key as the input's `submitBehavior` resolves (`InputConfig::submit`): `KeyPress` `Enter` and
+  `SubmitEditing` (then `Blur` for blur-and-submit), or a line break;
+- `scroll`: the scroll view (the match, the nearest one around it, else the first in it) moves along its axis 10
+  points per frame within its content (`ScrollBeginDrag`, offsets with the applied count as platforms report them,
+  `ScrollEndDrag`, `ScrollEnd`); the model applies `ScrollBy` and `ScrollTo` / `ScrollToEnd` and reports where a
+  command moved the view;
+- `wait`, `wait_for` / `wait_until` (until a selector matches), `idle` (until quiet for a while).
+
+A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
+for 100 ms (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
+(`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
+failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
+edits than were typed is dropped. `headless::StubNetwork` (responses by `"<METHOD> <URL>"`, others fail) and
+`headless::MemoryStorage` (entries given up front) stand in for the device's services.
+
+`nsh trace`'s flags are steps: the first render, `--scroll <points>` on the first scroll view, `idle` for `--idle-ms`
+(at most 10 s; it lets the engine's idle collection run first, so retention bugs show up), then one `press` per
+`--tap` (without `--tap`, `--taps <n>` presses the first pressable view), `--wait <ms>` runs exactly that long instead
+of `idle` and after each press, `--duration <ms>` keeps running after the last one. `--safe-area
+<top,right,bottom,left>` sets the environment's insets (`useSafeAreaInsets`, `SafeAreaView`, screens).
+
+Tests use the same driver: `headless::start` (the engine with its frames, the batches to the caller), `headless::Screen`
+(texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `headless::Headless`.
+`EngineConfig::new(app)` is the phone-sized config the trace and the tests start from. `nsh-testing` adds what a TSX
+entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so that a Rust
+app's tests link neither the bundler nor QuickJS.
 
 ## New apps (`nsh init --template`)
 

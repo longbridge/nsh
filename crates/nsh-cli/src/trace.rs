@@ -69,7 +69,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         crate::own_sets().to_vec(),
         Arc::new(DirectoryAssets::new(dir, files)),
         &options,
-        &mut std::io::stdout().lock(),
+        Box::new(std::io::stdout()),
         &mut warn,
     )
     .map_err(anyhow::Error::msg)
