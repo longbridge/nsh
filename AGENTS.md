@@ -128,7 +128,7 @@ docs/                 Documentation; `docs/dev/`: for developers of nsh (archite
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
 examples/             Example apps (gallery: a demo index, one module per demo, `tests/` the reference for `nsh test` (storage,
-                      inputs, a long list, stubbed requests); gallery-rs: the same in Rust, the app's crate in `native/`, a
+                      inputs, a long list, stubbed requests, dark mode); gallery-rs: the same in Rust, the app's crate in `native/`, a
                       TypeScript test of its root; rust-exports: a TSX app using one of each export of its crate, the reference
                       for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
                       with a test), embedding samples

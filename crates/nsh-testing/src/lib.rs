@@ -46,14 +46,15 @@ use nsh_core::ui::description::SetDescription;
 use nsh_engine::{Bundle, EngineConfig};
 
 pub use self::headless::{
-    DialogAnswer, DirectoryAssets, Headless, MemoryStorage, Screen, StubNetwork, StubResponse,
-    UreqNetwork, WAIT, default_answer, print_batch, start,
+    DialogAnswer, DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, Screen, StubHandler,
+    StubNetwork, StubReply, StubResponse, StubRoute, UreqNetwork, WAIT, default_answer,
+    print_batch, start,
 };
 #[cfg(feature = "js")]
 pub use self::{
     module::{
-        App, Entries, Expectation, NetworkOption, OpenOptions, SPECIFIER, SafeArea, Testing,
-        registry,
+        App, ColorScheme, Entries, Expectation, MobilePlatform, NetworkOption, OpenOptions,
+        RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
     },
     run::{Built, Compile, Entry, Failure, Output, TestResult, TestRun, run_file},
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},

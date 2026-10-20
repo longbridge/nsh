@@ -5,13 +5,16 @@
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use nsh_core::storage::{StorageBackend, StorageChange};
 use nsh_engine::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
+use regex::Regex;
 
 /// A response [`StubNetwork`] gives.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct StubResponse {
     /// The status code.
     pub status: u16,
@@ -19,25 +22,94 @@ pub struct StubResponse {
     pub headers: Vec<(String, String)>,
     /// The body.
     pub body: Vec<u8>,
+    /// The request fails with this instead (no response: offline, a reset
+    /// connection).
+    pub error: Option<String>,
+    /// How long the response takes.
+    pub delay: Duration,
 }
 
-/// `fetch` that answers from a list of responses, by method and URL; a
-/// request it has none for fails, so a test never reaches the network
-/// unasked.
+/// Gives the response to a request ([`StubRoute::Handler`]): `reply` takes
+/// it, now or later, from any thread.
+pub type StubHandler = Arc<dyn Fn(HttpRequest, StubReply) + Send + Sync>;
+
+/// Takes the response a [`StubHandler`] gives.
+pub struct StubReply(Box<dyn FnOnce(StubResponse) + Send>);
+
+impl StubReply {
+    /// Answers the request with `response`.
+    pub fn send(self, response: StubResponse) {
+        (self.0)(response);
+    }
+}
+
+/// What [`StubNetwork`] answers the requests a route matches with.
+#[derive(Clone)]
+pub enum StubRoute {
+    /// This response.
+    Response(StubResponse),
+    /// What the handler gives.
+    Handler(StubHandler),
+}
+
+impl From<StubResponse> for StubRoute {
+    fn from(response: StubResponse) -> Self {
+        StubRoute::Response(response)
+    }
+}
+
+impl std::fmt::Debug for StubRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StubRoute::Response(response) => f.debug_tuple("Response").field(response).finish(),
+            StubRoute::Handler(_) => f.write_str("Handler"),
+        }
+    }
+}
+
+/// The URLs a route matches: one, or (with `*`) a glob.
+#[derive(Debug)]
+enum Url {
+    Exact(String),
+    Glob(Regex),
+}
+
+impl Url {
+    fn of(pattern: &str) -> Url {
+        if !pattern.contains('*') {
+            return Url::Exact(pattern.to_owned());
+        }
+        let parts: Vec<String> = pattern.split('*').map(regex::escape).collect();
+        let re = Regex::new(&format!("^{}$", parts.join(".*"))).expect("an escaped glob");
+        Url::Glob(re)
+    }
+
+    fn matches(&self, url: &str) -> bool {
+        match self {
+            Url::Exact(want) => want == url,
+            Url::Glob(re) => re.is_match(url),
+        }
+    }
+}
+
+/// `fetch` that answers from a list of routes, by method and URL (the
+/// first that matches); a request none matches fails, so a test never
+/// reaches the network unasked.
 #[derive(Debug, Default)]
 pub struct StubNetwork {
-    responses: Vec<(String, String, StubResponse)>,
+    routes: Vec<(String, Url, StubRoute)>,
     requests: Mutex<Vec<HttpRequest>>,
 }
 
 impl StubNetwork {
-    /// A network with `responses`, each keyed `"<METHOD> <URL>"` (`"GET
+    /// A network with `routes`, each keyed `"<METHOD> <URL>"` (`"GET
     /// https://api.example.com/todos"`; a bare URL is a `GET`); the URL is
-    /// matched whole, its query included.
-    pub fn new(responses: impl IntoIterator<Item = (String, StubResponse)>) -> Self {
-        let responses = responses
+    /// matched whole, its query included, and `*` in it matches anything
+    /// (`"GET https://api.example.com/todos/*"`).
+    pub fn new<R: Into<StubRoute>>(routes: impl IntoIterator<Item = (String, R)>) -> Self {
+        let routes = routes
             .into_iter()
-            .map(|(key, response)| {
+            .map(|(key, route)| {
                 let (method, url) = match key.split_once(' ') {
                     Some((method, url))
                         if !method.is_empty()
@@ -47,11 +119,11 @@ impl StubNetwork {
                     }
                     _ => ("GET".to_owned(), key.trim().to_owned()),
                 };
-                (method, url, response)
+                (method, Url::of(&url), route.into())
             })
             .collect();
         Self {
-            responses,
+            routes,
             requests: Mutex::new(Vec::new()),
         }
     }
@@ -62,11 +134,11 @@ impl StubNetwork {
         self.requests.lock().expect("requests").clone()
     }
 
-    fn response(&self, request: &HttpRequest) -> Option<&StubResponse> {
-        self.responses
+    fn route(&self, request: &HttpRequest) -> Option<&StubRoute> {
+        self.routes
             .iter()
-            .find(|(method, url, _)| *method == request.method && *url == request.url)
-            .map(|(_, _, response)| response)
+            .find(|(method, url, _)| *method == request.method && url.matches(&request.url))
+            .map(|(_, _, route)| route)
     }
 }
 
@@ -76,78 +148,159 @@ impl Network for StubNetwork {
             .lock()
             .expect("requests")
             .push(request.clone());
-        let answer = match self.response(&request) {
-            Some(response) => Answer::Response(request.url.clone(), response.clone()),
-            None => Answer::Failed(format!(
-                "{} {}: no response is listed for it",
-                request.method, request.url
-            )),
-        };
-        if request.body == HttpBody::Stream {
+        let route = self.route(&request).cloned();
+        let streamed = request.body == HttpBody::Stream;
+        if streamed {
             // The body is taken first, as a server would.
             events(FetchEvent::BodyWanted);
-            return Box::new(StubTask {
-                events: Some(events),
-                answer: Some(answer),
-            });
         }
-        answer.send(&mut events);
-        Box::new(StubTask {
-            events: None,
-            answer: None,
-        })
+        let task = StubTask {
+            events: Arc::new(Mutex::new(Some(events))),
+            pending: None,
+        };
+        let start = Pending {
+            route,
+            request,
+            events: task.events.clone(),
+        };
+        let mut task = task;
+        if streamed {
+            task.pending = Some(start);
+        } else {
+            start.answer();
+        }
+        Box::new(task)
     }
 }
 
-enum Answer {
-    Response(String, StubResponse),
-    Failed(String),
+/// A request to answer.
+struct Pending {
+    route: Option<StubRoute>,
+    request: HttpRequest,
+    /// Taken by the answer (or a cancel).
+    events: Arc<Mutex<Option<FetchEvents>>>,
 }
 
-impl Answer {
-    fn send(self, events: &mut FetchEvents) {
-        match self {
-            Answer::Response(url, response) => {
-                events(FetchEvent::Head(HttpHead {
-                    status: response.status,
-                    status_text: String::new(),
-                    url,
-                    redirected: false,
-                    headers: response.headers,
-                }));
-                if !response.body.is_empty() {
-                    events(FetchEvent::Data(response.body));
-                }
-                events(FetchEvent::End);
+impl Pending {
+    fn answer(self) {
+        let url = self.request.url.clone();
+        let events = self.events;
+        let send = move |response: StubResponse| deliver(&events, url, response);
+        match self.route {
+            Some(StubRoute::Response(response)) => send(response),
+            Some(StubRoute::Handler(handler)) => handler(self.request, StubReply(Box::new(send))),
+            None => {
+                let message = format!(
+                    "{} {}: no response is listed for it",
+                    self.request.method, self.request.url
+                );
+                send(StubResponse {
+                    error: Some(message),
+                    ..StubResponse::default()
+                });
             }
-            Answer::Failed(message) => events(FetchEvent::Failed(message)),
         }
     }
 }
 
-/// A request of [`StubNetwork`] whose body JS still streams: answered once
-/// the body is complete.
+/// Reports `response` (after its delay, from a thread then) to the request
+/// whose events are `events`, unless it was cancelled.
+fn deliver(events: &Arc<Mutex<Option<FetchEvents>>>, url: String, response: StubResponse) {
+    if !response.delay.is_zero() {
+        let events = events.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(response.delay);
+            deliver(
+                &events,
+                url,
+                StubResponse {
+                    delay: Duration::ZERO,
+                    ..response
+                },
+            );
+        });
+        return;
+    }
+    let Some(mut events) = events.lock().expect("events").take() else {
+        return;
+    };
+    if let Some(message) = response.error {
+        events(FetchEvent::Failed(message));
+        return;
+    }
+    events(FetchEvent::Head(HttpHead {
+        status: response.status,
+        status_text: String::new(),
+        url,
+        redirected: false,
+        headers: response.headers,
+    }));
+    if !response.body.is_empty() {
+        events(FetchEvent::Data(response.body));
+    }
+    events(FetchEvent::End);
+}
+
+/// A request of [`StubNetwork`]: whose body JS still streams until
+/// `pending` answers it once the body is complete.
 struct StubTask {
-    events: Option<FetchEvents>,
-    answer: Option<Answer>,
+    events: Arc<Mutex<Option<FetchEvents>>>,
+    pending: Option<Pending>,
 }
 
 impl FetchTask for StubTask {
     fn send(&mut self, _chunk: Vec<u8>) {
-        if let Some(events) = &mut self.events {
+        if self.pending.is_some()
+            && let Some(events) = self.events.lock().expect("events").as_mut()
+        {
             events(FetchEvent::BodyWanted);
         }
     }
 
     fn finish(&mut self) {
-        if let (Some(mut events), Some(answer)) = (self.events.take(), self.answer.take()) {
-            answer.send(&mut events);
+        if let Some(pending) = self.pending.take() {
+            pending.answer();
         }
     }
 
     fn pause(&mut self, _paused: bool) {}
 
-    fn cancel(self: Box<Self>) {}
+    fn cancel(self: Box<Self>) {
+        self.events.lock().expect("events").take();
+    }
+}
+
+/// A network that keeps the requests it is asked, then hands them to
+/// another (a [`StubNetwork`], the real one): what a test reads back.
+pub struct RecordingNetwork {
+    inner: Arc<dyn Network>,
+    requests: Mutex<Vec<HttpRequest>>,
+}
+
+impl RecordingNetwork {
+    /// `inner`, its requests kept.
+    pub fn new(inner: Arc<dyn Network>) -> Arc<Self> {
+        Arc::new(Self {
+            inner,
+            requests: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The requests made so far, in order (bodies streamed by JS are not
+    /// kept).
+    pub fn requests(&self) -> Vec<HttpRequest> {
+        self.requests.lock().expect("requests").clone()
+    }
+}
+
+impl Network for RecordingNetwork {
+    fn fetch(&self, request: HttpRequest, events: FetchEvents) -> Box<dyn FetchTask> {
+        self.requests
+            .lock()
+            .expect("requests")
+            .push(request.clone());
+        self.inner.fetch(request, events)
+    }
 }
 
 /// Storage in memory that starts with the entries given: an app's data as
@@ -211,6 +364,7 @@ mod tests {
                     status: 200,
                     headers: vec![("content-type".into(), "application/json".into())],
                     body: b"[]".to_vec(),
+                    ..Default::default()
                 },
             ),
             (
@@ -241,6 +395,84 @@ mod tests {
         assert_eq!(events[0], FetchEvent::BodyWanted);
         assert!(matches!(&events[1], FetchEvent::Head(h) if h.status == 201));
         assert_eq!(network.requests().len(), 4);
+    }
+
+    /// The events a request gets within `wait`.
+    fn fetch_within(
+        network: &StubNetwork,
+        request: HttpRequest,
+        wait: Duration,
+    ) -> Vec<FetchEvent> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _task = network.fetch(
+            request,
+            Box::new(move |e| {
+                let _ = tx.send(e);
+            }),
+        );
+        let mut events = Vec::new();
+        while let Ok(event) = rx.recv_timeout(wait) {
+            let end = matches!(event, FetchEvent::End | FetchEvent::Failed(_));
+            events.push(event);
+            if end {
+                break;
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn routes_answer_by_handler_glob_error_and_delay() {
+        let handler: StubHandler = Arc::new(|request: HttpRequest, reply: StubReply| {
+            // Answered later, from another thread, as a test's JS handler does.
+            std::thread::spawn(move || {
+                reply.send(StubResponse {
+                    status: 200,
+                    body: request.url.into_bytes(),
+                    ..Default::default()
+                })
+            });
+        });
+        let network = StubNetwork::new([
+            (
+                "GET https://api.test/todos/*".to_owned(),
+                StubRoute::Handler(handler),
+            ),
+            (
+                "GET https://api.test/offline".to_owned(),
+                StubRoute::Response(StubResponse {
+                    error: Some("the network is down".into()),
+                    ..Default::default()
+                }),
+            ),
+            (
+                "GET https://api.test/slow".to_owned(),
+                StubRoute::Response(StubResponse {
+                    status: 204,
+                    delay: Duration::from_millis(100),
+                    ..Default::default()
+                }),
+            ),
+        ]);
+        let wait = Duration::from_secs(2);
+        let events = fetch_within(&network, HttpRequest::get("https://api.test/todos/7"), wait);
+        assert_eq!(
+            events[1],
+            FetchEvent::Data(b"https://api.test/todos/7".to_vec())
+        );
+        assert_eq!(
+            fetch_within(&network, HttpRequest::get("https://api.test/offline"), wait),
+            [FetchEvent::Failed("the network is down".into())]
+        );
+        let started = std::time::Instant::now();
+        let events = fetch_within(&network, HttpRequest::get("https://api.test/slow"), wait);
+        assert!(matches!(&events[0], FetchEvent::Head(h) if h.status == 204));
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        // The glob does not reach past what it names.
+        assert!(matches!(
+            &fetch_within(&network, HttpRequest::get("https://api.test/todo"), wait)[0],
+            FetchEvent::Failed(_)
+        ));
     }
 
     #[test]

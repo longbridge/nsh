@@ -4,15 +4,22 @@
 //! TypeScript face and declarations are generated, as a UI set's are; only
 //! the engine `nsh test` runs a test file on serves it.
 
-use std::{cell::RefCell, collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    cell::RefCell, collections::BTreeMap, future::Future, rc::Rc, sync::Arc, task::Poll,
+    time::Duration,
+};
 
 use nsh_core::{
     JsonValue,
     ui::{Arg, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Registry, TsTypes, prelude::*},
 };
+use nsh_engine::{HttpBody, HttpRequest};
 
 use crate::{
-    headless::{self, Headless, MemoryStorage, StubResponse, default_answer},
+    headless::{
+        self, Headless, MemoryStorage, RecordingNetwork, StubReply, StubResponse, StubRoute,
+        default_answer,
+    },
     run::{OpenApp, Session},
 };
 
@@ -76,12 +83,28 @@ impl Testing {
     pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, String> {
         let session = Session::current()?;
         let options = options.unwrap_or_default();
-        let (app, storage) = blocking(move || session.open(&entry, options))
-            .await
+        let (network, server) = network_setup(options.network);
+        let launch = Launch {
+            storage: options.storage.unwrap_or_default(),
+            network,
+            width: options.width,
+            height: options.height,
+            safe_area: options.safe_area.unwrap_or_default(),
+            clipboard: options.clipboard,
+            color_scheme: options.color_scheme.unwrap_or_default(),
+            locale: options.locale,
+            reduced_motion: options.reduced_motion.unwrap_or(false),
+            platform: options.platform.unwrap_or_default(),
+        };
+        let opening = blocking(move || session.open(&entry, launch));
+        let (app, storage, requests) = serve(server.as_ref(), opening)
+            .await?
             .map_err(|e| e.to_string())??;
         Ok(App {
             app,
             storage,
+            requests,
+            server: server.map(Rc::new),
             dialog: None,
         })
     }
@@ -120,11 +143,13 @@ impl Runner {
 
 /// How `open` starts the app.
 #[derive(Debug, Default, JsObject)]
+#[non_exhaustive]
 pub struct OpenOptions {
     /// What the app's storage (`nsh/storage`) holds at the start.
     pub storage: Option<Entries>,
-    /// The responses its requests get, by `"<METHOD> <URL>"` (a bare URL is
-    /// a `GET`); a request not listed fails. `"live"`: the network.
+    /// What its requests get, by `"<METHOD> <URL>"` (a bare URL is a `GET`;
+    /// `*` matches any text): a response, or a function of the request that
+    /// returns one; a request not listed fails. `"live"`: the network.
     pub network: Option<NetworkOption>,
     /// The viewport's width in points (390).
     pub width: Option<f64>,
@@ -134,6 +159,43 @@ pub struct OpenOptions {
     pub safe_area: Option<SafeArea>,
     /// The text on the clipboard at the start (none).
     pub clipboard: Option<String>,
+    /// The system's appearance (`"light"`).
+    pub color_scheme: Option<ColorScheme>,
+    /// The device's locale, a BCP 47 tag (`"en-US"`).
+    pub locale: Option<String>,
+    /// The user asked for less motion (false).
+    pub reduced_motion: Option<bool>,
+    /// The platform the app believes it runs on (`"ios"`).
+    pub platform: Option<MobilePlatform>,
+}
+
+/// The system's appearance.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum ColorScheme {
+    /// Light mode.
+    #[default]
+    Light,
+    /// Dark mode.
+    Dark,
+}
+
+impl From<ColorScheme> for nsh_core::platform::ColorScheme {
+    fn from(scheme: ColorScheme) -> Self {
+        match scheme {
+            ColorScheme::Light => nsh_core::platform::ColorScheme::Light,
+            ColorScheme::Dark => nsh_core::platform::ColorScheme::Dark,
+        }
+    }
+}
+
+/// The mobile platform an app is opened as.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum MobilePlatform {
+    /// iOS.
+    #[default]
+    Ios,
+    /// Android.
+    Android,
 }
 
 /// A dialog the app showed (`Alert.alert`, an action sheet).
@@ -241,12 +303,22 @@ impl JsValue for Entries {
 }
 
 /// The network of an app a test opens.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum NetworkOption {
     /// The network itself (`"live"`).
     Live,
-    /// The responses listed, by `"<METHOD> <URL>"`.
-    Stub(Vec<(String, StubResponse)>),
+    /// The routes listed, by `"<METHOD> <URL>"`.
+    Routes(Vec<(String, RouteOption)>),
+}
+
+/// What a route of `open`'s `network` answers with.
+#[derive(Debug)]
+pub enum RouteOption {
+    /// This response.
+    Response(StubResponse),
+    /// What this function returns for the request (or the promise it
+    /// returns resolves to).
+    Handler(Callback<StubRequest, JsonValue>),
 }
 
 impl JsValue for NetworkOption {
@@ -257,52 +329,246 @@ impl JsValue for NetworkOption {
              /** The status code (200). */\n  status?: number;\n  \
              /** Header names and values. */\n  headers?: Record<string, string>;\n  \
              /** The body: a string, or a value sent as JSON (with `content-type: \
-             application/json` unless `headers` name one). */\n  body?: unknown;\n}"
+             application/json` unless `headers` name one). */\n  body?: unknown;\n  \
+             /** The request fails with this message instead: no response (offline, a \
+             reset connection). */\n  error?: string;\n  \
+             /** How long the response takes, in milliseconds. */\n  delay?: number;\n}"
                 .to_owned()
         });
-        format!("\"live\" | Record<string, {response}>")
+        let request = <StubRequest as JsValue>::ts_type(types);
+        format!(
+            "\"live\" | Record<string, {response} | ((request: {request}) => {response} | Promise<{response}>)>"
+        )
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        match value.to_json()? {
-            JsonValue::String(s) if s == "live" => Ok(NetworkOption::Live),
-            JsonValue::Object(map) => map
-                .into_iter()
-                .map(|(key, v)| {
-                    stub_response(&v)
-                        .map(|r| (key.clone(), r))
-                        .map_err(|e| PropError(format!("`{key}`: {}", e.0)))
-                })
-                .collect::<Result<_, _>>()
-                .map(NetworkOption::Stub),
-            _ => Err(value.expected("\"live\" or an object of responses")),
+        if value.as_string().as_deref() == Some("live") {
+            return Ok(NetworkOption::Live);
         }
+        if value.kind() != JsKind::Object {
+            return Err(value.expected("\"live\" or an object of routes"));
+        }
+        let mut routes = Vec::new();
+        for key in value.keys()? {
+            let field = value.field(&key)?;
+            let field = field.get();
+            let route = if field.kind() == JsKind::Function {
+                <Callback<StubRequest, JsonValue> as Arg>::from_js(field).map(RouteOption::Handler)
+            } else {
+                stub_response(&field.to_json()?).map(RouteOption::Response)
+            };
+            routes.push((
+                key.clone(),
+                route.map_err(|e| PropError(format!("`{key}`: {}", e.0)))?,
+            ));
+        }
+        Ok(NetworkOption::Routes(routes))
     }
 
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
         let json = match self {
             NetworkOption::Live => JsonValue::String("live".into()),
-            NetworkOption::Stub(responses) => JsonValue::Object(
-                responses
+            // A route's function stays JS's: only responses go back.
+            NetworkOption::Routes(routes) => JsonValue::Object(
+                routes
                     .iter()
-                    .map(|(key, r)| {
-                        let headers = r
-                            .headers
-                            .iter()
-                            .map(|(k, v)| (k.clone(), JsonValue::String(v.clone())))
-                            .collect();
-                        let body = String::from_utf8_lossy(&r.body).into_owned();
-                        let response = serde_json::json!({
-                            "status": r.status,
-                            "headers": JsonValue::Object(headers),
-                            "body": body,
-                        });
-                        (key.clone(), response)
+                    .filter_map(|(key, route)| match route {
+                        RouteOption::Response(r) => Some((key.clone(), response_json(r))),
+                        RouteOption::Handler(_) => None,
                     })
                     .collect(),
             ),
         };
         Ok(JsOwned::new(host, host.json(&json)?))
+    }
+}
+
+/// `response` as a test writes one.
+fn response_json(response: &StubResponse) -> JsonValue {
+    let headers = response
+        .headers
+        .iter()
+        .map(|(k, v)| (k.clone(), JsonValue::String(v.clone())))
+        .collect();
+    let mut json = serde_json::json!({
+        "status": response.status,
+        "headers": JsonValue::Object(headers),
+        "body": String::from_utf8_lossy(&response.body),
+        "delay": response.delay.as_millis() as f64,
+    });
+    if let Some(error) = &response.error {
+        json["error"] = JsonValue::String(error.clone());
+    }
+    json
+}
+
+/// A request the app made, as a test reads it (`app.requests()`, a route's
+/// function).
+#[derive(Debug, Default, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct StubRequest {
+    /// Its method (`GET`, `POST`, ...).
+    pub method: String,
+    /// Its URL.
+    pub url: String,
+    /// Its headers, by name.
+    pub headers: Entries,
+    /// Its body as text, `null` without one (or streamed).
+    pub body: Option<String>,
+}
+
+impl From<&HttpRequest> for StubRequest {
+    fn from(request: &HttpRequest) -> Self {
+        StubRequest {
+            method: request.method.clone(),
+            url: request.url.clone(),
+            headers: Entries(request.headers.iter().cloned().collect()),
+            body: match &request.body {
+                HttpBody::Bytes(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// How an app starts, handed to the thread that starts it: `open`'s options
+/// with the routes' JS functions left on the test file's VM.
+pub(crate) struct Launch {
+    pub(crate) storage: Entries,
+    pub(crate) network: NetworkSetup,
+    pub(crate) width: Option<f64>,
+    pub(crate) height: Option<f64>,
+    pub(crate) safe_area: SafeArea,
+    pub(crate) clipboard: Option<String>,
+    pub(crate) color_scheme: ColorScheme,
+    pub(crate) locale: Option<String>,
+    pub(crate) reduced_motion: bool,
+    pub(crate) platform: MobilePlatform,
+}
+
+/// The network an app opens with, made where it starts (it is `Send`).
+pub(crate) enum NetworkSetup {
+    /// None: every request fails.
+    None,
+    /// The network itself.
+    Live,
+    /// The routes.
+    Stub(Vec<(String, StubRoute)>),
+}
+
+/// A request a route's JS function answers, waiting for the test file's
+/// VM.
+struct RouteCall {
+    route: usize,
+    request: HttpRequest,
+    reply: StubReply,
+}
+
+/// The JS functions of an app's routes, and the requests waiting for them:
+/// answered while the app's steps run ([`serve`]).
+pub(crate) struct RouteServer {
+    keys: Vec<String>,
+    handlers: Vec<Callback<StubRequest, JsonValue>>,
+    calls: RefCell<tokio::sync::mpsc::UnboundedReceiver<RouteCall>>,
+}
+
+impl RouteServer {
+    /// Answers `call` with its function's response: an error the step
+    /// reports when the function threw or gave no response.
+    async fn answer(&self, call: RouteCall) -> Result<(), String> {
+        let key = &self.keys[call.route];
+        let given = self.handlers[call.route]
+            .call_async((&call.request).into())
+            .await
+            .map_err(|e| format!("the route `{key}` threw: {e}"))
+            .and_then(|json| {
+                stub_response(&json)
+                    .map_err(|e| format!("the route `{key}` gave no response: {}", e.0))
+            });
+        match given {
+            Ok(response) => {
+                call.reply.send(response);
+                Ok(())
+            }
+            Err(message) => {
+                call.reply.send(StubResponse {
+                    error: Some(message.clone()),
+                    ..StubResponse::default()
+                });
+                Err(message)
+            }
+        }
+    }
+}
+
+/// The network `option` sets up, and the server of its JS functions.
+fn network_setup(option: Option<NetworkOption>) -> (NetworkSetup, Option<RouteServer>) {
+    let routes = match option {
+        None => return (NetworkSetup::None, None),
+        Some(NetworkOption::Live) => return (NetworkSetup::Live, None),
+        Some(NetworkOption::Routes(routes)) => routes,
+    };
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut keys = Vec::new();
+    let mut handlers = Vec::new();
+    let mut stub = Vec::new();
+    for (key, route) in routes {
+        let route = match route {
+            RouteOption::Response(response) => StubRoute::Response(response),
+            RouteOption::Handler(handler) => {
+                let index = handlers.len();
+                handlers.push(handler);
+                keys.push(key.clone());
+                let tx = tx.clone();
+                StubRoute::Handler(Arc::new(move |request: HttpRequest, reply: StubReply| {
+                    let _ = tx.send(RouteCall {
+                        route: index,
+                        request,
+                        reply,
+                    });
+                }))
+            }
+        };
+        stub.push((key, route));
+    }
+    let server = (!handlers.is_empty()).then(|| RouteServer {
+        keys,
+        handlers,
+        calls: RefCell::new(rx),
+    });
+    (NetworkSetup::Stub(stub), server)
+}
+
+/// `future`, while `server` answers the requests of the app's routes that
+/// come meanwhile; an error when one of their functions failed.
+async fn serve<T>(
+    server: Option<&RouteServer>,
+    future: impl Future<Output = T>,
+) -> Result<T, String> {
+    let Some(server) = server else {
+        return Ok(future.await);
+    };
+    let mut future = std::pin::pin!(future);
+    let mut failed = None;
+    loop {
+        let next = std::future::poll_fn(|cx| {
+            if let Poll::Ready(value) = future.as_mut().poll(cx) {
+                return Poll::Ready(Ok(value));
+            }
+            match server.calls.borrow_mut().poll_recv(cx) {
+                Poll::Ready(Some(call)) => Poll::Ready(Err(call)),
+                _ => Poll::Pending,
+            }
+        })
+        .await;
+        match next {
+            Ok(value) => return failed.map_or(Ok(value), Err),
+            Err(call) => {
+                if let Err(e) = server.answer(call).await {
+                    failed.get_or_insert(e);
+                }
+            }
+        }
     }
 }
 
@@ -348,10 +614,24 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
             json.to_string().into_bytes()
         }
     };
+    let error = match map.get("error") {
+        None | Some(JsonValue::Null) => None,
+        Some(JsonValue::String(message)) => Some(message.clone()),
+        Some(other) => return Err(PropError::expected("a string", other)),
+    };
+    let delay = match map.get("delay") {
+        None | Some(JsonValue::Null) => Duration::ZERO,
+        Some(JsonValue::Number(ms)) => {
+            Duration::from_secs_f64(ms.as_f64().unwrap_or(0.0).max(0.0) / 1000.0)
+        }
+        Some(other) => return Err(PropError::expected("a number of milliseconds", other)),
+    };
     Ok(StubResponse {
         status,
         headers,
         body,
+        error,
+        delay,
     })
 }
 
@@ -366,6 +646,10 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 pub struct App {
     app: OpenApp,
     storage: Arc<MemoryStorage>,
+    /// The requests the app made.
+    requests: Arc<RecordingNetwork>,
+    /// The JS functions of its routes.
+    server: Option<Rc<RouteServer>>,
     /// Answers the dialogs the app shows ([`App::on_dialog`]).
     dialog: Option<Callback<Dialog, Option<String>>>,
 }
@@ -444,6 +728,7 @@ impl App {
         let timeout = options.unwrap_or_default().timeout();
         let deadline = std::time::Instant::now() + timeout;
         let app = this.with(|a| a.app.clone());
+        let server = this.with(|a| a.server.clone());
         on_app(&app, |a| {
             a.step("waitUntil");
             Ok(())
@@ -462,7 +747,11 @@ impl App {
                 ));
             }
             let wait = left.min(Duration::from_millis(50));
-            on_app(&app, move |a| a.next_change(wait)).await?;
+            serve(
+                server.as_deref(),
+                on_app(&app, move |a| a.next_change(wait)),
+            )
+            .await??;
         }
     }
 
@@ -540,6 +829,32 @@ impl App {
         self.with(|app| Ok(app.screen().dialogs().iter().map(Dialog::from).collect()))
     }
 
+    /// The requests the app made, in order.
+    pub fn requests(&self) -> Vec<StubRequest> {
+        self.requests
+            .requests()
+            .iter()
+            .map(StubRequest::from)
+            .collect()
+    }
+
+    /// Makes the viewport `width` × `height` points (a rotation, a resized
+    /// window) and resolves once the app laid itself out again.
+    pub async fn set_viewport(this: Instance<Self>, width: f64, height: f64) -> Result<(), String> {
+        let size = nsh_core::Size::new(width as f32, height as f32);
+        step(&this, move |app| app.set_viewport(size)).await
+    }
+
+    /// Switches the system's appearance to `scheme`, as the user does.
+    pub async fn set_color_scheme(this: Instance<Self>, scheme: ColorScheme) -> Result<(), String> {
+        step(&this, move |app| {
+            app.set_environment(&format!("setColorScheme({})", scheme.js_name()), |e| {
+                e.color_scheme = scheme.into();
+            })
+        })
+        .await
+    }
+
     /// The text on the clipboard now, `null` when it holds none.
     pub fn clipboard(&self) -> Result<Option<String>, String> {
         self.with(|app| Ok(app.screen().clipboard().map(str::to_owned)))
@@ -562,7 +877,8 @@ async fn step(
     f: impl FnOnce(&mut Headless) -> Result<(), String> + Send + 'static,
 ) -> Result<(), String> {
     let app = this.with(|a| a.app.clone());
-    on_app(&app, f).await?;
+    let server = this.with(|a| a.server.clone());
+    serve(server.as_deref(), on_app(&app, f)).await??;
     loop {
         let pending = on_app(&app, |a| Ok(a.pending_dialog().cloned())).await?;
         let Some(dialog) = pending else {
@@ -575,7 +891,11 @@ async fn step(
             },
             None => default_answer(&dialog)?,
         };
-        on_app(&app, move |a| a.answer_dialog(answer)).await?;
+        serve(
+            server.as_deref(),
+            on_app(&app, move |a| a.answer_dialog(answer)),
+        )
+        .await??;
     }
 }
 
