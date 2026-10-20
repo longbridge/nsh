@@ -27,6 +27,22 @@ demo: el-text
 </Text>
 ```
 
+### 片段背景
+
+设置了 `backgroundColor` 的片段会在字符后面填充它们的方框：高度就是字体的高度（基线以上的 ascent 加基线以下的 descent，与行高无关）；片段换到几行，每行各画一个方框，圆角取片段的 `borderRadius`。片段内部的片段沿用它的背景，除非自己另设。背景只影响绘制：文本排版与不设背景时相同，可选中的文本复制时连同片段的字符一起复制。行内代码就是一个片段：
+
+```tsx
+<Text style={{ fontSize: 15, lineHeight: 22 }} selectable>
+  {"提交前先运行 "}
+  <Text style={{ fontFamily: "ui-monospace", fontSize: 13, backgroundColor: "#eff1f3", borderRadius: 4 }}>
+    {" cargo test "}
+  </Text>
+  {"。"}
+</Text>
+```
+
+Tailwind 类同样适用：`<Text class="bg-gray-100 rounded">`。内边距和边框是方框样式，片段上不起作用；在片段内两侧加空格，方框两边就会留出空间。
+
 ### 链接
 
 带按压处理函数的片段就是链接：按在它的字符上由该片段处理，按在其他位置则由段落处理。

@@ -125,6 +125,10 @@ closes the retained window, stops the engine and returns from `run_app`.
 `nsh_core::ui::desktop::close_window()` follows the chosen window-close policy.
 
 
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-macos-rust).
 

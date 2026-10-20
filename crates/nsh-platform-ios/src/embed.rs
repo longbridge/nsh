@@ -261,6 +261,47 @@ pub unsafe extern "C" fn nsh_app_set_storage_directory(
     status(dir.map(|dir| app.view.set_storage_directory(dir)))
 }
 
+/// The embedding app's locale, which stands in for the user's: a BCP 47
+/// tag or a platform identifier (`zh-Hans-CN`, `en_US`); `NULL` follows the
+/// system's again. Applies at once and to every app loaded later. Returns
+/// why `tag` is no locale (nothing changes), or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `tag` must be `NULL` or a
+/// NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_locale(app: *mut NshApp, tag: *const c_char) -> *mut c_char {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    let locale = if tag.is_null() {
+        Ok(None)
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe { utf8(tag, "the locale") }.and_then(|tag| {
+            nsh_engine::Locale::parse(tag)
+                .map(Some)
+                .ok_or_else(|| format!("not a locale: {tag}"))
+        })
+    };
+    status(locale.map(|locale| app.view.set_locale(locale)))
+}
+
+/// The embedding app's text size relative to the default (1.0), which
+/// stands in for Dynamic Type's; 0 (or less) follows the system's again.
+/// Applies at once and to every app loaded later.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_font_scale(app: *mut NshApp, scale: f32) {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    app.view
+        .set_font_scale((scale.is_finite() && scale > 0.0).then_some(scale));
+}
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change, showing errors over the app. Returns an error
 /// when the library was built without development support, or `NULL`.

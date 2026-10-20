@@ -189,6 +189,9 @@ pub(crate) struct Surface {
     /// The embedding app's appearance (dark or not), standing in for the
     /// window's ([`crate::AppView::set_appearance`]).
     pub(crate) host_dark: Cell<Option<bool>>,
+    /// The embedding app's locale and text size, standing in for the
+    /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
+    pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
 }
 
 impl Surface {
@@ -238,6 +241,7 @@ impl Surface {
             chrome: Default::default(),
             host_theme: RefCell::new(None),
             host_dark: Cell::new(None),
+            host_environment: Cell::default(),
         });
         SURFACES.with(|s| s.borrow_mut().insert(key, Rc::downgrade(&surface)));
         let weak = Rc::downgrade(&surface);
@@ -368,8 +372,10 @@ impl Surface {
         *self.on_hot_update_failed.borrow_mut() = Some(Rc::new(f));
     }
 
-    /// Updates the environment and tells the engine.
-    pub(crate) fn set_environment(&self, environment: Environment) {
+    /// Updates the environment and tells the engine, with the embedding
+    /// app's settings over the system's.
+    pub(crate) fn set_environment(&self, mut environment: Environment) {
+        self.host_environment.get().apply(&mut environment);
         if self.environment.replace(environment) != environment {
             self.control(|c| c.set_environment(environment));
             crate::system::environment_applied(self);
@@ -603,6 +609,35 @@ mod tests {
             tx.send(m).unwrap();
         }
         *surface.rx.borrow_mut() = Some(rx);
+    }
+
+    #[test]
+    fn the_hosts_locale_and_text_size_stand_in_for_the_systems() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let zh = nsh_engine::Locale::parse("zh-Hans-CN");
+        surface
+            .host_environment
+            .set(nsh_core::platform::HostEnvironment {
+                locale: zh,
+                font_scale: Some(1.5),
+            });
+        // What the system reports goes under the host's settings.
+        surface.set_environment(nsh_engine::Environment {
+            font_scale: 1.25,
+            ..Default::default()
+        });
+        let env = surface.environment.get();
+        assert_eq!((Some(env.locale), env.font_scale), (zh, 1.5));
+        surface.host_environment.set(Default::default());
+        surface.set_environment(nsh_engine::Environment {
+            font_scale: 1.25,
+            ..Default::default()
+        });
+        let env = surface.environment.get();
+        assert_eq!(
+            (env.locale, env.font_scale),
+            (nsh_engine::Locale::EN_US, 1.25)
+        );
     }
 
     #[test]

@@ -78,8 +78,18 @@ export declare const colorScheme: Accessor<"light" | "dark">;
  */
 export declare function setColorScheme(scheme: "light" | "dark" | "system"): void;
 
-/** The user's preferred text size relative to the default (reactive). */
+/**
+ * The user's preferred text size relative to the default (reactive):
+ * the system's, unless the embedding app set its own.
+ */
 export declare const fontScale: Accessor<number>;
+
+/**
+ * The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), which
+ * `Intl` formats for by default (reactive): the system's, unless the
+ * embedding app set its own.
+ */
+export declare const locale: Accessor<string>;
 
 /** The platform the app runs on (React Native's `Platform`). */
 export declare const Platform: PlatformStatic;

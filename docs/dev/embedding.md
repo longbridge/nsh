@@ -77,6 +77,16 @@
   host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
   them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
+- **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
+  pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
+  / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`
+  (C `nsh_app_set_locale` / `nsh_app_set_font_scale`), Java `NshView.setLocale` / `setFontScale`. Each platform writes
+  them over the system's values where it builds the environment (`Surface::set_environment` on the desktops, the root
+  view's `environment()` on iOS, `publishEnvironment` in Java), so they reach the engine as a system change would and
+  are in the first frame of every app loaded later; the platform's own drawing that reads the environment (alerts,
+  toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
+  size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
+  in classes included, stay as they are. The layout direction stays the system's (`I18nManager` decides it in the app).
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

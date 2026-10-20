@@ -258,6 +258,13 @@ fn system_changed() {
     }
 }
 
+/// The embedding app set its locale or text size
+/// ([`crate::AppView::set_locale`]): the system's settings are read again,
+/// with the host's over them.
+pub(crate) fn host_environment_changed(surface: &Surface) {
+    update(surface);
+}
+
 /// Writes the system's settings and the surface's own values into its
 /// environment.
 fn update(surface: &Surface) {

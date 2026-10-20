@@ -6,10 +6,10 @@ order: 6
 
 # nsh/device
 
-`nsh/device` 向应用提供设备及其环境的信息。`windowSize`、`colorScheme` 和 `fontScale` 是响应式的 accessor：在 JSX、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小）时，读取它们的地方会随之更新。
+`nsh/device` 向应用提供设备及其环境的信息。`windowSize`、`colorScheme`、`fontScale` 和 `locale` 是响应式的 accessor：在 JSX、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言）时，读取它们的地方会随之更新。
 
 ```ts
-import { colorScheme, fontScale, I18nManager, PixelRatio, Platform, windowSize } from "nsh/device";
+import { colorScheme, fontScale, I18nManager, locale, PixelRatio, Platform, windowSize } from "nsh/device";
 ```
 
 教程见[设备与环境](../docs/device-and-environment.md)。
@@ -48,7 +48,15 @@ const dark = () => colorScheme() === "dark";
 const fontScale: Accessor<number>;
 ```
 
-用户偏好的文字大小相对于默认大小的比例（`1` 为默认；iOS 上是动态字体，Android 上是字体大小设置）。响应式。除非设置了 `allowFontScaling={false}`，文本本身已经会随之缩放；当其他尺寸（例如文字旁边的图标）也需要跟随时再读取它。
+用户偏好的文字大小相对于默认大小的比例（`1` 为默认；iOS 上是动态字体，Android 上是字体大小设置），或嵌入它的应用设置的文字大小。响应式。除非设置了 `allowFontScaling={false}`，文本本身已经会随之缩放；当其他尺寸（例如文字旁边的图标）也需要跟随时再读取它。
+
+## locale
+
+```ts
+const locale: Accessor<string>;
+```
+
+用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`），或嵌入它的应用设置的区域设置。响应式。`Intl` 默认按它格式化；读取它来选择你自己的翻译文案（[设备与环境](../docs/device-and-environment.md#语言和地区)）。
 
 ## Platform
 

@@ -123,6 +123,7 @@ const KEYFRAMES = `
 .nsh-bar > div { position: absolute; border-radius: 2px; background: rgba(0,0,0,.45); transition: opacity .3s; }
 .nsh-dark .nsh-bar > div { background: rgba(255,255,255,.55); }
 .nsh-run { position: absolute; white-space: pre; }
+.nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 .nsh-pointer { cursor: pointer; }
 /* The mounter's own styles: no element has an inline style but its frame
@@ -1300,10 +1301,18 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds]) {
     const el = this.view(id);
     if (!el) return;
     const frag = document.createDocumentFragment();
+    // Span backgrounds, behind the runs: one box per span and line.
+    for (const [x, y, w, h, r, color] of backgrounds ?? []) {
+      const box = document.createElement("div");
+      box.className = "nsh-run-bg";
+      box.style.cssText = `left:${cx + x}px;top:${cy + y}px;width:${w}px;height:${h}px;` +
+        `border-radius:${r}px;background:${color}`;
+      frag.append(box);
+    }
     for (const [x, y, text, style, after] of runs) {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
@@ -1315,7 +1324,7 @@ class Player {
       if (el._animation.color) span.style.color = el._animation.color;
       frag.append(span);
     }
-    for (const span of [...el.querySelectorAll(":scope > .nsh-run")]) span.remove();
+    for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     el.classList.toggle("nsh-selectable", !!selectable);
     el.classList.toggle("nsh-autoselect", selectable == null);

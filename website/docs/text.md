@@ -63,6 +63,18 @@ A span with `onPress` (or `onLongPress`) is a link: a press on its characters go
 </Text>
 ```
 
+### Backgrounds of spans
+
+A span's `backgroundColor` and `borderRadius` paint a box behind its characters on each line it reaches, as tall as
+its font; the text lays out the same and copies whole, so inline code is a span
+([Text element](../elements/text.md#span-backgrounds)):
+
+```tsx
+<Text>
+  Run <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4 }}> npm test </Text> first.
+</Text>
+```
+
 ### Views and images inside text
 
 Any element other than `<Text>` inside a `<Text>` is laid out inline, on the baseline, and wraps with the words. It can take presses of its own:

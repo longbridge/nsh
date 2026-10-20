@@ -29,8 +29,11 @@ trusted: every limit and check is enforced in Rust, never in JS.
   visible environment names), `fs` (`read` / `write`: trusted path roots), `clipboard` (`nsh/clipboard`: reading and
   writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
   is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
-  are build errors; an app without the key retains unrestricted network, webview, status bar and clipboard access.
-  Process execution and filesystem access always require explicit declarations, including standalone apps. The embedding app
+  are build errors (`Capabilities::from_json`); a signed package's declaration is read with `from_json_lenient`, as a
+  newer signer may have written it: an unknown capability is not granted, an unknown key inside one drops that
+  capability or `http` grant (it may be a restriction), so unknown keys never widen access; an app without the key
+  retains unrestricted network, webview, status bar and clipboard access. Process execution and filesystem access
+  always require explicit declarations, including standalone apps. The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by
   `nsh build` / `nsh package`; the dev protocol's `Bundle` message, so development enforces the same capabilities; a change

@@ -547,6 +547,7 @@ final class TextBox extends android.view.ViewGroup implements Node {
         canvas.translate(contentX, contentY);
         // Lines past `numberOfLines` (clip mode) stay outside the box.
         canvas.clipRect(0, 0, Math.max(contentWidth, layout.getWidth()), contentHeight);
+        drawBackgrounds(canvas);
         if (selStart >= 0) {
             if (highlightPaint == null) {
                 highlightPaint = new android.graphics.Paint();
@@ -594,6 +595,38 @@ final class TextBox extends android.view.ViewGroup implements Node {
     private final android.graphics.Paint decorationPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
 
     private final android.graphics.Path decorationPath = new android.graphics.Path();
+
+    private final android.graphics.Paint backgroundPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+    private final android.graphics.RectF backgroundRect = new android.graphics.RectF();
+
+    /** Span backgrounds: a rounded box on each line a span reaches, its
+     * fonts' ascent to descent around the baseline. */
+    private void drawBackgrounds(Canvas canvas) {
+        CharSequence text = layout.getText();
+        if (!(text instanceof android.text.Spanned)) return;
+        android.text.Spanned spanned = (android.text.Spanned) text;
+        TextLayouts.Background[] backgrounds = spanned.getSpans(0, text.length(), TextLayouts.Background.class);
+        if (backgrounds.length == 0) return;
+        int lines = layout.getLineCount();
+        for (TextLayouts.Background bg : backgrounds) {
+            int start = spanned.getSpanStart(bg), end = spanned.getSpanEnd(bg);
+            backgroundPaint.setColor(bg.color);
+            for (int line = layout.getLineForOffset(start); line < lines; line++) {
+                int lineStart = layout.getLineStart(line), lineEnd = layout.getLineVisibleEnd(line);
+                if (lineStart >= end) break;
+                int a = Math.max(start, lineStart), b = Math.min(end, lineEnd);
+                if (a >= b) continue;
+                float x1 = layout.getPrimaryHorizontal(a);
+                float x2 = b < layout.getLineEnd(line) ? layout.getPrimaryHorizontal(b) : layout.getLineRight(line);
+                if (layout.getParagraphDirection(line) < 0 && b >= lineEnd) x2 = layout.getLineLeft(line);
+                float baseline = layout.getLineBaseline(line);
+                backgroundRect.set(Math.min(x1, x2), baseline - bg.ascentPx, Math.max(x1, x2), baseline + bg.descentPx);
+                float r = Math.min(bg.radiusPx, Math.min(backgroundRect.width(), backgroundRect.height()) / 2);
+                canvas.drawRoundRect(backgroundRect, r, r, backgroundPaint);
+            }
+        }
+    }
 
     /** Underlines and strikethroughs, across the lines each run covers. */
     private void drawDecorations(Canvas canvas) {

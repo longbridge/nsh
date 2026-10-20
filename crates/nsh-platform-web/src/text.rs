@@ -162,10 +162,24 @@ pub(crate) struct Run {
     pub(crate) after: String,
 }
 
+/// A box of a span background, behind the runs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Background {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) radius: f32,
+    pub(crate) color: nsh_core::Color,
+}
+
 /// A final layout.
 #[derive(Debug)]
 pub(crate) struct WebLayout {
     pub(crate) runs: Vec<Run>,
+    /// Span backgrounds, drawn behind the runs: one box per span and line,
+    /// across the runs of the styles inside it.
+    pub(crate) backgrounds: Vec<Background>,
     pub(crate) styles: Arc<[RunStyle]>,
     lines: Vec<TextLine>,
     attachments: Vec<Option<(f32, f32)>>,
@@ -468,6 +482,8 @@ impl TextEngine for WebTextEngine {
         }
         let styles = prepared.styles.clone();
         let mut runs: Vec<Run> = Vec::new();
+        let mut backgrounds = Vec::new();
+        let mut line_pieces = Vec::new();
         let mut text_lines = Vec::with_capacity(lines.len());
         let mut attachments = vec![
             None;
@@ -530,7 +546,17 @@ impl TextEngine for WebTextEngine {
             let baseline = y + line.above;
             // Neighbouring pieces of one style draw as one run.
             let mut merge = false;
+            line_pieces.clear();
             for (text, style, w, kind) in pieces {
+                let s = &styles[style as usize];
+                let attachment = matches!(kind, AtomKind::Attachment(..));
+                line_pieces.push(nsh_core::LinePiece {
+                    x,
+                    width: w,
+                    background: s.style.background,
+                    ascent: if attachment { 0.0 } else { s.ascent },
+                    descent: if attachment { 0.0 } else { s.descent },
+                });
                 if let AtomKind::Attachment(_, h) = kind {
                     if let Some(slot) = attachments.get_mut(attachment_index) {
                         *slot = Some((x, baseline - h));
@@ -554,6 +580,16 @@ impl TextEngine for WebTextEngine {
                 merge = true;
                 x += w;
             }
+            nsh_core::BackgroundBox::join(line_pieces.drain(..), (x0, x0 + width), |b| {
+                backgrounds.push(Background {
+                    x: b.x,
+                    y: baseline - b.ascent,
+                    width: b.width,
+                    height: b.ascent + b.descent,
+                    radius: b.radius(),
+                    color: b.background.color,
+                });
+            });
             if !last && let Some(run) = runs.last_mut() {
                 // An empty line adds its newline to the one before.
                 match atoms.get(line.end) {
@@ -581,6 +617,7 @@ impl TextEngine for WebTextEngine {
         }
         TextLayout(Arc::new(WebLayout {
             runs,
+            backgrounds,
             styles,
             lines: text_lines,
             attachments,

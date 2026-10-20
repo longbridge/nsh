@@ -295,6 +295,9 @@ pub(crate) fn verify(
             "for another runtime (the source runs)"
         }
     );
+    for ignored in &verified.ignored {
+        crate::ui::warn(format!("this runtime ignores {ignored} (from a newer nsh)"));
+    }
     Ok(())
 }
 

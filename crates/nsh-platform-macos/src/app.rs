@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use nsh_core::platform::Appearance;
+use nsh_core::platform::{Appearance, Locale};
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use objc2::{
     MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
@@ -269,6 +269,31 @@ impl AppView {
     /// reads it.
     pub fn perf_monitor(&self) -> Option<Arc<nsh_engine::perf::PerfMonitor>> {
         self.fps.borrow().as_ref().map(|h| h.monitor().clone())
+    }
+
+    /// The embedding app's locale, which stands in for the user's: what
+    /// `Intl` formats for by default and what `locale()` (`nsh/device`) and
+    /// Rust components' `locale()` read, at once and for every app loaded
+    /// later. `None` follows the system's again.
+    pub fn set_locale(&self, locale: Option<Locale>) {
+        let mut host = self.surface.host_environment.get();
+        host.locale = locale;
+        self.surface.host_environment.set(host);
+        crate::system::host_environment_changed(&self.surface);
+    }
+
+    /// The embedding app's text size relative to the default (1.0), which
+    /// stands in for the user's: every text that allows font scaling (texts,
+    /// inputs, the components' labels, alerts and toasts) is laid out again
+    /// at it, and `fontScale()` reads it, at once and for every app loaded
+    /// later. Lengths stay as they are (spacing, sizes, radii, `rem`):
+    /// boxes sized by their text grow with it. `None` follows the system's
+    /// again.
+    pub fn set_font_scale(&self, scale: Option<f32>) {
+        let mut host = self.surface.host_environment.get();
+        host.font_scale = scale;
+        self.surface.host_environment.set(host);
+        crate::system::host_environment_changed(&self.surface);
     }
 
     /// Stops the app.

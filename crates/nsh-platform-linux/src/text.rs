@@ -242,6 +242,8 @@ struct FontInfo {
     strikethrough: (f32, f32),
     /// Cap height and x height (points), for `onTextLayout`.
     cap_x: (f32, f32),
+    /// Ascent and descent (points), for span backgrounds.
+    extents: (f32, f32),
 }
 
 /// One glyph of a run (Pango units, as Pango shaped it).
@@ -489,6 +491,7 @@ impl PangoTextEngine {
                 from_pango(metrics.strikethrough_thickness()),
             ),
             cap_x: cap_and_x_height(font, size),
+            extents: (from_pango(metrics.ascent()), from_pango(metrics.descent())),
         });
         let mut fonts = self.fonts.borrow_mut();
         // Bounded: animated font sizes make new fonts every frame.
@@ -1083,6 +1086,17 @@ pub(crate) fn selectable(state: &ViewState) -> bool {
 /// Draws a text view's text.
 pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
     let Some(drawn) = &state.text else { return };
+    if drawn.text.has_backgrounds()
+        && let Some(layout) = drawn.layout.downcast::<LinuxLayout>()
+    {
+        let (cx, cy) = (drawn.content.x, drawn.content.y);
+        layout.background_rects(&drawn.text, |x, y, w, h, r, color| {
+            let rect = graphene::Rect::new(cx + x, cy + y, w, h);
+            snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(rect, r));
+            snapshot.append_color(&crate::decor::rgba(color), &rect);
+            snapshot.pop();
+        });
+    }
     if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get())
         && let Some(layout) = drawn.layout.downcast::<LinuxLayout>()
     {
@@ -1803,6 +1817,48 @@ impl LinuxLayout {
         }
     }
 
+    /// Calls `f(x, y, width, height, radius, color)` with the boxes
+    /// (content coordinates) of the span backgrounds of `text`.
+    fn background_rects(
+        &self,
+        text: &AttributedText,
+        mut f: impl FnMut(f32, f32, f32, f32, f32, nsh_core::Color),
+    ) {
+        for line in &self.lines {
+            let runs = &self.runs[line.runs.clone()];
+            let Some(baseline) = runs.first().map(|r| r.baseline) else {
+                continue;
+            };
+            let pieces = runs.iter().flat_map(|run| {
+                let mut gx = run.x;
+                let (ascent, descent) = run.font.extents;
+                run.glyphs.iter().map(move |g| {
+                    let x = gx;
+                    let width = from_pango(g.width);
+                    gx += width;
+                    nsh_core::LinePiece {
+                        x,
+                        width,
+                        background: text.background_at(g.index),
+                        ascent,
+                        descent,
+                    }
+                })
+            });
+            let clip = (line.info.x, line.info.x + line.info.width);
+            nsh_core::BackgroundBox::join(pieces, clip, |b| {
+                f(
+                    b.x,
+                    baseline - b.ascent,
+                    b.width,
+                    b.ascent + b.descent,
+                    b.radius(),
+                    b.background.color,
+                );
+            });
+        }
+    }
+
     /// Calls `f(x, y, width, height)` with the rectangles (content
     /// coordinates) that highlight the characters of `range`: per line,
     /// the spans of selected glyphs and attachments, line high.
@@ -2145,6 +2201,46 @@ mod tests {
         assert_eq!(extend(s, (4, 7), 1, Unit::Word), (0, 7));
         // A caret at a word's end stays in it.
         assert_eq!(extend(s, (0, 3), 7, Unit::Word), (0, 7));
+    }
+
+    #[test]
+    fn span_backgrounds_box_each_line() {
+        let engine = PangoTextEngine::new("sans-serif".into());
+        let style = ResolvedTextStyle {
+            font_size: 15.0,
+            ..Default::default()
+        };
+        let code = ResolvedTextStyle {
+            font_size: 13.0,
+            background: Some(nsh_core::TextBackground {
+                color: nsh_core::Color(0xeeee_eeff),
+                radius: 4.0,
+                node: 4,
+            }),
+            ..style
+        };
+        let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
+        let boxes = |width: Option<f32>| {
+            let prepared = engine.prepare(&t);
+            let size = engine.measure(&prepared, width);
+            let layout = engine.layout(&prepared, size);
+            let l = layout.downcast::<LinuxLayout>().unwrap();
+            let mut rects = Vec::new();
+            l.background_rects(&t, |x, y, w, h, r, _| rects.push((x, y, w, h, r)));
+            (size, rects)
+        };
+        let (size, rects) = boxes(None);
+        assert_eq!(rects.len(), 1, "{rects:?}");
+        let (x, y, w, h, r) = rects[0];
+        assert!(
+            x > 0.0 && x + w < size.width && y >= 0.0 && h <= size.height,
+            "{rects:?}"
+        );
+        assert_eq!(r, 4.0);
+        // Wrapped: a box on each line the span reaches.
+        let (_, rects) = boxes(Some(w * 0.7));
+        assert!(rects.len() >= 2, "{rects:?}");
+        assert!(rects[1].1 > rects[0].1);
     }
 
     #[test]

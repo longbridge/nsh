@@ -107,6 +107,9 @@ pub(crate) struct Surface {
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
     /// scheme is the system's resolved with it ([`crate::system`]).
     pub(crate) appearance: Cell<nsh_core::platform::Appearance>,
+    /// The embedding app's locale and text size, standing in for the
+    /// system's ([`crate::AppView::set_locale`], `set_font_scale`).
+    pub(crate) host_environment: Cell<nsh_core::platform::HostEnvironment>,
     /// JS asked for a display frame.
     js_frame: Cell<bool>,
     /// The tick callback runs.
@@ -146,6 +149,7 @@ impl Surface {
             pending: RefCell::new(Arc::new(AtomicBool::new(false))),
             environment: Cell::new(environment),
             appearance: Cell::default(),
+            host_environment: Cell::default(),
             js_frame: Cell::new(false),
             ticking: Cell::new(false),
             on_error: RefCell::new(None),
@@ -238,7 +242,9 @@ impl Surface {
     }
 
     /// Updates the environment and tells the engine.
-    pub(crate) fn set_environment(&self, environment: Environment) {
+    pub(crate) fn set_environment(&self, mut environment: Environment) {
+        // The embedding app's settings over the system's.
+        self.host_environment.get().apply(&mut environment);
         if self.environment.replace(environment) != environment {
             self.control(|c| c.set_environment(environment));
             crate::system::environment_applied(self);

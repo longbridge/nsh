@@ -77,8 +77,9 @@ pub use crate::{
         TransformOrigin, ViewStyle,
     },
     text::{
-        ATTACHMENT_CHAR, ApproxTextEngine, AttributedText, ResolvedTextStyle, TextAttachment,
-        TextEngine, TextLayout, TextLine, TextLink, TextSpan,
+        ATTACHMENT_CHAR, ApproxTextEngine, AttributedText, BackgroundBox, LinePiece,
+        ResolvedTextStyle, TextAttachment, TextBackground, TextEngine, TextLayout, TextLine,
+        TextLink, TextSpan,
     },
     transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
 };

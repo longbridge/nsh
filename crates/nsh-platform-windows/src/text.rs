@@ -367,6 +367,8 @@ struct FontInfo {
     strikethrough: (f32, f32),
     /// Cap height and x height (points), for `onTextLayout`.
     cap_x: (f32, f32),
+    /// Ascent and descent (points), for span backgrounds.
+    extents: (f32, f32),
     /// It has color glyphs (emoji).
     color: bool,
 }
@@ -1282,6 +1284,7 @@ impl DWriteTextEngine {
                 f32::from(m.strikethroughThickness) * scale,
             ),
             cap_x: (metrics.cap * size, metrics.x * size),
+            extents: (metrics.ascent * size, metrics.descent * size),
             color,
         });
         let mut fonts = self.fonts.borrow_mut();
@@ -2235,6 +2238,17 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
         return;
     };
     let (ox, oy) = (drawn.content.x, drawn.content.y);
+    if drawn.text.has_backgrounds() {
+        layout.background_rects(&drawn.text, |x, y, w, h, r, color| {
+            let rr = windows::Win32::Graphics::Direct2D::D2D1_ROUNDED_RECT {
+                rect: rect_f(ox + x, oy + y, w, h),
+                radiusX: r,
+                radiusY: r,
+            };
+            // SAFETY: a COM call between BeginDraw and EndDraw.
+            unsafe { cx.dc.FillRoundedRectangle(&rr, cx.solid(color)) };
+        });
+    }
     if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
         let brush = cx.solid(selection_tint(&drawn.text));
         layout.selection_rects(&drawn.text, range, |x, y, w, h| {
@@ -2834,6 +2848,45 @@ impl WinLayout {
         }
     }
 
+    /// Calls `f(x, y, width, height, radius, color)` with the boxes
+    /// (content coordinates) of the span backgrounds of `text`.
+    fn background_rects(
+        &self,
+        text: &AttributedText,
+        mut f: impl FnMut(f32, f32, f32, f32, f32, Color),
+    ) {
+        let mut pieces = Vec::new();
+        for line in &self.lines {
+            let runs = &self.runs[line.runs.clone()];
+            let Some(baseline) = runs.first().map(|r| r.baseline) else {
+                continue;
+            };
+            pieces.clear();
+            for run in runs {
+                let (ascent, descent) = run.font.extents;
+                pieces.extend(run.boxes().map(|(x, width, index)| nsh_core::LinePiece {
+                    x,
+                    width,
+                    background: text.background_at(index),
+                    ascent,
+                    descent,
+                }));
+            }
+            pieces.sort_by(|a, b| a.x.total_cmp(&b.x));
+            let clip = (line.info.x, line.info.x + line.info.width);
+            nsh_core::BackgroundBox::join(pieces.iter().copied(), clip, |b| {
+                f(
+                    b.x,
+                    baseline - b.ascent,
+                    b.width,
+                    b.ascent + b.descent,
+                    b.radius(),
+                    b.background.color,
+                );
+            });
+        }
+    }
+
     /// Calls `f(x, y, width, height)` with the rectangles (content
     /// coordinates) that highlight the characters of `range`: per line,
     /// the spans of selected glyphs and attachments, line high.
@@ -3373,6 +3426,41 @@ mod tests {
         assert_eq!(extend(s, (4, 7), 1, Unit::Word), (0, 7));
         // A caret at a word's end stays in it.
         assert_eq!(extend(s, (0, 3), 7, Unit::Word), (0, 7));
+    }
+
+    #[test]
+    fn span_backgrounds_box_each_line() {
+        let engine = engine();
+        let style = plain(15.0);
+        let code = ResolvedTextStyle {
+            font_size: 13.0,
+            background: Some(nsh_core::TextBackground {
+                color: Color(0xeeee_eeff),
+                radius: 4.0,
+                node: 4,
+            }),
+            ..style
+        };
+        let t = text(&[("Run ", style), ("cargo test --all", code), (" now", style)]);
+        let boxes = |width: Option<f32>| {
+            let (size, layout) = layout_of(&engine, &t, width);
+            let l = layout.downcast::<WinLayout>().unwrap();
+            let mut rects = Vec::new();
+            l.background_rects(&t, |x, y, w, h, r, _| rects.push((x, y, w, h, r)));
+            (size, rects)
+        };
+        let (size, rects) = boxes(None);
+        assert_eq!(rects.len(), 1, "{rects:?}");
+        let (x, y, w, h, r) = rects[0];
+        assert!(
+            x > 0.0 && x + w < size.width && y >= 0.0 && h <= size.height,
+            "{rects:?}"
+        );
+        assert_eq!(r, 4.0);
+        // Wrapped: a box on each line the span reaches.
+        let (_, rects) = boxes(Some(w * 0.7));
+        assert!(rects.len() >= 2, "{rects:?}");
+        assert!(rects[1].1 > rects[0].1);
     }
 
     #[test]

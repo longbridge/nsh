@@ -295,7 +295,9 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: Appearance) {
     }
 }
 
-/// The embedding app set its appearance ([`crate::AppView::set_appearance`]).
+/// The embedding app set its appearance ([`crate::AppView::set_appearance`]),
+/// locale or text size: the system's settings are read again, with the
+/// host's over them.
 pub(crate) fn host_appearance_changed(surface: &Surface) {
     update(surface);
     surface.invalidate();
