@@ -3,6 +3,7 @@
 //! Those with content take it with `.child(..)` / `.children(..)`; those
 //! with a root to place (a card in a row) take [`Styled`] methods for it.
 
+use nsh_base::nav_page;
 use nsh_core::{
     PatchValue, StyleDecl, StyleKey,
     ui::{AnyElement, Os, Screen, Style, StyleRefinement, prelude::*},
@@ -93,7 +94,7 @@ pub(crate) fn draws_header() -> bool {
 /// draws it.
 pub(crate) fn titled(title: impl Into<SharedString>) -> Screen {
     let title = title.into();
-    with_header(header(screen().title(title.clone())), || {
+    with_header(header(nav_page().title(title.clone())), || {
         PageHeader::new(title)
     })
 }

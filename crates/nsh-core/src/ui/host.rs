@@ -154,7 +154,8 @@ host_element! {
 }
 
 host_element! {
-    /// A native navigation stack (`<stack>`), made by [`stack`]:
+    /// A native navigation stack (`<stack>`, TS: `NavStack` of `nsh/base`),
+    /// made by `nsh_base::nav_stack`:
     /// UINavigationController on iOS (swipe back, native header), a stack
     /// with a toolbar and predictive back on Android. Its children are its
     /// [`Screen`]s, bottom to top.
@@ -162,14 +163,16 @@ host_element! {
 }
 
 host_element! {
-    /// One screen of a [`Stack`] (`<screen>`), made by [`screen`]: its
-    /// header options and its content (its children).
+    /// One page of a [`Stack`] (`<screen>`, TS: `NavPage` of `nsh/base`),
+    /// made by `nsh_base::nav_page`: its header options and its content (its
+    /// children).
     Screen
 }
 
 host_element! {
-    /// A modal (`<modal>`), made by [`modal`]: presented while it is in the
-    /// view, over everything else; its children are its content.
+    /// A dialog (`<modal>`, TS: `Dialog` of `nsh/base`), made by
+    /// `nsh_base::dialog`: presented while it is in the view, over everything
+    /// else; its children are its content.
     Modal
 }
 
@@ -238,12 +241,14 @@ pub fn scroll() -> Scroll {
 /// A native navigation stack of [`screen`]s: put a screen in to push it,
 /// leave it out to pop it. Give each screen a [`Element::key`] (its route)
 /// so the screens below keep their state.
+#[deprecated(note = "use nsh_base::nav_stack, as TSX's `NavStack` of `nsh/base`")]
 pub fn stack() -> Stack {
     Stack(ElNode::new(Tag::Stack))
 }
 
 /// A screen of a [`stack`]. What it shows reads its insets below the
 /// header ([`super::Scope::insets`]).
+#[deprecated(note = "use nsh_base::nav_page, as TSX's `NavPage` of `nsh/base`")]
 pub fn screen() -> Screen {
     let mut node = ElNode::new(Tag::Screen);
     // Its insets come with this event.
@@ -253,6 +258,7 @@ pub fn screen() -> Screen {
 
 /// A modal presenting its children. Put it in the view to present it (in
 /// a region: [`super::If`]), leave it out to dismiss it.
+#[deprecated(note = "use nsh_base::dialog, as TSX's `Dialog` of `nsh/base`")]
 pub fn modal() -> Modal {
     let mut node = ElNode::new(Tag::Modal);
     // Its insets (`Scope::insets` inside it) come with this event.

@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
+use nsh_base::{nav_page, nav_stack};
 use nsh_core::{
     ApproxTextEngine, EventKind, EventPayload, MountBatch, MountItem, Size,
     ui::{Root, prelude::*},
@@ -143,12 +144,12 @@ fn a_rust_app_starts_in_its_appearance() {
 #[component]
 fn Navigation() -> impl IntoElement {
     let routes = signal(vec![0_u32, 1]);
-    stack().flex_1().child(Each::new(
+    nav_stack().flex_1().child(Each::new(
         move || routes.get(),
         |&route: &u32| route,
         move |route, _| {
             let route = route.get_untracked();
-            screen()
+            nav_page()
                 .title(format!("page {route}"))
                 .header_right(text("more"))
                 .on_dismiss(move |_: &()| routes.update(|r| r.retain(|r| *r < route)))

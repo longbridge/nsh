@@ -5646,6 +5646,8 @@ mod components {
             }))
             .child(If::new(
                 move || name.with(String::len) > 2,
+                // `nsh_base::dialog` is this, and nsh-base depends on the core.
+                #[allow(deprecated)]
                 move || {
                     modal()
                         .close_on_swipe(false)

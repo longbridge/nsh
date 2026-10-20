@@ -5,7 +5,9 @@
 //! and keys, a sheet of inputs and a message bar riding on the keyboard
 //! (as the TSX gallery's `demos/Form.tsx`).
 
-use nsh_base::{KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView, SafeAreaViewProps};
+use nsh_base::{
+    KeyboardAvoidingView, KeyboardAvoidingViewProps, SafeAreaView, SafeAreaViewProps, dialog,
+};
 use nsh_core::{
     Points, Size,
     ui::{
@@ -889,7 +891,7 @@ fn sheet_view(open: Signal<bool>, fx: &[FieldFx]) -> Modal {
         .iter()
         .zip(fx)
         .map(|(label, fx)| field(fx, *label).render(|i| i.placeholder(format!("{label} field"))));
-    modal()
+    dialog()
         .presentation(ModalPresentation::PageSheet)
         .on_cancel(close)
         .child(
