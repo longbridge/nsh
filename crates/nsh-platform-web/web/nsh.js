@@ -642,6 +642,11 @@ class Player {
     if (!this.takesTests) return { outcome: "failed", message: "this runtime takes no test steps" };
     const len = this.withStrings([JSON.stringify(step)], (p, l) => this.wasm.nsh_test_answer(p, l));
     const answer = JSON.parse(this.str(this.wasm.nsh_test_answer_ptr(), len));
+    if (step.query?.query === "animating" && "done" in answer) {
+      // The native graph's, or the page's own (a screen sliding in, a
+      // dialog fading): a finite animation still running.
+      return { outcome: "done", value: answer.done === true || this.pageAnimating() };
+    }
     if ("done" in answer) return { outcome: "done", value: answer.done ?? null };
     if ("failed" in answer) return { outcome: "failed", message: answer.failed };
     try {
@@ -649,6 +654,15 @@ class Player {
     } catch (e) {
       return { outcome: "failed", message: String(e?.message ?? e) };
     }
+  }
+
+  /** Whether a finite CSS or Web Animations animation of the app runs. */
+  pageAnimating() {
+    return this.root.getAnimations({ subtree: true }).some((a) => {
+      if (a.playState !== "running") return false;
+      const end = a.effect?.getComputedTiming().endTime;
+      return end != null && Number.isFinite(Number(end));
+    });
   }
 
   /** What only the page's views answer of a test agent's question. */

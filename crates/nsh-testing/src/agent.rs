@@ -10,8 +10,8 @@
 //! [`Agent`] on a thread of its own, which resolves the selector on the
 //! model, asks the platform ([`Native`]) where the view is on screen and
 //! acts there (a click or a tap, a drag, typed keys), then waits until the
-//! app is quiet: no batch for 100 ms and no native animation running, 2 s
-//! at most. [`Native`]'s calls come from that thread; implementations do
+//! app is quiet: no batch and no native animation for 100 ms, 2 s at
+//! most. [`Native`]'s calls come from that thread; implementations do
 //! their work on the main thread and return when it is done.
 
 use std::{
@@ -863,13 +863,21 @@ impl Agent {
     /// [`SETTLE`] at most, then fails if it threw meanwhile.
     fn settled(&self) -> Result<(), String> {
         let start = Instant::now();
+        // When an animation last ran: what it ends with (a screen popped
+        // once it slid out) comes after it.
+        let mut moved = start;
         loop {
             let activity = self.scene.activity()?;
-            // Quiet since the step began as well as since the last batch.
+            if self.native.animating() {
+                moved = Instant::now();
+            }
+            // Quiet since the step began, the last batch and the last
+            // animation.
             let since = activity
                 .since_last
-                .map_or(start.elapsed(), |d| d.min(start.elapsed()));
-            if since >= QUIET && !self.native.animating() || start.elapsed() >= SETTLE {
+                .map_or(start.elapsed(), |d| d.min(start.elapsed()))
+                .min(moved.elapsed());
+            if since >= QUIET || start.elapsed() >= SETTLE {
                 break;
             }
             self.scene.wait_for_batch(activity.batches, POLL);

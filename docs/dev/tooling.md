@@ -345,7 +345,8 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
 (`Native`: press, long press, scroll, typed keys, `back`, dialogs, screenshots, the window's size and appearance),
-then waits until no batch came for 100 ms and no native animation runs (2 s at most). `Native`'s calls do their work
+then waits until neither a batch came nor a native animation ran for 100 ms (2 s at most; the web's page counts its own
+finite animations too: a screen sliding in). `Native`'s calls do their work
 on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
 test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
 `runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (stubbed
