@@ -805,7 +805,7 @@ impl<M: TextEngine> Core<M> {
     pub fn run_component_tasks(&mut self) {
         let _entered = self.components.runtime.enter();
         let executor = self.components.executor.clone();
-        executor.fire_timers(crate::time::Instant::now());
+        executor.fire_timers(crate::time::now());
         // A task that keeps waking itself cannot hold the engine.
         for _ in 0..MAX_TASK_ROUNDS {
             let polled = executor.poll_ready();

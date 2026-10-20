@@ -64,6 +64,7 @@ mount(() => <Text>{status()}</Text>);
         runtime: None,
         data_dir: Some(dir.join("data")),
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -146,6 +147,7 @@ mount(() => <Text>{status()}</Text>);"#,
         runtime: None,
         data_dir: Some(root.join("data")),
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);

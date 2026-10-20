@@ -60,6 +60,15 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   there too (`web/intl/`): formatted in Rust from hand-written tables of the common languages rather than CLDR (a few
   kilobytes instead of ICU4X's megabytes; trade-offs and limits in its module doc), in `Environment::locale` by
   default (the platform's region format: `NSLocale.currentLocale`, `Locale.getDefault()`).
+- **Time**: an engine runs on a `nsh_core::time::Clock` (`EngineConfig::clock`), its thread's while it runs
+  (`Clock::enter`): JS's timers, Rust tasks' timers, throttled scroll and hover events and the frames' time read it
+  through `nsh_core::time::now()`, `Intl` and `Date` through `unix_ms()`. The system's clock is the default. A manual
+  one (`Clock::manual`) moves only when told: the loop no longer wakes for timers, and `EngineControl::advance_clock`
+  steps it to each time something comes due on the way (timers, task timers, the clock's alarms such as a held-back
+  response), running it before going on, as Playwright's `clock.runFor` and Jest's fake timers do. QuickJS reads the
+  system's time in C for `Date` and `performance`, so on a manual clock `nsh-js` replaces them (`clock.rs`: a native
+  `Date` constructor that hands the intrinsic the clock's time and shares its prototype, and a `performance` of the
+  same shape). The idle collection keeps the system's time.
 - **Networking**: requests go to the platform stack through `nsh_engine::Network`
   (NSURLSession, HttpURLConnection; ureq on Linux, on Windows and for `nsh test`), streaming both ways: the stack reports the response head,
   then body chunks as they arrive (`FetchEvent`), and JS can pause reading (back pressure); a streamed request body is

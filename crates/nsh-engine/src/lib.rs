@@ -49,6 +49,7 @@ pub use nsh_core::{
         HttpRequest, Idiom, Locale, Os,
     },
     storage::{StorageBackend, StorageChange},
+    time::Clock,
     ui::{Root, Theme},
 };
 #[cfg(feature = "js")]
@@ -662,6 +663,10 @@ pub struct EngineConfig {
     /// names (the browser's `localStorage`, an embedder's own); `None`
     /// with no data directory either: in memory, for the engine's life.
     pub storage: Option<Arc<dyn nsh_core::storage::StorageBackend>>,
+    /// The time the app runs on: the system's, or a manual clock a test
+    /// moves (`nsh_core::time::Clock::manual`), which its timers, frames
+    /// and `Date` follow.
+    pub clock: Clock,
 }
 
 fn trusted_directory(path: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
@@ -718,6 +723,7 @@ impl EngineConfig {
             runtime: None,
             data_dir: None,
             storage: None,
+            clock: Clock::system(),
         }
     }
 }
@@ -771,6 +777,11 @@ impl std::fmt::Debug for EngineConfig {
     }
 }
 
+/// How many times [`EngineControl::advance_clock`] stops for what comes
+/// due at most (sinon's fake timers stop at 1000 for one `runAll`; this
+/// leaves room for a long run of 60 Hz intervals).
+const MAX_ADVANCE_ROUNDS: usize = 100_000;
+
 enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
@@ -796,6 +807,8 @@ enum Message {
     Perf(Option<Arc<perf::PerfMonitor>>),
     /// The embedding app's theme.
     Theme(Option<Box<Theme>>),
+    /// Moves a manual clock forward by this much, then calls back.
+    Advance(std::time::Duration, Box<dyn FnOnce() + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -902,6 +915,16 @@ impl EngineControl {
     /// `requestAnimationFrame` callbacks and the tasks waiting for it.
     pub fn frame(&self) {
         let _ = self.tx.send(Message::Frame);
+    }
+
+    /// Moves the engine's manual clock ([`EngineConfig::clock`]) forward
+    /// by `by`: the timers and tasks due meanwhile run in the order they
+    /// come due, each at its time, with what they make due in turn, and the
+    /// clock's alarms (a response it holds back) go off on the way. Then
+    /// `done` runs, after the batches of what ran were submitted. With the
+    /// system's clock it only runs `done`.
+    pub fn advance_clock(&self, by: std::time::Duration, done: impl FnOnce() + Send + 'static) {
+        let _ = self.tx.send(Message::Advance(by, Box::new(done)));
     }
 
     /// Reports the interaction states of view `id` that the core asked to
@@ -1026,6 +1049,8 @@ fn run<M: TextEngine + 'static, S: MountSink>(
     stop: Arc<std::sync::atomic::AtomicBool>,
 ) {
     raise_thread_priority();
+    // The thread's time is the engine's from its first line of JS on.
+    let _clock = config.clock.enter();
     let Some(mut driver) = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop) else {
         return;
     };
@@ -1043,12 +1068,12 @@ fn run<M: TextEngine + 'static, S: MountSink>(
         };
         let started = driver.state.perf.is_some().then(Instant::now);
         if let Some(message) = message {
-            if !driver.handle(message) {
+            if !driver.handle(message, &rx) {
                 return;
             }
             // Coalesce everything already queued into this frame.
             while let Ok(message) = rx.try_recv() {
-                if !driver.handle(message) {
+                if !driver.handle(message, &rx) {
                     return;
                 }
             }
@@ -1078,6 +1103,7 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         let (tx, rx) = crossbeam_channel::unbounded();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let control = EngineControl { tx: tx.clone() };
+        let _clock = config.clock.enter();
         let driver = Driver::start(config, text_engine, Rc::new(sink), tx, &rx, stop)?;
         Some(LocalEngine {
             driver,
@@ -1095,12 +1121,13 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
     /// (timers, tasks) and commits. Returns when to call again at the
     /// latest (sooner if input arrives); `None`: only for input.
     pub fn pump(&mut self) -> Option<Instant> {
+        let _clock = self.driver.clock.enter();
         // Bounded: messages sent while handling (a task waking another)
         // are handled in the same call, a loop that never settles is not.
         for _ in 0..4 {
             let started = self.driver.state.perf.is_some().then(Instant::now);
             while let Ok(message) = self.rx.try_recv() {
-                self.driver.handle(message);
+                self.driver.handle(message, &self.rx);
             }
             self.driver.turn();
             self.driver.state.record_perf(started);
@@ -1123,6 +1150,8 @@ struct Driver<M: TextEngine + 'static> {
     /// once; its views stay as they were and no JS runs any more.
     stopped: bool,
     last_gc: Instant,
+    /// The engine's clock, its thread's ([`Clock::enter`]).
+    clock: Clock,
 }
 
 impl<M: TextEngine + 'static> Driver<M> {
@@ -1254,6 +1283,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             assets: config.assets.clone(),
             stopped: false,
             last_gc: Instant::now(),
+            clock: config.clock.clone(),
         };
         let eval_us = match &config.app {
             App::Js(bundle) => {
@@ -1303,9 +1333,12 @@ impl<M: TextEngine + 'static> Driver<M> {
         } = &mut driver;
         let script = script.as_ref();
         // What was sent before the start (`Engine::start_with`) is in the
-        // first frame.
+        // first frame; a move of the clock comes after it.
+        let mut moves = Vec::new();
         while let Ok(message) = rx.try_recv() {
-            if !handle(script, state, message) {
+            if let Message::Advance(..) = message {
+                moves.push(message);
+            } else if !handle(script, state, message) {
                 return None;
             }
         }
@@ -1329,22 +1362,36 @@ impl<M: TextEngine + 'static> Driver<M> {
         state.load_chunks(script, &**sink);
         state.request_frame(script, &**sink);
         driver.check_stopped();
+        for message in moves {
+            if !driver.handle(message, rx) {
+                return None;
+            }
+        }
         Some(driver)
     }
 
-    /// When the next timer, idle collection or throttled scroll event is
-    /// due.
+    /// When the loop wakes next: for the next timer or throttled event
+    /// (on the system's clock; a manual one moves only when told), or the
+    /// idle collection (the system's time, whatever the clock).
     fn deadline(&self) -> Option<Instant> {
-        let script = self.script.as_ref();
-        let gc_deadline = (script.is_some() && self.state.committed_since_gc)
+        let gc_deadline = (self.script.is_some() && self.state.committed_since_gc)
             .then(|| self.last_gc + IDLE_GC_INTERVAL);
-        let task_timer = self.state.core.next_task_timer();
+        let due = if self.clock.is_manual() {
+            None
+        } else {
+            self.due()
+        };
+        [due, gc_deadline].into_iter().flatten().min()
+    }
+
+    /// When the next timer, task timer or throttled scroll or hover event
+    /// is due, on the engine's clock.
+    fn due(&self) -> Option<Instant> {
         [
-            script.and_then(Script::next_timer),
-            gc_deadline,
+            self.script.as_ref().and_then(Script::next_timer),
             self.state.next_scroll_event(),
             self.state.next_hover_move(),
-            task_timer,
+            self.state.core.next_task_timer(),
         ]
         .into_iter()
         .flatten()
@@ -1352,8 +1399,54 @@ impl<M: TextEngine + 'static> Driver<M> {
     }
 
     /// Handles one message; false on shutdown.
-    fn handle(&mut self, message: Message) -> bool {
-        handle(self.script.as_ref(), &mut self.state, message)
+    fn handle(&mut self, message: Message, rx: &Receiver<Message>) -> bool {
+        match message {
+            Message::Advance(by, done) => {
+                let running = self.advance(by, rx);
+                done();
+                running
+            }
+            message => handle(self.script.as_ref(), &mut self.state, message),
+        }
+    }
+
+    /// Moves a manual clock forward by `by` ([`EngineControl::advance_clock`]):
+    /// to each time something comes due on the way, running it (and the
+    /// messages its alarms sent) before going on; false on shutdown.
+    fn advance(&mut self, by: std::time::Duration, rx: &Receiver<Message>) -> bool {
+        if !self.clock.is_manual() {
+            // What the messages before it did is submitted before `done`.
+            self.turn();
+            return true;
+        }
+        let to = self.clock.now() + by;
+        for round in 0.. {
+            // A timer that keeps scheduling itself at once (`setTimeout(f,
+            // 0)` in `f`) would hold the clock at one time for good.
+            let next = [self.due(), self.clock.next_alarm()]
+                .into_iter()
+                .flatten()
+                .min()
+                .filter(|&at| at <= to && round < MAX_ADVANCE_ROUNDS);
+            if round == MAX_ADVANCE_ROUNDS {
+                log::warn!(
+                    "the clock ran {MAX_ADVANCE_ROUNDS} rounds of timers without getting there: \
+                     a timer keeps scheduling another at once"
+                );
+            }
+            let at = next.unwrap_or(to);
+            self.clock.advance_to(at);
+            while let Ok(message) = rx.try_recv() {
+                if !self.handle(message, rx) {
+                    return false;
+                }
+            }
+            self.turn();
+            if next.is_none() {
+                break;
+            }
+        }
+        true
     }
 
     /// Runs what the handled messages and the time made due, and submits
@@ -1371,7 +1464,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         state.dispatch_touch_move(script);
         if state
             .next_hover_move()
-            .is_some_and(|due| due <= Instant::now())
+            .is_some_and(|due| due <= nsh_core::time::now())
         {
             state.dispatch_hover_moves(script);
         }
@@ -1381,7 +1474,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             for update in hot {
                 script.hot_update(update, &**sink);
             }
-            script.run_timers(Instant::now());
+            script.run_timers(nsh_core::time::now());
             script.run_system();
         }
         state.core.run_component_tasks();
@@ -1682,7 +1775,7 @@ impl<M: TextEngine> State<M> {
         }
         Some(
             self.hover_moved
-                .map_or_else(Instant::now, |t| t + HOVER_MOVE_INTERVAL),
+                .map_or_else(nsh_core::time::now, |t| t + HOVER_MOVE_INTERVAL),
         )
     }
 
@@ -1692,7 +1785,7 @@ impl<M: TextEngine> State<M> {
         if self.hover_moves.is_empty() {
             return;
         }
-        self.hover_moved = Some(Instant::now());
+        self.hover_moved = Some(nsh_core::time::now());
         for (id, event) in std::mem::take(&mut self.hover_moves) {
             let payload = EventPayload::Hover(event);
             if self
@@ -1721,7 +1814,7 @@ impl<M: TextEngine> State<M> {
         if self.scroll_events.is_empty() {
             return;
         }
-        let now = Instant::now();
+        let now = nsh_core::time::now();
         // Views that stopped listening (or are gone).
         let core = &self.core;
         self.scroll_events
@@ -2052,7 +2145,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
         Message::Frame => {
             state.frame_requested = false;
-            state.core.run_frame(Instant::now());
+            state.core.run_frame(nsh_core::time::now());
             if let Some(script) = script {
                 script.run_frame();
             }
@@ -2086,6 +2179,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             state.perf_commit = perf::CommitTiming::default();
         }
         Message::Theme(theme) => state.core.set_host_theme(theme.map(|t| *t)),
+        // The driver handles it ([`Driver::handle`]), and keeps the ones
+        // sent before it started for after the first frame.
+        Message::Advance(..) => unreachable!("the driver moves the clock"),
         Message::Shutdown => return false,
     }
     true

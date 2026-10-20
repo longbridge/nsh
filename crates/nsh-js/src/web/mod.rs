@@ -234,6 +234,10 @@ pub(crate) struct Web {
     /// What relative request URLs resolve against ([`crate::HostOptions`]
     /// `base_url`).
     pub(crate) base_url: Option<::url::Url>,
+    /// The intrinsic `Date`, under a manual clock (`crate::clock`).
+    pub(crate) date: V,
+    /// When `performance.now()` is 0 under a manual clock.
+    pub(crate) clock_origin: Option<nsh_core::time::Instant>,
 }
 
 impl Web {
@@ -245,6 +249,7 @@ impl Web {
         self.blob_urls = Default::default();
         self.cached.clear();
         self.fetches.clear();
+        self.date = V::undefined();
     }
 }
 

@@ -86,6 +86,7 @@ mount(() => <Text>{{shown()}}</Text>);
         runtime: None,
         data_dir: data,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -641,6 +642,7 @@ mount(() => <Text>{shown}</Text>);
         runtime: None,
         data_dir: Some(root.clone()),
         storage: None,
+        clock: Default::default(),
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(

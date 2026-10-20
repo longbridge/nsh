@@ -409,6 +409,7 @@ impl RootView {
             storage: self.ivars().options.storage.as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
+            clock: Default::default(),
         };
         let sink = MainThreadSink {
             mounter: mounter.clone(),

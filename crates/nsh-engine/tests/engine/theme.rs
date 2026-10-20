@@ -47,6 +47,7 @@ fn start(app_theme: Option<Theme>, host_theme: Option<Theme>) -> (Engine, Receiv
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start_with(
         config,
@@ -138,6 +139,7 @@ fn a_tsx_apps_token_classes_follow_the_host_theme() {
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(

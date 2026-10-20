@@ -526,6 +526,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             namespace,
         })),
         storage: Some(std::sync::Arc::new(storage)),
+        clock: Default::default(),
     };
     let text = Rc::new(WebTextEngine::default());
     let Some(engine) = LocalEngine::start(config, text.clone(), Sink) else {

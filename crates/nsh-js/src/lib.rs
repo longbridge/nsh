@@ -14,6 +14,7 @@ mod bytecode;
 mod canvas;
 mod chunks;
 mod classes;
+mod clock;
 mod components;
 mod console;
 mod declarations;

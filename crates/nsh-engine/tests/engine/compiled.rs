@@ -74,6 +74,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -229,6 +230,7 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

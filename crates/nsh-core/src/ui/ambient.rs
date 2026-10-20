@@ -550,10 +550,10 @@ pub fn set_timeout(delay: Duration, f: impl FnOnce() + 'static) -> Spawned<()> {
 pub fn set_interval(period: Duration, f: impl Fn() + 'static) -> Spawned<()> {
     let owner = Owner::current();
     spawn(async move {
-        let mut next = Instant::now() + period;
+        let mut next = crate::time::now() + period;
         loop {
             timer_until(next).await;
-            next = (next + period).max(Instant::now());
+            next = (next + period).max(crate::time::now());
             owner.run(&f);
         }
     })
@@ -571,7 +571,7 @@ pub fn request_animation_frame(f: impl FnOnce(Instant) + 'static) -> Spawned<()>
 
 /// Waits `delay` (in a task; TS: what `setTimeout` waits for).
 pub fn timer(delay: Duration) -> Delay {
-    timer_until(Instant::now() + delay)
+    timer_until(crate::time::now() + delay)
 }
 
 /// Waits until `at` (in a task).
@@ -608,7 +608,7 @@ impl Future for Delay {
         if let Some(sleep) = &mut self.elsewhere {
             return sleep.as_mut().poll(cx);
         }
-        if Instant::now() >= self.at {
+        if crate::time::now() >= self.at {
             return std::task::Poll::Ready(());
         }
         if self.registered {

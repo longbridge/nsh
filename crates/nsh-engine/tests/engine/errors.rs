@@ -47,6 +47,7 @@ fn config(bundle: Bundle, limits: nsh_engine::Limits) -> EngineConfig {
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     }
 }
 
@@ -123,6 +124,7 @@ fn first_error(bundle: Bundle) -> String {
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     };
     let _engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
     rx.recv_timeout(Duration::from_secs(5))

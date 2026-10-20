@@ -106,6 +106,7 @@ impl Platform {
             runtime: None,
             data_dir: None,
             storage: None,
+            clock: Default::default(),
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

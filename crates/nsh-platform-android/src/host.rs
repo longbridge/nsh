@@ -121,6 +121,7 @@ impl Host {
             storage: self.storage.lock().expect("storage").as_ref().map(|dir| {
                 nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
             }),
+            clock: Default::default(),
         };
         let density = self.density;
         let sink = Sink(self.clone());

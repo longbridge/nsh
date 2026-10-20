@@ -223,6 +223,7 @@ impl AppView {
             runtime: None,
             data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
             storage: options.storage.clone(),
+            clock: Default::default(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface

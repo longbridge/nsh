@@ -449,7 +449,8 @@ waker may fire on any thread: it sends the engine a `Wake` message, and the loop
 (`Core::run_component_tasks`). Timers (`timer(d)`, `timer_until(at)`, and `set_timeout` / `set_interval` on them)
 are the executor's own, not tokio's: the core fires them as they come due and the engine's loop waits for the
 soonest (`Core::next_task_timer`), as it does for JS's, so they are as punctual as JS's on the engine thread (a
-tokio timer wakes the engine from another thread, which the OS may run late); awaited off the engine thread (in
+tokio timer wakes the engine from another thread, which the OS may run late), and they follow the engine's clock
+(`nsh_core::time::now()`, a test's manual one: `architecture.md` "Time"); awaited off the engine thread (in
 `background`), a `Delay` is tokio's. A task changes what it wants by writing
 signals, inside the graph like any other Rust code of the view; the patches that makes go out with the next commit.
 `spawn`, `set_timeout`, `set_interval` and `request_animation_frame` return a `Spawned`: the task belongs to the owner

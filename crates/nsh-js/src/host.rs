@@ -237,6 +237,8 @@ impl Host {
                 .and_then(|u| url::Url::parse(u).ok());
             install(&ctx, &shared)?;
             crate::standard::install(&ctx)?;
+            // Before hardening freezes the globals.
+            crate::clock::install(&ctx)?;
             if options.harden {
                 match &options.harden_bytecode {
                     // SAFETY: trusted, per the option's contract.

@@ -52,6 +52,7 @@ fn config(app: App) -> EngineConfig {
         runtime: None,
         data_dir: None,
         storage: None,
+        clock: Default::default(),
     }
 }
 

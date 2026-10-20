@@ -13,6 +13,7 @@ use nsh_engine::MountSink;
 
 mod canvas;
 mod class_bench;
+mod clock;
 mod compat;
 mod compiled;
 mod component_bench;
