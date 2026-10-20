@@ -1,9 +1,11 @@
 import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Platform, windowSize } from "nsh/device";
+import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { Image } from "nsh/image";
 import { Storage } from "nsh/storage";
 import { Screen, Stack, StatusBar } from "nsh/ui/mobile";
 import { Icon } from "./icons";
+import { TitleBar } from "./TitleBar";
 import logo from "./logo@2x.png";
 import { type DemoEntry, nav } from "./nav";
 import { Appear, Badge, colors, desktop, header, IconTile, isDark, lazy, mono, Press, radius, SIDEBAR } from "./ui";
@@ -165,7 +167,7 @@ const select = (demo: DemoEntry) => {
 /** A demo in the sidebar: an accent bar and a raised fill when selected,
  * a fill under the pointer otherwise. */
 function SidebarRow(props: { demo: DemoEntry }) {
-  const active = () => selected() === props.demo;
+  const active = () => selected().name === props.demo.name;
   return (
     <View
       onPress={() => select(props.demo)}
@@ -221,7 +223,7 @@ function Sidebar() {
 
 /** The selected demo under a toolbar with its name and what it shows. */
 function DemoPane() {
-  const group = () => groups.find((g) => g.demos.includes(selected()))!.title;
+  const group = () => groups.find((g) => g.demos.some((demo) => demo.name === selected().name))?.title ?? "Gallery";
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
@@ -314,10 +316,15 @@ function rememberDemo() {
 }
 
 function App() {
+  if (hasWindow) {
+    Window.setTitle("Gallery");
+    Window.setTitleBar("hidden", 40);
+  }
   rememberDemo();
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar barStyle={isDark() ? "light-content" : "dark-content"} />
+      <TitleBar />
       <If when={desktop()} else={<Phone />}>
         <Desktop />
       </If>
