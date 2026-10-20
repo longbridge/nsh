@@ -521,6 +521,56 @@ fn a_new_value_replaces_the_effect_of_its_items() {
     }
 }
 
+const IF_VALUE: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+const user = signal<{ name: string } | null>(null);
+mount(() => (
+  <View>
+    <If when={user()} else={<Text>signed out</Text>}>
+      {(u) => <Text>{`hello ${u().name}`}</Text>}
+    </If>
+    <Text onPress={() => user.set({ name: user()?.name === "Ada" ? "Grace" : "Ada" })}>next</Text>
+    <Text onPress={() => user.set(null)}>out</Text>
+  </View>
+));
+"#;
+
+/// An `<If>`'s function child gets an accessor of `when`: the branch is
+/// made when it turns truthy, follows its value in place while it stays
+/// so, and goes when it turns falsy.
+#[test]
+fn an_if_hands_its_function_child_the_value() {
+    let (engine, rx) = start_app(IF_VALUE);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(texts(&first).contains(&"signed out".to_owned()));
+    let (next_id, out) = (
+        text_id(&first, "next").expect("next"),
+        text_id(&first, "out").expect("out"),
+    );
+    let press = |id| control.dispatch_event(id, EventKind::Press, EventPayload::None);
+    press(next_id);
+    let batch = next(&rx, |b| texts(b).contains(&"hello Ada".to_owned()));
+    let hello = text_id(&batch, "hello Ada").expect("the branch's text");
+    press(next_id);
+    let batch = next(&rx, |b| texts(b).contains(&"hello Grace".to_owned()));
+    // The same text, updated: the branch stayed.
+    assert_eq!(text_id(&batch, "hello Grace"), Some(hello));
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Create { .. })),
+        "{:#?}",
+        batch.items
+    );
+    press(out);
+    next(&rx, |b| texts(b).contains(&"signed out".to_owned()));
+}
+
 const REFS: &str = r#"
 import { Input, mount, signal, Text, View, type YNode } from "nsh";
 import { Stepper, type StepperRef } from "nsh/ui/mobile";
