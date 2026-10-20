@@ -88,7 +88,7 @@ Clipboard.hasString().then((has) => canPaste.set(has));
 getImage(): Promise<ClipboardImage | null>;
 ```
 
-返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。`uri` 是图片的 `data:` URI（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；`fetch(uri)` 拿到它的字节，用于上传。`width` 和 `height` 是像素尺寸。和 `getString` 一样，在用户要求粘贴时再读。
+返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。`uri` 是图片的 `data:` URI（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；`fetch(uri)` 拿到它的字节，用于上传。`width` 和 `height` 是像素尺寸。和 `getString` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB（编码后），这样 `data:` URI 能放进应用的内存；更大的图片 `getImage` 返回 `null`，`hasImage` 返回 `true`。
 
 ```tsx
 import { signal, View } from "nsh";
@@ -140,7 +140,7 @@ hasImage(): Promise<boolean>;
 setImage(uri: string): void;
 ```
 
-把 `uri`（base64 `data:` URI，例如 `getImage` 给的）的图片放到剪贴板上，替换原有内容。Windows 上图片以 PNG 写入，浏览器、Office 和截图工具都能读取。
+把 `uri`（base64 `data:` URI，例如 `getImage` 给的）的图片放到剪贴板上，替换原有内容。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
 
 ```ts
 Clipboard.setImage(image.uri);
@@ -152,7 +152,7 @@ Clipboard.setImage(image.uri);
 getFiles(): Promise<string[]>;
 ```
 
-返回在文件管理器（访达、资源管理器、Files）里复制的文件和文件夹的 `file:` URL，按原顺序，没有时为 `[]`：与[文件拖放](../elements/view.md)给出的 URL 相同。解析 URL 得到路径。
+返回在文件管理器（访达、资源管理器、Files）里复制的文件和文件夹的 `file:` URL，按原顺序，没有时为 `[]`：与[文件拖放](../elements/view.md#桌面文件拖放)给出的 URL 相同。解析 URL 得到路径。
 
 ```ts
 const files = await Clipboard.getFiles();

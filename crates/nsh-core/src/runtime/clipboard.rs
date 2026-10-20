@@ -36,8 +36,9 @@ impl Clipboard {
 
     /// The clipboard's image, `null` when it holds none: `uri` is a
     /// `data:` URI an `Image` shows and `fetch(uri)` reads the bytes of,
-    /// `width` and `height` its size in pixels. On iOS, reading it may show
-    /// the system's paste notice.
+    /// `width` and `height` its size in pixels; `null` too for an image
+    /// over 48 MB (encoded), which the app's memory may not hold. On iOS,
+    /// reading it may show the system's paste notice.
     pub(crate) async fn get_image() -> Option<ClipboardImage> {
         crate::ui::prelude::clipboard_image().await
     }

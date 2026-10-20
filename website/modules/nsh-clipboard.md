@@ -91,7 +91,8 @@ getImage(): Promise<ClipboardImage | null>;
 Resolves with the clipboard's image, or `null` when it holds none: a pasted screenshot, or an image copied in a browser
 or an image editor. `uri` is a `data:` URI of the image (PNG, or the clipboard's own JPEG, GIF, WebP or BMP), which an
 [`Image`](../elements/image.md) shows as its `src`; `fetch(uri)` gives its bytes, for an upload. `width` and `height` are
-its size in pixels. As with `getString`, read it when the user asks to paste.
+its size in pixels. As with `getString`, read it when the user asks to paste. Images of up to 48 MB (encoded) are read,
+so the `data:` URI fits in the app's memory; for a larger one `getImage` resolves `null` and `hasImage` `true`.
 
 ```tsx
 import { signal, View } from "nsh";
@@ -145,7 +146,7 @@ setImage(uri: string): void;
 ```
 
 Puts the image of `uri`, a base64 `data:` URI such as `getImage` gives, on the clipboard, replacing what it holds. On
-Windows the image is a PNG, which browsers, Office and the Snipping Tool read.
+Windows it takes a PNG, the format browsers, Office and the Snipping Tool read.
 
 ```ts
 Clipboard.setImage(image.uri);

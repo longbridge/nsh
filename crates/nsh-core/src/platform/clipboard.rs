@@ -7,6 +7,20 @@
 
 use crate::{EventPayload, PayloadValue};
 
+/// The largest image a clipboard read gives, in encoded bytes (48 MiB).
+/// Its `data:` URI (a third larger) becomes a JS string the VM's heap holds
+/// (256 MB for an embedded app), with whatever the app makes of it, such as
+/// a `Blob`; running out of heap stops the VM, so a larger image reads as
+/// none (`has` stays true).
+pub const MAX_IMAGE_BYTES: usize = 48 << 20;
+
+/// Whether `uri`, a clipboard image's `data:` URI, is within
+/// [`MAX_IMAGE_BYTES`] (the core checks what every backend answers).
+pub(crate) fn uri_within_limit(uri: &str) -> bool {
+    // `data:image/…;base64,` and the base64 of the bytes.
+    uri.len() <= 64 + MAX_IMAGE_BYTES.div_ceil(3) * 4
+}
+
 /// An image read from the clipboard, as the platform found it.
 #[derive(Debug, Clone, Copy)]
 pub struct Image<'a> {
@@ -37,12 +51,27 @@ impl<'a> Image<'a> {
 
 /// The answer to image read `id`: whether the clipboard holds an image and,
 /// unless only that was asked (`image` is `None` then), the image as a
-/// `data:` URI and its size.
+/// `data:` URI and its size. An image over [`MAX_IMAGE_BYTES`] is left
+/// out (and logged), unencoded.
 pub fn image_answer(id: u32, has: bool, image: Option<Image<'_>>) -> EventPayload {
     let mut fields = vec![
         ("id", PayloadValue::Number(id as f64)),
         ("has", PayloadValue::Bool(has || image.is_some())),
     ];
+    let image = image.filter(|image| {
+        let fits = image.bytes.len() <= MAX_IMAGE_BYTES;
+        if !fits {
+            log::warn!(
+                target: "js",
+                "Clipboard.getImage: the clipboard's {}x{} image is {} MB, over the {} MB an app reads",
+                image.width,
+                image.height,
+                image.bytes.len() >> 20,
+                MAX_IMAGE_BYTES >> 20
+            );
+        }
+        fits
+    });
     if let Some(image) = image {
         fields.push(("uri", PayloadValue::Str(data_uri(image.mime, image.bytes))));
         fields.push(("width", PayloadValue::Number(image.width as f64)));
@@ -277,6 +306,29 @@ mod tests {
     }
 
     #[test]
+    fn images_over_the_limit_read_as_none() {
+        let mut bytes = PNG.to_vec();
+        bytes.resize(MAX_IMAGE_BYTES + 1, 0);
+        let image = Image::sniff(&bytes).unwrap();
+        assert_eq!(
+            image_answer(1, true, Some(image)),
+            EventPayload::Map(vec![
+                ("id", PayloadValue::Number(1.0)),
+                ("has", PayloadValue::Bool(true)),
+            ])
+        );
+        bytes.truncate(MAX_IMAGE_BYTES);
+        let EventPayload::Map(fields) = image_answer(1, true, Image::sniff(&bytes)) else {
+            panic!()
+        };
+        assert!(matches!(&fields[2], ("uri", PayloadValue::Str(u)) if uri_within_limit(u)));
+        assert!(!uri_within_limit(&data_uri(
+            "image/png",
+            &vec![0; MAX_IMAGE_BYTES + 64]
+        )));
+    }
+
+    #[test]
     fn answers_carry_images_and_files() {
         let image = Image::sniff(PNG).unwrap();
         let EventPayload::Map(fields) = image_answer(4, true, Some(image)) else {
@@ -285,7 +337,7 @@ mod tests {
         assert_eq!(fields[0], ("id", PayloadValue::Number(4.0)));
         assert_eq!(fields[1], ("has", PayloadValue::Bool(true)));
         assert!(
-            matches!(&fields[2], ("uri", PayloadValue::Str(u)) if u.starts_with("data:image/png;base64,"))
+            matches!(&fields[2], ("uri", PayloadValue::Str(u)) if u.starts_with("data:image/png;base64,") && uri_within_limit(u))
         );
         assert_eq!(
             fields[3..],

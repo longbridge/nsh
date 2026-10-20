@@ -361,7 +361,6 @@ enum Awaited {
     Value(AnswerSlot<f32>),
 }
 
-/// An HTTP request of a task in flight ([`Core::fetch_event`]).
 /// What the platform answered a clipboard read with (the root's
 /// `Clipboard` event).
 #[derive(Default)]
@@ -400,14 +399,16 @@ impl ClipboardAnswer {
                 _ => {}
             }
         }
-        // Only an image NSH can show: a `data:` URI.
+        // Only an image NSH can show, a `data:` URI, and only one the VM
+        // can hold (the web's player encodes its own).
         answer.image = uri
-            .filter(|u| u.starts_with("data:"))
+            .filter(|u| u.starts_with("data:") && crate::platform::clipboard::uri_within_limit(u))
             .map(|uri| crate::ui::ClipboardImage { uri, width, height });
         answer
     }
 }
 
+/// An HTTP request of a task in flight ([`Core::fetch_event`]).
 struct PendingFetch {
     /// What arrived so far.
     response: crate::ui::HttpResponse,
@@ -4327,8 +4328,6 @@ impl<M: TextEngine> Core<M> {
         true
     }
 
-    /// The answer to clipboard read `id`: the text, `None` when it holds
-    /// none.
     /// Resolves clipboard read `id` with the platform's answer (an empty
     /// one when the clipboard is not granted).
     pub(super) fn answer_clipboard(&mut self, id: u32, answer: ClipboardAnswer) {
