@@ -24,6 +24,8 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 每个模块都按表中的名称导入：`import { join } from "path"`、`import fs from "fs/promises"`。打包器保留这些导入，由运行时原生提供；标准模块目录就是这十一个名称。`buffer`、`crypto`、`path`、`url` 和 `zlib` 采用 LLRT 的实现，固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`，其声明从该版本投影到运行时实际具有的导出。其余模块由 NSH 自己实现。NSH 的 URL、Blob、流和事件类保留其对象身份。
 
+`buffer`、`crypto`、`path`、`url`、`zlib` 和 `websocket`，以及全局对象 `Buffer` 和 `crypto`，是原生宿主模块：iOS、Android、macOS、Windows 和 Linux 应用都可以使用。Web 应用运行 `fs/promises`、`process`、`net`、`os` 和 `console`；在 Web 上导入原生宿主模块会抛出指明该模块的错误，其声明中也有说明。
+
 ## 与 Node.js 和 gpui-shell 的比较
 
 这些模块在其导出的子集内沿用 Node 的名称和形态，在 gpui-shell 定义了行为之处沿用 gpui-shell 的行为。NSH 自己的选择：

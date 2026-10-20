@@ -41,7 +41,8 @@ const UNREAD_BYTES: usize = LIMIT;
 /// `bufferedAmount` limit); a write past it throws.
 const PENDING_WRITES: usize = LIMIT;
 
-/// WebSocket client connections to the hosts the HTTP grants allow.
+/// WebSocket client connections to the hosts the HTTP grants allow (native
+/// hosts only: on the web, importing this module throws).
 #[module]
 pub(crate) struct WebSocket;
 

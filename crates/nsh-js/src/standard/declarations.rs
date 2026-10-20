@@ -46,6 +46,9 @@ const SOURCES: &[(&str, &str)] = &[
     ),
 ];
 const GLOBALS: &str = include_str!("../../../../third_party/llrt-types/globals.d.ts.txt");
+/// What the declaration of a module of [`super::NATIVE_ONLY`] says.
+const NATIVE_ONLY_DOC: &str =
+    "/** Native hosts only: on the web, importing this module throws. */\n";
 
 #[derive(Clone, Copy)]
 struct Token<'a> {
@@ -271,6 +274,9 @@ pub(crate) fn type_definitions(exports: &[(&str, &[&str])]) -> Vec<(String, Stri
         } else {
             value_names(source)
         };
+        if super::NATIVE_ONLY.contains(name) {
+            public.push_str(NATIVE_ONLY_DOC);
+        }
         let _ = writeln!(public, "declare module \"{name}\" {{");
         if *name == "path" {
             let _ = writeln!(
@@ -341,9 +347,11 @@ fn adapter(out: &mut String, name: &str, body: &str) {
 pub(crate) fn globals() -> String {
     String::from(
         r#"
+/** Native hosts only: not defined on the web. */
 declare var Buffer: typeof import("buffer").Buffer;
 type Buffer = import("buffer").Buffer;
 declare var process: typeof import("process").default;
+/** Native hosts only: not defined on the web. */
 declare var crypto: Pick<typeof import("crypto").default, "createHash" | "createHmac" | "randomBytes" | "randomInt" | "randomUUID" | "randomFill" | "randomFillSync" | "getRandomValues"> & { readonly subtle: typeof import("@nsh/llrt-types/crypto").subtle };
 /** Native constructor without an upstream constructor signature. */
 declare const Crypto: unknown;
@@ -379,6 +387,7 @@ mod tests {
         let files = type_definitions(&[("url", &["URL", "default"])]);
         let public = &files[1].1;
         assert!(public.contains("export { URL }"));
+        assert!(public.contains(&format!("{NATIVE_ONLY_DOC}declare module \"url\"")));
         assert!(!public.contains("export { parse }"));
         assert!(!public.contains("declare module \"node:"));
     }

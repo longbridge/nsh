@@ -24,6 +24,8 @@ Native Shell provides eleven standard modules, imported by their bare names: Nod
 
 Each module is imported by exactly the name in the table: `import { join } from "path"`, `import fs from "fs/promises"`. The bundler keeps these imports, and the runtime serves them natively; the catalog is these eleven names. `buffer`, `crypto`, `path`, `url` and `zlib` are LLRT's implementations, pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`, with declarations projected from that revision onto the exports the runtime has. The others are NSH's own. NSH keeps the identity of its URL, Blob, stream and event classes.
 
+`buffer`, `crypto`, `path`, `url`, `zlib` and `websocket`, and the globals `Buffer` and `crypto`, are native-host modules: iOS, Android, macOS, Windows and Linux apps have them. A web app runs `fs/promises`, `process`, `net`, `os` and `console`, and an import of a native-host module there throws an error that names it; their declarations say so.
+
 ## How they compare with Node.js and gpui-shell
 
 The modules follow Node's names and shapes for the subset they export, and gpui-shell's behavior where it defines one. NSH's own choices:

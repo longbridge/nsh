@@ -1,34 +1,16 @@
 //! Standard URL utilities share the existing WHATWG constructors and brands.
-#[cfg(target_arch = "wasm32")]
-use rquickjs::Exception;
 use rquickjs::{
-    Class, Coerced, Ctx, FromJs, Function, JsLifetime, Object, Result, Value,
+    Class, Coerced, Ctx, FromJs, Function, IntoJs, JsLifetime, Object, Result, Value,
     class::{ClassKind, JsCell, JsClass, Readable, Trace, Tracer},
     function::{Constructor, Func, Opt, Params},
     module::{Declarations, Exports, ModuleDef},
 };
-#[cfg(target_arch = "wasm32")]
-use url::Url;
 
 fn domain_to_ascii(domain: &str) -> String {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        quickjs_jit_stdlib::url::domain_to_ascii(domain)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        url::quirks::domain_to_ascii(domain)
-    }
+    quickjs_jit_stdlib::url::domain_to_ascii(domain)
 }
 fn domain_to_unicode(domain: &str) -> String {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        quickjs_jit_stdlib::url::domain_to_unicode(domain)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        url::quirks::domain_to_unicode(domain)
-    }
+    quickjs_jit_stdlib::url::domain_to_unicode(domain)
 }
 
 pub(crate) struct UrlModule;
@@ -73,45 +55,19 @@ const METHODS: &[&str] = &[
     "urlToHttpOptions",
 ];
 
-#[cfg(target_arch = "wasm32")]
-fn parse(ctx: &Ctx<'_>, text: &str) -> Result<Url> {
-    Url::parse(text).map_err(|_| Exception::throw_type(ctx, "Invalid URL"))
-}
-
 fn path_to_file_url<'js>(
     ctx: &Ctx<'js>,
     constructor: &Constructor<'js>,
     path: String,
 ) -> Result<Object<'js>> {
-    #[cfg(not(target_arch = "wasm32"))]
     let href = quickjs_jit_stdlib::url::path_to_file_url(ctx.clone(), path, Opt(None))?.href();
-    #[cfg(target_arch = "wasm32")]
-    let href = {
-        if !path.starts_with('/') {
-            return Err(Exception::throw_type(ctx, "Path is not absolute"));
-        }
-        let mut url = parse(ctx, "file:///")?;
-        url.set_path(&path.replace('%', "%25"));
-        url.to_string()
-    };
     constructor.construct((href,))
 }
 
 fn file_url_to_path<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use rquickjs::IntoJs;
-        quickjs_jit_stdlib::url::file_url_to_path(ctx.clone(), input.0.into_js(&ctx)?)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = ctx;
-        // Match LLRT's utility contract, including preserving percent escapes.
-        Ok(input.0.trim_start_matches("file://").to_owned())
-    }
+    quickjs_jit_stdlib::url::file_url_to_path(ctx.clone(), input.0.into_js(&ctx)?)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn native_url<'js>(
     ctx: &Ctx<'js>,
     input: &str,
@@ -123,82 +79,14 @@ fn native_url<'js>(
 }
 
 fn format<'js>(ctx: Ctx<'js>, input: Coerced<String>, options: Opt<Value<'js>>) -> Result<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        quickjs_jit_stdlib::url::url_format(native_url(&ctx, &input.0)?, options)
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let url = parse(&ctx, &input.0)?;
-        let flag = |name: &str, fallback| {
-            options
-                .0
-                .as_ref()
-                .and_then(Value::as_object)
-                .and_then(|options| options.get::<_, bool>(name).ok())
-                .unwrap_or(fallback)
-        };
-        let mut text = format!("{}//", url::quirks::protocol(&url));
-        if flag("auth", true) && !url.username().is_empty() {
-            text.push_str(url.username());
-            if let Some(password) = url.password().filter(|p| !p.is_empty()) {
-                text.push(':');
-                text.push_str(password);
-            }
-            text.push('@');
-        }
-        let host = url::quirks::host(&url);
-        text.push_str(&if flag("unicode", false) {
-            domain_to_unicode(host)
-        } else {
-            host.to_owned()
-        });
-        text.push_str(url::quirks::pathname(&url));
-        if flag("search", true) {
-            text.push_str(url::quirks::search(&url));
-        }
-        if flag("fragment", true) {
-            text.push_str(url::quirks::hash(&url));
-        }
-        Ok(text)
-    }
+    quickjs_jit_stdlib::url::url_format(native_url(&ctx, &input.0)?, options)
 }
 
 fn url_to_http_options<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<Object<'js>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        quickjs_jit_stdlib::url::url_class::url_to_http_options(
-            ctx.clone(),
-            native_url(&ctx, &input.0)?,
-        )
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let url = parse(&ctx, &input.0)?;
-        let result = Object::new(ctx.clone())?;
-        let search = url::quirks::search(&url);
-        result.set("protocol", url::quirks::protocol(&url))?;
-        result.set("hostname", url::quirks::hostname(&url))?;
-        if let Some(hash) = url.fragment().filter(|h| !h.is_empty()) {
-            result.set("hash", hash)?;
-        }
-        if !search.is_empty() {
-            result.set("search", search)?;
-        }
-        result.set("pathname", url::quirks::pathname(&url))?;
-        result.set("path", format!("{}{search}", url::quirks::pathname(&url)))?;
-        result.set("href", url.as_str())?;
-        if !url.username().is_empty() {
-            result.set(
-                "auth",
-                format!("{}:{}", url.username(), url.password().unwrap_or_default()),
-            )?;
-        }
-        if let Some(port) = url.port() {
-            result.set("port", port.to_string())?;
-        }
-        Ok(result)
-    }
+    quickjs_jit_stdlib::url::url_class::url_to_http_options(
+        ctx.clone(),
+        native_url(&ctx, &input.0)?,
+    )
 }
 
 impl ModuleDef for UrlModule {
