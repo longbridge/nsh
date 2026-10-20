@@ -7,9 +7,22 @@ use rquickjs::{
 use crate::error::JsError;
 
 /// Identifies the bytecode format produced by [`compile_bytecode`] and
-/// accepted by [`crate::Host::eval_bytecode`]: QuickJS bytecode is only
-/// valid for the exact engine build. Bump together with the `quickjs-jit` pin.
-pub const BYTECODE_VERSION: &str = "quickjs-jit-0.14.0/quickjs-ng-0.16.2/le64";
+/// accepted by [`crate::Host::eval_bytecode`]: the QuickJS-NG release and
+/// revision, its bytecode format (`BC_VERSION`) and the byte order written.
+///
+/// It names the engine, not the binding: native targets run quickjs-jit and
+/// the browser upstream rquickjs, both building QuickJS-NG at this revision
+/// with the same serializer (quickjs-jit's patches leave `JS_WriteObject` /
+/// `JS_ReadObject` and the compiler as they are), so bytecode the CLI
+/// compiles runs in the web runtime. Bump it with either `-sys` pin
+/// ([`ENGINES`]).
+pub const BYTECODE_VERSION: &str = "quickjs-ng-0.16.2+0fdea21/bc28/le";
+
+/// The `-sys` crates whose QuickJS-NG [`BYTECODE_VERSION`] names: (package,
+/// version). The test `engines_build_the_named_quickjs` holds them to the
+/// lockfile.
+#[cfg(test)]
+const ENGINES: &[(&str, &str)] = &[("quickjs-jit-sys", "0.14.0"), ("rquickjs-sys", "0.14.0")];
 
 /// Module name every bundle is evaluated under; JS stack frames reference
 /// it as `bundle.js:LINE:COL`.
@@ -163,7 +176,8 @@ mod tests {
         assert!(host.eval_source("import 'node:node:buffer';").is_err());
     }
 
-    /// Fails when the engine is upgraded without bumping `BYTECODE_VERSION`.
+    /// Fails when the engine is upgraded without bumping `BYTECODE_VERSION`:
+    /// its release, and the format byte bytecode starts with.
     #[test]
     fn bytecode_version_matches_linked_engine() {
         // SAFETY: returns a static NUL-terminated string.
@@ -171,8 +185,33 @@ mod tests {
             .to_str()
             .unwrap();
         assert!(
-            BYTECODE_VERSION.contains(&format!("quickjs-ng-{engine}/")),
+            BYTECODE_VERSION.starts_with(&format!("quickjs-ng-{engine}+")),
             "linked QuickJS-NG {engine}, BYTECODE_VERSION says {BYTECODE_VERSION}"
         );
+        let bytecode = compile_bytecode("export const x = 1;", true).unwrap();
+        assert!(
+            BYTECODE_VERSION.contains(&format!("/bc{}/", bytecode[0])),
+            "bytecode format {}, BYTECODE_VERSION says {BYTECODE_VERSION}",
+            bytecode[0]
+        );
+    }
+
+    /// Native targets and the browser link different `-sys` crates; both
+    /// must be the versions that build `BYTECODE_VERSION`'s QuickJS-NG
+    /// revision, or bytecode compiled by the CLI would not be the web
+    /// runtime's.
+    #[test]
+    fn engines_build_the_named_quickjs() {
+        let lock = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"),
+        )
+        .unwrap();
+        for (package, version) in ENGINES {
+            let entry = format!("name = \"{package}\"\nversion = \"{version}\"\n");
+            assert!(
+                lock.contains(&entry),
+                "Cargo.lock has no {package} {version}: check its QuickJS-NG against BYTECODE_VERSION ({BYTECODE_VERSION}), then update ENGINES"
+            );
+        }
     }
 }

@@ -13,7 +13,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Nodes are released by GC, not by Remove.** A memo may keep removed nodes and insert them again, so `Remove` only detaches;
   `Release` (queued by the node's finalizer) frees the node and its native view.
 - **`nsh_js::BUNDLE_NAME` (`bundle.js`)** is the module name of every bundle and is how stacks are matched for symbolication; `BYTECODE_VERSION`
-  is tested against the linked QuickJS version: update both when upgrading quickjs-jit (the `rquickjs` dependency).
+  names the QuickJS-NG release and revision, `BC_VERSION` and the byte order, never the binding: native targets
+  (quickjs-jit) and the browser (upstream rquickjs) must build the same QuickJS-NG, as the web runtime loads what
+  the native CLI compiles. Tests hold it to the linked release, the bytecode's format byte and the `-sys` versions
+  in `Cargo.lock` (`ENGINES`): update them together when upgrading either.
 - **Encoded operations' codes** (`ANIMATION_*`, `CV_*`) come from `nsh_core::js` (`protocol.rs`, `canvas.rs`): never write a code's value
   by hand in `nsh-js`.
 - **rquickjs converts `Option::None` to `undefined`, not `null`**: compare native results with `== null` in JS.

@@ -1163,7 +1163,7 @@ mod tests {
     fn requests_and_messages_survive_their_lines() {
         let request = TraceRequest {
             bytecode: Some(PathBuf::from("C:\\app\\.nsh\\rust\\trace\\bundle.nshc")),
-            bytecode_version: Some("rquickjs-0.14.0/quickjs-ng-0.16.2/le64".into()),
+            bytecode_version: Some("quickjs-ng-0.16.2+0fdea21/bc28/le".into()),
             source_map: None,
             dir: PathBuf::from("/apps/charts"),
             verbose: true,
