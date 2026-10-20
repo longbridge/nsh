@@ -43,6 +43,7 @@ pub(crate) fn test(
     filter: Option<String>,
     trace: bool,
     junit: Option<&Path>,
+    target: Option<crate::run::Target>,
 ) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let work_dir = app_dir.join(".nsh/test");
@@ -72,7 +73,13 @@ pub(crate) fn test(
     };
     let start = Instant::now();
     let mut tally = Tally::default();
+    let host = target.map(crate::test_host::starter).transpose()?;
     match crate::rust_app::current() {
+        Some(_) if host.is_some() => {
+            bail!(
+                "an app with Rust crates of its own runs its tests headless for now: leave out --target"
+            )
+        }
         Some(app) => {
             let request = TestRequest {
                 protocol: nsh_testing::PROTOCOL,
@@ -92,6 +99,7 @@ pub(crate) fn test(
                 work_dir: work_dir.clone(),
                 filter,
                 trace: trace.then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
+                host,
             };
             for file in &files {
                 let shown = shown(file);

@@ -203,6 +203,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.requests()` | 应用发出的请求，按顺序排列：`method`、`url`、`headers`、`body`。 |
 | `await app.setViewport(width, height)` | 改变视口大小，就像旋转设备或调整窗口大小那样（`windowSize()`）。 |
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
+| `await app.screenshot(path?)` | 应用窗口的 PNG 截图（`Uint8Array`）；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 
 步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
 代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。选择器没有匹配到任何视图
@@ -238,6 +239,27 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `toBeGreaterThan(n)`、`toBeGreaterThanOrEqual(n)`、`toBeLessThan(n)`、`toBeLessThanOrEqual(n)` | 数字与 `n` 满足相应的大小关系。 |
 | `toThrow(message?)` | `expect(fn)`：调用 `fn` 会抛出异常；给了 `message` 时，异常消息要匹配它。 |
 | `rejects.toThrow(message?)` | `expect(fn)`：`fn` 返回的 promise 会 reject：`await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`。 |
+
+### 在真实平台上运行
+
+`nsh test --target macos` 在平台的开发 host 上运行同样的测试，而不是 headless：每次 `open` 都在一个新窗口里启动应用，并使用全新的
+数据目录；步骤用平台自己的输入作用在选择器指向的视图上，就像 Playwright 在浏览器里那样：
+
+- 按压是在视图中心点击，长按是按住不放，`type` 先点击输入框再逐键输入，`scroll` 是在滚动视图上的触控板手势，`back` 是用户按下的键（Escape）；
+- 不在屏幕上的视图会先被滚动到可见，每次一个手势；
+- 选择器、等待和查询看到的应用模型与 headless 相同，由 host 绘制的内容建立，所以找到的是同样的视图；
+- 对话框是平台自己的：`app.dialogs()` 读取它们，回答对话框（`onDialog`，或测试没有回答时按它的取消按钮）会按下对应的按钮；
+- `app.screenshot(path)` 截取窗口。
+
+```sh
+nsh test --target macos                       # 在 macOS 窗口里运行应用的测试
+nsh test tests/form.test.tsx --target macos   # 只运行一个文件
+```
+
+窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕。时间是真实的：`clock` 和系统时钟一样走，所以
+`app.clock.runFor(ms)` 会真的等待这么久，而真实时间做不到的 `fastForward` 和 `setSystemTime` 会 reject。真实平台暂时还给不了的
+选项会让 `open` reject，而不是被忽略：模拟的 `network` 路由、`storage`、`clipboard`、`locale`、`reducedMotion` 和 `safeArea`；请求会
+发往真实网络。`app.storage()` 和 `app.requests()` 只在 headless 下可用。带有自己 Rust crate 的应用暂时只在 headless 下运行测试。
 
 ### 从标准输入给出步骤
 

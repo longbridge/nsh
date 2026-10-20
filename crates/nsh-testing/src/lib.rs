@@ -27,6 +27,10 @@
 //! app.wait_for("Ready")?;
 //! ```
 
+#[cfg(feature = "agent")]
+pub mod agent;
+#[cfg(feature = "js")]
+mod driver;
 mod headless;
 #[cfg(feature = "js")]
 mod module;
@@ -45,18 +49,23 @@ use nsh_core::ui::description::SetDescription;
 #[cfg(feature = "bundle")]
 use nsh_engine::{Bundle, EngineConfig};
 
+#[cfg(feature = "live")]
+pub use self::headless::UreqNetwork;
 pub use self::headless::{
     DialogAnswer, DirectoryAssets, Headless, MemoryStorage, RecordingNetwork, Screen, StubHandler,
-    StubNetwork, StubReply, StubResponse, StubRoute, UreqNetwork, WAIT, default_answer,
-    print_batch, start,
+    StubNetwork, StubReply, StubResponse, StubRoute, WAIT, default_answer, print_batch, start,
 };
 #[cfg(feature = "js")]
 pub use self::{
+    driver::Host,
     module::{
         App, ClockOptions, ColorScheme, Entries, Expectation, MobilePlatform, NetworkOption,
         OpenOptions, RouteOption, SPECIFIER, SafeArea, StubRequest, Testing, registry,
     },
-    run::{Built, Compile, Entry, Failure, Output, TestResult, TestRun, TestStatus, run_file},
+    run::{
+        Built, Compile, Entry, Failure, HostOptions, Output, StartHost, TestResult, TestRun,
+        TestStatus, run_file,
+    },
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
 };
 

@@ -70,8 +70,10 @@ crates/
   nsh-testing/         Headless tests: the driver (`headless/`: an engine without a window, display frames, a model of the views,
                        the steps, stand-in network and storage, fetch on ureq; no QuickJS, for Rust apps' `cargo test`); feature
                        `js`: `nsh test`'s side, the `nsh/test` module test files import (`module.rs`, Rust), each test file on an
-                       engine of its own and each app it opens on a headless one (`run.rs`), apps' headless runners (`runner.rs`);
-                       feature `bundle`: building entries in process (TSX entries of `cargo test`, the CLI's compiler)
+                       engine of its own and each app it opens on a headless one (`run.rs`) or a real host (`driver.rs`, `--target`),
+                       apps' headless runners (`runner.rs`); feature `bundle`: building entries in process (TSX entries of
+                       `cargo test`, the CLI's compiler); feature `agent`: a real host's test agent (`agent.rs`, the dev hosts'),
+                       which takes the steps with the platform's input
   nsh-platform-ios/    UIKit backend (iOS / simulator / Mac Catalyst): native view mounting, CoreText text engine, input, AppView, standalone app;
                        feature `dev`: dev server client, log forwarding, error overlay; feature `embed`: the C ABI (`embed.rs`,
                        `include/nsh.h`) under the `NativeShell` Swift module (`swift/NativeShell.swift`) iOS apps embed nsh with
@@ -202,6 +204,7 @@ cargo run -p example-embed-gpui                                                 
 echo 'await app.scroll("id:photos", 3000)' | ./target/release/nsh test examples/gallery/Bench.tsx --trace   # headless scrolling (10pt per frame): per-frame list cost
 echo 'await app.press("label:Plan"); await app.wait(500)' | ./target/debug/nsh test examples/hopper/App.tsx --trace   # steps from stdin (`app`: nsh/test's App)
 ./target/debug/nsh test examples/gallery                                   # the app's tests (`*.test.tsx`, `nsh/test`), headless; --trace prints batches
+./target/debug/nsh test examples/gallery --target macos                    # the same tests in macOS windows: native input at the views (`nsh_testing::agent`)
 ./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
 ./target/debug/nsh run examples/counter --trace                            # dev server + Catalyst host (390×844), hot reload on save
 ./target/debug/nsh run examples/gallery --target ios                       # in an iOS simulator (boots one; needs the nsh-ios-host sim build)

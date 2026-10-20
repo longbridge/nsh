@@ -14,6 +14,7 @@ on:
     paths:
       - "crates/nsh-bundler/**"
       - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
       - "crates/nsh-engine/**"
       - "crates/nsh-js/**"
       - "crates/nsh-macros/**"
@@ -33,6 +34,7 @@ on:
     paths:
       - "crates/nsh-bundler/**"
       - "crates/nsh-core/**"
+      - "crates/nsh-dev/**"
       - "crates/nsh-engine/**"
       - "crates/nsh-js/**"
       - "crates/nsh-macros/**"
@@ -69,7 +71,7 @@ env:
   PACKAGES: >-
     -p nsh-core -p nsh-macros -p nsh-js -p nsh-base -p nsh-engine
     -p nsh-bundler -p nsh-package -p nsh-testing
-    --features nsh-bundler/bundle,nsh-testing/bundle
+    --features nsh-bundler/bundle,nsh-testing/bundle,nsh-testing/agent
 
 jobs:
   check:

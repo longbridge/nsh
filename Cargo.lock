@@ -3015,6 +3015,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
+ "nsh-testing",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
@@ -3071,12 +3072,14 @@ dependencies = [
 name = "nsh-testing"
 version = "0.1.1"
 dependencies = [
+ "base64 0.22.1",
  "crossbeam-channel",
  "dunce",
  "log",
  "nsh-base",
  "nsh-bundler",
  "nsh-core",
+ "nsh-dev",
  "nsh-engine",
  "nsh-js",
  "regex",

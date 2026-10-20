@@ -318,6 +318,35 @@ directory): the runner then makes the app's root (`app_root()`), so `open(".")` 
 failures and log records come back as `RunnerMessage`s; batches of `--trace` go to the runner's stdout, which is
 `nsh`'s.
 
+### On a real platform (`--target`)
+
+`nsh test --target <platform>` runs the apps tests open on the platform's development host. `App` drives either kind
+of app through one trait (`driver.rs` `Driver`): `Headless`, or `Remote`, which turns each step and query into a
+`nsh_dev::protocol::TestStep` for the host (`TestRun::host`, a `StartHost` the CLI makes: `nsh-cli/src/test_host.rs`).
+For each `open`, the CLI builds the entry, starts a dev server of its own in a test session
+(`DevServer::test_session`: its hello says `test`), publishes the build and starts the host with `--dev-server`,
+`--window-size` and a fresh `--data-dir`, removed after it. A host whose hello says `tests` takes steps:
+`DevServer::step` sends a `ServerMessage::Step` with an id to the test host that connected last and blocks for the
+`ClientMessage::StepDone` with that id; a host that leaves fails its waiting steps.
+
+The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network; the dev hosts link it). Its
+`Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
+so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
+selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
+a gesture at a time), asks the platform where it is (`Native::bounds`) and acts there with synthesized input
+(`Native`: press, long press, scroll, typed keys, `back`, dialogs, screenshots, the window's size and appearance),
+then waits until no batch came for 100 ms and no native animation runs (2 s at most). `Native`'s calls do their work
+on the platform's main thread and return when the input is posted. Screenshots come back as PNG bytes (base64): the
+test's side saves them, as the host may run on another machine. A manual clock does not exist on a real platform:
+`runFor` waits, `fastForward` and `setSystemTime` fail, and `open` refuses what a host cannot be given yet (stubbed
+routes, storage, clipboard, locale, reduced motion, safe area).
+
+macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
+and key events (which `--script` steps use too), `NSView` frames converted to the content's top-left points, `NSAlert`
+buttons pressed by title (`system::answer_dialog`), and the content view cached into a PNG; `dev.rs`'s `Tester`
+attaches the model to the surface on the server's test session (before the first bundle) and starts the agent's
+thread.
+
 ## New apps (`nsh init --template`)
 
 `nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a

@@ -1381,6 +1381,14 @@ fn place(view: &NshView, input: &InputState) {
 const FIELD_PADDING: f32 = 2.0;
 
 /// `InputValue`: JS's text, unless the user typed since JS saw `count`.
+/// The text input `view` holds now (`None`: it is no input).
+#[cfg(feature = "dev")]
+pub(crate) fn current_text(view: &NshView) -> Option<String> {
+    let input = view.state().input.clone()?;
+    let text = input.editor.borrow().text();
+    Some(text)
+}
+
 pub(crate) fn value(view: &NshView, text: &str, count: u32) {
     let Some(input) = view.state().input.clone() else {
         return;

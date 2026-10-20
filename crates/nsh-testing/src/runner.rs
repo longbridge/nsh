@@ -227,6 +227,8 @@ pub fn runner(ui_sets: Vec<Registry>, root: Option<fn() -> Root>) -> ExitCode {
         trace: request
             .trace
             .then(|| Arc::new(Mutex::new(Box::new(std::io::stdout()) as _))),
+        // Apps with Rust crates of their own run headless only for now.
+        host: None,
     };
     for file in &request.files {
         let mut report = |result: &TestResult| {

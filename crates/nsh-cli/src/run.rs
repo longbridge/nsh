@@ -51,7 +51,7 @@ impl Target {
         }
     }
 
-    fn platform(self) -> crate::runtime::Platform {
+    pub(crate) fn platform(self) -> crate::runtime::Platform {
         match self {
             Target::Catalyst => crate::runtime::Platform::MacCatalyst,
             Target::Linux => crate::runtime::Platform::Linux,

@@ -16,6 +16,7 @@ mod runtime;
 mod rust_app;
 mod sign;
 mod test;
+mod test_host;
 mod ui;
 mod web;
 mod windows;
@@ -141,6 +142,11 @@ enum Command {
         /// format CI services read.
         #[arg(long, value_name = "FILE")]
         junit: Option<PathBuf>,
+        /// Run the apps the tests open on this platform's development host
+        /// instead of headless: the steps act with the platform's own input
+        /// (macos for now).
+        #[arg(long, value_enum)]
+        target: Option<run::Target>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -571,7 +577,8 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             filter,
             trace,
             junit,
-        } => test::test(&path, &entry, filter, trace, junit.as_deref()),
+            target,
+        } => test::test(&path, &entry, filter, trace, junit.as_deref(), target),
         Command::Dev {
             entry,
             port,

@@ -3,7 +3,7 @@ use std::{
     net::SocketAddr,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -21,7 +21,8 @@ use axum::{
 use tokio::sync::broadcast;
 
 use crate::protocol::{
-    BundleFormat, ClientMessage, HostPlatform, LogLevel, PROTOCOL_VERSION, ServerMessage, WS_PATH,
+    BundleFormat, ClientMessage, HostPlatform, LogLevel, PROTOCOL_VERSION, ServerMessage,
+    StepOutcome, TestStep, WS_PATH,
 };
 
 /// What a dev host did, for the server's owner to show ([`DevServer::start`]).
@@ -131,6 +132,16 @@ struct Shared {
     /// Hosts connected now.
     clients: AtomicUsize,
     on_event: Box<dyn Fn(ClientEvent) + Send + Sync>,
+    /// A test session ([`DevServer::test_session`]).
+    test: AtomicBool,
+    /// The connected hosts that take test steps, oldest first: their
+    /// connection's id and what sends it a message.
+    testers: Mutex<Vec<(u64, tokio::sync::mpsc::UnboundedSender<ServerMessage>)>>,
+    /// The steps waiting for an outcome, by id: their host's connection and
+    /// who waits.
+    steps: Mutex<std::collections::HashMap<u64, (u64, std::sync::mpsc::Sender<StepOutcome>)>>,
+    next_step: AtomicU64,
+    next_connection: AtomicU64,
 }
 
 /// An id for this run of the server, different from earlier runs' (the
@@ -179,6 +190,11 @@ impl DevServer {
             session: new_session(),
             clients: AtomicUsize::new(0),
             on_event: Box::new(on_event),
+            test: AtomicBool::new(false),
+            testers: Mutex::default(),
+            steps: Mutex::default(),
+            next_step: AtomicU64::new(1),
+            next_connection: AtomicU64::new(1),
         });
         let listener = runtime.block_on(tokio::net::TcpListener::bind(addr))?;
         let addr = listener.local_addr()?;
@@ -247,6 +263,55 @@ impl DevServer {
     /// The number of hosts connected now.
     pub fn clients(&self) -> usize {
         self.shared.clients.load(Ordering::Relaxed)
+    }
+
+    /// Makes this a test session (`nsh test --target`): hosts connecting
+    /// from now on are told to keep the model of their app that test steps
+    /// need ([`DevServer::step`]).
+    pub fn test_session(&self) {
+        self.shared.test.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether a host that takes test steps is connected.
+    pub fn has_tester(&self) -> bool {
+        !self.shared.testers.lock().expect("testers lock").is_empty()
+    }
+
+    /// Asks the host that connected last of those taking test steps to
+    /// take `step`, and waits for its outcome, `timeout` at most: what a
+    /// query gives (`null` for actions), or why it failed. Blocks: call it
+    /// off the server's threads.
+    pub fn step(&self, step: TestStep, timeout: Duration) -> Result<serde_json::Value, String> {
+        let shared = &self.shared;
+        let (connection, host) = shared
+            .testers
+            .lock()
+            .expect("testers lock")
+            .last()
+            .cloned()
+            .ok_or("no host that takes test steps is connected")?;
+        let id = shared.next_step.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = std::sync::mpsc::channel();
+        shared
+            .steps
+            .lock()
+            .expect("steps lock")
+            .insert(id, (connection, tx));
+        if host.send(ServerMessage::Step { id, step }).is_err() {
+            shared.steps.lock().expect("steps lock").remove(&id);
+            return Err("the host left".into());
+        }
+        let outcome = rx.recv_timeout(timeout);
+        shared.steps.lock().expect("steps lock").remove(&id);
+        match outcome {
+            Ok(StepOutcome::Done { value }) => Ok(value),
+            Ok(StepOutcome::Failed { message }) => Err(message),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+                "the host did not take the step in {} s",
+                timeout.as_secs_f64()
+            )),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("the host left".into()),
+        }
     }
 
     /// Announces that a rebuild started.
@@ -440,6 +505,7 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
         device,
         platform,
         ui_sets,
+        tests,
     } = serde_json::from_str(&text)?
     else {
         return Err("expected hello".into());
@@ -465,6 +531,7 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
         &ServerMessage::Hello {
             protocol: PROTOCOL_VERSION,
             session: shared.session,
+            test: shared.test.load(Ordering::Relaxed),
         },
     )
     .await?;
@@ -488,11 +555,16 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
     };
     let device = host.device.clone();
     let _connection = Connection::new(&shared, &device, build);
+    // A host taking a test session's steps: steps reach it through `steps`.
+    let (step_tx, mut steps) = tokio::sync::mpsc::unbounded_channel();
+    let _tester =
+        (tests && shared.test.load(Ordering::Relaxed)).then(|| Tester::new(&shared, step_tx));
     if let Some(event) = latest {
         send_event(&mut socket, &shared, &mut host, &event).await?;
     }
     loop {
         tokio::select! {
+            Some(step) = steps.recv() => send(&mut socket, &step).await?,
             event = events.recv() => match event {
                 Ok(event) => send_event(&mut socket, &shared, &mut host, &event).await?,
                 Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -504,11 +576,17 @@ async fn serve_client(mut socket: WebSocket, shared: Arc<Shared>) -> Result<(), 
                 Err(broadcast::error::RecvError::Closed) => return Ok(()),
             },
             msg = socket.recv() => match msg {
-                Some(Ok(Message::Text(text))) => {
-                    if let Ok(ClientMessage::Log { level, target, message }) = serde_json::from_str(&text) {
+                Some(Ok(Message::Text(text))) => match serde_json::from_str(&text) {
+                    Ok(ClientMessage::Log { level, target, message }) => {
                         (shared.on_event)(ClientEvent::Log(ClientLog { device: device.clone(), level, target, message }));
                     }
-                }
+                    Ok(ClientMessage::StepDone { id, outcome }) => {
+                        if let Some((_, waiting)) = shared.steps.lock().expect("steps lock").remove(&id) {
+                            let _ = waiting.send(outcome);
+                        }
+                    }
+                    _ => {}
+                },
                 Some(Ok(_)) => {}
                 Some(Err(err)) => return Err(err.into()),
                 None => return Ok(()),
@@ -588,6 +666,41 @@ impl Drop for Connection<'_> {
         (self.shared.on_event)(ClientEvent::Disconnected {
             device: self.device.to_owned(),
         });
+    }
+}
+
+/// A host taking test steps, while it is connected: its steps fail when
+/// it leaves.
+struct Tester<'a> {
+    shared: &'a Shared,
+    id: u64,
+}
+
+impl<'a> Tester<'a> {
+    fn new(shared: &'a Shared, steps: tokio::sync::mpsc::UnboundedSender<ServerMessage>) -> Self {
+        let id = shared.next_connection.fetch_add(1, Ordering::Relaxed);
+        shared
+            .testers
+            .lock()
+            .expect("testers lock")
+            .push((id, steps));
+        Tester { shared, id }
+    }
+}
+
+impl Drop for Tester<'_> {
+    fn drop(&mut self) {
+        self.shared
+            .testers
+            .lock()
+            .expect("testers lock")
+            .retain(|(id, _)| *id != self.id);
+        // Its waiting steps end now: dropping their senders.
+        self.shared
+            .steps
+            .lock()
+            .expect("steps lock")
+            .retain(|_, (connection, _)| *connection != self.id);
     }
 }
 

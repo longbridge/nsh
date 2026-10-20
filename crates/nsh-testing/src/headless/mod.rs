@@ -27,9 +27,11 @@
 //! of an app's crate, which need no QuickJS for a Rust root.
 
 mod animation;
+#[cfg(feature = "live")]
+mod live;
 mod net;
-mod screen;
-mod selector;
+pub(crate) mod screen;
+pub(crate) mod selector;
 mod stub;
 
 use std::{
@@ -51,13 +53,15 @@ use nsh_engine::{
     AppError, AppErrorKind, Clock, Engine, EngineConfig, EngineControl, Environment, MountSink,
 };
 
+#[cfg(feature = "live")]
+pub use self::live::UreqNetwork;
 use self::{
     animation::{Animator, FRAME},
     screen::{Back, Pick},
     selector::Selector,
 };
 pub use self::{
-    net::{DirectoryAssets, UreqNetwork},
+    net::DirectoryAssets,
     screen::Screen,
     stub::{
         MemoryStorage, RecordingNetwork, StubHandler, StubNetwork, StubReply, StubResponse,
