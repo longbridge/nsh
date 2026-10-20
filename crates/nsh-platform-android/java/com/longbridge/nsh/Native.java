@@ -64,6 +64,7 @@ final class Native {
     static final int FILE_DRAG_ENTER = 53;
     static final int FILE_DRAG_LEAVE = 54;
     static final int FILE_DROP = 55;
+    static final int HOVER_MOVE = 56;
 
     /** A host whose apps keep their data in {@code dataDir}, each in a directory named by its id. */
     static native long create(NshView view, float density, boolean trace, String dataDir);
@@ -133,6 +134,13 @@ final class Native {
     static native void environment(long handle, float[] values, boolean dark, String locale);
 
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
+
+    /**
+     * {@code onHoverMove} of view {@code id}: the pointer at ({@code x}, {@code y}) in it and at
+     * ({@code pageX}, {@code pageY}) in its root view (dp); {@code modifiers}: 1 Ctrl, 2 Alt,
+     * 4 Shift, 8 Meta.
+     */
+    static native void hover(long handle, int id, float x, float y, float pageX, float pageY, int modifiers);
 
     /**
      * An event with an object payload ({@code Double}, {@code Boolean} or

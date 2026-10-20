@@ -1061,6 +1061,16 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
                 obj.set(*key, payload_value(ctx, value)?)?;
             }
         }
+        EventPayload::Hover(e) => {
+            obj.set("locationX", e.location_x)?;
+            obj.set("locationY", e.location_y)?;
+            obj.set("pageX", e.page_x)?;
+            obj.set("pageY", e.page_y)?;
+            obj.set("altKey", e.modifiers.alt)?;
+            obj.set("ctrlKey", e.modifiers.ctrl)?;
+            obj.set("metaKey", e.modifiers.cmd)?;
+            obj.set("shiftKey", e.modifiers.shift)?;
+        }
         EventPayload::FileDrop(uris) => {
             let list = rquickjs::Array::new(ctx.clone())?;
             for (index, uri) in uris.iter().enumerate() {
@@ -1640,6 +1650,39 @@ const report = (v) => text(String(v));
         assert_eq!(Rc::strong_count(&captured), 1);
         assert!(host.shared.system_exit_handler.borrow().is_none());
         host.stop("idempotent stop".into());
+    }
+
+    #[test]
+    fn hover_payload_has_both_positions_and_the_modifiers() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::HoverEvent {
+            location_x: 3.0,
+            location_y: 4.5,
+            page_x: 30.0,
+            page_y: 40.5,
+            modifiers: nsh_core::keymap::Modifiers {
+                shift: true,
+                cmd: true,
+                ..Default::default()
+            },
+        };
+        host.ctx.with(|ctx| {
+            let value = payload_object(&ctx, &EventPayload::Hover(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |k: &str| obj.get::<_, f64>(k).unwrap();
+            let flag = |k: &str| obj.get::<_, bool>(k).unwrap();
+            assert_eq!(
+                (
+                    num("locationX"),
+                    num("locationY"),
+                    num("pageX"),
+                    num("pageY")
+                ),
+                (3.0, 4.5, 30.0, 40.5)
+            );
+            assert!(flag("shiftKey") && flag("metaKey"));
+            assert!(!flag("altKey") && !flag("ctrlKey"));
+        });
     }
 
     #[test]

@@ -170,11 +170,11 @@ pub use self::{
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow, Cursor,
     Dialog, DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode, EventKind, EventPayload,
-    KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType, KeyframeAnimation,
-    Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, Measurement,
-    ModalAnimation, ModalPresentation, PanActivation, PointerEvents, ResizeMode, ReturnKeyType,
-    ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
-    SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
+    HoverEvent, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
+    KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition,
+    Measurement, ModalAnimation, ModalPresentation, PanActivation, PointerEvents, ResizeMode,
+    ReturnKeyType, ScreenAnimation, SnapAlignment, StatusBarConfig, StatusBarSetting,
+    StatusBarStyle, SubmitBehavior, TouchEvent, TransformKind, TransformOrigin, Viewability,
     platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Locale, Os},
     style::{Color, OriginLen},
 };
@@ -233,6 +233,7 @@ pub mod prelude {
         FontAsset,
         FontWeight,
         GestureEvent,
+        HoverEvent,
         // The network.
         HttpRequest,
         HttpResponse,

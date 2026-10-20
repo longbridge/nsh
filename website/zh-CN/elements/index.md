@@ -84,20 +84,32 @@ mount(App);
 
 ### 悬停
 
-在 macOS、Linux 和 GPUI 后端上，JS 可以得知鼠标移到视图上和离开视图（其他平台暂不触发这两个事件；凡是平台跟踪悬停的地方，`hover:` 类都会为悬停的视图设置样式）。
+JS 可以得知鼠标移到视图上、在视图上移动和离开视图：macOS、Windows、Linux、GPUI 后端和桌面浏览器都支持；iOS 上是 iPad 的指针或 Mac 的鼠标，Android 上是鼠标或手写笔。`hover:` 类在同样的地方为悬停的视图设置样式。
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
 | `onHoverIn` | `() => void` | 鼠标移到视图或其内部的视图上。 |
+| `onHoverMove` | `(e: HoverEvent) => void` | 没有按下按键时，鼠标在视图（或其内部的视图）上移动。 |
 | `onHoverOut` | `() => void` | 鼠标离开视图及其内部的视图，或离开窗口。 |
 
-与 CSS 的 `:hover` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onHoverIn`（由外向内；`onHoverOut` 由内向外）。事件在发生之后才通知 JS，触摸从不触发。从鼠标下方移除的视图会收到 `onHoverOut`，在 Linux 上要等到鼠标下一次移动。
+与 CSS 的 `:hover` 一样，鼠标在视图上或在其内部任何内容上时，视图都算作被悬停，因此鼠标下方视图外层的视图也会收到 `onHoverIn`（由外向内；`onHoverOut` 由内向外）。事件在发生之后才通知 JS，触摸从不触发；按着按键移动属于触摸（`onTouchMove`、响应者系统）。从鼠标下方移除的视图会收到 `onHoverOut`，在 Linux 和 Windows 上要等到鼠标下一次移动。
+
+`HoverEvent` 给出鼠标的位置：`locationX` / `locationY` 是在视图中的位置（单位为点，已去掉视图的变换），`pageX` / `pageY` 是在视图所在根视图中的位置（与触摸相同），以及按住的修饰键（`altKey`、`ctrlKey`、`metaKey`：Apple 平台上是 Command，其他平台是 Windows 键，`shiftKey`）。移动事件每帧最多一次，总是最新的那次，并且一定在随后的 `onHoverOut` 之前到达，因此处理函数可以在每次移动时重绘：
 
 ```tsx
 const hovered = signal<string | null>(null);
 
 <View onHoverIn={() => hovered.set(file.path)} onHoverOut={() => hovered.set(null)} class="hover:bg-zinc-100">
   <Text>{file.name}</Text>
+</View>
+
+// 图表上的十字线。
+const at = signal<number | null>(null);
+
+<View onHoverMove={(e) => at.set(e.locationX)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+  <If when={at() !== null}>
+    <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
+  </If>
 </View>
 ```
 

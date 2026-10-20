@@ -603,7 +603,7 @@ pub(crate) fn reset(surface: &Surface) {
 
 /// `TrackStates`.
 pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
-    let id = {
+    {
         let mut s = view.state_mut();
         s.tracked = states;
         // The core keeps the states still tracked and forgets the rest
@@ -611,15 +611,29 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
         // about (the pointer leaving a view whose hover was tracked
         // throughout) would never reach it.
         s.states &= states;
-        s.id
-    };
+    }
+    update_hover_tracking(surface, view);
+}
+
+/// Whether hovering `view` matters: for its `hover:` styles (the
+/// `HOVERED` state) or its `onHoverIn` / `onHoverOut` / `onHoverMove`.
+fn hoverable(view: &NshView) -> bool {
+    let s = view.state();
+    s.tracked & HOVERED != 0
+        || s.events.contains(EventKind::HoverIn)
+        || s.events.contains(EventKind::HoverOut)
+        || s.events.contains(EventKind::HoverMove)
+}
+
+fn update_hover_tracking(surface: &Surface, view: &NshView) {
+    let id = view.state().id;
     let mut tracked = surface.input.hover_tracked.borrow_mut();
-    if states & HOVERED != 0 {
+    if hoverable(view) {
         tracked.insert(id);
     } else {
         tracked.remove(&id);
-        // Not hovered as far as anyone knows: picked again if it tracks
-        // hovers again under the pointer.
+        // Not hovered as far as anyone knows: picked again if hovering it
+        // matters again under the pointer.
         surface.input.hovered.borrow_mut().retain(|v| v != view);
     }
 }
@@ -656,9 +670,11 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
 }
 
 /// The view's events changed.
-pub(crate) fn events_changed(_surface: &Rc<Surface>, _view: &NshView) {
+pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
     // Press listeners and the cursor are read when a pointer goes down or
-    // the window asks for the cursor (`WM_SETCURSOR`, on every move).
+    // the window asks for the cursor (`WM_SETCURSOR`, on every move);
+    // hover handlers have the view hovered (from the next move).
+    update_hover_tracking(surface, view);
 }
 
 /// The view's props changed.
@@ -2155,28 +2171,73 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     }
     if tracking {
         let views = match &hit {
-            Some(hit) => chain(&hit.view)
-                .into_iter()
-                .filter(|v| v.state().tracked & HOVERED != 0)
-                .collect(),
+            Some(hit) => chain(&hit.view).into_iter().filter(hoverable).collect(),
             None => Vec::new(),
         };
         set_hovered(surface, views);
     }
     // While the mouse is down, its moves go to what it pressed.
     if !pressed {
+        if tracking {
+            hover_moved(surface, x, y, modifiers);
+        }
         let item = hit.and_then(|h| h.item.map(|n| Item::Hosted(h.view, n)));
         set_hover_item(surface, item, (x, y), modifiers);
     }
 }
 
+/// The views under the mouse are `views` (innermost first): those it left
+/// hear so from the inside out, then those it came over from the outside
+/// in, as with the DOM's `pointerleave` / `pointerenter`.
 fn set_hovered(surface: &Surface, views: Vec<NshView>) {
     let old = std::mem::replace(&mut *surface.input.hovered.borrow_mut(), views.clone());
     for v in old.iter().filter(|v| !views.contains(v)) {
         set_state(surface, v, HOVERED, false);
+        hover_event(surface, v, EventKind::HoverOut);
     }
-    for v in views.iter().filter(|v| !old.contains(v)) {
+    for v in views.iter().rev().filter(|v| !old.contains(v)) {
         set_state(surface, v, HOVERED, true);
+        hover_event(surface, v, EventKind::HoverIn);
+    }
+}
+
+/// `onHoverIn` / `onHoverOut` of `view`, if it listens.
+fn hover_event(surface: &Surface, view: &NshView, kind: EventKind) {
+    let (id, listens) = {
+        let s = view.state();
+        (s.id, s.events.contains(kind))
+    };
+    if listens {
+        surface.event(id, kind, EventPayload::None);
+    }
+}
+
+/// `onHoverMove` of the hovered views that listen, with the mouse at
+/// `(x, y)` (root coordinates) in each.
+fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
+    let hovered = surface.input.hovered.borrow().clone();
+    for v in hovered {
+        let id = {
+            let s = v.state();
+            if !s.events.contains(EventKind::HoverMove) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(&v, x, y);
+        let event = nsh_core::HoverEvent {
+            location_x,
+            location_y,
+            page_x: x,
+            page_y: y,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: modifiers.ctrl,
+                alt: modifiers.alt,
+                shift: modifiers.shift,
+                cmd: modifiers.meta,
+            },
+        };
+        surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
 }
 

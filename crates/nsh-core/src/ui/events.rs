@@ -4,7 +4,7 @@
 use std::{borrow::Cow, sync::Arc};
 
 use super::element::Listener;
-use crate::{EventPayload, JsonValue, PayloadValue, Rect, Size, TouchEvent};
+use crate::{EventPayload, HoverEvent, JsonValue, PayloadValue, Rect, Size, TouchEvent};
 
 /// Local files or directories dropped on an element (`on_file_drop`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -373,6 +373,13 @@ pub(crate) fn native(p: &EventPayload) -> Option<Cow<'_, NativeEvent>> {
             name: name.clone(),
             data: data.clone(),
         })),
+        _ => None,
+    }
+}
+
+pub(crate) fn hover(p: &EventPayload) -> Option<Cow<'_, HoverEvent>> {
+    match p {
+        EventPayload::Hover(e) => Some(Cow::Borrowed(e)),
         _ => None,
     }
 }

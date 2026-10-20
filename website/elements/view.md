@@ -54,7 +54,7 @@ The Tailwind `flex` class follows CSS rather than the style default: `class="fle
 
 `<View>` has no props of its own beyond the [common props](./index.md#common-props): `style` (`ViewStyle`), `class`,
 `classList`, `disabled`, the press props (`onPress`, `onLongPress`, `onPressIn`, `onPressOut`, `delayLongPress`,
-`activeOpacity`, `underlayColor`, `underlayOpacity`, `hitSlop`, `pointerEvents`), `onHoverIn` / `onHoverOut`,
+`activeOpacity`, `underlayColor`, `underlayOpacity`, `hitSlop`, `pointerEvents`), `onHoverIn` / `onHoverMove` / `onHoverOut`,
 `onFileDragEnter` / `onFileDragLeave` / `onFileDrop`, `onLayout`, `ref`, `nativeID`,
 `testID`, the gesture props (`pan`, `pinch`, `rotation` and their events), the touch and responder props, the
 accessibility props and `ios` / `android` / `desktop`.
@@ -91,7 +91,8 @@ On Android, `android={{ ripple: { color: "#0000001f" } }}` adds the material rip
 | `onPress` | none | A tap ended inside the view. |
 | `onLongPress` | none | The finger stayed down for `delayLongPress` (500 ms). |
 | `onPressIn` / `onPressOut` | none | A finger went down / lifted or left. |
-| `onHoverIn` / `onHoverOut` | none | The mouse came over the view (or a view inside it) / left it or the window; macOS, Linux and GPUI ([hover](./index.md#hover)). |
+| `onHoverIn` / `onHoverOut` | none | The mouse came over the view (or a view inside it) / left it or the window ([hover](./index.md#hover)). |
+| `onHoverMove` | `HoverEvent` | The mouse moved over the view with no button down: `locationX` / `locationY`, `pageX` / `pageY`, the modifier keys; at most once a frame. |
 | `onFileDragEnter` / `onFileDragLeave` | none | A local-file drag entered / left the active desktop destination. |
 | `onFileDrop` | `{ uris: string[] }` | Local files or directories were dropped on the desktop destination. |
 | `onLayout` | `{ x, y, width, height }` | The frame relative to the parent changed. |
