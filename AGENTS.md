@@ -264,6 +264,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
 
 ## Rules
 
+- **Convention over configuration (CoC, a project constraint).** Follow the existing project and toolchain conventions
+  before adding configuration, wrapper scripts, environment overrides or another cache directory. NSH-managed
+  temporary/generated files belong in `.nsh/`. Cargo keeps its normal `target/` directory and the user's existing
+  `CARGO_TARGET_DIR` behavior; do not add Cargo configuration or change that environment variable just to organize
+  NSH files. Reuse the existing Cargo cache rather than creating a second one under `.nsh/`.
 - **Three layers, as GPUI Kit's (an architecture rule).** `nsh-core` ↔ `gpui`: the primitives and the environment,
   `nsh` / `nsh/<module>` (native in `crates/nsh-js` or Rust modules of the runtime, `crates/nsh-core/src/runtime/`).
   `nsh-base` ↔ `gpui-base`: `nsh/base` (`crates/nsh-base`), unstyled base components of `gpui-base`'s scope that own

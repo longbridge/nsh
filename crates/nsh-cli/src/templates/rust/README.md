@@ -43,5 +43,5 @@ runs on QuickJS, while `nsh run` alone keeps running the Rust root. The first `n
 declarations of `__SPECIFIER__` into `.nsh/types`. Register more with `registry.register::<…>()` (components),
 `registry.module::<…>()` and `registry.class::<…>()`.
 
-Generated files stay in `.nsh/`: build caches in `.nsh/target/`, runner sources in `.nsh/rust/`,
-and default packages in `.nsh/out/`. `.cargo/config.toml` makes direct Cargo commands share the cache.
+NSH-generated files stay in `.nsh/`: runner sources in `.nsh/rust/` and default packages in `.nsh/out/`.
+Cargo keeps its normal `target/` directory and respects your existing `CARGO_TARGET_DIR`.

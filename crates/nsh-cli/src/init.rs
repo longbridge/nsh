@@ -42,10 +42,8 @@ test("counts taps", async () => {
 });
 "##;
 
-/// Generated declarations, workspaces, builds and packages share one cache.
-const GITIGNORE: &str = ".nsh/\n";
-/// Direct Cargo builds and generated hosts share the project's build cache.
-const CARGO_CONFIG: &str = "[build]\ntarget-dir = \".nsh/target\"\n";
+/// NSH-generated files stay in `.nsh`; Cargo keeps its standard `target`.
+const GITIGNORE: &str = ".nsh/\ntarget/\n";
 
 /// What `nsh init` makes ([`init`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -144,9 +142,6 @@ pub(crate) fn init(
             .replace("__APP_NAME__", &name)
     };
     let mut files = vec![(".gitignore", GITIGNORE.to_owned())];
-    if template != Template::Ts {
-        files.push((".cargo/config.toml", CARGO_CONFIG.to_owned()));
-    }
     match template {
         Template::Ts => files.extend([
             ("App.tsx", APP.to_owned()),
@@ -572,8 +567,8 @@ mod tests {
         let dir = directory("rust");
         init(&dir, Some("123 My App".into()), Template::Rust, None).unwrap();
         let config = config(&dir);
-        assert_eq!(read(&dir, ".gitignore"), ".nsh/\n");
-        assert_eq!(read(&dir, ".cargo/config.toml"), CARGO_CONFIG);
+        assert_eq!(read(&dir, ".gitignore"), GITIGNORE);
+        assert!(!dir.join(".cargo/config.toml").exists());
         assert_eq!(config["rust"], ".");
         assert_eq!(config["root"], "App");
         assert_eq!(config["name"], "123 My App");

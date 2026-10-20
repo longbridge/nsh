@@ -68,12 +68,13 @@ and the integrities (`npm view @typescript/typescript-<os>-<arch>@<version> dist
 
 ## Project files
 
-Generated declarations, runner workspaces, tests, Cargo builds and default build/package outputs live under `.nsh/`.
-The Cargo cache is `.nsh/target/`; default bundles and packages are `.nsh/out/`. `nsh init` writes a
-`.cargo/config.toml` for Rust and mixed apps so direct Cargo commands reuse that cache. Explicit `--out`
-and `CARGO_TARGET_DIR` overrides remain available. Existing generated directories are never deleted automatically.
+NSH-generated declarations, runner workspaces, tests and default build/package outputs live under `.nsh/`.
+Default bundles and packages are `.nsh/out/`; `--out` still overrides that location. Cargo keeps its normal
+`target/` cache and existing `CARGO_TARGET_DIR` behavior. NSH does not add Cargo configuration to relocate it.
+Existing directories are never deleted automatically. Follow the CoC project constraint in `AGENTS.md`.
 
 ## Output
+
 
 The CLI's terminal output is `crates/nsh-cli/src/ui.rs` (`website/docs/cli.md`, "Output", shows it): one line per
 step, the details only when something fails. Every command prints through it:
@@ -425,8 +426,8 @@ program that describes them, builds the hosts and runners with them, and does ev
   lockfile, including registry dependencies redirected by its patches. The generated workspaces patch both crates.io
   and the Git repository to that checkout, so the app and its hosts share the same core and native module types.
   Requirements of another version, or crates taking nsh from two places, stop the command with what to change, rather
-  than a build failing later on two `nsh-core`s. They build in the app's `.nsh/target/`, shared with direct Cargo builds through
-  `.cargo/config.toml` in Rust and mixed templates, or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
+  than a build failing later on two `nsh-core`s. They build in the app's own `target/`, as a Cargo project in the app's
+  directory does (`nsh init` ignores it), or in `CARGO_TARGET_DIR` when it is set (one directory several checkouts or
   CI jobs share), and Cargo resolves and keeps the workspace's own `Cargo.lock`. Every crate those workspaces depend on
   is published by `release-crate.yml`, the hosts and runners included; the binaries are named after the app
   (`nsh-app-<package>-describe`; with several crates all their packages, `nsh-app-charts-storage-test`), and so are

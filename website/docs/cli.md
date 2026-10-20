@@ -150,9 +150,9 @@ Type checks the app: refreshes `.nsh/types` and `.nsh/tsconfig.json`, then runs 
 | `--tsc <TSC>` | Run this `tsc` instead (also `NSH_TSC`), for example one from `node_modules` or a copy for machines without network. |
 | `-- <TSC ARGS>` | Passed on to `tsc`, e.g. `nsh check -- --pretty false`. |
 
-Generated files stay under `.nsh/`: declarations and runner sources, Cargo caches in `.nsh/target/`,
-and default build/package outputs in `.nsh/out/`. Rust and mixed templates include `.cargo/config.toml`
-so direct Cargo commands share the cache. `--out` and `CARGO_TARGET_DIR` can override the defaults.
+NSH-generated files stay under `.nsh/`: declarations, runner sources, and default build/package outputs in
+`.nsh/out/`. Cargo keeps its normal `target/` cache and existing `CARGO_TARGET_DIR` behavior; NSH does not
+add Cargo configuration to relocate it. `--out` still overrides the output location.
 
 ## nsh build
 
@@ -305,7 +305,7 @@ Signs a revocation list: release keys and packages that must not load any more.
 | Variable | Used by | Description |
 |---|---|---|
 | `ANDROID_HOME`, `ANDROID_SDK_ROOT` | Android targets | The Android SDK. Fallback: `~/Library/Android/sdk`. |
-| `CARGO_TARGET_DIR` | apps with Rust crates | Where the app's runners build. Default: the app's `.nsh/target/`. |
+| `CARGO_TARGET_DIR` | apps with Rust crates | Where the app's runners build. Default: the app's `target/`. |
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | The keystore password. |
 | `NSH_RUNTIME` | `run`, `package` | A runtime directory to use instead of the one next to the CLI. |
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |

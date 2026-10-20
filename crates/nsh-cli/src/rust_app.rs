@@ -41,8 +41,8 @@
 //! ([`Nsh::of`]): from crates.io at this `nsh`'s version ([`VERSION`]: the
 //! generated code calls their API), or from the checkout they depend on by
 //! path or Git, with the app's crates.io and Git dependencies on nsh patched
-//! to that checkout. It builds in the app's `.nsh/target`, shared with the Cargo configuration
-//! of Rust templates, or in `CARGO_TARGET_DIR`.
+//! to that checkout. It builds in the app's own `target`, as a Cargo project in the app's
+//! directory would, or in `CARGO_TARGET_DIR`.
 
 use std::{
     env, fs,
@@ -1508,8 +1508,8 @@ opt-level = 3
 
     /// The target directory: `CARGO_TARGET_DIR` when it is set, as for any
     /// Cargo build (a directory several checkouts or CI jobs share), else
-    /// the app's `.nsh/target` (the workspace is `<app>/.nsh/rust`). Rust
-    /// templates configure Cargo to use the same cache for direct builds.
+    /// the app's own `target` (the workspace is `<app>/.nsh/rust`), where its
+    /// crates build with `cargo` too.
     fn target_dir(&self) -> anyhow::Result<PathBuf> {
         target_dir(&self.workspace, env::var_os("CARGO_TARGET_DIR"))
     }
@@ -1977,7 +1977,7 @@ fn cargo() -> std::ffi::OsString {
 
 /// The target directory of the generated `workspace` ([`RustApp::target_dir`]):
 /// `cargo_target_dir` (a relative one against the current directory, as Cargo
-/// takes it), else the app's `.nsh/target`.
+/// takes it), else the app's `target`.
 fn target_dir(
     workspace: &Path,
     cargo_target_dir: Option<std::ffi::OsString>,
@@ -1994,7 +1994,7 @@ fn target_dir(
         .parent()
         .and_then(Path::parent)
         .context("the generated workspace is not in an app's .nsh")?;
-    Ok(app.join(".nsh/target"))
+    Ok(app.join("target"))
 }
 
 /// The directory of nsh's crate `name` in the checkout at `source`: the GPUI
@@ -2528,10 +2528,10 @@ mod tests {
     }
 
     #[test]
-    fn builds_go_to_cargo_target_dir_else_the_app_s_nsh_cache() {
+    fn builds_go_to_cargo_target_dir_else_the_app_s_target() {
         let ws = Path::new("/apps/charts/.nsh/rust");
         let app = super::target_dir(ws, None).unwrap();
-        assert_eq!(app, Path::new("/apps/charts/.nsh/target"));
+        assert_eq!(app, Path::new("/apps/charts/target"));
         assert_eq!(super::target_dir(ws, Some("".into())).unwrap(), app);
         // Absolute on this system: `/cache/target` has no drive on Windows.
         let absolute = if cfg!(windows) {
