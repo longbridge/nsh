@@ -47,8 +47,8 @@ pub use crate::{
     core::{ApplyError, Core, ListBind, Measurement},
     effects::{
         BlendMode, BoxShadow, ColorStop, Cursor, Effects, Filter, Gradient, GradientKind,
-        GradientSize, KeyframeAnimation, Keyframes, Outline, Transition, TransitionProps,
-        blur_radius, compose_color_matrices,
+        GradientSize, KeyframeAnimation, Keyframes, Outline, StopPosition, Transition,
+        TransitionProps, blur_radius, compose_color_matrices,
     },
     geometry::{Rect, Size},
     mount::{

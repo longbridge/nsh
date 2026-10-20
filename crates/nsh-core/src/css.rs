@@ -290,7 +290,9 @@ impl Color {
 
 // --- Shadows, gradients, filters --------------------------------------------
 
-use crate::effects::{BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize};
+use crate::effects::{
+    BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, StopPosition,
+};
 
 /// A `box-shadow` list (`none` is empty).
 pub(crate) fn box_shadows(s: &str) -> Option<Vec<BoxShadow>> {
@@ -377,31 +379,28 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     {
         parts = &parts[1..];
     }
+    let conic = matches!(kind, GradientKind::Conic { .. });
     let mut stops = Vec::with_capacity(parts.len());
     for part in parts {
         let w = words(part);
         let (c, positions) = w.split_first()?;
-        let c = color(c)?;
-        let mut pos = positions.iter().map(|p| amount_or_length(p));
-        match (pos.next(), pos.next()) {
-            (None, _) => stops.push(ColorStop {
-                color: c,
+        let color = color(c)?;
+        // A stop takes up to two positions (`red 0 10px`: a band of one
+        // color).
+        if positions.len() > 2 {
+            return None;
+        }
+        if positions.is_empty() {
+            stops.push(ColorStop {
+                color,
                 position: None,
-            }),
-            (Some(p), None) => stops.push(ColorStop {
-                color: c,
-                position: Some(p?),
-            }),
-            (Some(a), Some(b)) => {
-                stops.push(ColorStop {
-                    color: c,
-                    position: Some(a?),
-                });
-                stops.push(ColorStop {
-                    color: c,
-                    position: Some(b?),
-                });
-            }
+            });
+        }
+        for p in positions {
+            stops.push(ColorStop {
+                color,
+                position: Some(stop_position(p, conic)?),
+            });
         }
     }
     if stops.is_empty() {
@@ -418,12 +417,27 @@ pub(crate) fn gradient(s: &str) -> Option<Gradient> {
     })
 }
 
-/// A stop position as a fraction (`50%`); lengths are not supported along
-/// a gradient line, so `0` is the only length taken.
-fn amount_or_length(s: &str) -> Option<f32> {
-    match s.trim().strip_suffix('%') {
-        Some(p) => number(p).map(|p| p / 100.0),
-        None => number(s).filter(|&n| n == 0.0),
+/// A stop's position: a percentage, or a length along a linear or radial
+/// gradient's line (`10px`, `1rem`; resolved against the box when it is
+/// drawn), or an angle around a conic one (`90deg`, `0.25turn`, as a
+/// fraction of a turn).
+fn stop_position(s: &str, conic: bool) -> Option<StopPosition> {
+    let s = s.trim();
+    if let Some(p) = s.strip_suffix('%') {
+        return number(p).map(|p| StopPosition::Fraction(p / 100.0));
+    }
+    if conic {
+        angle(s).map(|a| StopPosition::Fraction(a / 360.0))
+    } else {
+        // A zero length is the line's start whatever its length, as
+        // before lengths were taken.
+        length(s).map(|l| {
+            if l == 0.0 {
+                StopPosition::Fraction(0.0)
+            } else {
+                StopPosition::Points(l)
+            }
+        })
     }
 }
 
@@ -637,7 +651,7 @@ mod tests {
     fn gradient_syntax() {
         let g = gradient("linear-gradient(to right, #f00, rgb(0 0 255) 80%)").unwrap();
         assert_eq!(g.kind, GradientKind::Linear { angle: 90.0 });
-        assert_eq!(g.stops[1].position, Some(0.8));
+        assert_eq!(g.stops[1].position, Some(StopPosition::Fraction(0.8)));
         let g = gradient("linear-gradient(45deg in oklab, red, blue)").unwrap();
         assert_eq!(g.kind, GradientKind::Linear { angle: 45.0 });
         let g = gradient("radial-gradient(circle at 25% 75%, red, blue)").unwrap();
@@ -653,6 +667,43 @@ mod tests {
         let g = gradient("conic-gradient(from 90deg, red, blue, red)").unwrap();
         assert_eq!(g.stops.len(), 3);
         assert!(gradient("linear-gradient(red)").unwrap().stops.len() == 2);
+    }
+
+    #[test]
+    fn gradient_stop_positions() {
+        let at = |g: &Gradient| g.stops.iter().map(|s| s.position).collect::<Vec<_>>();
+        use StopPosition::{Fraction, Points};
+        let g = gradient("repeating-linear-gradient(90deg, red 0px, blue 10px)").unwrap();
+        assert!(g.repeating);
+        assert_eq!(at(&g), [Some(Fraction(0.0)), Some(Points(10.0))]);
+        // Lengths in every unit, mixed with percentages; two positions
+        // make a band.
+        let g = gradient("linear-gradient(red 0 1rem, blue 50%, green 2pt)").unwrap();
+        assert_eq!(
+            at(&g),
+            [
+                Some(Fraction(0.0)),
+                Some(Points(16.0)),
+                Some(Fraction(0.5)),
+                Some(Points(2.0))
+            ]
+        );
+        let g = gradient("radial-gradient(circle, red 4px, blue 20px)").unwrap();
+        assert_eq!(at(&g), [Some(Points(4.0)), Some(Points(20.0))]);
+        // Conic stops are angles (as fractions of a turn) or percentages.
+        let g = gradient("conic-gradient(red 0deg 90deg, blue 0.5turn, green 75%)").unwrap();
+        assert_eq!(
+            at(&g),
+            [
+                Some(Fraction(0.0)),
+                Some(Fraction(0.25)),
+                Some(Fraction(0.5)),
+                Some(Fraction(0.75))
+            ]
+        );
+        assert!(gradient("conic-gradient(red 10px, blue)").is_none());
+        assert!(gradient("linear-gradient(red 90deg, blue)").is_none());
+        assert!(gradient("linear-gradient(red 0 10px 20px, blue)").is_none());
     }
 
     #[test]

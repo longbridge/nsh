@@ -157,7 +157,10 @@ Three ways to cast a shadow:
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #54aeff, #8250df)" }} />
 <View style={{ backgroundImage: "radial-gradient(circle at top left, #fff8c5, #fd8c73)" }} />
 <View style={{ backgroundImage: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }} />
+<View style={{ backgroundImage: "linear-gradient(90deg, #8250df 0 12px, #54aeff 12px)" }} />
 ```
+
+Color stops are placed by percentages or lengths (`px`, `pt`, `rem`; plain numbers are points) along a linear or radial gradient, and by percentages or angles (`deg`, `turn`, `rad`, `grad`) around a conic one. A stop with two positions (`#8250df 0 12px`) is a band of one color. Lengths are measured along the gradient line at the view's current size, so a 12px band stays 12px wide as the view resizes.
 
 `experimental_backgroundImage` is accepted too, as an alias of `backgroundImage`. Text elements do not draw gradients on iOS.
 

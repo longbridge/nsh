@@ -284,7 +284,10 @@ fn gradients() {
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
     assert_eq!(g.kind, GradientKind::Linear { angle: 90.0 });
     assert_eq!(g.stops.len(), 3);
-    assert_eq!(g.stops[1].position, Some(0.4));
+    assert_eq!(
+        g.stops[1].position,
+        Some(crate::effects::StopPosition::Fraction(0.4))
+    );
     let s = styled("bg-linear-to-br from-red-500");
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
     assert!(matches!(
@@ -298,6 +301,13 @@ fn gradients() {
     let s = styled("bg-[linear-gradient(45deg,red,blue)]");
     let g = &s.view.effects.as_ref().unwrap().background_images[0];
     assert_eq!(g.kind, GradientKind::Linear { angle: 45.0 });
+    let s = styled("bg-[repeating-linear-gradient(90deg,red_0px,blue_10px)]");
+    let g = &s.view.effects.as_ref().unwrap().background_images[0];
+    assert!(g.repeating);
+    assert_eq!(
+        g.stops[1].position,
+        Some(crate::effects::StopPosition::Points(10.0))
+    );
 }
 
 #[test]

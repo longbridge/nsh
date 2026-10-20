@@ -157,7 +157,10 @@ const palette = () =>
 <View style={{ height: 120, borderRadius: 16, backgroundImage: "linear-gradient(135deg, #54aeff, #8250df)" }} />
 <View style={{ backgroundImage: "radial-gradient(circle at top left, #fff8c5, #fd8c73)" }} />
 <View style={{ backgroundImage: "conic-gradient(red, yellow, lime, aqua, blue, magenta, red)" }} />
+<View style={{ backgroundImage: "linear-gradient(90deg, #8250df 0 12px, #54aeff 12px)" }} />
 ```
+
+线性和径向渐变的色标位置可以是百分比或长度（`px`、`pt`、`rem`；纯数字表示点），锥形渐变的色标位置可以是百分比或角度（`deg`、`turn`、`rad`、`grad`）。带两个位置的色标（`#8250df 0 12px`）是一段纯色。长度沿视图当前尺寸下的渐变线计算，因此视图尺寸变化时，12px 的色带始终是 12px 宽。
 
 也接受 `experimental_backgroundImage`，它是 `backgroundImage` 的别名。在 iOS 上，文本元素不绘制渐变。
 

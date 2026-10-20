@@ -492,7 +492,7 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
             fitted,
             gsk: out,
         } = &mut *stops;
-        resolve_stops(g, resolved);
+        g.resolve_stops(w, h, resolved);
         dehue(resolved);
         let first = resolved[0].1;
         let last = resolved[resolved.len() - 1].1;
@@ -571,49 +571,6 @@ fn draw_gradient(snapshot: &gtk::Snapshot, g: &Gradient, w: f32, h: f32) {
 fn gsk_stops(stops: &[(Color, f32)], out: &mut Vec<gsk::ColorStop>) {
     out.clear();
     out.extend(stops.iter().map(|&(c, p)| gsk::ColorStop::new(p, rgba(c))));
-}
-
-/// [`Gradient::resolved_stops`] into a reused buffer: missing positions
-/// spread evenly, each at least the one before it.
-fn resolve_stops(g: &Gradient, out: &mut Vec<(Color, f32)>) {
-    out.clear();
-    out.extend(
-        g.stops
-            .iter()
-            .map(|s| (s.color, s.position.unwrap_or(f32::NAN))),
-    );
-    let n = out.len();
-    if n == 0 {
-        return;
-    }
-    if out[0].1.is_nan() {
-        out[0].1 = 0.0;
-    }
-    if out[n - 1].1.is_nan() {
-        out[n - 1].1 = 1.0;
-    }
-    let mut max = f32::NEG_INFINITY;
-    for s in out.iter_mut().filter(|s| !s.1.is_nan()) {
-        max = max.max(s.1);
-        s.1 = max;
-    }
-    let mut i = 1;
-    while i < n {
-        if !out[i].1.is_nan() {
-            i += 1;
-            continue;
-        }
-        let start = i - 1;
-        let mut end = i;
-        while out[end].1.is_nan() {
-            end += 1;
-        }
-        let (a, b) = (out[start].1, out[end].1);
-        for (k, s) in out[i..end].iter_mut().enumerate() {
-            s.1 = a + (b - a) * (k + 1) as f32 / (end - start) as f32;
-        }
-        i = end;
-    }
 }
 
 /// Gives transparent stops their neighbor's hue, so fades to transparent
@@ -755,8 +712,6 @@ fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::ColorStop;
-
     use super::*;
 
     const RED: Color = Color(0xff00_00ff);
@@ -790,24 +745,6 @@ mod tests {
         assert!(close(rx, 175.0) && close(ry, 50.0));
         let (rx, _) = radial_radii(true, GradientSize::ClosestSide, 25.0, 50.0, 200.0, 100.0);
         assert!(close(rx, 25.0));
-    }
-
-    #[test]
-    fn stops_resolve_like_core() {
-        let g = Gradient {
-            kind: GradientKind::Linear { angle: 90.0 },
-            stops: [None, None, Some(0.8), Some(0.5), None]
-                .into_iter()
-                .map(|position| ColorStop {
-                    color: RED,
-                    position,
-                })
-                .collect(),
-            repeating: false,
-        };
-        let mut out = Vec::new();
-        resolve_stops(&g, &mut out);
-        assert_eq!(out, g.resolved_stops());
     }
 
     #[test]

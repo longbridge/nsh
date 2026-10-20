@@ -140,10 +140,10 @@ struct Ramp {
 }
 
 impl Ramp {
-    /// The ramp of `g`, its colors passed through `color` (the pass's
-    /// filters and opacity, as straight RGBA).
-    fn new(g: &Gradient, color: impl Fn(Color) -> [f32; 4]) -> Ramp {
-        let resolved = g.resolved_stops();
+    /// The ramp of `g` over a `w` x `h` box, its colors passed through
+    /// `color` (the pass's filters and opacity, as straight RGBA).
+    fn new(g: &Gradient, w: f32, h: f32, color: impl Fn(Color) -> [f32; 4]) -> Ramp {
+        let resolved = g.resolved_stops(w, h);
         let stops: Vec<([f32; 4], f32)> = resolved
             .iter()
             .map(|&(c, p)| {
@@ -222,7 +222,7 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, g: &Gradient, w: f32, h: f32, radii: [f3
         let rgba = gpui::Rgba::from(cx.color(c));
         [rgba.r, rgba.g, rgba.b, rgba.a]
     };
-    let ramp = Ramp::new(g, color);
+    let ramp = Ramp::new(g, w, h, color);
     let geometry = Geometry::of(g.kind, w, h);
     if cx.axis_aligned() {
         draw_image(cx, &ramp, geometry, w, h, radii);
@@ -476,7 +476,7 @@ fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::ColorStop;
+    use nsh_core::{ColorStop, StopPosition};
 
     use super::*;
 
@@ -497,7 +497,10 @@ mod tests {
             kind,
             stops: stops
                 .iter()
-                .map(|&(color, position)| ColorStop { color, position })
+                .map(|&(color, position)| ColorStop {
+                    color,
+                    position: position.map(StopPosition::Fraction),
+                })
                 .collect(),
             repeating,
         }
@@ -556,7 +559,7 @@ mod tests {
             &[(RED, None), (Color::TRANSPARENT, None)],
             false,
         );
-        let ramp = Ramp::new(&g, rgba);
+        let ramp = Ramp::new(&g, 100.0, 50.0, rgba);
         // Halfway to transparent keeps the hue at half alpha.
         let c = straight(ramp.at(0.5));
         assert_eq!(c.0 >> 8, 0xff_0000);
@@ -573,9 +576,33 @@ mod tests {
             &[(RED, Some(0.0)), (BLUE, Some(0.25))],
             true,
         );
-        let ramp = Ramp::new(&g, rgba);
+        let ramp = Ramp::new(&g, 100.0, 50.0, rgba);
         assert_eq!(straight(ramp.at(0.25 + 0.1)), straight(ramp.at(0.1)));
         assert_eq!(straight(ramp.at(-0.15)), straight(ramp.at(0.1)));
+    }
+
+    #[test]
+    fn length_stops_follow_the_box() {
+        // `repeating-linear-gradient(90deg, red 0px, blue 10px)`.
+        let g = Gradient {
+            kind: GradientKind::Linear { angle: 90.0 },
+            stops: vec![
+                ColorStop {
+                    color: RED,
+                    position: Some(StopPosition::Points(0.0)),
+                },
+                ColorStop {
+                    color: BLUE,
+                    position: Some(StopPosition::Points(10.0)),
+                },
+            ],
+            repeating: true,
+        };
+        let wide = Ramp::new(&g, 200.0, 50.0, rgba);
+        assert!(close(wide.stops[1].1, 0.05));
+        let narrow = Ramp::new(&g, 100.0, 50.0, rgba);
+        assert!(close(narrow.stops[1].1, 0.1));
+        assert!(narrow.repeating);
     }
 
     #[test]
@@ -609,7 +636,7 @@ mod tests {
             &[(RED, None), (BLUE, None)],
             false,
         );
-        let ramp = Ramp::new(&g, rgba);
+        let ramp = Ramp::new(&g, 100.0, 50.0, rgba);
         let geometry = Geometry::of(g.kind, 100.0, 50.0);
         let image = rasterize(&ramp, geometry, 100.0, 50.0, (10, 5)).unwrap();
         let bytes = image.as_bytes(0).unwrap();
@@ -619,7 +646,7 @@ mod tests {
         assert!(bytes[last] > 200 && bytes[last + 2] < 50);
         assert_eq!(&bytes[..40], &bytes[40..80]);
         // A different size or color makes a different key.
-        let other = Ramp::new(&g, |c| {
+        let other = Ramp::new(&g, 100.0, 50.0, |c| {
             let mut v = rgba(c);
             v[3] *= 0.5;
             v

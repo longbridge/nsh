@@ -14,7 +14,7 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
+    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, StopPosition, Transform, TransformKind,
     TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource, ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
@@ -324,11 +324,18 @@ fn origin(o: OriginLen) -> String {
     }
 }
 
+/// The CSS of `g`: stops as written (lengths in pixels), which the
+/// browser resolves against the box as the core does on the other
+/// platforms.
 fn gradient(g: &Gradient) -> String {
     let stops: Vec<String> = g
-        .resolved_stops()
+        .stops
         .iter()
-        .map(|(c, p)| format!("{} {}%", css_color(*c), p * 100.0))
+        .map(|s| match s.position {
+            Some(StopPosition::Fraction(p)) => format!("{} {}%", css_color(s.color), p * 100.0),
+            Some(StopPosition::Points(p)) => format!("{} {p}px", css_color(s.color)),
+            None => css_color(s.color),
+        })
         .collect();
     let stops = stops.join(", ");
     let repeating = if g.repeating { "repeating-" } else { "" };

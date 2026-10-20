@@ -647,7 +647,9 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
 /// The effects of `Mounter.java` `style`: shadows, gradients, filters,
 /// blend mode, outline, visibility, cursor, transition, animation.
 fn effects(e: &mut Encoded, s: &ViewStyle) {
-    use nsh_core::{BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes};
+    use nsh_core::{
+        BlendMode, Cursor, Filter, GradientKind, GradientSize, Keyframes, StopPosition,
+    };
     let fx = s.effects.as_deref();
     let shadows = fx.map_or(&[][..], |f| &f.box_shadows[..]);
     e.int(shadows.len() as i32);
@@ -693,11 +695,30 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
                 e.float(y);
             }
         }
-        let stops = g.resolved_stops();
-        e.int(stops.len() as i32);
-        for (c, p) in stops {
-            e.int(argb(c));
-            e.float(p);
+        if g.has_lengths() {
+            // Stops placed in points depend on the box, which `Decor`
+            // knows when it draws: they go as written, their count
+            // negated, each with its unit (0 spread, 1 fraction, 2
+            // points), and `Decor.Gradient.resolve` places them.
+            e.int(-(g.stops.len() as i32));
+            for s in &g.stops {
+                e.int(argb(s.color));
+                let (unit, v) = match s.position {
+                    None => (0, 0.0),
+                    Some(StopPosition::Fraction(f)) => (1, f),
+                    Some(StopPosition::Points(p)) => (2, p),
+                };
+                e.float(v);
+                e.int(unit);
+            }
+        } else {
+            // Without lengths the box does not matter.
+            let stops = g.resolved_stops(0.0, 0.0);
+            e.int(stops.len() as i32);
+            for (c, p) in stops {
+                e.int(argb(c));
+                e.float(p);
+            }
         }
     }
     let filter_list = |e: &mut Encoded, list: &[Filter]| {

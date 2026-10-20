@@ -104,14 +104,40 @@ impl GradientKind {
     }
 }
 
+/// Where a color stop sits along the gradient line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StopPosition {
+    /// A fraction of the line (`50%`; a conic gradient's angles as
+    /// fractions of a turn: `90deg` is 0.25).
+    Fraction(f32),
+    /// Points from the line's start (`10px`), resolved against the
+    /// length of the line ([`Gradient::line_length`]) where the box is
+    /// known.
+    Points(f32),
+}
+
+impl StopPosition {
+    /// The position as a fraction of a `line` points long.
+    pub fn fraction(self, line: f32) -> f32 {
+        match self {
+            StopPosition::Fraction(f) => f,
+            StopPosition::Points(p) if line > 0.0 => p / line,
+            // A line of no length (an empty box) draws nothing: lengths
+            // only need to stay in order and finite.
+            StopPosition::Points(p) if p > 0.0 => 1.0,
+            StopPosition::Points(_) => 0.0,
+        }
+    }
+}
+
 /// A color at a point of a gradient.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ColorStop {
     /// Color.
     pub color: Color,
-    /// Position along the gradient as a fraction; `None` is spread evenly
-    /// between its neighbors.
-    pub position: Option<f32>,
+    /// Position along the gradient; `None` is spread evenly between its
+    /// neighbors.
+    pub position: Option<StopPosition>,
 }
 
 /// A gradient image (`backgroundImage`).
@@ -126,44 +152,112 @@ pub struct Gradient {
 }
 
 impl Gradient {
-    /// Stop positions resolved as CSS does: missing ones spread evenly,
-    /// each at least the one before it.
-    pub fn resolved_stops(&self) -> Vec<(Color, f32)> {
-        let n = self.stops.len();
-        let mut pos: Vec<Option<f32>> = self.stops.iter().map(|s| s.position).collect();
-        if pos[0].is_none() {
-            pos[0] = Some(0.0);
+    /// Whether a stop is placed in points, so the stops depend on the
+    /// size of the box ([`Gradient::resolved_stops`]).
+    pub fn has_lengths(&self) -> bool {
+        self.stops
+            .iter()
+            .any(|s| matches!(s.position, Some(StopPosition::Points(_))))
+    }
+
+    /// The length in points of the gradient line over a `w` × `h` box,
+    /// what lengths of stops are fractions of (CSS Images 3): a linear
+    /// gradient's line through the center, long enough that the corners
+    /// get the end colors; a radial gradient's ray to the right, from the
+    /// center to the ending shape; 0 for a conic gradient, whose stops
+    /// are angles.
+    pub fn line_length(&self, w: f32, h: f32) -> f32 {
+        match self.kind {
+            GradientKind::Radial { circle, size, x, y } => {
+                radial_radii(circle, size, x * w, y * h, w, h).0
+            }
+            GradientKind::Conic { .. } => 0.0,
+            kind => {
+                let angle = kind.linear_angle(w, h).unwrap_or(180.0);
+                let (s, c) = angle.to_radians().sin_cos();
+                (w * s).abs() + (h * c).abs()
+            }
         }
-        if pos[n - 1].is_none() {
-            pos[n - 1] = Some(1.0);
+    }
+
+    /// Stop positions over a `w` × `h` box as fractions of the gradient
+    /// line, resolved as CSS does: lengths against the line's length,
+    /// missing ones spread evenly, each at least the one before it.
+    pub fn resolved_stops(&self, w: f32, h: f32) -> Vec<(Color, f32)> {
+        let mut out = Vec::with_capacity(self.stops.len());
+        self.resolve_stops(w, h, &mut out);
+        out
+    }
+
+    /// [`Gradient::resolved_stops`] into a reused buffer.
+    pub fn resolve_stops(&self, w: f32, h: f32, out: &mut Vec<(Color, f32)>) {
+        let line = if self.has_lengths() {
+            self.line_length(w, h)
+        } else {
+            0.0
+        };
+        out.clear();
+        out.extend(
+            self.stops
+                .iter()
+                .map(|s| (s.color, s.position.map_or(f32::NAN, |p| p.fraction(line)))),
+        );
+        let n = out.len();
+        if n == 0 {
+            return;
         }
-        let mut max = 0.0f32;
-        for p in pos.iter_mut().flatten() {
-            max = max.max(*p);
-            *p = max;
+        if out[0].1.is_nan() {
+            out[0].1 = 0.0;
         }
-        let mut i = 0;
+        if out[n - 1].1.is_nan() {
+            out[n - 1].1 = 1.0;
+        }
+        let mut max = f32::NEG_INFINITY;
+        for s in out.iter_mut().filter(|s| !s.1.is_nan()) {
+            max = max.max(s.1);
+            s.1 = max;
+        }
+        let mut i = 1;
         while i < n {
-            if pos[i].is_some() {
+            if !out[i].1.is_nan() {
                 i += 1;
                 continue;
             }
             let start = i - 1;
             let mut end = i;
-            while pos[end].is_none() {
+            while out[end].1.is_nan() {
                 end += 1;
             }
-            let (a, b) = (pos[start].unwrap_or(0.0), pos[end].unwrap_or(1.0));
-            for (k, p) in pos.iter_mut().enumerate().take(end).skip(i) {
-                *p = Some(a + (b - a) * (k - start) as f32 / (end - start) as f32);
+            let (a, b) = (out[start].1, out[end].1);
+            for (k, s) in out[i..end].iter_mut().enumerate() {
+                s.1 = a + (b - a) * (k + 1) as f32 / (end - start) as f32;
             }
             i = end;
         }
-        self.stops
-            .iter()
-            .zip(pos)
-            .map(|(s, p)| (s.color, p.unwrap_or(0.0)))
-            .collect()
+    }
+}
+
+/// The radii of a radial gradient's ending shape centered at `cx`, `cy`
+/// in a `w` × `h` box.
+fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f32) -> (f32, f32) {
+    let near = (cx.min(w - cx).abs(), cy.min(h - cy).abs());
+    let far = (cx.max(w - cx).abs(), cy.max(h - cy).abs());
+    if circle {
+        let r = match size {
+            GradientSize::ClosestSide => near.0.min(near.1),
+            GradientSize::FarthestSide => far.0.max(far.1),
+            GradientSize::ClosestCorner => near.0.hypot(near.1),
+            GradientSize::FarthestCorner => far.0.hypot(far.1),
+        };
+        return (r, r);
+    }
+    // An ellipse to a corner keeps the side ellipse's aspect ratio.
+    let s = std::f32::consts::SQRT_2;
+    match size {
+        GradientSize::ClosestSide => near,
+        GradientSize::FarthestSide => far,
+        GradientSize::ClosestCorner => (near.0 * s, near.1 * s),
+        GradientSize::FarthestCorner => (far.0 * s, far.1 * s),
     }
 }
 
@@ -671,17 +765,75 @@ mod tests {
                 },
                 ColorStop {
                     color: c,
-                    position: Some(0.8),
+                    position: Some(StopPosition::Fraction(0.8)),
                 },
                 ColorStop {
                     color: c,
-                    position: Some(0.5),
+                    position: Some(StopPosition::Fraction(0.5)),
                 },
             ],
             repeating: false,
         };
-        let p: Vec<f32> = g.resolved_stops().into_iter().map(|(_, p)| p).collect();
+        let p: Vec<f32> = g
+            .resolved_stops(100.0, 100.0)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
         assert_eq!(p, [0.0, 0.4, 0.8, 0.8]);
+    }
+
+    #[test]
+    fn lengths_resolve_against_the_line() {
+        let c = Color::BLACK;
+        let stop = |p: Option<StopPosition>| ColorStop {
+            color: c,
+            position: p,
+        };
+        let mut g = Gradient {
+            kind: GradientKind::Linear { angle: 90.0 },
+            stops: vec![
+                stop(Some(StopPosition::Points(0.0))),
+                stop(Some(StopPosition::Points(10.0))),
+                stop(None),
+                stop(Some(StopPosition::Fraction(0.5))),
+            ],
+            repeating: true,
+        };
+        assert!(g.has_lengths());
+        // Across a 200 × 50 box: the line is the width.
+        let p: Vec<f32> = g
+            .resolved_stops(200.0, 50.0)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        assert_eq!(p, [0.0, 0.05, 0.275, 0.5]);
+        // Down: the height.
+        g.kind = GradientKind::Linear { angle: 180.0 };
+        assert!((g.resolved_stops(200.0, 50.0)[1].1 - 0.2).abs() < 1e-6);
+        // Diagonal over a square: the diagonal.
+        g.kind = GradientKind::Linear { angle: 45.0 };
+        let line = g.line_length(100.0, 100.0);
+        assert!((line - 100.0 * std::f32::consts::SQRT_2).abs() < 1e-3);
+        // Radial: the ray to the ending shape (a circle to the farthest
+        // side of a 200 × 100 box from its center is 100 points).
+        g.kind = GradientKind::Radial {
+            circle: true,
+            size: GradientSize::FarthestSide,
+            x: 0.5,
+            y: 0.5,
+        };
+        assert!((g.line_length(200.0, 100.0) - 100.0).abs() < 1e-4);
+        assert!((g.resolved_stops(200.0, 100.0)[1].1 - 0.1).abs() < 1e-6);
+        // An empty box puts lengths at the start or past the end, still
+        // in order.
+        g.kind = GradientKind::Linear { angle: 90.0 };
+        let p: Vec<f32> = g
+            .resolved_stops(0.0, 0.0)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        assert_eq!(p[0], 0.0);
+        assert!(p.windows(2).all(|w| w[0] <= w[1]));
     }
 
     #[test]

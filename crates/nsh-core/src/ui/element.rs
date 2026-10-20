@@ -781,12 +781,21 @@ pub struct Style(pub(crate) Option<Arc<crate::StylePatch>>);
 
 impl Style {
     /// A style of `decls`, applied in order; one that does not apply (a
-    /// value of the wrong type) is left out, as on a host element.
+    /// value of the wrong type or format) is left out and logged, as on a
+    /// host element.
     pub fn from_decls(decls: impl IntoIterator<Item = crate::StyleDecl>) -> Self {
         let mut style = crate::Style::default();
         let mut patch = crate::StylePatch::default();
         for decl in decls {
-            let _ = patch.push(&mut style, decl);
+            let key = match &decl {
+                crate::StyleDecl::Set(key, _) => Some(*key),
+                _ => None,
+            };
+            if patch.push(&mut style, decl).is_err()
+                && let Some(key) = key
+            {
+                log::warn!("invalid value for style `{}`", key.name());
+            }
         }
         Self(Some(Arc::new(patch)))
     }

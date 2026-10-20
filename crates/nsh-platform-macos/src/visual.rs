@@ -594,7 +594,7 @@ fn add_reversed(path: &CFRetained<CGMutablePath>, rect: CGRect, radii: CornerRad
 /// Configures `g` to draw `gradient` over a `size` box.
 fn shape_gradient(g: &CAGradientLayer, gradient: &Gradient, size: CGSize) {
     let (w, h) = (size.width.max(1.0), size.height.max(1.0));
-    let stops = gradient.resolved_stops();
+    let stops = gradient.resolved_stops(w as f32, h as f32);
     // A transparent stop takes its neighbor's hue (as CSS's premultiplied
     // mixing does), so fades to transparent do not darken.
     let colors: Vec<Retained<objc2::runtime::AnyObject>> = (0..stops.len())

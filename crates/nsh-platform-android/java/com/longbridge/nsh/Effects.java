@@ -82,11 +82,25 @@ final class Effects {
                 default: g.angle = b.getFloat(); g.x = b.getFloat(); g.y = b.getFloat(); break;
             }
             int stops = b.getInt();
+            // Negative: stops as written, some in points, placed when the
+            // box is known (`Decor.Gradient.resolve`).
+            boolean written = stops < 0;
+            if (written) stops = -stops;
             g.colors = new int[stops];
             g.positions = new float[stops];
+            if (written) {
+                g.values = new float[stops];
+                g.units = new int[stops];
+            }
             for (int k = 0; k < stops; k++) {
                 g.colors[k] = b.getInt();
-                g.positions[k] = b.getFloat();
+                float v = b.getFloat();
+                if (written) {
+                    g.units[k] = b.getInt();
+                    g.values[k] = g.units[k] == 2 ? v * density : v;
+                } else {
+                    g.positions[k] = v;
+                }
             }
             // A transparent stop takes its neighbor's hue: fades to
             // transparent do not darken (CSS mixes premultiplied).

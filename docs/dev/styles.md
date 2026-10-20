@@ -34,8 +34,13 @@
   components: `SafeAreaView`, `KeyboardAvoidingView`) are added to the resolved padding / margin, so classes and
   styles keep their own.
 - **Effects** (styles and classes; `effects.rs`): `boxShadow` (CSS syntax, several, `inset`; also `shadow-*` / `ring-*`),
-  `experimental_backgroundImage` / `backgroundImage` (linear / radial / conic gradients, drawn over `backgroundColor` as in
-  CSS; but press feedback must show, so a background color an interaction state sets (`active:` / `hover:` / `focus:` /
+  `experimental_backgroundImage` / `backgroundImage` (linear / radial / conic gradients and their `repeating-` forms,
+  drawn over `backgroundColor` as in CSS; stops at percentages, at lengths along linear and radial gradients
+  (`StopPosition::Points`: `Gradient::resolve_stops` places them against `Gradient::line_length` of the box when it is
+  drawn, so every native backend passes the view's size; Android's `Decor.Gradient.resolve` does the same for the
+  gradients `encode.rs` sends as written, with their stop count negated; the web hands them to the browser as `px`), or
+  at angles around conic ones (fractions of a turn), up to two per stop; transition hints are not parsed; a gradient
+  that does not parse is logged (inline styles, `bg-[…]` classes, Rust components' `Style`); but press feedback must show, so a background color an interaction state sets (`active:` / `hover:` / `focus:` /
   `focus-within:` / `group-*:` classes, Rust components' `.active(..)`, `underlayColor` while pressed) or a native
   animation drives (`Animated` `backgroundColor`) replaces the gradients, unless that state sets a gradient of its own:
   done in the core, so every platform shows it alike), `filter` (`brightness`, `contrast`,

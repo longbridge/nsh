@@ -9,7 +9,7 @@ use crate::{
     css,
     effects::{
         BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation,
-        Keyframes, Transition, TransitionProps,
+        Keyframes, StopPosition, Transition, TransitionProps,
     },
     ops::ResizeMode,
     props::PointerEvents,
@@ -507,17 +507,17 @@ impl Parts {
                     let [fp, vp, tp] = self.stop_positions;
                     let mut stops = vec![ColorStop {
                         color: from.unwrap_or(Color::TRANSPARENT),
-                        position: Some(fp.unwrap_or(0.0)),
+                        position: Some(StopPosition::Fraction(fp.unwrap_or(0.0))),
                     }];
                     if let Some(via) = via {
                         stops.push(ColorStop {
                             color: via,
-                            position: Some(vp.unwrap_or(0.5)),
+                            position: Some(StopPosition::Fraction(vp.unwrap_or(0.5))),
                         });
                     }
                     stops.push(ColorStop {
                         color: to.unwrap_or(Color::TRANSPARENT),
-                        position: Some(tp.unwrap_or(1.0)),
+                        position: Some(StopPosition::Fraction(tp.unwrap_or(1.0))),
                     });
                     style.set_background_images(vec![Gradient {
                         kind,
@@ -1502,8 +1502,14 @@ static PREFIXES: &[(&str, Handler)] = &[
     }),
     ("bg", |t, v, _| {
         if let Some(a) = arbitrary(v)
-            && css::gradient(&a).is_some()
+            && a.contains("gradient(")
         {
+            if css::gradient(&a).is_none() {
+                // Reported here: the class is also unknown, but that does
+                // not say the gradient is what was rejected.
+                log::warn!("invalid gradient in class `bg-{v}`: {a}");
+                return None;
+            }
             return one(Decl::Style(StyleDecl::Set(
                 K::BackgroundImage,
                 PatchValue::Str(a.into()),
