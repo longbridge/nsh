@@ -215,11 +215,29 @@ screen. Each step sends what a platform would, to the views that report it:
 - `wait`, `wait_for` / `wait_until` (until a selector matches), `idle` (until quiet for a while).
 
 A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
-for 100 ms (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
+for 100 ms and no native animation runs (2 s at most). It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
 failure is the log's only). The model keeps inputs' text and edit count as platforms do: a value JS sets for fewer
 edits than were typed is dropped. `headless::StubNetwork` (responses by `"<METHOD> <URL>"`, others fail) and
 `headless::MemoryStorage` (entries given up front) stand in for the device's services.
+
+Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
+(`headless/mod.rs` `Headless::react`, `go_back`, `answer`; `headless/animation.rs`):
+
+- the native animation graph (`nsh-animation`, platform-free) runs frame by frame at 60 Hz while anything animates,
+  fed the mount items' animation ops and scroll values, its finished animations reported (`animations_finished`); a
+  step is quiet only when nothing animates;
+- a back (`Headless::back`, and the app's `Command::Back`) does what `nsh-platform-macos`'s `default_back` does: in the
+  newest modal, else the screen, the innermost stack that can go back pops its top screen (hidden in the model until
+  the app removes it, `onDismiss`) or asks it (`preventBack`: `onBackRequest`); else the newest modal gets
+  `onRequestClose`, and `onDismiss` when it is `dismissible`;
+- dialogs (`Command::Dialog`) are answered with `onDialog` (`id`, `index`, -1 dismissed): by the test's handler, else
+  `default_answer` (the cancel button, else dismissed when cancelable, else the step fails); `nsh/test`'s `App` answers
+  them after each step itself (`answer_dialogs_myself`), so its JS handler runs on the test file's VM;
+- the clipboard holds text (`SetClipboard`, `ReadClipboard` answered with `onClipboard`), modals get `onShow` when
+  inserted;
+- images are not loaded; an image's size (`ImageInfo`) and an image or files on the clipboard fail the step that asked
+  (`Screen::take_unsupported`).
 
 Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
 `Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.

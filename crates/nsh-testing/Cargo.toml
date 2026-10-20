@@ -24,6 +24,7 @@ bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
 
 [dependencies]
 nsh-bundler = { workspace = true, features = ["bundle"], optional = true }
+nsh-animation.workspace = true
 nsh-core.workspace = true
 nsh-engine.workspace = true
 nsh-js = { workspace = true, optional = true }
@@ -37,6 +38,7 @@ ureq.workspace = true
 [dev-dependencies]
 # The fetch tests drive a VM's network by hand (`headless/net_fetch_tests.rs`).
 nsh-js.workspace = true
+nsh-ui-mobile.workspace = true
 
 [[test]]
 name = "testing"

@@ -355,6 +355,9 @@ impl Session {
             .ok()
             .and_then(|cwd| path.strip_prefix(cwd).ok().map(Path::to_path_buf))
             .unwrap_or_else(|| path.clone());
+        // `App` answers dialogs after each step, with the test's handler.
+        app.answer_dialogs_myself();
+        app.set_clipboard(options.clipboard);
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app = Arc::new(Mutex::new(Some(app)));
