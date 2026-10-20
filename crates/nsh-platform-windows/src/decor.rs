@@ -143,11 +143,13 @@ pub(crate) fn outset(state: &ViewState) -> f32 {
     }
     let outline = state.style.outline;
     if outline.is_visible() {
-        o = o.max(outline.offset + outline.width);
+        o = o.max((outline.offset + outline.width).0);
     }
     if let Some(e) = &state.style.effects {
         for b in e.box_shadows.iter().filter(|b| !b.inset && b.is_visible()) {
-            o = o.max(b.offset_x.abs().max(b.offset_y.abs()) + b.spread + 1.5 * b.blur.max(0.0));
+            o = o.max(
+                b.offset_x.0.abs().max(b.offset_y.0.abs()) + b.spread.0 + 1.5 * b.blur.0.max(0.0),
+            );
         }
         o += layer::filters_outset(&e.filters);
     }
@@ -320,10 +322,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         for b in e.box_shadows.iter().rev() {
             if !b.inset && b.is_visible() {
                 let spec = ShadowSpec {
-                    dx: b.offset_x,
-                    dy: b.offset_y,
-                    spread: b.spread,
-                    blur: b.blur.max(0.0),
+                    dx: b.offset_x.0,
+                    dy: b.offset_y.0,
+                    spread: b.spread.0,
+                    blur: b.blur.0.max(0.0),
                     color: b.color,
                     cut: true,
                 };
@@ -362,10 +364,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 let spec = ShadowSpec {
-                    dx: b.offset_x,
-                    dy: b.offset_y,
-                    spread: b.spread,
-                    blur: b.blur.max(0.0),
+                    dx: b.offset_x.0,
+                    dy: b.offset_y.0,
+                    spread: b.spread.0,
+                    blur: b.blur.0.max(0.0),
                     color: b.color,
                     cut: true,
                 };
@@ -837,14 +839,14 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
 /// The outline: outside the border box by its offset; rounded corners
 /// follow the border radius outwards, square ones stay square.
 fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4]) {
-    let d = o.offset + o.width;
+    let (width, off) = (o.width.0, o.offset.0);
+    let d = off + width;
     let (ow, oh) = (w + 2.0 * d, h + 2.0 * d);
     if ow <= 0.0 || oh <= 0.0 {
         return;
     }
     if o.style == BorderStyle::Solid {
         let outer = (rect(-d, -d, ow, oh), circular(radii.map(|r| grown(r, d))));
-        let off = o.offset;
         let inner = rect(-off, -off, w + 2.0 * off, h + 2.0 * off);
         let mut figures = vec![outer];
         if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
@@ -856,18 +858,15 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
         }
         return;
     }
-    let half = o.width / 2.0;
+    let half = width / 2.0;
     let line = crate::render::rounded_geometry(
         cx.gfx,
-        rect(-d + half, -d + half, ow - o.width, oh - o.width),
+        rect(-d + half, -d + half, ow - width, oh - width),
         radii.map(|r| grown(r, d - half)),
     );
     if let (Some(line), Some(style)) = (line, stroke_style(cx.gfx, o.style)) {
         // SAFETY: as above.
-        unsafe {
-            cx.dc
-                .DrawGeometry(&line, cx.solid(o.color), o.width, &style)
-        };
+        unsafe { cx.dc.DrawGeometry(&line, cx.solid(o.color), width, &style) };
     }
 }
 

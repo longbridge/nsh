@@ -70,10 +70,10 @@ fn knob<E: Finished>(element: E) -> E {
         [
             inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.35)),
             BoxShadow {
-                offset_x: 0.0,
-                offset_y: 3.0,
-                blur: 10.0,
-                spread: 0.0,
+                offset_x: px(0.0),
+                offset_y: px(3.0),
+                blur: px(10.0),
+                spread: px(0.0),
                 color: rgb_a(0x000000, 0.45).to_packed(),
                 inset: false,
             },

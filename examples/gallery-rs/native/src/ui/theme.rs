@@ -10,6 +10,7 @@
 //! shadows for both appearances (`.dark(..)` variants: native too).
 
 use nsh_core::{
+    geometry::px,
     nsh_animation::{Curve, EaseMode},
     ui::{
         AdaptiveColor, BoxShadow, Easing, Rgba, Spring, StyleRefinement, Styled, Timing, rgb, rgba,
@@ -187,10 +188,10 @@ pub(crate) mod motion {
 /// A box shadow outside the box.
 const fn drop(y: f32, blur: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: y,
-        blur,
-        spread: 0.0,
+        offset_x: px(0.0),
+        offset_y: px(y),
+        blur: px(blur),
+        spread: px(0.0),
         color: color.to_packed(),
         inset: false,
     }
@@ -199,10 +200,10 @@ const fn drop(y: f32, blur: f32, color: Rgba) -> BoxShadow {
 /// A box shadow inside the box (`spread`: a rim all around).
 const fn inner(y: f32, blur: f32, spread: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: y,
-        blur,
-        spread,
+        offset_x: px(0.0),
+        offset_y: px(y),
+        blur: px(blur),
+        spread: px(spread),
         color: color.to_packed(),
         inset: true,
     }

@@ -240,7 +240,7 @@ pub(crate) fn is_identity(m: &[f32; 20]) -> bool {
 /// True if `filters` change anything.
 pub(crate) fn filters_visible(filters: &[Filter]) -> bool {
     filters.iter().any(|f| match *f {
-        Filter::Blur(r) => r > 0.0,
+        Filter::Blur(r) => r.0 > 0.0,
         Filter::DropShadow { color, .. } => !color.is_transparent(),
         _ => f.color_matrix().is_some_and(|m| !is_identity(&m)),
     })
@@ -252,13 +252,13 @@ pub(crate) fn filters_outset(filters: &[Filter]) -> f32 {
     filters
         .iter()
         .map(|f| match *f {
-            Filter::Blur(r) => 3.0 * r.max(0.0),
+            Filter::Blur(r) => 3.0 * r.0.max(0.0),
             Filter::DropShadow {
                 offset_x,
                 offset_y,
                 blur,
                 ..
-            } => offset_x.abs().max(offset_y.abs()) + 1.5 * blur.max(0.0),
+            } => offset_x.0.abs().max(offset_y.0.abs()) + 1.5 * blur.0.max(0.0),
             _ => 0.0,
         })
         .sum()
@@ -401,8 +401,8 @@ pub(crate) fn apply_filters(
             continue;
         }
         match filters[i] {
-            Filter::Blur(r) if r > 0.0 => {
-                image = blur(dc, &image, r * length_scale(lin), hard)?;
+            Filter::Blur(r) if r.0 > 0.0 => {
+                image = blur(dc, &image, r.0 * length_scale(lin), hard)?;
             }
             Filter::DropShadow {
                 offset_x,
@@ -410,7 +410,7 @@ pub(crate) fn apply_filters(
                 blur,
                 color,
             } if !color.is_transparent() => {
-                image = drop_shadow(dc, &image, offset_x, offset_y, blur, color, lin)?;
+                image = drop_shadow(dc, &image, offset_x.0, offset_y.0, blur.0, color, lin)?;
             }
             _ => {}
         }
@@ -534,6 +534,8 @@ pub(crate) fn backdrop(
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::geometry::{deg, px};
+
     use super::*;
 
     #[test]
@@ -561,13 +563,15 @@ mod tests {
         ));
         assert!(is_identity(&Filter::Saturate(1.0).color_matrix().unwrap()));
         assert!(is_identity(&Filter::Grayscale(0.0).color_matrix().unwrap()));
-        assert!(is_identity(&Filter::HueRotate(0.0).color_matrix().unwrap()));
+        assert!(is_identity(
+            &Filter::HueRotate(deg(0.0)).color_matrix().unwrap()
+        ));
         assert!(!is_identity(
             &Filter::Grayscale(1.0).color_matrix().unwrap()
         ));
         assert!(!filters_visible(&[
             Filter::Contrast(1.0),
-            Filter::Blur(0.0)
+            Filter::Blur(px(0.0))
         ]));
         assert!(filters_visible(&[Filter::Contrast(1.2)]));
         // Full grayscale leaves equal channels.
@@ -602,11 +606,11 @@ mod tests {
 
     #[test]
     fn outsets_cover_blurs_and_shadows() {
-        assert_eq!(filters_outset(&[Filter::Blur(4.0)]), 12.0);
+        assert_eq!(filters_outset(&[Filter::Blur(px(4.0))]), 12.0);
         let s = Filter::DropShadow {
-            offset_x: 2.0,
-            offset_y: 6.0,
-            blur: 8.0,
+            offset_x: px(2.0),
+            offset_y: px(6.0),
+            blur: px(8.0),
             color: Color::BLACK,
         };
         assert_eq!(filters_outset(&[s]), 18.0);

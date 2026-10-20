@@ -11,6 +11,7 @@ use crate::{
         BlendMode, BoxShadow, Cursor, Effects, Filter, Gradient, KeyframeAnimation, Keyframes,
         Outline, Transition, TransitionProps,
     },
+    geometry::{Points, px},
     grid,
     transform::{Transform, TransformKind},
     ui::PropEnum,
@@ -2051,18 +2052,20 @@ impl Style {
                     Some(s) => BlendMode::parse(s).ok_or(StyleError::InvalidValue)?,
                 }
             }
-            StyleKey::OutlineWidth => self.view.outline.width = length_value(value, 0.0)?.max(0.0),
+            StyleKey::OutlineWidth => {
+                self.view.outline.width = px(length_value(value, 0.0)?.max(0.0))
+            }
             StyleKey::OutlineColor => {
                 self.view.outline.color = color(value)?.unwrap_or(Outline::NONE.color)
             }
-            StyleKey::OutlineOffset => self.view.outline.offset = length_value(value, 0.0)?,
+            StyleKey::OutlineOffset => self.view.outline.offset = px(length_value(value, 0.0)?),
             StyleKey::OutlineStyle => {
                 self.view.outline.style = match keyword(value)? {
                     None | Some("solid") | Some("double") => BorderStyle::Solid,
                     Some("dashed") => BorderStyle::Dashed,
                     Some("dotted") => BorderStyle::Dotted,
                     Some("none") | Some("hidden") => {
-                        self.view.outline.width = 0.0;
+                        self.view.outline.width = Points::ZERO;
                         BorderStyle::Solid
                     }
                     Some(_) => return Err(StyleError::InvalidValue),

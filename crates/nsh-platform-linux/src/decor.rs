@@ -184,10 +184,10 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
                     snapshot,
                     &outline,
                     &rgba(b.color),
-                    b.offset_x,
-                    b.offset_y,
-                    b.spread,
-                    b.blur.max(0.0),
+                    b.offset_x.0,
+                    b.offset_y.0,
+                    b.spread.0,
+                    b.blur.0.max(0.0),
                     soft,
                 );
             }
@@ -221,10 +221,10 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
                 snapshot.append_inset_shadow(
                     &padding,
                     &rgba(b.color),
-                    b.offset_x,
-                    b.offset_y,
-                    b.spread,
-                    b.blur.max(0.0),
+                    b.offset_x.0,
+                    b.offset_y.0,
+                    b.spread.0,
+                    b.blur.0.max(0.0),
                 );
             }
         }
@@ -253,7 +253,7 @@ pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
     if o.is_visible() {
         // Outside the border box by `offset`; rounded corners follow the
         // border radius outwards, square ones stay square.
-        let d = o.offset + o.width;
+        let (d, width) = ((o.offset + o.width).0, o.width.0);
         let (ow, oh) = (w + 2.0 * d, h + 2.0 * d);
         if ow <= 0.0 || oh <= 0.0 {
             return;
@@ -262,14 +262,14 @@ pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
         if o.style == BorderStyle::Solid {
             let c = rgba(o.color);
             let outer = rounded(rect, radii.map(|r| grown(r, d)));
-            snapshot.append_border(&outer, &[o.width; 4], &[c, c, c, c]);
+            snapshot.append_border(&outer, &[width; 4], &[c, c, c, c]);
         } else {
-            let half = o.width / 2.0;
+            let half = width / 2.0;
             let line = rounded(
-                graphene::Rect::new(-d + half, -d + half, ow - o.width, oh - o.width),
+                graphene::Rect::new(-d + half, -d + half, ow - width, oh - width),
                 radii.map(|r| grown(r, d - half)),
             );
-            stroke(snapshot, &line, o.width, o.style, &rgba(o.color));
+            stroke(snapshot, &line, width, o.style, &rgba(o.color));
         }
     }
 }
@@ -415,8 +415,8 @@ pub(crate) fn push_filters(snapshot: &gtk::Snapshot, state: &ViewState) -> usize
         match f[end - 1] {
             // CSS's blur length is the Gaussian's deviation, GSK's radius
             // twice that.
-            Filter::Blur(r) if r > 0.0 => {
-                snapshot.push_blur(r as f64 * 2.0);
+            Filter::Blur(r) if r.0 > 0.0 => {
+                snapshot.push_blur(r.0 as f64 * 2.0);
                 pushes += 1;
             }
             Filter::DropShadow {
@@ -427,9 +427,9 @@ pub(crate) fn push_filters(snapshot: &gtk::Snapshot, state: &ViewState) -> usize
             } if !color.is_transparent() => {
                 snapshot.push_shadow(&[gsk::Shadow::new(
                     rgba(color),
-                    offset_x,
-                    offset_y,
-                    blur.max(0.0),
+                    offset_x.0,
+                    offset_y.0,
+                    blur.0.max(0.0),
                 )]);
                 pushes += 1;
             }

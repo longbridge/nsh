@@ -12,14 +12,14 @@ use crate::{
 /// One layer of `boxShadow` (CSS `box-shadow`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct BoxShadow {
-    /// Horizontal offset in points.
-    pub offset_x: f32,
-    /// Vertical offset in points.
-    pub offset_y: f32,
-    /// Blur radius in points (CSS: twice the Gaussian's standard deviation).
-    pub blur: f32,
+    /// Horizontal offset.
+    pub offset_x: Points,
+    /// Vertical offset.
+    pub offset_y: Points,
+    /// Blur radius (CSS: twice the Gaussian's standard deviation).
+    pub blur: Points,
     /// How far the shadow's shape grows (negative: shrinks).
-    pub spread: f32,
+    pub spread: Points,
     /// Color.
     pub color: Color,
     /// Drawn inside the box, over the background.
@@ -269,16 +269,16 @@ fn radial_radii(circle: bool, size: GradientSize, cx: f32, cy: f32, w: f32, h: f
 /// One function of `filter` / `backdropFilter`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Filter {
-    /// Gaussian blur radius in points.
-    Blur(f32),
+    /// Gaussian blur radius.
+    Blur(Points),
     /// 1 is unchanged.
     Brightness(f32),
     /// 1 is unchanged.
     Contrast(f32),
     /// 0..1.
     Grayscale(f32),
-    /// Degrees.
-    HueRotate(f32),
+    /// The hue's rotation.
+    HueRotate(Radians),
     /// 0..1.
     Invert(f32),
     /// 0..1.
@@ -289,12 +289,12 @@ pub enum Filter {
     Sepia(f32),
     /// A shadow of the content's shape.
     DropShadow {
-        /// Horizontal offset in points.
-        offset_x: f32,
-        /// Vertical offset in points.
-        offset_y: f32,
-        /// Blur radius in points.
-        blur: f32,
+        /// Horizontal offset.
+        offset_x: Points,
+        /// Vertical offset.
+        offset_y: Points,
+        /// Blur radius.
+        blur: Points,
         /// Color.
         color: Color,
     },
@@ -352,8 +352,8 @@ impl Filter {
                 [0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s],
                 [0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s],
             ),
-            Filter::HueRotate(deg) => {
-                let (s, c) = deg.to_radians().sin_cos();
+            Filter::HueRotate(angle) => {
+                let (s, c) = angle.sin_cos();
                 id(
                     [
                         0.213 + c * 0.787 - s * 0.213,
@@ -416,12 +416,12 @@ pub fn compose_color_matrices(filters: &[Filter]) -> Option<[f32; 20]> {
 }
 
 /// The total blur radius of `filters`.
-pub fn blur_radius(filters: &[Filter]) -> f32 {
+pub fn blur_radius(filters: &[Filter]) -> Points {
     filters
         .iter()
         .map(|f| match f {
             Filter::Blur(r) => *r,
-            _ => 0.0,
+            _ => Points::ZERO,
         })
         .sum()
 }
@@ -505,28 +505,28 @@ impl BlendMode {
 /// `outline*`: a line around the border box, outside the layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Outline {
-    /// Width in points (0: none).
-    pub width: f32,
+    /// Width (0: none).
+    pub width: Points,
     /// Color.
     pub color: Color,
     /// Line style.
     pub style: BorderStyle,
     /// Gap between the border box and the outline (negative: inside).
-    pub offset: f32,
+    pub offset: Points,
 }
 
 impl Outline {
     /// No outline.
     pub const NONE: Outline = Outline {
-        width: 0.0,
+        width: Points::ZERO,
         color: Color::BLACK,
         style: BorderStyle::Solid,
-        offset: 0.0,
+        offset: Points::ZERO,
     };
 
     /// True if the outline draws anything.
     pub fn is_visible(&self) -> bool {
-        self.width > 0.0 && !self.color.is_transparent()
+        self.width > Points::ZERO && !self.color.is_transparent()
     }
 }
 
@@ -878,7 +878,7 @@ mod tests {
         let apply = |c: f32| m[0] * c + m[4];
         assert!((apply(1.0) - 0.0).abs() < 1e-6);
         assert!((apply(0.0) - 0.5).abs() < 1e-6);
-        assert!(compose_color_matrices(&[Filter::Blur(2.0)]).is_none());
+        assert!(compose_color_matrices(&[Filter::Blur(px(2.0))]).is_none());
     }
 
     #[test]

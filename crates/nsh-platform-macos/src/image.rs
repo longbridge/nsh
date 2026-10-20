@@ -1006,7 +1006,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
             .as_ref()
             .map(|e| &e.filters[..])
             .unwrap_or(&[]);
-        let blur = nsh_core::blur_radius(filters);
+        let blur = nsh_core::blur_radius(filters).0;
         let matrix = nsh_core::compose_color_matrices(filters);
         let (events, id) = (s.events, s.id);
         let Some(image) = s.image.as_mut() else {

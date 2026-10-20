@@ -90,7 +90,7 @@ pub(crate) fn has_backdrop(style: &ViewStyle) -> bool {
     style.effects.as_ref().is_some_and(|e| {
         e.backdrop_filters
             .iter()
-            .any(|f| matches!(*f, Filter::Blur(r) if r > 0.0))
+            .any(|f| matches!(*f, Filter::Blur(r) if r.0 > 0.0))
     })
 }
 
@@ -125,7 +125,7 @@ pub(crate) fn drop_shadow(style: &ViewStyle) -> Option<(f32, f32, f32, Color)> {
                 offset_y,
                 blur,
                 color,
-            } => Some((offset_x, offset_y, blur, color)),
+            } => Some((offset_x.0, offset_y.0, blur.0, color)),
             _ => None,
         })
 }
@@ -190,7 +190,7 @@ impl Visual {
             e.backdrop_filters
                 .iter()
                 .map(|f| match *f {
-                    Filter::Blur(r) => r,
+                    Filter::Blur(r) => r.0,
                     _ => 0.0,
                 })
                 .sum::<f32>()
@@ -221,7 +221,9 @@ impl Visual {
         // Everything but the box, as far as the farthest shadow reaches.
         let reach = shadows
             .iter()
-            .map(|s| s.offset_x.abs().max(s.offset_y.abs()) + s.spread.abs() + s.blur * 2.0 + 4.0)
+            .map(|s| {
+                s.offset_x.0.abs().max(s.offset_y.0.abs()) + s.spread.0.abs() + s.blur.0 * 2.0 + 4.0
+            })
             .fold(0.0, f32::max) as CGFloat;
         let around = grow(local, reach);
         holder.setFrame(local);
@@ -251,10 +253,10 @@ impl Visual {
         let content = rounded(local, radii);
         // CSS order is top first; later sublayers draw on top.
         for (l, s) in casters.iter().zip(shadows.iter().rev()) {
-            let shape = grow(local, s.spread as CGFloat);
+            let shape = grow(local, s.spread.0 as CGFloat);
             l.setFrame(local);
-            let path = rounded(shape, grown(radii, s.spread));
-            cast(l, &path, &content, s, s.offset_x, s.offset_y);
+            let path = rounded(shape, grown(radii, s.spread.0));
+            cast(l, &path, &content, s, s.offset_x.0, s.offset_y.0);
             if covered {
                 // Nothing to hide the stand-in content: the shadow only.
                 l.setFillColor(None);
@@ -315,22 +317,23 @@ impl Visual {
             CGMutablePath::add_rect(Some(&content), std::ptr::null(), local);
         }
         for (l, s) in casters.iter().zip(shadows.iter().rev()) {
-            let reach =
-                (s.offset_x.abs().max(s.offset_y.abs()) + s.spread.abs() + s.blur * 2.0 + 4.0)
-                    as CGFloat;
+            let reach = (s.offset_x.0.abs().max(s.offset_y.0.abs())
+                + s.spread.0.abs()
+                + s.blur.0 * 2.0
+                + 4.0) as CGFloat;
             // The frame around the shifted, shrunk inner shape casts its
             // shadow inwards (non-zero winding: the hole runs backwards).
             let hole = offset(
-                grow(padding, -(s.spread as CGFloat)),
-                s.offset_x,
-                s.offset_y,
+                grow(padding, -(s.spread.0 as CGFloat)),
+                s.offset_x.0,
+                s.offset_y.0,
             );
             let path = CGMutablePath::new();
             // SAFETY: valid mutable paths, a null transform.
             unsafe {
                 CGMutablePath::add_rect(Some(&path), std::ptr::null(), grow(local, reach));
             }
-            add_reversed(&path, hole, grown(inner_radii, -s.spread));
+            add_reversed(&path, hole, grown(inner_radii, -s.spread.0));
             l.setFrame(local);
             cast(l, &path, &content, s, 0.0, 0.0);
         }
@@ -394,7 +397,7 @@ impl Visual {
         });
         // Centered on a line `offset` outside the border box; the corners
         // follow the border radius outwards.
-        let d = o.offset + o.width / 2.0;
+        let d = (o.offset + o.width / 2.0).0;
         let radii = if radii.is_zero() {
             radii
         } else {
@@ -402,9 +405,9 @@ impl Visual {
         };
         l.setFrame(local);
         l.setPath(Some(&rounded(grow(local, d as CGFloat), radii)));
-        l.setLineWidth(o.width as CGFloat);
+        l.setLineWidth(o.width.0 as CGFloat);
         l.setStrokeColor(cg_color(o.color).as_deref());
-        let w = o.width as f64;
+        let w = o.width.0 as f64;
         let pattern: Option<Retained<NSArray<NSNumber>>> = match o.style {
             BorderStyle::Solid => None,
             BorderStyle::Dashed => Some(NSArray::from_retained_slice(&[
@@ -517,7 +520,7 @@ fn cast(
     l.setShadowOffset(CGSize::new(x as CGFloat, y as CGFloat));
     // CSS blur is twice the Gaussian's deviation; Core Animation's radius
     // is close to the deviation.
-    l.setShadowRadius(s.blur as CGFloat / 2.0);
+    l.setShadowRadius(s.blur.0 as CGFloat / 2.0);
 }
 
 /// Keeps `layers` at `n`, adding new ones from `make` to `parent`.

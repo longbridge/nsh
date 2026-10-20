@@ -440,12 +440,12 @@ impl Node {
         let mut style = Box::new(self.view_style.clone());
         style.elevation = self.elevation;
         if style.transform.has_fractions() {
-            let (w, h) = if self.frame.size.width.0.is_nan() {
-                (0.0, 0.0)
+            let size = if self.frame.size.width.is_nan() {
+                Size::default()
             } else {
-                (self.frame.size.width.0, self.frame.size.height.0)
+                self.frame.size
             };
-            style.transform = style.transform.resolve_fractions(w, h);
+            style.transform = style.transform.resolve_fractions(size);
         }
         style
     }

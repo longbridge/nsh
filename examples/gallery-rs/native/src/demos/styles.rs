@@ -158,10 +158,10 @@ fn face(
             [
                 inset_shadow(1.0, 0.0, rgb(0xffffff)),
                 BoxShadow {
-                    offset_x: 0.0,
-                    offset_y: 8.0,
-                    blur: 20.0,
-                    spread: 0.0,
+                    offset_x: px(0.0),
+                    offset_y: px(8.0),
+                    blur: px(20.0),
+                    spread: px(0.0),
                     color: rgb_a(0x14140a, 0.10).to_packed(),
                     inset: false,
                 },
@@ -169,10 +169,10 @@ fn face(
             [
                 inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.07)),
                 BoxShadow {
-                    offset_x: 0.0,
-                    offset_y: 10.0,
-                    blur: 24.0,
-                    spread: 0.0,
+                    offset_x: px(0.0),
+                    offset_y: px(10.0),
+                    blur: px(24.0),
+                    spread: px(0.0),
                     color: rgb_a(0x000000, 0.4).to_packed(),
                     inset: false,
                 },

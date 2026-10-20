@@ -101,10 +101,10 @@ pub(crate) fn Toggle(props: ToggleProps, cx: Scope<ToggleEvent>) -> impl IntoEle
                     [
                         inset_shadow(1.0, 0.0, rgb_a(0xffffff, 0.2)),
                         BoxShadow {
-                            offset_x: 0.0,
-                            offset_y: 1.0,
-                            blur: 3.0,
-                            spread: 0.0,
+                            offset_x: px(0.0),
+                            offset_y: px(1.0),
+                            blur: px(3.0),
+                            spread: px(0.0),
                             color: rgb_a(0x000000, 0.4).to_packed(),
                             inset: false,
                         },

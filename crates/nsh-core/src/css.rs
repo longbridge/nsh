@@ -310,11 +310,13 @@ pub(crate) fn box_shadow(s: &str) -> Option<BoxShadow> {
         }
     }
     match lengths.as_slice() {
-        [x, y] => (shadow.offset_x, shadow.offset_y) = (*x, *y),
-        [x, y, blur] => (shadow.offset_x, shadow.offset_y, shadow.blur) = (*x, *y, blur.max(0.0)),
+        [x, y] => (shadow.offset_x, shadow.offset_y) = (px(*x), px(*y)),
+        [x, y, blur] => {
+            (shadow.offset_x, shadow.offset_y, shadow.blur) = (px(*x), px(*y), px(blur.max(0.0)))
+        }
         [x, y, blur, spread] => {
             (shadow.offset_x, shadow.offset_y, shadow.blur, shadow.spread) =
-                (*x, *y, blur.max(0.0), *spread)
+                (px(*x), px(*y), px(blur.max(0.0)), px(*spread))
         }
         _ => return None,
     }
@@ -574,11 +576,11 @@ fn filter(s: &str) -> Option<Filter> {
         }
     };
     Some(match name {
-        "blur" => Filter::Blur(if arg.is_empty() { 0.0 } else { length(arg)? }),
+        "blur" => Filter::Blur(px(if arg.is_empty() { 0.0 } else { length(arg)? })),
         "brightness" => Filter::Brightness(factor(1.0)?),
         "contrast" => Filter::Contrast(factor(1.0)?),
         "grayscale" => Filter::Grayscale(factor(1.0)?.clamp(0.0, 1.0)),
-        "hue-rotate" => Filter::HueRotate(if arg.is_empty() { 0.0 } else { angle(arg)? }),
+        "hue-rotate" => Filter::HueRotate(deg(if arg.is_empty() { 0.0 } else { angle(arg)? })),
         "invert" => Filter::Invert(factor(1.0)?.clamp(0.0, 1.0)),
         "opacity" => Filter::Opacity(factor(1.0)?.clamp(0.0, 1.0)),
         "saturate" => Filter::Saturate(factor(1.0)?),
@@ -670,10 +672,13 @@ mod tests {
     fn shadows() {
         let s = box_shadows("0 1px 3px 0 rgb(0 0 0 / 0.1), inset 0 1px 2px -1px #f00").unwrap();
         assert_eq!(s.len(), 2);
-        assert_eq!((s[0].offset_y, s[0].blur, s[0].spread), (1.0, 3.0, 0.0));
+        assert_eq!(
+            (s[0].offset_y, s[0].blur, s[0].spread),
+            (px(1.0), px(3.0), px(0.0))
+        );
         assert_eq!(s[0].color, Color(0x0000_001a));
         assert!(s[1].inset);
-        assert_eq!(s[1].spread, -1.0);
+        assert_eq!(s[1].spread, px(-1.0));
         assert_eq!(s[1].color, Color(0xff00_00ff));
         assert!(box_shadows("none").unwrap().is_empty());
         assert!(box_shadows("1px").is_none());
@@ -743,10 +748,16 @@ mod tests {
     fn filter_lists() {
         let f = filters("blur(4px) brightness(120%) hue-rotate(90deg) drop-shadow(0 1px 2px #000)")
             .unwrap();
-        assert_eq!(f[0], Filter::Blur(4.0));
+        assert_eq!(f[0], Filter::Blur(px(4.0)));
         assert_eq!(f[1], Filter::Brightness(1.2));
-        assert_eq!(f[2], Filter::HueRotate(90.0));
-        assert!(matches!(f[3], Filter::DropShadow { blur: 2.0, .. }));
+        assert_eq!(f[2], Filter::HueRotate(deg(90.0)));
+        assert!(matches!(
+            f[3],
+            Filter::DropShadow {
+                blur: crate::geometry::Points(2.0),
+                ..
+            }
+        ));
     }
 
     #[test]

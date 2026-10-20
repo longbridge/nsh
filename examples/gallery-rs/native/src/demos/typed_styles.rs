@@ -54,10 +54,10 @@ fn zinc(light: u16, dark: u16) -> AdaptiveColor {
 /// A box shadow outside the box (`shadow-[0_{y}px_{blur}px_{color}]`).
 fn drop(y: f32, blur: f32, color: Rgba) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: y,
-        blur,
-        spread: 0.0,
+        offset_x: px(0.0),
+        offset_y: px(y),
+        blur: px(blur),
+        spread: px(0.0),
         color: color.to_packed(),
         inset: false,
     }

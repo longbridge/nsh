@@ -1854,7 +1854,7 @@ impl Mounter {
                 .map(|e| &e.filters[..])
                 .unwrap_or(&[]);
             let look = crate::image::Look {
-                blur: s.image_options.blur_radius + nsh_core::blur_radius(filters),
+                blur: s.image_options.blur_radius + nsh_core::blur_radius(filters).0,
                 matrix: nsh_core::compose_color_matrices(filters),
             };
             let (source, placeholder) = (

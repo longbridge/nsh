@@ -751,18 +751,40 @@ fn add_outline(
     continuous: bool,
     reverse: bool,
 ) {
-    use nsh_core::shape::Segment;
-    let (x0, y0) = (rect.origin.x, rect.origin.y);
-    let bounds = (x0, y0, x0 + rect.size.width, y0 + rect.size.height);
+    use nsh_core::{
+        Corners, Point, Points,
+        geometry::{bounds, point, size},
+        shape::Segment,
+    };
+    let pt = |v: CGFloat| Points(v as f32);
+    let rect = bounds(
+        point(pt(rect.origin.x), pt(rect.origin.y)),
+        size(pt(rect.size.width), pt(rect.size.height)),
+    );
+    let [tl, tr, br, bl] = corners.map(|(h, v)| size(pt(h), pt(v)));
+    let corners = Corners {
+        top_left: tl,
+        top_right: tr,
+        bottom_right: br,
+        bottom_left: bl,
+    };
+    let cg = |p: Point<Points>| (p.x.0 as CGFloat, p.y.0 as CGFloat);
     let p = Some(path);
     let m = std::ptr::null();
-    nsh_core::shape::rounded_rect(bounds, corners, continuous, reverse, &mut |s| {
+    nsh_core::shape::rounded_rect(rect, corners, continuous, reverse, &mut |s| {
         // SAFETY: a valid mutable path and a null transform.
         unsafe {
             match s {
-                Segment::Move(x, y) => CGMutablePath::move_to_point(p, m, x, y),
-                Segment::Line(x, y) => CGMutablePath::add_line_to_point(p, m, x, y),
-                Segment::Cubic([a, b, c, d, x, y]) => {
+                Segment::Move(to) => {
+                    let (x, y) = cg(to);
+                    CGMutablePath::move_to_point(p, m, x, y)
+                }
+                Segment::Line(to) => {
+                    let (x, y) = cg(to);
+                    CGMutablePath::add_line_to_point(p, m, x, y)
+                }
+                Segment::Cubic([c1, c2, to]) => {
+                    let ((a, b), (c, d), (x, y)) = (cg(c1), cg(c2), cg(to));
                     CGMutablePath::add_curve_to_point(p, m, a, b, c, d, x, y)
                 }
                 Segment::Close => CGMutablePath::close_subpath(p),

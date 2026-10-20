@@ -306,11 +306,11 @@ impl FilterFn {
     /// utilities), and the filter.
     fn part(self, backdrop: bool, amount: f32) -> Part {
         let (slot, filter) = match self {
-            FilterFn::Blur => (0, Filter::Blur(amount)),
+            FilterFn::Blur => (0, Filter::Blur(crate::geometry::px(amount))),
             FilterFn::Brightness => (1, Filter::Brightness(amount)),
             FilterFn::Contrast => (2, Filter::Contrast(amount)),
             FilterFn::Grayscale => (3, Filter::Grayscale(amount)),
-            FilterFn::HueRotate => (4, Filter::HueRotate(amount)),
+            FilterFn::HueRotate => (4, Filter::HueRotate(crate::geometry::deg(amount))),
             FilterFn::Invert => (5, Filter::Invert(amount)),
             FilterFn::Opacity => (6, Filter::Opacity(amount)),
             FilterFn::Saturate => (6 + u8::from(backdrop), Filter::Saturate(amount)),
@@ -332,10 +332,10 @@ impl Layers {
     fn bits(&self) -> impl Iterator<Item = (u32, u32, u32, u32, u32, bool)> + '_ {
         self.0.iter().map(|l| {
             (
-                l.offset_x.to_bits(),
-                l.offset_y.to_bits(),
-                l.blur.to_bits(),
-                l.spread.to_bits(),
+                l.offset_x.0.to_bits(),
+                l.offset_y.0.to_bits(),
+                l.blur.0.to_bits(),
+                l.spread.0.to_bits(),
                 l.color.0,
                 l.inset,
             )
@@ -3268,10 +3268,10 @@ mod tests {
         assert_eq!(style.text.shadow_radius, Some(4.0));
         assert_eq!(style.text.shadow_offset, Some((2.0, 2.0)));
         let layer = BoxShadow {
-            offset_x: 0.0,
-            offset_y: 2.0,
-            blur: 4.0,
-            spread: 0.0,
+            offset_x: px(0.0),
+            offset_y: px(2.0),
+            blur: px(4.0),
+            spread: px(0.0),
             color: rgba(0x0000_000d).into(),
             inset: true,
         };

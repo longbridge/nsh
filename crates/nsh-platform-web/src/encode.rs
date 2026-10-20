@@ -395,11 +395,11 @@ fn filters(list: &[Filter]) -> String {
     let mut out = String::new();
     for f in list {
         let _ = match *f {
-            Filter::Blur(v) => write!(out, "blur({v}px) "),
+            Filter::Blur(v) => write!(out, "blur({}px) ", v.0),
             Filter::Brightness(v) => write!(out, "brightness({v}) "),
             Filter::Contrast(v) => write!(out, "contrast({v}) "),
             Filter::Grayscale(v) => write!(out, "grayscale({v}) "),
-            Filter::HueRotate(v) => write!(out, "hue-rotate({v}deg) "),
+            Filter::HueRotate(v) => write!(out, "hue-rotate({}deg) ", degrees(v)),
             Filter::Invert(v) => write!(out, "invert({v}) "),
             Filter::Opacity(v) => write!(out, "opacity({v}) "),
             Filter::Saturate(v) => write!(out, "saturate({v}) "),
@@ -411,7 +411,10 @@ fn filters(list: &[Filter]) -> String {
                 color,
             } => write!(
                 out,
-                "drop-shadow({offset_x}px {offset_y}px {blur}px {}) ",
+                "drop-shadow({}px {}px {}px {}) ",
+                offset_x.0,
+                offset_y.0,
+                blur.0,
                 css_color(color)
             ),
         };
@@ -468,10 +471,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
             shadows.push(format!(
                 "{}{}px {}px {}px {}px {}",
                 if b.inset { "inset " } else { "" },
-                b.offset_x,
-                b.offset_y,
-                b.blur,
-                b.spread,
+                b.offset_x.0,
+                b.offset_y.0,
+                b.blur.0,
+                b.spread.0,
                 css_color(b.color)
             ));
         }
@@ -512,10 +515,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         let _ = write!(
             css,
             "outline:{}px {} {};outline-offset:{}px;",
-            s.outline.width,
+            s.outline.width.0,
             border_style(s.outline.style),
             css_color(s.outline.color),
-            s.outline.offset
+            s.outline.offset.0
         );
     }
     if s.hidden {

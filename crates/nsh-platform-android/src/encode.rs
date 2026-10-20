@@ -678,7 +678,7 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
     e.int(shadows.len() as i32);
     for sh in shadows {
         for v in [sh.offset_x, sh.offset_y, sh.blur, sh.spread] {
-            e.float(v);
+            e.float(v.0);
         }
         e.int(argb(sh.color));
         e.bool(sh.inset);
@@ -752,14 +752,14 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         for v in matrix.unwrap_or([0.0; 20]) {
             e.float(v);
         }
-        e.float(nsh_core::blur_radius(list));
+        e.float(nsh_core::blur_radius(list).0);
         let shadow = list.iter().find_map(|f| match *f {
             Filter::DropShadow {
                 offset_x,
                 offset_y,
                 blur,
                 color,
-            } => Some((offset_x, offset_y, blur, color)),
+            } => Some((offset_x.0, offset_y.0, blur.0, color)),
             _ => None,
         });
         e.bool(shadow.is_some());
@@ -792,14 +792,14 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         BlendMode::PlusLighter => 17,
     });
     let o = s.outline;
-    e.float(if o.is_visible() { o.width } else { 0.0 });
+    e.float(if o.is_visible() { o.width.0 } else { 0.0 });
     e.int(argb(o.color));
     e.int(match o.style {
         BorderStyle::Solid => 0,
         BorderStyle::Dashed => 1,
         BorderStyle::Dotted => 2,
     });
-    e.float(o.offset);
+    e.float(o.offset.0);
     e.bool(s.hidden);
     e.int(match s.cursor {
         Cursor::Auto => 0,

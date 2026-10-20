@@ -11,7 +11,7 @@ use crate::{
         BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation,
         Keyframes, Transition, TransitionProps,
     },
-    geometry::{DefiniteLength, REM_SIZE, deg, percentage},
+    geometry::{DefiniteLength, REM_SIZE, deg, percentage, px},
     ops::ResizeMode,
     props::PointerEvents,
     style::{
@@ -472,7 +472,7 @@ impl Parts {
             }
             if let Some(w) = self.inset_ring {
                 list.push(BoxShadow {
-                    spread: w,
+                    spread: px(w),
                     color: self.inset_ring_color.unwrap_or(current),
                     inset: true,
                     ..BoxShadow::default()
@@ -482,14 +482,14 @@ impl Parts {
             if let Some(w) = self.ring {
                 if offset > 0.0 {
                     list.push(BoxShadow {
-                        spread: offset,
+                        spread: px(offset),
                         color: self.ring_offset_color.unwrap_or(Color(0xffff_ffff)),
                         inset: self.ring_inset,
                         ..BoxShadow::default()
                     });
                 }
                 list.push(BoxShadow {
-                    spread: w + offset,
+                    spread: px(w + offset),
                     color: self.ring_color.unwrap_or(current),
                     inset: self.ring_inset,
                     ..BoxShadow::default()
@@ -1704,7 +1704,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(filter(
             true,
             4,
-            Filter::HueRotate(if n { -degrees(v)? } else { degrees(v)? }),
+            Filter::HueRotate(deg(if n { -degrees(v)? } else { degrees(v)? })),
         ))
     }),
     ("backdrop-invert", |_, v, _| {
@@ -1733,7 +1733,7 @@ static PREFIXES: &[(&str, Handler)] = &[
         one(filter(
             false,
             4,
-            Filter::HueRotate(if n { -degrees(v)? } else { degrees(v)? }),
+            Filter::HueRotate(deg(if n { -degrees(v)? } else { degrees(v)? })),
         ))
     }),
     ("invert", |_, v, _| {
@@ -2032,7 +2032,7 @@ fn blur(theme: &Theme, v: &str, backdrop: bool) -> Option<Vec<Decl>> {
             None => css::length(&arbitrary(v)?)?,
         },
     };
-    one(filter(backdrop, 0, Filter::Blur(r)))
+    one(filter(backdrop, 0, Filter::Blur(px(r))))
 }
 
 fn translate(theme: &Theme, v: &str, neg: bool) -> Option<Len> {

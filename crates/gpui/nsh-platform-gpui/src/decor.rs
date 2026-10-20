@@ -362,10 +362,10 @@ pub(crate) fn draw_content_shadow(cx: &mut DrawCx<'_>, view: &NshView, world: Ma
                     && !color.is_transparent()
                 {
                     specs.push(ShadowSpec {
-                        dx: offset_x,
-                        dy: offset_y,
+                        dx: offset_x.0,
+                        dy: offset_y.0,
                         spread: 0.0,
-                        sigma: blur.max(0.0) / 2.0,
+                        sigma: blur.0.max(0.0) / 2.0,
                         color,
                     });
                 }
@@ -458,10 +458,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         for b in e.box_shadows.iter().rev() {
             if !b.inset && b.is_visible() {
                 let spec = ShadowSpec {
-                    dx: b.offset_x,
-                    dy: b.offset_y,
-                    spread: b.spread,
-                    sigma: b.blur.max(0.0) / 2.0,
+                    dx: b.offset_x.0,
+                    dy: b.offset_y.0,
+                    spread: b.spread.0,
+                    sigma: b.blur.0.max(0.0) / 2.0,
                     color: b.color,
                 };
                 outer_shadow(cx, w, h, radii, &spec);
@@ -481,10 +481,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 let spec = ShadowSpec {
-                    dx: b.offset_x,
-                    dy: b.offset_y,
-                    spread: b.spread,
-                    sigma: b.blur.max(0.0) / 2.0,
+                    dx: b.offset_x.0,
+                    dy: b.offset_y.0,
+                    spread: b.spread.0,
+                    sigma: b.blur.0.max(0.0) / 2.0,
                     color: b.color,
                 };
                 inset_shadow(cx, w, h, radii, widths, &spec);
@@ -606,7 +606,8 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
 /// The outline: outside the border box by its offset; rounded corners
 /// follow the border radius outwards, square ones stay square.
 fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4]) {
-    let d = o.offset + o.width;
+    let (width, off) = (o.width.0, o.offset.0);
+    let d = off + width;
     let (ow, oh) = (w + 2.0 * d, h + 2.0 * d);
     if ow <= 0.0 || oh <= 0.0 {
         return;
@@ -625,7 +626,7 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
             bounds,
             corners(outer_radii, k),
             gpui::transparent_black(),
-            edges([o.width; 4], k),
+            edges([width; 4], k),
             cx.color(o.color),
             style,
         );
@@ -635,7 +636,6 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
     let px_per = pixels(cx);
     if o.style == BorderStyle::Solid {
         let mut contours = vec![rounded(rect(-d, -d, ow, oh), circular(outer_radii), px_per)];
-        let off = o.offset;
         let inner = rect(-off, -off, w + 2.0 * off, h + 2.0 * off);
         if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
             contours.push(rounded(
@@ -647,21 +647,21 @@ fn draw_outline(cx: &mut DrawCx<'_>, o: &Outline, w: f32, h: f32, radii: [f32; 4
         cx.fill_contours(&contours, o.color);
         return;
     }
-    let half = o.width / 2.0;
+    let half = width / 2.0;
     let line = rounded(
-        rect(-d + half, -d + half, ow - o.width, oh - o.width),
+        rect(-d + half, -d + half, ow - width, oh - width),
         circular(radii.map(|r| grown(r, d - half))),
         px_per,
     );
     let contours: Vec<Vec<Pt>> = if o.style == BorderStyle::Dotted {
-        shape::dots(&line, 2.0 * o.width)
+        shape::dots(&line, 2.0 * width)
             .into_iter()
             .map(|c| shape::circle(c, half, px_per))
             .collect()
     } else {
-        shape::dashes(&line, 3.0 * o.width, 3.0 * o.width)
+        shape::dashes(&line, 3.0 * width, 3.0 * width)
             .iter()
-            .map(|dash| shape::thick(dash, o.width))
+            .map(|dash| shape::thick(dash, width))
             .collect()
     };
     cx.fill_contours(&contours, o.color);

@@ -271,15 +271,15 @@ fn shadows_and_rings() {
     let s = styled("shadow-md");
     let e = s.view.effects.as_ref().unwrap();
     assert_eq!(e.box_shadows.len(), 2);
-    assert_eq!(e.box_shadows[0].offset_y, 4.0);
-    assert_eq!(e.box_shadows[0].spread, -1.0);
+    assert_eq!(e.box_shadows[0].offset_y, px(4.0));
+    assert_eq!(e.box_shadows[0].spread, px(-1.0));
     let s = styled("shadow-lg shadow-blue-500/50 ring-2 ring-offset-2 ring-red-500");
     let e = s.view.effects.as_ref().unwrap();
     // Ring offset, ring, then the two shadow layers.
     assert_eq!(e.box_shadows.len(), 4);
-    assert_eq!(e.box_shadows[0].spread, 2.0);
+    assert_eq!(e.box_shadows[0].spread, px(2.0));
     assert_eq!(e.box_shadows[0].color, Color(0xffff_ffff));
-    assert_eq!(e.box_shadows[1].spread, 4.0);
+    assert_eq!(e.box_shadows[1].spread, px(4.0));
     assert_eq!(e.box_shadows[1].color, Color(0xfb2c_36ff));
     assert_eq!(e.box_shadows[2].color, Color(0x2b7f_ff80));
     // A color without an alpha keeps each layer's.
@@ -368,7 +368,10 @@ fn transforms() {
     assert_eq!(ops[2].kind, TransformKind::Rotate);
     assert_eq!(ops[3].kind, TransformKind::Scale);
     assert!((ops[3].value - 1.1).abs() < 1e-6);
-    let t = s.view.transform.resolve_fractions(100.0, 40.0);
+    let t = s
+        .view
+        .transform
+        .resolve_fractions(crate::geometry::size(px(100.0), px(40.0)));
     assert_eq!(t.ops()[0].kind, TransformKind::TranslateX);
     assert_eq!(t.ops()[0].value, -50.0);
 }
@@ -382,14 +385,17 @@ fn effects_and_interaction() {
     assert_eq!(
         e.filters,
         vec![
-            crate::effects::Filter::Blur(8.0),
+            crate::effects::Filter::Blur(px(8.0)),
             crate::effects::Filter::Brightness(1.25)
         ]
     );
-    assert_eq!(e.backdrop_filters, vec![crate::effects::Filter::Blur(12.0)]);
+    assert_eq!(
+        e.backdrop_filters,
+        vec![crate::effects::Filter::Blur(px(12.0))]
+    );
     assert_eq!(s.view.blend_mode, BlendMode::Multiply);
-    assert_eq!(s.view.outline.width, 2.0);
-    assert_eq!(s.view.outline.offset, 2.0);
+    assert_eq!(s.view.outline.width, px(2.0));
+    assert_eq!(s.view.outline.offset, px(2.0));
     assert!(s.view.hidden);
     assert_eq!(s.view.cursor, Cursor::Pointer);
 }

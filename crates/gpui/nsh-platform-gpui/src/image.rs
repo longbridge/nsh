@@ -1762,7 +1762,8 @@ fn draw_one(
         .as_ref()
         .map(|e| &e.filters[..])
         .unwrap_or(&[]);
-    let blur = ((image.options.blur_radius.max(0.0) + nsh_core::blur_radius(filters)) * px_per_pt)
+    let blur = ((image.options.blur_radius.max(0.0) + nsh_core::blur_radius(filters).0)
+        * px_per_pt)
         .round()
         .clamp(0.0, u16::MAX as f32);
     let (mip, blur_px) = level(picture.pixels, (fw * px_per_pt, fh * px_per_pt), blur);

@@ -387,10 +387,10 @@ fn lerp_transform(a: &Transform, b: &Transform, t: f32) -> Option<Transform> {
 /// A shadow that draws nothing, to interpolate against `s`.
 fn none_like(s: &BoxShadow) -> BoxShadow {
     BoxShadow {
-        offset_x: 0.0,
-        offset_y: 0.0,
-        blur: 0.0,
-        spread: 0.0,
+        offset_x: Points::ZERO,
+        offset_y: Points::ZERO,
+        blur: Points::ZERO,
+        spread: Points::ZERO,
         color: Color::TRANSPARENT,
         inset: s.inset,
     }
@@ -411,11 +411,12 @@ fn lerp_box_shadows(a: &[BoxShadow], b: &[BoxShadow], t: f32) -> Option<Vec<BoxS
         if sa.inset != sb.inset {
             return None;
         }
+        let l = |a: Points, b: Points| Points(lerp(a.0, b.0, t));
         out.push(BoxShadow {
-            offset_x: lerp(sa.offset_x, sb.offset_x, t),
-            offset_y: lerp(sa.offset_y, sb.offset_y, t),
-            blur: lerp(sa.blur, sb.blur, t).max(0.0),
-            spread: lerp(sa.spread, sb.spread, t),
+            offset_x: l(sa.offset_x, sb.offset_x),
+            offset_y: l(sa.offset_y, sb.offset_y),
+            blur: l(sa.blur, sb.blur).max(Points::ZERO),
+            spread: l(sa.spread, sb.spread),
             color: lerp_color(sa.color, sb.color, t),
             inset: sa.inset,
         });
@@ -503,7 +504,7 @@ fn lerp_style(
             });
         out.borders.widths =
             std::array::from_fn(|i| lerp(from.borders.widths[i], to.borders.widths[i], t).max(0.0));
-        out.outline.width = lerp(from.outline.width, to.outline.width, t).max(0.0);
+        out.outline.width = Points(lerp(from.outline.width.0, to.outline.width.0, t).max(0.0));
     }
 }
 
@@ -991,16 +992,16 @@ mod tests {
     #[test]
     fn box_shadows_pad_with_none() {
         let s = BoxShadow {
-            offset_x: 0.0,
-            offset_y: 10.0,
-            blur: 20.0,
-            spread: 0.0,
+            offset_x: Points(0.0),
+            offset_y: Points(10.0),
+            blur: Points(20.0),
+            spread: Points(0.0),
             color: Color::rgba(0, 0, 0, 100),
             inset: false,
         };
         let out = lerp_box_shadows(&[], &[s], 0.5).unwrap();
-        assert_eq!(out[0].offset_y, 5.0);
-        assert_eq!(out[0].blur, 10.0);
+        assert_eq!(out[0].offset_y, Points(5.0));
+        assert_eq!(out[0].blur, Points(10.0));
         assert_eq!(out[0].color, Color::rgba(0, 0, 0, 50));
         let inset = BoxShadow { inset: true, ..s };
         assert!(lerp_box_shadows(&[inset], &[s], 0.5).is_none());

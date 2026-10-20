@@ -2,32 +2,6 @@
 # nsh_core::geometry (geometry::unit_types, docs/dev/geometry.md "Migration"). This list only
 # shrinks: a pull request that types an item removes its line.
 
-# A: effects, css, transform, shape
-effects::BoxShadow.blur
-effects::BoxShadow.offset_x
-effects::BoxShadow.offset_y
-effects::BoxShadow.spread
-effects::Filter::Blur.0
-effects::Filter::DropShadow.blur
-effects::Filter::DropShadow.offset_x
-effects::Filter::DropShadow.offset_y
-effects::Filter::HueRotate.0
-effects::Outline.offset
-effects::Outline.width
-effects::blur_radius ->
-shape::Corner
-shape::Segment::Cubic.0
-shape::Segment::Line.0
-shape::Segment::Line.1
-shape::Segment::Move.0
-shape::Segment::Move.1
-shape::rounded_rect(_)
-transform::Decomposed.perspective
-transform::Decomposed.rotate
-transform::Decomposed.translate
-transform::Transform::resolve_fractions(height)
-transform::Transform::resolve_fractions(width)
-
 # B: style.rs and Tailwind
 style::Borders.widths
 style::Borders::uniform ->
