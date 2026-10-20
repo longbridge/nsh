@@ -34,7 +34,7 @@ function App() {
         class="text-base text-neutral-900 dark:text-neutral-100"
         classes={{
           heading1: "text-3xl",
-          code: "rounded bg-neutral-100 px-1 dark:bg-neutral-800",
+          code: "rounded bg-neutral-100 dark:bg-neutral-800",
           link: "text-blue-600",
           alertTip: "border-l-4 border-green-600 pl-3",
         }}
@@ -51,7 +51,7 @@ mount(App);
 
 ## 基于 Text 构建
 
-`TextView` 由 [`Text`](./text.md) 元素组成，其中的文本行为与 Text 页面描述的完全一致。每个段落、标题、表格单元格和代码块都是一个原生 `Text`：一个独立排版、换行、跟随字体缩放的文本块，设置 `selectable` 后可以选择和复制。加粗、强调、删除线等行内标记是它的[片段](./text.md#片段)；行内代码是带[片段背景](./text.md#片段背景)的片段，因此 `code: "rounded bg-neutral-100 px-1"` 会给它一个带内边距的圆角背景；链接是[可点击的片段](./text.md#链接)；图片和行内自定义节点是[行内附件](./text.md#行内视图和图片)。根节点上的文本样式会传给每个部件，就像[文本样式](./text.md#文本样式)从 `Text` 传给它的片段一样。
+`TextView` 由 [`Text`](./text.md) 元素组成，其中的文本行为与 Text 页面描述的完全一致。每个段落、标题、表格单元格和代码块都是一个原生 `Text`：一个独立排版、换行、跟随字体缩放的文本块，设置 `selectable` 后可以选择和复制。加粗、强调、删除线等行内标记是它的[片段](./text.md#片段)；行内代码是带[片段背景](./text.md#片段背景)的片段，因此 `code: "rounded bg-neutral-100"` 会给它一个圆角背景；链接是[可点击的片段](./text.md#链接)；图片和行内自定义节点是[行内附件](./text.md#行内视图和图片)。根节点上的文本样式会传给每个部件，就像[文本样式](./text.md#文本样式)从 `Text` 传给它的片段一样。
 
 设置 `selectable` 后，整个文档作为一体选择，就像网页一样：拖动（在触摸屏上是长按后拖动选择手柄）可以从一个段落、列表项、单元格或代码块延伸到下一个，复制会取得它们全部的文字。设置了 `selectable` 的 `TextView` 本身就是一个 [`SelectionArea`](../modules/nsh-base.md#selectionarea)；放在 `SelectionArea` 里时，它的选区还会延伸到周围的文字和其他 `TextView`。
 

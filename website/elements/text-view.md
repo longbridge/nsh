@@ -42,7 +42,7 @@ function App() {
         class="text-base text-neutral-900 dark:text-neutral-100"
         classes={{
           heading1: "text-3xl",
-          code: "rounded bg-neutral-100 px-1 dark:bg-neutral-800",
+          code: "rounded bg-neutral-100 dark:bg-neutral-800",
           link: "text-blue-600",
           alertTip: "border-l-4 border-green-600 pl-3",
         }}
@@ -61,7 +61,7 @@ mount(App);
 paragraph, heading, table cell and code block is one native `Text`: one block that lays out, wraps, follows the font
 scale and, with `selectable`, selects and copies. Strong, emphasis, struck-through and the other inline marks
 are its [spans](./text.md#spans); inline code is a span with a [span background](./text.md#span-backgrounds), so
-`code: "rounded bg-neutral-100 px-1"` gives it a padded, rounded background; links are
+`code: "rounded bg-neutral-100"` gives it a rounded background; links are
 [pressable spans](./text.md#links); images and inline custom nodes are
 [inline attachments](./text.md#inline-views-and-images). Text styles on the root pass to every part, as
 [text styles](./text.md#text-styles) pass from a `Text` to its spans.

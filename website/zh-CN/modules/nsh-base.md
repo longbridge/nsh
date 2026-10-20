@@ -113,7 +113,7 @@ import { SelectionArea, TextView } from "nsh/base";
 - **不参与选择的文字**：设置了 `selectable={false}` 的文字（标签、按钮上的文字）会被选区及其手势跳过。
 - **嵌套的区域**：一个区域在另一个区域里面时属于外层区域，一个选区覆盖两者。
 - **TextView**：设置了 `selectable` 的 `TextView` 本身就是一个选择区域：它的段落、列表项、单元格和代码块一起选择。放在 `SelectionArea` 里时，它加入外层的选区。
-- **区域之外**：不在任何区域里的 `selectable` 文字单独选择，见 [Text](../elements/text.md#props)。
+- **区域之外**：不在任何区域里的 `selectable` 文字单独选择，见 [Text](../elements/text.md#属性)。
 - **外观**是平台的高亮，使用每段文字的 `selectionColor`（`selection:text-*`）；区域本身不绘制任何东西。
 - **列表**：在虚拟化的 [List](../elements/list.md) 中，选区覆盖已挂载的行；滚出视野被回收的行会离开选区。
 
