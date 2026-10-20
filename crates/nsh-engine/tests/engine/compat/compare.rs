@@ -9,6 +9,13 @@
 //!   trailing optional parameters, a parameter becomes optional;
 //! - what apps pass in (an interface named `…Props`, `…Style`, `…Options`
 //!   or `…Config`) gains optional members only.
+//!
+//! Parameter names are not part of a declaration: TypeScript compares
+//! function types by structure, so `(data: number) => void` and
+//! `(value: number) => void` are one type, and a method or function whose
+//! parameters only got new names takes the same calls. Both sides are
+//! compared with their parameters' names erased ([`erase_names`]); their
+//! count, optionality, types and the return types still count.
 
 use std::collections::BTreeMap;
 
@@ -146,6 +153,10 @@ pub(crate) fn compatible(old: &str, new: &str) -> bool {
     if old == new {
         return true;
     }
+    let (old, new) = (&erase_names(old)[..], &erase_names(new)[..]);
+    if old == new {
+        return true;
+    }
     // A function or method signature (not a function type: a callback an
     // app passes in has to accept what it is given): the same before the
     // parameters and after them.
@@ -167,6 +178,86 @@ pub(crate) fn compatible(old: &str, new: &str) -> bool {
                 .all(|p| p.starts_with("...") || optional(p));
     }
     union_widened(old, new)
+}
+
+/// `text` with the names of the parameters of every function type and
+/// signature in it as `_` (`(data: number) => void` is `(_: number) =>
+/// void`, `m(a?: X, ...rest: Y[]): void` is `m(_?: X, ..._: Y[]): void`),
+/// their `?` and `...` kept, and `this` kept (it types the receiver, not
+/// an argument). Property names, in object types too, stay.
+pub(crate) fn erase_names(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < text.len() {
+        let c = text[i..].chars().next().expect("a char");
+        if let Some(q) = quote {
+            out.push(c);
+            if c == '\\' {
+                if let Some(n) = text[i + 1..].chars().next() {
+                    out.push(n);
+                    i += n.len_utf8();
+                }
+            } else if c == q {
+                quote = None;
+            }
+            i += c.len_utf8();
+            continue;
+        }
+        match c {
+            '"' | '\'' | '`' => {
+                quote = Some(c);
+                out.push(c);
+            }
+            '(' => {
+                let Some(close) = matching(text, i) else {
+                    out.push_str(&text[i..]);
+                    break;
+                };
+                let inner = &text[i + 1..close];
+                // A parameter list is followed by its result: `=> T` (a
+                // function type) or `: T` (a signature); a parenthesized
+                // type by anything else.
+                let after = text[close + 1..].trim_start();
+                out.push('(');
+                if after.starts_with("=>") || after.starts_with(':') {
+                    let params: Vec<String> = split_top(inner, ',')
+                        .into_iter()
+                        .map(erase_parameter)
+                        .collect();
+                    out.push_str(&params.join(", "));
+                } else {
+                    out.push_str(&erase_names(inner));
+                }
+                out.push(')');
+                i = close + 1;
+                continue;
+            }
+            _ => out.push(c),
+        }
+        i += c.len_utf8();
+    }
+    out
+}
+
+/// One parameter (`name: T`, `name?: T`, `...name: T`, `name`) with its
+/// name as `_`, and its type's names erased.
+fn erase_parameter(param: &str) -> String {
+    let (name, ty) = match top_level(param, ':') {
+        Some(c) => (param[..c].trim(), Some(param[c + 1..].trim())),
+        None => (param.trim(), None),
+    };
+    let name = if name == "this" {
+        name.to_owned()
+    } else {
+        let rest = if name.starts_with("...") { "..." } else { "" };
+        let optional = if name.ends_with('?') { "?" } else { "" };
+        format!("{rest}_{optional}")
+    };
+    match ty {
+        Some(ty) => format!("{name}: {}", erase_names(ty)),
+        None => name,
+    }
 }
 
 fn parameter_compatible(old: &str, new: &str) -> bool {
@@ -618,6 +709,79 @@ mod tests {
         assert!(compatible(
             "onPress?: ((e: X) => void) | null",
             "onPress?: ((e: X) => void) | null | string"
+        ));
+    }
+
+    #[test]
+    fn parameter_names_are_not_compared() {
+        // A callback's or event handler's parameter renamed.
+        assert!(compatible(
+            "onSelect?: (data: number) => void",
+            "onSelect?: (index: number) => void"
+        ));
+        // A method's, a function's and a nested callback's.
+        assert!(compatible("m(a: X, b?: Y): void", "m(x: X, y?: Y): void"));
+        assert!(compatible(
+            "export declare function f(a: number, ...rest: string[]): void",
+            "export declare function f(n: number, ...more: string[]): void"
+        ));
+        assert!(compatible(
+            "subscribe(on: (a: number, b: string) => void): () => void",
+            "subscribe(listener: (count: number, label: string) => void): () => void"
+        ));
+        // Renamed and widened at once.
+        assert!(compatible("m(a: X): void", "m(b: X | Y, c?: Z): void"));
+        assert!(compatible("m(a: X): void", "m(b?: X): void"));
+        assert!(compatible(
+            "export declare const S: ((props: P) => JSX.Element) & { set(a: number): void; }",
+            "export declare const S: ((p: P) => JSX.Element) & { set(value: number): void; }"
+        ));
+        // Strings and property names are not parameters.
+        assert_eq!(
+            erase_names("f(e: { x: number }, s: \"(a: b) => c\"): void"),
+            "f(_: { x: number }, _: \"(a: b) => c\"): void"
+        );
+        assert_eq!(
+            erase_names("m(this: Foo, a?: (A | B)[]): (C)"),
+            "m(this: Foo, _?: (A | B)[]): (C)"
+        );
+    }
+
+    #[test]
+    fn real_changes_still_break_with_names_erased() {
+        // A type, a count, an optionality, a return type.
+        assert!(!compatible(
+            "onSelect?: (data: number) => void",
+            "onSelect?: (index: string) => void"
+        ));
+        assert!(!compatible(
+            "onSelect?: (data: number) => void",
+            "onSelect?: (index: number, more: number) => void"
+        ));
+        assert!(!compatible(
+            "onSelect?: (data: number) => void",
+            "onSelect?: (index?: number) => void"
+        ));
+        assert!(!compatible(
+            "onSelect?: (data: number) => void",
+            "onSelect?: (index: number) => boolean"
+        ));
+        assert!(!compatible("m(a: X): void", "m(b: X): Promise<void>"));
+        assert!(!compatible("m(a?: X): void", "m(b: X): void"));
+        assert!(!compatible("m(a: X): void", "m(b: X, c: Y): void"));
+        assert!(!compatible(
+            "m(cb: (a: X) => void): void",
+            "m(listener: (value: Y) => void): void"
+        ));
+        // Property names in an object type count.
+        assert!(!compatible(
+            "onPress?: (e: { x: number }) => void",
+            "onPress?: (event: { y: number }) => void"
+        ));
+        // A member's own name counts.
+        assert!(!compatible(
+            "onSelect?: (data: number) => void",
+            "onPick?: (data: number) => void"
         ));
     }
 
