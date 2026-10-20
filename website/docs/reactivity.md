@@ -188,6 +188,15 @@ effect(() => {
 });
 ```
 
+An effect can also return its cleanup, as in React: a function `fn` returns runs at the same moments as one it passes to `cleanup`.
+
+```tsx
+effect(() => {
+  const id = setInterval(tick, 100);
+  return () => clearInterval(id);
+});
+```
+
 A component goes away when it is no longer rendered: its `<If>` branch is hidden, its `<Each>` row is removed, or its screen is popped. Everything it created (effects, computed values, cleanups, nested components) is disposed with it.
 
 ## batch
