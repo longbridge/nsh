@@ -26,19 +26,24 @@ use crate::{android::root, term};
 
 pub(crate) fn api(keep: &[String]) -> anyhow::Result<()> {
     let root = root();
-    term::cargo(
-        Command::new("cargo")
-            .current_dir(&root)
-            .args(["test", "-p", "nsh-engine", "--test", "engine", "--"])
-            .args([
-                "--exact",
-                "compat::surface_is_recorded",
-                "compat::coverage::every_api_is_tested",
-            ])
-            .env("NSH_API_UPDATE", "1"),
-        "and recording the API",
-    )?;
-    term::done("recorded api/runtime.txt, api/types and api/uncovered.txt");
+    let mut record = Command::new("cargo");
+    record
+        .current_dir(&root)
+        .args(["test", "-p", "nsh-engine", "--test", "engine", "--"])
+        .args(["--exact", "compat::surface_is_recorded"])
+        .env("NSH_API_UPDATE", "1");
+    // A new API's fixture must exist before its coverage can be checked.
+    // `--keep` creates it with a script to complete; the next plain `api`
+    // run verifies that script and removes the newly covered entries.
+    if keep.is_empty() {
+        record.arg("compat::coverage::every_api_is_tested");
+    }
+    term::cargo(&mut record, "and recording the API")?;
+    term::done(if keep.is_empty() {
+        "recorded api/runtime.txt, api/types and api/uncovered.txt"
+    } else {
+        "recorded api/runtime.txt and api/types"
+    });
     if keep.is_empty() {
         return Ok(());
     }

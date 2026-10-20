@@ -39,5 +39,38 @@
       "card": 14
     }
   },
-  "theme": "theme.json"
+  "theme": "theme.json",
+  "capabilities": {
+    "network": {
+      "hosts": [
+        "*"
+      ],
+      "sockets": [
+        "127.0.0.1:9876"
+      ]
+    },
+    "fs": {
+      "read": [
+        "${dataDir}"
+      ],
+      "write": [
+        "${dataDir}"
+      ]
+    },
+    "process": {
+      "execute": [
+        "echo",
+        "cat",
+        "cmd.exe"
+      ],
+      "env": []
+    },
+    "webview": {
+      "hosts": [
+        "*"
+      ]
+    },
+    "statusBar": true,
+    "clipboard": true
+  }
 }

@@ -162,3 +162,7 @@ try {
   socket.close();
 }
 ```
+
+## Gallery
+
+Open **Standard APIs** in `examples/gallery` to run file operations, child processes, TCP and both WebSocket interfaces, and inspect host metadata and queued jobs. The utilities action demonstrates buffers, hashing, compression and file URLs. Each action displays its result or error. Files stay in a temporary directory under the gallery's own data directory and are removed after the action. The TCP and WebSocket actions connect to local echo servers on ports 9876 and 9877.

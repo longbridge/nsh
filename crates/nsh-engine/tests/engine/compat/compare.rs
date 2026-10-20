@@ -428,6 +428,13 @@ fn keyword(statement: &str) -> &str {
 
 /// What a statement declares: (kind, name); `None` for imports.
 fn head(statement: &str) -> Option<(&'static str, String)> {
+    if let Some(name) = statement.strip_prefix("export default ") {
+        if !name.trim_end_matches(';').is_empty()
+            && name.trim_end_matches(';').chars().all(is_ident)
+        {
+            return Some(("re-export", "default".into()));
+        }
+    }
     let mut rest = statement;
     loop {
         let before = rest;
@@ -810,6 +817,26 @@ mod tests {
         assert_eq!(
             erase_names("m(this: Foo, a?: (A | B)[]): (C)"),
             "m(this: Foo, _?: (A | B)[]): (C)"
+        );
+    }
+
+    #[test]
+    fn default_exports_are_compared() {
+        let old = declarations("declare const value: number; export default value;");
+        assert_eq!(old["default"].kind, "re-export");
+        let base = vec![("example.d.ts".into(), "export default value;".into())];
+        assert!(types(&base, &base).is_empty());
+        assert!(!types(&base, &[("example.d.ts".into(), String::new())]).is_empty());
+        assert!(
+            !types(
+                &base,
+                &[("example.d.ts".into(), "export default other;".into())]
+            )
+            .is_empty()
+        );
+        assert_ne!(
+            old["default"].members,
+            declarations("export default other;")["default"].members
         );
     }
 

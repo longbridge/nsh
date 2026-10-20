@@ -162,3 +162,7 @@ try {
   socket.close();
 }
 ```
+
+## Gallery
+
+打开 `examples/gallery` 中的 **Standard APIs**，可以运行文件操作、子进程、TCP 和两种 WebSocket 接口，并查看主机信息和排队任务。Utilities 操作展示缓冲区、哈希、压缩和文件 URL。每项操作都会显示结果或错误。文件操作使用 gallery 数据目录下的临时目录，并在操作后清理。TCP 和 WebSocket 操作分别连接本机 9876 和 9877 端口的回显服务。

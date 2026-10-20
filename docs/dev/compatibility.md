@@ -21,6 +21,11 @@ keeps, and for good, whatever the version number says; earlier versions made no 
 | The TypeScript declarations (`.nsh/types`) | generated (`crates/nsh-js/src/declarations.rs`) | an old app's source must still type-check and build when its team fixes a bug |
 | The package format (`.nshpkg`) and its signatures | `crates/nsh-package` | a package signed for an earlier release still verifies; it carries its JS source, which runs when its bytecode is not this runtime's (`BYTECODE_VERSION` may change freely) |
 
+The standard catalog also imports `buffer`, `crypto`, `path`, `url` and `zlib` from quickjs-stdlib. That project
+owns their API, declarations and exhaustive compatibility tests, including its `Buffer` and cryptography globals.
+NSH keeps the catalog, native integration, capability checks and resource limits under local tests; `api/` records
+NSH-owned declarations and behavior rather than copying the upstream API into its fixture coverage requirements.
+
 ## The rules
 
 1. **Nothing that reached `main` is removed or renamed**, released or not: no module, export, member, prop, event,
@@ -113,7 +118,8 @@ request records it with `cargo xtask api` and says so.
 1. Make the change additive (the rules above).
 2. Test it: write `api/cases/<case>.tsx`, a small app that uses the new API and shows its result, keep its build with
    `cargo xtask api --keep api/cases/<case>.tsx`, and write steps in `api/apps/<case>-<version>/script.txt` that check
-   the result, with a `covers <item>` step for each part.
+   the result, with a `covers <item>` step for each part. `--keep` records the surface before adding the fixture;
+   coverage is checked after its script is complete, by the following plain `cargo xtask api` run.
 3. Run `cargo xtask api` and commit `api/` with the change: the record's diff is the review of the API change, next
    to the `## Public API` section of the pull request, and `uncovered.txt` loses what the scripts now check. Covering
    an older entry of `uncovered.txt` is welcome the same way.
