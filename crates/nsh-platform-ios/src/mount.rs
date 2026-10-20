@@ -3090,8 +3090,11 @@ fn dynamic_transform(slot: &Slot, animator: &Animator) -> CATransform3D {
         // Around the origin rather than the layer's center (its anchor):
         // to the origin, transform, and back (row vectors).
         let size = slot.native.view().bounds().size;
-        let (dx, dy, dz) = origin.offset(size.width as f32, size.height as f32);
-        let (dx, dy, dz) = (dx as CGFloat, dy as CGFloat, dz as CGFloat);
+        let (d, dz) = origin.offset(nsh_core::geometry::size(
+            Points(size.width as f32),
+            Points(size.height as f32),
+        ));
+        let (dx, dy, dz) = (d.x.0 as CGFloat, d.y.0 as CGFloat, dz.0 as CGFloat);
         m = mat_mul(
             &mat_mul(&translation(-dx, -dy, -dz), &m),
             &translation(dx, dy, dz),
@@ -3188,7 +3191,7 @@ fn bound_style(slot: &Slot, animator: &Animator) -> Option<ViewStyle> {
                 shadow = true;
             }
             (AnimationProp::ShadowRadius, v) => {
-                style.shadow.radius = v.number().max(0.0);
+                style.shadow.radius = Points(v.number().max(0.0));
                 shadow = true;
             }
             _ => {}
@@ -3223,13 +3226,13 @@ fn apply_bound_decor(slot: &Slot, animator: &Animator) {
                 shadow.get_or_insert(slot.style.shadow).opacity = v.number()
             }
             (AnimationProp::ShadowRadius, v) => {
-                shadow.get_or_insert(slot.style.shadow).radius = v.number()
+                shadow.get_or_insert(slot.style.shadow).radius = Points(v.number())
             }
             _ => {}
         }
     }
     if let Some(s) = shadow {
-        slot.decor.set_shadow(view, s.color, s.opacity, s.radius);
+        slot.decor.set_shadow(view, s.color, s.opacity, s.radius.0);
     }
 }
 

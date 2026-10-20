@@ -2765,7 +2765,7 @@ fn classes_style_views_and_inline_styles_win() {
     assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 80.0);
     let v = view_style_of(&batch, 2).unwrap();
     assert_eq!(v.background_color, Color(0x2b7f_ffff));
-    assert_eq!(v.border_radius, 8.0);
+    assert_eq!(v.border_radius, px(8.0));
     // The inline style applies over the classes, and survives a class change.
     c.apply(style_op(
         2,
@@ -2782,7 +2782,7 @@ fn classes_style_views_and_inline_styles_win() {
     assert_eq!(frame_of(&batch, 2).unwrap().size.width.0, 96.0);
     let v = view_style_of(&batch, 2).unwrap();
     assert_eq!(v.background_color, Color(0xff00_00ff));
-    assert_eq!(v.border_radius, 0.0);
+    assert_eq!(v.border_radius, px(0.0));
     // Same classes again: nothing to do.
     c.apply(class_op(2, "w-24 h-10 bg-green-500")).unwrap();
     assert!(c.commit().is_none());
@@ -2833,7 +2833,7 @@ fn inline_styles_resolve_longhands_whatever_their_order() {
     ))
     .unwrap();
     let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
-    assert_eq!(v.borders.widths, [1.0; 4]);
+    assert_eq!(v.borders.widths.to_array().map(|w| w.0), [1.0; 4]);
     assert!(!v.outline.is_visible());
     let a = v.animation.unwrap();
     assert_eq!((a.keyframes, a.duration), (Keyframes::Spin, 500.0));
@@ -2849,11 +2849,17 @@ fn inline_styles_resolve_longhands_whatever_their_order() {
     ))
     .unwrap();
     let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
-    assert_eq!(v.borders.widths, [5.0, 2.0, 2.0, 2.0]);
+    assert_eq!(
+        v.borders.widths.to_array().map(|w| w.0),
+        [5.0, 2.0, 2.0, 2.0]
+    );
     assert_eq!(v.outline.width, px(2.0));
     c.apply(class_op(2, "border-t-8")).unwrap();
     let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
-    assert_eq!(v.borders.widths, [5.0, 2.0, 2.0, 2.0]);
+    assert_eq!(
+        v.borders.widths.to_array().map(|w| w.0),
+        [5.0, 2.0, 2.0, 2.0]
+    );
     assert!(!v.outline.is_visible());
     let a = v.animation.unwrap();
     assert_eq!((a.keyframes, a.iterations), (Keyframes::Pulse, Some(2)));
@@ -2861,7 +2867,7 @@ fn inline_styles_resolve_longhands_whatever_their_order() {
     c.apply(style_op(2, &[("borderWidth", StyleValue::Number(2.0))]))
         .unwrap();
     let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
-    assert_eq!(v.borders.widths, [2.0; 4]);
+    assert_eq!(v.borders.widths.to_array().map(|w| w.0), [2.0; 4]);
     assert_eq!(v.animation, None);
 }
 
@@ -7906,7 +7912,7 @@ mod views {
         assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
         let batch = c.commit().unwrap();
         let style = batch.items.iter().find_map(|i| match i {
-            MountItem::ViewStyle { style, .. } if style.borders.widths[0] > 0.0 => {
+            MountItem::ViewStyle { style, .. } if style.borders.widths.top > Points::ZERO => {
                 Some(style.clone())
             }
             _ => None,

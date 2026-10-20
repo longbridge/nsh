@@ -1175,9 +1175,9 @@ fn build(
     if let Some(shadow) = text.shadow {
         snapshot.push_shadow(&[gsk::Shadow::new(
             crate::decor::rgba(shadow.color),
-            shadow.offset_x,
-            shadow.offset_y,
-            shadow.radius,
+            shadow.offset_x.0,
+            shadow.offset_y.0,
+            shadow.radius.0,
         )]);
     }
     let default = ResolvedTextStyle::default();

@@ -25,6 +25,7 @@ use gtk4::{self as gtk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 use nsh_core::{
     Bounds, EventMask, MAX_TRANSFORMS, NodeId, PointerEvents, Points, TransformKind, ViewKind,
     ViewProps, ViewStyle,
+    geometry::{AbsoluteLength, DefiniteLength, REM_SIZE},
 };
 
 /// Values native animations set on a view; they win over the style's.
@@ -179,7 +180,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.unwrap_or(s.radius);
+        s.radius = a.shadow_radius.map_or(s.radius, Points);
         s
     }
 
@@ -201,8 +202,10 @@ impl ViewState {
     /// clamped as CSS clamps them to the box.
     pub(crate) fn radii(&self) -> [f32; 4] {
         let s = &self.style;
-        let mut r: [f32; 4] =
-            std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
+        let mut r: [f32; 4] = s
+            .corner_radius
+            .to_array()
+            .map(|r| r.unwrap_or(s.border_radius).0);
         let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let sums = [r[0] + r[1], r[1] + r[2], r[2] + r[3], r[3] + r[0]];
         let lens = [w, h, w, h];
@@ -268,10 +271,14 @@ impl ViewState {
         }
         let (w, h) = (self.frame.size.width.0, self.frame.size.height.0);
         let o = self.style.transform_origin;
-        let (ox, oy) = (o.x.resolve(w), o.y.resolve(h));
+        let at = |l: DefiniteLength, side: f32| {
+            l.to_points(AbsoluteLength::Points(Points(side)), REM_SIZE)
+                .0
+        };
+        let (ox, oy, oz) = (at(o.x, w), at(o.y, h), o.z.0);
         let mut m = gsk::Transform::new().translate(&graphene::Point::new(ox, oy));
-        if o.z != 0.0 {
-            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, o.z));
+        if oz != 0.0 {
+            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, oz));
         }
         for (i, op) in t.ops().iter().enumerate() {
             let v = self.anim.transform[i].unwrap_or(op.value);
@@ -300,8 +307,8 @@ impl ViewState {
         if let Some(extra) = extra {
             m = extra.apply(m, h);
         }
-        if o.z != 0.0 {
-            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, -o.z));
+        if oz != 0.0 {
+            m = m.translate_3d(&graphene::Point3D::new(0.0, 0.0, -oz));
         }
         Some(m.translate(&graphene::Point::new(-ox, -oy)))
     }

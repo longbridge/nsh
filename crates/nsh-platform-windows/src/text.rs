@@ -2280,12 +2280,12 @@ pub(crate) fn draw(cx: &mut DrawCx<'_>, state: &ViewState) {
     if let Some(shadow) = drawn.text.shadow
         && !shadow.color.is_transparent()
     {
-        if shadow.radius <= 0.0 {
+        if shadow.radius <= Points::ZERO {
             painter.paint(
                 &drawn.text,
                 layout,
-                ox + shadow.offset_x,
-                oy + shadow.offset_y,
+                ox + shadow.offset_x.0,
+                oy + shadow.offset_y.0,
                 Some(shadow.color),
             );
         } else {
@@ -2336,7 +2336,7 @@ fn draw_shadow(
                 let effect = cx.dc.CreateEffect(&CLSID_D2D1Shadow)?;
                 effect.SetInput(0, &list, true);
                 // CSS blur radii are twice the standard deviation.
-                let sigma = shadow.radius / 2.0;
+                let sigma = shadow.radius.0 / 2.0;
                 effect.SetValue(
                     D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION.0 as u32,
                     D2D1_PROPERTY_TYPE_FLOAT,
@@ -2370,8 +2370,8 @@ fn draw_shadow(
             cx.dc.DrawImage(
                 &output,
                 Some(&Vector2 {
-                    X: shadow.offset_x,
-                    Y: shadow.offset_y,
+                    X: shadow.offset_x.0,
+                    Y: shadow.offset_y.0,
                 }),
                 None,
                 D2D1_INTERPOLATION_MODE_LINEAR,

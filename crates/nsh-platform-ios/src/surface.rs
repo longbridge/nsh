@@ -450,13 +450,13 @@ impl RootView {
 
 /// Height of a navigation bar (status bar excluded), normal and with a
 /// large title, as UIKit lays them out on this device.
-fn header_heights(mtm: MainThreadMarker) -> (f32, f32) {
+fn header_heights(mtm: MainThreadMarker) -> (Points, Points) {
     let bar = objc2_ui_kit::UINavigationBar::new(mtm);
     crate::navigation::keep_in_window(&bar);
     let normal = bar.sizeThatFits(CGSize::new(390.0, 0.0)).height as f32;
     let normal = if normal > 0.0 { normal } else { 44.0 };
     // Large titles add a 52pt row below the bar.
-    (normal, normal + 52.0)
+    (Points(normal), Points(normal + 52.0))
 }
 
 /// Options of a [`Surface`].

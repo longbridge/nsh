@@ -36,12 +36,20 @@ fn mobile_ui_renders_and_answers_presses() {
     let list = screen
         .scroll_of(screen.find("Notifications").unwrap())
         .expect("the list");
-    engine.control().scroll(list, 0.0, 1200.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(1200.0)),
+        u32::MAX,
+    );
     drain(&rx, &mut screen);
     for label in ["SYM000", "No. 1", "-2.50%"] {
         assert!(shows(&screen, label), "{label}: {:?}", screen.texts);
     }
-    engine.control().scroll(list, 0.0, 0.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(0.0)),
+        u32::MAX,
+    );
     drain(&rx, &mut screen);
     // The header's buttons are nested components: their events change the
     // header's state.
@@ -113,14 +121,22 @@ fn mobile_ui_renders_and_answers_presses() {
 
     // The header is the list's own (not a recycled row): its state stays
     // while the list scrolls far away and back.
-    engine.control().scroll(list, 0.0, 12000.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(12000.0)),
+        u32::MAX,
+    );
     drain(&rx, &mut screen);
     assert!(
         screen.texts.iter().any(|t| t.1.starts_with("SYM2")),
         "rows far down: {:?}",
         screen.texts
     );
-    engine.control().scroll(list, 0.0, 0.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(0.0)),
+        u32::MAX,
+    );
     drain(&rx, &mut screen);
     assert!(shows(&screen, "It was 6; reset to 5"), "{:?}", screen.texts);
 

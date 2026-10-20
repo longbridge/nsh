@@ -217,7 +217,7 @@ impl Run {
             network: None,
             assets: Some(Arc::new(AppAssets(assets.to_path_buf()))),
             environment: Default::default(),
-            header_heights: (44.0, 96.0),
+            header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
             limits: nsh_engine::Limits::default(),
             ui_sets: vec![nsh_ui_mobile::registry()],
             runtime: None,

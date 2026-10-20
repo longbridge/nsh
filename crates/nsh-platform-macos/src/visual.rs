@@ -18,6 +18,7 @@
 use nsh_core::{
     BorderStyle, BoxShadow, Color, CornerRadii, Filter, Gradient, GradientKind, GradientSize,
     ViewStyle,
+    geometry::{Points, px},
 };
 use objc2::{MainThreadOnly as _, rc::Retained};
 use objc2_app_kit::{
@@ -167,7 +168,7 @@ impl Visual {
         // Text draws in the layer's own contents, below every sublayer:
         // effects inside the box would cover it.
         let inner: &[&BoxShadow] = if text { &[] } else { &inner };
-        let border = style.borders.uniform().map_or(0.0, |(w, _)| w);
+        let border = style.borders.uniform().map_or(0.0, |(w, _)| w.0);
         self.set_insets(layer, inner, local, radii, border);
         let gradients = if text {
             &[][..]
@@ -255,7 +256,7 @@ impl Visual {
         for (l, s) in casters.iter().zip(shadows.iter().rev()) {
             let shape = grow(local, s.spread.0 as CGFloat);
             l.setFrame(local);
-            let path = rounded(shape, grown(radii, s.spread.0));
+            let path = rounded(shape, grown(radii, s.spread));
             cast(l, &path, &content, s, s.offset_x.0, s.offset_y.0);
             if covered {
                 // Nothing to hide the stand-in content: the shadow only.
@@ -286,7 +287,7 @@ impl Visual {
         });
         // Inside the padding box.
         let padding = inset(local, border as CGFloat);
-        let inner_radii = radii.inset(border);
+        let inner_radii = radii.inset(px(border));
         match crate::decor::shared(&inner_radii) {
             Some(r) => {
                 // Rounded bounds clip at no cost per frame (a mask has one):
@@ -333,7 +334,7 @@ impl Visual {
             unsafe {
                 CGMutablePath::add_rect(Some(&path), std::ptr::null(), grow(local, reach));
             }
-            add_reversed(&path, hole, grown(inner_radii, -s.spread.0));
+            add_reversed(&path, hole, grown(inner_radii, -s.spread));
             l.setFrame(local);
             cast(l, &path, &content, s, 0.0, 0.0);
         }
@@ -397,14 +398,14 @@ impl Visual {
         });
         // Centered on a line `offset` outside the border box; the corners
         // follow the border radius outwards.
-        let d = (o.offset + o.width / 2.0).0;
+        let d = o.offset + o.width / 2.0;
         let radii = if radii.is_zero() {
             radii
         } else {
             grown(radii, d)
         };
         l.setFrame(local);
-        l.setPath(Some(&rounded(grow(local, d as CGFloat), radii)));
+        l.setPath(Some(&rounded(grow(local, d.0 as CGFloat), radii)));
         l.setLineWidth(o.width.0 as CGFloat);
         l.setStrokeColor(cg_color(o.color).as_deref());
         let w = o.width.0 as f64;
@@ -577,8 +578,14 @@ fn offset(rect: CGRect, x: f32, y: f32) -> CGRect {
 
 /// Radii grown by `d` (shrunk when negative), corners without a radius
 /// staying square.
-fn grown(radii: CornerRadii, d: f32) -> CornerRadii {
-    let g = |r: f32| if r > 0.0 { (r + d).max(0.0) } else { 0.0 };
+fn grown(radii: CornerRadii, d: Points) -> CornerRadii {
+    let g = |r: Points| {
+        if r > Points::ZERO {
+            (r + d).max(Points::ZERO)
+        } else {
+            Points::ZERO
+        }
+    };
     CornerRadii {
         top_left: g(radii.top_left),
         top_right: g(radii.top_right),

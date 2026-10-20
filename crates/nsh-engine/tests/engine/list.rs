@@ -106,7 +106,7 @@ fn scrolls_with_recycled_cells(app: &str) {
         network: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -133,7 +133,11 @@ fn scrolls_with_recycled_cells(app: &str) {
 
     // Scroll to row 40: rows 30..=60 are needed; cells are recycled, so the
     // update re-renders text in existing views instead of creating them.
-    engine.control().scroll(list, 0.0, 2000.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(2000.0)),
+        u32::MAX,
+    );
     let batch = rx.recv_timeout(Duration::from_secs(5)).unwrap();
     let shown = texts(&batch);
     assert!(shown.contains(&"row 40".to_owned()), "{shown:?}");
@@ -144,7 +148,11 @@ fn scrolls_with_recycled_cells(app: &str) {
     );
 
     // Near the end: `onEndReached` appends rows; the content grows.
-    engine.control().scroll(list, 0.0, 4600.0, u32::MAX);
+    engine.control().scroll(
+        list,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(4600.0)),
+        u32::MAX,
+    );
     let mut grew = false;
     while let Ok(batch) = rx.recv_timeout(Duration::from_secs(2)) {
         grew |= batch.items.iter().any(

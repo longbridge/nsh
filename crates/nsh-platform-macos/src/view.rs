@@ -215,7 +215,7 @@ impl ViewState {
         let a = &self.anim;
         s.color = a.shadow_color.unwrap_or(s.color);
         s.opacity = a.shadow_opacity.unwrap_or(s.opacity);
-        s.radius = a.shadow_radius.unwrap_or(s.radius);
+        s.radius = a.shadow_radius.map(Points).unwrap_or(s.radius);
         s
     }
 
@@ -263,7 +263,14 @@ impl ViewState {
             m = extra.apply(m, h);
         }
         let o = self.style.transform_origin;
-        let (ox, oy, oz) = (o.x.resolve(w) as f64, o.y.resolve(h) as f64, o.z as f64);
+        let at = |len: nsh_core::geometry::DefiniteLength, side: f32| {
+            len.to_points(
+                nsh_core::geometry::AbsoluteLength::Points(Points(side)),
+                nsh_core::geometry::REM_SIZE,
+            )
+            .0 as f64
+        };
+        let (ox, oy, oz) = (at(o.x, w), at(o.y, h), o.z.0 as f64);
         // To the origin, transform, and back (row vectors).
         Some(
             translation(-ox, -oy, -oz)

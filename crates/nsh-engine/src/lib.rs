@@ -42,7 +42,7 @@ use nsh_core::{
 };
 pub use nsh_core::{
     access::{Access, Capabilities},
-    geometry::{self, Bounds, Edges, Points, Size},
+    geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
@@ -607,7 +607,7 @@ pub struct EngineConfig {
     pub environment: Environment,
     /// Height of the platform's screen header bar, normal and with a large
     /// title (status bar excluded).
-    pub header_heights: (f32, f32),
+    pub header_heights: (Points, Points),
     /// The JS VM's resource limits (a JS app's; Rust code has none).
     pub limits: Limits,
     /// The UI sets JS imports (`nsh_ui_mobile::registry()` on mobile, the
@@ -644,7 +644,7 @@ impl EngineConfig {
             network: None,
             assets: None,
             environment: Environment::default(),
-            header_heights: (44.0, 96.0),
+            header_heights: (Points(44.0), Points(96.0)),
             limits: Limits::default(),
             ui_sets: Vec::new(),
             runtime: None,
@@ -705,7 +705,7 @@ impl std::fmt::Debug for EngineConfig {
 
 enum Message {
     Event(NodeId, EventKind, EventPayload),
-    Scroll(NodeId, f32, f32, u32),
+    Scroll(NodeId, Point<Points>, u32),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
     AnimationsFinished(Vec<nsh_animation::Finished>),
@@ -714,7 +714,7 @@ enum Message {
     Wake,
     Environment(Environment),
     RootSize(NodeId, Size<Points>, EdgeInsets),
-    ScreenHeader(NodeId, Option<f32>),
+    ScreenHeader(NodeId, Option<Points>),
     Frame,
     States(NodeId, u8),
     FontsChanged,
@@ -768,8 +768,8 @@ impl EngineControl {
     /// `Command::ScrollTo` commands for the view) were applied before it.
     /// Cheap to call on every scroll frame: offsets are coalesced per
     /// engine frame.
-    pub fn scroll(&self, id: NodeId, x: f32, y: f32, applied: u32) {
-        let _ = self.tx.send(Message::Scroll(id, x, y, applied));
+    pub fn scroll(&self, id: NodeId, offset: Point<Points>, applied: u32) {
+        let _ = self.tx.send(Message::Scroll(id, offset, applied));
     }
 
     /// Reports the zoom scale of a zoomable scroll view (before the offset
@@ -808,7 +808,7 @@ impl EngineControl {
 
     /// The platform measured where the content of screen `id` starts below
     /// its header (`None`: let the core estimate it).
-    pub fn set_screen_header(&self, id: NodeId, height: Option<f32>) {
+    pub fn set_screen_header(&self, id: NodeId, height: Option<Points>) {
         let _ = self.tx.send(Message::ScreenHeader(id, height));
     }
 
@@ -1088,10 +1088,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_storage(app_storage(&config));
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
-        core.set_header_heights(
-            Points(config.header_heights.0),
-            Points(config.header_heights.1),
-        );
+        core.set_header_heights(config.header_heights.0, config.header_heights.1);
         core.set_safe_area(insets(&config.environment));
         core.set_environment(ui_environment(&config.environment, config.viewport));
         // WebAssembly has no threads for a runtime: tasks' timers are
@@ -1912,10 +1909,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 log::info!(target: "nsh::perf", "event js: {}µs", start.elapsed().as_micros());
             }
         }
-        Message::Scroll(id, x, y, applied) => {
-            state
-                .core
-                .set_scroll_offset(id, geometry::point(Points(x), Points(y)), applied);
+        Message::Scroll(id, offset, applied) => {
+            state.core.set_scroll_offset(id, offset, applied);
+            let (x, y) = (offset.x.0, offset.y.0);
             if let Some((throttle_ms, content, viewport, zoom)) = state.core.scroll_listener(id) {
                 let event = state.scroll_events.entry(id).or_insert(ScrollEvent {
                     x,
@@ -1958,7 +1954,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
             }
         }
         Message::RootSize(id, size, insets) => state.core.set_root_size(id, size, insets),
-        Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height.map(Points)),
+        Message::ScreenHeader(id, height) => state.core.set_screen_header(id, height),
         Message::Frame => {
             state.frame_requested = false;
             state.core.run_frame(Instant::now());

@@ -47,6 +47,17 @@ The rest of the Rust UI API (`nsh_core::ui`) follows GPUI's element APIs:
   `content_size`, `ImageAsset::size`); single lengths are `Points` (`ListLayout`'s paddings, gaps and estimates,
   `Scrollable::snap_interval` / `snap_offsets`, `Theme`'s `radius`, `radius_lg` and `font_size`, `keyboard_height()`,
   `measure_text`, `round_to_nearest_pixel`, `set_title_bar`'s height).
+- **Styles** (`nsh_core::style`, what a node's style resolves to and the platforms draw): lengths are `Points`
+  (`ViewStyle`'s `border_radius` and `elevation`, `Shadow` and `TextShadow` offsets and radii, `TextStyle`'s font size,
+  line height, letter spacing, decoration thickness and underline offset), side widths `Edges<Points>`
+  (`Borders.widths`), corners `Corners<Option<Points>>` (`ViewStyle.corner_radius`, unset corners take the
+  `border_radius`), and `CornerRadii` is a `Corners<Points>` with its curve (`corners()`, `fit(Size<Points>)`,
+  `inset(Points)`); offsets are `Point<Points>` (`shadowOffset`, `textShadowOffset`); `transformOrigin`'s x and y are
+  `DefiniteLength`s (points or a fraction of the side; `TransformOrigin::offset(Size<Points>)`), `textAlignVertical`
+  a `Percentage`.
+- **The engine** (`nsh_engine`): what platforms report is typed as the core takes it: `EngineControl::scroll` takes a
+  `Point<Points>` offset, `set_screen_header` an `Option<Points>`, `EngineConfig.header_heights` is `(Points,
+  Points)`, and nsh-js's `TextMeasurer` returns `Points`.
 - **Natural sizes of images**: what a platform decodes is counted in pixels, as GPUI's `RenderImage::size` is
   `Size<DevicePixels>`: `ImageSize` (`Image.getSize`), `ClipboardImage` and `VideoInfo` are `DevicePixels`. An
   `ImageAsset`'s size is the size it lays out at, the file's pixels over the `@2x` / `@3x` of its name, so it is
@@ -68,6 +79,8 @@ The rest of the Rust UI API (`nsh_core::ui`) follows GPUI's element APIs:
 - **CSS angle constructors** (`deg`, `turn`, `grad`) beside GPUI's `radians`.
 - **No bounds on the shapes' type parameter** (GPUI requires `Clone + Debug + Default + PartialEq` on the struct); the
   methods ask for what they use.
+- **`to_array()` and `From<[T; 4]>` on `Edges` and `Corners`** (clockwise from the top / top left): platforms hand
+  sides and corners to their toolkits by index and interpolate them in loops.
 - **Left out** until something needs them: GPUI's `Anchor` / `Corner`, `GridLocation`, `phi()`, and `JsonSchema`.
 
 ## Where conversion happens
@@ -125,7 +138,9 @@ Each flagged item must be listed in one of two files next to the crate's `Cargo.
 What `untyped.txt` lists, grouped so that agents can migrate in parallel without touching the same files. Each group is
 one pull request; it removes its entries from `untyped.txt` and keeps behavior and wire formats.
 
-Counts are the entries of `untyped.txt` when the check landed (379 in all; `unitless.txt` held 225).
+Counts are the entries of `untyped.txt` when the check landed (379 in all; `unitless.txt` held 225). Every group has
+landed: the three `untyped.txt` files are empty, and the test keeps them so (new public API uses the geometry types or
+gives a reason in `unitless.txt`).
 
 | Group | Files (nsh-core) | Entries | What |
 |---|---|---|---|

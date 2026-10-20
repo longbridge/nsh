@@ -26,9 +26,9 @@ use crate::{
     effects::{Filter, GradientKind, GradientSize, KeyframeAnimation, Keyframes},
     geometry::{
         AbsoluteLength, DefiniteLength, Length, Percentage, Point, Points, REM_SIZE, Radians, Rems,
-        deg, percentage, px, relative,
+        deg, percentage, point, px, relative,
     },
-    style::{Color, OriginLen, PatchValue, StyleDecl, StyleKey},
+    style::{Color, PatchValue, StyleDecl, StyleKey},
     tailwind::{self, ClassList, Decl, Part, Rule, rank, state},
     transform::TransformKind,
 };
@@ -508,12 +508,12 @@ impl Declaration {
             Declaration::RingOffset(w) => part(out, Part::RingOffset(w.0)),
             Declaration::RingInset => part(out, Part::RingInset),
             Declaration::InsetRing(w) => part(out, Part::InsetRing(w.0)),
-            Declaration::ShadowOffset(x, y) => {
-                out.push(Decl::Style(StyleDecl::ShadowOffset(Some((x.0, y.0)))))
-            }
-            Declaration::TextShadowOffset(x, y) => {
-                out.push(Decl::Style(StyleDecl::TextShadowOffset(Some((x.0, y.0)))))
-            }
+            Declaration::ShadowOffset(x, y) => out.push(Decl::Style(StyleDecl::ShadowOffset(
+                Some(point(px(x.0), px(y.0))),
+            ))),
+            Declaration::TextShadowOffset(x, y) => out.push(Decl::Style(
+                StyleDecl::TextShadowOffset(Some(point(px(x.0), px(y.0)))),
+            )),
             Declaration::Transform(kind, v) => {
                 let v = v.0;
                 let parts: &[Part] = match kind {
@@ -2504,9 +2504,9 @@ pub trait Styled: Sized {
     /// The point its transform turns and scales around (the center by
     /// default).
     fn transform_origin(mut self, origin: TransformOrigin) -> Self {
-        let axis = |l: OriginLen| match l {
-            OriginLen::Px(p) => (false, Bits(p)),
-            OriginLen::Fraction(f) => (true, Bits(f)),
+        let axis = |l: DefiniteLength| match l {
+            DefiniteLength::Absolute(a) => (false, Bits(a.to_points(REM_SIZE).0)),
+            DefiniteLength::Fraction(f) => (true, Bits(f.0)),
         };
         self.style()
             .push(Declaration::Origin([axis(origin.x), axis(origin.y)]));
@@ -3329,14 +3329,14 @@ mod tests {
         );
         assert_eq!(style.view.shadow.color, rgb(0x0969da).into());
         assert_eq!(style.view.shadow.opacity, 0.35);
-        assert_eq!(style.view.shadow.radius, 10.0);
+        assert_eq!(style.view.shadow.radius, px(10.0));
         assert_eq!(
             (style.view.shadow.offset_x, style.view.shadow.offset_y),
-            (4.0, 8.0)
+            (px(4.0), px(8.0))
         );
         assert_eq!(style.text.shadow_color, Some(rgba(0x0000_0099).into()));
-        assert_eq!(style.text.shadow_radius, Some(4.0));
-        assert_eq!(style.text.shadow_offset, Some((2.0, 2.0)));
+        assert_eq!(style.text.shadow_radius, Some(px(4.0)));
+        assert_eq!(style.text.shadow_offset, Some(point(px(2.0), px(2.0))));
         let layer = BoxShadow {
             offset_x: px(0.0),
             offset_y: px(2.0),
@@ -3477,9 +3477,9 @@ mod tests {
         );
         same(
             s().transform_origin(TransformOrigin {
-                x: OriginLen::Px(10.0),
-                y: OriginLen::Fraction(0.25),
-                z: 0.0,
+                x: px(10.0).into(),
+                y: relative(0.25),
+                z: Points::ZERO,
             }),
             "origin-[10px_25%]",
         );

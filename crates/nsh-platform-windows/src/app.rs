@@ -210,7 +210,10 @@ impl AppView {
             network: Some(crate::net::network()),
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
-            header_heights: crate::navigation::HEADER_HEIGHTS,
+            header_heights: {
+                let (normal, large) = crate::navigation::HEADER_HEIGHTS;
+                (nsh_core::Points(normal), nsh_core::Points(large))
+            },
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,

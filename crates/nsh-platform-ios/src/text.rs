@@ -1010,17 +1010,7 @@ pub(crate) fn draw_backgrounds(
                 ),
                 CGSize::new(b.width.0 as CGFloat, (b.ascent + b.descent).0 as CGFloat),
             );
-            let r = b.radius().0;
-            let path = crate::decor::rounded(
-                rect,
-                nsh_core::CornerRadii {
-                    top_left: r,
-                    top_right: r,
-                    bottom_right: r,
-                    bottom_left: r,
-                    continuous: false,
-                },
-            );
+            let path = crate::decor::rounded(rect, nsh_core::CornerRadii::all(b.radius()));
             objc2_core_graphics::CGContext::set_fill_color_with_color(
                 c,
                 Some(&cg_color(b.background.color)),

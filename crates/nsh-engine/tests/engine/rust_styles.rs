@@ -70,7 +70,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -125,9 +125,9 @@ fn a_rust_apps_typed_styles_and_spans_reach_the_platform() {
     let effects = card.effects.as_ref().unwrap();
     // The shadow's two layers and the ring.
     assert_eq!(effects.box_shadows.len(), 3);
-    assert_eq!(card.borders.widths[0], 4.0);
+    assert_eq!(card.borders.widths.top.0, 4.0);
     assert_eq!(card.borders.style, nsh_core::BorderStyle::Dashed);
-    assert_eq!(card.corner_radius[0], Some(20.0));
+    assert_eq!(card.corner_radius.top_left, Some(nsh_core::Points(20.0)));
     assert_eq!(card.transform.ops().len(), 2, "perspective and rotateY");
     assert_eq!(
         card.animation.map(|a| a.keyframes),

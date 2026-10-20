@@ -72,7 +72,8 @@ impl Shared {
 }
 
 /// Measures the width of one line of `text` in `font`, in points.
-pub type TextMeasurer = Box<dyn Fn(&nsh_core::canvas::CanvasFont, &str) -> f32>;
+pub type TextMeasurer =
+    Box<dyn Fn(&nsh_core::canvas::CanvasFont, &str) -> nsh_core::geometry::Points>;
 
 /// One QuickJS runtime + context with the nsh host APIs installed.
 pub struct Host {
@@ -1423,9 +1424,12 @@ const report = (v) => text(String(v));
         assert_eq!(format!("{:?}", style.layout.flex_direction), "Row");
         assert_eq!(style.view.background_color, nsh_core::Color(0xff00_00ff));
         let shadow = style.view.shadow;
-        assert_eq!((shadow.offset_x, shadow.offset_y), (2.0, 6.0));
-        assert_eq!((shadow.opacity, shadow.radius), (0.25, 10.0));
-        assert_eq!(style.view.radii().to_array(), [12.0, 12.0, 12.0, 0.0]);
+        assert_eq!((shadow.offset_x.0, shadow.offset_y.0), (2.0, 6.0));
+        assert_eq!((shadow.opacity, shadow.radius.0), (0.25, 10.0));
+        assert_eq!(
+            style.view.radii().to_array().map(|r| r.0),
+            [12.0, 12.0, 12.0, 0.0]
+        );
         assert_eq!(styles[1].view.shadow, nsh_core::Shadow::DEFAULT);
     }
 

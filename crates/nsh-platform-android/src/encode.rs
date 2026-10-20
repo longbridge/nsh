@@ -21,9 +21,10 @@ use nsh_core::{
     AccessibilityRole, AutoCapitalize, AutoFill, BorderStyle, Checked, Color, Command,
     DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType, LayoutCurve,
     LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation, MountBatch,
-    MountItem, NativeProps, OriginLen, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
+    MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
     ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
     ViewStyle, WebSource,
+    geometry::{DefiniteLength, REM_SIZE},
 };
 
 use crate::{
@@ -609,12 +610,12 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     e.int(argb(s.background_color));
     let radii = s.radii();
     for r in radii.to_array() {
-        e.float(r);
+        e.float(r.0);
     }
     e.bool(radii.continuous);
     let b = &s.borders;
-    for w in b.widths {
-        e.float(w);
+    for w in b.widths.to_array() {
+        e.float(w.0);
     }
     for c in b.colors {
         e.int(argb(c));
@@ -628,30 +629,30 @@ fn view_style(e: &mut Encoded, s: &ViewStyle) {
     e.bool(s.overflow_hidden);
     let shadow = s.shadow;
     e.int(argb(shadow.color));
-    e.float(shadow.offset_x);
-    e.float(shadow.offset_y);
+    e.float(shadow.offset_x.0);
+    e.float(shadow.offset_y.0);
     e.float(if shadow.is_visible() {
         shadow.opacity
     } else {
         0.0
     });
-    e.float(shadow.radius);
+    e.float(shadow.radius.0);
     for v in view_transform(&s.transform, |_| None) {
         e.float(v);
     }
     e.bool(s.tint_color.is_some());
     e.int(s.tint_color.map_or(0, argb));
-    e.float(s.elevation);
+    e.float(s.elevation.0);
     // Transform origin: kind (0 points, 1 fraction) and value per axis.
     for v in [s.transform_origin.x, s.transform_origin.y] {
         match v {
-            OriginLen::Px(p) => {
+            DefiniteLength::Absolute(p) => {
                 e.int(0);
-                e.float(p);
+                e.float(p.to_points(REM_SIZE).0);
             }
-            OriginLen::Fraction(f) => {
+            DefiniteLength::Fraction(f) => {
                 e.int(1);
-                e.float(f);
+                e.float(f.0);
             }
         }
     }

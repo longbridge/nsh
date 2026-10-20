@@ -212,9 +212,9 @@ impl Default for Theme {
                 .into_iter()
                 .map(|l| TextShadow {
                     color: l.color,
-                    offset_x: l.offset_x.0,
-                    offset_y: l.offset_y.0,
-                    radius: l.blur.0,
+                    offset_x: l.offset_x,
+                    offset_y: l.offset_y,
+                    radius: l.blur,
                 })
                 .collect()
         };

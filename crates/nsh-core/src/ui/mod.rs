@@ -182,7 +182,7 @@ pub use crate::{
         transparent_black, transparent_white, white, yellow,
     },
     platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Locale, Os},
-    style::{Color, OriginLen},
+    style::Color,
 };
 
 /// Everything a component's module needs: `use nsh_core::ui::prelude::*;`.

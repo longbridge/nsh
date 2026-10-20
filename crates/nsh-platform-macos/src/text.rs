@@ -1042,8 +1042,8 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
         // AppKit's flipped context: a positive offset must still go down.
         CGContext::set_shadow_with_color(
             c,
-            CGSize::new(shadow.offset_x as CGFloat, -shadow.offset_y as CGFloat),
-            shadow.radius as CGFloat,
+            CGSize::new(shadow.offset_x.0 as CGFloat, -shadow.offset_y.0 as CGFloat),
+            shadow.radius.0 as CGFloat,
             Some(&cg_color(shadow.color)),
         );
     }
@@ -1149,17 +1149,7 @@ fn draw_backgrounds(
                 ),
                 CGSize::new(b.width.0 as CGFloat, (b.ascent + b.descent).0 as CGFloat),
             );
-            let r = b.radius().0;
-            let path = crate::decor::rounded(
-                rect,
-                nsh_core::CornerRadii {
-                    top_left: r,
-                    top_right: r,
-                    bottom_right: r,
-                    bottom_left: r,
-                    continuous: false,
-                },
-            );
+            let path = crate::decor::rounded(rect, nsh_core::CornerRadii::all(b.radius()));
             CGContext::set_fill_color_with_color(c, Some(&cg_color(b.background.color)));
             CGContext::add_path(c, Some(&path));
             CGContext::fill_path(c);

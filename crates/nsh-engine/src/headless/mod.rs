@@ -199,7 +199,7 @@ impl Headless {
             if let Some(scroll) = self.screen.scroll(id) {
                 self.engine
                     .control()
-                    .scroll(id, scroll.x.0, scroll.y.0, scroll.applied);
+                    .scroll(id, point(scroll.x, scroll.y), scroll.applied);
             }
         }
     }
@@ -566,7 +566,7 @@ impl Headless {
                 scroll.y = next;
             }
             let (x, y, applied) = (scroll.x, scroll.y, scroll.applied);
-            self.engine.control().scroll(id, x.0, y.0, applied);
+            self.engine.control().scroll(id, point(x, y), applied);
             // One display frame per step; a frame that needs nothing
             // produces no batch, and a late one is applied with the next.
             self.next_batch(FRAME);

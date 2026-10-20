@@ -414,7 +414,7 @@ pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<Moun
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
@@ -752,7 +752,7 @@ fn a_style_prop_takes_what_a_host_elements_style_does() {
         ),
         "{items}"
     );
-    assert!(items.contains("offset_x: 1.0, offset_y: 2.0"), "{items}");
+    assert!(items.contains("offset_x: 1pt, offset_y: 2pt"), "{items}");
     assert!(items.contains("bindings: [(Opacity, "), "{items}");
 }
 

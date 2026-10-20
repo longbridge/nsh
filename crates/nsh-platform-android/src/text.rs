@@ -164,9 +164,9 @@ impl TextEngine for AndroidTextEngine {
                 JValue::Float(density).as_jni(),
                 // Shadow behind the block: color 0 means none.
                 JValue::Int(shadow.map_or(0, |s| argb(s.color))).as_jni(),
-                JValue::Float(shadow.map_or(0.0, |s| s.offset_x)).as_jni(),
-                JValue::Float(shadow.map_or(0.0, |s| s.offset_y)).as_jni(),
-                JValue::Float(shadow.map_or(0.0, |s| s.radius)).as_jni(),
+                JValue::Float(shadow.map_or(0.0, |s| s.offset_x.0)).as_jni(),
+                JValue::Float(shadow.map_or(0.0, |s| s.offset_y.0)).as_jni(),
+                JValue::Float(shadow.map_or(0.0, |s| s.radius.0)).as_jni(),
                 JValue::Object(&attachment_array).as_jni(),
             ];
             // SAFETY: the method id and argument types match the signature

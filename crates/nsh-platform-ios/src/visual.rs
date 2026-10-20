@@ -10,6 +10,7 @@
 use nsh_core::{
     BorderStyle, BoxShadow, Color, CornerRadii, Filter, Gradient, GradientKind, GradientSize,
     ViewStyle,
+    geometry::{Points, px},
 };
 use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
@@ -133,7 +134,7 @@ impl Visual {
         // Text draws in the layer's own contents, below every sublayer:
         // effects inside the box would cover it.
         let inner: &[&BoxShadow] = if text { &[] } else { &inner };
-        let border = style.borders.uniform().map_or(0.0, |(w, _)| w);
+        let border = style.borders.uniform().map_or(0.0, |(w, _)| w.0);
         self.set_insets(&layer, inner, local, radii, border);
         let gradients = if text {
             &[][..]
@@ -186,7 +187,7 @@ impl Visual {
             let spread = s.spread.0 as CGFloat;
             let shape = grow(local, spread);
             l.setFrame(local);
-            l.setShadowPath(Some(&rounded(shape, grown(radii, s.spread.0))));
+            l.setShadowPath(Some(&rounded(shape, grown(radii, s.spread))));
             l.setShadowColor(cg_color(Color(s.color.0 | 0xff)).as_deref());
             l.setShadowOpacity((s.color.0 & 0xff) as f32 / 255.0);
             l.setShadowOffset(CGSize::new(
@@ -236,7 +237,7 @@ impl Visual {
         });
         // Inside the padding box.
         let padding = inset(local, border as CGFloat);
-        let inner_radii = radii.inset(border);
+        let inner_radii = radii.inset(px(border));
         holder.setFrame(local);
         let mask = mask_layer(holder);
         mask.setFrame(local);
@@ -259,7 +260,7 @@ impl Visual {
             unsafe {
                 CGMutablePath::add_rect(Some(&path), std::ptr::null(), grow(local, reach));
             }
-            add_reversed(&path, hole, grown(inner_radii, -s.spread.0));
+            add_reversed(&path, hole, grown(inner_radii, -s.spread));
             l.setFrame(local);
             l.setShadowPath(Some(&path));
             l.setShadowColor(cg_color(Color(s.color.0 | 0xff)).as_deref());
@@ -281,7 +282,7 @@ impl Visual {
             g.setZPosition(GRADIENT_Z);
             g
         });
-        let shared = radii.shared();
+        let shared = radii.shared().map(|r| r.0);
         // CSS order is top first.
         for (g, gradient) in self.gradients.iter().zip(gradients.iter().rev()) {
             g.setFrame(local);
@@ -332,14 +333,14 @@ impl Visual {
         });
         // Centered on a line `offset` outside the border box; the corners
         // follow the border radius outwards.
-        let d = (o.offset + o.width / 2.0).0;
+        let d = o.offset + o.width / 2.0;
         let radii = if radii.is_zero() {
             radii
         } else {
             grown(radii, d)
         };
         l.setFrame(local);
-        l.setPath(Some(&rounded(grow(local, d as CGFloat), radii)));
+        l.setPath(Some(&rounded(grow(local, d.0 as CGFloat), radii)));
         l.setLineWidth(o.width.0 as CGFloat);
         l.setStrokeColor(cg_color(o.color).as_deref());
         let w = o.width.0 as f64;
@@ -442,7 +443,7 @@ impl Visual {
         if let Some(b) = &self.backdrop {
             b.view.setFrame(local);
             let layer = b.view.layer();
-            match radii.shared() {
+            match radii.shared().map(|r| r.0) {
                 Some(r) => {
                     crate::decor::set_corners(
                         &layer,
@@ -518,8 +519,14 @@ fn offset(rect: CGRect, x: f32, y: f32) -> CGRect {
 
 /// Radii grown by `d` (shrunk when negative), corners without a radius
 /// staying square.
-fn grown(radii: CornerRadii, d: f32) -> CornerRadii {
-    let g = |r: f32| if r > 0.0 { (r + d).max(0.0) } else { 0.0 };
+fn grown(radii: CornerRadii, d: Points) -> CornerRadii {
+    let g = |r: Points| {
+        if r > Points::ZERO {
+            (r + d).max(Points::ZERO)
+        } else {
+            Points::ZERO
+        }
+    };
     CornerRadii {
         top_left: g(radii.top_left),
         top_right: g(radii.top_right),

@@ -169,10 +169,10 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
             snapshot,
             &outline,
             &faded(s.color, s.opacity),
-            s.offset_x,
-            s.offset_y,
+            s.offset_x.0,
+            s.offset_y.0,
             0.0,
-            s.radius * 2.0,
+            s.radius.0 * 2.0,
             soft,
         );
     }
@@ -215,7 +215,12 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
     if let Some(e) = effects
         && e.box_shadows.iter().any(|b| b.inset && b.is_visible())
     {
-        let padding = padding_box(w, h, radii, state.style.borders.widths);
+        let padding = padding_box(
+            w,
+            h,
+            radii,
+            state.style.borders.widths.to_array().map(|w| w.0),
+        );
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 snapshot.append_inset_shadow(
@@ -306,7 +311,11 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
         return;
     }
     if b.style == BorderStyle::Solid {
-        snapshot.append_border(outline, &b.widths, &b.colors.map(rgba));
+        snapshot.append_border(
+            outline,
+            &b.widths.to_array().map(|w| w.0),
+            &b.colors.map(rgba),
+        );
         return;
     }
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
@@ -319,6 +328,7 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
         )
     };
     if let Some((bw, c)) = b.uniform() {
+        let bw = bw.0;
         stroke(snapshot, &line(bw), bw, b.style, &rgba(c));
         return;
     }
@@ -326,7 +336,7 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
     // and color, clipped to that side's trapezoid (corners split at 45°).
     let m = w.min(h) / 2.0;
     for side in 0..4 {
-        let (bw, c) = (b.widths[side], b.colors[side]);
+        let (bw, c) = (b.width(side).0, b.colors[side]);
         if bw <= 0.0 || c.is_transparent() {
             continue;
         }
@@ -379,9 +389,9 @@ pub(crate) fn push_filters(snapshot: &gtk::Snapshot, state: &ViewState) -> usize
     if s.is_visible() && !has_fill(state) {
         snapshot.push_shadow(&[gsk::Shadow::new(
             faded(s.color, s.opacity),
-            s.offset_x,
-            s.offset_y,
-            s.radius * 2.0,
+            s.offset_x.0,
+            s.offset_y.0,
+            s.radius.0 * 2.0,
         )]);
         pushes += 1;
     }

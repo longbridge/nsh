@@ -759,6 +759,29 @@ impl<T: Clone> Edges<T> {
             left: value,
         }
     }
+
+    /// `[top, right, bottom, left]`, for toolkits that take sides by index.
+    #[inline]
+    pub fn to_array(&self) -> [T; 4] {
+        [
+            self.top.clone(),
+            self.right.clone(),
+            self.bottom.clone(),
+            self.left.clone(),
+        ]
+    }
+}
+
+impl<T> From<[T; 4]> for Edges<T> {
+    /// From `[top, right, bottom, left]`.
+    fn from([top, right, bottom, left]: [T; 4]) -> Self {
+        Edges {
+            top,
+            right,
+            bottom,
+            left,
+        }
+    }
 }
 
 impl<T> Edges<T> {
@@ -854,6 +877,30 @@ impl<T: Clone> Corners<T> {
             top_right: value.clone(),
             bottom_right: value.clone(),
             bottom_left: value,
+        }
+    }
+
+    /// `[top_left, top_right, bottom_right, bottom_left]`, clockwise from
+    /// the top left, for toolkits that take corners by index.
+    #[inline]
+    pub fn to_array(&self) -> [T; 4] {
+        [
+            self.top_left.clone(),
+            self.top_right.clone(),
+            self.bottom_right.clone(),
+            self.bottom_left.clone(),
+        ]
+    }
+}
+
+impl<T> From<[T; 4]> for Corners<T> {
+    /// From `[top_left, top_right, bottom_right, bottom_left]`.
+    fn from([top_left, top_right, bottom_right, bottom_left]: [T; 4]) -> Self {
+        Corners {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
         }
     }
 }

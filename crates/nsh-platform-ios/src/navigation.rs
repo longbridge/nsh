@@ -98,7 +98,9 @@ impl ScreenController {
             return;
         };
         if ivars.measured.replace(header) != header {
-            ivars.control.set_screen_header(ivars.id, header);
+            ivars
+                .control
+                .set_screen_header(ivars.id, header.map(Points));
         }
     }
 

@@ -2129,18 +2129,19 @@ pub(crate) fn draw_shadow(cx: &mut DrawCx<'_>, state: &ViewState) {
         return;
     }
     let (ox, oy) = (
-        drawn.content.origin.x.0 + shadow.offset_x,
-        drawn.content.origin.y.0 + shadow.offset_y,
+        drawn.content.origin.x.0 + shadow.offset_x.0,
+        drawn.content.origin.y.0 + shadow.offset_y.0,
     );
     let k = cx.transform_scale();
     // GPUI blurs no glyphs: a blurred shadow is the glyphs painted on
     // rings out to the blur's radius, each faint, which spreads them as a
     // blur does.
     let mut offsets = vec![(0.0f32, 0.0f32)];
-    if shadow.radius > 0.0 {
+    let radius = shadow.radius.0;
+    if radius > 0.0 {
         let rings = [(0.25, 6), (0.5, 10), (0.75, 14), (1.0, 18)];
         for (r, count) in rings {
-            let r = r * shadow.radius * 0.8;
+            let r = r * radius * 0.8;
             for i in 0..count {
                 let a = (i as f32 + r) / count as f32 * std::f32::consts::TAU;
                 offsets.push((r * a.cos(), r * a.sin()));
@@ -2161,7 +2162,7 @@ pub(crate) fn draw_shadow(cx: &mut DrawCx<'_>, state: &ViewState) {
         }
     }
     paint_glyphs(cx, glyphs);
-    if shadow.radius <= 0.0 {
+    if radius <= 0.0 {
         decorate(cx, &drawn.text, layout, ox, oy, Some(shadow.color));
     }
 }

@@ -31,7 +31,7 @@ fn stop_spinning(code: &str) -> (Duration, Vec<String>) {
         network: None,
         assets: None,
         environment: Default::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,

@@ -360,19 +360,19 @@ fn sheet_frame(config: &ModalConfig, width: f32, height: f32) -> Option<nsh_core
 fn sheet_style(t: &Theme) -> ViewStyle {
     ViewStyle {
         background_color: t.sheet,
-        border_radius: SHEET_RADIUS,
+        border_radius: nsh_core::Points(SHEET_RADIUS),
         overflow_hidden: true,
         borders: nsh_core::Borders {
-            widths: [1.0; 4],
+            widths: nsh_core::Edges::all(nsh_core::Points(1.0)),
             colors: [t.sheet_edge; 4],
             ..nsh_core::Borders::NONE
         },
         shadow: Shadow {
             color: Color::BLACK,
-            offset_x: 0.0,
-            offset_y: 8.0,
+            offset_x: nsh_core::Points(0.0),
+            offset_y: nsh_core::Points(8.0),
             opacity: 0.35,
-            radius: 24.0,
+            radius: nsh_core::Points(24.0),
         },
         ..ViewStyle::default()
     }
@@ -888,7 +888,7 @@ impl ScreenNav {
         let header = measured_header(&self.config);
         if self.header_reported.replace(header) != Some(header) {
             let id = self.view.id();
-            surface.control(|c| c.set_screen_header(id, header));
+            surface.control(|c| c.set_screen_header(id, header.map(nsh_core::Points)));
         }
         let f = stack.state().frame;
         let insets = content_insets(&self.config);
@@ -1970,7 +1970,7 @@ impl Nav {
             match &style {
                 Some(style) => **current != *style,
                 // Back from a sheet: the modal itself has no style.
-                None => current.overflow_hidden && current.border_radius == SHEET_RADIUS,
+                None => current.overflow_hidden && current.border_radius.0 == SHEET_RADIUS,
             }
         };
         if restyle {

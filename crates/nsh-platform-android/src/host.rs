@@ -111,7 +111,7 @@ impl Host {
             assets: Some(Arc::new(ViewAssets(self.clone()))),
             environment: *self.environment.lock().expect("environment"),
             // Android's toolbar is 56dp; it has no large titles.
-            header_heights: (56.0, 56.0),
+            header_heights: (nsh_core::Points(56.0), nsh_core::Points(56.0)),
             limits: *self.limits.lock().expect("limits"),
             ui_sets: crate::ui_sets(),
             runtime: None,
@@ -1036,7 +1036,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_scroll(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     if let Some(control) = host.control() {
-        control.scroll(id as NodeId, x, y, applied as u32);
+        control.scroll(id as NodeId, point(px(x), px(y)), applied as u32);
     }
     let mut ui = host.ui.lock().expect("ui");
     if !ui.scrolled(id as u32, x, y) {

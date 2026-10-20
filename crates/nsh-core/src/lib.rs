@@ -76,8 +76,8 @@ pub use crate::{
     },
     style::{
         BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, FontFamily,
-        FontVariant, OriginLen, PatchValue, Shadow, Style, StyleDecl, StyleError, StyleKey,
-        StylePatch, StyleValue, TextAlign, TextDecoration, TextShadow, TextStyle, TextTransform,
+        FontVariant, PatchValue, Shadow, Style, StyleDecl, StyleError, StyleKey, StylePatch,
+        StyleValue, TextAlign, TextDecoration, TextShadow, TextStyle, TextTransform,
         TransformOrigin, ViewStyle,
     },
     text::{

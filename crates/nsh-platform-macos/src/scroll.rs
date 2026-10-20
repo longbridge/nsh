@@ -575,7 +575,7 @@ fn report(surface: &Surface, view: &NshView) {
         let (x, y) = reported(&state);
         (state.id, x, y, applied)
     };
-    surface.control(|c| c.scroll(id, x, y, applied));
+    surface.control(|c| c.scroll(id, point(Points(x), Points(y)), applied));
 }
 
 /// Eases to `to` (clamped to the rest limits).

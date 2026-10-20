@@ -108,7 +108,7 @@ const FORM_HEIGHT: f32 = 620.0;
 /// Space a sheet leaves to the window's edges (less in small windows).
 const SHEET_MARGIN: f32 = 32.0;
 /// Corner radius of a sheet.
-const SHEET_RADIUS: f32 = 12.0;
+const SHEET_RADIUS: Points = Points(12.0);
 /// How far below the window a sheet starts and ends, so that its shadow
 /// is not seen at the bottom edge.
 const SHADOW_ROOM: f32 = 48.0;
@@ -638,16 +638,16 @@ fn sheet_style(t: &Theme) -> ViewStyle {
         border_radius: SHEET_RADIUS,
         overflow_hidden: true,
         borders: nsh_core::Borders {
-            widths: [1.0; 4],
+            widths: nsh_core::Edges::all(px(1.0)),
             colors: [t.sheet_edge; 4],
             ..nsh_core::Borders::NONE
         },
         shadow: Shadow {
             color: Color::BLACK,
-            offset_x: 0.0,
-            offset_y: 8.0,
+            offset_x: px(0.0),
+            offset_y: px(8.0),
             opacity: 0.35,
-            radius: 24.0,
+            radius: px(24.0),
         },
         ..ViewStyle::default()
     }
@@ -996,7 +996,7 @@ impl ScreenNav {
         let header = measured_header(&self.config);
         if self.header_reported.replace(header) != Some(header) {
             let id = self.view.id();
-            surface.control(|c| c.set_screen_header(id, header));
+            surface.control(|c| c.set_screen_header(id, header.map(px)));
         }
         let f = stack.state().frame;
         let insets = content_insets(&self.config);

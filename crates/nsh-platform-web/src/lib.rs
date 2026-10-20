@@ -36,7 +36,7 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, MountBatch, MountItem, PayloadValue, Points, ROOT_ID, Size,
-    geometry::{DevicePixels, point, size},
+    geometry::{DevicePixels, point, px, size},
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
@@ -511,9 +511,9 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         // A desktop browser's headers are as tall as the desktop backends'
         // (`navigation::HEADER_HEIGHTS` there).
         header_heights: if environment.idiom == Idiom::Desktop {
-            (47.0, 94.0)
+            (px(47.0), px(94.0))
         } else {
-            (44.0, 96.0)
+            (px(44.0), px(96.0))
         },
         limits,
         ui_sets: ui_sets(),
@@ -1153,7 +1153,7 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
                 ffi::submit(&out.finish());
             }
         }
-        app.control.scroll(id, x, y, applied);
+        app.control.scroll(id, point(px(x), px(y)), applied);
     })
 }
 

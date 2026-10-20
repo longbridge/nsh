@@ -192,13 +192,13 @@ impl ResolvedTextStyle {
     /// Applies the properties set on a node on top of the inherited style.
     #[inline]
     pub(crate) fn inherit(self, style: &TextStyle) -> Self {
-        let font_size = style.font_size.map_or(self.font_size, Points);
+        let font_size = style.font_size.unwrap_or(self.font_size);
         // A multiple follows each nested font size (unitless CSS
         // line-height); points stay points.
         let (line_height, line_height_multiple) =
             match (style.line_height_multiple, style.line_height) {
                 (Some(m), _) => (m * font_size, m),
-                (None, Some(points)) => (Points(points), 0.0),
+                (None, Some(points)) => (points, 0.0),
                 (None, None) if self.line_height_multiple > 0.0 => (
                     self.line_height_multiple * font_size,
                     self.line_height_multiple,
@@ -216,16 +216,13 @@ impl ResolvedTextStyle {
             // Ems are of the node's own font size, then inherited as points.
             letter_spacing: match style.letter_spacing_em {
                 Some(em) => em * font_size,
-                None => style.letter_spacing.map_or(self.letter_spacing, Points),
+                None => style.letter_spacing.unwrap_or(self.letter_spacing),
             },
             decoration: style.decoration.unwrap_or(self.decoration),
             decoration_color: style.decoration_color.or(self.decoration_color),
             decoration_style: style.decoration_style.unwrap_or(self.decoration_style),
-            decoration_thickness: style
-                .decoration_thickness
-                .map(Points)
-                .or(self.decoration_thickness),
-            underline_offset: style.underline_offset.map(Points).or(self.underline_offset),
+            decoration_thickness: style.decoration_thickness.or(self.decoration_thickness),
+            underline_offset: style.underline_offset.or(self.underline_offset),
             transform: style.transform.unwrap_or(self.transform),
             font_variant: style.font_variant.unwrap_or(self.font_variant),
             background: self.background,

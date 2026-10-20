@@ -17,7 +17,7 @@ use taffy::{AvailableSpace, NodeId as LayoutId, Overflow, Position, TaffyTree};
 use self::list::{ExtraKind, Follow, ListState, PinTarget};
 pub use self::measure::Measurement;
 use crate::{
-    geometry::{Bounds, Point, Points, Size, rect, size_pt},
+    geometry::{Bounds, Percentage, Point, Points, Size, rect, size_pt},
     mount::{
         InputConfig, ModalConfig, MountBatch, MountItem, NativeProps, ScreenConfig, ScrollBehavior,
         StickyCell, VideoProps, ViewKind,
@@ -415,8 +415,8 @@ struct Node {
     text_queued: bool,
     /// A list cell whose subtree was laid out again this commit.
     relaid: bool,
-    /// `android={{ elevation }}` (points).
-    elevation: f32,
+    /// `android={{ elevation }}`.
+    elevation: Points,
     /// A text block: its attachments (inline views and images, in text
     /// order) whose native views are inside its own.
     attached: Vec<NodeId>,
@@ -504,7 +504,7 @@ impl Node {
             frame: Bounds::UNSET,
             overflow: None,
             attached: Vec::new(),
-            elevation: 0.0,
+            elevation: Points::ZERO,
             dirty: 0,
             queued: false,
             text_queued: false,
@@ -613,7 +613,7 @@ pub struct Core<M: TextEngine> {
     /// Attached input accessories by `nativeID`.
     accessories: rustc_hash::FxHashMap<Box<str>, NodeId>,
     /// Height of the native header bar of screens: normal and large title.
-    header_heights: (f32, f32),
+    header_heights: (Points, Points),
     /// Natural sizes of the platform's controls.
     /// The surface's safe-area insets (stacks at the top extend their
     /// headers under the status bar).
@@ -699,7 +699,7 @@ impl<M: TextEngine> Core<M> {
             lists: Vec::new(),
             roots: Vec::new(),
             accessories: Default::default(),
-            header_heights: (44.0, 96.0),
+            header_heights: (Points(44.0), Points(96.0)),
             safe_area: EdgeInsets::default(),
             list_binds: Vec::new(),
             events: Vec::new(),
@@ -723,7 +723,6 @@ impl<M: TextEngine> Core<M> {
     /// Sets the height of the platform's screen header bar, normal and with
     /// a large title (status bar excluded).
     pub fn set_header_heights(&mut self, normal: Points, large: Points) {
-        let (normal, large) = (normal.0, large.0);
         if self.header_heights != (normal, large) {
             self.header_heights = (normal, large);
             self.needs_layout = true;
@@ -2187,7 +2186,7 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Prop::Elevation(value) => {
-                let value = value.0.max(0.0);
+                let value = value.max(Points::ZERO);
                 if node.elevation != value {
                     node.elevation = value;
                     flags |= dirty::VIEW;
@@ -2859,7 +2858,7 @@ impl<M: TextEngine> Core<M> {
         let kind = node.kind;
         // A new native view already has the default style and no listeners.
         let mut flags = 0;
-        if node.view_style != ViewStyle::default() || node.elevation != 0.0 {
+        if node.view_style != ViewStyle::default() || node.elevation != Points::ZERO {
             flags |= dirty::VIEW;
         }
         if !node.events.is_empty() {
@@ -3659,7 +3658,7 @@ impl<M: TextEngine> Core<M> {
                     } else {
                         self.header_heights.0
                     };
-                    bar + self.top_overlap(parent)
+                    bar.0 + self.top_overlap(parent)
                 };
                 let size = size_pt(s.width, s.height);
                 (size, header, definite(size))
@@ -3876,7 +3875,7 @@ impl<M: TextEngine> Core<M> {
                 continue;
             };
             node.text_queued = false;
-            let align_vertical = node.text_style.align_vertical.unwrap_or(0.0);
+            let align_vertical = node.text_style.align_vertical.unwrap_or_default();
             let report_lines = node.events.contains(EventKind::TextLayout);
             // Shrinking stops at a tenth: smaller is unreadable anyway.
             let fit = node
@@ -3902,11 +3901,11 @@ impl<M: TextEngine> Core<M> {
                     .width
                     .max(measure_text(engine, cache, ctx, None).width);
             }
-            if align_vertical > 0.0 {
+            if align_vertical > Percentage(0.0) {
                 // Text shorter than its box: moved down within it.
                 let height = measure_text(engine, cache, ctx, Some(content.size.width.0)).height;
                 if height < content.size.height {
-                    content.origin.y += (content.size.height - height) * align_vertical;
+                    content.origin.y += align_vertical.of(content.size.height - height);
                     content.size.height = height;
                 }
             }
@@ -4708,7 +4707,7 @@ const PRESSES: [EventKind; 4] = [
 fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {
     (style.background_color.0 & 0xff != 0).then_some(crate::text::TextBackground {
         color: style.background_color,
-        radius: Points(style.border_radius.max(0.0)),
+        radius: style.border_radius.max(Points::ZERO),
         node,
     })
 }

@@ -26,8 +26,9 @@
 use std::{rc::Rc, sync::Arc};
 
 use nsh_core::{
-    Bounds, BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
-    LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewKind, ViewStyle,
+    Bounds, BoxShadow, Color, Corners, Edges, KeyframeAnimation, Keyframes, LayoutAnimation,
+    LayoutCurve, LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewKind,
+    ViewStyle,
     geometry::{Point, Size},
 };
 
@@ -340,6 +341,10 @@ fn keyframes_at(animation: &KeyframeAnimation, elapsed: f32) -> Option<(f32, Ext
     Some((opacity, extra))
 }
 
+fn lerp_points(a: Points, b: Points, t: f32) -> Points {
+    Points(lerp(a.0, b.0, t))
+}
+
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
@@ -481,10 +486,10 @@ fn lerp_style(
     if props.has(TransitionProps::SHADOW) {
         let (a, b) = (&from.shadow, &to.shadow);
         out.shadow.color = lerp_color(a.color, b.color, t);
-        out.shadow.offset_x = lerp(a.offset_x, b.offset_x, t);
-        out.shadow.offset_y = lerp(a.offset_y, b.offset_y, t);
+        out.shadow.offset_x = lerp_points(a.offset_x, b.offset_x, t);
+        out.shadow.offset_y = lerp_points(a.offset_y, b.offset_y, t);
         out.shadow.opacity = lerp(a.opacity, b.opacity, t).clamp(0.0, 1.0);
-        out.shadow.radius = lerp(a.radius, b.radius, t).max(0.0);
+        out.shadow.radius = lerp_points(a.radius, b.radius, t).max(Points::ZERO);
         let (sa, sb) = (box_shadows(from), box_shadows(to));
         if sa != sb
             && let Some(shadows) = lerp_box_shadows(sa, sb, t)
@@ -495,21 +500,23 @@ fn lerp_style(
         }
     }
     if props.has(TransitionProps::SHAPE) {
-        out.border_radius = lerp(from.border_radius, to.border_radius, t).max(0.0);
-        out.corner_radius =
-            std::array::from_fn(|i| match (from.corner_radius[i], to.corner_radius[i]) {
-                (None, None) => None,
-                (a, b) => Some(
-                    lerp(
-                        a.unwrap_or(from.border_radius),
-                        b.unwrap_or(to.border_radius),
-                        t,
-                    )
-                    .max(0.0),
-                ),
-            });
-        out.borders.widths =
-            std::array::from_fn(|i| lerp(from.borders.widths[i], to.borders.widths[i], t).max(0.0));
+        out.border_radius = lerp_points(from.border_radius, to.border_radius, t).max(Points::ZERO);
+        let (ca, cb) = (from.corner_radius.to_array(), to.corner_radius.to_array());
+        out.corner_radius = Corners::from(std::array::from_fn(|i| match (ca[i], cb[i]) {
+            (None, None) => None,
+            (a, b) => Some(
+                lerp_points(
+                    a.unwrap_or(from.border_radius),
+                    b.unwrap_or(to.border_radius),
+                    t,
+                )
+                .max(Points::ZERO),
+            ),
+        }));
+        let (wa, wb) = (from.borders.widths.to_array(), to.borders.widths.to_array());
+        out.borders.widths = Edges::from(std::array::from_fn(|i| {
+            lerp_points(wa[i], wb[i], t).max(Points::ZERO)
+        }));
         out.outline.width = Points(lerp(from.outline.width.0, to.outline.width.0, t).max(0.0));
     }
 }
@@ -1082,7 +1089,7 @@ mod tests {
         let to = ViewStyle {
             opacity: 1.0,
             background_color: Color::rgba(255, 255, 255, 255),
-            border_radius: 10.0,
+            border_radius: Points(10.0),
             ..ViewStyle::default()
         };
         let mut out = to.clone();
@@ -1095,7 +1102,7 @@ mod tests {
         );
         assert_eq!(out.opacity, 0.5);
         assert_eq!(out.background_color, to.background_color);
-        assert_eq!(out.border_radius, 10.0);
+        assert_eq!(out.border_radius, Points(10.0));
         assert!(differs(
             &from,
             &to,

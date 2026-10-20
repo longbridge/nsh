@@ -66,7 +66,7 @@ fn start_with(
         network: None,
         assets: None,
         environment,
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_ui_mobile::registry()],
         runtime: None,
@@ -113,7 +113,9 @@ fn rows_know_whether_they_are_last() {
             _ => None,
         })
     };
-    let rounded = |c: [Option<f32>; 4]| c.iter().map(|r| r.is_some()).collect::<Vec<_>>();
+    let rounded = |c: nsh_core::Corners<Option<nsh_core::Points>>| {
+        c.to_array().iter().map(|r| r.is_some()).collect::<Vec<_>>()
+    };
     let wrapper = |name| parent_of(&first, text_ids(&first, name).unwrap()).unwrap();
     let (a, b, c) = (wrapper("A"), wrapper("B"), wrapper("C"));
     // The first row rounds its top corners, the last its bottom ones.
@@ -809,9 +811,11 @@ fn measure_reports_frames_and_page_positions() {
             .any(|t| t == "at 20,520 350x30 page 20,587 null"),
         "{shown:?}"
     );
-    engine
-        .control()
-        .scroll(scroll.expect("scroll view"), 0.0, 400.0, 0);
+    engine.control().scroll(
+        scroll.expect("scroll view"),
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(400.0)),
+        0,
+    );
     let after = until(&rx, |b| shows(b, "scrolled 187"));
     assert!(after.iter().any(|b| shows(b, "scrolled 187")));
 }
@@ -1084,7 +1088,7 @@ fn components_place_the_apps_children_and_rows() {
     };
     let top_border = |id| {
         first.items.iter().any(|i| {
-            matches!(i, MountItem::ViewStyle { id: v, style } if *v == id && style.borders.widths[0] == 1.0)
+            matches!(i, MountItem::ViewStyle { id: v, style } if *v == id && style.borders.widths.top.0 == 1.0)
         })
     };
     let a = parent_of(text_ids(&first, "First").expect("First")).unwrap();

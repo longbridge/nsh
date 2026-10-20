@@ -29,7 +29,7 @@ use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*};
 use nsh_core::{
     Bounds, BoxShadow, Color, KeyframeAnimation, Keyframes, LayoutAnimation, LayoutCurve,
     LayoutProperty, LayoutTransition, Points, Transform, TransitionProps, ViewKind, ViewStyle,
-    geometry::{Point, Size},
+    geometry::{Corners, Edges, Point, Size},
 };
 
 use crate::{surface::Surface, view::NshView};
@@ -475,10 +475,10 @@ fn lerp_style(
     if props.has(TransitionProps::SHADOW) {
         let (a, b) = (&from.shadow, &to.shadow);
         out.shadow.color = lerp_color(a.color, b.color, t);
-        out.shadow.offset_x = lerp(a.offset_x, b.offset_x, t);
-        out.shadow.offset_y = lerp(a.offset_y, b.offset_y, t);
+        out.shadow.offset_x = Points(lerp(a.offset_x.0, b.offset_x.0, t));
+        out.shadow.offset_y = Points(lerp(a.offset_y.0, b.offset_y.0, t));
         out.shadow.opacity = lerp(a.opacity, b.opacity, t).clamp(0.0, 1.0);
-        out.shadow.radius = lerp(a.radius, b.radius, t).max(0.0);
+        out.shadow.radius = Points(lerp(a.radius.0, b.radius.0, t).max(0.0));
         let (sa, sb) = (box_shadows(from), box_shadows(to));
         if sa != sb
             && let Some(shadows) = lerp_box_shadows(sa, sb, t)
@@ -489,21 +489,23 @@ fn lerp_style(
         }
     }
     if props.has(TransitionProps::SHAPE) {
-        out.border_radius = lerp(from.border_radius, to.border_radius, t).max(0.0);
-        out.corner_radius =
-            std::array::from_fn(|i| match (from.corner_radius[i], to.corner_radius[i]) {
-                (None, None) => None,
-                (a, b) => Some(
-                    lerp(
-                        a.unwrap_or(from.border_radius),
-                        b.unwrap_or(to.border_radius),
-                        t,
-                    )
-                    .max(0.0),
-                ),
-            });
-        out.borders.widths =
-            std::array::from_fn(|i| lerp(from.borders.widths[i], to.borders.widths[i], t).max(0.0));
+        out.border_radius = Points(lerp(from.border_radius.0, to.border_radius.0, t).max(0.0));
+        let (fc, tc) = (from.corner_radius.to_array(), to.corner_radius.to_array());
+        out.corner_radius = Corners::from(std::array::from_fn(|i| match (fc[i], tc[i]) {
+            (None, None) => None,
+            (a, b) => Some(Points(
+                lerp(
+                    a.unwrap_or(from.border_radius).0,
+                    b.unwrap_or(to.border_radius).0,
+                    t,
+                )
+                .max(0.0),
+            )),
+        }));
+        let (fw, tw) = (from.borders.widths.to_array(), to.borders.widths.to_array());
+        out.borders.widths = Edges::from(std::array::from_fn(|i| {
+            Points(lerp(fw[i].0, tw[i].0, t).max(0.0))
+        }));
         out.outline.width = Points(lerp(from.outline.width.0, to.outline.width.0, t).max(0.0));
     }
 }
@@ -967,7 +969,7 @@ mod tests {
         let to = ViewStyle {
             opacity: 1.0,
             background_color: Color::rgba(255, 255, 255, 255),
-            border_radius: 10.0,
+            border_radius: Points(10.0),
             ..ViewStyle::default()
         };
         let mut out = to.clone();
@@ -980,7 +982,7 @@ mod tests {
         );
         assert_eq!(out.opacity, 0.5);
         assert_eq!(out.background_color, to.background_color);
-        assert_eq!(out.border_radius, 10.0);
+        assert_eq!(out.border_radius, Points(10.0));
         assert!(differs(
             &from,
             &to,

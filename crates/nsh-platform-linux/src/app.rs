@@ -10,6 +10,7 @@ use std::{
 
 use gtk4::{self as gtk, glib, prelude::*};
 use nsh_core::{
+    Points,
     geometry::px,
     platform::{Appearance, Locale},
 };
@@ -212,7 +213,10 @@ impl AppView {
             network: Some(crate::net::network()),
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
-            header_heights: crate::navigation::HEADER_HEIGHTS,
+            header_heights: (
+                Points(crate::navigation::HEADER_HEIGHTS.0),
+                Points(crate::navigation::HEADER_HEIGHTS.1),
+            ),
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,

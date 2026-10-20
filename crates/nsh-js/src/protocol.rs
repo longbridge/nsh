@@ -9,7 +9,7 @@ use nsh_animation::{
 use nsh_core::{
     Color, Command, EventKind, LayoutAnimation, NodeId, Op, Prop, Style, StyleDecl, StyleError,
     StylePatch, StyleValue, TransformKind,
-    geometry::{Percentage, Points, point},
+    geometry::{Percentage, Points, point, px},
     js::{
         host::{HostCx, HostInput, HostList, HostProps, HostValue},
         protocol::*,
@@ -458,9 +458,9 @@ fn decode_style<'js>(
         }
         if key == "textShadowOffset" {
             let offset = match value.as_object() {
-                Some(o) => Some((
-                    o.get::<_, Option<f64>>("width")?.unwrap_or(0.0) as f32,
-                    o.get::<_, Option<f64>>("height")?.unwrap_or(0.0) as f32,
+                Some(o) => Some(point(
+                    px(o.get::<_, Option<f64>>("width")?.unwrap_or(0.0) as f32),
+                    px(o.get::<_, Option<f64>>("height")?.unwrap_or(0.0) as f32),
                 )),
                 None => None,
             };
@@ -470,9 +470,9 @@ fn decode_style<'js>(
         if key == "shadowOffset" {
             // `{ width, height }`; null / undefined restores the default.
             let offset = match value.as_object() {
-                Some(o) => Some((
-                    o.get::<_, Option<f64>>("width")?.unwrap_or(0.0) as f32,
-                    o.get::<_, Option<f64>>("height")?.unwrap_or(0.0) as f32,
+                Some(o) => Some(point(
+                    px(o.get::<_, Option<f64>>("width")?.unwrap_or(0.0) as f32),
+                    px(o.get::<_, Option<f64>>("height")?.unwrap_or(0.0) as f32),
                 )),
                 None if value.is_null() || value.is_undefined() => None,
                 None => {

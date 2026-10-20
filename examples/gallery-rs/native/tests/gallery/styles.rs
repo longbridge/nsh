@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use nsh_core::{BorderStyle, EventKind, EventPayload, MountItem, TransformKind, ViewStyle};
+use nsh_core::{
+    BorderStyle, EventKind, EventPayload, MountItem, TransformKind, ViewStyle, geometry::px,
+};
 
 #[test]
 fn styles_render_their_cards() {
@@ -70,13 +72,15 @@ fn styles_send_the_cards_styles() {
     // "Mixed radii": three corners of their own; "Offset shadow": a
     // colored shadow, offset.
     assert!(any(
-        &|s| s.corner_radius[..3] == [Some(44.0), Some(6.0), Some(28.0)]
+        &|s| s.corner_radius.to_array()[..3] == [Some(px(44.0)), Some(px(6.0)), Some(px(28.0))]
     ));
     assert!(any(&|s| s.shadow.opacity == 0.45
-        && s.shadow.radius == 10.0
-        && (s.shadow.offset_x, s.shadow.offset_y) == (4.0, 8.0)));
+        && s.shadow.radius == px(10.0)
+        && (s.shadow.offset_x, s.shadow.offset_y) == (px(4.0), px(8.0))));
     // Per-side borders.
-    assert!(any(&|s| s.borders.widths == [6.0, 2.0, 4.0, 1.0]));
+    assert!(any(
+        &|s| s.borders.widths.to_array() == [6.0, 2.0, 4.0, 1.0].map(px)
+    ));
     assert!(any(&|s| s.borders.style == BorderStyle::Dashed));
     assert!(any(&|s| s.borders.style == BorderStyle::Dotted));
     assert!(any(&|s| s.continuous_corners));
@@ -88,7 +92,7 @@ fn styles_send_the_cards_styles() {
     ));
     assert!(any(&|s| has(s, TransformKind::SkewX)));
     assert!(any(
-        &|s| s.transform_origin.x == nsh_core::OriginLen::Fraction(0.0)
+        &|s| s.transform_origin.x == nsh_core::geometry::relative(0.0)
     ));
 }
 

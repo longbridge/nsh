@@ -344,10 +344,10 @@ pub(crate) fn draw_content_shadow(cx: &mut DrawCx<'_>, view: &NshView, world: Ma
         let s = state.shadow();
         if s.is_visible() && !has_fill(&state) {
             specs.push(ShadowSpec {
-                dx: s.offset_x,
-                dy: s.offset_y,
+                dx: s.offset_x.0,
+                dy: s.offset_y.0,
                 spread: 0.0,
-                sigma: s.radius.max(0.0),
+                sigma: s.radius.0.max(0.0),
                 color: faded(s.color, s.opacity),
             });
         }
@@ -445,10 +445,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
     let s = state.shadow();
     if s.is_visible() && has_fill(state) {
         let spec = ShadowSpec {
-            dx: s.offset_x,
-            dy: s.offset_y,
+            dx: s.offset_x.0,
+            dy: s.offset_y.0,
             spread: 0.0,
-            sigma: s.radius.max(0.0),
+            sigma: s.radius.0.max(0.0),
             color: faded(s.color, s.opacity),
         };
         outer_shadow(cx, w, h, radii, &spec);
@@ -477,7 +477,7 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
         for g in e.background_images.iter().rev() {
             gradient::draw(cx, g, w, h, radii);
         }
-        let widths = state.style.borders.widths;
+        let widths = state.style.borders.widths.to_array().map(|w| w.0);
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 let spec = ShadowSpec {
@@ -522,7 +522,8 @@ fn pixels(cx: &DrawCx<'_>) -> f32 {
 
 /// The color all drawn sides share, if they do.
 fn shared_color(b: &Borders) -> Option<Color> {
-    let mut drawn = (0..4).filter(|&i| b.widths[i] > 0.0);
+    let widths = b.widths.to_array().map(|w| w.0);
+    let mut drawn = (0..4).filter(|&i| widths[i] > 0.0);
     let first = drawn.next().map_or(Color::TRANSPARENT, |i| b.colors[i]);
     drawn.all(|i| b.colors[i] == first).then_some(first)
 }
@@ -530,7 +531,8 @@ fn shared_color(b: &Borders) -> Option<Color> {
 /// The borders of a `w` x `h` box with `radii`.
 fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4]) {
     let shared = shared_color(b);
-    let uniform_width = b.widths.iter().all(|&x| x == b.widths[0]);
+    let widths = b.widths.to_array().map(|w| w.0);
+    let uniform_width = widths.iter().all(|&x| x == widths[0]);
     let quad_style = match b.style {
         BorderStyle::Solid => Some(gpui::BorderStyle::Solid),
         // GPUI's dashes follow one width around the box.
@@ -545,7 +547,7 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
             bounds,
             corners(radii, k),
             gpui::transparent_black(),
-            edges(b.widths, k),
+            edges(widths, k),
             cx.color(color),
             style,
         );
@@ -553,9 +555,9 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
         return;
     }
     let px_per = pixels(cx);
-    let quads = side_quads(w, h, b.widths);
+    let quads = side_quads(w, h, widths);
     if b.style == BorderStyle::Solid {
-        let ring = shape::ring(w, h, radii, b.widths, px_per);
+        let ring = shape::ring(w, h, radii, widths, px_per);
         if let Some(color) = shared {
             cx.fill_contours(&ring, color);
             return;
@@ -564,7 +566,7 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
         // triangles (cutting distributes over the even-odd fill).
         for (side, quad) in quads.iter().enumerate() {
             let c = b.colors[side];
-            if b.widths[side] <= 0.0 || c.is_transparent() {
+            if widths[side] <= 0.0 || c.is_transparent() {
                 continue;
             }
             let mut contours = Vec::with_capacity(4);
@@ -579,25 +581,25 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
     }
     // Dashes and dots along the line through the middle of the borders,
     // each in the color and width of the side it lies on.
-    let half = b.widths.map(|x| x / 2.0);
+    let half = widths.map(|x| x / 2.0);
     let (line_rect, line_corners) = padding_box(w, h, radii, half);
     let line = rounded(line_rect, line_corners, px_per);
-    let widest = b.widths.iter().copied().fold(0.0, f32::max);
+    let widest = widths.iter().copied().fold(0.0, f32::max);
     let mut by_side: [Vec<Vec<Pt>>; 4] = Default::default();
     if b.style == BorderStyle::Dotted {
         for c in shape::dots(&line, 2.0 * widest) {
             let side = shape::side_of(&quads, c);
-            by_side[side].push(shape::circle(c, b.widths[side] / 2.0, px_per));
+            by_side[side].push(shape::circle(c, widths[side] / 2.0, px_per));
         }
     } else {
         for dash in shape::dashes(&line, 3.0 * widest, 3.0 * widest) {
             let mid = dash[dash.len() / 2];
             let side = shape::side_of(&quads, mid);
-            by_side[side].push(shape::thick(&dash, b.widths[side]));
+            by_side[side].push(shape::thick(&dash, widths[side]));
         }
     }
     for (side, contours) in by_side.iter().enumerate() {
-        if b.widths[side] > 0.0 && !contours.is_empty() {
+        if widths[side] > 0.0 && !contours.is_empty() {
             cx.fill_contours(contours, b.colors[side]);
         }
     }
@@ -758,7 +760,7 @@ mod tests {
     #[test]
     fn shared_border_colors() {
         let mut b = Borders {
-            widths: [1.0, 2.0, 0.0, 1.0],
+            widths: [1.0, 2.0, 0.0, 1.0].map(nsh_core::Points).into(),
             colors: [Color::BLACK; 4],
             style: BorderStyle::Solid,
         };

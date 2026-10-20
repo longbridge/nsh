@@ -424,19 +424,19 @@ fn is_sheet(config: &ModalConfig) -> bool {
 fn sheet_style(t: &Theme) -> ViewStyle {
     ViewStyle {
         background_color: t.sheet,
-        border_radius: SHEET_RADIUS,
+        border_radius: Points(SHEET_RADIUS),
         overflow_hidden: true,
         borders: nsh_core::Borders {
-            widths: [1.0; 4],
+            widths: nsh_core::Edges::all(Points(1.0)),
             colors: [t.sheet_edge; 4],
             ..nsh_core::Borders::NONE
         },
         shadow: Shadow {
             color: Color::BLACK,
-            offset_x: 0.0,
-            offset_y: 8.0,
+            offset_x: Points(0.0),
+            offset_y: Points(8.0),
             opacity: 0.35,
-            radius: 24.0,
+            radius: Points(24.0),
         },
         ..ViewStyle::default()
     }
@@ -696,7 +696,7 @@ impl ScreenNav {
         let header = measured_header(&self.config);
         if self.header_reported.replace(header) != Some(header) {
             let id = self.view.id();
-            surface.control(|c| c.set_screen_header(id, header));
+            surface.control(|c| c.set_screen_header(id, header.map(Points)));
         }
         let f = stack.state().frame;
         let insets = content_insets(&self.config);
@@ -1558,7 +1558,7 @@ impl Nav {
             match &style {
                 Some(style) => **current != *style,
                 // Back from a sheet: the modal itself has no style.
-                None => current.overflow_hidden && current.border_radius == SHEET_RADIUS,
+                None => current.overflow_hidden && current.border_radius == Points(SHEET_RADIUS),
             }
         };
         if restyle {

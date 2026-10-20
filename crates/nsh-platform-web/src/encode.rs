@@ -14,9 +14,9 @@ use std::{cell::RefCell, fmt::Write as _};
 use nsh_core::{
     BorderStyle, Color, Command, EventKind, Filter, Gradient, GradientKind, GradientSize,
     ImageSource, InputConfig, Keyframes, LayoutCurve, LayoutTransition, MountItem, NativeProps,
-    OriginLen, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind,
-    TransitionProps, ViewKind, ViewProps, ViewStyle, WebSource,
-    geometry::{DefiniteLength, REM_SIZE, Radians, Size},
+    Points, ResizeMode, ScreenAnimation, ScrollBehavior, Transform, TransformKind, TransitionProps,
+    ViewKind, ViewProps, ViewStyle, WebSource,
+    geometry::{DefiniteLength, REM_SIZE, Radians, Size, relative},
     ui::PropEnum,
 };
 use rustc_hash::FxHashMap;
@@ -319,10 +319,10 @@ pub(crate) fn css_transform(t: &Transform, value: impl Fn(usize) -> Option<f32>)
     out
 }
 
-fn origin(o: OriginLen) -> String {
+fn origin(o: DefiniteLength) -> String {
     match o {
-        OriginLen::Px(v) => format!("{v}px"),
-        OriginLen::Fraction(f) => format!("{}%", f * 100.0),
+        DefiniteLength::Absolute(v) => format!("{}px", v.to_points(REM_SIZE).0),
+        DefiniteLength::Fraction(f) => format!("{}%", f.0 * 100.0),
     }
 }
 
@@ -434,7 +434,10 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
     if !s.background_color.is_transparent() {
         let _ = write!(css, "background-color:{};", css_color(s.background_color));
     }
-    let radii: [f32; 4] = std::array::from_fn(|i| s.corner_radius[i].unwrap_or(s.border_radius));
+    let radii: [f32; 4] = s
+        .corner_radius
+        .to_array()
+        .map(|r| r.unwrap_or(s.border_radius).0);
     let radius = if radii.iter().any(|&r| r > 0.0) {
         format!(
             "border-radius:{}px {}px {}px {}px;",
@@ -460,9 +463,9 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
     if s.shadow.opacity > 0.0 && !s.shadow.color.is_transparent() {
         shadows.push(format!(
             "{}px {}px {}px {}",
-            s.shadow.offset_x,
-            s.shadow.offset_y,
-            s.shadow.radius,
+            s.shadow.offset_x.0,
+            s.shadow.offset_y.0,
+            s.shadow.radius.0,
             css_color(with_alpha(s.shadow.color, s.shadow.opacity))
         ));
     }
@@ -501,7 +504,7 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         );
     }
     let o = s.transform_origin;
-    if o.x != OriginLen::Fraction(0.5) || o.y != OriginLen::Fraction(0.5) {
+    if o.x != relative(0.5) || o.y != relative(0.5) {
         let _ = write!(css, "transform-origin:{} {};", origin(o.x), origin(o.y));
     }
     if s.backface_hidden {
@@ -587,11 +590,12 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         );
     }
     let b = &s.borders;
-    let border = if b.widths.iter().any(|&w| w > 0.0) {
+    let border = if b.widths.any(|&w| w > Points::ZERO) {
         let style = border_style(b.style);
         let sides = ["top", "right", "bottom", "left"];
         let mut out = String::new();
-        for ((side, width), color) in sides.iter().zip(b.widths).zip(b.colors) {
+        for ((side, width), color) in sides.iter().zip(b.widths.to_array()).zip(b.colors) {
+            let width = width.0;
             let _ = write!(
                 out,
                 "border-{side}-width:{width}px;border-{side}-style:{style};border-{side}-color:{};",
@@ -701,9 +705,9 @@ fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextS
         let _ = write!(
             css,
             "text-shadow:{}px {}px {}px {};",
-            s.offset_x,
-            s.offset_y,
-            s.radius,
+            s.offset_x.0,
+            s.offset_y.0,
+            s.radius.0,
             css_color(s.color)
         );
     }

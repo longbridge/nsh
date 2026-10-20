@@ -295,8 +295,8 @@ define_class!(
                 // The context is flipped: a positive offset must still go down.
                 CGContext::set_shadow_with_color(
                     c,
-                    CGSize::new(shadow.offset_x as CGFloat, -shadow.offset_y as CGFloat),
-                    shadow.radius as CGFloat,
+                    CGSize::new(shadow.offset_x.0 as CGFloat, -shadow.offset_y.0 as CGFloat),
+                    shadow.radius.0 as CGFloat,
                     // SAFETY: a plain getter.
                     Some(&*unsafe { color.CGColor() }),
                 );

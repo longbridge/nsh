@@ -349,6 +349,10 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
+fn lerp_pt(a: Points, b: Points, t: f32) -> Points {
+    Points(lerp(a.0, b.0, t))
+}
+
 /// Interpolates colors in premultiplied RGBA, as CSS does, so that
 /// transparent ends do not pass through black.
 fn lerp_color(a: Color, b: Color, t: f32) -> Color {
@@ -486,10 +490,10 @@ fn lerp_style(
     if props.has(TransitionProps::SHADOW) {
         let (a, b) = (&from.shadow, &to.shadow);
         out.shadow.color = lerp_color(a.color, b.color, t);
-        out.shadow.offset_x = lerp(a.offset_x, b.offset_x, t);
-        out.shadow.offset_y = lerp(a.offset_y, b.offset_y, t);
+        out.shadow.offset_x = lerp_pt(a.offset_x, b.offset_x, t);
+        out.shadow.offset_y = lerp_pt(a.offset_y, b.offset_y, t);
         out.shadow.opacity = lerp(a.opacity, b.opacity, t).clamp(0.0, 1.0);
-        out.shadow.radius = lerp(a.radius, b.radius, t).max(0.0);
+        out.shadow.radius = lerp_pt(a.radius, b.radius, t).max(Points::ZERO);
         let (sa, sb) = (box_shadows(from), box_shadows(to));
         if sa != sb
             && let Some(shadows) = lerp_box_shadows(sa, sb, t)
@@ -500,21 +504,23 @@ fn lerp_style(
         }
     }
     if props.has(TransitionProps::SHAPE) {
-        out.border_radius = lerp(from.border_radius, to.border_radius, t).max(0.0);
-        out.corner_radius =
-            std::array::from_fn(|i| match (from.corner_radius[i], to.corner_radius[i]) {
-                (None, None) => None,
-                (a, b) => Some(
-                    lerp(
-                        a.unwrap_or(from.border_radius),
-                        b.unwrap_or(to.border_radius),
-                        t,
-                    )
-                    .max(0.0),
-                ),
-            });
+        out.border_radius = lerp_pt(from.border_radius, to.border_radius, t).max(Points::ZERO);
+        let (fc, tc) = (from.corner_radius.to_array(), to.corner_radius.to_array());
+        out.corner_radius = std::array::from_fn(|i| match (fc[i], tc[i]) {
+            (None, None) => None,
+            (a, b) => Some(
+                lerp_pt(
+                    a.unwrap_or(from.border_radius),
+                    b.unwrap_or(to.border_radius),
+                    t,
+                )
+                .max(Points::ZERO),
+            ),
+        })
+        .into();
+        let (fw, tw) = (from.borders.widths.to_array(), to.borders.widths.to_array());
         out.borders.widths =
-            std::array::from_fn(|i| lerp(from.borders.widths[i], to.borders.widths[i], t).max(0.0));
+            std::array::from_fn(|i| lerp_pt(fw[i], tw[i], t).max(Points::ZERO)).into();
         out.outline.width = Points(lerp(from.outline.width.0, to.outline.width.0, t).max(0.0));
     }
 }
@@ -977,7 +983,7 @@ mod tests {
         let to = ViewStyle {
             opacity: 1.0,
             background_color: Color::rgba(255, 255, 255, 255),
-            border_radius: 10.0,
+            border_radius: Points(10.0),
             ..ViewStyle::default()
         };
         let mut out = to.clone();
@@ -990,7 +996,7 @@ mod tests {
         );
         assert_eq!(out.opacity, 0.5);
         assert_eq!(out.background_color, to.background_color);
-        assert_eq!(out.border_radius, 10.0);
+        assert_eq!(out.border_radius, Points(10.0));
         assert!(differs(
             &from,
             &to,

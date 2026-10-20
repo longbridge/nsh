@@ -11,7 +11,10 @@ use crate::{
         BlendMode, BoxShadow, Cursor, Effects, Filter, Gradient, KeyframeAnimation, Keyframes,
         Outline, Transition, TransitionProps,
     },
-    geometry::{Points, px},
+    geometry::{
+        AbsoluteLength, Corners, DefiniteLength, Edges, Percentage, Point, Points, REM_SIZE, Size,
+        percentage, point, px,
+    },
     grid,
     transform::{Transform, TransformKind},
     ui::PropEnum,
@@ -191,17 +194,18 @@ pub enum EllipsizeMode {
     Clip,
 }
 
-/// Corner radii in points, clockwise from the top left.
+/// The corner radii of a view, clockwise from the top left: a
+/// [`Corners<Points>`] with the curve they are drawn with.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CornerRadii {
     /// Top left.
-    pub top_left: f32,
+    pub top_left: Points,
     /// Top right.
-    pub top_right: f32,
+    pub top_right: Points,
     /// Bottom right.
-    pub bottom_right: f32,
+    pub bottom_right: Points,
     /// Bottom left.
-    pub bottom_left: f32,
+    pub bottom_left: Points,
     /// `borderCurve: "continuous"`: corners whose curvature grows from the
     /// edges (iOS app icons) instead of circular arcs; see [`crate::shape`].
     pub continuous: bool,
@@ -209,7 +213,7 @@ pub struct CornerRadii {
 
 impl CornerRadii {
     /// The same circular radius on every corner.
-    pub const fn all(r: f32) -> Self {
+    pub const fn all(r: Points) -> Self {
         Self {
             top_left: r,
             top_right: r,
@@ -219,9 +223,31 @@ impl CornerRadii {
         }
     }
 
+    /// Circular corners with these radii.
+    pub const fn circular(corners: Corners<Points>) -> Self {
+        Self {
+            top_left: corners.top_left,
+            top_right: corners.top_right,
+            bottom_right: corners.bottom_right,
+            bottom_left: corners.bottom_left,
+            continuous: false,
+        }
+    }
+
+    /// The radii, without the curve.
+    #[inline]
+    pub const fn corners(self) -> Corners<Points> {
+        Corners {
+            top_left: self.top_left,
+            top_right: self.top_right,
+            bottom_right: self.bottom_right,
+            bottom_left: self.bottom_left,
+        }
+    }
+
     /// `[top_left, top_right, bottom_right, bottom_left]`.
     #[inline]
-    pub const fn to_array(self) -> [f32; 4] {
+    pub const fn to_array(self) -> [Points; 4] {
         [
             self.top_left,
             self.top_right,
@@ -233,17 +259,17 @@ impl CornerRadii {
     /// True if no corner is rounded.
     #[inline]
     pub fn is_zero(&self) -> bool {
-        self.to_array().iter().all(|&r| r <= 0.0)
+        self.to_array().iter().all(|&r| r <= Points::ZERO)
     }
 
     /// The radius shared by every rounded corner, if they all share one.
     /// Platforms render such shapes with a single radius plus a mask of
     /// the rounded corners (no paths).
-    pub fn shared(&self) -> Option<f32> {
-        let mut shared = 0.0;
+    pub fn shared(&self) -> Option<Points> {
+        let mut shared = Points::ZERO;
         for r in self.to_array() {
-            if r > 0.0 {
-                if shared > 0.0 && r != shared {
+            if r > Points::ZERO {
+                if shared > Points::ZERO && r != shared {
                     return None;
                 }
                 shared = r;
@@ -252,10 +278,13 @@ impl CornerRadii {
         Some(shared)
     }
 
-    /// Scales the radii down so adjacent corners do not overlap on a
-    /// `width` x `height` box (CSS rule).
-    pub fn fit(self, width: f32, height: f32) -> Self {
-        let ratio = |side: f32, a: f32, b: f32| if a + b > side { side / (a + b) } else { 1.0 };
+    /// Scales the radii down so adjacent corners do not overlap on a box
+    /// of `size` (CSS rule).
+    pub fn fit(self, size: Size<Points>) -> Self {
+        let ratio = |side: Points, a: Points, b: Points| {
+            if a + b > side { side / (a + b) } else { 1.0 }
+        };
+        let (width, height) = (size.width, size.height);
         let f = ratio(width, self.top_left, self.top_right)
             .min(ratio(width, self.bottom_left, self.bottom_right))
             .min(ratio(height, self.top_left, self.bottom_left))
@@ -273,16 +302,22 @@ impl CornerRadii {
         }
     }
 
-    /// The radii of a curve `d` points inside this one (e.g. the inner edge
-    /// of a border).
-    pub fn inset(self, d: f32) -> Self {
+    /// The radii of a curve `d` inside this one (e.g. the inner edge of a
+    /// border).
+    pub fn inset(self, d: Points) -> Self {
         Self {
-            top_left: (self.top_left - d).max(0.0),
-            top_right: (self.top_right - d).max(0.0),
-            bottom_right: (self.bottom_right - d).max(0.0),
-            bottom_left: (self.bottom_left - d).max(0.0),
+            top_left: (self.top_left - d).max(Points::ZERO),
+            top_right: (self.top_right - d).max(Points::ZERO),
+            bottom_right: (self.bottom_right - d).max(Points::ZERO),
+            bottom_left: (self.bottom_left - d).max(Points::ZERO),
             ..self
         }
+    }
+}
+
+impl From<CornerRadii> for Corners<Points> {
+    fn from(radii: CornerRadii) -> Self {
+        radii.corners()
     }
 }
 
@@ -291,24 +326,24 @@ impl CornerRadii {
 pub struct Shadow {
     /// Shadow color; its alpha is multiplied by `opacity`.
     pub color: Color,
-    /// Horizontal offset in points.
-    pub offset_x: f32,
-    /// Vertical offset in points.
-    pub offset_y: f32,
+    /// Horizontal offset.
+    pub offset_x: Points,
+    /// Vertical offset.
+    pub offset_y: Points,
     /// Opacity in `0.0..=1.0`; 0 (the default) means no shadow.
     pub opacity: f32,
-    /// Blur radius in points.
-    pub radius: f32,
+    /// Blur radius.
+    pub radius: Points,
 }
 
 impl Shadow {
     /// React Native's defaults: black, offset `(0, -3)`, radius 3, opacity 0.
     pub const DEFAULT: Shadow = Shadow {
         color: Color::BLACK,
-        offset_x: 0.0,
-        offset_y: -3.0,
+        offset_x: Points(0.0),
+        offset_y: Points(-3.0),
         opacity: 0.0,
-        radius: 3.0,
+        radius: Points(3.0),
     };
 
     /// True if the shadow draws anything.
@@ -339,8 +374,8 @@ pub enum BorderStyle {
 /// Border widths and colors, per side.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Borders {
-    /// Widths in points: top, right, bottom, left.
-    pub widths: [f32; 4],
+    /// Widths.
+    pub widths: Edges<Points>,
     /// Colors: top, right, bottom, left.
     pub colors: [Color; 4],
     /// Line style.
@@ -350,22 +385,48 @@ pub struct Borders {
 impl Borders {
     /// No border.
     pub const NONE: Borders = Borders {
-        widths: [0.0; 4],
+        widths: Edges {
+            top: Points::ZERO,
+            right: Points::ZERO,
+            bottom: Points::ZERO,
+            left: Points::ZERO,
+        },
         colors: [Color::BLACK; 4],
         style: BorderStyle::Solid,
     };
 
     /// True if some side draws something.
     pub fn is_visible(&self) -> bool {
-        (0..4).any(|i| self.widths[i] > 0.0 && !self.colors[i].is_transparent())
+        let widths = self.widths.to_array();
+        (0..4).any(|i| widths[i] > Points::ZERO && !self.colors[i].is_transparent())
     }
 
     /// `(width, color)` when every side is the same.
-    pub fn uniform(&self) -> Option<(f32, Color)> {
-        let [w, ..] = self.widths;
+    pub fn uniform(&self) -> Option<(Points, Color)> {
+        let widths = self.widths.to_array();
+        let [w, ..] = widths;
         let [c, ..] = self.colors;
-        (self.widths.iter().all(|&x| x == w) && self.colors.iter().all(|&x| x == c))
-            .then_some((w, c))
+        (widths.iter().all(|&x| x == w) && self.colors.iter().all(|&x| x == c)).then_some((w, c))
+    }
+
+    /// The width of side `side`: 0 top, 1 right, 2 bottom, 3 left (the
+    /// order of `colors`).
+    pub fn width(&self, side: usize) -> Points {
+        match side {
+            0 => self.widths.top,
+            1 => self.widths.right,
+            2 => self.widths.bottom,
+            _ => self.widths.left,
+        }
+    }
+
+    fn width_mut(&mut self, side: usize) -> &mut Points {
+        match side {
+            0 => &mut self.widths.top,
+            1 => &mut self.widths.right,
+            2 => &mut self.widths.bottom,
+            _ => &mut self.widths.left,
+        }
     }
 }
 
@@ -381,10 +442,9 @@ pub struct ViewStyle {
     /// Background fill.
     pub background_color: Color,
     /// `borderRadius`: the radius of corners without their own.
-    pub border_radius: f32,
-    /// `borderTopLeftRadius` etc., clockwise from the top left; they
-    /// override `border_radius`.
-    pub corner_radius: [Option<f32>; 4],
+    pub border_radius: Points,
+    /// `borderTopLeftRadius` etc.; they override `border_radius`.
+    pub corner_radius: Corners<Option<Points>>,
     /// `borderCurve: "continuous"`.
     pub continuous_corners: bool,
     /// Borders (their widths also affect layout).
@@ -399,9 +459,9 @@ pub struct ViewStyle {
     pub transform: Transform,
     /// `tintColor`: recolors an image's opaque pixels.
     pub tint_color: Option<Color>,
-    /// Android's material shadow (points): the node's `android={{ elevation }}`
-    /// prop, not a style.
-    pub elevation: f32,
+    /// Android's material shadow: the node's `android={{ elevation }}` prop,
+    /// not a style.
+    pub elevation: Points,
     /// `transformOrigin`: the point transforms act around.
     pub transform_origin: TransformOrigin,
     /// `backfaceVisibility: "hidden"`: invisible when turned away.
@@ -422,34 +482,15 @@ pub struct ViewStyle {
     pub animation: Option<KeyframeAnimation>,
 }
 
-/// A coordinate of [`TransformOrigin`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum OriginLen {
-    /// Points from the left / top edge.
-    Px(f32),
-    /// A fraction of the width / height.
-    Fraction(f32),
-}
-
-impl OriginLen {
-    /// The coordinate in a box `length` points long.
-    pub fn resolve(self, length: f32) -> f32 {
-        match self {
-            OriginLen::Px(v) => v,
-            OriginLen::Fraction(f) => f * length,
-        }
-    }
-}
-
 /// `transformOrigin`: the point transforms rotate and scale around.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransformOrigin {
-    /// Horizontal position.
-    pub x: OriginLen,
-    /// Vertical position.
-    pub y: OriginLen,
-    /// Depth in points.
-    pub z: f32,
+    /// Horizontal position: from the left edge, or a fraction of the width.
+    pub x: DefiniteLength,
+    /// Vertical position: from the top edge, or a fraction of the height.
+    pub y: DefiniteLength,
+    /// Depth.
+    pub z: Points,
 }
 
 impl Default for TransformOrigin {
@@ -461,16 +502,19 @@ impl Default for TransformOrigin {
 impl TransformOrigin {
     /// The center (the default).
     pub const CENTER: Self = Self {
-        x: OriginLen::Fraction(0.5),
-        y: OriginLen::Fraction(0.5),
-        z: 0.0,
+        x: DefiniteLength::Fraction(Percentage(0.5)),
+        y: DefiniteLength::Fraction(Percentage(0.5)),
+        z: Points::ZERO,
     };
 
-    /// Offset of the origin from the center of a `width` × `height` box.
-    pub fn offset(&self, width: f32, height: f32) -> (f32, f32, f32) {
+    /// Offset of the origin from the center of a box of `size`, in the
+    /// plane, and its depth.
+    pub fn offset(&self, size: Size<Points>) -> (Point<Points>, Points) {
+        let at = |len: DefiniteLength, side: Points| {
+            len.to_points(AbsoluteLength::Points(side), REM_SIZE) - side / 2.0
+        };
         (
-            self.x.resolve(width) - width / 2.0,
-            self.y.resolve(height) - height / 2.0,
+            point(at(self.x, size.width), at(self.y, size.height)),
             self.z,
         )
     }
@@ -483,30 +527,27 @@ impl TransformOrigin {
         if parts.is_empty() || parts.len() > 3 {
             return None;
         }
-        let len = |p: &str| -> Option<OriginLen> {
+        let fraction = |f: f32| DefiniteLength::Fraction(percentage(f));
+        let len = |p: &str| -> Option<DefiniteLength> {
             if let Some(pct) = p.strip_suffix('%') {
-                return pct
-                    .trim()
-                    .parse::<f32>()
-                    .ok()
-                    .map(|v| OriginLen::Fraction(v / 100.0));
+                return pct.trim().parse::<f32>().ok().map(|v| fraction(v / 100.0));
             }
             p.strip_suffix("px")
                 .unwrap_or(p)
                 .parse::<f32>()
                 .ok()
-                .map(OriginLen::Px)
+                .map(|v| px(v).into())
         };
         let mut x = None;
         let mut y = None;
         let mut free = Vec::new();
         for &p in parts.iter().take(2) {
             match p {
-                "left" => x = Some(OriginLen::Fraction(0.0)),
-                "right" => x = Some(OriginLen::Fraction(1.0)),
-                "top" => y = Some(OriginLen::Fraction(0.0)),
-                "bottom" => y = Some(OriginLen::Fraction(1.0)),
-                "center" => free.push(OriginLen::Fraction(0.5)),
+                "left" => x = Some(fraction(0.0)),
+                "right" => x = Some(fraction(1.0)),
+                "top" => y = Some(fraction(0.0)),
+                "bottom" => y = Some(fraction(1.0)),
+                "center" => free.push(fraction(0.5)),
                 p => free.push(len(p)?),
             }
         }
@@ -521,12 +562,12 @@ impl TransformOrigin {
             }
         }
         let z = match parts.get(2) {
-            Some(p) => p.strip_suffix("px").unwrap_or(p).parse::<f32>().ok()?,
-            None => 0.0,
+            Some(p) => px(p.strip_suffix("px").unwrap_or(p).parse::<f32>().ok()?),
+            None => Points::ZERO,
         };
         Some(Self {
-            x: x.unwrap_or(OriginLen::Fraction(0.5)),
-            y: y.unwrap_or(OriginLen::Fraction(0.5)),
+            x: x.unwrap_or(fraction(0.5)),
+            y: y.unwrap_or(fraction(0.5)),
             z,
         })
     }
@@ -604,15 +645,12 @@ impl ViewStyle {
     /// The radius of each corner (before fitting them to a size with
     /// [`CornerRadii::fit`]).
     pub fn radii(&self) -> CornerRadii {
-        let [tl, tr, br, bl] = self
+        let radii = self
             .corner_radius
-            .map(|r| r.unwrap_or(self.border_radius).max(0.0));
+            .map(|r| r.unwrap_or(self.border_radius).max(Points::ZERO));
         CornerRadii {
-            top_left: tl,
-            top_right: tr,
-            bottom_right: br,
-            bottom_left: bl,
             continuous: self.continuous_corners,
+            ..CornerRadii::circular(radii)
         }
     }
 }
@@ -621,8 +659,13 @@ impl Default for ViewStyle {
     fn default() -> Self {
         Self {
             background_color: Color::TRANSPARENT,
-            border_radius: 0.0,
-            corner_radius: [None; 4],
+            border_radius: Points::ZERO,
+            corner_radius: Corners {
+                top_left: None,
+                top_right: None,
+                bottom_right: None,
+                bottom_left: None,
+            },
             continuous_corners: false,
             borders: Borders::NONE,
             opacity: 1.0,
@@ -630,7 +673,7 @@ impl Default for ViewStyle {
             shadow: Shadow::DEFAULT,
             transform: Transform::IDENTITY,
             tint_color: None,
-            elevation: 0.0,
+            elevation: Points::ZERO,
             transform_origin: TransformOrigin::CENTER,
             backface_hidden: false,
             effects: None,
@@ -649,12 +692,12 @@ impl Default for ViewStyle {
 pub struct TextShadow {
     /// Color.
     pub color: Color,
-    /// Horizontal offset in points.
-    pub offset_x: f32,
-    /// Vertical offset in points.
-    pub offset_y: f32,
-    /// Blur radius in points.
-    pub radius: f32,
+    /// Horizontal offset.
+    pub offset_x: Points,
+    /// Vertical offset.
+    pub offset_y: Points,
+    /// Blur radius.
+    pub radius: Points,
 }
 
 /// Text properties as written on a node; unset values are inherited from
@@ -663,20 +706,20 @@ pub struct TextShadow {
 pub struct TextStyle {
     /// Foreground color.
     pub color: Option<Color>,
-    /// Font size in points.
-    pub font_size: Option<f32>,
+    /// Font size.
+    pub font_size: Option<Points>,
     /// Font weight, `100..=900`.
     pub font_weight: Option<u16>,
-    /// Line height in points.
-    pub line_height: Option<f32>,
+    /// Line height.
+    pub line_height: Option<Points>,
     /// Block alignment (only meaningful on a text block).
     pub text_align: Option<TextAlign>,
     /// Font family; `None` inherits (the system font at the root).
     pub font_family: Option<FontFamily>,
     /// Italic (`fontStyle`).
     pub italic: Option<bool>,
-    /// Extra space between characters in points.
-    pub letter_spacing: Option<f32>,
+    /// Extra space between characters.
+    pub letter_spacing: Option<Points>,
     /// Extra space between characters in ems of this node's font size
     /// (`"0.05em"`); overrides `letter_spacing` when set after it.
     pub letter_spacing_em: Option<f32>,
@@ -687,10 +730,10 @@ pub struct TextStyle {
     pub decoration: Option<TextDecoration>,
     /// `textDecorationStyle`.
     pub decoration_style: Option<DecorationStyle>,
-    /// `textDecorationThickness` in points.
-    pub decoration_thickness: Option<f32>,
-    /// `textUnderlineOffset` in points below the baseline.
-    pub underline_offset: Option<f32>,
+    /// `textDecorationThickness`.
+    pub decoration_thickness: Option<Points>,
+    /// `textUnderlineOffset`: below the baseline.
+    pub underline_offset: Option<Points>,
     /// Color of the decoration lines; the text color by default.
     pub decoration_color: Option<Color>,
     /// Case transform.
@@ -698,17 +741,17 @@ pub struct TextStyle {
     /// `textShadowColor`.
     pub shadow_color: Option<Color>,
     /// `textShadowOffset`.
-    pub shadow_offset: Option<(f32, f32)>,
+    pub shadow_offset: Option<Point<Points>>,
     /// `textShadowRadius`.
-    pub shadow_radius: Option<f32>,
+    pub shadow_radius: Option<Points>,
     /// `fontVariant`.
     pub font_variant: Option<FontVariant>,
     /// `writingDirection`: right to left (`Some(true)`), left to right, or
     /// the layout's direction (`None`, `auto`).
     pub writing_direction: Option<bool>,
-    /// `textAlignVertical`: where text shorter than its box sits, 0 top
-    /// (`auto`, `top`), 0.5 `center`, 1 `bottom`.
-    pub align_vertical: Option<f32>,
+    /// `textAlignVertical`: where text shorter than its box sits, 0% top
+    /// (`auto`, `top`), 50% `center`, 100% `bottom`.
+    pub align_vertical: Option<Percentage>,
 }
 
 impl TextStyle {
@@ -725,12 +768,12 @@ impl TextStyle {
         if color.is_transparent() {
             return None;
         }
-        let (offset_x, offset_y) = self.shadow_offset.unwrap_or((0.0, 0.0));
+        let offset = self.shadow_offset.unwrap_or_default();
         Some(TextShadow {
             color,
-            offset_x,
-            offset_y,
-            radius: self.shadow_radius.unwrap_or(0.0).max(0.0),
+            offset_x: offset.x,
+            offset_y: offset.y,
+            radius: self.shadow_radius.unwrap_or_default().max(Points::ZERO),
         })
     }
 }
@@ -818,12 +861,12 @@ pub struct Logical {
     /// `start`, `end`.
     pub inset: [Option<LengthPercentageAuto>; 2],
     /// `borderStartWidth`, `borderEndWidth`.
-    pub border_width: [Option<f32>; 2],
+    pub border_width: [Option<Points>; 2],
     /// `borderStartColor`, `borderEndColor`.
     pub border_color: [Option<Color>; 2],
     /// `borderTopStartRadius`, `borderTopEndRadius`,
     /// `borderBottomEndRadius`, `borderBottomStartRadius`.
-    pub radius: [Option<f32>; 4],
+    pub radius: [Option<Points>; 4],
 }
 
 impl Logical {
@@ -851,11 +894,11 @@ pub(crate) fn swap_sides(layout: &mut taffy::Style, view: &mut ViewStyle) {
     swap(&mut layout.padding);
     swap(&mut layout.inset);
     swap(&mut layout.border);
-    view.borders.widths.swap(1, 3);
+    let (w, r) = (&mut view.borders.widths, &mut view.corner_radius);
+    std::mem::swap(&mut w.left, &mut w.right);
     view.borders.colors.swap(1, 3);
-    // top left, top right, bottom right, bottom left
-    view.corner_radius.swap(0, 1);
-    view.corner_radius.swap(2, 3);
+    std::mem::swap(&mut r.top_left, &mut r.top_right);
+    std::mem::swap(&mut r.bottom_left, &mut r.bottom_right);
 }
 
 /// Gives an unset `alignContent` (taffy's `normal`) its meaning for the
@@ -902,18 +945,29 @@ pub(crate) fn apply_direction(
         }
         let side = if left { 3 } else { 1 };
         if let Some(w) = logical.border_width[i] {
-            set_side(&mut layout.border, left, LengthPercentage::length(w));
-            view.borders.widths[side] = w;
+            set_side(&mut layout.border, left, LengthPercentage::length(w.0));
+            *view.borders.width_mut(side) = w;
         }
         if let Some(c) = logical.border_color[i] {
             view.borders.colors[side] = c;
         }
     }
     // Corners: top start, top end, bottom end, bottom start.
-    let corners = if rtl { [1, 0, 3, 2] } else { [0, 1, 2, 3] };
-    for (i, &corner) in corners.iter().enumerate() {
-        if let Some(r) = logical.radius[i] {
-            view.corner_radius[corner] = Some(r);
+    let [top_start, top_end, bottom_end, bottom_start] = logical.radius;
+    let c = &mut view.corner_radius;
+    let (top_left, top_right, bottom_right, bottom_left) = if rtl {
+        (top_end, top_start, bottom_start, bottom_end)
+    } else {
+        (top_start, top_end, bottom_end, bottom_start)
+    };
+    for (corner, r) in [
+        (&mut c.top_left, top_left),
+        (&mut c.top_right, top_right),
+        (&mut c.bottom_right, bottom_right),
+        (&mut c.bottom_left, bottom_left),
+    ] {
+        if r.is_some() {
+            *corner = r;
         }
     }
 }
@@ -1224,9 +1278,9 @@ pub enum StyleDecl {
     /// (the amount is then the identity until it is bound).
     Transform(TransformKind, f32, Option<nsh_animation::NodeId>),
     /// `shadowOffset`; `None` restores the default.
-    ShadowOffset(Option<(f32, f32)>),
+    ShadowOffset(Option<Point<Points>>),
     /// `textShadowOffset`.
-    TextShadowOffset(Option<(f32, f32)>),
+    TextShadowOffset(Option<Point<Points>>),
     /// A property driven by a native animation node.
     Animated(nsh_animation::AnimationProp, nsh_animation::NodeId),
 }
@@ -1515,6 +1569,10 @@ fn opt_number(v: StyleValue<'_>) -> Result<Option<f32>, StyleError> {
     }
 }
 
+fn opt_points(v: StyleValue<'_>) -> Result<Option<Points>, StyleError> {
+    Ok(opt_number(v)?.map(px))
+}
+
 fn color(v: StyleValue<'_>) -> Result<Option<Color>, StyleError> {
     match v {
         StyleValue::Str(s) => Color::parse(s).map(Some).ok_or(StyleError::InvalidValue),
@@ -1766,14 +1824,15 @@ impl Style {
     }
 
     /// Sets `shadowOffset: { width, height }`; `None` restores the default.
-    pub fn set_shadow_offset(&mut self, offset: Option<(f32, f32)>) {
-        let (x, y) = offset.unwrap_or((Shadow::DEFAULT.offset_x, Shadow::DEFAULT.offset_y));
-        self.view.shadow.offset_x = x;
-        self.view.shadow.offset_y = y;
+    pub fn set_shadow_offset(&mut self, offset: Option<Point<Points>>) {
+        let offset =
+            offset.unwrap_or_else(|| point(Shadow::DEFAULT.offset_x, Shadow::DEFAULT.offset_y));
+        self.view.shadow.offset_x = offset.x;
+        self.view.shadow.offset_y = offset.y;
     }
 
     /// Sets `textShadowOffset: { width, height }`.
-    pub fn set_text_shadow_offset(&mut self, offset: Option<(f32, f32)>) {
+    pub fn set_text_shadow_offset(&mut self, offset: Option<Point<Points>>) {
         self.text.shadow_offset = offset;
     }
 
@@ -1785,7 +1844,7 @@ impl Style {
         let w = number(value, 0.0)?.max(0.0);
         let v = LengthPercentage::length(w);
         for &side in sides {
-            self.view.borders.widths[side] = w;
+            *self.view.borders.width_mut(side) = px(w);
             let b = &mut self.layout.border;
             match side {
                 0 => b.top = v,
@@ -1969,27 +2028,33 @@ impl Style {
             StyleKey::Start => self.logical.inset[0] = opt_lpa(value)?,
             StyleKey::End => self.logical.inset[1] = opt_lpa(value)?,
             StyleKey::BorderStartWidth => {
-                self.logical.border_width[0] = opt_number(value)?.map(|w| w.max(0.0))
+                self.logical.border_width[0] = opt_points(value)?.map(|w| w.max(Points::ZERO))
             }
             StyleKey::BorderEndWidth => {
-                self.logical.border_width[1] = opt_number(value)?.map(|w| w.max(0.0))
+                self.logical.border_width[1] = opt_points(value)?.map(|w| w.max(Points::ZERO))
             }
             StyleKey::BorderStartColor => self.logical.border_color[0] = color(value)?,
             StyleKey::BorderEndColor => self.logical.border_color[1] = color(value)?,
-            StyleKey::BorderTopStartRadius => self.logical.radius[0] = opt_number(value)?,
-            StyleKey::BorderTopEndRadius => self.logical.radius[1] = opt_number(value)?,
-            StyleKey::BorderBottomEndRadius => self.logical.radius[2] = opt_number(value)?,
-            StyleKey::BorderBottomStartRadius => self.logical.radius[3] = opt_number(value)?,
+            StyleKey::BorderTopStartRadius => self.logical.radius[0] = opt_points(value)?,
+            StyleKey::BorderTopEndRadius => self.logical.radius[1] = opt_points(value)?,
+            StyleKey::BorderBottomEndRadius => self.logical.radius[2] = opt_points(value)?,
+            StyleKey::BorderBottomStartRadius => self.logical.radius[3] = opt_points(value)?,
 
             // View
             StyleKey::BackgroundColor => {
                 self.view.background_color = color(value)?.unwrap_or(Color::TRANSPARENT)
             }
-            StyleKey::BorderRadius => self.view.border_radius = number(value, 0.0)?,
-            StyleKey::BorderTopLeftRadius => self.view.corner_radius[0] = opt_number(value)?,
-            StyleKey::BorderTopRightRadius => self.view.corner_radius[1] = opt_number(value)?,
-            StyleKey::BorderBottomRightRadius => self.view.corner_radius[2] = opt_number(value)?,
-            StyleKey::BorderBottomLeftRadius => self.view.corner_radius[3] = opt_number(value)?,
+            StyleKey::BorderRadius => self.view.border_radius = px(number(value, 0.0)?),
+            StyleKey::BorderTopLeftRadius => self.view.corner_radius.top_left = opt_points(value)?,
+            StyleKey::BorderTopRightRadius => {
+                self.view.corner_radius.top_right = opt_points(value)?
+            }
+            StyleKey::BorderBottomRightRadius => {
+                self.view.corner_radius.bottom_right = opt_points(value)?
+            }
+            StyleKey::BorderBottomLeftRadius => {
+                self.view.corner_radius.bottom_left = opt_points(value)?
+            }
             StyleKey::ShadowColor => {
                 self.view.shadow.color = color(value)?.unwrap_or(Shadow::DEFAULT.color)
             }
@@ -1997,7 +2062,7 @@ impl Style {
                 self.view.shadow.opacity = number(value, Shadow::DEFAULT.opacity)?.clamp(0.0, 1.0)
             }
             StyleKey::ShadowRadius => {
-                self.view.shadow.radius = number(value, Shadow::DEFAULT.radius)?.max(0.0)
+                self.view.shadow.radius = px(number(value, Shadow::DEFAULT.radius.0)?.max(0.0))
             }
             StyleKey::BorderColor => self.set_border_color(&[0, 1, 2, 3], value)?,
             StyleKey::BorderTopColor => self.set_border_color(&[0], value)?,
@@ -2044,7 +2109,7 @@ impl Style {
 
             // Text
             StyleKey::Color => self.text.color = color(value)?,
-            StyleKey::FontSize => self.text.font_size = opt_number(value)?,
+            StyleKey::FontSize => self.text.font_size = opt_points(value)?,
             StyleKey::FontWeight => self.text.font_weight = font_weight(value)?,
             StyleKey::LineHeight => {
                 // Numbers are points (React Native); strings may be a
@@ -2053,14 +2118,17 @@ impl Style {
                     StyleValue::Str(s)
                         if s.ends_with("px") || s.ends_with("pt") || s.ends_with("rem") =>
                     {
-                        (Some(css::length(s).ok_or(StyleError::InvalidValue)?), None)
+                        (
+                            Some(px(css::length(s).ok_or(StyleError::InvalidValue)?)),
+                            None,
+                        )
                     }
                     StyleValue::Str(s) => {
                         let n = css::number(s.strip_suffix("em").unwrap_or(s))
                             .ok_or(StyleError::InvalidValue)?;
                         (None, Some(n.max(0.0)))
                     }
-                    v => (opt_number(v)?, None),
+                    v => (opt_points(v)?, None),
                 };
                 self.text.line_height = points;
                 self.text.line_height_multiple = multiple;
@@ -2082,10 +2150,11 @@ impl Style {
                         let n = css::number(&s[..s.len() - 2]).ok_or(StyleError::InvalidValue)?;
                         (None, Some(n))
                     }
-                    StyleValue::Str(s) => {
-                        (Some(css::length(s).ok_or(StyleError::InvalidValue)?), None)
-                    }
-                    v => (opt_number(v)?, None),
+                    StyleValue::Str(s) => (
+                        Some(px(css::length(s).ok_or(StyleError::InvalidValue)?)),
+                        None,
+                    ),
+                    v => (opt_points(v)?, None),
                 };
                 self.text.letter_spacing = points;
                 self.text.letter_spacing_em = em;
@@ -2111,9 +2180,9 @@ impl Style {
             StyleKey::TextAlignVertical => {
                 self.text.align_vertical = match keyword(value)? {
                     None => None,
-                    Some("auto" | "top") => Some(0.0),
-                    Some("center") => Some(0.5),
-                    Some("bottom") => Some(1.0),
+                    Some("auto" | "top") => Some(percentage(0.0)),
+                    Some("center") => Some(percentage(0.5)),
+                    Some("bottom") => Some(percentage(1.0)),
                     Some(_) => return Err(StyleError::InvalidValue),
                 }
             }
@@ -2132,7 +2201,7 @@ impl Style {
                 }
             }
             StyleKey::TextShadowColor => self.text.shadow_color = color(value)?,
-            StyleKey::TextShadowRadius => self.text.shadow_radius = opt_number(value)?,
+            StyleKey::TextShadowRadius => self.text.shadow_radius = opt_points(value)?,
             StyleKey::TextTransform => {
                 self.text.transform = match keyword(value)? {
                     None => None,
@@ -2318,13 +2387,13 @@ impl Style {
                     StyleValue::Null | StyleValue::Str("auto") | StyleValue::Str("from-font") => {
                         None
                     }
-                    v => Some(length_value(v, 1.0)?.max(0.0)),
+                    v => Some(px(length_value(v, 1.0)?.max(0.0))),
                 }
             }
             StyleKey::TextUnderlineOffset => {
                 self.text.underline_offset = match value {
                     StyleValue::Null | StyleValue::Str("auto") => None,
-                    v => Some(length_value(v, 0.0)?),
+                    v => Some(px(length_value(v, 0.0)?)),
                 }
             }
 
@@ -2370,6 +2439,7 @@ impl Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::{relative, size};
 
     #[test]
     fn parse_colors() {
@@ -2435,15 +2505,18 @@ mod tests {
     #[test]
     fn transform_origins() {
         let p = |s| TransformOrigin::parse(s).unwrap();
-        assert_eq!(p("top left").x, OriginLen::Fraction(0.0));
-        assert_eq!(p("top left").y, OriginLen::Fraction(0.0));
-        assert_eq!(p("bottom").y, OriginLen::Fraction(1.0));
-        assert_eq!(p("bottom").x, OriginLen::Fraction(0.5));
-        assert_eq!(p("10px 25%").x, OriginLen::Px(10.0));
-        assert_eq!(p("10px 25%").y, OriginLen::Fraction(0.25));
-        assert_eq!(p("right 5 3").z, 3.0);
-        assert_eq!(p("center top").y, OriginLen::Fraction(0.0));
-        assert_eq!(p("0 0").offset(100.0, 50.0), (-50.0, -25.0, 0.0));
+        assert_eq!(p("top left").x, relative(0.0));
+        assert_eq!(p("top left").y, relative(0.0));
+        assert_eq!(p("bottom").y, relative(1.0));
+        assert_eq!(p("bottom").x, relative(0.5));
+        assert_eq!(p("10px 25%").x, DefiniteLength::from(px(10.0)));
+        assert_eq!(p("10px 25%").y, relative(0.25));
+        assert_eq!(p("right 5 3").z, px(3.0));
+        assert_eq!(p("center top").y, relative(0.0));
+        assert_eq!(
+            p("0 0").offset(size(px(100.0), px(50.0))),
+            (point(px(-50.0), px(-25.0)), Points::ZERO)
+        );
         assert!(TransformOrigin::parse("sideways").is_none());
     }
 
@@ -2509,7 +2582,10 @@ mod tests {
                 ("borderColor", Str("blue")),
             ],
             |s| {
-                assert_eq!(s.view.borders.widths, [5.0, 2.0, 2.0, 2.0]);
+                assert_eq!(
+                    s.view.borders.widths.to_array().map(|w| w.0),
+                    [5.0, 2.0, 2.0, 2.0]
+                );
                 assert_eq!(s.layout.border.top, LengthPercentage::length(5.0));
                 assert_eq!(s.layout.border.left, LengthPercentage::length(2.0));
                 let (red, blue) = (Color(0xff00_00ff), Color(0x0000_ffff));
@@ -2519,7 +2595,7 @@ mod tests {
         // A null longhand is unset: the shorthand shows.
         in_any_order(
             &[("borderTopWidth", Null), ("borderWidth", Number(2.0))],
-            |s| assert_eq!(s.view.borders.widths, [2.0; 4]),
+            |s| assert_eq!(s.view.borders.widths.to_array().map(|w| w.0), [2.0; 4]),
         );
         // Without its shorthand, null still resets the longhand (a class's).
         let mut s = Style::default();
@@ -2527,7 +2603,7 @@ mod tests {
         StylePatch::default()
             .set(&mut s, "borderTopWidth", Null)
             .unwrap();
-        assert_eq!(s.view.borders.widths[0], 0.0);
+        assert_eq!(s.view.borders.widths.top, Points::ZERO);
     }
 
     #[test]
@@ -2682,21 +2758,21 @@ mod tests {
             .unwrap();
         s.set("borderRadius", StyleValue::Number(10.0)).unwrap();
         let r = s.view.radii();
-        assert_eq!(r.to_array(), [4.0, 10.0, 10.0, 10.0]);
+        assert_eq!(r.to_array(), [px(4.0), px(10.0), px(10.0), px(10.0)]);
         assert_eq!(r.shared(), None);
         s.set("borderTopLeftRadius", StyleValue::Null).unwrap();
-        assert_eq!(s.view.radii().shared(), Some(10.0));
+        assert_eq!(s.view.radii().shared(), Some(px(10.0)));
     }
 
     #[test]
     fn shared_radius_ignores_square_corners() {
         let r = CornerRadii {
-            top_left: 12.0,
-            top_right: 12.0,
+            top_left: px(12.0),
+            top_right: px(12.0),
             ..CornerRadii::default()
         };
-        assert_eq!(r.shared(), Some(12.0));
-        assert_eq!(CornerRadii::default().shared(), Some(0.0));
+        assert_eq!(r.shared(), Some(px(12.0)));
+        assert_eq!(CornerRadii::default().shared(), Some(px(0.0)));
         assert!(CornerRadii::default().is_zero());
     }
 
@@ -2704,18 +2780,18 @@ mod tests {
     fn radii_fit_the_box() {
         // 100 + 300 on a 200 wide box: everything scales by 0.5.
         let r = CornerRadii {
-            top_left: 100.0,
-            top_right: 300.0,
-            bottom_right: 0.0,
-            bottom_left: 0.0,
+            top_left: px(100.0),
+            top_right: px(300.0),
+            bottom_right: px(0.0),
+            bottom_left: px(0.0),
             continuous: false,
         }
-        .fit(200.0, 1000.0);
-        assert_eq!(r.to_array(), [50.0, 150.0, 0.0, 0.0]);
-        let fits = CornerRadii::all(10.0);
-        assert_eq!(fits.fit(100.0, 100.0), fits);
-        assert_eq!(fits.inset(4.0), CornerRadii::all(6.0));
-        assert_eq!(fits.inset(40.0), CornerRadii::all(0.0));
+        .fit(size(px(200.0), px(1000.0)));
+        assert_eq!(r.to_array(), [px(50.0), px(150.0), px(0.0), px(0.0)]);
+        let fits = CornerRadii::all(px(10.0));
+        assert_eq!(fits.fit(size(px(100.0), px(100.0))), fits);
+        assert_eq!(fits.inset(px(4.0)), CornerRadii::all(px(6.0)));
+        assert_eq!(fits.inset(px(40.0)), CornerRadii::all(px(0.0)));
     }
 
     #[test]
@@ -2724,14 +2800,14 @@ mod tests {
         assert!(!s.view.shadow.is_visible());
         s.set("shadowOpacity", StyleValue::Number(0.3)).unwrap();
         s.set("shadowRadius", StyleValue::Number(8.0)).unwrap();
-        s.set_shadow_offset(Some((0.0, 4.0)));
+        s.set_shadow_offset(Some(point(px(0.0), px(4.0))));
         assert!(s.view.shadow.is_visible());
-        assert_eq!(s.view.shadow.offset_y, 4.0);
+        assert_eq!(s.view.shadow.offset_y, px(4.0));
         s.set("shadowColor", StyleValue::Str("transparent"))
             .unwrap();
         assert!(!s.view.shadow.is_visible());
         s.set_shadow_offset(None);
-        assert_eq!(s.view.shadow.offset_y, -3.0);
+        assert_eq!(s.view.shadow.offset_y, px(-3.0));
     }
 
     #[test]

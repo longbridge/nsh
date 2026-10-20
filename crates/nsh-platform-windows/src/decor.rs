@@ -139,7 +139,7 @@ pub(crate) fn outset(state: &ViewState) -> f32 {
     let s = state.shadow();
     let mut o: f32 = 0.0;
     if s.is_visible() {
-        o = s.offset_x.abs().max(s.offset_y.abs()) + 3.0 * s.radius.max(0.0);
+        o = s.offset_x.0.abs().max(s.offset_y.0.abs()) + 3.0 * s.radius.0.max(0.0);
     }
     let outline = state.style.outline;
     if outline.is_visible() {
@@ -193,9 +193,9 @@ pub(crate) fn draw_layered(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
             image = layer::drop_shadow(
                 cx.dc,
                 &image,
-                shadow.offset_x,
-                shadow.offset_y,
-                shadow.radius * 2.0,
+                shadow.offset_x.0,
+                shadow.offset_y.0,
+                shadow.radius.0 * 2.0,
                 faded(shadow.color, shadow.opacity),
                 &lin,
             )?;
@@ -207,7 +207,7 @@ pub(crate) fn draw_layered(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
             let area = state.overflow.unwrap_or(rect(0.0, 0.0, w, h));
             let mut o = layer::filters_outset(filters);
             if content_shadow {
-                o += shadow.offset_x.abs().max(shadow.offset_y.abs()) + 3.0 * shadow.radius;
+                o += shadow.offset_x.0.abs().max(shadow.offset_y.0.abs()) + 3.0 * shadow.radius.0;
             }
             let bounds = world.bounds(
                 area.origin.x.0 - o,
@@ -308,10 +308,10 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
     let s = state.shadow();
     if s.is_visible() && has_fill(state) {
         let spec = ShadowSpec {
-            dx: s.offset_x,
-            dy: s.offset_y,
+            dx: s.offset_x.0,
+            dy: s.offset_y.0,
             spread: 0.0,
-            blur: s.radius.max(0.0) * 2.0,
+            blur: s.radius.0.max(0.0) * 2.0,
             color: faded(s.color, s.opacity),
             cut: false,
         };
@@ -360,7 +360,7 @@ pub(crate) fn draw_background(cx: &mut DrawCx<'_>, state: &ViewState) {
     }
 
     if let Some(e) = effects {
-        let widths = state.style.borders.widths;
+        let widths = state.style.borders.widths.to_array().map(|w| w.0);
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
                 let spec = ShadowSpec {
@@ -746,9 +746,11 @@ pub(crate) fn draw_border(cx: &mut DrawCx<'_>, state: &ViewState) {
 
 /// The borders of a `w` x `h` box with `radii`.
 fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4]) {
+    let widths = b.widths.to_array().map(|w| w.0);
+    let uniform = b.uniform().map(|(bw, c)| (bw.0, c));
     let uniform_radii = radii.iter().all(|&r| r == radii[0]);
     if b.style == BorderStyle::Solid {
-        if let Some((bw, c)) = b.uniform() {
+        if let Some((bw, c)) = uniform {
             let half = bw / 2.0;
             let line = rect_f(half, half, (w - bw).max(0.0), (h - bw).max(0.0));
             // Stroking the middle line is exact while the inner corners
@@ -771,7 +773,7 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
             }
         }
         // The ring between the border box and the padding box.
-        let (inner, corners) = padding_box(w, h, radii, b.widths);
+        let (inner, corners) = padding_box(w, h, radii, widths);
         let mut figures = vec![(rect(0.0, 0.0, w, h), circular(radii))];
         if inner.size.width.0 > 0.0 && inner.size.height.0 > 0.0 {
             figures.push((inner, corners));
@@ -779,16 +781,16 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
         let Some(ring) = path(cx.gfx, &figures) else {
             return;
         };
-        let mut drawn = (0..4).filter(|&i| b.widths[i] > 0.0);
+        let mut drawn = (0..4).filter(|&i| widths[i] > 0.0);
         let first = drawn.next().map_or(Color::TRANSPARENT, |i| b.colors[i]);
         if drawn.all(|i| b.colors[i] == first) {
             // SAFETY: a COM call between BeginDraw and EndDraw.
             unsafe { cx.dc.FillGeometry(&ring, cx.solid(first), None) };
             return;
         }
-        for (side, quad) in side_quads(w, h, b.widths).iter().enumerate() {
+        for (side, quad) in side_quads(w, h, widths).iter().enumerate() {
             let c = b.colors[side];
-            if b.widths[side] <= 0.0 || c.is_transparent() {
+            if widths[side] <= 0.0 || c.is_transparent() {
                 continue;
             }
             let Some(clip) = polygon(cx.gfx, quad) else {
@@ -812,7 +814,7 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
             radii.map(|r| (r - half).max(0.0)),
         )
     };
-    if let Some((bw, c)) = b.uniform() {
+    if let Some((bw, c)) = uniform {
         if let Some(g) = line(bw) {
             // SAFETY: as above.
             unsafe { cx.dc.DrawGeometry(&g, cx.solid(c), bw, &style) };
@@ -821,8 +823,8 @@ fn draw_borders(cx: &mut DrawCx<'_>, b: &Borders, w: f32, h: f32, radii: [f32; 4
     }
     // Sides that differ: the whole line stroked with each side's width and
     // color, clipped to that side's part of the box.
-    for (side, quad) in side_quads(w, h, b.widths).iter().enumerate() {
-        let (bw, c) = (b.widths[side], b.colors[side]);
+    for (side, quad) in side_quads(w, h, widths).iter().enumerate() {
+        let (bw, c) = (widths[side], b.colors[side]);
         if bw <= 0.0 || c.is_transparent() {
             continue;
         }

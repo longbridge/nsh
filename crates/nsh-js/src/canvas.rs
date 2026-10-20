@@ -998,7 +998,7 @@ native!(
             .measurer
             .borrow()
             .as_ref()
-            .map_or(0.0, |m| m(&font, &text) as f64);
+            .map_or(0.0, |m| m(&font, &text).0 as f64);
         // SAFETY: a new object.
         unsafe {
             let o = qjs::JS_NewObject(ctx);

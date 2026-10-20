@@ -11,7 +11,7 @@ use crate::{
         BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation,
         Keyframes, Transition, TransitionProps,
     },
-    geometry::{DefiniteLength, REM_SIZE, deg, percentage, px},
+    geometry::{DefiniteLength, REM_SIZE, deg, percentage, point, px},
     ops::ResizeMode,
     props::PointerEvents,
     style::{
@@ -567,7 +567,7 @@ impl Parts {
             let mut shadow = layers
                 .iter()
                 .copied()
-                .max_by(|a, b| a.radius.total_cmp(&b.radius));
+                .max_by(|a, b| a.radius.0.total_cmp(&b.radius.0));
             if let (Some(s), Some((c, own))) = (shadow.as_mut(), self.text_shadow_color) {
                 s.color = if own {
                     c
@@ -578,7 +578,7 @@ impl Parts {
             match shadow {
                 Some(s) => {
                     style.text.shadow_color = Some(s.color);
-                    style.text.shadow_offset = Some((s.offset_x, s.offset_y));
+                    style.text.shadow_offset = Some(point(s.offset_x, s.offset_y));
                     style.text.shadow_radius = Some(s.radius);
                 }
                 None => {

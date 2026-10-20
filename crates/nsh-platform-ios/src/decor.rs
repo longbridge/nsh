@@ -13,7 +13,10 @@
 //! their shadow; a `<text>` with different radii is masked, which clips its
 //! shadow too.
 
-use nsh_core::{BorderStyle, Borders, Color, CornerRadii, ResizeMode, ViewStyle};
+use nsh_core::{
+    BorderStyle, Borders, Color, CornerRadii, ResizeMode, ViewStyle,
+    geometry::{px, size},
+};
 use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
 use objc2_core_foundation::{CFRetained, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGColor, CGImage, CGMutablePath};
@@ -315,12 +318,15 @@ impl Decor {
         // layer's own (self-clamping) radius needs no size: views without
         // paths are not reshaped on resize.
         let raw = style.radii();
-        let radii = raw.fit(w, h);
+        let radii = raw.fit(size(px(w), px(h)));
         let shadow = style.shadow.is_visible();
         let borders = &style.borders;
         // Sides that differ are drawn as colored rings; equal sides by the
         // layer's border or a stroke.
-        let uniform = borders.uniform().filter(|_| borders.is_visible());
+        let uniform = borders
+            .uniform()
+            .map(|(w, c)| (w.0, c))
+            .filter(|_| borders.is_visible());
         let ring = uniform.is_none() && borders.is_visible();
         let border = uniform.is_some();
         let dashed = borders.style != BorderStyle::Solid;
@@ -328,8 +334,8 @@ impl Decor {
         // Corners sharing one radius are drawn by the layer itself. Scroll
         // views always do so (their sublayers scroll): the largest radius
         // stands in for the others.
-        let shared = raw.shared().or_else(|| {
-            (kind == Kind::Scroll).then(|| raw.to_array().into_iter().fold(0.0, f32::max))
+        let shared = raw.shared().map(|r| r.0).or_else(|| {
+            (kind == Kind::Scroll).then(|| raw.to_array().into_iter().fold(0.0, |m, r| r.0.max(m)))
         });
         let corners = corner_mask(&raw);
         let outside = shadow || crate::visual::draws_outside(style);
@@ -414,7 +420,10 @@ impl Decor {
             });
             let half = (bw / 2.0) as CGFloat;
             s.setFrame(local);
-            s.setPath(Some(&rounded(inset(local, half), radii.inset(bw / 2.0))));
+            s.setPath(Some(&rounded(
+                inset(local, half),
+                radii.inset(px(bw / 2.0)),
+            )));
             s.setLineWidth(bw as CGFloat);
             s.setStrokeColor(cg_color(bc).as_deref());
             let w = bw as f64;
@@ -526,8 +535,11 @@ impl Decor {
             let s = style.shadow;
             layer.setShadowColor(cg_color(s.color).as_deref());
             layer.setShadowOpacity(s.opacity);
-            layer.setShadowOffset(CGSize::new(s.offset_x as CGFloat, s.offset_y as CGFloat));
-            layer.setShadowRadius(s.radius as CGFloat);
+            layer.setShadowOffset(CGSize::new(
+                s.offset_x.0 as CGFloat,
+                s.offset_y.0 as CGFloat,
+            ));
+            layer.setShadowRadius(s.radius.0 as CGFloat);
             let solid = !style.background_color.is_transparent() || animated_background;
             let path = solid.then(|| rounded(local, radii));
             layer.setShadowPath(path.as_deref().map(|p| &**p));
@@ -562,7 +574,7 @@ impl Decor {
             }
             return;
         };
-        let [top, right, bottom, left] = b.widths.map(|w| w as CGFloat);
+        let [top, right, bottom, left] = b.widths.to_array().map(|w| w.0 as CGFloat);
         let ring = ring_path(local, radii, [top, right, bottom, left]);
         let same_color = b.colors.iter().all(|&c| c == b.colors[0]);
         let count = if same_color { 1 } else { 4 };
@@ -681,7 +693,7 @@ pub(crate) fn corner_mask(radii: &CornerRadii) -> CACornerMask {
     ];
     let rounded = all
         .iter()
-        .filter(|(r, _)| *r > 0.0)
+        .filter(|(r, _)| r.0 > 0.0)
         .fold(CACornerMask::empty(), |m, &(_, c)| m | c);
     if rounded.is_empty() {
         CACornerMask::all()
@@ -716,7 +728,7 @@ fn ring_path(rect: CGRect, radii: CornerRadii, widths: [CGFloat; 4]) -> CFRetain
     if inner.size.width <= 0.0 || inner.size.height <= 0.0 {
         return path;
     }
-    let [tl, tr, br, bl] = radii.to_array().map(|r| r as CGFloat);
+    let [tl, tr, br, bl] = radii.to_array().map(|r| r.0 as CGFloat);
     // (horizontal, vertical) radii of each inner corner.
     let corner = |r: CGFloat, h: CGFloat, v: CGFloat| ((r - h).max(0.0), (r - v).max(0.0));
     let corners = [
@@ -739,7 +751,7 @@ pub(crate) fn rounded(rect: CGRect, radii: CornerRadii) -> CFRetained<CGMutableP
 /// Adds a rectangle with the corners `radii` to `path`, counterclockwise
 /// with `reverse` (a hole under the non-zero rule).
 pub(crate) fn add_rounded(path: &CGMutablePath, rect: CGRect, radii: CornerRadii, reverse: bool) {
-    let corners = radii.to_array().map(|r| (r as CGFloat, r as CGFloat));
+    let corners = radii.to_array().map(|r| (r.0 as CGFloat, r.0 as CGFloat));
     add_outline(path, rect, corners, radii.continuous, reverse);
 }
 

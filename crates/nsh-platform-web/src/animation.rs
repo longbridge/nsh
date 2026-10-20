@@ -193,7 +193,7 @@ impl UiAnimation {
                     }
                     AnimationProp::ShadowRadius => {
                         shadow.get_or_insert(static_shadow).radius =
-                            self.graph.eval(node).number().max(0.0);
+                            nsh_core::Points(self.graph.eval(node).number().max(0.0));
                     }
                     AnimationProp::Opacity => {
                         out.animation(view, "opacity", &self.graph.eval(node).number().to_string());

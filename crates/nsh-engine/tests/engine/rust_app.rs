@@ -47,7 +47,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         // Nothing registered: Rust renders its components by type.
         ui_sets: Vec::new(),
@@ -113,7 +113,7 @@ fn a_rust_app_starts_in_its_appearance() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -161,7 +161,7 @@ fn rust_components_navigate_with_native_stacks() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -245,7 +245,7 @@ fn rust_components_pass_content_to_rust_components() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -337,7 +337,7 @@ fn rust_components_take_the_back_button() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -411,7 +411,7 @@ fn rust_components_hear_layouts_and_scrolls() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -443,7 +443,11 @@ fn rust_components_hear_layouts_and_scrolls() {
     let mut scroll = None;
     assert!(wait("width 390 scrolled 0", &mut scroll), "the layout came");
     let scroll = scroll.expect("a scroll view");
-    engine.control().scroll(scroll, 0.0, 120.0, 0);
+    engine.control().scroll(
+        scroll,
+        nsh_core::geometry::point(nsh_core::geometry::px(0.0), nsh_core::geometry::px(120.0)),
+        0,
+    );
     assert!(wait("width 390 scrolled 120", &mut None), "the scroll came");
 }
 
@@ -477,7 +481,7 @@ fn nested_components_in_list_rows_reach_the_list_owner() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
@@ -538,7 +542,7 @@ fn content_a_component_does_not_place_is_not_shown() {
         network: None,
         assets: None,
         environment: Environment::default(),
-        header_heights: (44.0, 96.0),
+        header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,

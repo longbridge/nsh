@@ -98,7 +98,7 @@ fn colors_and_opacity() {
     let s = styled("bg-white/50 text-zinc-900 border border-[#ff0000] opacity-75");
     assert_eq!(s.view.background_color, Color(0xffff_ff80));
     assert_eq!(s.text.color, Some(Color(0x1818_1bff)));
-    assert_eq!(s.view.borders.widths, [1.0; 4]);
+    assert_eq!(s.view.borders.widths.to_array().map(|w| w.0), [1.0; 4]);
     assert_eq!(s.view.borders.colors[0], Color(0xff00_00ff));
     assert_eq!(s.view.opacity, 0.75);
     let s = styled("bg-[rgb(0_0_255)]/25 text-black/[0.5]");
@@ -117,7 +117,7 @@ fn theme_tokens() {
     assert_eq!(s.view.background_color, Color::from(ui.primary.light));
     assert_eq!(s.text.color, Some(Color::from(ui.muted_foreground.light)));
     assert_eq!(s.view.borders.colors[0], Color::from(ui.border.light));
-    assert_eq!(s.view.border_radius, ui.radius.0);
+    assert_eq!(s.view.border_radius, ui.radius);
     let (s, _) = styled_with(
         "bg-primary text-(--muted-foreground)",
         dark,
@@ -163,8 +163,8 @@ fn theme_tokens() {
     let (s, _) = styled_with("dark:bg-accent", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color::from(ui.accent.dark));
     let s = styled("text-(length:--font-size) rounded-(--radius-lg)");
-    assert_eq!(s.text.font_size, Some(ui.font_size.0));
-    assert_eq!(s.view.border_radius, ui.radius_lg.0);
+    assert_eq!(s.text.font_size, Some(ui.font_size));
+    assert_eq!(s.view.border_radius, ui.radius_lg);
     // Later utilities still win, in both appearances.
     let (s, _) = styled_with("bg-primary bg-red-500", dark, (390.0, 844.0), 0);
     assert_eq!(s.view.background_color, Color(0xfb2c_36ff));
@@ -231,7 +231,7 @@ fn tailwind_colors_win_over_tokens_and_tokens_come_from_the_theme() {
     // A color set in one mode only is used in both.
     let s = apply("border border-chart-grid rounded-(--radius-card)", true);
     assert_eq!(s.view.borders.colors[0], Color(0x0000_ffff));
-    assert_eq!(s.view.border_radius, 10.0);
+    assert_eq!(s.view.border_radius, px(10.0));
 }
 
 #[test]
@@ -239,7 +239,7 @@ fn typography() {
     let s = styled(
         "text-lg font-semibold italic tracking-wide leading-tight underline decoration-wavy decoration-red-500 uppercase text-center tabular-nums",
     );
-    assert_eq!(s.text.font_size, Some(18.0));
+    assert_eq!(s.text.font_size, Some(px(18.0)));
     assert_eq!(s.text.font_weight, Some(600));
     assert_eq!(s.text.italic, Some(true));
     assert_eq!(s.text.letter_spacing_em, Some(0.025));
@@ -258,8 +258,8 @@ fn typography() {
             .has(crate::style::FontVariant::TABULAR_NUMS)
     );
     let s = styled("text-sm/6 font-mono");
-    assert_eq!(s.text.font_size, Some(14.0));
-    assert_eq!(s.text.line_height, Some(24.0));
+    assert_eq!(s.text.font_size, Some(px(14.0)));
+    assert_eq!(s.text.line_height, Some(px(24.0)));
     assert_eq!(s.text.font_family.unwrap().name().as_ref(), "monospace");
     let (_, props) = styled_with("truncate", ClassEnvironment::default(), (390.0, 844.0), 0);
     assert_eq!(props.number_of_lines, Some(1));
