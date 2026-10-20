@@ -19,7 +19,10 @@
   (a new `lib`, a path) reaches existing apps with the next build, without an edit of theirs. An app's
   `tsconfig.json` that an earlier `nsh init` wrote and the app never changed (`templates/tsconfig/*.json`, compared
   byte for byte) is replaced by the new one, with a note saying so; one the app changed is never rewritten, and
-  `nsh check` warns that it does not extend `.nsh/tsconfig.json`, saying what to change.
+  `nsh check` warns that it does not extend `.nsh/tsconfig.json`, saying what to change. Only the type checker reads
+  `tsconfig.json`: bundling never does (rolldown's `tsconfig` option is off, `bundle.rs`), so an app bundles before
+  any command wrote `.nsh/tsconfig.json` (`nsh_testing::compile_tsx` in a fresh checkout), and its `paths`, which
+  lead to declarations, never decide what a bundle imports. Aliases are `nsh.json`'s `"resolve"`.
 - Where each declaration comes from:
   - a native module's export: the `Ts` next to it in its table (`modules::Item`; the module's own interfaces in its
     `types`);
@@ -136,9 +139,12 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   of what is missing. A later bundle that needs only what the host has reaches it again. Hosts that do not report
   their UI sets (older ones) get every bundle.
 - The host's `log` output (including JS `console.*`, target `js`) is forwarded to the CLI terminal with the device name while connected, and goes
-  to stderr when disconnected (see "Output" for what the CLI shows of it).
+  to stderr when disconnected (see "Output" for what the CLI shows of it). Unhandled promise rejections are part of
+  it: `unhandled rejection: <reason>` at level error, target `js`, the stack mapped to the sources as an uncaught
+  exception's (`Script`'s rejection handler in `nsh-engine`; on the web the browser console gets it).
 - Build failures, bundle evaluation failures and uncaught exceptions show an overlay on the host (dark, the title in red; tap to dismiss; its Copy button copies the error, to paste into an AI chat or a report); it disappears on the next
-  successful reload.
+  successful reload. They also reach the host app's error handler; unhandled rejections are logged only, as a
+  browser logs them.
 - **Hot module replacement** (`nsh dev` / `nsh run` without `--release`): development bundles keep one CommonJS chunk per
   module (rolldown `preserveModules`, tree shaking off), each registered with the native hot runtime
   (`crates/nsh-js/src/hot.rs`, the `__nsh_hot` global that importing `nsh:hot` makes; only development bundles import

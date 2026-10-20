@@ -910,6 +910,91 @@ fn the_clipboard_needs_its_capability() {
     serve_clipboard(&engine, &rx, "false true copied");
 }
 
+const CLIPBOARD_IMAGE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh/clipboard";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const before = await Clipboard.hasImage();
+  Clipboard.setImage("data:image/png;base64,aGk=");
+  const image = await Clipboard.getImage();
+  const bytes = new Uint8Array(await (await fetch(image!.uri)).arrayBuffer());
+  const files = await Clipboard.getFiles();
+  shown.set(`${before} ${image!.width}x${image!.height} ${bytes.join(",")} ${files.join(" ")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_images_and_files_reach_js() {
+    let (engine, rx) = start(CLIPBOARD_IMAGE);
+    let control = engine.control();
+    let mut board: Option<String> = None;
+    let mut commands = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            let MountItem::Command {
+                id: ROOT_ID,
+                command,
+            } = item
+            else {
+                continue;
+            };
+            let payload = match command {
+                Command::SetClipboardImage(uri) => {
+                    board = Some(uri.clone());
+                    None
+                }
+                Command::ReadClipboardImage { id, has_only } => {
+                    let mut payload = vec![
+                        ("id", PayloadValue::Number(*id as f64)),
+                        ("has", PayloadValue::Bool(board.is_some())),
+                    ];
+                    if let (false, Some(uri)) = (has_only, &board) {
+                        payload.push(("uri", PayloadValue::Str(uri.clone())));
+                        payload.push(("width", PayloadValue::Number(2.0)));
+                        payload.push(("height", PayloadValue::Number(1.0)));
+                    }
+                    Some(payload)
+                }
+                Command::ReadClipboardFiles { id } => Some(vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("has", PayloadValue::Bool(true)),
+                    (
+                        "files",
+                        PayloadValue::Str("file:///tmp/a%20b.txt\nfile:///tmp/c/".into()),
+                    ),
+                ]),
+                _ => continue,
+            };
+            if let Some(payload) = payload {
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+            commands.push(command.clone());
+        }
+        shows(
+            batch,
+            "false 2x1 104,105 file:///tmp/a%20b.txt file:///tmp/c/",
+        )
+    });
+    assert_eq!(
+        commands,
+        [
+            Command::ReadClipboardImage {
+                id: 1,
+                has_only: true
+            },
+            Command::SetClipboardImage("data:image/png;base64,aGk=".into()),
+            Command::ReadClipboardImage {
+                id: 2,
+                has_only: false
+            },
+            Command::ReadClipboardFiles { id: 3 },
+        ]
+    );
+}
+
 const INPUT_TRAITS: &str = r##"import { mount, Input, Text } from "nsh";
 
 mount(() => (

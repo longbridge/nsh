@@ -142,7 +142,8 @@ a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
   - returning `()`, it gives `void`, with no reply: JS calls it and moves on, the op runs in order with the UI at
     the commit, nothing answers it (`RustOp::call` 0, no `JsEvent::Reply`), and a wrong argument throws in the call;
   - returning `Result<(), E>`, it gives `Promise<void>`: resolved once the op ran, rejected with the `Err`'s message.
-    It cannot throw instead, because the op runs at the commit, after the JS call returned;
+    It cannot throw instead, because the op runs at the commit, after the JS call returned. A call nobody awaits or
+    catches is still seen: the rejection is logged as an unhandled one (`docs/dev/pitfalls.md`);
   - returning a value (`T`, `Result<T, E>`), it gives `Promise<T>`, and a wrong argument rejects it.
 - **`async fn`:** a task of the core; it gives a Promise (`Promise<void>` for `()`, resolved when the task ends).
 

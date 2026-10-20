@@ -307,6 +307,10 @@ enum Command {
         /// package whose error stacks have no positions.
         #[arg(long)]
         strip_debug: bool,
+        /// The lowest runtime that runs the package, e.g. `0.2.0` (default:
+        /// this CLI's version); older runtimes refuse it.
+        #[arg(long, value_name = "VERSION")]
+        min_runtime: Option<String>,
     },
     /// Map the positions in a reported error stack (`bundle.js:LINE:COL`)
     /// to the app's sources, with a package's source map.
@@ -654,11 +658,13 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             build,
             source_map,
             strip_debug,
+            min_runtime,
         } => {
             let mut config = package::read_config(&entry)?;
             config.id = id.or(config.id);
             config.version = version.or(config.version);
             config.build = build.or(config.build);
+            config.min_runtime = min_runtime.or(config.min_runtime);
             sign::publish(sign::PublishOptions {
                 entry: &entry,
                 key: &key,

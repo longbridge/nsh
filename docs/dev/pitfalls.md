@@ -6,6 +6,13 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **QuickJS microtasks are run by the host.** Call `Host::run_jobs()` after every call from Rust into JS. `setTimeout` / `console` are our own;
   `queueMicrotask`, `WeakRef` and `FinalizationRegistry` are built into QuickJS-NG.
+- **`Host::run_jobs()` is also the end of the turn for unhandled rejections** (`rejections.rs`): QuickJS's rejection
+  tracker reports a promise rejected without a handler and one that gets a handler later; the host holds the first
+  kind until the job queue is drained, then reports those still unhandled (`Host::set_rejection_handler`, else a
+  `js` error log). A handler attached later in the same turn makes no report, as in browsers. A promise the host
+  settles or reads natively without `then` (the bundle's evaluation promise, a stream's) is marked handled
+  (`JS_PromiseMarkAsHandled`), or it is reported. Interrupts are uncatchable and reject nothing; rejections while
+  the heap ran out are dropped, the VM stops with that report.
 - **The JS object graph must stay reachable from a GC root.** The renderer holds the root node, which holds its children's
   objects and each node its handlers (`dom.rs`, reported by the classes' GC marks). Without that the whole rendered app (nodes,
   handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh trace` taps after 1.2s of idling by

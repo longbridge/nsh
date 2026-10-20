@@ -52,7 +52,7 @@ use std::{
 use gtk4::{self as gtk, gdk, gio, glib, prelude::*};
 use nsh_core::{
     Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
-    Rect,
+    Rect, platform::clipboard,
 };
 use nsh_engine::{ColorScheme, Environment, Insets, Locale};
 
@@ -483,6 +483,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
             }
         }
         Command::ReadClipboard { id, has_only } => read_clipboard(surface, *id, *has_only),
+        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::ReadClipboardImage { id, has_only } => {
+            read_clipboard_image(surface, *id, *has_only)
+        }
+        Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
@@ -999,6 +1004,104 @@ fn read_clipboard(surface: &Rc<Surface>, id: u32, has_only: bool) {
         };
         if let Some(surface) = surface.upgrade() {
             answer(&surface, text.is_some(), text);
+        }
+    });
+}
+
+/// `Clipboard.setImage`: the image of a `data:` URI as a GDK texture,
+/// which GDK offers in the formats it encodes (PNG, TIFF, ...).
+fn set_clipboard_image(uri: &str) {
+    let Some((_, bytes)) = clipboard::decode_data_uri(uri) else {
+        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        return;
+    };
+    match gdk::Texture::from_bytes(&glib::Bytes::from_owned(bytes)) {
+        Ok(texture) => {
+            if let Some(display) = gdk::Display::default() {
+                display.clipboard().set_texture(&texture);
+            }
+        }
+        Err(err) => log::warn!("Clipboard.setImage: {err}"),
+    }
+}
+
+/// `Clipboard.getImage` / `hasImage`: the clipboard's image as a GDK
+/// texture (whatever format the app offering it put), answered as PNG.
+fn read_clipboard_image(surface: &Rc<Surface>, id: u32, has_only: bool) {
+    let answer = move |surface: &Surface, payload| {
+        surface.event(ROOT_ID, EventKind::Clipboard, payload);
+    };
+    let Some(display) = gdk::Display::default() else {
+        return answer(surface, clipboard::image_answer(id, false, None));
+    };
+    let board = display.clipboard();
+    let has = board
+        .formats()
+        .union_deserialize_types()
+        .contains_type(gdk::Texture::static_type());
+    if has_only || !has {
+        return answer(surface, clipboard::image_answer(id, has, None));
+    }
+    let surface = Rc::downgrade(surface);
+    glib::spawn_future_local(async move {
+        let png = match board.read_texture_future().await {
+            Ok(texture) => texture.map(|t| t.save_to_png_bytes()),
+            Err(err) => {
+                log::debug!("linux: clipboard image read failed: {err}");
+                None
+            }
+        };
+        let image = png.as_deref().and_then(clipboard::Image::sniff);
+        if let Some(surface) = surface.upgrade() {
+            answer(&surface, clipboard::image_answer(id, true, image));
+        }
+    });
+}
+
+/// `Clipboard.getFiles`: the `file:` URIs of a file list on the clipboard
+/// (files copied in a file manager).
+fn read_clipboard_files(surface: &Rc<Surface>, id: u32) {
+    let answer = move |surface: &Surface, files: &[String]| {
+        surface.event(
+            ROOT_ID,
+            EventKind::Clipboard,
+            clipboard::files_answer(id, files),
+        );
+    };
+    let Some(display) = gdk::Display::default() else {
+        return answer(surface, &[]);
+    };
+    let board = display.clipboard();
+    if !board
+        .formats()
+        .union_deserialize_types()
+        .contains_type(gdk::FileList::static_type())
+    {
+        return answer(surface, &[]);
+    }
+    let surface = Rc::downgrade(surface);
+    glib::spawn_future_local(async move {
+        let files = match board
+            .read_value_future(gdk::FileList::static_type(), glib::Priority::DEFAULT)
+            .await
+        {
+            Ok(value) => value
+                .get::<gdk::FileList>()
+                .map(|list| {
+                    list.files()
+                        .into_iter()
+                        .filter(|file| file.path().is_some_and(|path| path.is_absolute()))
+                        .map(|file| file.uri().to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            Err(err) => {
+                log::debug!("linux: clipboard files read failed: {err}");
+                Vec::new()
+            }
+        };
+        if let Some(surface) = surface.upgrade() {
+            answer(&surface, &files);
         }
     });
 }

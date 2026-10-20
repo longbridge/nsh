@@ -21,6 +21,9 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   `bundle.js:L:C` and the package's map (or `nsh symbolicate` with the map kept out of it, `--source-map file`) maps
   them; `Strip::All` (`--strip-debug`) leaves `<null>:0:1`. The source the package carries is the same minified
   code, so stripping it from the bytecode as well hides nothing.
+  The minimum runtime defaults to the signing CLI's version (`RUNTIME_VERSION`, the workspace version): the bundle
+  links against that CLI's native modules, so only it is known to run it. `nsh publish --min-runtime` / `nsh.json`
+  `minRuntime` lowers it (`MAJOR.MINOR.PATCH`, never above the signer's; suffixes are ignored when comparing).
   `nsh publish` refuses to sign what a device would refuse (the certificate must cover the app and the time).
 - **Verification** (`TrustStore::verify`): the certificate's root signature, the release key not revoked, the package
   signature, the app id and the signing time against the certificate, the minimum runtime, the file table tiling the

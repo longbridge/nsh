@@ -2,6 +2,8 @@
 //! keyboard, appearance, device) and the HTTP requests it carries out: the
 //! data both Rust components and JS read, with or without a JS runtime.
 
+pub mod clipboard;
+
 /// Edge insets in points.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Insets {

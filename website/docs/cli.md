@@ -257,7 +257,7 @@ Certifies a release key with a root key for some app ids and a time window; pack
 
 ```sh
 nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--app-version <V>] [--build <N>]
-            [--source-map package|file|none] [--strip-debug]
+            [--source-map package|file|none] [--strip-debug] [--min-runtime <VERSION>]
 ```
 
 Builds the app in release mode and signs it into a package. Metadata comes from `nsh.json`, overridden by the flags.
@@ -272,6 +272,7 @@ Builds the app in release mode and signs it into a package. Metadata comes from 
 | `--build <BUILD>` | Build number: must grow with every release. |
 | `--source-map <WHERE>` | Where the source map goes: `package` (default), `file` (`<package>.map` next to the package) or `none` ([Signed packages](./signed-packages.md#errors-from-published-packages)). |
 | `--strip-debug` | Leave the line and column tables out of the bytecode: smaller, but error stacks have no positions. |
+| `--min-runtime <VERSION>` | The lowest runtime that runs the package, e.g. `0.2.0`; older runtimes refuse it. Default: this CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 
 ### nsh verify
 

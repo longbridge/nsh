@@ -562,6 +562,11 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(id as i32);
                         e.bool(has_only);
                     }
+                    // Answered by the sink (`host::answer_clipboard_reads`);
+                    // images are not written to Android's clipboard.
+                    Command::ReadClipboardImage { .. }
+                    | Command::ReadClipboardFiles { .. }
+                    | Command::SetClipboardImage(_) => e.int(-1),
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)

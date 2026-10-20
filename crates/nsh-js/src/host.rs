@@ -22,13 +22,15 @@ use crate::{
     error::JsError,
     net::{FetchEvent, NetworkQueue, RequestId},
     protocol::Warnings,
+    rejections::Rejections,
     sandbox::{self, Budget, Phase},
     standard::scheduler::{Context, Scheduler},
     timers::Timers,
     web,
 };
 
-/// Receives uncaught JS exceptions.
+/// Receives JS errors: uncaught exceptions ([`Host::set_error_handler`])
+/// or unhandled promise rejections ([`Host::set_rejection_handler`]).
 pub type ErrorHandler = Box<dyn Fn(&JsError)>;
 type ExitHandler = Rc<dyn Fn(i32)>;
 
@@ -81,6 +83,8 @@ pub(crate) struct Shared {
     /// Why the VM was stopped (out of memory, over a quota): no JS runs
     /// after that.
     pub(crate) fatal: RefCell<Option<String>>,
+    /// Rejected promises without a handler, until the end of the turn.
+    rejections: RefCell<Rejections>,
 }
 
 impl Shared {
@@ -103,6 +107,7 @@ pub struct Host {
     exhausted: Arc<AtomicBool>,
     shared: Rc<Shared>,
     on_error: Option<ErrorHandler>,
+    on_rejection: Option<ErrorHandler>,
     budget: Budget,
     evaluations: RefCell<Vec<Persistent<Promise<'static>>>>,
     entry_depth: Cell<usize>,
@@ -206,6 +211,15 @@ impl Host {
             scheduler: Rc::downgrade(&scheduler),
             ..Shared::default()
         });
+        let tracked = shared.clone();
+        scheduler.ready(rt.set_host_promise_rejection_tracker(Some(Box::new(
+            move |ctx, promise, reason, handled| {
+                tracked
+                    .rejections
+                    .borrow_mut()
+                    .track(&ctx, promise, reason, handled);
+            },
+        ))));
         ctx.with(|ctx| {
             crate::state::install(
                 &ctx,
@@ -236,6 +250,7 @@ impl Host {
             exhausted,
             shared,
             on_error: None,
+            on_rejection: None,
             budget,
             evaluations: RefCell::new(Vec::new()),
             entry_depth: Cell::new(0),
@@ -308,6 +323,13 @@ impl Host {
             self.ctx.with(|ctx| crate::state::uninstall(&ctx));
             self.ctx.retire();
         }
+        // After the state, whose freeing may reject what waits on it;
+        // the rejections' values go before the runtime.
+        if let Some(rt) = self.rt.borrow().as_ref() {
+            self.scheduler
+                .ready(rt.set_host_promise_rejection_tracker(None));
+        }
+        self.shared.rejections.borrow_mut().clear();
         self.rt.borrow_mut().take();
     }
 
@@ -385,6 +407,14 @@ impl Host {
         Ok(Vec::new())
     }
 
+    /// Sets the handler for unhandled promise rejections: promises still
+    /// rejected without a handler once a turn's jobs ran (as browsers
+    /// report them). Without a handler they are logged (target `js`, level
+    /// error), as `unhandled rejection: <reason>`.
+    pub fn set_rejection_handler(&mut self, handler: ErrorHandler) {
+        self.on_rejection = Some(handler);
+    }
+
     /// Evaluates a bundle given as source.
     pub fn eval_source(&self, source: &str) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
@@ -395,6 +425,8 @@ impl Host {
                         .catch(&ctx)
                         .map_err(JsError::caught)?;
                     let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
+                    // Its failure is the bundle's, reported as such.
+                    mark_handled(&ctx, &promise);
                     Ok(Persistent::save(&ctx, promise))
                 })
                 .map_err(|e| self.classify(e))?;
@@ -481,6 +513,8 @@ impl Host {
                         .catch(&ctx)
                         .map_err(JsError::caught)?;
                     let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
+                    // Its failure is the bundle's, reported as such.
+                    mark_handled(&ctx, &promise);
                     Ok(Persistent::save(&ctx, promise))
                 })
                 .map_err(|e| self.classify(e))?;
@@ -736,34 +770,80 @@ impl Host {
         }
     }
 
-    /// Runs pending promise jobs and microtasks until the queue is empty.
+    /// Runs pending promise jobs and microtasks until the queue is empty,
+    /// then reports the promises rejected meanwhile that are still without
+    /// a handler ([`Host::set_rejection_handler`]). Every call from Rust
+    /// into JS ends with it: it is the end of the turn.
     pub fn run_jobs(&self) {
         self.guarded(Phase::Call, || {
             loop {
-                match self
-                    .scheduler
-                    .poll_job(self.rt.borrow().as_ref().expect("live VM"))
-                {
-                    std::task::Poll::Ready(Ok(true)) => {}
-                    std::task::Poll::Ready(Ok(false)) | std::task::Poll::Pending => break,
-                    std::task::Poll::Ready(Err(err)) => {
-                        let err = self.scheduler.ready(err.with(|ctx| {
-                            let caught = ctx.catch();
-                            let mut err = JsError::new(describe(caught.clone()));
-                            err.null = caught.is_null();
-                            err
-                        }));
-                        self.uncaught(&err);
-                        if self.fatal().is_some() {
-                            break;
+                loop {
+                    match self
+                        .scheduler
+                        .poll_job(self.rt.borrow().as_ref().expect("live VM"))
+                    {
+                        std::task::Poll::Ready(Ok(true)) => {}
+                        std::task::Poll::Ready(Ok(false)) | std::task::Poll::Pending => break,
+                        std::task::Poll::Ready(Err(err)) => {
+                            let err = self.scheduler.ready(err.with(|ctx| {
+                                let caught = ctx.catch();
+                                let mut err = JsError::new(describe(caught.clone()));
+                                err.null = caught.is_null();
+                                err
+                            }));
+                            self.uncaught(&err);
+                            if self.fatal().is_some() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            if self.fatal().is_none() {
+                if self.fatal().is_some() {
+                    break;
+                }
                 self.settle_evaluations();
+                // Rendering a reason may run JS (a getter) and queue jobs.
+                if !self.report_rejections() {
+                    break;
+                }
             }
         });
+    }
+
+    /// Reports the rejections still unhandled; whether there were any.
+    fn report_rejections(&self) -> bool {
+        // Taken first: rendering a reason may run JS, which may reject.
+        let rejections = self.shared.rejections.borrow_mut().take();
+        if rejections.is_empty() {
+            return false;
+        }
+        // A VM out of memory stops with that report; what failed for it is
+        // not the app's to handle.
+        if self.exhausted.load(Ordering::Relaxed) || self.shared.fatal.borrow().is_some() {
+            return false;
+        }
+        self.ctx.with(|ctx| {
+            for rejection in rejections {
+                let mut text = String::new();
+                if let Ok(reason) = rejection.reason(&ctx) {
+                    console::format_value(&reason, &mut text);
+                }
+                // An error without a stack ends with its empty line.
+                text.truncate(text.trim_end().len());
+                let err = JsError::new(text);
+                match &self.on_rejection {
+                    Some(handler) => handler(&err),
+                    None => log::error!(target: "js", "unhandled rejection: {err}"),
+                }
+            }
+        });
+        true
+    }
+
+    /// How many rejections wait for the end of the turn (tests).
+    #[cfg(test)]
+    pub(crate) fn pending_rejections(&self) -> usize {
+        self.shared.rejections.borrow().len()
     }
 
     /// Whether warning `message` was logged (tests).
@@ -962,6 +1042,12 @@ impl Drop for Host {
     fn drop(&mut self) {
         self.stop_work();
     }
+}
+
+/// Marks `promise` handled: it is not reported as an unhandled rejection.
+fn mark_handled(ctx: &Ctx<'_>, promise: &rquickjs::Promise<'_>) {
+    // SAFETY: a live promise of this context.
+    unsafe { qjs::JS_PromiseMarkAsHandled(ctx.as_raw().as_ptr(), promise.as_raw()) };
 }
 
 /// The JS object handed to event handlers.
@@ -1918,5 +2004,272 @@ const report = (v) => text(String(v));
         host.eval_source(&format!("{REPORT}report(eval(\"1 + 1\"));"))
             .unwrap();
         assert_eq!(reported(&host), ["2"]);
+    }
+
+    /// Captures the `js` errors logged on this thread (each test runs on
+    /// a thread of its own, its host too).
+    mod logs {
+        use std::cell::RefCell;
+
+        struct Capture;
+
+        thread_local! {
+            static LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        }
+
+        impl log::Log for Capture {
+            fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+                metadata.target() == "js" && metadata.level() == log::Level::Error
+            }
+
+            fn log(&self, record: &log::Record<'_>) {
+                if self.enabled(record.metadata()) {
+                    LINES.with_borrow_mut(|lines| lines.push(record.args().to_string()));
+                }
+            }
+
+            fn flush(&self) {}
+        }
+
+        static CAPTURE: Capture = Capture;
+
+        /// Captures from here on (the logger is the process's: installed
+        /// once).
+        pub(super) fn capture() {
+            static INSTALL: std::sync::Once = std::sync::Once::new();
+            INSTALL.call_once(|| {
+                if log::set_logger(&CAPTURE).is_ok() {
+                    log::set_max_level(log::LevelFilter::Error);
+                }
+            });
+            LINES.with_borrow_mut(Vec::clear);
+        }
+
+        /// The lines logged since the last call.
+        pub(super) fn take() -> Vec<String> {
+            LINES.with_borrow_mut(std::mem::take)
+        }
+    }
+
+    /// Lines about unhandled rejections among `lines`.
+    fn rejections(lines: &[String]) -> Vec<&String> {
+        lines
+            .iter()
+            .filter(|l| l.contains("unhandled rejection"))
+            .collect()
+    }
+
+    #[test]
+    fn unhandled_rejections_are_logged_once_the_turn_ends() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"function fail() { return Promise.reject(new Error("boom")); }
+            fail();
+            Promise.reject("plain");"#,
+        )
+        .unwrap();
+        let lines = logs::take();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].starts_with("unhandled rejection: Error: boom")
+                && lines[0].contains("at fail"),
+            "{}",
+            lines[0]
+        );
+        assert_eq!(lines[1], "unhandled rejection: plain");
+        // Reported once: the next turns have nothing left.
+        host.run_jobs();
+        host.collect_garbage();
+        assert!(logs::take().is_empty());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn rejections_handled_in_the_same_turn_are_not_logged() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"// A handler attached later in the same code.
+            const p = Promise.reject(new Error("later"));
+            const other = 1 + 1;
+            p.catch(() => {});
+            // One attached by a microtask of the same turn.
+            const q = Promise.reject(new Error("micro"));
+            Promise.resolve().then(() => Promise.resolve()).then(() => q.catch(() => {}));
+            // Handled the usual ways.
+            Promise.reject(new Error("caught")).catch(() => {});
+            Promise.reject(new Error("then")).then(undefined, () => {});
+            Promise.reject(new Error("chain")).then(() => 1).catch(() => {});
+            (async () => { try { await Promise.reject(new Error("awaited")); } catch (e) {} })();
+            Promise.allSettled([Promise.reject(new Error("settled"))]);"#,
+        )
+        .unwrap();
+        assert_eq!(logs::take(), Vec::<String>::new());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn a_rejection_left_by_a_chain_is_logged_once() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        // The first promise is handled by `then`, which rejects in turn.
+        host.eval_source(r#"Promise.reject(new Error("chained")).then(() => 1);"#)
+            .unwrap();
+        let lines = logs::take();
+        assert_eq!(rejections(&lines).len(), 1, "{lines:?}");
+        assert!(lines[0].contains("chained"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn async_functions_that_throw_unawaited_are_logged() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"async function now() { throw new Error("at once"); }
+            async function later() { await null; throw new TypeError("after await"); }
+            setTimeout(() => { now(); later(); }, 0);"#,
+        )
+        .unwrap();
+        assert!(logs::take().is_empty());
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        let lines = logs::take();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].contains("at once") && lines[0].contains("at now"),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[1].contains("after await"), "{}", lines[1]);
+    }
+
+    #[test]
+    fn a_rejection_handled_in_a_later_turn_is_logged_once() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"const p = Promise.reject(new Error("too late"));
+            setTimeout(() => p.catch(() => {}), 0);"#,
+        )
+        .unwrap();
+        assert_eq!(rejections(&logs::take()).len(), 1);
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert!(logs::take().is_empty());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn rejections_go_to_the_handler_not_the_error_handler() {
+        logs::capture();
+        let mut host = Host::new().unwrap();
+        let (errors, rejected) = (
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(RefCell::new(Vec::new())),
+        );
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        let seen = rejected.clone();
+        host.set_rejection_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(r#"Promise.reject(new Error("to the handler"));"#)
+            .unwrap();
+        assert!(errors.borrow().is_empty());
+        assert_eq!(rejected.borrow().len(), 1);
+        assert!(rejected.borrow()[0].starts_with("Error: to the handler"));
+        assert!(logs::take().is_empty());
+    }
+
+    #[test]
+    fn a_failing_bundle_is_not_an_unhandled_rejection() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        let err = host
+            .eval_source(r#"throw new Error("top level");"#)
+            .unwrap_err();
+        assert!(err.message.contains("top level"), "{}", err.message);
+        assert!(rejections(&logs::take()).is_empty());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn many_rejections_leave_nothing_behind() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"globalThis.reject = (n) => {
+                for (let i = 0; i < n; i++) {
+                    Promise.reject(new Error("unhandled " + i));
+                    Promise.reject(new Error("handled " + i)).catch(() => {});
+                    (async () => { throw new Error("async " + i); })();
+                }
+            };
+            setTimeout(() => reject(1), 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        logs::take();
+        host.collect_garbage();
+        let before = host.object_count();
+        host.eval_script(
+            "rounds.js",
+            "for (let i = 0; i < 20; i++) setTimeout(() => reject(50), 0);",
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert_eq!(rejections(&logs::take()).len(), 20 * 50 * 2);
+        assert_eq!(host.pending_rejections(), 0);
+        host.collect_garbage();
+        // The 3000 promises and their errors are gone.
+        assert!(
+            host.object_count() < before + 100,
+            "{} → {}",
+            before,
+            host.object_count()
+        );
+    }
+
+    #[test]
+    fn interrupts_and_running_out_of_memory_are_not_rejections() {
+        logs::capture();
+        let mut host = sandboxed(Limits {
+            call_budget: Duration::from_millis(50),
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"setTimeout(async () => { await null; for (;;) {} }, 0);
+            setTimeout(async () => { try { for (;;) {} } catch (e) {} }, 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert_eq!(errors.borrow().len(), 2, "{:?}", errors.borrow());
+        assert!(
+            errors
+                .borrow()
+                .iter()
+                .all(|e| e.contains("budget of 50 ms"))
+        );
+        assert_eq!(rejections(&logs::take()), Vec::<&String>::new());
+        assert_eq!(host.pending_rejections(), 0);
+
+        let mut host = sandboxed(Limits {
+            memory_bytes: 16 << 20,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"setTimeout(async () => {
+                const keep = [];
+                for (;;) keep.push(new Array(100000).fill(1));
+            }, 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert_eq!(errors.borrow().len(), 1, "{:?}", errors.borrow());
+        assert!(errors.borrow()[0].contains("limited to 16 MB"));
+        assert_eq!(rejections(&logs::take()), Vec::<&String>::new());
     }
 }

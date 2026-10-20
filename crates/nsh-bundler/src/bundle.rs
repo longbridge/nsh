@@ -247,6 +247,10 @@ impl ResolveSetup {
             resolve.alias = Some(self.alias.clone());
         }
         options.resolve = Some(resolve);
+        // tsconfig.json is the type checker's: its `paths` lead to `.nsh/types`'
+        // declarations and it extends `.nsh/tsconfig.json`, which may not be
+        // written yet. Aliases come from nsh.json, the JSX transform is nsh's.
+        options.tsconfig = Some(rolldown_common::TsConfig::Auto(false));
     }
 }
 
@@ -836,6 +840,28 @@ mod tests {
         let (code, _) = bundle_hot(&dir.join("App.tsx"), &[]).unwrap().script();
         assert!(code.contains("require(\"./Screen.js\")"), "{code}");
         assert!(!code.contains("import("), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bundles_ignore_the_apps_tsconfig() {
+        // As an app is before any nsh command wrote `.nsh/tsconfig.json`, with
+        // `paths` only the type checker may follow.
+        let dir = app("tsconfig");
+        std::fs::write(
+            dir.join("tsconfig.json"),
+            r#"{ "extends": "./.nsh/tsconfig.json",
+                 "compilerOptions": { "paths": { "./shared": ["./missing.d.ts"] } } }"#,
+        )
+        .unwrap();
+        let code = bundle_app(&dir, false).code;
+        assert!(code.contains("second screen"), "{code}");
+        let hot = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        assert!(
+            hot.modules.iter().any(|m| m.id.contains("shared")),
+            "{:?}",
+            hot.modules
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

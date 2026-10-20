@@ -75,6 +75,8 @@ pub(crate) struct AppConfig {
     pub(crate) build: Option<u32>,
     /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`.
     pub(crate) icon: Option<PathBuf>,
+    /// The lowest runtime that runs a signed package (`nsh publish`).
+    pub(crate) min_runtime: Option<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde::de::IgnoredAny>,

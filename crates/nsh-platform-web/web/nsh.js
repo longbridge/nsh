@@ -3129,6 +3129,10 @@ class Player {
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
+      case "setClipboardImage": this.writeClipboardImage(args[0]); break;
+      case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
+      // Pages see no local paths: never any files.
+      case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "statusBar": this.setThemeColor(args[0]); break;
       case "back": this.defaultBack(); break;
@@ -3205,6 +3209,46 @@ class Player {
     const payload = { id: request, has: text.length > 0 };
     if (!hasOnly && text) payload.text = text;
     this.event(ROOT_ID, "onClipboard", payload);
+  }
+
+  /** `Clipboard.setImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
+  async writeClipboardImage(uri) {
+    try {
+      const blob = await (await fetch(uri)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    } catch {
+      // Denied, an insecure context, or a type the browser does not write.
+    }
+  }
+
+  /** `Clipboard.getImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
+  async readClipboardImage(request, hasOnly) {
+    const app = this.app;
+    const answer = (payload) => app === this.app && this.event(ROOT_ID, "onClipboard", { id: request, ...payload });
+    let blob = null;
+    try {
+      for (const item of (await navigator.clipboard?.read()) ?? []) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          blob = await item.getType(type);
+          break;
+        }
+      }
+    } catch {
+      // Denied, or no clipboard access (an insecure context).
+    }
+    if (!blob || hasOnly) return answer({ has: !!blob });
+    const uri = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+    if (!uri) return answer({ has: true });
+    const img = new Image();
+    img.onload = () => answer({ has: true, uri, width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => answer({ has: true });
+    img.src = uri;
   }
 
   /** `Image.getSize` / `prefetch`: loads the image (the browser keeps it cached for the views that show it). */

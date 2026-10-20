@@ -132,6 +132,38 @@ fn only_trusted_roots_and_certified_apps() {
 }
 
 #[test]
+fn packages_name_the_lowest_runtime_they_need() {
+    let k = keys(&["*"]);
+    // By default, the runtime that built it.
+    let bytes = build(&contents("a.b", 1), &k.release, &k.cert).unwrap();
+    let header = nsh_package::verify_signature(&bytes).unwrap();
+    assert_eq!(header.min_runtime(), nsh_package::RUNTIME_VERSION);
+    // An older one, so that older runtimes run it too.
+    let older = Contents {
+        min_runtime: Some("0.0.1".into()),
+        ..contents("a.b", 2)
+    };
+    let bytes = build(&older, &k.release, &k.cert).unwrap();
+    assert_eq!(
+        nsh_package::verify_signature(&bytes).unwrap().min_runtime(),
+        "0.0.1"
+    );
+    assert!(store(&[k.root.public()]).verify(&bytes, BYTECODE).is_ok());
+    // Not a version, or newer than the signer: refused before signing.
+    for bad in ["0.1", "latest", "999.0.0"] {
+        let bad = Contents {
+            min_runtime: Some(bad.into()),
+            ..contents("a.b", 3)
+        };
+        assert!(
+            matches!(build(&bad, &k.release, &k.cert), Err(Error::Format(_))),
+            "{:?}",
+            bad.min_runtime
+        );
+    }
+}
+
+#[test]
 fn certificates_have_a_validity_window() {
     let root = SecretKey::generate().unwrap();
     let release = SecretKey::generate().unwrap();

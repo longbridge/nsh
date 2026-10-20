@@ -22,7 +22,7 @@ use super::{
     reactive::with_data,
     signal_with,
     status_bar::{SharedStatusBars, StatusBarEntry, StatusBars},
-    task::{self, Action, Answer, DialogAnswer, Executor, ImageSize},
+    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Size, StatusBarSetting,
@@ -397,6 +397,36 @@ pub fn clipboard_string() -> Answer<String> {
 /// Whether the system clipboard holds text (TS: `Clipboard.hasString`).
 pub fn clipboard_has_string() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_string();
+    act(action);
+    answer
+}
+
+/// Puts the image of a `data:` URI (as [`clipboard_image`] gives) on the
+/// system clipboard (TS: `Clipboard.setImage`).
+pub fn set_clipboard_image(uri: impl Into<String>) {
+    act(super::services::set_clipboard_image(uri.into()));
+}
+
+/// The image on the system clipboard, `None` when it holds none (TS:
+/// `Clipboard.getImage`), to await in a task.
+pub fn clipboard_image() -> Answer<Option<ClipboardImage>> {
+    let (answer, action) = super::services::clipboard_image();
+    act(action);
+    answer
+}
+
+/// Whether the system clipboard holds an image, without reading it (TS:
+/// `Clipboard.hasImage`).
+pub fn clipboard_has_image() -> Answer<bool> {
+    let (answer, action) = super::services::clipboard_has_image();
+    act(action);
+    answer
+}
+
+/// The `file:` URLs of the local files on the system clipboard (files
+/// copied in a file manager; TS: `Clipboard.getFiles`), to await in a task.
+pub fn clipboard_files() -> Answer<Vec<String>> {
+    let (answer, action) = super::services::clipboard_files();
     act(action);
     answer
 }
