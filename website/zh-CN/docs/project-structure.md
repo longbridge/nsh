@@ -181,7 +181,7 @@ const open = async () => {
 | `nsh/native` | 嵌入应用注册的组件和函数 |
 | `nsh/ios`, `nsh/android` | 平台专属 API |
 
-[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。
+[模块参考](../modules/index.md) 逐一介绍了它们。导入 NSH 没有的模块（`nsh/foo`）会导致构建错误。代码用到、但模块没有导出的名字（`import { Buton } from "nsh/ui/mobile"`）同样是构建错误：错误指向这条导入，并给出最接近的导出名（``did you mean `Button`?``）。只当作类型用的名字由 `nsh check` 检查。
 
 ### npm 包
 
