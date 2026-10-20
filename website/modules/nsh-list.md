@@ -50,7 +50,8 @@ mount(App);
 
 ## Props
 
-`ListProps<T>` combines the list's own props with the scrolling props shared with `<Scroll>`.
+`ListProps<T>` combines the list's own props with the scrolling props shared with `<Scroll>` and the props every
+element takes, which go to the list's scroll view.
 
 ### Data and rendering
 

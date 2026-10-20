@@ -79,6 +79,8 @@ mount(App);
 
 列表同样支持 [`<Scroll>`](./scroll.md) 的滚动属性：`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`disableIntervalMomentum`、`decelerationRate`、`bounces`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`scrollEventThrottle` 和 `scrollEnabled`。列表不支持缩放。
 
+所有元素通用的属性（[通用属性](./index.md)）原样传给列表的滚动视图：`testID`、`accessibilityLabel` 等无障碍属性、`class` 和 `classList`、`onLayout`、触摸和响应者属性。UI 测试按 `testID` 找到列表，和找其他视图一样。
+
 `ViewabilityConfig`：
 
 | 字段 | 类型 | 说明 |

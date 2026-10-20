@@ -90,6 +90,10 @@ Lists also take the scrolling props of [`<Scroll>`](./scroll.md#scrolling): `pag
 `snapToOffsets`, `snapToAlignment`, `disableIntervalMomentum`, `decelerationRate`, `bounces`, `contentInset`,
 `contentOffset`, `keyboardShouldPersistTaps`, `scrollEventThrottle` and `scrollEnabled`. Lists do not zoom.
 
+The props every element takes ([common props](./index.md)) go to the list's scroll view as they are: `testID`,
+`accessibilityLabel` and the other accessibility props, `class` and `classList`, `onLayout`, touch and responder props.
+UI tests find a list by its `testID` as they find any view.
+
 `ViewabilityConfig`:
 
 | Field | Type | Description |

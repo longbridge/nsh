@@ -62,6 +62,25 @@ const FORWARDED: &[&str] = &[
     "onMomentumScrollEnd",
 ];
 
+/// The props the list itself uses: every other prop the app passes (the
+/// test id, accessibility, classes, touch and layout events, ...) goes to
+/// the scroll view as it would on a `<Scroll>`, as React Native's
+/// `FlatList` passes the rest to its `ScrollView`.
+const OWN: &[&str] = &[
+    "each",
+    "children",
+    "ref",
+    "keyExtractor",
+    "estimatedItemSize",
+    "onEndReachedThreshold",
+    "initialScrollIndex",
+    "onViewableItemsChanged",
+    "ListHeaderComponent",
+    "ListFooterComponent",
+    "ListEmptyComponent",
+    "ItemSeparatorComponent",
+];
+
 /// What the app passes a Rust component's rows (`listItemsProps` of the
 /// JS glue): the data and the rows; the component lays them out.
 pub(crate) const ITEMS_PROPS: &[&str] = &[
@@ -239,12 +258,17 @@ pub(crate) fn render(ctx: *mut JsContext, props: JsValue) -> Result<JsValue, JsV
     let r = reactive::render_effect(ctx, func);
     // SAFETY: the effect keeps its own value.
     unsafe { qjs::JS_FreeValue(ctx, r) };
-    // The forwarded props, the estimated size and the end threshold.
+    // The forwarded props, the estimated size, the end threshold and the
+    // host props passed on.
+    let rest = rest_names(ctx, props).map_err(fail)?;
     // SAFETY: a new array of the previous values.
     let prev = unsafe { qjs::JS_NewArray(ctx) };
-    let func = native(ctx, forward_run, 0, &mut [node, props, prev]);
-    // SAFETY: the function keeps a dup.
-    unsafe { qjs::JS_FreeValue(ctx, prev) };
+    let func = native(ctx, forward_run, 0, &mut [node, props, prev, rest]);
+    // SAFETY: the function keeps dups.
+    unsafe {
+        qjs::JS_FreeValue(ctx, prev);
+        qjs::JS_FreeValue(ctx, rest);
+    }
     let r = reactive::render_effect(ctx, func);
     unsafe { qjs::JS_FreeValue(ctx, r) };
     // Header and footer cells (always rendered), and the empty one.
@@ -424,41 +448,126 @@ unsafe extern "C" fn forward_run(
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: three data values; the array keeps dups of the values.
+    // SAFETY: four data values; the array keeps dups of the values.
     unsafe {
-        let (node, props, prev) = (*data, *data.add(1), *data.add(2));
+        let (node, props, prev, rest) = (*data, *data.add(1), *data.add(2), *data.add(3));
         let names = FORWARDED.iter().map(|&n| (n, n)).chain([
             ("estimatedItemSize", "estimatedItemSize"),
             ("endReachedThreshold", "onEndReachedThreshold"),
         ]);
-        for (i, (wire, key)) in names.enumerate() {
-            let mut value = get(ctx, props, key);
-            if qjs::JS_IsException(value) {
-                return value;
+        let mut at = 0;
+        for (wire, key) in names {
+            if let Err(e) = forward(ctx, node, props, prev, at, wire, key) {
+                return e;
             }
-            if qjs::JS_IsUndefined(value) || qjs::JS_IsNull(value) {
-                value = match wire {
-                    "estimatedItemSize" => qjs::JS_NewFloat64(50.0),
-                    "endReachedThreshold" => qjs::JS_NewFloat64(1.0),
-                    _ => value,
-                };
+            at += 1;
+        }
+        for i in 0..length(ctx, rest) {
+            let name = qjs::JS_GetPropertyInt64(ctx, rest, i);
+            let s = qjs::JS_ToCString(ctx, name);
+            qjs::JS_FreeValue(ctx, name);
+            if s.is_null() {
+                return qjs::JS_EXCEPTION;
             }
-            let old = qjs::JS_GetPropertyUint32(ctx, prev, i as u32);
-            let first = qjs::JS_IsUndefined(old)
-                && !matches!(wire, "estimatedItemSize" | "endReachedThreshold");
-            let result =
-                if qjs::JS_IsStrictEqual(ctx, old, value) || first && qjs::JS_IsUndefined(value) {
-                    Ok(())
-                } else {
-                    dom::set_prop_with_prev(ctx, node, wire, value, old)
-                };
-            qjs::JS_FreeValue(ctx, old);
-            qjs::JS_SetPropertyUint32(ctx, prev, i as u32, value);
+            let result = match CStr::from_ptr(s).to_str() {
+                Ok(key) => forward(ctx, node, props, prev, at, key, key),
+                Err(_) => Ok(()),
+            };
+            qjs::JS_FreeCString(ctx, s);
             if let Err(e) = result {
                 return e;
             }
+            at += 1;
         }
         UNDEFINED
+    }
+}
+
+/// Sends prop `wire` of the list (`props[key]`) when it changed from the
+/// value kept at `prev[at]`.
+fn forward(
+    ctx: *mut JsContext,
+    node: JsValue,
+    props: JsValue,
+    prev: JsValue,
+    at: u32,
+    wire: &str,
+    key: &str,
+) -> Result<(), JsValue> {
+    let mut value = get(ctx, props, key);
+    // SAFETY: inline checks and reads of live values; `prev` keeps the
+    // value, the old one is freed.
+    unsafe {
+        if qjs::JS_IsException(value) {
+            return Err(value);
+        }
+        if qjs::JS_IsUndefined(value) || qjs::JS_IsNull(value) {
+            value = match wire {
+                "estimatedItemSize" => qjs::JS_NewFloat64(50.0),
+                "endReachedThreshold" => qjs::JS_NewFloat64(1.0),
+                _ => value,
+            };
+        }
+        let old = qjs::JS_GetPropertyUint32(ctx, prev, at);
+        let first = qjs::JS_IsUndefined(old)
+            && !matches!(wire, "estimatedItemSize" | "endReachedThreshold");
+        let result =
+            if qjs::JS_IsStrictEqual(ctx, old, value) || first && qjs::JS_IsUndefined(value) {
+                Ok(())
+            } else {
+                dom::set_prop_with_prev(ctx, node, wire, value, old)
+            };
+        qjs::JS_FreeValue(ctx, old);
+        qjs::JS_SetPropertyUint32(ctx, prev, at, value);
+        result
+    }
+}
+
+/// The names of the props in `props` (borrowed) the list passes on to its
+/// scroll view (all but its own and the ones it forwards by name), as an
+/// array (owned). Read once: compiled JSX gives a list the same props for
+/// its whole life, their values change behind getters.
+fn rest_names(ctx: *mut JsContext, props: JsValue) -> Result<JsValue, JsValue> {
+    // SAFETY: a new array; an enumeration of a live object's own names,
+    // freed after use.
+    unsafe {
+        let out = qjs::JS_NewArray(ctx);
+        if !qjs::JS_IsObject(props) {
+            return Ok(out);
+        }
+        let mut tab: *mut qjs::JSPropertyEnum = ptr::null_mut();
+        let mut len: u32 = 0;
+        if qjs::JS_GetOwnPropertyNames(
+            ctx,
+            &mut tab,
+            &mut len,
+            props,
+            (qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY) as c_int,
+        ) != 0
+        {
+            qjs::JS_FreeValue(ctx, out);
+            return Err(qjs::JS_EXCEPTION);
+        }
+        let mut n = 0;
+        for j in 0..len as usize {
+            let name = qjs::JS_AtomToString(ctx, (*tab.add(j)).atom);
+            let s = qjs::JS_ToCString(ctx, name);
+            let pass = !s.is_null()
+                && CStr::from_ptr(s)
+                    .to_str()
+                    .is_ok_and(|name| !OWN.contains(&name) && !FORWARDED.contains(&name));
+            if !s.is_null() {
+                qjs::JS_FreeCString(ctx, s);
+            }
+            if pass {
+                qjs::JS_SetPropertyUint32(ctx, out, n, name);
+                n += 1;
+            } else {
+                qjs::JS_FreeValue(ctx, name);
+            }
+        }
+        qjs::JS_FreePropertyEnum(ctx, tab, len);
+        Ok(out)
     }
 }
 
@@ -1054,7 +1163,10 @@ export interface ViewabilityConfig {
   minimumViewTime?: number;
 }
 
-export interface ListProps<T> extends ScrollingHostProps, ListHostProps {
+/** A list's props: its own, and those of the scroll view it is (the test
+ * id, accessibility, classes, touch and layout events, ...), which it
+ * passes on as they are. */
+export interface ListProps<T> extends Omit<ViewProps, "children">, ScrollingHostProps, ListHostProps {
   each: readonly T[];
   ListHeaderComponent?: ListSlot;
   ListFooterComponent?: ListSlot;
