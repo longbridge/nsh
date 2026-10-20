@@ -201,8 +201,12 @@ Path2D#.roundRect function
 
 [nsh/clipboard]
 Clipboard object
+Clipboard.getFiles function
+Clipboard.getImage function
 Clipboard.getString function
+Clipboard.hasImage function
 Clipboard.hasString function
+Clipboard.setImage function
 Clipboard.setString function
 
 [nsh/desktop]
