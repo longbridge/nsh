@@ -996,7 +996,14 @@ impl ListState {
         let overscan = self.viewport * OVERSCAN;
         let range = self.items_in(at - overscan, at + self.viewport + overscan);
         let sticky = self.active_sticky();
-        let wanted = |i: u32| range.is_some_and(|(f, l)| (f..=l).contains(&i)) || sticky == Some(i);
+        // And the one before it: scrolled back, it shows at once, pushed by
+        // the pinned one, before a round of binding could render it.
+        let before = sticky.and_then(|s| self.sticky.iter().rev().find(|&&p| p < s).copied());
+        let wanted = |i: u32| {
+            range.is_some_and(|(f, l)| (f..=l).contains(&i))
+                || sticky == Some(i)
+                || before == Some(i)
+        };
 
         for slot in 0..self.slots.len() as u32 {
             if let Some(i) = self.slots[slot as usize].index
@@ -1029,7 +1036,7 @@ impl ListState {
                 bind(self, i);
             }
         }
-        if let Some(s) = sticky {
+        for s in [before, sticky].into_iter().flatten() {
             bind(self, s);
         }
 
@@ -1285,6 +1292,26 @@ mod tests {
         assert_eq!(l.sticky_range(30, 1, 50.0).end, f32::INFINITY);
         l.offset = 1600.0;
         assert_eq!(l.active_sticky(), Some(30));
+    }
+
+    #[test]
+    fn the_sticky_item_before_the_pinned_one_stays_rendered() {
+        let mut l = list(100, 50.0, 400.0);
+        l.set_sticky(vec![0, 30, 60]);
+        // 60 is pinned; 30 starts at 1500, far above the rendered window.
+        l.offset = 3200.0;
+        assert_eq!(l.active_sticky(), Some(60));
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        let bound = |l: &ListState, i: u32| l.slots.iter().any(|s| s.index == Some(i));
+        assert!(bound(&l, 60) && bound(&l, 30), "{binds:?}");
+        assert!(!bound(&l, 0));
+        // Scrolled back into 30's rows: 30 is pinned and 0 waits above it.
+        l.offset = 2000.0;
+        binds.clear();
+        l.update_window(&mut binds);
+        assert!(bound(&l, 30) && bound(&l, 0), "{binds:?}");
+        assert!(!bound(&l, 60));
     }
 
     #[test]
