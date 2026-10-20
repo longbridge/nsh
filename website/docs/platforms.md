@@ -20,10 +20,10 @@ On every platform, NSH's main use is the same: modules embedded in a native app 
 | [macOS](./macos.md) | AppKit and Core Animation; CoreText | macOS 14+ | `nsh run --target macos` | ad hoc signed `.app` |
 | [Windows](./windows.md) | Win32 windows drawn with Direct2D; DirectWrite | Windows 10 1809+, Windows 11 | `nsh run` (the default on Windows) | a directory and a `.zip` |
 | [Linux](./linux.md) | GTK 4 widgets; Pango | GTK 4.14+ | `nsh run` (the default on Linux) | a directory and a `.tar.gz` |
-| [GPUI](./gpui.md) | GPUI; GPUI's text system | macOS, Windows, Linux (Vulkan) | `nsh run --target gpui` | as the desktop it runs on |
+| [GPUI](./gpui.md) | GPUI; GPUI's text system | macOS, Windows, Linux (Vulkan) | `nsh run --target gpui` | inside the GPUI app that embeds it |
 | [Web](./web.md) | HTML and CSS; the browser's fonts | modern browsers, desktop and phone | `nsh run --target web` | a static site |
 
-- **[GPUI](./gpui.md)** draws modules with [GPUI](https://gpui-kit.com), the framework of the sibling project GPUI Kit, on macOS, Windows and Linux alike: one renderer for all three desktops, and an `AppView` that GPUI and GPUI Kit apps place in their own element tree.
+- **[GPUI](./gpui.md)** draws modules with [GPUI](https://gpui-kit.com), the framework of the sibling project GPUI Kit, on macOS, Windows and Linux alike: it is the backend for embedding in GPUI and GPUI Kit apps, whose `AppView` they place in their own element tree. Standalone desktop apps run and are packaged with each OS's own backend (AppKit, Win32, GTK 4).
 - **[Web](./web.md)** renders apps as HTML in a browser page: `nsh package --target web` publishes a static site for any web server or CDN, and a page of your own embeds an app with `createPlayer` or an iframe. It also runs the live demos and the [playground](/playground) on this site.
 - **Mac Catalyst** runs the iOS backend in an iPhone-sized window (390×844) on a Mac, for development. Select it with `--target catalyst` to see how a module looks on a phone.
 
@@ -33,10 +33,10 @@ On every platform, NSH's main use is the same: modules embedded in a native app 
 
 ```sh
 nsh run my-app --target macos      # or ios, android, windows, linux, gpui, web, catalyst
-nsh package my-app --target macos  # or ios, ios-simulator, android, windows, linux, gpui, web
+nsh package my-app --target macos  # or ios, ios-simulator, android, windows, linux, web
 ```
 
-Desktop backends build for the machine they run on: package a Mac app on a Mac, a Windows app on Windows and a Linux app on Linux. [Packaging](./packaging.md) covers every target's output, signing and icons.
+Each desktop OS packages apps with its own backend, built for the machine it runs on: package a Mac app on a Mac, a Windows app on Windows and a Linux app on Linux. [Packaging](./packaging.md) covers every target's output, signing and icons.
 
 ## Embed in a native app
 

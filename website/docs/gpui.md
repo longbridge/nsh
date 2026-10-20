@@ -1,6 +1,6 @@
 ---
 title: GPUI
-description: Run NSH apps drawn by GPUI on macOS, Windows and Linux, package them, embed them in a GPUI or GPUI Kit app with AppView, and what the GPUI backend does differently.
+description: Embed NSH apps in a GPUI or GPUI Kit app with AppView, drawn by GPUI on macOS, Windows and Linux, try them in the GPUI development host, and what the GPUI backend does differently.
 order: 15.5
 group: platforms
 ---
@@ -8,8 +8,10 @@ group: platforms
 # GPUI
 
 The GPUI backend draws NSH apps with [GPUI](https://gpui-kit.com) (GPUI Fast), the GPU-accelerated UI framework that
-GPUI Kit is built on, on macOS, Windows and Linux alike. Its main use is embedding: an `AppView` is a GPUI view, so a
-GPUI or GPUI Kit app shows NSH modules anywhere in its own element tree. The core, the reactive graph, the renderer,
+GPUI Kit is built on, on macOS, Windows and Linux alike. It is the backend for embedding in GPUI and GPUI Kit apps: an
+`AppView` is a GPUI view, so a GPUI or GPUI Kit app shows NSH modules anywhere in its own element tree. Standalone apps
+run and are packaged with each desktop's own backend: [macOS](./macos.md) (AppKit), [Windows](./windows.md) (Win32)
+and [Linux](./linux.md) (GTK). The core, the reactive graph, the renderer,
 Taffy layout and the native modules are the same as on every other platform, so one bundle runs
 everywhere. `Platform.OS` is the OS it runs on (`"macos"`, `"windows"` or `"linux"`) and the `desktop={{…}}` props
 apply.
@@ -34,7 +36,7 @@ says how.
 
 - macOS, Windows or Linux, with a GPU GPUI can draw with (Metal on macOS, DirectX on Windows, Vulkan on Linux).
 - On macOS, building the runtime from a checkout uses Xcode's Metal Toolchain (`xcodebuild -downloadComponent
-  MetalToolchain`), which compiles GPUI's shaders ahead of time. On a Mac without it, `nsh run` and `nsh package` build
+  MetalToolchain`), which compiles GPUI's shaders ahead of time. On a Mac without it, `nsh run` builds
   the runtime with GPUI's `runtime-shaders` feature and say so: the shaders are compiled when the app starts (a fraction
   of a second the first time, cached by macOS after that).
 - On Linux: a Vulkan driver, Wayland or X11 with `libxkbcommon`, GTK 3 and WebKitGTK 4.1 (web views) and GStreamer
@@ -54,9 +56,9 @@ says how.
 nsh run my-app --target gpui
 ```
 
-Opens the app in a GPUI window (1200×800 by default), with hot reload, logs in the terminal and the error overlay as
-on the other targets. The development host (`nsh-gpui-host`) runs in place on every OS, with no app bundle around it.
-In a checkout, `nsh run` builds it first; the distribution ships it in `runtime/gpui/`. The host also runs a built
+Opens the app in a GPUI window (1200×800 by default), as a GPUI app that embeds it shows it, with hot reload, logs in
+the terminal and the error overlay as on the other targets. The development host (`nsh-gpui-host`) runs in place on
+every OS, with no app bundle around it. In a checkout, `nsh run` builds it first; the distribution ships it in `runtime/gpui/`. The host also runs a built
 bundle on its own:
 
 ```sh
@@ -66,25 +68,20 @@ dist/nsh/runtime/gpui/nsh-gpui-host --bundle build/bundle.nshc --window-size 390
 
 `--window-size` is the window's size in points (`<width>x<height>`).
 
+The host runs TSX and JavaScript apps. A Rust app (`nsh.json` `"root"`) runs on this OS's own backend (`--target
+macos`, `windows` or `linux`), and a GPUI app embeds its root with `AppView` (`App::Rust`).
+
 ## Packaging
 
-```sh
-nsh package my-app --target gpui [--run]
-```
+A GPUI app ships NSH inside its own executable: it embeds the app's bundle with `AppView` ([Embedding in a GPUI
+app](#embedding-in-a-gpui-app)) and is built and distributed as the GPUI app it is. A standalone NSH app is packaged
+with this OS's own target: [`--target macos`](./macos.md#packaging), [`--target windows`](./windows.md#packaging) or
+[`--target linux`](./linux.md#packaging) ([Packaging](./packaging.md)).
 
-The package is laid out as the native backend's of the machine it is made on, with GPUI's release runner
-(`nsh-gpui-app`) as the executable:
-
-| Packaged on | Output |
-|---|---|
-| macOS | an ad hoc signed `<Name>.app`, as [`--target macos`](./macos.md#packaging) makes |
-| Windows | a directory `<Name>\` with `<Name>.exe` and `nsh\`, and `<Name>.zip`, as [`--target windows`](./windows.md#packaging) makes |
-| Linux | a directory `<Name>/` with the executable, `nsh/` and a `.desktop` file, and `<Name>.tar.gz`, as [`--target linux`](./linux.md#packaging) makes |
-
-As with the native backends, the runner is built for the machine it is built on: package a Mac app on a Mac, a
-Windows app on Windows and a Linux app on Linux. `--run` launches the app after packaging it.
-
-A Linux package links WebKitGTK 4.1 (web views) and GStreamer (videos) dynamically, so the machines it runs on need them installed, with GTK 3 and GStreamer's base and good plug-ins (Debian / Ubuntu: `libwebkit2gtk-4.1-0`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-good`), besides a Vulkan driver and `libxkbcommon`.
+On Linux, a GPUI app with web views and videos links WebKitGTK 4.1 and GStreamer dynamically, so the machines it runs
+on need them installed, with GTK 3 and GStreamer's base and good plug-ins (Debian / Ubuntu: `libwebkit2gtk-4.1-0`,
+`libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, `gstreamer1.0-plugins-good`), besides a Vulkan driver and
+`libxkbcommon`.
 
 ## Embedding in a GPUI app
 
@@ -116,12 +113,12 @@ URIs resolve (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`b
 so only load it from your own app's files.
 
 - `open_app_window(source, options, cx)` opens a window with one `AppView` in a running GPUI app.
-- `run_app(source, options)` starts GPUI and runs one app in a window until it closes (what the release runner does).
+- `run_app(source, options)` starts GPUI and runs one app in a window until it closes (what the development host does).
 - `AppView::register_component(name, factory)` registers a native component of yours before loading
   ([Native components](./native-components.md)).
 - `AppOptions::limits` (or `AppView::set_limits`, for the apps loaded next) sets the VM limits: the JS heap, the
   stack, the time budgets and the node quota ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Embedded apps get `Limits::default()` (a
-  256 MB heap); the development host and the release runner run apps on their own, with `Limits::standalone()`.
+  256 MB heap); the development host runs apps on its own, with `Limits::standalone()`.
 - `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
   with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
 - `AppView::on_app_error(|error| …)` hears the app's errors: `error.kind` (the app failed to load, an uncaught
@@ -169,6 +166,6 @@ For comparison, each native backend's own list: [macOS](./macos.md#what-differs-
 
 ## See also
 
-- [CLI](./cli.md): `nsh run --target gpui`, `nsh package --target gpui`
-- [Packaging](./packaging.md)
+- [CLI](./cli.md): `nsh run --target gpui`
+- [Packaging](./packaging.md): standalone apps, with each OS's own target
 - [Platform overview](./platforms.md)

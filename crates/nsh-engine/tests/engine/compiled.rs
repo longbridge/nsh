@@ -482,6 +482,55 @@ fn a_changing_child_leaves_its_siblings() {
     assert!(remade.is_empty(), "{remade:#?}");
 }
 
+const BRANCH_EXPRESSION: &str = r#"
+import { Input, mount, signal, Text, View } from "nsh";
+
+const wide = signal(true);
+const saved = signal(false);
+mount(() => (
+  <View>
+    <If when={wide()}>
+      {(() => <Input testID="a" />)()}
+    </If>
+    {saved() ? <Text>saved</Text> : null}
+    <Text onPress={() => saved.set(true)}>save</Text>
+  </View>
+));
+"#;
+
+/// An `<If>` whose branch is an expression (a function the branch returns)
+/// keeps its nodes when a sibling changes: the expression runs in its
+/// item's memo, not again in the effect of the whole array (issue #171: a
+/// page's cards made again, and their enter animation replayed, when a
+/// dialog beside them opened).
+#[test]
+fn a_branch_expression_stays_when_a_sibling_changes() {
+    let (engine, rx) = start_app(BRANCH_EXPRESSION);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let save = text_id(&first, "save").expect("the save text");
+    engine
+        .control()
+        .dispatch_event(save, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t == "saved"));
+    let remade: Vec<&MountItem> = batch
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                MountItem::Create {
+                    kind: nsh_core::ViewKind::Input,
+                    ..
+                } | MountItem::Remove { .. }
+                    | MountItem::Delete { .. }
+            )
+        })
+        .collect();
+    assert!(remade.is_empty(), "{remade:#?}");
+}
+
 const NESTED_CHILDREN: &str = r#"
 import { mount, signal, Text, View } from "nsh";
 

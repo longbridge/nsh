@@ -1,6 +1,6 @@
 ---
 title: GPUI
-description: 在 macOS、Windows 和 Linux 上运行由 GPUI 绘制的 NSH 应用、打包应用、用 AppView 嵌入 GPUI 或 GPUI Kit 应用，以及 GPUI 后端的不同之处。
+description: 用 AppView 把 NSH 应用嵌入 GPUI 或 GPUI Kit 应用，在 macOS、Windows 和 Linux 上由 GPUI 绘制，在 GPUI 开发宿主中试用，以及 GPUI 后端的不同之处。
 order: 15.5
 group: platforms
 ---
@@ -8,8 +8,9 @@ group: platforms
 # GPUI
 
 GPUI 后端用 [GPUI](https://gpui-kit.com)（GPUI Fast）绘制 NSH 应用。GPUI 是 GPUI Kit 所基于的 GPU 加速 UI 框架，在 macOS、
-Windows 和 Linux 上表现一致。它的主要用途是嵌入：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在自己元素树的任意位置
-显示 NSH 模块。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个 bundle 可以在所有
+Windows 和 Linux 上表现一致。它是嵌入 GPUI 和 GPUI Kit 应用的后端：`AppView` 是一个 GPUI 视图，GPUI 或 GPUI Kit 应用可以在
+自己元素树的任意位置显示 NSH 模块。独立应用用各桌面系统自己的后端运行和打包：[macOS](./macos.md)（AppKit）、
+[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）。核心、响应式图、渲染器、Taffy 布局以及原生模块与其他所有平台完全相同，因此同一个 bundle 可以在所有
 平台上运行。`Platform.OS` 是它所运行的操作系统（`"macos"`、`"windows"` 或 `"linux"`），并会应用 `desktop={{…}}` 属性。
 
 [macOS](./macos.md)（AppKit）、[Windows](./windows.md)（Win32）和 [Linux](./linux.md)（GTK）后端的元素和模块它都具备；
@@ -27,7 +28,7 @@ GPUI 用自己方式绘制的地方，见[差异](#差异)。
 
 - macOS、Windows 或 Linux，以及 GPUI 能使用的 GPU（macOS 上是 Metal，Windows 上是 DirectX，Linux 上是 Vulkan）。
 - macOS 上：从源码构建运行时会用到 Xcode 的 Metal Toolchain（`xcodebuild -downloadComponent MetalToolchain`），由它提前编译
-  GPUI 的着色器。在没有它的 Mac 上，`nsh run` 和 `nsh package` 会打开 GPUI 的 `runtime-shaders` feature 构建运行时并给出提示：
+  GPUI 的着色器。在没有它的 Mac 上，`nsh run` 会打开 GPUI 的 `runtime-shaders` feature 构建运行时并给出提示：
   着色器在应用启动时编译（第一次不到一秒，之后由 macOS 缓存）。
 - Linux 上：Vulkan 驱动、带 `libxkbcommon` 的 Wayland 或 X11、GTK 3 和 WebKitGTK 4.1（Web 视图），以及 GStreamer 1.20
   或更新版本及其 base 和 good 插件（视频）。Web 视图需要 X11：在 Wayland 桌面上请让应用运行在 Xwayland 下（把
@@ -45,7 +46,7 @@ GPUI 用自己方式绘制的地方，见[差异](#差异)。
 nsh run my-app --target gpui
 ```
 
-在一个 GPUI 窗口（默认 1200×800）中打开应用，和其他目标一样支持热重载、在终端显示日志并提供错误浮层。开发宿主
+在一个 GPUI 窗口（默认 1200×800）中打开应用，显示效果与嵌入它的 GPUI 应用相同，和其他目标一样支持热重载、在终端显示日志并提供错误浮层。开发宿主
 （`nsh-gpui-host`）在每个操作系统上都直接运行，不需要外面包一层应用包。在源码仓库中，`nsh run` 会先构建它；发行版把它放在
 `runtime/gpui/` 中。宿主也可以单独运行一个构建好的 bundle：
 
@@ -56,24 +57,18 @@ dist/nsh/runtime/gpui/nsh-gpui-host --bundle build/bundle.nshc --window-size 390
 
 `--window-size` 是窗口的尺寸，单位为点（`<宽>x<高>`）。
 
+宿主运行 TSX 和 JavaScript 应用。Rust 应用（`nsh.json` 的 `"root"`）在本机操作系统自己的后端上运行（`--target macos`、
+`windows` 或 `linux`），GPUI 应用则用 `AppView`（`App::Rust`）嵌入它的根组件。
+
 ## 打包
 
-```sh
-nsh package my-app --target gpui [--run]
-```
+GPUI 应用把 NSH 放在自己的可执行文件里：它用 `AppView` 嵌入应用的 bundle（[嵌入 GPUI 应用](#嵌入-gpui-应用)），并作为
+GPUI 应用本身构建和分发。独立的 NSH 应用用本机操作系统自己的目标打包：[`--target macos`](./macos.md#打包)、
+[`--target windows`](./windows.md#打包) 或 [`--target linux`](./linux.md#打包)（[打包](./packaging.md)）。
 
-包的结构与打包所在机器的原生后端相同，只是可执行文件换成 GPUI 的发布版运行器（`nsh-gpui-app`）：
-
-| 打包所在系统 | 输出 |
-|---|---|
-| macOS | ad hoc 签名的 `<Name>.app`，与 [`--target macos`](./macos.md#打包) 相同 |
-| Windows | 一个目录 `<Name>\`（`<Name>.exe` 和 `nsh\`）和 `<Name>.zip`，与 [`--target windows`](./windows.md#打包) 相同 |
-| Linux | 一个目录 `<Name>/`（可执行文件、`nsh/` 和 `.desktop` 文件）和 `<Name>.tar.gz`，与 [`--target linux`](./linux.md#打包) 相同 |
-
-和原生后端一样，运行器只为构建它的机器构建：Mac 应用在 Mac 上打包，Windows 应用在 Windows 上打包，Linux 应用在 Linux 上打包。
-`--run` 会在打包后启动应用。
-
-Linux 包动态链接 WebKitGTK 4.1（Web 视图）和 GStreamer（视频），因此运行它的机器需要安装它们，以及 GTK 3 和 GStreamer 的 base、good 插件（Debian / Ubuntu：`libwebkit2gtk-4.1-0`、`libgstreamer1.0-0`、`libgstreamer-plugins-base1.0-0`、`gstreamer1.0-plugins-good`），此外还需要 Vulkan 驱动和 `libxkbcommon`。
+在 Linux 上，带 Web 视图和视频的 GPUI 应用动态链接 WebKitGTK 4.1 和 GStreamer，因此运行它的机器需要安装它们，以及 GTK 3 和
+GStreamer 的 base、good 插件（Debian / Ubuntu：`libwebkit2gtk-4.1-0`、`libgstreamer1.0-0`、`libgstreamer-plugins-base1.0-0`、
+`gstreamer1.0-plugins-good`），此外还需要 Vulkan 驱动和 `libxkbcommon`。
 
 ## 嵌入 GPUI 应用
 
@@ -103,9 +98,9 @@ gpui_platform::application().run(|cx| {
 `Bundle::read_trusted(path)`）加载：QuickJS 字节码是受信任的输入，只应从你自己应用的文件中加载。
 
 - `open_app_window(source, options, cx)` 在运行中的 GPUI 应用里打开一个带 `AppView` 的窗口。
-- `run_app(source, options)` 启动 GPUI，在一个窗口中运行一个应用直到窗口关闭（发布版运行器就是这样做的）。
+- `run_app(source, options)` 启动 GPUI，在一个窗口中运行一个应用直到窗口关闭（开发宿主就是这样做的）。
 - `AppView::register_component(name, factory)` 在加载前注册你自己的原生组件（[原生组件](./native-components.md)）。
-- `AppOptions::limits`（或 `AppView::set_limits`，作用于之后加载的应用）设置 VM 限制：JS 堆、栈、时间预算和节点配额（[沙箱与能力](./sandbox-and-capabilities.md)）。嵌入的应用默认是 `Limits::default()`（256 MB 堆）；开发宿主和发布版运行器把应用作为独立应用运行，使用 `Limits::standalone()`。
+- `AppOptions::limits`（或 `AppView::set_limits`，作用于之后加载的应用）设置 VM 限制：JS 堆、栈、时间预算和节点配额（[沙箱与能力](./sandbox-and-capabilities.md)）。嵌入的应用默认是 `Limits::default()`（256 MB 堆）；开发宿主把应用作为独立应用运行，使用 `Limits::standalone()`。
 - `AppView::connect_dev_server(url, cx)`（feature `dev`）从 `nsh dev` 加载应用，边改边重新加载，错误浮层显示在视图上；`AppView::on_error` 照样收到应用的错误。
 - `AppView::on_app_error(|error| …)` 接收应用的错误：`error.kind`（应用加载失败、未捕获的异常、VM 已停止），`error.is_fatal()` 表示该应用不会再执行任何 JS，`error.message`、`error.stack`，以及 `error.package`（它来自的签名包的 id 和 build 号）。`AppView::on_error` 以文本形式收到同样的错误。
 - `AppView::set_locale(locale, cx)` 和 `AppView::set_font_scale(scale, cx)` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
@@ -140,6 +135,6 @@ gpui_platform::application().run(|cx| {
 
 ## 另见
 
-- [命令行](./cli.md)：`nsh run --target gpui`、`nsh package --target gpui`
-- [打包](./packaging.md)
+- [命令行](./cli.md)：`nsh run --target gpui`
+- [打包](./packaging.md)：独立应用，用各操作系统自己的目标
 - [平台概览](./platforms.md)

@@ -1938,15 +1938,55 @@ fn memoize_run(ctx: *mut JsContext, value: JsValue) -> Option<JsValue> {
     let items = items
         .into_iter()
         .map(|v| {
-            // SAFETY: an owned value; the memo takes the function.
-            if unsafe { qjs::JS_IsFunction(ctx, v) } {
-                reactive::memo(ctx, v, false)
+            // SAFETY: a borrowed check of an owned value.
+            if unsafe { qjs::JS_IsFunction(ctx, v) } && node_ptr(ctx, v).is_null() {
+                item_memo(ctx, v)
             } else {
                 v
             }
         })
         .collect();
     Some(new_array(ctx, items))
+}
+
+/// A memo of `func` (owned), one function of an array of children, made
+/// under the running owner (owned; an exception value when it throws).
+fn item_memo(ctx: *mut JsContext, func: JsValue) -> JsValue {
+    let mut data = [func];
+    // SAFETY: the function keeps a dup of `func`, which is then freed.
+    let run = unsafe { qjs::JS_NewCFunctionData(ctx, Some(item_run), 0, 0, 1, data.as_mut_ptr()) };
+    unsafe { qjs::JS_FreeValue(ctx, func) };
+    if unsafe { qjs::JS_IsException(run) } {
+        return run;
+    }
+    // The memo takes the function.
+    reactive::memo(ctx, run, false)
+}
+
+/// A run of an [`item_memo`]: calls its function, and gives a function it
+/// returns (an `<If>` whose branch is an expression returns one) a memo of
+/// its own, under this one. Called by the array's effect instead, that
+/// function would run again, and make its nodes again, whenever any other
+/// item of the array changes; called by this memo, a change in what it
+/// reads would run this function again too (a component's `children`
+/// getter: the component made again).
+unsafe extern "C" fn item_run(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (`item_memo`).
+    let r = unsafe { qjs::JS_Call(ctx, *data, UNDEFINED, 0, ptr::null_mut()) };
+    // SAFETY: inline checks of a live value.
+    if unsafe { !qjs::JS_IsException(r) && qjs::JS_IsFunction(ctx, r) }
+        && node_ptr(ctx, r).is_null()
+    {
+        return item_memo(ctx, r);
+    }
+    r
 }
 
 /// `insert(parent, value, marker)`: children before `marker` (or at the

@@ -3,9 +3,9 @@
 An app written in Rust: its UI is `src/lib.rs`, and `nsh.json` names the root component (`"root": "App"`).
 
 ```sh
-nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
+nsh run                      # this machine's backend; --target ios, android, web, macos, linux or windows
 nsh test nsh.json --trace    # headless: what the root mounts, and the time of each commit
-nsh package --target web     # or ios, android, macos, linux, windows, gpui
+nsh package --target web     # or ios, android, macos, linux, windows
 ```
 
 `nsh run` and `nsh package` mount the root on every platform, the browser included, without QuickJS: the app is Rust

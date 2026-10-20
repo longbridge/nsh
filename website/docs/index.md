@@ -120,7 +120,7 @@ Because JavaScript only describes the UI and handles events, the work done in th
 | macOS | Supported (macOS 14+) | AppKit | Standalone apps; embedded with `AppView` ([macOS](./macos.md)) |
 | Windows | Supported (Windows 10 1809+) | Win32, Direct2D | Standalone apps; embedded with `AppView` ([Windows](./windows.md)) |
 | Linux | Supported (GTK 4.14+) | GTK 4 | Standalone apps; embedded with `AppView` ([Linux](./linux.md)) |
-| GPUI (macOS, Windows, Linux) | Supported | GPUI | Standalone apps; embedded with `AppView` in GPUI and GPUI Kit apps ([GPUI](./gpui.md)) |
+| GPUI (macOS, Windows, Linux) | Supported | GPUI | Embedded with `AppView` in GPUI and GPUI Kit apps ([GPUI](./gpui.md)) |
 | Web | Supported (modern browsers) | HTML | Static sites; embedded in a page with `createPlayer` or an iframe ([Web](./web.md)) |
 | Mac Catalyst | For development | UIKit | The iPhone-sized window `nsh run` opens on a Mac, to see a module as on a phone |
 
