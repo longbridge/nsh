@@ -3,6 +3,7 @@
 // The globals of nsh's JS environment besides the ECMAScript library
 // (there is no DOM).
 
+/// <reference path="../standard/index.d.ts" />
 declare var console: {
   log(...data: unknown[]): void;
   info(...data: unknown[]): void;
@@ -15,6 +16,13 @@ declare var performance: {
   /** Milliseconds since the JS context started, with sub-millisecond precision. */
   now(): number;
 };
+
+interface ImportMeta {
+  /** The module's own URL: `file:` in the app's directory on desktop hosts,
+   * the page's on the web, `asset:/` in packaged mobile apps, so
+   * `new URL("./data.json", import.meta.url)` names a file beside it. */
+  readonly url: string;
+}
 
 declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;
 declare function setInterval(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;
@@ -52,6 +60,19 @@ declare class DOMException extends Error {
   readonly message: string;
   readonly code: number;
 }
+
+/** Native hosts only: not defined on the web. */
+declare var Buffer: typeof import("buffer").Buffer;
+type Buffer = import("buffer").Buffer;
+declare var process: typeof import("process").default;
+/** Native hosts only: not defined on the web. */
+declare var crypto: Pick<typeof import("crypto").default, "createHash" | "createHmac" | "randomBytes" | "randomInt" | "randomUUID" | "randomFill" | "randomFillSync" | "getRandomValues"> & { readonly subtle: typeof import("@nsh/llrt-types/crypto").subtle };
+/** Native constructor without an upstream constructor signature. */
+declare const Crypto: unknown;
+/** Native constructor without an upstream constructor signature. */
+declare const CryptoKey: unknown;
+/** Native constructor without an upstream constructor signature. */
+declare const SubtleCrypto: unknown;
 
 type BufferSource = ArrayBuffer | ArrayBufferView;
 
@@ -163,6 +184,10 @@ interface ResponseInit {
   statusText?: string;
   headers?: HeadersInit;
 }
+
+interface WebSocketMessageEvent extends Event { readonly data: string | Blob | ArrayBuffer; }
+interface WebSocketCloseEvent extends Event { readonly code: number; readonly reason: string; readonly wasClean: boolean; }
+interface WebSocketErrorEvent extends Event { readonly message: string; }
 
 declare class EventTarget {
   constructor();
@@ -385,6 +410,31 @@ declare class Response implements Body {
   json(): Promise<any>;
   text(): Promise<string>;
   clone(): Response;
+}
+
+/** A WebSocket connection, checked against the app's network capabilities. */
+declare class WebSocket extends EventTarget {
+  static readonly CONNECTING: 0;
+  readonly CONNECTING: 0;
+  static readonly OPEN: 1;
+  readonly OPEN: 1;
+  static readonly CLOSING: 2;
+  readonly CLOSING: 2;
+  static readonly CLOSED: 3;
+  readonly CLOSED: 3;
+  constructor(url: string | URL, protocols?: string | string[]);
+  readonly url: string;
+  readonly readyState: number;
+  readonly protocol: string;
+  readonly extensions: string;
+  readonly bufferedAmount: number;
+  binaryType: "blob" | "arraybuffer";
+  onopen: ((event: Event) => void) | null;
+  onmessage: ((event: WebSocketMessageEvent) => void) | null;
+  onerror: ((event: WebSocketErrorEvent) => void) | null;
+  onclose: ((event: WebSocketCloseEvent) => void) | null;
+  send(data: string | Blob | ArrayBuffer | ArrayBufferView): void;
+  close(code?: number, reason?: string): void;
 }
 
 declare class ByteLengthQueuingStrategy implements QueuingStrategy<ArrayBufferView> {
