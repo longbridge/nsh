@@ -24,11 +24,11 @@ const isAvailable: boolean;
 
 ```ts
 const Window: {
-  setTitle(title: string): Promise<void>;
-  setTitleBar(style: "default" | "hidden", height?: number): Promise<void>;
-  minimize(): Promise<void>;
-  toggleMaximize(): Promise<void>;
-  toggleFullScreen(): Promise<void>;
+  setTitle(title: string): void;
+  setTitleBar(style: "default" | "hidden", height?: number): void;
+  minimize(): void;
+  toggleMaximize(): void;
+  toggleFullScreen(): void;
   setFrame(frame: {
     x?: number;
     y?: number;
@@ -36,10 +36,10 @@ const Window: {
     height?: number;
     animated?: boolean;
     anchorTop?: boolean;
-  }): Promise<void>;
-  setLevel(level: "normal" | "floating" | "desktopIcon"): Promise<void>;
-  orderFront(): Promise<void>;
-  close(): Promise<void>;
+  }): void;
+  setLevel(level: "normal" | "floating" | "desktopIcon"): void;
+  orderFront(): void;
+  close(): void;
 };
 ```
 

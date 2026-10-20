@@ -129,6 +129,21 @@ fn calls_into_rust_settle_their_promises_whatever_happens() {
         4,
         RustCall::Op(Box::new(|_| Ok(Box::new(1.0f64) as Box<dyn ToJs>))),
     )]);
+    // Call 0 (an op or method returning `()`: JS waits for nothing): run,
+    // failed or discarded, no reply.
+    c.apply(op(
+        0,
+        RustCall::Op(Box::new(|_| Ok(Box::new(()) as Box<dyn ToJs>))),
+    ))
+    .unwrap();
+    c.apply(op(0, RustCall::Op(Box::new(|_| panic!("quiet boom")))))
+        .unwrap();
+    c.apply(op(0, RustCall::Method(40, Box::new(|_| None))))
+        .unwrap();
+    c.discard_ops(vec![op(
+        0,
+        RustCall::Op(Box::new(|_| Ok(Box::new(()) as Box<dyn ToJs>))),
+    )]);
     let replies: Vec<_> = js_events(&mut c)
         .into_iter()
         .map(|(_, _, payload)| match payload {

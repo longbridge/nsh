@@ -4,10 +4,11 @@
 //! The signature decides how a call runs: a function without a context
 //! runs in the JS call and returns its value (as a class's method does);
 //! one taking `cx: &mut ModuleCx` is an op, ordered with the props set
-//! before it (a `Promise`, of `void` when it returns nothing: settled once
-//! the op ran); an `async fn` runs as a task of the core (a `Promise`). In every kind the arguments are
-//! converted in the JS call, and the op carries a closure holding them
-//! (`super::call`).
+//! before it (a `Promise` when it returns a value, `Result<(), E>`
+//! included; `undefined` when it returns nothing: nothing answers it); an
+//! `async fn` runs as a task of the core (a `Promise`, of `void` too). In
+//! every kind the arguments are converted in the JS call, and the op
+//! carries a closure holding them (`super::call`).
 
 use std::{future::Future, pin::Pin};
 
@@ -54,7 +55,7 @@ pub enum FunctionCall {
     Sync(SyncCall),
     /// As an op, with a [`ModuleCx`], in order with what JS set before it
     /// (its arguments converted in the JS call); an error rejects the
-    /// `Promise`.
+    /// `Promise` (a wrong argument of one returning nothing throws).
     Op(fn(&dyn JsHost) -> Result<OpCall, Thrown>),
     /// As a task started in order with the UI's ops (its arguments
     /// converted in the JS call): it reaches the platform with the same free
@@ -85,8 +86,8 @@ impl FunctionCall {
 pub enum FunctionKind {
     /// In the JS call: TS gets the value.
     Sync,
-    /// An op: TS gets a promise of the value (`Promise<void>` without one,
-    /// settled once the op ran).
+    /// An op: TS gets a promise of the value; without one (`()`), nothing
+    /// (`void`): the op runs in order with the UI, and no reply comes back.
     Op,
     /// A task: TS gets a promise of the value (`Promise<void>` without
     /// one, settled when the task ends).
@@ -102,7 +103,7 @@ pub struct Function {
     /// Its parameters.
     pub params: &'static [ModuleParam],
     /// The TypeScript type of its result; `None`: nothing (`void`; a
-    /// promise of it for an op or a task).
+    /// promise of it for a task).
     pub returns: Option<TsType>,
     /// The classes its parameters and result name.
     pub refs: super::ClassRefs,
@@ -125,6 +126,21 @@ pub struct FunctionSpec {
     pub kind: FunctionKind,
     /// The call.
     pub call: FunctionCall,
+}
+
+impl FunctionSpec {
+    /// Whether JS gets a `Promise` of the result: a task always, an op
+    /// when it returns a value (`Result<(), E>` too, rejected with an
+    /// `Err`). An op returning `()` gives `undefined` (`void`): it runs in
+    /// order with the UI and nothing answers it, and a wrong argument
+    /// throws in the call.
+    pub fn promises(&self) -> bool {
+        match self.kind {
+            FunctionKind::Sync => false,
+            FunctionKind::Op => self.returns.is_some(),
+            FunctionKind::Async => true,
+        }
+    }
 }
 
 /// What a module is to JS.
