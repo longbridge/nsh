@@ -15,6 +15,7 @@ mod run;
 mod runtime;
 mod rust_app;
 mod sign;
+mod test;
 mod trace;
 mod ui;
 mod web;
@@ -161,6 +162,23 @@ enum Command {
         /// Viewport height in points.
         #[arg(long, default_value_t = 844.0)]
         height: f32,
+    },
+    /// Run an app's tests headless: its test files (`*.test.tsx`,
+    /// `*.test.ts`, importing `nsh/test`), each test opening the app on an
+    /// engine of its own; or, given the app's entry, open it and take the
+    /// steps standard input gives (`await app.press("Add")`).
+    Test {
+        /// A test file, a directory whose test files to run (default: the
+        /// current one), or an app's entry.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Run only the tests whose name contains this.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Print every mount batch of the apps the tests open, under the
+        /// step it came in, and the time of every commit.
+        #[arg(long)]
+        trace: bool,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed).
@@ -433,6 +451,7 @@ impl Command {
             | Command::Certify { .. }
             | Command::Verify { .. }
             | Command::Symbolicate { .. }
+            | Command::Test { .. }
             | Command::Revoke { .. } => None,
         }
     }
@@ -591,6 +610,11 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             },
         ),
         Command::Check { entry, tsc, args } => check::check(&entry, tsc.as_deref(), &args),
+        Command::Test {
+            path,
+            filter,
+            trace,
+        } => test::test(&path, filter, trace),
         Command::Dev {
             entry,
             port,

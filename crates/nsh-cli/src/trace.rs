@@ -77,8 +77,17 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
 
 /// The app at `entry`, bundled and compiled to bytecode, with its source
 /// map.
-fn compile(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
-    let sets = crate::ui_sets();
+pub(crate) fn compile(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    compile_with(entry, &crate::ui_sets(), true)
+}
+
+/// The entry `entry` bundled against `sets` and compiled to bytecode, with
+/// its source map; `announce`: saying so.
+pub(crate) fn compile_with(
+    entry: &Path,
+    sets: &[nsh_core::ui::description::SetDescription],
+    announce: bool,
+) -> anyhow::Result<(Vec<u8>, Option<String>)> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,
@@ -86,17 +95,19 @@ fn compile(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
         ui_sets: sets.to_vec(),
     })
     .map_err(|e| BuildError::from(e).into_error(entry))?;
-    // Exact numbers: traces are compared.
-    ui::done(format!(
-        "bundled {} {}",
-        ui::path(entry),
-        ui::dim(format!(
-            "({} B in {:.1} ms)",
-            bundle.code.len(),
-            bundle.elapsed_ms
-        ))
-    ));
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &sets)?;
+    if announce {
+        // Exact numbers: traces are compared.
+        ui::done(format!(
+            "bundled {} {}",
+            ui::path(entry),
+            ui::dim(format!(
+                "({} B in {:.1} ms)",
+                bundle.code.len(),
+                bundle.elapsed_ms
+            ))
+        ));
+    }
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
     Ok((bytecode, bundle.source_map))
 }
 

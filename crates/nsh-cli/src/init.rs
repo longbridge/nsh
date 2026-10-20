@@ -30,6 +30,18 @@ function App() {
 mount(App);
 "##;
 
+/// The test of [`APP`] (`nsh test`).
+const APP_TEST: &str = r##"import { expect, open, test } from "nsh/test";
+
+test("counts taps", async () => {
+  const app = await open("./App.tsx");
+  expect(app.texts()).toContain("0");
+  await app.press("Tap");
+  await app.press("Tap");
+  expect(app.texts()).toContain("2");
+});
+"##;
+
 /// What an app's repository leaves out: generated types and workspaces
 /// (`.nsh`), bundles (`out`) and Cargo's builds (`target`: an app's own
 /// crate, and its hosts once `nsh.json` names a `"rust"` crate).
@@ -69,9 +81,9 @@ impl Template {
 
 /// Creates an app in `dir` from `template`:
 ///
-/// - [`Template::Ts`]: `App.tsx` (the entry by convention), `nsh.json`,
-///   `tsconfig.json`, `.gitignore` and the type declarations; existing
-///   files are kept.
+/// - [`Template::Ts`]: `App.tsx` (the entry by convention), its test
+///   `App.test.tsx` (`nsh test`), `nsh.json`, `tsconfig.json`, `.gitignore`
+///   and the type declarations; existing files are kept.
 /// - [`Template::Rust`]: a Cargo project (`Cargo.toml`, `src/lib.rs` with
 ///   the root component, `src/main.rs` for `cargo run`), `nsh.json`
 ///   naming the root, `.gitignore` and a README.
@@ -135,6 +147,7 @@ pub(crate) fn init(
     match template {
         Template::Ts => files.extend([
             ("App.tsx", APP.to_owned()),
+            ("App.test.tsx", APP_TEST.to_owned()),
             ("tsconfig.json", nsh_bundler::TSCONFIG.to_owned()),
         ]),
         Template::Rust => {
@@ -335,7 +348,12 @@ const TSCONFIG_BASE: &str = ".nsh/tsconfig.json";
 /// becomes one extending `.nsh/tsconfig.json` ([`migrate_tsconfig`]).
 pub(crate) fn write_types(dir: &Path) {
     let types = dir.join(".nsh/types");
-    let mut definitions = nsh_js::type_definitions(&crate::ui_sets());
+    // The app's sets, and `nsh/test` for its test files.
+    let mut sets = crate::ui_sets().to_vec();
+    sets.push(nsh_core::ui::description::SetDescription::from(
+        &nsh_testing::registry(),
+    ));
+    let mut definitions = nsh_js::type_definitions(&sets);
     definitions.extend(nsh_bundler::type_definitions());
     remove_stale(&types, &types, &definitions);
     let files = definitions
@@ -472,9 +490,12 @@ mod tests {
         let dir = directory("ts");
         init(&dir, Some("My App".into()), Template::Ts, None).unwrap();
         assert!(read(&dir, "App.tsx").contains("mount(App)"));
+        assert!(read(&dir, "App.test.tsx").contains("from \"nsh/test\""));
         assert_eq!(read(&dir, "tsconfig.json"), nsh_bundler::TSCONFIG);
         assert_eq!(read(&dir, ".gitignore"), GITIGNORE);
         assert!(dir.join(".nsh/types/nsh/index.d.ts").is_file());
+        // Its test file's module is declared.
+        assert!(dir.join(".nsh/types/nsh/test.d.ts").is_file());
         let config = config(&dir);
         assert_eq!(config["name"], "My App");
         assert!(config.get("rust").is_none() && config.get("root").is_none());

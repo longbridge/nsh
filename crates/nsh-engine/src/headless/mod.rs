@@ -322,6 +322,12 @@ impl Headless {
         }
     }
 
+    /// Applies the batches that came, without waiting: the screen as it
+    /// is now.
+    pub fn catch_up(&mut self) {
+        self.drain();
+    }
+
     /// Applies the batches that came, without waiting.
     fn drain(&mut self) {
         while let Ok(batch) = self.batches.try_recv() {

@@ -231,6 +231,37 @@ Tests use the same driver: `headless::start` (the engine with its frames, the ba
 entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so that a Rust
 app's tests link neither the bundler nor QuickJS.
 
+## `nsh test`
+
+Tests are TypeScript (`*.test.tsx`, `*.test.ts`) importing `nsh/test`, a UI set written in Rust in `nsh-testing`
+(`module.rs`: `test`, `open`, `expect` and the classes `App` and `Expectation`, `#[module]` / `#[class]`, so its JS face
+and `.nsh/types/nsh/test.d.ts` are generated like any set's; the CLI declares it for every app, `init::write_types`).
+Only the engine of a test file serves it: an app's bundle cannot import it (the bundler knows no such module there).
+
+`nsh_testing::run_file` runs one test file (`run.rs`):
+
+- It writes an entry for the file in `<app>/.nsh/test/` that imports it and then calls `run` of the internal set
+  `nsh/test/runner`, and builds it through `TestRun::compile` (`Entry::TestFile`: the app's sets plus
+  `nsh_testing::test_sets()`). The file's source map gets its sources relative to the current directory, so failures
+  name `App.test.tsx:12:5`.
+- The test file runs on an engine of its own (the VM). `test(name, body)` keeps the body (`Callback`) in a
+  thread-local of the VM's thread; `run`, a task, takes them and calls each in order with
+  `Callback::call_async_traced` (what was thrown with its stack), bounded by 30 s, then closes the apps the test opened
+  and reports the result over a channel to the caller, who symbolicates the stack with the test file's map.
+- The VM's calls reach the run through the process's current `Session` (one test file at a time in a process, under a
+  lock): the test file's directory, the app's sets, the compiler and the apps the running test opened.
+- `open(entry, options)` builds the entry (`Entry::App`, once per run) and starts it on a `headless::Headless` of its
+  own (`StubNetwork` from `options.network`, or `UreqNetwork` for `"live"`; `MemoryStorage` seeded with
+  `options.storage`; the viewport and safe area), on a blocking thread; `App`'s async methods are the driver's steps,
+  run there too, and its synchronous ones (`texts`, `shows`, `value`) read the screen after `catch_up`. With
+  `TestRun::trace` every app observes its batches and prints them under their step (`print_batch`).
+
+`crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
+`target`), builds entries with the CLI's sets (`trace::compile_with`), prints a line per test (a failure with its
+message, its frames in the test file and the texts on screen) and fails when any test failed. Given an app's entry, it
+writes a test file in `.nsh/test` that opens the entry on the network, waits 1.2 s and runs what standard input holds.
+Apps with Rust crates of their own are refused for now (`nsh trace` runs them).
+
 ## New apps (`nsh init --template`)
 
 `nsh init <dir> --template ts|rust|mixed` (`init.rs`) writes one of three apps; without `--template` it asks with a
