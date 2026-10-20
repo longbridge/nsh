@@ -25,6 +25,7 @@ pub mod input;
 pub mod js;
 pub mod keymap;
 mod mount;
+pub mod navigation;
 mod ops;
 pub mod platform;
 mod props;

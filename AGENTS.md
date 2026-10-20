@@ -29,8 +29,10 @@ crates/
                        mount items; CSS values (`css.rs`: colors, lengths, shadows, gradients, filters), effects (`effects.rs`), Tailwind (`tailwind/`);
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host), the loads of
                        resources both faces share (`resource.rs`); the selection across the texts of a selection area (`selection.rs`, the platforms run it); the native animation graph (`animation/`: value / interpolate /
-                       math nodes, timing / spring / decay drivers; the platforms evaluate it every frame); the desktop
-                       backends' pointer decisions (`input.rs`: what a pointer may start, presses, hover, hit areas, wheel latching);
+                       math nodes, timing / spring / decay drivers; the platforms evaluate it every frame); what the
+                       desktop backends share, free of any toolkit: pointer decisions (`input.rs`: what a pointer may start,
+                       presses, hover, hit areas, wheel latching), navigation decisions (`navigation.rs`: stacks' screens,
+                       transitions' timing and motion, what going back acts on);
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, design tokens;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
                        Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the

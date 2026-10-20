@@ -100,6 +100,16 @@ mount::ScrollBehavior::snap_target(velocity)                     # a rate or a p
 mount::VideoProps.progress_interval_ms                           # time
 mount::VideoProps.rate                                           # a playback rate multiplier
 mount::VideoProps.volume                                         # audio volume, 0..1
+navigation::Tick::At.1                                           # eased transition progress (easing curve coordinates, unit square)
+navigation::Transitions::tick(now)                               # time
+navigation::dim ->                                               # an opacity, 0..1
+navigation::dim(amount)                                          # eased transition progress (easing curve coordinates, unit square)
+navigation::ease ->                                              # eased transition progress (easing curve coordinates, unit square)
+navigation::ease(t)                                              # transition progress (easing curve coordinates, unit square)
+navigation::modal_in_offset(e)                                   # eased transition progress (easing curve coordinates, unit square)
+navigation::modal_out_offset(e)                                  # eased transition progress (easing curve coordinates, unit square)
+navigation::pop_offsets(e)                                       # eased transition progress (easing curve coordinates, unit square)
+navigation::push_offsets(e)                                      # eased transition progress (easing curve coordinates, unit square)
 ops::Command::Seek.0                                             # time
 ops::Command::ZoomTo.scale                                       # a zoom scale factor
 ops::EventPayload::Pan.velocity_x                                # a rate or a physical constant of an animation

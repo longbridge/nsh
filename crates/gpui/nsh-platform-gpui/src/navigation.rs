@@ -53,11 +53,15 @@
 //! and only move views (`shift`, `fade`): nothing is laid out again while
 //! they run.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 use nsh_core::{
-    Bounds, Color, EdgeInsets, EventKind, EventPayload, ModalAnimation, ModalConfig, NodeId,
-    PayloadValue, Points, ROOT_ID, ScreenAnimation, ScreenConfig, Size, ViewKind,
+    Bounds, Color, EdgeInsets, EventKind, EventPayload, ModalConfig, NodeId, PayloadValue, Points,
+    ROOT_ID, ScreenConfig, Size, ViewKind,
+    navigation::{
+        Back, Reported, Stack, Tick, Transitions, back_target, dim, innermost, insets_payload,
+        modal_in_offset, modal_motion, modal_out_offset, pop_offsets, push_offsets, screen_motion,
+    },
 };
 use rustc_hash::FxHashMap;
 
@@ -69,16 +73,6 @@ use crate::{
     view::{Hosted, NshView},
 };
 
-/// Push and pop.
-const SLIDE_MS: f64 = 300.0;
-/// Cross-fades (and slides when the user asked for less motion).
-const FADE_MS: f64 = 200.0;
-/// Modals sliding up or down.
-const MODAL_MS: f64 = 300.0;
-/// How far the screen under a pushed one moves left, of the width.
-const PARALLAX: f32 = 0.3;
-/// How dark the screen under a pushed one gets (black's opacity).
-const DIM: f32 = 0.12;
 /// The node id of the views navigation makes itself (backgrounds, images
 /// of leaving screens): never one of the app's (JS ids are even and small,
 /// the core's odd and small) and never in the mounter.
@@ -197,33 +191,6 @@ fn keep_last(parent: &NshView, tail: &[NshView]) {
     }
 }
 
-fn ease(t: f64) -> f32 {
-    let u = 1.0 - t.clamp(0.0, 1.0);
-    (1.0 - u * u * u) as f32
-}
-
-/// How a screen comes and goes: the duration and whether it fades;
-/// `None`: at once.
-fn screen_motion(animation: ScreenAnimation, reduce_motion: bool) -> Option<(f64, bool)> {
-    match animation {
-        ScreenAnimation::None => None,
-        ScreenAnimation::Fade => Some((FADE_MS, true)),
-        ScreenAnimation::Default if reduce_motion => Some((FADE_MS, true)),
-        ScreenAnimation::Default => Some((SLIDE_MS, false)),
-    }
-}
-
-/// How a modal comes and goes: the duration and whether it fades;
-/// `None`: at once.
-fn modal_motion(animation: ModalAnimation, reduce_motion: bool) -> Option<(f64, bool)> {
-    match animation {
-        ModalAnimation::None => None,
-        ModalAnimation::Fade => Some((FADE_MS, true)),
-        ModalAnimation::Slide if reduce_motion => Some((FADE_MS, true)),
-        ModalAnimation::Slide => Some((MODAL_MS, false)),
-    }
-}
-
 fn reduce_motion(surface: &Surface) -> bool {
     surface.environment.get().reduce_motion
 }
@@ -239,29 +206,17 @@ fn safe_area(surface: &Surface) -> EdgeInsets {
     }
 }
 
-fn insets_payload(i: EdgeInsets) -> EventPayload {
-    let n = |v: f32| PayloadValue::Number(v as f64);
-    EventPayload::Map(vec![
-        ("top", n(i.top.0)),
-        ("right", n(i.right.0)),
-        ("bottom", n(i.bottom.0)),
-        ("left", n(i.left.0)),
-    ])
-}
-
 /// Reports root `id`'s size and insets when they changed.
 fn report(
     surface: &Surface,
     id: NodeId,
-    last: &mut Option<(Size<Points>, EdgeInsets)>,
+    last: &mut Reported,
     size: Size<Points>,
     insets: EdgeInsets,
 ) {
-    if size.width <= Points::ZERO || *last == Some((size, insets)) {
+    let Some(insets_changed) = last.update(size, insets) else {
         return;
-    }
-    let insets_changed = last.is_none_or(|(_, i)| i != insets);
-    *last = Some((size, insets));
+    };
     surface.control(|c| c.set_root_size(id, size, insets));
     if insets_changed {
         surface.event(id, EventKind::Insets, insets_payload(insets));
@@ -349,7 +304,7 @@ struct ScreenNav {
     /// The header items the app inserted (only the `header` one shows).
     items: Vec<NshView>,
     /// The size and insets last reported.
-    reported: Option<(Size<Points>, EdgeInsets)>,
+    reported: Reported,
 }
 
 impl ScreenNav {
@@ -363,7 +318,7 @@ impl ScreenNav {
             backdrop,
             backdrop_item: Rc::new(Backdrop),
             items: Vec::new(),
-            reported: None,
+            reported: Reported::default(),
         }
     }
 
@@ -416,10 +371,8 @@ impl ScreenNav {
 /// One stack.
 struct StackNav {
     view: NshView,
-    /// Its screens as shown, bottom to top (without popped ones).
-    shown: Vec<NodeId>,
-    /// Screens the user popped, until the app removes them.
-    popped: Vec<NodeId>,
+    /// Its screens as shown, and those the user popped.
+    screens: Stack,
 }
 
 /// One modal (kept while its node lives: the app may show it again).
@@ -431,7 +384,7 @@ struct ModalNav {
     /// The user closed it natively (`closeOnEscape`) and it was reported:
     /// the app's removal only forgets it.
     closed: bool,
-    reported: Option<(Size<Points>, EdgeInsets)>,
+    reported: Reported,
     /// The field that had the keyboard focus when it was presented: it
     /// gets it back when the modal closes, as a desktop dialog gives it
     /// back.
@@ -464,7 +417,7 @@ impl Dim {
     /// Dims at `amount` (0 to 1).
     fn set(&self, amount: f32) {
         self.fill
-            .set_color(with_alpha(Color::BLACK, DIM * amount), &self.view);
+            .set_color(with_alpha(Color::BLACK, dim(amount)), &self.view);
     }
 
     fn remove(&self) {
@@ -517,26 +470,12 @@ enum Motion {
     },
 }
 
-struct Transition {
-    /// Time of its first frame (seconds, the surface's clock).
-    start: Option<f64>,
-    /// Milliseconds.
-    duration: f64,
-    motion: Motion,
-}
-
-impl Transition {
+impl Motion {
     fn stack(&self) -> Option<&NshView> {
-        match &self.motion {
+        match self {
             Motion::Push { stack, .. } | Motion::Pop { stack, .. } => Some(stack),
             _ => None,
         }
-    }
-
-    /// Its progress at `now` (0 to 1 and beyond, not eased).
-    fn progress(&self, now: f64) -> f64 {
-        self.start
-            .map_or(0.0, |s| (now - s) * 1000.0 / self.duration.max(1.0))
     }
 }
 
@@ -552,7 +491,7 @@ pub(crate) struct Nav {
     dirty: Vec<NodeId>,
     /// Modals presented in this batch.
     presenting: Vec<NodeId>,
-    transitions: Vec<Transition>,
+    transitions: Transitions<Motion>,
     ticking: bool,
     /// Top screens and presented modals this batch started tearing down:
     /// their descendants stay attached until the end of the batch, so they
@@ -584,7 +523,7 @@ impl Nav {
 
     /// True when `view` is in the layer of a screen or modal leaving.
     fn in_departing(&self, view: &NshView) -> bool {
-        self.transitions.iter().any(|t| match &t.motion {
+        self.transitions.iter().any(|motion| match motion {
             Motion::Pop {
                 leaving: Leaving::Departed(layer),
                 ..
@@ -644,15 +583,9 @@ impl Nav {
     }
 
     /// Ends the transitions `which` selects at once.
-    fn finish(&mut self, surface: &Surface, which: impl Fn(&Transition) -> bool) {
-        let mut i = 0;
-        while i < self.transitions.len() {
-            if which(&self.transitions[i]) {
-                let t = self.transitions.remove(i);
-                self.end(surface, t);
-            } else {
-                i += 1;
-            }
+    fn finish(&mut self, surface: &Surface, which: impl Fn(&Motion) -> bool) {
+        for motion in self.transitions.take(which) {
+            self.end(surface, motion);
         }
     }
 
@@ -666,13 +599,13 @@ impl Nav {
                 dim,
                 fade,
             } => {
-                let w = stack.state().frame.size.width.0;
+                let (x, below_x) = push_offsets(stack.state().frame.size.width, e);
                 if *fade {
                     set_fade(entering, e);
                 } else {
-                    set_shift(entering, (w * (1.0 - e), 0.0));
+                    set_shift(entering, (x.0, 0.0));
                     if let Some(below) = below {
-                        set_shift(below, (-PARALLAX * w * e, 0.0));
+                        set_shift(below, (below_x.0, 0.0));
                     }
                 }
                 if let Some(dim) = dim {
@@ -687,16 +620,16 @@ impl Nav {
                 fade,
                 ..
             } => {
-                let w = stack.state().frame.size.width.0;
+                let (x, below_x) = pop_offsets(stack.state().frame.size.width, e);
                 let v = match leaving {
                     Leaving::View(v) | Leaving::Departed(v) => v,
                 };
                 if *fade {
                     set_fade(v, 1.0 - e);
                 } else {
-                    set_shift(v, (w * e, 0.0));
+                    set_shift(v, (x.0, 0.0));
                     if let Some(below) = below {
-                        set_shift(below, (-PARALLAX * w * (1.0 - e), 0.0));
+                        set_shift(below, (below_x.0, 0.0));
                     }
                 }
                 if let Some(dim) = dim {
@@ -710,7 +643,7 @@ impl Nav {
                     // From below the window's bottom edge.
                     let h = surface.root.state().frame.size.height.0;
                     let y = view.state().frame.origin.y.0;
-                    set_shift(view, (0.0, (h - y) * (1.0 - e)));
+                    set_shift(view, (0.0, modal_in_offset(Points(h - y), e).0));
                 }
             }
             Motion::ModalOut {
@@ -720,15 +653,15 @@ impl Nav {
                     set_fade(layer, 1.0 - e);
                 } else {
                     let h = surface.root.state().frame.size.height.0;
-                    set_shift(layer, (0.0, (h - top) * e));
+                    set_shift(layer, (0.0, modal_out_offset(Points(h - top), e).0));
                 }
             }
         }
     }
 
-    fn end(&mut self, surface: &Surface, t: Transition) {
-        Self::apply(surface, &t.motion, 1.0);
-        match t.motion {
+    fn end(&mut self, surface: &Surface, motion: Motion) {
+        Self::apply(surface, &motion, 1.0);
+        match motion {
             Motion::Push { stack, dim, .. } => {
                 if let Some(dim) = dim {
                     dim.remove();
@@ -777,7 +710,7 @@ impl Nav {
         let Some(st) = self.stacks.get(&stack) else {
             return;
         };
-        let top = st.shown.last().copied();
+        let top = st.screens.top();
         for view in st.view.child_views() {
             if view.kind() != ViewKind::Screen {
                 continue;
@@ -788,13 +721,9 @@ impl Nav {
         }
     }
 
-    fn start(&mut self, surface: &Rc<Surface>, duration: f64, motion: Motion) {
+    fn start(&mut self, surface: &Rc<Surface>, duration: Duration, motion: Motion) {
         Self::apply(surface, &motion, 0.0);
-        self.transitions.push(Transition {
-            start: None,
-            duration,
-            motion,
-        });
+        self.transitions.push(duration, motion);
         if self.ticking {
             return;
         }
@@ -814,25 +743,17 @@ impl Nav {
     }
 
     fn tick(&mut self, surface: &Surface, now: f64) {
-        for t in &mut self.transitions {
-            t.start.get_or_insert(now);
-        }
-        let mut i = 0;
-        while i < self.transitions.len() {
-            let p = self.transitions[i].progress(now);
-            if p >= 1.0 {
-                let t = self.transitions.remove(i);
-                self.end(surface, t);
-            } else {
-                Self::apply(surface, &self.transitions[i].motion, ease(p));
-                i += 1;
+        for tick in self.transitions.tick(now) {
+            match tick {
+                Tick::Ended(motion) => self.end(surface, motion),
+                Tick::At(i, e) => Self::apply(surface, &self.transitions[i], e),
             }
         }
     }
 
     /// Shows the app's screens of `stack` after a batch changed them.
     fn reconcile(&mut self, surface: &Rc<Surface>, stack_id: NodeId) {
-        self.finish(surface, |t| t.stack().is_some_and(|s| s.id() == stack_id));
+        self.finish(surface, |m| m.stack().is_some_and(|s| s.id() == stack_id));
         let Some(st) = self.stacks.get_mut(&stack_id) else {
             return;
         };
@@ -843,13 +764,9 @@ impl Nav {
             .filter(|v| v.kind() == ViewKind::Screen)
             .collect();
         let find = |id: NodeId| children.iter().find(|c| c.id() == id).cloned();
-        st.popped.retain(|&id| find(id).is_some());
-        let desired: Vec<NodeId> = children
-            .iter()
-            .map(NshView::id)
-            .filter(|id| !st.popped.contains(id))
-            .collect();
-        let prev = std::mem::replace(&mut st.shown, desired.clone());
+        let ids: Vec<NodeId> = children.iter().map(NshView::id).collect();
+        let prev = st.screens.reconcile(&ids);
+        let desired = st.screens.shown().to_vec();
         let (old, new) = (prev.last().copied(), desired.last().copied());
         let frame = stack.state().frame;
         // The top screen the app removed, with its views as they showed.
@@ -945,11 +862,11 @@ impl Nav {
     /// listens (`onBackPress`), then pops it natively unless it prevents it
     /// (`popOnBack` false), and tells the app once it is gone.
     fn back(&mut self, surface: &Rc<Surface>, stack_id: NodeId) {
-        self.finish(surface, |t| t.stack().is_some_and(|s| s.id() == stack_id));
+        self.finish(surface, |m| m.stack().is_some_and(|s| s.id() == stack_id));
         let Some(st) = self.stacks.get_mut(&stack_id) else {
             return;
         };
-        let Some(&top) = st.shown.last() else { return };
+        let Some(top) = st.screens.top() else { return };
         if let Some(s) = self.screens.get(&top) {
             if s.view.state().events.contains(EventKind::BackRequest) {
                 surface.event(top, EventKind::BackRequest, EventPayload::None);
@@ -958,15 +875,13 @@ impl Nav {
                 return;
             }
         }
-        if st.shown.len() < 2 {
+        if st.screens.pop().is_none() {
             return;
         }
-        st.shown.pop();
-        st.popped.push(top);
         let stack = st.view.clone();
         let children = stack.child_views();
         let find = |id: NodeId| children.iter().find(|c| c.id() == id).cloned();
-        let below = st.shown.last().copied().and_then(find);
+        let below = st.screens.top().and_then(find);
         let animation = self.screens.get(&top).map(|s| s.config.animation);
         match (
             screen_motion(animation.unwrap_or_default(), reduce_motion(surface)),
@@ -999,21 +914,15 @@ impl Nav {
     fn back_stack(&self, within: Option<&NshView>) -> Option<NodeId> {
         let wants = |st: &StackNav| {
             within.is_none_or(|w| is_ancestor(w, &st.view))
-                && (st.shown.len() > 1
-                    || st.shown.last().is_some_and(|top| {
-                        self.screens.get(top).is_some_and(|s| s.config.prevent_back)
-                    }))
+                && st.screens.takes_back(|top| {
+                    self.screens
+                        .get(&top)
+                        .is_some_and(|s| s.config.prevent_back)
+                })
                 && is_shown(&st.view)
         };
         let candidates: Vec<&StackNav> = self.stacks.values().filter(|s| wants(s)).collect();
-        candidates
-            .iter()
-            .find(|c| {
-                !candidates
-                    .iter()
-                    .any(|o| o.view != c.view && is_ancestor(&c.view, &o.view))
-            })
-            .map(|c| c.view.id())
+        innermost(&candidates, |c, o| is_ancestor(&c.view, &o.view)).map(|c| c.view.id())
     }
 
     /// Takes modal `id` away natively (it leaves as it last showed, its
@@ -1021,7 +930,7 @@ impl Nav {
     fn close_modal(&mut self, surface: &Rc<Surface>, id: NodeId, reported: bool) {
         self.finish(
             surface,
-            |t| matches!(&t.motion, Motion::ModalIn { view, .. } if view.id() == id),
+            |m| matches!(m, Motion::ModalIn { view, .. } if view.id() == id),
         );
         self.order.retain(|&m| m != id);
         // Its descendants were kept for this; once it is in its departing
@@ -1138,17 +1047,10 @@ impl Nav {
     /// What going back acts on (`back_press`: the app listens to
     /// `onBackPress`, and hears it before the stacks).
     fn back_target(&self, back_press: bool) -> Option<Back> {
-        if let Some(&id) = self.order.last() {
-            let view = self.modals.get(&id).and_then(|m| m.view.clone());
-            return Some(match self.back_stack(view.as_ref()) {
-                Some(stack) => Back::Stack(stack),
-                None => Back::Modal(id),
-            });
-        }
-        if back_press {
-            return Some(Back::App);
-        }
-        self.back_stack(None).map(Back::Stack)
+        back_target(self.order.last().copied(), back_press, |modal| {
+            let view = modal.and_then(|id| self.modals.get(&id)?.view.clone());
+            self.back_stack(view.as_ref())
+        })
     }
 
     /// Keeps the presented modals (and those leaving) over the app's
@@ -1160,8 +1062,8 @@ impl Nav {
                 tail.push(view.clone());
             }
         }
-        for t in &self.transitions {
-            if let Motion::ModalOut { layer, .. } = &t.motion {
+        for motion in self.transitions.iter() {
+            if let Motion::ModalOut { layer, .. } = motion {
                 tail.push(layer.clone());
             }
         }
@@ -1190,18 +1092,6 @@ impl Nav {
             self.keeping.push(view.clone());
         }
     }
-}
-
-/// What going back acts on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Back {
-    /// This stack's top screen hears `onBackPress` (when the app listens)
-    /// and pops unless its `popOnBack` is false.
-    Stack(NodeId),
-    /// The newest modal is asked to close.
-    Modal(NodeId),
-    /// The app's `onBackPress`.
-    App,
 }
 
 /// `Command::Back`: goes back as without the app's listeners, once the
@@ -1266,7 +1156,7 @@ pub(crate) fn removing(surface: &Rc<Surface>, view: &NshView) {
                 let on_top = parent.as_ref().is_some_and(|p| {
                     nav.stacks
                         .get(&p.id())
-                        .is_some_and(|st| st.shown.last() == Some(&id))
+                        .is_some_and(|st| st.screens.top() == Some(id))
                 });
                 if on_top {
                     let animated = nav
@@ -1323,17 +1213,16 @@ pub(crate) fn stack_changed(surface: &Rc<Surface>, stack: &NshView, added: Optio
     let id = stack.id();
     nav.stacks.entry(id).or_insert_with(|| StackNav {
         view: stack.clone(),
-        shown: Vec::new(),
-        popped: Vec::new(),
+        screens: Stack::default(),
     });
     if let Some(screen) = added.filter(|v| v.kind() == ViewKind::Screen) {
         nav.screen(screen);
         // Until the end of the batch decides which screen shows: a screen
         // pushed under the top one must not flash.
         if nav.stacks[&id]
-            .shown
-            .last()
-            .is_some_and(|&top| top != screen.id())
+            .screens
+            .top()
+            .is_some_and(|top| top != screen.id())
         {
             set_concealed(surface, screen, true);
         }
@@ -1350,7 +1239,7 @@ pub(crate) fn stack_resized(surface: &Rc<Surface>, stack: &NshView) {
     let Some(st) = nav.stacks.get(&stack.id()) else {
         return;
     };
-    for id in &st.shown {
+    for id in st.screens.shown() {
         if let Some(s) = nav.screens.get_mut(id) {
             s.report(surface, stack);
         }
@@ -1386,7 +1275,7 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     // Presented again while it leaves: it stops leaving.
     nav.finish(
         surface,
-        |t| matches!(&t.motion, Motion::ModalOut { view: v, .. } if v == view),
+        |m| matches!(m, Motion::ModalOut { view: v, .. } if v == view),
     );
     let m = nav.modals.entry(id).or_default();
     // The field being typed in under the modal leaves it (until the modal
@@ -1398,7 +1287,7 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     m.restore = field;
     m.view = Some(view.clone());
     m.closed = false;
-    m.reported = None;
+    m.reported = Reported::default();
     view.insert_before(&surface.root, None);
     nav.order.push(id);
     nav.size_modal(surface, id);
@@ -1490,70 +1379,9 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
 
 #[cfg(test)]
 mod tests {
+    use nsh_core::ModalAnimation;
+
     use super::*;
-
-    #[test]
-    fn eases_out() {
-        assert_eq!(ease(0.0), 0.0);
-        assert_eq!(ease(1.0), 1.0);
-        assert_eq!(ease(2.0), 1.0);
-        assert_eq!(ease(-1.0), 0.0);
-        assert!(ease(0.5) > 0.5);
-        // Monotonic.
-        let mut last = 0.0;
-        for i in 1..=20 {
-            let e = ease(i as f64 / 20.0);
-            assert!(e >= last);
-            last = e;
-        }
-    }
-
-    #[test]
-    fn transitions_progress_from_their_first_frame() {
-        let t = Transition {
-            start: None,
-            duration: SLIDE_MS,
-            motion: Motion::ModalIn {
-                view: layer_view(),
-                fade: true,
-            },
-        };
-        // Not started: at the beginning.
-        assert_eq!(t.progress(5.0), 0.0);
-        let t = Transition {
-            start: Some(2.0),
-            ..t
-        };
-        assert_eq!(t.progress(2.0), 0.0);
-        assert!((t.progress(2.15) - 0.5).abs() < 1e-9);
-        assert!(t.progress(2.3) >= 1.0 - 1e-9);
-    }
-
-    #[test]
-    fn motions_follow_the_animation_and_reduce_motion() {
-        assert_eq!(screen_motion(ScreenAnimation::None, false), None);
-        assert_eq!(
-            screen_motion(ScreenAnimation::Default, false),
-            Some((SLIDE_MS, false))
-        );
-        assert_eq!(
-            screen_motion(ScreenAnimation::Default, true),
-            Some((FADE_MS, true))
-        );
-        assert_eq!(
-            screen_motion(ScreenAnimation::Fade, false),
-            Some((FADE_MS, true))
-        );
-        assert_eq!(modal_motion(ModalAnimation::None, true), None);
-        assert_eq!(
-            modal_motion(ModalAnimation::Slide, false),
-            Some((MODAL_MS, false))
-        );
-        assert_eq!(
-            modal_motion(ModalAnimation::Slide, true),
-            Some((FADE_MS, true))
-        );
-    }
 
     #[test]
     fn back_keys() {
@@ -1592,12 +1420,13 @@ mod tests {
                 screen.state_mut().concealed = true;
             }
         }
+        let mut screens = Stack::default();
+        screens.reconcile(ids);
         nav.stacks.insert(
             id,
             StackNav {
                 view: stack.clone(),
-                shown: ids.to_vec(),
-                popped: Vec::new(),
+                screens,
             },
         );
         stack
@@ -1652,7 +1481,7 @@ mod tests {
         stack(&mut nav, &modal, 32, &[34, 36]);
         assert_eq!(nav.back_target(true), Some(Back::Stack(32)));
         // Popped down to one screen: the modal is asked to close.
-        nav.stacks.get_mut(&32).unwrap().shown.pop();
+        nav.stacks.get_mut(&32).unwrap().screens.pop();
         assert_eq!(nav.back_target(true), Some(Back::Modal(30)));
     }
 
