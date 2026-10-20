@@ -373,6 +373,9 @@ impl Headless {
     /// Applies the next batch, waiting `timeout` at most: the batch, or
     /// `None` when none came.
     pub fn next_batch(&mut self, timeout: Duration) -> Option<MountBatch> {
+        if self.exited {
+            return None;
+        }
         let batch = self.batches.recv_timeout(timeout).ok()?;
         self.apply(&batch);
         Some(batch)
@@ -715,6 +718,9 @@ impl Headless {
         // moves on from where the view is.
         let mut frames = ((target - start).abs() / SCROLL_STEP).ceil() as usize * 2 + 10;
         loop {
+            if self.exited {
+                break;
+            }
             let now = at(&self.screen);
             if (target - now).abs() < 0.5 || frames == 0 {
                 break;
