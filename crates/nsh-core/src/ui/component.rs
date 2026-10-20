@@ -60,7 +60,10 @@ pub trait Component: 'static {
     /// makes (signals, effects, timers) goes with the component.
     fn view(props: Self::Props, cx: super::Scope<Self::Event>) -> impl IntoElement;
 
-    /// This component inside another one's view.
+    /// This component inside another one's view, given all its props.
+    /// A `#[component]` has a constructor of its own, which Rust views use
+    /// (`button().disabled(..)`); this stays for components implemented
+    /// by hand and for code generic over components.
     fn element(props: Self::Props) -> ComponentElement<Self>
     where
         Self: Sized,
@@ -320,7 +323,12 @@ impl Props for () {
     }
 }
 
-/// A component's events. Derive it: `#[derive(Event)]`.
+/// A component's events. Derive it: `#[derive(Event)]`. The element of a
+/// `#[component]` emitting them gets a listener method per event, named
+/// as its TSX handler in snake case (`onPress` is `.on_press(..)`): a
+/// unit variant's takes `move || ..`, a one-field variant's the value
+/// (`move |index: &u32| ..`), a named-field variant's the event itself
+/// ([`ComponentBuilder`](super::ComponentBuilder)).
 pub trait Event: 'static {
     /// The events (their named types declared in `types`).
     fn spec(types: &mut TsTypes) -> Vec<EventSpec>;

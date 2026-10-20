@@ -96,7 +96,7 @@ fn card(
                         .border_color(colors::BORDER)
                         .bg(colors::RAISED)
                         .finish(Finish::Raised)
-                        .child(icon(name, 20.0, colors::TEXT)),
+                        .child(icon().name(name).size(20.0).tint(colors::TEXT)),
                 )
                 .child(
                     view()

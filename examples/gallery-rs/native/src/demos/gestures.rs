@@ -10,9 +10,9 @@ use nsh_core::{
 };
 
 use crate::ui::{
-    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, MONO,
-    PressProps, Row, Stat, Tone, caption, colors, hint, icon, inset_shadow, lengths, press_with,
-    radius, rect, rgb_a, tints,
+    Badge, Button, ButtonVariant, Card, DemoPage, Finish, Finished, IconName, IconTile, MONO, Row,
+    Stat, Tone, caption, colors, hint, icon, inset_shadow, lengths, press, radius, rect, rgb_a,
+    tints,
 };
 
 /// A dot matrix behind a stage, drawn for its size (again when it or the
@@ -43,11 +43,6 @@ fn Dots() -> impl IntoElement {
         .on_layout(move |frame: &Bounds<Points>| {
             size.set((frame.size.width.0, frame.size.height.0))
         })
-}
-
-/// [`Dots`] filling its stage.
-fn dots() -> impl IntoElement {
-    Dots::element(()).absolute().inset_0()
 }
 
 /// A stage: the darker surface a demo plays on.
@@ -587,7 +582,7 @@ fn PressEvents() -> impl IntoElement {
                     .size(px(56.0))
                     .items_center()
                     .justify_center()
-                    .child(icon(IconName::Star, 24.0, colors::WARN)),
+                    .child(icon().name(IconName::Star).size(24.0).tint(colors::WARN)),
             ),
         )
         .child(
@@ -650,22 +645,18 @@ fn HitSlop() -> impl IntoElement {
                         .bind_scale(&ring.interpolate(&[0.0, 1.0], &[0.96, 1.04])),
                 )
                 .child(
-                    press_with(
-                        PressProps {
-                            hit_slop: Some(30.0),
-                            scale: 0.8.into(),
-                            label: Some("Tiny dot".into()).into(),
-                            ..PressProps::default()
-                        },
-                        move |_: &()| taps.update(|n| *n += 1),
-                    )
-                    .child(
-                        view()
-                            .size(px(12.0))
-                            .rounded(px(6.0))
-                            .bg(colors::DANGER)
-                            .map(knob),
-                    ),
+                    press()
+                        .hit_slop(30.0)
+                        .scale(0.8)
+                        .label("Tiny dot")
+                        .on_press(move |_: &()| taps.update(|n| *n += 1))
+                        .child(
+                            view()
+                                .size(px(12.0))
+                                .rounded(px(6.0))
+                                .bg(colors::DANGER)
+                                .map(knob),
+                        ),
                 ),
         )
         .child(api(
@@ -731,31 +722,27 @@ fn pointer_events() -> impl IntoElement {
                 .h(px(88.0))
                 .on_layout(move |frame: &Bounds<Points>| overlay.set(frame.size.width.0))
                 .child(
-                    press_with(
-                        PressProps {
-                            scale: 0.98.into(),
-                            ..PressProps::default()
-                        },
-                        move |_: &()| through.update(|n| *n += 1),
-                    )
-                    .flex_1()
-                    .child(
-                        view()
-                            .flex_1()
-                            .rounded(px(radius::CONTROL))
-                            .border_curve(BorderCurve::Continuous)
-                            .bg(tints::UP)
-                            .border_1()
-                            .border_color(colors::UP)
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                text("Button under an overlay")
-                                    .text_size(px(15.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(colors::UP),
-                            ),
-                    ),
+                    press()
+                        .scale(0.98)
+                        .on_press(move |_: &()| through.update(|n| *n += 1))
+                        .flex_1()
+                        .child(
+                            view()
+                                .flex_1()
+                                .rounded(px(radius::CONTROL))
+                                .border_curve(BorderCurve::Continuous)
+                                .bg(tints::UP)
+                                .border_1()
+                                .border_color(colors::UP)
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    text("Button under an overlay")
+                                        .text_size(px(15.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(colors::UP),
+                                ),
+                        ),
                 )
                 .child(
                     canvas(move || hatch(overlay.get()))
@@ -836,11 +823,11 @@ fn accessibility() -> impl IntoElement {
 #[component]
 pub(crate) fn Gestures() -> impl IntoElement {
     DemoPage::new()
-        .card(|| Transformable::element(()))
-        .card(|| Ball::element(()))
-        .card(|| TouchPad::element(()))
-        .card(|| PressEvents::element(()))
-        .card(|| HitSlop::element(()))
+        .card(transformable)
+        .card(ball)
+        .card(touch_pad)
+        .card(press_events)
+        .card(hit_slop)
         .card(pointer_events)
         .card(accessibility)
 }

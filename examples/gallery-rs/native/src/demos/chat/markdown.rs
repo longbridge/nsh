@@ -16,7 +16,7 @@ use super::{
     glyphs::{GlyphName, glyph},
     parts::caret,
 };
-use crate::ui::{Finish, Finished, MONO, PressProps, colors, press_with, radius};
+use crate::ui::{Finish, Finished, MONO, colors, press, radius};
 
 /// What a block is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -558,40 +558,37 @@ fn block_view(block: ReadSignal<Block>, last: Memo<bool>, shared: Shared) -> Vie
                             .font_family(MONO),
                         )
                         .child(
-                            press_with(
-                                PressProps {
-                                    label: Some("Copy code".into()).into(),
-                                    hit_slop: Some(4.0),
-                                    ..PressProps::default()
-                                },
-                                copy,
-                            )
-                            .child(
-                                view()
-                                    .h(px(40.0))
-                                    .px_3()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(glyph(
-                                        Prop::bind(move || {
-                                            if done.get() {
-                                                GlyphName::Check
-                                            } else {
-                                                GlyphName::Copy
-                                            }
-                                        }),
-                                        14.0,
-                                        tone,
-                                    ))
-                                    .child(
-                                        nsh_core::ui::text(move || {
-                                            if done.get() { "Copied" } else { "Copy" }
-                                        })
-                                        .text_size(px(13.0))
-                                        .text_color(tone),
-                                    ),
-                            ),
+                            press()
+                                .label("Copy code")
+                                .hit_slop(4.0)
+                                .on_press(copy)
+                                .child(
+                                    view()
+                                        .h(px(40.0))
+                                        .px_3()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .child(
+                                            glyph()
+                                                .name(move || {
+                                                    if done.get() {
+                                                        GlyphName::Check
+                                                    } else {
+                                                        GlyphName::Copy
+                                                    }
+                                                })
+                                                .size(14.0)
+                                                .tint(tone),
+                                        )
+                                        .child(
+                                            nsh_core::ui::text(move || {
+                                                if done.get() { "Copied" } else { "Copy" }
+                                            })
+                                            .text_size(px(13.0))
+                                            .text_color(tone),
+                                        ),
+                                ),
                         ),
                 )
                 .child(

@@ -14,17 +14,16 @@ use nsh_core::{
 };
 
 use super::{
-    book::{Depth, OrderBook},
-    chart::{Chart, ChartProps},
+    book::{depth, order_book},
+    chart::chart,
     live,
     market::{HORIZONS, Quote, Range, compact, price, signed, time, tone_of},
     parts::{Block, live_dot},
-    tape::{Flow, tape},
-    ticket::{Side, Ticket, TicketEvent, TicketProps},
+    tape::{flow, tape_block},
+    ticket::{Side, TicketEvent},
 };
 use crate::ui::{
-    Button, ButtonVariant, Finish, Finished, IconName, Sheet, SheetEvent, SheetProps, Stat, colors,
-    icon, lengths, radius,
+    Button, ButtonVariant, Finish, Finished, IconName, Stat, colors, icon, lengths, radius, sheet,
 };
 
 /// The props of a part of a stock's screen.
@@ -58,7 +57,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     let live = live();
     let index = props.stock as usize;
     let (wide, split) = (props.wide, props.split);
-    let props = StockProps { stock: props.stock };
+    let stock = props.stock;
     // The market keeps the stock's book, tape and flow while it is shown.
     live.market.borrow_mut().focus(Some(index));
     {
@@ -129,7 +128,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     .text_size(px(12.0))
     .text_color(colors::FAINT)
     .tabular_nums();
-    let chart = move |props: ChartProps| Block::new().child(Chart::element(props));
+    let chart_block = move |height: f32| Block::new().child(chart().stock(stock).height(height));
     let content = if wide {
         scroll()
             .flex_1()
@@ -149,37 +148,31 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                         view()
                             .min_w(px(0.0))
                             .style_when(split, |s| s.flex_1())
-                            .child(QuoteSection::element(props))
-                            .child(chart(ChartProps {
-                                stock: props.stock,
-                                height: 340.0,
-                            }))
-                            .child(Ranges::element(props)),
+                            .child(quote_section().stock(stock))
+                            .child(chart_block(340.0))
+                            .child(ranges().stock(stock)),
                     )
                     .child(
                         view()
                             .border_l_color(colors::LINE)
                             .style_when(split, |s| s.w(px(380.0)).border_l_1())
-                            .child(OrderBook::element(props))
-                            .child(tape(&live, index))
-                            .child(Depth::element(props))
-                            .child(Flow::element(())),
+                            .child(order_book().stock(stock))
+                            .child(tape_block(&live, index))
+                            .child(depth().stock(stock))
+                            .child(flow()),
                     ),
             )
             .child(footer)
     } else {
         scroll()
             .flex_1()
-            .child(QuoteSection::element(props))
-            .child(chart(ChartProps {
-                stock: props.stock,
-                ..ChartProps::default()
-            }))
-            .child(OrderBook::element(props))
-            .child(tape(&live, index))
-            .child(Depth::element(props))
-            .child(Flow::element(()))
-            .child(Ranges::element(props))
+            .child(quote_section().stock(stock))
+            .child(Block::new().child(chart().stock(stock)))
+            .child(order_book().stock(stock))
+            .child(tape_block(&live, index))
+            .child(depth().stock(stock))
+            .child(flow())
+            .child(ranges().stock(stock))
             .child(footer)
     };
     let change = computed(move || quote.get().percent());
@@ -252,7 +245,12 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                         colors::DOWN
                     }
                 })
-                .child(icon(IconName::Check, 18.0, colors::ON_LIGHT)),
+                .child(
+                    icon()
+                        .name(IconName::Check)
+                        .size(18.0)
+                        .tint(colors::ON_LIGHT),
+                ),
         )
         .child(
             view()
@@ -273,23 +271,23 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
         );
     // The ticket: made fresh each time it opens.
     let ticket_view = move || {
-        Ticket::element(TicketProps {
-            code: code.into(),
-            tick,
-            last: Prop::bind(move || quote.get().last),
-            side: side.into(),
-        })
-        .on_event(move |e: &TicketEvent| match e {
-            TicketEvent::Side(chosen) => side.set(*chosen),
-            TicketEvent::Placed {
-                title,
-                detail,
-                side,
-            } => {
-                ticket.set(false);
-                show_banner(title.clone(), detail.clone(), *side);
-            }
-        })
+        super::ticket::ticket()
+            .code(code)
+            .tick(tick)
+            .last(move || quote.get().last)
+            .side(side)
+            .on_side(move |chosen: &Side| side.set(*chosen))
+            .on_placed(move |e: &TicketEvent| {
+                if let TicketEvent::Placed {
+                    title,
+                    detail,
+                    side,
+                } = e
+                {
+                    ticket.set(false);
+                    show_banner(title.clone(), detail.clone(), *side);
+                }
+            })
     };
     // A bottom sheet on phones, a card in the window on desktops (Escape or
     // a click outside closes it).
@@ -310,13 +308,11 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
         })
         .into_element()
     } else {
-        Sheet::element(SheetProps {
-            open: ticket.into(),
-            ..SheetProps::default()
-        })
-        .on_event(move |_: &SheetEvent| ticket.set(false))
-        .child(ticket_view())
-        .into_element()
+        sheet()
+            .open(ticket)
+            .on_close(move || ticket.set(false))
+            .child(ticket_view())
+            .into_element()
     };
     view()
         .flex_1()
@@ -414,7 +410,7 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
                         .text_color(colors::MUTED),
                 )
                 .child(text(sector).text_size(px(13.0)).text_color(colors::FAINT))
-                .child(live_dot(live.running, 6.0))
+                .child(live_dot().running(live.running).size(6.0))
                 .child(
                     text(move || time(clock.get(), true))
                         .text_size(px(12.0))
@@ -438,7 +434,12 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
                 .child(
                     view()
                         .bind_rotate(&turn.interpolate(&[0.0, 1.0], &[0.0, 180.0]))
-                        .child(icon(IconName::ArrowUp, 20.0, tone)),
+                        .child(
+                            icon()
+                                .name(IconName::ArrowUp)
+                                .size(20.0)
+                                .tint(move || tone.get()),
+                        ),
                 )
                 .child(
                     view()
@@ -462,7 +463,7 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
                         ),
                 ),
         )
-        .child(DayRange::element(props))
+        .child(day_range().stock(props.stock))
         .child(
             view().flex_row().flex_wrap().children(
                 FIGURES

@@ -382,17 +382,3 @@ pub(crate) fn Icon(props: IconProps) -> impl IntoElement {
             .size_full(),
         )
 }
-
-/// [`Icon`] `name`, `size` points wide, in `tint` (a color, or a signal or
-/// closure of one: the glyph is drawn again when it changes).
-pub(crate) fn icon(
-    name: impl Into<Prop<IconName>>,
-    size: impl Into<Prop<f32>>,
-    tint: impl IntoReactive<AdaptiveColor>,
-) -> ComponentElement<Icon> {
-    Icon::element(IconProps {
-        name: name.into(),
-        size: size.into(),
-        tint: tint.into_reactive().map(Tint::from).into(),
-    })
-}

@@ -8,8 +8,8 @@ use nsh_core::ui::{EllipsizeMode, WritingDirection, prelude::*};
 use crate::{
     assets::{LOGO, PACIFICO},
     ui::{
-        Card, DemoPage, Finish, Finished, IconName, MONO, PressProps, caption, colors, press_with,
-        radius, rgb_a, tints,
+        Card, DemoPage, Finish, Finished, IconName, MONO, caption, colors, press, radius, rgb_a,
+        tints,
     },
 };
 
@@ -136,32 +136,28 @@ fn inline(likes: Signal<u32>) -> Card {
                 )
                 .child(" and a button inside the sentence ")
                 .child(
-                    press_with(
-                        PressProps {
-                            scale: 0.9.into(),
-                            label: Some("Like".into()).into(),
-                            hit_slop: Some(10.0),
-                            ..PressProps::default()
-                        },
-                        like,
-                    )
-                    .child(
-                        view()
-                            .bg(colors::RAISED)
-                            .finish(Finish::Raised)
-                            .rounded(px(11.0))
-                            .px(px(9.0))
-                            .h(px(22.0))
-                            .justify_center()
-                            .border_1()
-                            .border_color(colors::BORDER)
-                            .child(
-                                text(move || format!("♥ {}", likes.get()))
-                                    .text_color(colors::ACCENT)
-                                    .text_size(px(13.0))
-                                    .tabular_nums(),
-                            ),
-                    ),
+                    press()
+                        .scale(0.9)
+                        .label("Like")
+                        .hit_slop(10.0)
+                        .on_press(like)
+                        .child(
+                            view()
+                                .bg(colors::RAISED)
+                                .finish(Finish::Raised)
+                                .rounded(px(11.0))
+                                .px(px(9.0))
+                                .h(px(22.0))
+                                .justify_center()
+                                .border_1()
+                                .border_color(colors::BORDER)
+                                .child(
+                                    text(move || format!("♥ {}", likes.get()))
+                                        .text_color(colors::ACCENT)
+                                        .text_size(px(13.0))
+                                        .tabular_nums(),
+                                ),
+                        ),
                 )
                 .child(" that takes presses of its own."),
         )

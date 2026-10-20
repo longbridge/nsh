@@ -211,7 +211,7 @@ fn sidebar_row(demo: &'static Demo) -> AnyElement {
                 .bg(colors::ACCENT)
                 .opacity(move || if active() { 1.0_f32 } else { 0.0 }),
         )
-        .child(icon(demo.icon, 17.0, move || {
+        .child(icon().name(demo.icon).size(17.0).tint(move || {
             if active() {
                 colors::ACCENT
             } else {

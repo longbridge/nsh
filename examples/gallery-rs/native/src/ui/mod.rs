@@ -3,11 +3,9 @@
 //! radii, motion, finishes), its icons, and the building blocks every demo
 //! is made of.
 //!
-//! - Stateful, native motion (components: `X::element(XProps { .. })`,
-//!   their events through `.on_event(..)`, or the helper functions):
-//!   [`Press`] / [`press`], [`Appear`] / [`appear`], [`Toggle`] /
-//!   [`toggle`], [`Segmented`] / [`segmented`], [`Icon`] / [`icon`],
-//!   [`Sheet`] (a bottom sheet).
+//! - Stateful, native motion (components, made as primitives are:
+//!   `toggle().value(on).on_change(..)`): [`press`], [`appear`],
+//!   [`toggle`], [`segmented`], [`icon`], [`sheet`] (a bottom sheet).
 //! - Builders (`Card::new().title(..).child(..)`, styled at their root):
 //!   [`Card`], [`Section`], [`Inset`], [`Row`], [`Figure`], [`Badge`],
 //!   [`Stat`], [`Meter`], [`IconTile`], [`Button`], [`RoundButton`]; and
@@ -30,11 +28,8 @@ mod sheet;
 mod theme;
 
 pub(crate) use self::{
-    animated::{Appear, AppearProps, Press, PressProps, PressRole, appear, press_with},
-    controls::{
-        Segment, Segmented, SegmentedEvent, SegmentedProps, SegmentedSize, ToggleEvent, segmented,
-        toggle,
-    },
+    animated::{PressRole, appear, press},
+    controls::{Segment, SegmentedElement, SegmentedSize, segmented, toggle},
     device::{bind_refresh, hint},
     icons::{IconName, Tint, icon},
     layout::{SIDEBAR, columns_for, desktop, pane_width},
@@ -44,6 +39,6 @@ pub(crate) use self::{
         RoundButton, Row, Section, Stat, caption, code, header, legend, titled, with_header,
     },
     shapes::{lengths, pt, rect},
-    sheet::{Sheet, SheetEvent, SheetProps},
+    sheet::sheet,
     theme::{Finish, Finished, MONO, Tone, colors, inset_shadow, motion, radius, rgb_a, tints},
 };
