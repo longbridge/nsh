@@ -47,6 +47,8 @@ mount(() => <Text>{status()}</Text>);
         viewport: Size::new(400.0, 300.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment {
             os: if cfg!(target_os = "macos") {
@@ -131,6 +133,8 @@ mount(() => <Text>{status()}</Text>);"#,
         viewport: Size::new(400.0, 300.0),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment {
             os: Os::Linux,

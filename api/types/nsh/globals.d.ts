@@ -68,12 +68,10 @@ declare class DOMException extends Error {
   readonly code: number;
 }
 
-/** Native hosts only: not defined on the web. */
 declare var process: typeof import("process").default;
-/** Native hosts only: not defined on the web. */
-/** Native constructor without an upstream constructor signature. */
-/** Native constructor without an upstream constructor signature. */
-/** Native constructor without an upstream constructor signature. */
+/** Runtime constructor without an upstream constructor signature. */
+/** Runtime constructor without an upstream constructor signature. */
+/** Runtime constructor without an upstream constructor signature. */
 
 type BufferSource = ArrayBuffer | ArrayBufferView;
 

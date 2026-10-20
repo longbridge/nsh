@@ -45,6 +45,10 @@ pub struct System {
     /// What the host does when the app asks to exit (`process.exit`);
     /// `None`: it installed nothing.
     pub exit: Option<Rc<dyn Fn(i32)>>,
+    /// The host WebSocket transport, when the platform supplies one.
+    pub websocket: Option<Arc<dyn crate::websocket::WebSocketTransport>>,
+    /// The host virtual filesystem, confined to this app’s data directory.
+    pub filesystem: Option<Arc<dyn crate::filesystem::FileSystem>>,
     /// The operating system the app runs on, as the host says.
     pub os: crate::platform::Os,
 }
@@ -64,8 +68,28 @@ impl System {
             quotas,
             locals: Locals::default(),
             exit: None,
+            websocket: None,
+            filesystem: None,
             os: crate::platform::Os::default(),
         }
+    }
+
+    /// Uses the host WebSocket transport instead of the native stack.
+    pub fn with_websocket(
+        mut self,
+        websocket: Option<Arc<dyn crate::websocket::WebSocketTransport>>,
+    ) -> Self {
+        self.websocket = websocket;
+        self
+    }
+
+    /// Uses the host virtual filesystem.
+    pub fn with_filesystem(
+        mut self,
+        filesystem: Option<Arc<dyn crate::filesystem::FileSystem>>,
+    ) -> Self {
+        self.filesystem = filesystem;
+        self
     }
 
     /// The operating system the app runs on.

@@ -47,15 +47,18 @@ pub(crate) struct Shared {
     timers: RefCell<Timers>,
     /// Per-VM host delegate for capability-gated exit requests.
     pub(crate) system_exit_handler: RefCell<Option<ExitHandler>>,
+    pub(crate) system_websocket:
+        RefCell<Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>>,
     /// Permissions and host-selected app directory for native system operations.
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
+    pub(crate) system_filesystem:
+        RefCell<Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// The VM's counts of limited resources for Rust modules (`net`'s
     /// sockets), handed to their calls' `System`.
     pub(crate) system_quotas: nsh_core::ui::Quotas,
-    /// The VM's scheduler, for the APIs that start its I/O runtime (the
-    /// global WebSocket, which WebAssembly builds have none of).
+    /// The VM's scheduler, for native transports that start its I/O runtime.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) scheduler: std::rc::Weak<Scheduler>,
     /// The VM's state of the runtime's Rust modules (`process`'s
@@ -704,6 +707,22 @@ impl Host {
     /// Sets trusted application and home directory anchors for manifest grants.
     pub fn set_system_paths(&self, paths: nsh_core::access::TrustedPaths) {
         *self.shared.system_paths.borrow_mut() = paths;
+    }
+
+    /// Installs an app-private virtual filesystem. Capability checks stay in Rust.
+    pub fn set_filesystem(
+        &self,
+        filesystem: Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>,
+    ) {
+        *self.shared.system_filesystem.borrow_mut() = filesystem;
+    }
+
+    /// Installs the host WebSocket transport.
+    pub fn set_websocket_transport(
+        &self,
+        transport: Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>,
+    ) {
+        *self.shared.system_websocket.borrow_mut() = transport;
     }
 
     /// Installs the meaning of `process.exit(code)` for this VM. The callback

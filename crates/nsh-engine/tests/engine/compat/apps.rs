@@ -312,6 +312,8 @@ impl Run {
             viewport,
             trace: false,
             network: None,
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(AppAssets(assets.to_path_buf()))),
             environment,
             header_heights: (44.0, 96.0),

@@ -1,27 +1,20 @@
 import { cleanup, signal, Text } from "nsh";
+import { Platform } from "nsh/device";
+import { Buffer } from "buffer";
 import console from "console";
+import { createHash, randomUUID } from "crypto";
 import fs from "fs/promises";
 import net from "net";
 import os from "os";
+import path from "path";
 import process from "process";
+import { fileURLToPath, pathToFileURL } from "url";
+import { gzipSync, gunzipSync } from "zlib";
 import { Button, Card, colors, DemoPage, mono } from "../ui";
+import { StandardWebSockets } from "./StandardWebSockets";
 
-/** Keep native-only imports deferred even in the development host's single bundle. */
-async function nativeModules() {
-  const [{ Buffer }, { createHash, randomUUID }, { default: path }, { fileURLToPath, pathToFileURL }, { WebSocket: SocketClient }, { gzipSync, gunzipSync }] = await Promise.all([
-    import("buffer"), import("crypto"), import("path"), import("url"), import("websocket"), import("zlib"),
-  ]);
-  return { Buffer, createHash, randomUUID, path, fileURLToPath, pathToFileURL, SocketClient, gzipSync, gunzipSync };
-}
-
-/** Load the native API demo after its host has been selected. */
-export async function loadStandardNative() {
-  const modules = await nativeModules();
-  return () => nativeDemo(modules);
-}
-
-/** Each action calls the native APIs and displays its result or error. */
-function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathToFileURL, SocketClient, gzipSync, gunzipSync }: Awaited<ReturnType<typeof nativeModules>>) {
+/** Each action calls the host's standard APIs and displays its result or error. */
+export function StandardActions() {
   const results = signal<Record<string, string>>({});
   const busy = signal<Record<string, boolean>>({});
   let disposed = false;
@@ -63,7 +56,7 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
   function Environment() {
     return <Action name="Environment" detail="os · process.nextTick · console · import.meta.url" action={async () => {
       await new Promise<void>((resolve) => process.nextTick(resolve));
-      return `${os.platform()} / ${os.arch()}\nProcess: ${process.platform} / ${process.arch}\nHome: ${os.homedir()}\nData: ${process.dataDir}\nEOL: ${JSON.stringify(os.EOL)}\nEnv: ${JSON.stringify(process.env)}\nModule: ${import.meta.url}`;
+      return `${os.platform() || Platform.OS} / ${os.arch()}\nProcess: ${process.platform || Platform.OS} / ${process.arch}\nHome: ${Platform.OS === "web" ? "Browser context" : os.homedir()}\nData: ${process.dataDir}\nEOL: ${JSON.stringify(os.EOL)}\nEnv: ${JSON.stringify(process.env)}\nModule: ${import.meta.url}`;
     }} />;
   }
   function Files() {
@@ -97,7 +90,7 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
     }} />;
   }
   function Processes() {
-    return <Action name="Processes" detail="process.run · spawn · stdout/stderr/exit · stdin · kill" action={async () => {
+    return <Action name="Processes" detail={Platform.OS === "web" ? "process.run · spawn · browser hosts return an unsupported-operation error" : "process.run · spawn · stdout/stderr/exit · stdin · kill"} action={async () => {
       const windows = os.platform() === "windows";
       const command = windows ? "cmd.exe" : "cat";
       const args = windows ? ["/d", "/c", "more"] : [];
@@ -118,13 +111,13 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
     }} />;
   }
   function Exit() {
-    return <Action name="Request host exit" detail="process.exit(0) · close this Gallery window" action={async () => {
+    return <Action name="Request host exit" detail={Platform.OS === "web" ? "process.exit(0) · stop and clear this Gallery surface" : "process.exit(0) · close this Gallery window"} action={async () => {
       process.exit(0);
       return "Exit requested from the host";
     }} />;
   }
   function Tcp() {
-    return <Action name="TCP" detail="net.connect · Socket.write/read/close · local echo on 127.0.0.1:9876" action={async () => {
+    return <Action name="TCP" detail={Platform.OS === "web" ? "net.connect · browser hosts return an unsupported-operation error" : "net.connect · Socket.write/read/close · local echo on 127.0.0.1:9876"} action={async () => {
       const socket = await net.connect("127.0.0.1", 9876);
       const close = () => socket.close();
       if (disposed) { close(); return "Closed"; }
@@ -134,35 +127,5 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
       finally { clearTimeout(timer); close(); release.delete(close); }
     }} />;
   }
-  function WebSockets() {
-    return <Action name="WebSockets" detail="websocket module and global WebSocket · local echo on 127.0.0.1:9877" action={async () => {
-      const url = "ws://127.0.0.1:9877/";
-      const socket = await SocketClient.connect(url);
-      const close = () => { void socket.close().catch(() => {}); };
-      if (disposed) { close(); return "Closed"; }
-      release.add(close);
-      const timer = setTimeout(close, 5000);
-      let reply: string;
-      try { await socket.write("Hello module"); reply = String(await socket.read()); }
-      finally { clearTimeout(timer); release.delete(close); await socket.close(); }
-      if (disposed) return "Closed";
-      const eventReply = await new Promise<string>((resolve, reject) => {
-        const ws = new WebSocket(url);
-        const stop = () => ws.close(); release.add(stop);
-        const finish = (error?: Error, value?: string) => {
-          clearTimeout(timer); release.delete(stop);
-          ws.onopen = null; ws.onmessage = null; ws.onerror = null; ws.onclose = null;
-          ws.close(1000, "Demo complete");
-          error ? reject(error) : resolve(value ?? "");
-        };
-        const timer = setTimeout(() => finish(new Error("WebSocket echo timed out")), 5000);
-        ws.onopen = () => ws.send("Hello global");
-        ws.onmessage = (event) => finish(undefined, String(event.data));
-        ws.onerror = () => finish(new Error("WebSocket connection failed"));
-        ws.onclose = () => finish(new Error("Peer closed before echo"));
-      });
-      return `Module: ${reply}\nGlobal: ${eventReply}`;
-    }} />;
-  }
-  return <DemoPage cards={[Utilities, Environment, Files, Processes, Tcp, WebSockets, Exit]} />;
+  return <DemoPage cards={[Utilities, Environment, Files, Processes, Tcp, StandardWebSockets, Exit]} />;
 }

@@ -396,7 +396,7 @@ Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GP
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
 Toolchain it builds GPUI's hosts and runners with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
-the `web` profile, into `target/wasm32-unknown-unknown/web/`.
+the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 
 ## Releases
 

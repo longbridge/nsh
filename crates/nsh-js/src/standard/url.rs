@@ -1,17 +1,24 @@
 //! Standard URL utilities share the existing WHATWG constructors and brands.
 use rquickjs::{
-    Class, Coerced, Ctx, FromJs, Function, IntoJs, JsLifetime, Object, Result, Value,
+    Class, Ctx, FromJs, Function, JsLifetime, Object, Result, Value,
     class::{ClassKind, JsCell, JsClass, Readable, Trace, Tracer},
-    function::{Constructor, Func, Opt, Params},
+    function::{Constructor, Func, Params},
     module::{Declarations, Exports, ModuleDef},
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rquickjs::{Coerced, IntoJs, function::Opt};
 
 fn domain_to_ascii(domain: &str) -> String {
-    quickjs_jit_stdlib::url::domain_to_ascii(domain)
+    url::quirks::domain_to_ascii(domain)
 }
 fn domain_to_unicode(domain: &str) -> String {
-    quickjs_jit_stdlib::url::domain_to_unicode(domain)
+    url::quirks::domain_to_unicode(domain)
 }
+
+#[cfg(any(target_arch = "wasm32", test))]
+mod browser;
+#[cfg(target_arch = "wasm32")]
+use browser::{file_url_to_path, format, url_to_http_options};
 
 pub(crate) struct UrlModule;
 
@@ -60,14 +67,22 @@ fn path_to_file_url<'js>(
     constructor: &Constructor<'js>,
     path: String,
 ) -> Result<Object<'js>> {
+    #[cfg(not(target_arch = "wasm32"))]
     let href = quickjs_jit_stdlib::url::path_to_file_url(ctx.clone(), path, Opt(None))?.href();
+    #[cfg(target_arch = "wasm32")]
+    let href = {
+        let _ = ctx;
+        browser::file_href(&path)
+    };
     constructor.construct((href,))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn file_url_to_path<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<String> {
     quickjs_jit_stdlib::url::file_url_to_path(ctx.clone(), input.0.into_js(&ctx)?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn native_url<'js>(
     ctx: &Ctx<'js>,
     input: &str,
@@ -78,10 +93,12 @@ fn native_url<'js>(
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn format<'js>(ctx: Ctx<'js>, input: Coerced<String>, options: Opt<Value<'js>>) -> Result<String> {
     quickjs_jit_stdlib::url::url_format(native_url(&ctx, &input.0)?, options)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn url_to_http_options<'js>(ctx: Ctx<'js>, input: Coerced<String>) -> Result<Object<'js>> {
     quickjs_jit_stdlib::url::url_class::url_to_http_options(
         ctx.clone(),

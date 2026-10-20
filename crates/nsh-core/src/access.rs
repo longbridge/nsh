@@ -269,7 +269,7 @@ impl TrustedPaths {
         ] {
             if let Some(tail) = root.strip_prefix(placeholder) {
                 let anchor = anchor
-                    .filter(|p| p.is_absolute())
+                    .filter(|p| absolute(p))
                     .ok_or_else(|| format!("host anchor {placeholder} unavailable"))?;
                 // Component by component: `/` separates nothing in a
                 // verbatim Windows anchor.
@@ -278,18 +278,28 @@ impl TrustedPaths {
             }
         }
         let path = PathBuf::from(root);
-        if path.is_absolute() {
+        if absolute(&path) {
             Ok(path)
         } else {
             let anchor = self
                 .plugin_dir
                 .as_deref()
-                .filter(|p| p.is_absolute())
+                .filter(|p| absolute(p))
                 .ok_or_else(|| {
                     "host application directory unavailable for relative filesystem root".to_owned()
                 })?;
             within(anchor, &path, root)
         }
+    }
+}
+
+/// Virtual browser paths use Unix roots. `Path::is_absolute` on
+/// wasm32-unknown-unknown always returns false because it has no OS prefix.
+pub(crate) fn absolute(path: &Path) -> bool {
+    if cfg!(target_arch = "wasm32") {
+        path.has_root()
+    } else {
+        path.is_absolute()
     }
 }
 

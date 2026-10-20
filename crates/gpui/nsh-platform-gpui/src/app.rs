@@ -273,6 +273,8 @@ impl AppView {
             viewport: nsh_core::Size::new(0.0, 0.0),
             trace: options.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
             header_heights: crate::navigation::HEADER_HEIGHTS,

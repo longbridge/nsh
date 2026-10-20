@@ -7,6 +7,8 @@
 #[cfg(feature = "js")]
 pub(crate) struct SystemConfig {
     pub(crate) access: nsh_core::access::Access,
+    pub(crate) websocket: Option<std::sync::Arc<dyn nsh_core::websocket::WebSocketTransport>>,
+    pub(crate) filesystem: Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>,
     pub(crate) data_dir: Option<std::path::PathBuf>,
     pub(crate) paths: nsh_core::access::TrustedPaths,
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
@@ -92,6 +94,8 @@ mod imp {
             };
             host.set_system_access(system.access, system.data_dir);
             host.set_system_paths(system.paths);
+            host.set_websocket_transport(system.websocket);
+            host.set_filesystem(system.filesystem);
             host.set_system_wake(system.wake);
             host.set_stop_flag(stop.clone());
             let exit_requested = Rc::new(Cell::new(false));

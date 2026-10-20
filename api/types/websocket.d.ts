@@ -6,24 +6,24 @@ export interface WebSocketConnectOptions {
   headers?: Record<string, string>;
 }
 
-/** WebSocket client connections to the hosts the HTTP grants allow (native hosts only: on the web, importing this module throws). */
+/** WebSocket clients under the app's network capabilities. */
 export interface WebSocketModule {
-  /** Connects to a `ws://` or `wss://` URL that capabilities.network allows a GET of (over `http` / `https`); at most 32 WebSockets per VM. */
+  /** Connects to a ws/wss URL allowed by capabilities.network; up to 32 connections are shared with the global WebSocket constructor. */
   connect(url: string, options?: WebSocketConnectOptions | null): Promise<WebSocketConnection>;
 }
 
-/** WebSocket client connections to the hosts the HTTP grants allow (native hosts only: on the web, importing this module throws). */
+/** WebSocket clients under the app's network capabilities. */
 export declare const WebSocket: WebSocketModule;
 
-/** An open WebSocket connection: one read, up to eight commands and 8 MiB of writes may wait at once. */
+/** An open connection with one outstanding read and bounded incoming data. */
 export declare class WebSocketConnection {
   /** Made by the class's members only. */
   private constructor();
-  /** Sends a text (string) or binary (Uint8Array) message of at most 8 MiB; at most 8 MiB of writes may wait to be sent. */
+  /** Sends a string or Uint8Array of at most 8 MiB; queued bytes are bounded. */
   write(data: string | Uint8Array): Promise<void>;
-  /** The next message: a string for text, a Uint8Array for bytes. */
+  /** Reads the next string or Uint8Array, in arrival order. */
   read(): Promise<string | Uint8Array>;
-  /** Sends a close frame and ends the connection. */
+  /** Closes the connection and discards unread messages. */
   close(): Promise<void>;
   /** Frees the Rust value now (else when the object is collected); the object throws after. */
   dispose(): void;

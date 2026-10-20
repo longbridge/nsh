@@ -109,22 +109,18 @@ the work runs as core tasks on the engine's tokio runtime (`fs/promises` on its 
 `ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
 adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
 `websocket`'s URL, options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake
-is a core task, and a task spawned per connection drives the socket (answering pings, keeping up to eight unread
+uses the configured `WebSocketTransport` (browser WebSocket on web, the native transport elsewhere). On native hosts a task spawned per connection drives the socket (answering pings, keeping up to eight unread
 messages); connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`, which the global `WebSocket`
 (`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
 and grant no file access. On WebAssembly, `os.homedir()` returns a typed error and `process.env` an empty object;
 both avoid `std::env`, whose accessors panic on `wasm32-unknown-unknown`.
 
-On native targets QuickJS comes through `quickjs-jit` (rquickjs 0.14's API and its JIT; the dependency
-`rquickjs-jit`, which `nsh-js`'s `lib.rs` names `rquickjs`) and the LLRT modules through `quickjs-jit-stdlib`,
-which vendors LLRT `d9fd873e793c6551c5d92b2e31480f3279e3cd8d` with one feature per module: NSH turns on `buffer`,
-`crypto`, `path`, `url`, `zlib` and `zlib-zstd`. WebAssembly links upstream `rquickjs` 0.14 (the same API and
-QuickJS-NG) and no LLRT: `standard::NATIVE_ONLY` (`buffer`, `crypto`, `path`, `url`, `zlib`, `websocket`) are
-not compiled there, an import of one throws an error naming it (the CLI compiles web apps natively, so their
-bytecode may import them), `Buffer` and `crypto` are not defined, and the declarations say so. The two crates are
+QuickJS and the LLRT modules come through `quickjs-jit` and `quickjs-jit-stdlib` on native and WebAssembly targets. The WebAssembly build uses the interpreter and pregenerated bindings; the portable standard-library implementation supplies `buffer`, `crypto`, `path`, `url`, `zlib` and `zlib-zstd`, including synchronous hashing and compression. Browser entropy reaches Rust through the player's `crypto.getRandomValues` import (`standard/random.rs`); wasm builds select getrandom's custom backend. All eleven catalog modules load on both targets, with `Buffer` and `crypto` globals. On WebAssembly, `path` uses POSIX separators and a virtual `/` working directory. The crates are
 published together at one version and pinned exactly (`=0.14.1`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
 `third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
 they differ (a symlink `exists`, listeners get the payload only, `Stats`' methods are on its prototype, the child
 environment and `cwd` rules), `website/modules/standard-modules.md` says so.
+
+On web, `System` receives a `BrowserFileSystem` and `BrowserWebSocket` from the player. `fs/promises` checks capabilities and quotas in Rust, then sends app-relative operations to the browser's persistent OPFS namespace. Browser WebSocket I/O crosses the transport bridge while Rust retains grants, size/count bounds and deadlines; custom handshake headers are rejected explicitly. `process.run` / `spawn` and raw TCP remain callable exports that report typed platform errors in a browser. `process.env` stays empty there.

@@ -24,7 +24,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 每个模块都按表中的名称导入：`import { join } from "path"`、`import fs from "fs/promises"`。打包器保留这些导入，由运行时原生提供；标准模块目录就是这十一个名称。`buffer`、`crypto`、`path`、`url` 和 `zlib` 采用 LLRT 的实现，固定在 `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`，其声明从该版本投影到运行时实际具有的导出。其余模块由 NSH 自己实现。NSH 的 URL、Blob、流和事件类保留其对象身份。
 
-`buffer`、`crypto`、`path`、`url`、`zlib` 和 `websocket`，以及全局对象 `Buffer` 和 `crypto`，是原生宿主模块：iOS、Android、macOS、Windows 和 Linux 应用都可以使用。Web 应用运行 `fs/promises`、`process`、`net`、`os` 和 `console`；在 Web 上导入原生宿主模块会抛出指明该模块的错误，其声明中也有说明。
+这十一个模块都可在原生宿主和浏览器应用中加载。`Buffer`、哈希、加密和压缩在 WebAssembly 中运行同一套可移植 Rust 实现，包括同步 API；随机值使用浏览器的密码学随机源。浏览器的 `path` 操作采用 POSIX 路径，虚拟工作目录为 `/`。浏览器文件使用持久化的应用私有存储，WebSocket 使用浏览器传输。浏览器中的进程执行和原始 TCP 调用返回带类型的平台错误。
 
 ## 与 Node.js 和 gpui-shell 的比较
 
@@ -34,7 +34,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 - `Stats` 和 `Dirent` 的字段（`size`、`mtimeMs`、`name` 等）与 Node 一样是对象自身的属性，`isFile()`、`isDirectory()` 和 `isSymbolicLink()` 在其原型上。
 - `ChildProcess` 的监听器收到事件的内容：输出文本，或退出时的 `{ code, signal }`（由运行时结束子进程时还带有 `error`）。`on` 返回子进程本身。
 - 子进程的环境是宿主的一小组变量加上应用获授权的变量名；它在应用的数据目录中运行，或在 `fs.write` 根目录内的 `cwd` 中运行（见[进程](#进程)）。
-- 宿主没有数据目录时 `process.dataDir` 为 `null`；`process.exit` 请求宿主退出。
+- 宿主没有数据目录时 `process.dataDir` 为 `null`；`process.exit` 请求宿主关闭当前应用界面。
 - 限制是每个接口的一部分：大小、数量和超时在下面各模块中列出。
 
 ## 系统元数据与日志
@@ -51,7 +51,7 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 ## 文件
 
-`fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。授权范围之外的路径在调用时抛出 `TypeError`；I/O 失败以 `Error` 拒绝 Promise。
+`fs/promises` 在桌面宿主（macOS、Windows 和 Linux）上读写原生文件，在浏览器中通过 Origin Private File System（OPFS）读写应用私有文件。每个路径在操作开始前都按 `capabilities.fs` 检查：`readFile`、`readdir`、`stat`、`lstat`、`readlink` 和 `exists` 使用 `read` 根目录，`writeFile`、`mkdir`、`rename`、`unlink` 和 `rmdir` 使用 `write` 根目录。授权范围之外的路径在调用时抛出 `TypeError`；I/O 失败以 `Error` 拒绝 Promise。
 
 ```json
 {
@@ -66,6 +66,8 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 失败时的错误带有 Node 的错误属性：`code`（`ENOENT`、`EEXIST`、`ENOTDIR`、`EISDIR`、`ENOTEMPTY`、`ELOOP`、`EACCES`、`EPERM` 等；文本不是 UTF-8 时为 `EILSEQ`，超出读取上限时为 `ERR_FS_FILE_TOO_LARGE`）、`syscall` 和 `path`，因此可以用 `error.code === "ENOENT"` 判断文件不存在。授权范围之外的路径抛出 `code` 为 `EACCES` 的 `TypeError`，宿主没有原生文件系统时 `code` 为 `ENOSYS`。
 
 `readFile` 返回 `Uint8Array`，指定 `"utf8"` 时返回字符串，可读取最大 64 MiB 的文件。`writeFile` 写入最多 8 MiB 的字符串或 `Uint8Array`，创建或替换一个普通文件。`readdir` 最多列出 10 000 个按名称排序的条目名（名称合计最多 1 MiB；更大的目录以 `code` 为 `ERR_OUT_OF_RANGE` 的 `RangeError` 拒绝），传入 `{ withFileTypes: true }` 时返回 `Dirent`（`name`、`isDirectory()`）。`stat` 和 `lstat` 返回 `Stats`，包含 `size`、`mode`、`mtimeMs` / `atimeMs` / `birthtimeMs`、`Date` 类型的 `mtime` / `atime` / `birthtime`，以及 `isFile()`、`isDirectory()` 和 `isSymbolicLink()`。`rmdir` 删除一个空目录。每个 VM 同时最多进行 1024 个操作，进行中的文件数据最多 64 MiB（交给 `writeFile` 直到写完的数据，以及读取后直到 Promise 完成的数据）；超出这些限制的调用抛出 `RangeError`，超出限制的读取被拒绝。
+
+浏览器存储按页面来源和应用命名空间隔离，文件授权与大小限制同样由 Rust 检查。OPFS 需要 HTTPS 或 localhost 等安全上下文。文件修改时间来自浏览器元数据；未知的访问时间、创建时间和权限模式为零。`rename` 使用浏览器句柄的原子移动操作，浏览器未提供该操作时返回 `ENOTSUP`。浏览器条目为普通文件或目录，`readlink` 返回 `EINVAL`。
 
 ## 进程
 
@@ -103,11 +105,11 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 | 每个子进程待写入的 stdin | 1 MiB；超出时 `write` 抛出错误 |
 | 监听器 | 每个子进程每个事件 64 个 |
 
-`process.exit(code?)` 请求宿主关闭当前应用界面。在 `capabilities.process` 中设置 `"exit": true` 后，引擎通过平台的应用退出命令转发请求。在 macOS 上，该请求关闭当前界面所在的窗口。嵌入宿主决定如何处理其界面的退出请求。Gallery 已为明确触发的 **Request host exit** 操作授予此能力。
+`process.exit(code?)` 请求宿主关闭当前应用界面。在 `capabilities.process` 中设置 `"exit": true` 后，引擎通过平台的应用退出命令转发请求。在 macOS 上，该请求关闭当前界面所在的窗口。在浏览器中，它停止应用并清空其界面，宿主页面保持打开。嵌入宿主决定如何处理其界面的退出请求。Gallery 已为明确触发的 **Request host exit** 操作授予此能力。
 
 ## 网络授权与边界
 
-全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。原生宿主上的 WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。检查在 DNS 查询之前针对规范化后的 URL 进行，握手连接的正是这个 URL，并拒绝重定向。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，两者的单条消息都最多 8 MiB。
+全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。NSH 在开始连接前检查初始的规范化 URL。原生握手连接该 URL 并拒绝重定向；浏览器 WebSocket 的重定向与连接策略由浏览器控制。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，两者的单条消息都最多 8 MiB。
 
 全局 `WebSocket` 的发送队列最多 8 条消息、缓冲总量最多 8 MiB（`bufferedAmount`），超出任一项时 `send()` 抛出错误。握手和每次写入超时为 30 秒，关闭时最多等待 5 秒对端的关闭帧。消息到达时即以 `message` 事件交付。
 
@@ -115,7 +117,7 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 `net.connect(host, port)` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 `Socket` 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。未授权时在调用处抛出 `TypeError`，超出限制时抛出 `RangeError`；连接与 I/O 失败以带有 Node 的 `code`（`ECONNREFUSED`、`ENOTFOUND`、`ETIMEDOUT`、`ECONNRESET` 等）和 `syscall` 的错误拒绝 Promise，连接失败还带有 `address` 和 `port`，对已关闭 socket 的操作为 `ERR_SOCKET_CLOSED`。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
 
-原始 TCP 和此 WebSocket 传输使用原生宿主。浏览器应用使用平台提供的 [全局 API](./globals.md)；平台支持以实际运行的宿主为准。嵌入宿主的能力授权与应用声明取交集。
+原始 TCP 使用原生宿主。Web 应用中的两种 WebSocket 接口使用浏览器传输，保留 Rust 能力检查和上述限制。自定义浏览器握手头会返回明确的选项不支持错误，同时遵循浏览器连接策略。嵌入宿主的能力授权与应用声明取交集。
 
 ## WebSocket 授权示例
 
@@ -169,6 +171,6 @@ try {
 
 ## Gallery
 
-打开 `examples/gallery` 中的 **Standard APIs**，可以运行文件操作、子进程、TCP 和两种 WebSocket 接口，并查看主机信息和排队任务。Utilities 操作展示缓冲区、哈希、压缩和文件 URL。每项操作都会显示结果或错误。文件操作使用 gallery 数据目录下的临时目录，并在操作后清理。TCP 和 WebSocket 操作分别连接本机 9876 和 9877 端口的回显服务。
+打开 `examples/gallery` 中的 **Standard APIs**，可以运行文件操作、子进程、TCP 和两种 WebSocket 接口，并查看主机信息和排队任务。Utilities 操作展示缓冲区、哈希、压缩和文件 URL。每项操作都会显示结果或错误。文件操作使用 gallery 数据目录下的临时目录，并在操作后清理。TCP 和 WebSocket 操作分别连接本机 9876 和 9877 端口的回显服务。在 Web 上，文件操作使用 OPFS，工具函数在 WebAssembly 中运行，两种 WebSocket 操作使用浏览器连接；进程与 TCP 操作显示宿主返回的带类型的平台错误。
 
 Gallery 的 **AI Chat** 在桌面上通过 `process.spawn` 调用本机安装的 Claude 或 Codex CLI。先在终端通过 CLI 登录，再在输入区选择提供方。回复使用对话记录作为上下文；停止生成或离开页面都会结束子进程。Web 和移动端运行模拟流式对话，展示推理、工具卡片和错误恢复。

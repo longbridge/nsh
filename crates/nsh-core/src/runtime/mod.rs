@@ -21,7 +21,6 @@ mod net;
 mod os;
 mod process;
 mod storage;
-#[cfg(not(target_arch = "wasm32"))]
 mod websocket;
 
 /// The [`crate::ui::Quotas`] kind WebSockets count under: the `websocket`
@@ -61,7 +60,6 @@ pub fn registries() -> &'static [Registry] {
         net.module::<net::Net>();
         let mut fs = Registry::runtime("fs/promises");
         fs.module::<fs::Fs>();
-        #[cfg(not(target_arch = "wasm32"))]
         let websocket = {
             let mut websocket = Registry::runtime("websocket");
             websocket.module::<websocket::WebSocket>();
@@ -78,7 +76,6 @@ pub fn registries() -> &'static [Registry] {
             net,
             process,
             fs,
-            #[cfg(not(target_arch = "wasm32"))]
             websocket,
         ]
     })

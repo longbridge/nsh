@@ -1,26 +1,23 @@
 //! Standard modules share NSH's VM, event loop and native permission boundary.
 //!
-//! `buffer`, `crypto`, `path`, `url` and `zlib` are LLRT's (quickjs-jit-stdlib)
-//! and, with `websocket`, exist on native hosts only: in the browser they
-//! are not linked, importing one throws ([`NATIVE_ONLY`]) and the globals
-//! `Buffer` and `crypto` are not defined.
-#[cfg(not(target_arch = "wasm32"))]
-use rquickjs::qjs;
-use rquickjs::{Ctx, Error, Module, Result, Value, object::Accessor};
+//! Portable LLRT modules run in the same QuickJS VM on every platform.
+//! Browser I/O uses host Web APIs; pure standard modules stay upstream-owned.
+use rquickjs::{Ctx, Error, Module, Result, Value, object::Accessor, qjs};
 
-#[cfg(not(target_arch = "wasm32"))]
 mod bounds;
 mod console;
 pub(crate) mod declarations;
 mod os;
+#[cfg(any(target_arch = "wasm32", test))]
+mod path;
 pub(crate) mod process;
 pub(crate) mod scheduler;
-#[cfg(not(target_arch = "wasm32"))]
 mod url;
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod websocket;
-#[cfg(not(target_arch = "wasm32"))]
 mod zlib;
+
+#[cfg(target_arch = "wasm32")]
+mod random;
 
 pub(crate) const NAMES: &[&str] = nsh_core::js::STANDARD_MODULES;
 
@@ -29,25 +26,10 @@ pub(crate) fn normalize(name: &str) -> Option<&str> {
     NAMES.iter().copied().find(|candidate| *candidate == name)
 }
 
-/// The standard modules a native host provides and the browser does not
-/// (LLRT's, and `websocket`'s native transport). Apps for the web may
-/// import them (the CLI compiles natively); loading one there throws.
-pub(crate) const NATIVE_ONLY: &[&str] = &["buffer", "crypto", "path", "url", "zlib", "websocket"];
-
 pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
-    #[cfg(target_arch = "wasm32")]
-    if NATIVE_ONLY.contains(&name) {
-        return Err(rquickjs::Exception::throw_type(
-            ctx,
-            &format!(
-                "the standard module `{name}` requires a native host: it is not available on the web"
-            ),
-        ));
-    }
     // LLRT's crypto module expects the classes its global defines.
     // Compiling to bytecode declares modules in a context without NSH's
     // state, and runs none.
-    #[cfg(not(target_arch = "wasm32"))]
     if name == "crypto" && !crate::state::state(ctx.as_raw().as_ptr()).is_null() {
         init_crypto(ctx)?;
     }
@@ -57,15 +39,13 @@ pub(crate) fn load<'js>(ctx: &Ctx<'js>, name: &str) -> Result<Module<'js>> {
         };
     }
     match name {
-        #[cfg(not(target_arch = "wasm32"))]
         "buffer" => declare!(quickjs_jit_stdlib::buffer::BufferModule),
-        #[cfg(not(target_arch = "wasm32"))]
         "crypto" => declare!(bounds::CryptoModule),
         #[cfg(not(target_arch = "wasm32"))]
         "path" => declare!(quickjs_jit_stdlib::path::PathModule),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_arch = "wasm32")]
+        "path" => declare!(path::PathModule),
         "url" => declare!(url::UrlModule),
-        #[cfg(not(target_arch = "wasm32"))]
         "zlib" => declare!(zlib::ZlibModule),
         "console" => declare!(console::ConsoleModule),
         _ => Err(Error::new_loading(name)),
@@ -82,20 +62,18 @@ type Init = fn(&Ctx<'_>) -> Result<()>;
 /// replaces the accessors with plain data properties.
 const LAZY: &[(&[&str], Init)] = &[
     (&["process"], init_process),
-    #[cfg(not(target_arch = "wasm32"))]
     (
         &["crypto", "Crypto", "SubtleCrypto", "CryptoKey"],
         init_crypto,
     ),
 ];
 
-/// Installs `Buffer` (native hosts) and the lazy standard globals. `Buffer`
+/// Installs `Buffer` and the lazy standard globals. `Buffer`
 /// is made now (about 30 µs): LLRT defines its methods by assignment, and
 /// over `%TypedArray%.prototype` members assignments throw once hardening
 /// has frozen that prototype, so it must exist before
 /// [`crate::sandbox::harden`].
 pub(crate) fn install<'js>(ctx: &Ctx<'js>) -> Result<()> {
-    #[cfg(not(target_arch = "wasm32"))]
     init_buffer(ctx)?;
     let globals = ctx.globals();
     for &(names, init) in LAZY {
@@ -144,7 +122,6 @@ pub(crate) fn take_lazy(ctx: &Ctx<'_>, name: &str) -> Result<bool> {
 /// `Buffer` and the LLRT state every standard module returning buffers
 /// needs. LLRT's initialization also defines its own `Blob`, `File`, `URL`
 /// and `URLSearchParams`; NSH's WHATWG globals stay the objects they were.
-#[cfg(not(target_arch = "wasm32"))]
 fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
     // The globals LLRT's initialization defines over NSH's. Their own
     // properties are kept as they are, not read: NSH's web globals are
@@ -156,6 +133,7 @@ fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
     quickjs_jit_stdlib::buffer::init(ctx)?;
     bounds::guard_buffer(ctx)?;
     // LLRT URL helper classes are registered once; public constructors remain NSH's.
+    #[cfg(not(target_arch = "wasm32"))]
     quickjs_jit_stdlib::url::init(ctx)?;
     for property in saved {
         property.restore(ctx)?;
@@ -164,14 +142,12 @@ fn init_buffer(ctx: &Ctx<'_>) -> Result<()> {
 }
 
 /// A global's own property as it was: its descriptor (or none).
-#[cfg(not(target_arch = "wasm32"))]
 struct OwnProperty {
     atom: qjs::JSAtom,
     descriptor: Option<qjs::JSPropertyDescriptor>,
 }
 
 /// Global `name`'s own property, without calling its getter.
-#[cfg(not(target_arch = "wasm32"))]
 fn own_property(ctx: &Ctx<'_>, name: &'static str) -> Result<OwnProperty> {
     let raw = ctx.as_raw().as_ptr();
     let name = std::ffi::CString::new(name).expect("no NUL in a global's name");
@@ -194,7 +170,6 @@ fn own_property(ctx: &Ctx<'_>, name: &'static str) -> Result<OwnProperty> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl OwnProperty {
     /// Puts the property back as it was (deleting it when there was none).
     fn restore(self, ctx: &Ctx<'_>) -> Result<()> {
@@ -252,7 +227,6 @@ fn init_process(ctx: &Ctx<'_>) -> Result<()> {
 }
 
 /// `crypto` and its classes.
-#[cfg(not(target_arch = "wasm32"))]
 fn init_crypto(ctx: &Ctx<'_>) -> Result<()> {
     if take_lazy(ctx, "crypto")? {
         quickjs_jit_stdlib::crypto::init(ctx)?;

@@ -1463,6 +1463,9 @@ opt-level = 3
             .env("CARGO_TARGET_DIR", self.target_dir()?);
         if let Some(triple) = triple {
             cmd.args(["--target", triple]);
+            if triple == "wasm32-unknown-unknown" {
+                crate::runtime::web_build_flags(&mut cmd);
+            }
         }
         if let Some(profile) = profile {
             cmd.args(["--profile", profile]);

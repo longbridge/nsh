@@ -9,6 +9,7 @@
 //! the engine.
 
 mod access;
+mod app_directory;
 mod error;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 pub mod headless;
@@ -22,6 +23,7 @@ mod symbolicate;
 
 use std::{io, rc::Rc, sync::Arc, time::Duration};
 
+pub use app_directory::app_dir_name;
 use crossbeam_channel::{Receiver, Sender};
 pub use local_storage::local_storage_prefix;
 use nsh_core::{
@@ -45,7 +47,7 @@ pub use nsh_js::BYTECODE_VERSION;
 pub use nsh_package as package;
 use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
-pub use storage::{FileStorage, app_dir_name, data_dir};
+pub use storage::{FileStorage, data_dir};
 
 pub use crate::error::{AppError, AppErrorKind, PackageInfo};
 use crate::script::{NetworkQueue, RequestId, Script};
@@ -619,6 +621,10 @@ pub struct EngineConfig {
     pub trace: bool,
     /// The HTTP stack behind `fetch`; without one, requests fail.
     pub network: Option<Arc<dyn Network>>,
+    /// The host transport for WebSockets, including the browser WebSocket API.
+    pub websocket: Option<Arc<dyn nsh_core::websocket::WebSocketTransport>>,
+    /// App-private host filesystem service (for browser storage).
+    pub filesystem: Option<Arc<dyn nsh_core::filesystem::FileSystem>>,
     /// Source of bundled files such as fonts; without one, they fail to load.
     pub assets: Option<Arc<dyn Assets>>,
     /// The surface's initial environment (its `window` is `viewport`).
@@ -691,6 +697,8 @@ impl EngineConfig {
             viewport: Size::new(390.0, 844.0),
             trace: false,
             network: None,
+            websocket: None,
+            filesystem: None,
             assets: None,
             environment: Environment::default(),
             header_heights: (44.0, 96.0),
@@ -1242,14 +1250,12 @@ impl<M: TextEngine + 'static> Driver<M> {
                 let system = {
                     script::SystemConfig {
                         access: (*access).clone(),
-                        #[cfg(not(target_arch = "wasm32"))]
+                        websocket: config.websocket.clone(),
+                        filesystem: config.filesystem.clone(),
                         data_dir: config
                             .data_dir
                             .as_ref()
                             .map(|root| root.join(app_dir_name(config.app.app_id()))),
-                        // The web keeps no app data in files.
-                        #[cfg(target_arch = "wasm32")]
-                        data_dir: None,
                         paths: bundle_system_paths(bundle),
                         wake: Arc::new(move || {
                             let _ = system_tx.send(Message::Wake);

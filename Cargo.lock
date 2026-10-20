@@ -2854,6 +2854,7 @@ dependencies = [
  "brotli",
  "flate2",
  "futures-util",
+ "getrandom 0.4.3",
  "libc",
  "log",
  "nsh-animation",
@@ -2862,7 +2863,6 @@ dependencies = [
  "percent-encoding",
  "quickjs-jit",
  "quickjs-jit-stdlib",
- "rquickjs",
  "rustc-hash",
  "serde_json",
  "thiserror 2.0.21",
@@ -3037,7 +3037,7 @@ dependencies = [
  "nsh-engine",
  "nsh-js",
  "nsh-ui-mobile",
- "rquickjs",
+ "quickjs-jit",
  "rustc-hash",
  "serde_json",
  "ttf-parser",
@@ -4984,52 +4984,6 @@ checksum = "93411e420bcd1a75ddd1dc3caf18c23155eda2c090631a85af21ba19e97093b5"
 dependencies = [
  "smallvec",
  "str_indices",
-]
-
-[[package]]
-name = "rquickjs"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
-dependencies = [
- "rquickjs-core",
- "rquickjs-macro",
-]
-
-[[package]]
-name = "rquickjs-core"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
-dependencies = [
- "async-lock",
- "hashbrown 0.17.1",
- "relative-path",
- "rquickjs-sys",
-]
-
-[[package]]
-name = "rquickjs-macro"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2ea9adb03b669c933482ff740b683cd36be7cef23891657a8ccb850401d286"
-dependencies = [
- "convert_case",
- "indexmap",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "rquickjs-core",
- "syn 3.0.9",
-]
-
-[[package]]
-name = "rquickjs-sys"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
-dependencies = [
- "cc",
 ]
 
 [[package]]

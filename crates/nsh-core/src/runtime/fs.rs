@@ -3,9 +3,11 @@
 //! by the path's text and the VM's resolved roots, without disk work; the
 //! work then runs off the engine thread, confined to the granted root by a
 //! cap-std `Dir`, so a symlink inside a root cannot lead a later operation
-//! outside it. Results settle as core tasks.
+//! outside it. Browser hosts provide app-private virtual files through
+//! `FileSystem`; the same Rust grant checks confine those requests to the
+//! app’s data directory and intersect the manifest and host roots. Results
+//! settle as core tasks.
 
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use crate::ui::{
@@ -14,7 +16,6 @@ use crate::ui::{
 };
 
 /// The largest file `readFile` returns.
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_READ: usize = 64 * 1024 * 1024;
 /// The most data one `writeFile` writes.
 const MAX_WRITE: usize = 8 * 1024 * 1024;
@@ -33,9 +34,7 @@ const IN_FLIGHT: &str = "fs.bytes";
 #[cfg(not(target_arch = "wasm32"))]
 const GROWTH: usize = 1024 * 1024;
 /// The most entries and name bytes one `readdir` lists.
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_ENTRIES: usize = 10_000;
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_NAME_BYTES: usize = 1024 * 1024;
 /// The name bytes a `readdir` holds of the budget ahead of listing them.
 #[cfg(not(target_arch = "wasm32"))]
@@ -339,8 +338,6 @@ impl<T: Ret> Ret for Holding<T> {
 }
 
 /// What `readdir` lists.
-// WebAssembly lists nothing.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) enum Entries {
     Names(Vec<String>),
     Typed(Vec<Instance<Dirent>>),
@@ -474,7 +471,6 @@ impl Stats {
 }
 
 /// `path` without `.` and `..`, resolved by its text.
-#[cfg(not(target_arch = "wasm32"))]
 fn lexical(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
@@ -556,7 +552,6 @@ impl Roots {
 
 /// The rest of `path` past `root`, when `path` is in it (component by
 /// component; ignoring ASCII case on Windows, as its file systems do).
-#[cfg(not(target_arch = "wasm32"))]
 fn inside(path: &Path, root: &Path) -> Option<PathBuf> {
     let mut rest = path.components();
     for part in root.components() {
@@ -582,9 +577,17 @@ fn in_root(path: &Path, (expanded, canonical): &(PathBuf, PathBuf)) -> Option<Pa
     inside(path, canonical).or_else(|| inside(path, expanded))
 }
 
-/// WebAssembly has no files: no path is ever granted.
+/// A capability-checked path in the host's private virtual filesystem.
+#[cfg(any(target_arch = "wasm32", test))]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+struct VirtualGrant {
+    filesystem: std::sync::Arc<dyn crate::filesystem::FileSystem>,
+    relative: String,
+    path: String,
+}
+
 #[cfg(target_arch = "wasm32")]
-pub(crate) enum Grant {}
+type Grant = VirtualGrant;
 
 /// Checks `path` against the `capabilities.fs` roots of a read or a write,
 /// by its text (`.` and `..` resolved as written) and the roots' resolved
@@ -602,6 +605,7 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
         target_os = "macos",
         target_os = "windows"
     )) && sys.os.is_desktop();
+    let available = available || (cfg!(target_arch = "wasm32") && sys.filesystem.is_some());
     if !roots.is_empty() && !available {
         return Err(
             JsError::Type("native filesystem unavailable on this platform".into())
@@ -679,6 +683,16 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
             });
         }
     }
+    #[cfg(target_arch = "wasm32")]
+    if let Some(filesystem) = &sys.filesystem
+        && let Some(relative) = virtual_relative(sys, path, write)?
+    {
+        return Ok(Grant {
+            filesystem: filesystem.clone(),
+            relative,
+            path: path.into(),
+        });
+    }
     let what = if write { "write" } else { "read" };
     Err(JsError::Type(format!(
         "filesystem {what} is not granted by capabilities.fs.{what}"
@@ -687,8 +701,59 @@ fn grant(sys: &System, path: &str, write: bool) -> Result<Grant, JsError> {
     .with("path", path))
 }
 
+/// Intersects manifest and host grants inside the app's private data root.
+#[cfg(any(target_arch = "wasm32", test))]
+fn virtual_relative(sys: &System, path: &str, write: bool) -> Result<Option<String>, JsError> {
+    let Some(data) = &sys.data_dir else {
+        return Ok(None);
+    };
+    let data = lexical(data);
+    let access = &sys.access;
+    let roots = if write {
+        &access.declared.fs.write
+    } else {
+        &access.declared.fs.read
+    };
+    let expand = |raw: &str| sys.paths.resolve_root(raw, &data).ok().map(|p| lexical(&p));
+    let requested = if path.starts_with("${") {
+        sys.paths.resolve_root(path, &data).map_err(JsError::Type)?
+    } else {
+        PathBuf::from(path)
+    };
+    if path.contains('\0') {
+        return Err(JsError::Type("filesystem path contains NUL".into())
+            .with_code("EINVAL")
+            .with("path", path));
+    }
+    for root in roots.iter().filter_map(|r| expand(r)) {
+        let candidate = lexical(&if crate::access::absolute(&requested) {
+            requested.clone()
+        } else {
+            root.join(&requested)
+        });
+        if inside(&candidate, &root).is_none() {
+            continue;
+        }
+        if let Some(host) = &access.granted {
+            let grants = if write { &host.fs.write } else { &host.fs.read };
+            if !grants
+                .iter()
+                .filter_map(|r| expand(r))
+                .any(|r| inside(&candidate, &r).is_some())
+            {
+                continue;
+            }
+        }
+        // OPFS is app-private even when a manifest names other roots.
+        let Some(relative) = inside(&candidate, &data) else {
+            continue;
+        };
+        return Ok(Some(relative.to_string_lossy().into_owned()));
+    }
+    Ok(None)
+}
+
 /// "cannot read `name`: the runtime already holds ... in flight".
-#[cfg(not(target_arch = "wasm32"))]
 fn exceeded(name: &str) -> JsError {
     JsError::Error(format!(
         "cannot read `{name}`: the runtime already holds {MAX_IN_FLIGHT} bytes of file data in flight"
@@ -1030,50 +1095,198 @@ impl Grant {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-impl Grant {
+#[cfg(any(target_arch = "wasm32", test))]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+impl VirtualGrant {
     fn name(&self) -> &str {
-        match *self {}
+        &self.relative
     }
 
-    async fn read(self, _: &Quotas, _: bool) -> Result<Holding<FileData>, JsError> {
-        match self {}
+    async fn run(
+        &self,
+        operation: crate::filesystem::FileOperation,
+        syscall: &'static str,
+    ) -> Result<crate::filesystem::FileResponse, JsError> {
+        self.filesystem
+            .execute(crate::filesystem::FileRequest {
+                path: self.relative.clone(),
+                operation,
+            })
+            .await
+            .map_err(|e| e.with("syscall", syscall).with("path", self.path.as_str()))
     }
 
-    async fn write(self, _: Vec<u8>) -> Result<(), JsError> {
-        match self {}
+    fn invalid(&self) -> JsError {
+        JsError::Error("invalid host filesystem response".into())
+            .with_code("EIO")
+            .with("path", self.path.as_str())
     }
 
-    async fn mkdir(self, _: bool) -> Result<(), JsError> {
-        match self {}
+    async fn read(self, quotas: &Quotas, text: bool) -> Result<Holding<FileData>, JsError> {
+        use crate::filesystem::{FileOperation as O, FileResponse as R};
+        // Reserve before the host allocates file bytes, including concurrent reads.
+        let held = quotas
+            .reserve(IN_FLIGHT, MAX_READ, MAX_IN_FLIGHT)
+            .ok_or_else(|| exceeded(self.name()))?;
+        let R::Bytes(bytes) = self
+            .run(
+                O::Read {
+                    max_bytes: MAX_READ,
+                },
+                "read",
+            )
+            .await?
+        else {
+            return Err(self.invalid());
+        };
+        if bytes.len() > MAX_READ {
+            return Err(JsError::Error("file exceeds fs.readFile limit".into())
+                .with_code("ERR_FS_FILE_TOO_LARGE"));
+        }
+        let len = bytes.len();
+        let value = if text {
+            FileData::Text(String::from_utf8(bytes).map_err(|e| {
+                JsError::Error(e.to_string())
+                    .with_code("EILSEQ")
+                    .with("path", self.path.as_str())
+            })?)
+        } else {
+            FileData::Bytes(bytes)
+        };
+        drop(held);
+        let held = quotas
+            .reserve(IN_FLIGHT, len, MAX_IN_FLIGHT)
+            .ok_or_else(|| exceeded(self.name()))?;
+        Ok(Holding {
+            value,
+            _held: vec![held],
+        })
     }
 
-    async fn exists(self) -> Result<bool, JsError> {
-        match self {}
+    async fn unit(
+        self,
+        operation: crate::filesystem::FileOperation,
+        syscall: &'static str,
+    ) -> Result<(), JsError> {
+        match self.run(operation, syscall).await? {
+            crate::filesystem::FileResponse::Unit => Ok(()),
+            _ => Err(self.invalid()),
+        }
     }
-
-    async fn stat(self, _: bool) -> Result<Stats, JsError> {
-        match self {}
+    async fn write(self, bytes: Vec<u8>) -> Result<(), JsError> {
+        self.unit(crate::filesystem::FileOperation::Write(bytes), "write")
+            .await
     }
-
-    async fn readlink(self) -> Result<String, JsError> {
-        match self {}
+    async fn mkdir(self, recursive: bool) -> Result<(), JsError> {
+        self.unit(
+            crate::filesystem::FileOperation::Mkdir { recursive },
+            "mkdir",
+        )
+        .await
     }
-
     async fn unlink(self) -> Result<(), JsError> {
-        match self {}
+        self.unit(crate::filesystem::FileOperation::Unlink, "unlink")
+            .await
     }
-
     async fn rmdir(self) -> Result<(), JsError> {
-        match self {}
+        self.unit(crate::filesystem::FileOperation::Rmdir, "rmdir")
+            .await
     }
-
-    async fn rename(self, _: Self) -> Result<(), JsError> {
-        match self {}
+    async fn rename(self, to: Self) -> Result<(), JsError> {
+        self.unit(
+            crate::filesystem::FileOperation::Rename { to: to.relative },
+            "rename",
+        )
+        .await
     }
-
-    async fn entries(self, _: &Quotas, _: bool) -> Result<Holding<Entries>, JsError> {
-        match self {}
+    async fn exists(self) -> Result<bool, JsError> {
+        match self
+            .run(crate::filesystem::FileOperation::Exists, "access")
+            .await?
+        {
+            crate::filesystem::FileResponse::Exists(value) => Ok(value),
+            _ => Err(self.invalid()),
+        }
+    }
+    async fn readlink(self) -> Result<String, JsError> {
+        match self
+            .run(crate::filesystem::FileOperation::Readlink, "readlink")
+            .await?
+        {
+            crate::filesystem::FileResponse::Link(value) => Ok(value),
+            _ => Err(self.invalid()),
+        }
+    }
+    async fn stat(self, link: bool) -> Result<Stats, JsError> {
+        match self
+            .run(
+                crate::filesystem::FileOperation::Stat { link },
+                if link { "lstat" } else { "stat" },
+            )
+            .await?
+        {
+            crate::filesystem::FileResponse::Metadata(m) => Ok(Stats {
+                size: m.size as f64,
+                mode: m.mode,
+                mtime_ms: m.mtime_ms,
+                atime_ms: m.atime_ms,
+                birthtime_ms: m.birthtime_ms,
+                file: m.file,
+                directory: m.directory,
+                symlink: m.symlink,
+            }),
+            _ => Err(self.invalid()),
+        }
+    }
+    async fn entries(self, quotas: &Quotas, types: bool) -> Result<Holding<Entries>, JsError> {
+        use crate::filesystem::{FileOperation as O, FileResponse as R};
+        let held = quotas
+            .reserve(IN_FLIGHT, MAX_NAME_BYTES, MAX_IN_FLIGHT)
+            .ok_or_else(|| exceeded(self.name()))?;
+        let R::Entries(mut entries) = self
+            .run(
+                O::Entries {
+                    max_entries: MAX_ENTRIES,
+                    max_name_bytes: MAX_NAME_BYTES,
+                },
+                "scandir",
+            )
+            .await?
+        else {
+            return Err(self.invalid());
+        };
+        let bytes = entries
+            .iter()
+            .try_fold(0usize, |n, e| n.checked_add(e.name.len()))
+            .unwrap_or(usize::MAX);
+        if entries.len() > MAX_ENTRIES || bytes > MAX_NAME_BYTES {
+            return Err(JsError::Range("directory exceeds fs.readdir limits".into())
+                .with_code("ERR_OUT_OF_RANGE"));
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        let value = if types {
+            Entries::Typed(
+                entries
+                    .into_iter()
+                    .map(|e| {
+                        Instance::new(Dirent {
+                            name: e.name,
+                            directory: e.directory,
+                        })
+                    })
+                    .collect(),
+            )
+        } else {
+            Entries::Names(entries.into_iter().map(|e| e.name).collect())
+        };
+        drop(held);
+        let held = quotas
+            .reserve(IN_FLIGHT, bytes, MAX_IN_FLIGHT)
+            .ok_or_else(|| exceeded(self.name()))?;
+        Ok(Holding {
+            value,
+            _held: vec![held],
+        })
     }
 }
 
@@ -1252,6 +1465,126 @@ mod tests {
         assert_eq!(super::inside(&sibling, root), None);
         #[cfg(windows)]
         assert!(super::inside(Path::new("c:\\DATA\\App\\x"), root).is_some());
+    }
+
+    #[test]
+    fn virtual_reads_hold_budget_and_preserve_host_error_fields() {
+        use std::{future::Future, pin::Pin, sync::Arc};
+
+        use crate::{
+            filesystem::*,
+            ui::{JsError, Quotas},
+        };
+        struct Fake;
+        impl FileSystem for Fake {
+            fn execute(
+                &self,
+                request: FileRequest,
+            ) -> Pin<Box<dyn Future<Output = Result<FileResponse, JsError>>>> {
+                Box::pin(async move {
+                    assert_eq!(request.path, "note.txt");
+                    match request.operation {
+                        FileOperation::Read { max_bytes } => {
+                            assert_eq!(max_bytes, super::MAX_READ);
+                            Ok(FileResponse::Bytes(b"hello".to_vec()))
+                        }
+                        _ => Err(JsError::Error("missing".into()).with_code("ENOENT")),
+                    }
+                })
+            }
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let make = || super::VirtualGrant {
+                filesystem: Arc::new(Fake),
+                relative: "note.txt".into(),
+                path: "${dataDir}/note.txt".into(),
+            };
+            let quotas = Quotas::default();
+            let value = make().read(&quotas, true).await.unwrap();
+            assert_eq!(value.value, super::FileData::Text("hello".into()));
+            assert_eq!(quotas.held(super::IN_FLIGHT), 5);
+            drop(value);
+            assert_eq!(quotas.held(super::IN_FLIGHT), 0);
+            let held = quotas
+                .reserve(super::IN_FLIGHT, 1, super::MAX_IN_FLIGHT)
+                .unwrap();
+            assert!(make().read(&quotas, false).await.is_err());
+            drop(held);
+            let error = make().stat(false).await.unwrap_err();
+            assert_eq!(error.code(), Some("ENOENT"));
+            let JsError::Fields(error) = error else {
+                panic!("structured error")
+            };
+            assert_eq!(
+                error.field("path").and_then(|v| v.as_str()),
+                Some("${dataDir}/note.txt")
+            );
+            assert_eq!(
+                error.field("syscall").and_then(|v| v.as_str()),
+                Some("stat")
+            );
+        });
+    }
+
+    #[test]
+    fn virtual_paths_intersect_grants_and_remain_app_private() {
+        use std::{path::PathBuf, sync::Arc};
+
+        use crate::{
+            access::{Access, Capabilities},
+            ui::System,
+        };
+        let mut declared = Capabilities::all();
+        declared.fs.read = vec!["${dataDir}".into()];
+        declared.fs.write = vec!["${dataDir}/notes".into()];
+        let mut sys = System::new(
+            Arc::new(Access {
+                declared,
+                granted: None,
+            }),
+            Some(PathBuf::from("/app-data/gallery")),
+            Default::default(),
+            Default::default(),
+        );
+        let check = |sys: &System, path, write| super::virtual_relative(sys, path, write).unwrap();
+        assert_eq!(
+            check(&sys, "notes/a.txt", false).as_deref(),
+            Some("notes/a.txt")
+        );
+        assert_eq!(check(&sys, "a.txt", true).as_deref(), Some("notes/a.txt"));
+        assert_eq!(
+            check(&sys, "/app-data/gallery/notes/a.txt", true).as_deref(),
+            Some("notes/a.txt")
+        );
+        assert_eq!(
+            check(&sys, "${dataDir}/notes/a.txt", true).as_deref(),
+            Some("notes/a.txt")
+        );
+        assert_eq!(check(&sys, "../other/a.txt", false), None);
+        assert_eq!(check(&sys, "/app-data/gallery-other/a.txt", false), None);
+        assert_eq!(check(&sys, "${dataDir}/outside/a.txt", true), None);
+        assert!(super::virtual_relative(&sys, "${dataDir}/notes/../../secret", true).is_err());
+        assert_eq!(
+            super::virtual_relative(&sys, "bad\0name", false)
+                .unwrap_err()
+                .code(),
+            Some("EINVAL")
+        );
+        let mut host = Capabilities::all();
+        host.fs.read = vec!["${dataDir}/notes/allowed".into()];
+        Arc::make_mut(&mut sys.access).granted = Some(host);
+        assert_eq!(check(&sys, "notes/blocked.txt", false), None);
+        assert_eq!(
+            check(&sys, "notes/allowed/a.txt", false).as_deref(),
+            Some("notes/allowed/a.txt")
+        );
+        Arc::make_mut(&mut sys.access).declared.fs.read = vec!["/".into()];
+        assert_eq!(check(&sys, "/outside", false), None);
+        Arc::make_mut(&mut sys.access).declared.fs.read.clear();
+        assert_eq!(check(&sys, "notes/allowed/a.txt", false), None);
     }
 
     use crate::ui::{Registry, declarations};

@@ -24,7 +24,7 @@ Native Shell provides eleven standard modules, imported by their bare names: Nod
 
 Each module is imported by exactly the name in the table: `import { join } from "path"`, `import fs from "fs/promises"`. The bundler keeps these imports, and the runtime serves them natively; the catalog is these eleven names. `buffer`, `crypto`, `path`, `url` and `zlib` are LLRT's implementations, pinned to `d9fd873e793c6551c5d92b2e31480f3279e3cd8d`, with declarations projected from that revision onto the exports the runtime has. The others are NSH's own. NSH keeps the identity of its URL, Blob, stream and event classes.
 
-`buffer`, `crypto`, `path`, `url`, `zlib` and `websocket`, and the globals `Buffer` and `crypto`, are native-host modules: iOS, Android, macOS, Windows and Linux apps have them. A web app runs `fs/promises`, `process`, `net`, `os` and `console`, and an import of a native-host module there throws an error that names it; their declarations say so.
+All eleven modules load on native hosts and in browser apps. `Buffer`, hashing, crypto and compression use the same portable Rust implementation in WebAssembly, including synchronous APIs; random values use browser cryptographic entropy. Browser `path` operations use POSIX paths and a virtual `/` working directory. Browser files use persistent app-private storage, and WebSockets use the browser transport. Process execution and raw TCP calls report typed platform errors in browsers.
 
 ## How they compare with Node.js and gpui-shell
 
@@ -34,7 +34,7 @@ The modules follow Node's names and shapes for the subset they export, and gpui-
 - `Stats` and `Dirent` have their fields (`size`, `mtimeMs`, `name`, ...) as own properties, as Node's do, and `isFile()`, `isDirectory()` and `isSymbolicLink()` on their prototype.
 - A `ChildProcess` listener receives the event's payload: the output text, or the exit's `{ code, signal }` (with `error` when the runtime ended the child). `on` returns the child.
 - A child's environment is a small set from the host plus the names the app is granted, and it runs in the app's data directory or a `cwd` within an `fs.write` root ([Processes](#processes)).
-- `process.dataDir` is `null` when the host has no data directory; `process.exit` asks the host to exit.
+- `process.dataDir` is `null` when the host has no data directory; `process.exit` asks the host to close the app surface.
 - Limits are part of each API: sizes, counts and timeouts are listed with each module below.
 
 ## OS metadata and logging
@@ -51,7 +51,7 @@ Browser apps read an empty `process.env` object and receive an error from `os.ho
 
 ## Files
 
-`fs/promises` reads and writes files on desktop hosts (macOS, Windows and Linux). Every path is checked against `capabilities.fs` before the operation starts: `read` roots for `readFile`, `readdir`, `stat`, `lstat`, `readlink` and `exists`, `write` roots for `writeFile`, `mkdir`, `rename`, `unlink` and `rmdir`. A path outside the grants throws a `TypeError` at the call; I/O failures reject the promise with an `Error`.
+`fs/promises` reads and writes native files on desktop hosts (macOS, Windows and Linux), and app-private browser files through the Origin Private File System (OPFS). Every path is checked against `capabilities.fs` before the operation starts: `read` roots for `readFile`, `readdir`, `stat`, `lstat`, `readlink` and `exists`, `write` roots for `writeFile`, `mkdir`, `rename`, `unlink` and `rmdir`. A path outside the grants throws a `TypeError` at the call; I/O failures reject the promise with an `Error`.
 
 ```json
 {
@@ -66,6 +66,8 @@ Roots are absolute paths, `${dataDir}` (this app's data directory, chosen by the
 Failures carry Node's error properties: `code` (`ENOENT`, `EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, `ELOOP`, `EACCES`, `EPERM`, ...; `EILSEQ` for text that is not UTF-8, `ERR_FS_FILE_TOO_LARGE` past the read limit), `syscall` and `path`, so `error.code === "ENOENT"` tells a missing file apart. A path outside the grants throws a `TypeError` with `code` `EACCES`, and `ENOSYS` where the host has no native filesystem.
 
 `readFile` returns a `Uint8Array`, or a string with `"utf8"`, and reads files up to 64 MiB. `writeFile` writes a string or `Uint8Array` of up to 8 MiB, creating or replacing a regular file. `readdir` lists up to 10 000 names (1 MiB of them; a larger directory rejects with a `RangeError`, `code` `ERR_OUT_OF_RANGE`), sorted, or `Dirent`s (`name`, `isDirectory()`) with `{ withFileTypes: true }`. `stat` and `lstat` resolve a `Stats` with `size`, `mode`, `mtimeMs` / `atimeMs` / `birthtimeMs`, `mtime` / `atime` / `birthtime` as `Date`s, and `isFile()`, `isDirectory()` and `isSymbolicLink()`. `rmdir` removes one empty directory. One VM runs up to 1024 operations at a time and holds up to 64 MiB of file data in flight (data handed to `writeFile` until it is written, data read until its promise settles); a call past these limits throws a `RangeError`, a read past them rejects.
+
+Browser storage is scoped to the page's origin and the app's own namespace, with the same file grants and size limits checked in Rust. OPFS requires a secure context, such as HTTPS or localhost. File modification times come from browser metadata; unknown access/birth times and modes are zero. `rename` uses an atomic browser handle move and reports `ENOTSUP` when the browser does not provide it. Browser entries are regular files or directories, and `readlink` reports `EINVAL`.
 
 ## Processes
 
@@ -103,11 +105,11 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 | Pending stdin per child | 1 MiB; `write` throws past it |
 | Listeners | 64 per event per child |
 
-`process.exit(code?)` requests that the host close this app surface. Grant it with `"exit": true` in `capabilities.process`; the engine forwards the request through the platform's app-exit command. On macOS, this closes the surface window. An embedding host controls how its surface handles the request. Gallery grants this capability for its explicit **Request host exit** action.
+`process.exit(code?)` requests that the host close this app surface. Grant it with `"exit": true` in `capabilities.process`; the engine forwards the request through the platform's app-exit command. On macOS, this closes the surface window. In a browser, it stops the app and clears its surface while keeping the host page open. An embedding host controls how its surface handles the request. Gallery grants this capability for its explicit **Request host exit** action.
 
 ## Network permissions and boundaries
 
-Global `fetch` retains NSH's streaming HTTP implementation, checking `network.hosts` or `network.http` for requests and redirect hops. Native-host WebSocket supports `ws:` / `wss:`, text and binary messages, event listeners and closing handshakes. A WebSocket handshake is an HTTP GET, so both the global `WebSocket` and the `websocket` module's `WebSocket.connect` use the HTTP grants: `ws` is checked as `http` and `wss` as `https`, using GET (a rule may also list `ws` / `wss` in `schemes`). The check runs on the normalized URL before DNS lookup, the handshake connects to that same URL and rejects redirects. Both APIs refuse a URL with credentials or a fragment. Each VM holds at most 32 WebSockets across both APIs, and messages are at most 8 MiB in both.
+Global `fetch` retains NSH's streaming HTTP implementation, checking `network.hosts` or `network.http` for requests and redirect hops. WebSocket supports `ws:` / `wss:`, text and binary messages, event listeners and closing handshakes. A WebSocket handshake is an HTTP GET, so both the global `WebSocket` and the `websocket` module's `WebSocket.connect` use the HTTP grants: `ws` is checked as `http` and `wss` as `https`, using GET (a rule may also list `ws` / `wss` in `schemes`). NSH checks the initial normalized URL before starting the connection. The native handshake connects to that URL and rejects redirects; browser WebSocket redirects and connection policy are controlled by the browser. Both APIs refuse a URL with credentials or a fragment. Each VM holds at most 32 WebSockets across both APIs, and messages are at most 8 MiB in both.
 
 The global `WebSocket` queues at most eight messages to send, with at most 8 MiB buffered (`bufferedAmount`); `send()` past either throws. Its handshake and each write time out after 30 seconds, and closing waits up to 5 seconds for the peer's close frame. Messages are delivered as `message` events as they arrive.
 
@@ -115,7 +117,7 @@ The `websocket` module's `WebSocketConnection` holds at most eight pending opera
 
 `net.connect(host, port)` uses only `network.sockets`, a list of exact `"host:port"` destinations (`"[::1]:9000"` for IPv6), checked before DNS lookup. Each entry grants one port on one host; host patterns, `network.hosts` and HTTP grants cover HTTP traffic only, and an app without `"capabilities"` lists its sockets too. The returned `Socket` provides `read(size?)`, `write(text)` and `close()`; reads return `Uint8Array`, or `null` at EOF. A refused grant throws a `TypeError` and a limit a `RangeError` at the call; connection and I/O failures reject with Node's `code` (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, `ECONNRESET`, ...) and `syscall`, a connection's also with `address` and `port`, and an operation on a closed socket with `ERR_SOCKET_CLOSED`. Connections and I/O have 30-second timeouts, each read/write is limited to 1 MiB, at most 4 MiB of writes may wait to be sent, and `close()` ends pending reads and writes at once. Each VM keeps at most 32 sockets open or connecting. This is a promise-based client socket interface.
 
-Raw TCP and this WebSocket transport use native hosts. Browser apps use the platform's [global APIs](./globals.md); availability follows the actual host. Embedding grants intersect the app's capability declaration.
+Raw TCP uses native hosts. Both WebSocket interfaces use the browser transport in web apps, retaining Rust capability checks and the limits above. Custom browser handshake headers report an explicit unsupported-option error. Browser connection policies also apply. Embedding grants intersect the app's capability declaration.
 
 ## WebSocket grant example
 
@@ -169,6 +171,6 @@ try {
 
 ## Gallery
 
-Open **Standard APIs** in `examples/gallery` to run file operations, child processes, TCP and both WebSocket interfaces, and inspect host metadata and queued jobs. The utilities action demonstrates buffers, hashing, compression and file URLs. Each action displays its result or error. Files stay in a temporary directory under the gallery's own data directory and are removed after the action. The TCP and WebSocket actions connect to local echo servers on ports 9876 and 9877.
+Open **Standard APIs** in `examples/gallery` to run file operations, child processes, TCP and both WebSocket interfaces, and inspect host metadata and queued jobs. The utilities action demonstrates buffers, hashing, compression and file URLs. Each action displays its result or error. Files stay in a temporary directory under the gallery's own data directory and are removed after the action. The TCP and WebSocket actions connect to local echo servers on ports 9876 and 9877. On web, file actions exercise OPFS, utilities run in WebAssembly, and both WebSocket actions use browser connections; process and TCP actions display the host's typed platform errors.
 
 Gallery's **AI Chat** uses `process.spawn` to chat through a locally installed Claude or Codex CLI on desktop. Sign in through the CLI in a terminal, then choose the provider in the composer. Replies use the conversation as context; Stop and leaving the screen end the child process. Web and mobile run scripted streaming conversations, including reasoning, tool cards and error recovery.

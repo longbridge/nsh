@@ -10,19 +10,17 @@ use crate::error::JsError;
 /// accepted by [`crate::Host::eval_bytecode`]: the QuickJS-NG release and
 /// revision, its bytecode format (`BC_VERSION`) and the byte order written.
 ///
-/// It names the engine, not the binding: native targets run quickjs-jit and
-/// the browser upstream rquickjs, both building QuickJS-NG at this revision
-/// with the same serializer (quickjs-jit's patches leave `JS_WriteObject` /
-/// `JS_ReadObject` and the compiler as they are), so bytecode the CLI
-/// compiles runs in the web runtime. Bump it with either `-sys` pin
-/// ([`ENGINES`]).
+/// It names the engine, not the binding: every platform runs the same
+/// QuickJS-NG revision and serializer. The JIT leaves `JS_WriteObject`,
+/// `JS_ReadObject` and the compiler unchanged, so the CLI's bytecode loads
+/// in the browser too. The test below holds the linked engine to this record.
 pub const BYTECODE_VERSION: &str = "quickjs-ng-0.16.2+0fdea21/bc28/le";
 
 /// The `-sys` crates whose QuickJS-NG [`BYTECODE_VERSION`] names: (package,
 /// version). The test `engines_build_the_named_quickjs` holds them to the
 /// lockfile.
 #[cfg(test)]
-const ENGINES: &[(&str, &str)] = &[("quickjs-jit-sys", "0.14.1"), ("rquickjs-sys", "0.14.0")];
+const ENGINES: &[(&str, &str)] = &[("quickjs-jit-sys", "0.14.1")];
 
 /// Module name every bundle is evaluated under; JS stack frames reference
 /// it as `bundle.js:LINE:COL`.
@@ -40,7 +38,9 @@ pub enum Strip {
     /// bundle's source map turns into app source locations.
     Source,
     /// Drops both: the smallest bytecode, whose stack frames have no
-    /// position (`<null>:0:1`).
+    /// position (`<null>:0:1`). Modules using dynamic `import()` retain
+    /// debug metadata because QuickJS needs the calling function's filename
+    /// to resolve their imports.
     All,
 }
 
@@ -56,7 +56,8 @@ impl From<bool> for Strip {
 /// The bytecode is only valid for the exact QuickJS version linked into
 /// this crate, which is why the CLI and the runtime share it.
 /// `strip` ([`Strip`], or `true` for [`Strip::All`]) removes source and
-/// debug info (smaller, but [`Strip::All`] stacks lose line numbers).
+/// debug info (smaller, but [`Strip::All`] stacks lose line numbers unless
+/// dynamic imports require their filenames).
 pub fn compile_bytecode(source: &str, strip: impl Into<Strip>) -> Result<Vec<u8>, JsError> {
     compile_bytecode_with(source, strip, &[])
 }
@@ -130,12 +131,38 @@ fn compile(
         let options = WriteOptions {
             endianness: WriteOptionsEndianness::Little,
             strip_source: strip != Strip::Nothing,
-            strip_debug: strip == Strip::All,
+            strip_debug: strip == Strip::All && !has_dynamic_import(source),
             ..WriteOptions::default()
         };
         module
             .write(options)
             .map_err(|e| JsError::from_engine(&ctx, e))
+    })
+}
+
+/// QuickJS resolves import() from the calling function's debug filename.
+/// Conservatively retaining metadata for a matching string or comment is
+/// harmless; skipping comments between the keyword and parenthesis keeps
+/// every legal spelling working without introducing a second JS parser.
+fn has_dynamic_import(source: &str) -> bool {
+    source.match_indices("import").any(|(at, _)| {
+        let mut rest = &source[at + "import".len()..];
+        loop {
+            rest = rest.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
+            if let Some(comment) = rest.strip_prefix("/*") {
+                let Some(end) = comment.find("*/") else {
+                    return false;
+                };
+                rest = &comment[end + 2..];
+            } else if let Some(comment) = rest.strip_prefix("//") {
+                let Some(end) = comment.find(['\n', '\r', '\u{2028}', '\u{2029}']) else {
+                    return false;
+                };
+                rest = &comment[end..];
+            } else {
+                return rest.starts_with('(');
+            }
+        }
     })
 }
 
@@ -176,6 +203,59 @@ mod tests {
         assert!(host.eval_source("import 'node:node:buffer';").is_err());
     }
 
+    #[test]
+    fn stripped_chunks_preserve_dynamic_import_resolution_after_loading() {
+        let entry = "globalThis.loaded = false;";
+        let chunk = r#"
+            globalThis.loadBuffer = () => import /* standard module */ ('buffer')
+                .then(({ Buffer }) => { globalThis.loaded = Buffer.from('ok').toString() === 'ok'; });
+        "#;
+        for strip in [Strip::Nothing, Strip::Source, Strip::All] {
+            let direct = crate::Host::new().unwrap();
+            direct.eval_bytecode(&compile_bytecode(
+                "import('buffer').then(({Buffer}) => { globalThis.direct = Buffer.from('ok').toString(); });",
+                strip,
+            ).unwrap()).unwrap();
+            direct.run_jobs();
+            assert!(
+                direct
+                    .eval_script("direct", "globalThis.direct === 'ok'")
+                    .unwrap()
+            );
+            let mut chunks =
+                compile_chunk_bytecode(entry, &[("lazy.js", chunk)], strip, &[]).unwrap();
+            let host = crate::Host::new().unwrap();
+            host.eval_bytecode(&compile_bytecode(entry, strip).unwrap())
+                .unwrap();
+            // SAFETY: these bytes were compiled above with this linked engine.
+            unsafe {
+                host.add_chunk_bytecode("lazy.js", chunks.remove(0));
+            }
+            host.eval_source("await __nsh_import('lazy.js'); loadBuffer();")
+                .unwrap();
+            host.run_jobs();
+            assert!(
+                host.eval_script("check", "globalThis.loaded === true")
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_import_metadata_detection_accepts_whitespace_and_comments() {
+        for source in [
+            "import('buffer')",
+            "import \n ('buffer')",
+            "import/**/('buffer')",
+            "import\u{feff}('buffer')",
+            "import//x\n/*y*/ ('buffer')",
+            "import//x\u{2028}('buffer')",
+        ] {
+            assert!(has_dynamic_import(source), "{source}");
+        }
+        assert!(!has_dynamic_import("import { Buffer } from 'buffer';"));
+    }
+
     /// Fails when the engine is upgraded without bumping `BYTECODE_VERSION`:
     /// its release, and the format byte bytecode starts with.
     #[test]
@@ -196,10 +276,7 @@ mod tests {
         );
     }
 
-    /// Native targets and the browser link different `-sys` crates; both
-    /// must be the versions that build `BYTECODE_VERSION`'s QuickJS-NG
-    /// revision, or bytecode compiled by the CLI would not be the web
-    /// runtime's.
+    /// Every platform links the engine revision named by `BYTECODE_VERSION`.
     #[test]
     fn engines_build_the_named_quickjs() {
         let lock = std::fs::read_to_string(
