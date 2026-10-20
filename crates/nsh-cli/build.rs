@@ -31,12 +31,10 @@ fn main() {
     let checkout = root
         .is_some_and(|root| root.join(".git").exists() && root.join("crates/nsh-cli") == manifest);
     let revision = if checkout {
-        let mut paths = vec!["HEAD".to_owned(), "packed-refs".to_owned()];
-        if let Some(reference) = git(&manifest, &["symbolic-ref", "-q", "HEAD"]) {
-            paths.push(reference);
-        }
-        for name in paths {
-            if let Some(path) = git(&manifest, &["rev-parse", "--git-path", &name]) {
+        // Packed branches acquire a loose ref on the next commit. Watch
+        // the refs directory too, so creating that file refreshes the SHA.
+        for name in ["HEAD", "refs", "packed-refs"] {
+            if let Some(path) = git(&manifest, &["rev-parse", "--git-path", name]) {
                 let path = manifest.join(path);
                 if path.exists() {
                     println!("cargo:rerun-if-changed={}", path.display());
