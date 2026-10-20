@@ -69,6 +69,14 @@ pub(crate) fn api(keep: &[String]) -> anyhow::Result<()> {
         std::fs::create_dir_all(&dir)?;
         std::fs::copy(out.join("bundle.js"), dir.join("bundle.js"))
             .with_context(|| format!("{app}'s bundle"))?;
+        // What an app that declares capabilities runs with, as a package
+        // carries it (the fixture runs with them, `compat/apps.rs`).
+        if out.join("capabilities.json").exists() {
+            for file in ["capabilities.json", "app.json"] {
+                std::fs::copy(out.join(file), dir.join(file))
+                    .with_context(|| format!("{app}'s {file}"))?;
+            }
+        }
         if out.join("assets").exists() {
             copy_dir(&out.join("assets"), &dir.join("assets"))?;
         }

@@ -53,11 +53,11 @@
 //! only through Tailwind classes is not counted.
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::PathBuf,
 };
 
-use super::{api_dir, apps, base_revision, compare, git, surface, text};
+use super::{api_dir, apps, base_revision, compare, in_force, record_at, surface, text};
 
 /// The list's name under `api/`.
 const FILE: &str = "uncovered.txt";
@@ -601,7 +601,7 @@ fn verify(fixture: &Fixture, item: &str, required: bool) -> Result<(), String> {
     if code == fixture.code {
         return Err("its bundle names it only where it cannot be taken out".into());
     }
-    match apps::run(code, &fixture.script, &fixture.dir.join("assets")) {
+    match apps::run(code, &fixture.script, &fixture.dir) {
         Ok(()) => Err("the script passes without it: no step checks what it does".into()),
         Err(f) if f.check.is_some() && !f.errors => Ok(()),
         // The component cannot work without it: the app's failing is the
@@ -738,11 +738,12 @@ fn every_api_is_tested() {
 }
 
 /// `api/uncovered.txt` gains nothing over what it listed at the record's
-/// base revision (see `nothing_merged_is_removed`).
+/// base revision, once the record is in force there (see
+/// `nothing_merged_is_removed`).
 #[test]
 fn uncovered_only_shrinks() {
-    let base = match base_revision() {
-        Ok(rev) => rev,
+    let (base, rev) = match base_revision().and_then(|rev| Ok((record_at(&rev)?, rev))) {
+        Ok(base) => base,
         Err(e) if std::env::var_os("CI").is_some() => {
             panic!("the record's base: {e} (CI needs git's history and `main`)")
         }
@@ -751,22 +752,44 @@ fn uncovered_only_shrinks() {
             return;
         }
     };
-    let Ok(at_base) = git(&["show", &format!("{base}:api/{FILE}")]) else {
-        // The list did not exist yet at the base.
+    let now = std::fs::read(api_dir().join(FILE))
+        .map(text)
+        .unwrap_or_default();
+    let Some(added) = uncovered_added(&base, &now) else {
+        eprintln!("note: uncovered_only_shrinks: the record was not in force at {rev}");
         return;
     };
-    let at_base = entries(&text(at_base));
-    let now = entries(
-        &std::fs::read(api_dir().join(FILE))
-            .map(text)
-            .unwrap_or_default(),
-    );
-    let added: Vec<_> = now.difference(&at_base).cloned().collect();
     assert!(
         added.is_empty(),
-        "api/{FILE} gained entries over {base}: a new API comes with a fixture that uses it, \
+        "api/{FILE} gained entries over {rev}: a new API comes with a fixture that uses it, \
          an exercised one stays exercised:\n  {}",
         added.join("\n  ")
+    );
+}
+
+/// The entries `now` (the list of this checkout) adds over the list of
+/// `base` (the files of `api/` at the base revision); `None` when the
+/// record was not in force there, which holds nothing.
+fn uncovered_added(base: &BTreeMap<String, Vec<u8>>, now: &str) -> Option<Vec<String>> {
+    if !in_force(base) {
+        return None;
+    }
+    let at_base = entries(&base.get(FILE).cloned().map(text).unwrap_or_default());
+    Some(entries(now).difference(&at_base).cloned().collect())
+}
+
+/// The list may only shrink, and only from the commit that put the record
+/// in force on.
+#[test]
+fn uncovered_is_held_once_in_force() {
+    let mut base = BTreeMap::new();
+    base.insert(FILE.to_owned(), b"[nsh] a\n[nsh] b\n".to_vec());
+    assert_eq!(uncovered_added(&base, "[nsh] a\n[nsh] c\n"), None);
+    base.insert(super::IN_FORCE.to_owned(), b"# in force\n".to_vec());
+    assert_eq!(uncovered_added(&base, "[nsh] a\n"), Some(vec![]));
+    assert_eq!(
+        uncovered_added(&base, "[nsh] a\n[nsh] c\n"),
+        Some(vec!["[nsh] c".to_owned()])
     );
 }
 

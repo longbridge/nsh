@@ -3,7 +3,10 @@
 //! (`<app>/bundle.js`; packages always carry their source, which runs when
 //! their bytecode is not this runtime's) and a script of what a user does
 //! and sees (`<app>/script.txt`), one step per line (with the assets it
-//! imports, `<app>/assets/`):
+//! imports, `<app>/assets/`, and what the build wrote of an app that
+//! declares `capabilities` in `nsh.json`: `<app>/capabilities.json` and its
+//! id, `<app>/app.json`, which the app then runs with, as a package's do,
+//! its data directory a new empty one):
 //!
 //! - `viewport <width> <height>`: before anything else, the screen's size
 //!   (390 × 844 by default);
@@ -100,8 +103,11 @@
 
 use std::{
     collections::HashMap,
-    path::Path,
-    sync::{Arc, Mutex, OnceLock},
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread::ThreadId,
     time::{Duration, Instant},
 };
@@ -341,7 +347,13 @@ struct Run {
 }
 
 impl Run {
-    fn start(bundle: Bundle, viewport: Size, environment: Environment, assets: &Path) -> Run {
+    fn start(
+        bundle: Bundle,
+        viewport: Size,
+        environment: Environment,
+        assets: &Path,
+        data_dir: Option<PathBuf>,
+    ) -> Run {
         crate::logs::capture();
         let (tx, rx) = crossbeam_channel::unbounded();
         let errors = Arc::new(Mutex::new(Vec::new()));
@@ -359,7 +371,7 @@ impl Run {
             limits: nsh_engine::Limits::default(),
             ui_sets: vec![nsh_base::registry()],
             runtime: None,
-            data_dir: None,
+            data_dir,
             storage: None,
         };
         let sink = Sink {
@@ -440,7 +452,48 @@ impl Run {
 pub(crate) fn run_app(dir: &Path) -> Result<(), String> {
     let code = std::fs::read_to_string(dir.join("bundle.js")).map_err(|e| e.to_string())?;
     let script = std::fs::read_to_string(dir.join("script.txt")).map_err(|e| e.to_string())?;
-    run(code, &script, &dir.join("assets")).map_err(|f| f.message)
+    run(code, &script, dir).map_err(|f| f.message)
+}
+
+/// `code` as the bundle of the fixture app in `dir`: with the capabilities
+/// it declared and its id, when its build wrote them.
+fn bundle(code: String, dir: &Path) -> Result<(Bundle, bool), String> {
+    let bundle = Bundle::source(code);
+    let Ok(json) = std::fs::read_to_string(dir.join("capabilities.json")) else {
+        return Ok((bundle, false));
+    };
+    let id = std::fs::read_to_string(dir.join("app.json"))
+        .ok()
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+        .and_then(|v| v.get("id")?.as_str().map(str::to_owned));
+    let bundle = bundle
+        .with_app_id(id.as_deref())
+        .with_capabilities_json(Some(&json))
+        .map_err(|e| format!("{}: {e}", dir.join("capabilities.json").display()))?;
+    Ok((bundle, true))
+}
+
+/// A new, empty data directory for one run of an app, removed with it.
+struct DataDir(PathBuf);
+
+impl DataDir {
+    fn new() -> DataDir {
+        static RUNS: AtomicUsize = AtomicUsize::new(0);
+        let dir = crate::temporary_root().join(format!(
+            "nsh-compat-data-{}-{}",
+            std::process::id(),
+            RUNS.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        DataDir(dir)
+    }
+}
+
+impl Drop for DataDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Why a script failed.
@@ -469,8 +522,9 @@ impl From<&str> for Failure {
     }
 }
 
-/// Runs the bundle `code` with its `assets` through `script`.
-pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failure> {
+/// Runs the bundle `code` of the fixture app in `dir` (its assets and
+/// declared capabilities) through `script`.
+pub(crate) fn run(code: String, script: &str, dir: &Path) -> Result<(), Failure> {
     let dump = std::env::var_os("NSH_API_DUMP").is_some();
     let mut lines = script
         .lines()
@@ -518,7 +572,17 @@ pub(crate) fn run(code: String, script: &str, assets: &Path) -> Result<(), Failu
         lines.next();
     }
     values::animated(None);
-    let mut run = Run::start(Bundle::source(code), viewport, environment, assets);
+    let (bundle, declares) = bundle(code, dir)?;
+    // Declared before the run, so dropped after its engine, which may
+    // still write there.
+    let data = declares.then(DataDir::new);
+    let mut run = Run::start(
+        bundle,
+        viewport,
+        environment,
+        &dir.join("assets"),
+        data.as_ref().map(|d| d.0.clone()),
+    );
     if !run.until(EXPECT_WAIT, |v| !v.attached().is_empty()) {
         return Err(Failure {
             check: None,
