@@ -1579,6 +1579,7 @@ impl<M: TextEngine> Core<M> {
             z_index,
             direction,
             logical,
+            pending: _,
         } = style;
         if animated
             .iter()

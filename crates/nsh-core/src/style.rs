@@ -754,6 +754,56 @@ pub struct Style {
     pub direction: Option<bool>,
     /// Start / end properties, placed by the resolved direction.
     pub logical: Logical,
+    /// Values that only show together with another property.
+    pub(crate) pending: Pending,
+}
+
+/// Values of properties that take effect only together with another one,
+/// kept so that the result does not depend on the order they are set in:
+/// `outlineWidth` under `outlineStyle: "none"` (no outline, as in CSS),
+/// `animationDuration` and the other `animation*` keys before
+/// `animationName`.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Pending {
+    /// `outlineWidth` as set.
+    outline_width: Points,
+    /// `outlineStyle: "none"` / `"hidden"`.
+    outline_hidden: bool,
+    /// `animationDuration`.
+    animation_duration: Option<f32>,
+    /// `animationDelay`.
+    animation_delay: Option<f32>,
+    /// `animationTimingFunction`.
+    animation_easing: Option<[f32; 4]>,
+    /// `animationIterationCount` (`None` inside: forever).
+    animation_iterations: Option<Option<u32>>,
+}
+
+/// Bookkeeping, not what the style shows: styles that look the same print
+/// the same (tests compare typed styles and classes so).
+impl std::fmt::Debug for Pending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Pending")
+    }
+}
+
+impl Pending {
+    /// `animation` with the `animation*` values set.
+    fn animation(&self, mut animation: KeyframeAnimation) -> KeyframeAnimation {
+        if let Some(ms) = self.animation_duration {
+            animation.duration = ms;
+        }
+        if let Some(ms) = self.animation_delay {
+            animation.delay = ms;
+        }
+        if let Some(easing) = self.animation_easing {
+            animation.easing = easing;
+        }
+        if let Some(count) = self.animation_iterations {
+            animation.iterations = count;
+        }
+        animation
+    }
 }
 
 /// Properties named by start and end (`marginStart`, `borderTopEndRadius`
@@ -894,6 +944,7 @@ impl Default for Style {
             z_index: 0,
             direction: None,
             logical: Logical::default(),
+            pending: Pending::default(),
         }
     }
 }
@@ -1221,8 +1272,9 @@ impl StyleDecl {
     }
 }
 
-/// A style as written (`style={...}`): its declarations in order, kept so
-/// the core can apply them again over class styles when those change.
+/// A style as written (`style={...}`): its declarations in order (the
+/// shorthands of [`StylePatch::set`] before their longhands), kept so the
+/// core can apply them again over class styles when those change.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StylePatch {
     decls: Vec<StyleDecl>,
@@ -1236,7 +1288,13 @@ impl StylePatch {
         Ok(())
     }
 
-    /// Sets property `key` on `style` and records it.
+    /// Sets property `key` of the style object this patch records on
+    /// `style`, and records it. As in React Native, a longhand
+    /// (`borderTopWidth`, `marginHorizontal`, `flexGrow`, ...) wins over
+    /// its shorthand (`borderWidth`, `margin`, `flex`) in one object
+    /// whatever their order: a shorthand set after its longhands is
+    /// recorded before them, and they apply again; a `null` longhand is
+    /// unset, so its shorthand shows.
     pub fn set(
         &mut self,
         style: &mut Style,
@@ -1244,9 +1302,41 @@ impl StylePatch {
         value: StyleValue<'_>,
     ) -> Result<(), StyleError> {
         let key = StyleKey::parse(key).ok_or(StyleError::UnknownProperty)?;
+        if matches!(value, StyleValue::Null) && self.has_shorthand_of(key) {
+            return Ok(());
+        }
         style.set_key(key, value)?;
-        self.decls.push(StyleDecl::Set(key, value.into()));
+        let decl = StyleDecl::Set(key, value.into());
+        let longhands = key.longhands();
+        let Some(at) = self
+            .decls
+            .iter()
+            .position(|d| matches!(d, StyleDecl::Set(k, _) if longhands.contains(k)))
+        else {
+            self.decls.push(decl);
+            return Ok(());
+        };
+        // Nulls set before are dropped (the shorthand shows); the others
+        // apply again over it.
+        self.decls
+            .retain(|d| !matches!(d, StyleDecl::Set(k, PatchValue::Null) if longhands.contains(k)));
+        let at = at.min(self.decls.len());
+        self.decls.insert(at, decl);
+        for d in &self.decls[at + 1..] {
+            if let StyleDecl::Set(k, v) = d
+                && longhands.contains(k)
+            {
+                let _ = style.set_key(*k, v.as_value());
+            }
+        }
         Ok(())
+    }
+
+    /// Whether a shorthand of `key` is recorded.
+    fn has_shorthand_of(&self, key: StyleKey) -> bool {
+        self.decls
+            .iter()
+            .any(|d| matches!(d, StyleDecl::Set(k, _) if k.longhands().contains(&key)))
     }
 
     /// Applies every declaration to `style`, in order.
@@ -1265,6 +1355,54 @@ impl StylePatch {
     /// The declarations.
     pub fn decls(&self) -> &[StyleDecl] {
         &self.decls
+    }
+}
+
+impl StyleKey {
+    /// The properties that override this shorthand in a style object
+    /// whatever their order (Yoga takes an edge's own value before its
+    /// axis' and that of all edges, `flexGrow` before `flex`).
+    fn longhands(self) -> &'static [StyleKey] {
+        use StyleKey as K;
+        match self {
+            K::Margin => &[
+                K::MarginHorizontal,
+                K::MarginVertical,
+                K::MarginTop,
+                K::MarginRight,
+                K::MarginBottom,
+                K::MarginLeft,
+            ],
+            K::MarginHorizontal => &[K::MarginLeft, K::MarginRight],
+            K::MarginVertical => &[K::MarginTop, K::MarginBottom],
+            K::Padding => &[
+                K::PaddingHorizontal,
+                K::PaddingVertical,
+                K::PaddingTop,
+                K::PaddingRight,
+                K::PaddingBottom,
+                K::PaddingLeft,
+            ],
+            K::PaddingHorizontal => &[K::PaddingLeft, K::PaddingRight],
+            K::PaddingVertical => &[K::PaddingTop, K::PaddingBottom],
+            K::BorderWidth => &[
+                K::BorderTopWidth,
+                K::BorderRightWidth,
+                K::BorderBottomWidth,
+                K::BorderLeftWidth,
+            ],
+            K::BorderColor => &[
+                K::BorderTopColor,
+                K::BorderRightColor,
+                K::BorderBottomColor,
+                K::BorderLeftColor,
+            ],
+            K::Gap => &[K::RowGap, K::ColumnGap],
+            K::Flex => &[K::FlexGrow, K::FlexShrink, K::FlexBasis],
+            K::GridColumn => &[K::GridColumnStart, K::GridColumnEnd],
+            K::GridRow => &[K::GridRowStart, K::GridRowEnd],
+            _ => &[],
+        }
     }
 }
 
@@ -2053,23 +2191,33 @@ impl Style {
                 }
             }
             StyleKey::OutlineWidth => {
-                self.view.outline.width = px(length_value(value, 0.0)?.max(0.0))
+                let width = px(length_value(value, 0.0)?.max(0.0));
+                self.pending.outline_width = width;
+                if !self.pending.outline_hidden {
+                    self.view.outline.width = width;
+                }
             }
             StyleKey::OutlineColor => {
                 self.view.outline.color = color(value)?.unwrap_or(Outline::NONE.color)
             }
             StyleKey::OutlineOffset => self.view.outline.offset = px(length_value(value, 0.0)?),
             StyleKey::OutlineStyle => {
-                self.view.outline.style = match keyword(value)? {
-                    None | Some("solid") | Some("double") => BorderStyle::Solid,
-                    Some("dashed") => BorderStyle::Dashed,
-                    Some("dotted") => BorderStyle::Dotted,
-                    Some("none") | Some("hidden") => {
-                        self.view.outline.width = Points::ZERO;
-                        BorderStyle::Solid
-                    }
+                // `none` draws no outline whatever the width, set before
+                // or after it (CSS).
+                let (style, hidden) = match keyword(value)? {
+                    None | Some("solid") | Some("double") => (BorderStyle::Solid, false),
+                    Some("dashed") => (BorderStyle::Dashed, false),
+                    Some("dotted") => (BorderStyle::Dotted, false),
+                    Some("none") | Some("hidden") => (BorderStyle::Solid, true),
                     Some(_) => return Err(StyleError::InvalidValue),
-                }
+                };
+                self.view.outline.style = style;
+                self.pending.outline_hidden = hidden;
+                self.view.outline.width = if hidden {
+                    Points::ZERO
+                } else {
+                    self.pending.outline_width
+                };
             }
             StyleKey::Visibility => {
                 self.view.hidden = match keyword(value)? {
@@ -2112,31 +2260,34 @@ impl Style {
                     Some("bounce") => Some(Keyframes::Bounce),
                     Some(_) => return Err(StyleError::InvalidValue),
                 };
+                // An animation already running (a class's) keeps its
+                // values; a new one takes those set before its name.
+                let pending = self.pending;
                 self.view.animation = keyframes.map(|keyframes| {
-                    let base = self.view.animation.unwrap_or(KeyframeAnimation {
-                        keyframes,
-                        duration: 1000.0,
-                        delay: 0.0,
-                        easing: [0.0, 0.0, 1.0, 1.0],
-                        iterations: None,
-                    });
+                    let base = self
+                        .view
+                        .animation
+                        .unwrap_or_else(|| pending.animation(KeyframeAnimation::new(keyframes)));
                     KeyframeAnimation { keyframes, ..base }
                 });
             }
             StyleKey::AnimationDuration => {
                 let ms = duration(value)?;
+                self.pending.animation_duration = Some(ms);
                 if let Some(a) = self.view.animation.as_mut() {
                     a.duration = ms;
                 }
             }
             StyleKey::AnimationDelay => {
                 let ms = duration(value)?;
+                self.pending.animation_delay = Some(ms);
                 if let Some(a) = self.view.animation.as_mut() {
                     a.delay = ms;
                 }
             }
             StyleKey::AnimationTimingFunction => {
                 let easing = timing_function(value)?;
+                self.pending.animation_easing = Some(easing);
                 if let Some(a) = self.view.animation.as_mut() {
                     a.easing = easing;
                 }
@@ -2146,6 +2297,7 @@ impl Style {
                     StyleValue::Str("infinite") | StyleValue::Null => None,
                     v => Some(number(v, 1.0)?.max(0.0) as u32),
                 };
+                self.pending.animation_iterations = Some(count);
                 if let Some(a) = self.view.animation.as_mut() {
                     a.iterations = count;
                 }
@@ -2309,6 +2461,218 @@ mod tests {
         assert_eq!(s.layout.flex_grow, 2.0);
         assert_eq!(s.layout.flex_shrink, 1.0);
         assert_eq!(s.layout.flex_basis, Dimension::length(0.0));
+    }
+
+    /// Every order of `decls`.
+    fn permutations<T: Clone>(decls: &[T]) -> Vec<Vec<T>> {
+        if decls.len() <= 1 {
+            return vec![decls.to_vec()];
+        }
+        let mut out = Vec::new();
+        for i in 0..decls.len() {
+            let mut rest = decls.to_vec();
+            let first = rest.remove(i);
+            for mut tail in permutations(&rest) {
+                tail.insert(0, first.clone());
+                out.push(tail);
+            }
+        }
+        out
+    }
+
+    /// Checks the style of one style object with `decls` in every order:
+    /// as recorded, and replayed from the patch (over classes).
+    fn in_any_order(decls: &[(&str, StyleValue<'_>)], check: impl Fn(&Style)) {
+        for order in permutations(decls) {
+            let mut style = Style::default();
+            let mut patch = StylePatch::default();
+            for &(key, value) in &order {
+                patch.set(&mut style, key, value).unwrap();
+            }
+            let keys: Vec<_> = order.iter().map(|(k, _)| *k).collect();
+            println!("{keys:?}");
+            check(&style);
+            let mut replayed = Style::default();
+            patch.apply(&mut replayed);
+            check(&replayed);
+        }
+    }
+
+    #[test]
+    fn border_longhands_override_the_shorthand_in_any_order() {
+        use StyleValue::{Null, Number, Str};
+        in_any_order(
+            &[
+                ("borderTopWidth", Number(5.0)),
+                ("borderWidth", Number(2.0)),
+                ("borderLeftColor", Str("red")),
+                ("borderColor", Str("blue")),
+            ],
+            |s| {
+                assert_eq!(s.view.borders.widths, [5.0, 2.0, 2.0, 2.0]);
+                assert_eq!(s.layout.border.top, LengthPercentage::length(5.0));
+                assert_eq!(s.layout.border.left, LengthPercentage::length(2.0));
+                let (red, blue) = (Color(0xff00_00ff), Color(0x0000_ffff));
+                assert_eq!(s.view.borders.colors, [blue, blue, blue, red]);
+            },
+        );
+        // A null longhand is unset: the shorthand shows.
+        in_any_order(
+            &[("borderTopWidth", Null), ("borderWidth", Number(2.0))],
+            |s| assert_eq!(s.view.borders.widths, [2.0; 4]),
+        );
+        // Without its shorthand, null still resets the longhand (a class's).
+        let mut s = Style::default();
+        s.set("borderTopWidth", Number(4.0)).unwrap();
+        StylePatch::default()
+            .set(&mut s, "borderTopWidth", Null)
+            .unwrap();
+        assert_eq!(s.view.borders.widths[0], 0.0);
+    }
+
+    #[test]
+    fn edge_longhands_override_their_shorthands_in_any_order() {
+        use StyleValue::Number;
+        let len = LengthPercentageAuto::length;
+        in_any_order(
+            &[
+                ("marginTop", Number(1.0)),
+                ("marginVertical", Number(2.0)),
+                ("margin", Number(3.0)),
+                ("marginLeft", Number(4.0)),
+                ("marginHorizontal", Number(5.0)),
+            ],
+            |s| {
+                let m = s.layout.margin;
+                assert_eq!(
+                    [m.top, m.bottom, m.left, m.right],
+                    [len(1.0), len(2.0), len(4.0), len(5.0)]
+                );
+            },
+        );
+        let len = LengthPercentage::length;
+        in_any_order(
+            &[
+                ("paddingRight", Number(1.0)),
+                ("padding", Number(3.0)),
+                ("paddingVertical", Number(2.0)),
+            ],
+            |s| {
+                let p = s.layout.padding;
+                assert_eq!(
+                    [p.top, p.bottom, p.left, p.right],
+                    [len(2.0), len(2.0), len(3.0), len(1.0)]
+                );
+            },
+        );
+        in_any_order(&[("rowGap", Number(4.0)), ("gap", Number(8.0))], |s| {
+            assert_eq!(s.layout.gap.height, len(4.0));
+            assert_eq!(s.layout.gap.width, len(8.0));
+        });
+    }
+
+    #[test]
+    fn flex_and_grid_longhands_override_their_shorthands_in_any_order() {
+        use StyleValue::{Number, Str};
+        in_any_order(&[("flexGrow", Number(2.0)), ("flex", Number(1.0))], |s| {
+            assert_eq!(s.layout.flex_grow, 2.0);
+            assert_eq!(s.layout.flex_shrink, 1.0);
+            assert_eq!(s.layout.flex_basis, Dimension::length(0.0));
+        });
+        in_any_order(
+            &[
+                ("gridColumnStart", Number(2.0)),
+                ("gridColumn", Str("1 / 4")),
+            ],
+            |s| {
+                assert_eq!(
+                    Some(&s.layout.grid_column.start),
+                    grid::placement("2").as_ref()
+                );
+                assert_eq!(
+                    Some(&s.layout.grid_column.end),
+                    grid::placement("4").as_ref()
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn outline_style_none_hides_the_outline_in_any_order() {
+        use StyleValue::{Null, Number, Str};
+        in_any_order(
+            &[("outlineStyle", Str("none")), ("outlineWidth", Number(3.0))],
+            |s| assert!(!s.view.outline.is_visible()),
+        );
+        in_any_order(
+            &[
+                ("outlineStyle", Str("dashed")),
+                ("outlineWidth", Number(3.0)),
+            ],
+            |s| {
+                assert_eq!(s.view.outline.width, px(3.0));
+                assert_eq!(s.view.outline.style, BorderStyle::Dashed);
+            },
+        );
+        // A later style (inline over classes) showing it again gets the
+        // width back.
+        let mut s = Style::default();
+        s.set("outlineWidth", Number(3.0)).unwrap();
+        s.set("outlineStyle", Str("none")).unwrap();
+        s.set("outlineStyle", Null).unwrap();
+        assert_eq!(s.view.outline.width, px(3.0));
+    }
+
+    #[test]
+    fn animation_keys_apply_in_any_order() {
+        use StyleValue::{Number, Str};
+        in_any_order(
+            &[
+                ("animationDuration", Number(500.0)),
+                ("animationIterationCount", Number(2.0)),
+                ("animationName", Str("spin")),
+                ("animationDelay", Str("0.1s")),
+                ("animationTimingFunction", Str("ease-in")),
+            ],
+            |s| {
+                let a = s.view.animation.unwrap();
+                assert_eq!(a.keyframes, Keyframes::Spin);
+                assert_eq!(a.duration, 500.0);
+                assert_eq!(a.iterations, Some(2));
+                assert_eq!(a.delay, 100.0);
+                assert_eq!(a.easing, [0.42, 0.0, 1.0, 1.0]);
+            },
+        );
+        // Without a name nothing runs.
+        in_any_order(&[("animationDuration", Number(500.0))], |s| {
+            assert_eq!(s.view.animation, None)
+        });
+        // Over a running (class) animation, the values change it.
+        let mut s = Style::default();
+        s.set("animationName", Str("ping")).unwrap();
+        s.set("animationDuration", Number(300.0)).unwrap();
+        s.set("animationName", Str("spin")).unwrap();
+        assert_eq!(s.view.animation.unwrap().duration, 300.0);
+    }
+
+    #[test]
+    fn transition_keys_apply_in_any_order() {
+        use StyleValue::{Number, Str};
+        in_any_order(
+            &[
+                ("transitionDuration", Number(300.0)),
+                ("transitionDelay", Number(50.0)),
+                ("transitionTimingFunction", Str("linear")),
+                ("transitionProperty", Str("opacity")),
+            ],
+            |s| {
+                let t = s.view.transition.unwrap();
+                assert_eq!(t.properties, TransitionProps(TransitionProps::OPACITY));
+                assert_eq!(t.duration, 300.0);
+                assert_eq!(t.delay, 50.0);
+                assert_eq!(t.easing, [0.0, 0.0, 1.0, 1.0]);
+            },
+        );
     }
 
     #[test]

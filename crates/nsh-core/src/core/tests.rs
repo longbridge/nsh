@@ -2816,6 +2816,56 @@ fn important_classes_win_over_inline_styles() {
 }
 
 #[test]
+fn inline_styles_resolve_longhands_whatever_their_order() {
+    use crate::effects::Keyframes;
+    let mut c = core();
+    view_with_classes(&mut c, 2, "border-t-4 outline-2 animate-spin");
+    // The inline style applies over the classes: its shorthand wins over a
+    // class's longhand, its `none` over a class's width, its duration
+    // changes the class's animation.
+    c.apply(style_op(
+        2,
+        &[
+            ("borderWidth", StyleValue::Number(1.0)),
+            ("outlineStyle", StyleValue::Str("none")),
+            ("animationDuration", StyleValue::Number(500.0)),
+        ],
+    ))
+    .unwrap();
+    let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(v.borders.widths, [1.0; 4]);
+    assert!(!v.outline.is_visible());
+    let a = v.animation.unwrap();
+    assert_eq!((a.keyframes, a.duration), (Keyframes::Spin, 500.0));
+    // In one object the longhand wins, also when the classes change.
+    c.apply(style_op(
+        2,
+        &[
+            ("borderTopWidth", StyleValue::Number(5.0)),
+            ("borderWidth", StyleValue::Number(2.0)),
+            ("animationIterationCount", StyleValue::Number(2.0)),
+            ("animationName", StyleValue::Str("pulse")),
+        ],
+    ))
+    .unwrap();
+    let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(v.borders.widths, [5.0, 2.0, 2.0, 2.0]);
+    assert_eq!(v.outline.width, px(2.0));
+    c.apply(class_op(2, "border-t-8")).unwrap();
+    let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(v.borders.widths, [5.0, 2.0, 2.0, 2.0]);
+    assert!(!v.outline.is_visible());
+    let a = v.animation.unwrap();
+    assert_eq!((a.keyframes, a.iterations), (Keyframes::Pulse, Some(2)));
+    // A longhand left out: the shorthand shows again.
+    c.apply(style_op(2, &[("borderWidth", StyleValue::Number(2.0))]))
+        .unwrap();
+    let v = view_style_of(&c.commit().unwrap(), 2).unwrap();
+    assert_eq!(v.borders.widths, [2.0; 4]);
+    assert_eq!(v.animation, None);
+}
+
+#[test]
 fn the_apps_appearance_wins_over_the_systems() {
     use crate::platform::Appearance;
     let mut c = core();

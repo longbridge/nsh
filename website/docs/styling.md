@@ -51,6 +51,8 @@ A style expression that reads signals is rebuilt when they change, and NSH sends
 
 When an element has both, `style` wins over `class`: classes are applied first, then the inline style on top. A key set to `undefined` sets nothing (`backgroundColor: active ? accent : undefined` keeps the class color when inactive); `null` sets the default.
 
+Within one style (an object, or an array merged into one), the order of the keys makes no difference. As in React Native, a more specific property wins over its shorthand: `borderTopWidth` over `borderWidth`, `borderLeftColor` over `borderColor`, `marginTop` over `marginVertical` over `margin` (padding alike), `rowGap` over `gap`, `flexGrow` over `flex`, `gridColumnStart` over `gridColumn`. A specific property set to `null` there shows the shorthand's value.
+
 ## Units and values
 
 - **Numbers are points** (density-independent pixels): `width: 100` is 100pt, which is 200 or 300 physical pixels on a 2× or 3× screen.
@@ -188,7 +190,7 @@ Platform support differs:
 
 ## Outlines, opacity and visibility
 
-- `outlineWidth`, `outlineColor`, `outlineStyle`, `outlineOffset`: a line outside the border that takes no space (negative offsets draw inside).
+- `outlineWidth`, `outlineColor`, `outlineStyle`, `outlineOffset`: a line outside the border that takes no space (negative offsets draw inside). `outlineStyle: "none"` (or `"hidden"`) hides the outline whatever its width, as in CSS.
 - `opacity`: 0 to 1, applied to the view and its children.
 - `visibility: "hidden"`: the view is not drawn but keeps its space. `display: "none"` removes it from layout.
 - `zIndex`: the order among siblings, also the native stacking order (stable for equal values).
@@ -239,7 +241,7 @@ Sizes and positions are layout, not style, and do not transition; animate layout
 
 ### Keyframe animations
 
-`animationName` runs one of Tailwind's built-in keyframe animations natively: `"spin"`, `"ping"`, `"pulse"` or `"bounce"`, with `animationDuration`, `animationDelay`, `animationTimingFunction` and `animationIterationCount` (a number or `"infinite"`):
+`animationName` runs one of Tailwind's built-in keyframe animations natively: `"spin"`, `"ping"`, `"pulse"` or `"bounce"`, with `animationDuration`, `animationDelay`, `animationTimingFunction` and `animationIterationCount` (a number or `"infinite"`), in any order:
 
 ```tsx
 <View style={{ width: 24, height: 24, borderRadius: 4, backgroundColor: "#0969da", animationName: "spin", animationDuration: 1000, animationIterationCount: "infinite", animationTimingFunction: "linear" }} />

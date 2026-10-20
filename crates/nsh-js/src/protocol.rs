@@ -1005,6 +1005,21 @@ mod tests {
     }
 
     #[test]
+    fn style_longhands_win_whatever_the_key_order() {
+        // As React Native flattens the styles of an array into one object,
+        // the longhand of a later style wins too.
+        let longhand_last = style("{ borderWidth: 2, borderTopWidth: 5, padding: 4 }");
+        assert_eq!(
+            style("{ borderTopWidth: 5, padding: 4, borderWidth: 2 }"),
+            longhand_last
+        );
+        assert_eq!(
+            style("[{ borderTopWidth: 5 }, { padding: 4, borderWidth: 2 }]"),
+            longhand_last
+        );
+    }
+
+    #[test]
     fn easings_decode_by_name_curve_and_bezier() {
         let easing = |s: &str| with_value(s, |v| nsh_core::js::animation::easing(&v));
         assert_eq!(easing("'easeOut'"), Some(Easing::EaseOut));

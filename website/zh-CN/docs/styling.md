@@ -51,6 +51,8 @@ const styles = {
 
 元素同时有 `style` 和 `class` 时，`style` 优先：先应用类名，再在其上叠加内联样式。值为 `undefined` 的键不设置任何东西（`backgroundColor: active ? accent : undefined` 在未激活时保留类名的颜色）；`null` 则设为默认值。
 
+在同一个样式中（一个对象，或合并成一个对象的数组），键的顺序不影响结果。与 React Native 一样，更具体的属性优先于它的简写：`borderTopWidth` 优先于 `borderWidth`，`borderLeftColor` 优先于 `borderColor`，`marginTop` 优先于 `marginVertical`、再优先于 `margin`（padding 同理），`rowGap` 优先于 `gap`，`flexGrow` 优先于 `flex`，`gridColumnStart` 优先于 `gridColumn`。在其中把具体属性设为 `null` 时，显示简写的值。
+
 ## 单位与取值
 
 - **数字的单位是点**（与密度无关的像素）：`width: 100` 是 100pt，在 2× 或 3× 屏幕上分别是 200 或 300 个物理像素。
@@ -188,7 +190,7 @@ const palette = () =>
 
 ## 轮廓线、不透明度与可见性
 
-- `outlineWidth`、`outlineColor`、`outlineStyle`、`outlineOffset`：边框之外、不占空间的一条线（负偏移会画在内侧）。
+- `outlineWidth`、`outlineColor`、`outlineStyle`、`outlineOffset`：边框之外、不占空间的一条线（负偏移会画在内侧）。与 CSS 一样，`outlineStyle: "none"`（或 `"hidden"`）会隐藏轮廓，无论宽度是多少。
 - `opacity`：0 到 1，作用于视图及其子视图。
 - `visibility: "hidden"`：视图不绘制，但保留所占空间。`display: "none"` 则将它移出布局。
 - `zIndex`：在兄弟视图中的顺序，也是原生的层叠顺序（值相同时保持稳定）。
@@ -239,7 +241,7 @@ Android 不支持斜切（skew）变换。
 
 ### 关键帧动画
 
-`animationName` 以原生方式运行 Tailwind 内置的关键帧动画之一：`"spin"`、`"ping"`、`"pulse"` 或 `"bounce"`，配合 `animationDuration`、`animationDelay`、`animationTimingFunction` 和 `animationIterationCount`（数字或 `"infinite"`）：
+`animationName` 以原生方式运行 Tailwind 内置的关键帧动画之一：`"spin"`、`"ping"`、`"pulse"` 或 `"bounce"`，配合 `animationDuration`、`animationDelay`、`animationTimingFunction` 和 `animationIterationCount`（数字或 `"infinite"`），顺序不限：
 
 ```tsx
 <View style={{ width: 24, height: 24, borderRadius: 4, backgroundColor: "#0969da", animationName: "spin", animationDuration: 1000, animationIterationCount: "infinite", animationTimingFunction: "linear" }} />

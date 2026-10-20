@@ -78,7 +78,16 @@
   defaults: offset `(0, -3)`, radius 3, opacity 0), `tintColor` (images), `android={{ elevation }}` (a prop, not a style: Android's material shadow, with
   `shadowColor` from API 28), `transformOrigin` (keywords / percentages / lengths; iOS conjugates the matrix around it,
   Android sets the pivot), `backfaceVisibility` (iOS `doubleSided`; Android hides the view while its rotations turn it away). `style` may be an array of styles merged left to right
-  (falsy entries skipped), decoded in Rust. Text adds `textShadowColor` / `textShadowOffset` / `textShadowRadius`,
+  (falsy entries skipped), decoded in Rust. In one style object (an array is flattened into one, as React Native does) a
+  longhand wins over its shorthand whatever the key order (`StylePatch::set`, `StyleKey::longhands`: border widths and
+  colors per side, margin / padding sides and axes, `rowGap` / `columnGap`, `flexGrow` / `flexShrink` / `flexBasis`,
+  grid start / end): a shorthand set after its longhands is recorded before them and they apply again, and a `null`
+  longhand of a shorthand in the same object is dropped (unset, as in Yoga). Corner radii keep their own fields
+  (`corner_radius` over `border_radius`), start / end properties are placed after the physical ones
+  (`apply_direction`). Between layers (classes, then the inline style; a Rust component's own style, then the app's)
+  order still decides, and classes keep "later wins". `outlineStyle: "none"` hides the outline whatever the width, and
+  the `animation*` timing keys apply with or before `animationName` (`Style::pending` keeps them); `transition*` keys
+  already combine in any order (`transitionProperty` defaults to `all`). Text adds `textShadowColor` / `textShadowOffset` / `textShadowRadius`,
   `fontVariant` (OpenType `smcp` / `onum` / `lnum` / `tnum` / `pnum`: CoreText feature settings, `Paint.setFontFeatureSettings`)
   and `writingDirection`.
   On Apple everything is drawn by Core Animation, escalating only as needed (`crates/nsh-platform-ios/src/decor.rs`
