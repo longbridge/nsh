@@ -38,6 +38,8 @@ pub(crate) struct NshPlugin {
     pub(crate) entry: PathBuf,
     /// The native modules the app imports.
     pub(crate) natives: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    /// Static native imports whose namespaces hot factories require immediately.
+    pub(crate) preloads: Option<Arc<Mutex<std::collections::BTreeSet<String>>>>,
     /// The native modules there are.
     pub(crate) modules: Arc<NativeModules>,
     /// A split bundle: dynamic imports of chunks call the runtime's chunk
@@ -189,10 +191,21 @@ impl Plugin for NshPlugin {
     ) -> HookResolveIdReturn {
         let spec = args.specifier;
         if self.modules.contains(spec) {
+            // Hot factories keep external import() expressions. Preloading
+            // their namespaces would turn an optional native API into an
+            // eager dependency, including on hosts where it is unavailable.
             self.natives
                 .lock()
                 .expect("natives lock")
                 .insert(spec.to_owned());
+            if !args.kind.is_dynamic()
+                && let Some(preloads) = &self.preloads
+            {
+                preloads
+                    .lock()
+                    .expect("preloads lock")
+                    .insert(spec.to_owned());
+            }
             return Ok(Some(HookResolveIdOutput {
                 external: Some(true.into()),
                 ..HookResolveIdOutput::from_id(spec)

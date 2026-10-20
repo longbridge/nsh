@@ -41,6 +41,8 @@ Native Shell 提供十一个标准模块，按裸模块名导入：与 gpui-shel
 
 `os.platform(): string` 和 `os.arch(): string` 返回实际原生宿主的系统与架构；`os.EOL: string` 是系统换行符。`os.homedir(): string` 返回配置为绝对路径的宿主主目录，在缺少此配置时抛出错误。返回目录路径只是元数据，文件操作仍需要 `fs.read` / `fs.write` 授权。
 
+浏览器应用读取的 `process.env` 是空对象，调用 `os.homedir()` 会收到错误；主目录路径与环境变量属于原生宿主。
+
 `import console from "console"` 与全局 `console` 是同一个 VM 日志对象。该模块仅默认导出，支持 `log`、`info`、`debug`、`warn`、`error`，每个方法的签名为 `(...values: unknown[]): void`。接口采用 NSH 的日志格式。
 
 ## 压缩
@@ -100,6 +102,8 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 | 每个 VM 进行中的输出 | 8 MiB；读取端等待 JS 取走 |
 | 每个子进程待写入的 stdin | 1 MiB；超出时 `write` 抛出错误 |
 | 监听器 | 每个子进程每个事件 64 个 |
+
+`process.exit(code?)` 请求宿主关闭当前应用界面。在 `capabilities.process` 中设置 `"exit": true` 后，引擎通过平台的应用退出命令转发请求。在 macOS 上，该请求关闭当前界面所在的窗口。嵌入宿主决定如何处理其界面的退出请求。Gallery 已为明确触发的 **Request host exit** 操作授予此能力。
 
 ## 网络授权与边界
 
@@ -166,3 +170,5 @@ try {
 ## Gallery
 
 打开 `examples/gallery` 中的 **Standard APIs**，可以运行文件操作、子进程、TCP 和两种 WebSocket 接口，并查看主机信息和排队任务。Utilities 操作展示缓冲区、哈希、压缩和文件 URL。每项操作都会显示结果或错误。文件操作使用 gallery 数据目录下的临时目录，并在操作后清理。TCP 和 WebSocket 操作分别连接本机 9876 和 9877 端口的回显服务。
+
+Gallery 的 **AI Chat** 在桌面上通过 `process.spawn` 调用本机安装的 Claude 或 Codex CLI。先在终端通过 CLI 登录，再在输入区选择提供方。回复使用对话记录作为上下文；停止生成或离开页面都会结束子进程。Web 和移动端运行模拟流式对话，展示推理、工具卡片和错误恢复。

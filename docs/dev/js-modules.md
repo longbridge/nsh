@@ -112,7 +112,8 @@ adds what needs the VM: the global `process` (the module's default object, one p
 is a core task, and a task spawned per connection drives the socket (answering pings, keeping up to eight unread
 messages); connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`, which the global `WebSocket`
 (`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
-and grant no file access.
+and grant no file access. On WebAssembly, `os.homedir()` returns a typed error and `process.env` an empty object;
+both avoid `std::env`, whose accessors panic on `wasm32-unknown-unknown`.
 
 On native targets QuickJS comes through `quickjs-jit` (rquickjs 0.14's API and its JIT; the dependency
 `rquickjs-jit`, which `nsh-js`'s `lib.rs` names `rquickjs`) and the LLRT modules through `quickjs-jit-stdlib`,

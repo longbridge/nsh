@@ -58,10 +58,13 @@
       ]
     },
     "process": {
+      "exit": true,
       "execute": [
         "echo",
         "cat",
-        "cmd.exe"
+        "cmd.exe",
+        "claude",
+        "codex"
       ],
       "env": []
     },

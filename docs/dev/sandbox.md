@@ -79,6 +79,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   uses the default metadata-name list in `default-env` (language, time zone, terminal and desktop kind only: no
   identity, paths or proxies, which can carry credentials), plus explicit `process.env` names (matched exactly, ignoring case only on Windows)
   allowed by both policies. `process.exit` requests a host handler and never exits the embedding process itself.
+  The engine forwards a granted request as the platform app-close command, closing its surface or standalone window.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
   budgets, node quota; unset / 0 keeps a default; both through `HostLimits`, as `--limits` is), from the next load;
   on macOS, Windows, Linux and GPUI `AppOptions::limits` / `AppView::set_limits` (a whole `Limits`), likewise from

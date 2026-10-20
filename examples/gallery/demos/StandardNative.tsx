@@ -1,19 +1,27 @@
 import { cleanup, signal, Text } from "nsh";
-import { Buffer } from "buffer";
 import console from "console";
-import { createHash, randomUUID } from "crypto";
 import fs from "fs/promises";
 import net from "net";
 import os from "os";
-import path from "path";
 import process from "process";
-import { fileURLToPath, pathToFileURL } from "url";
-import { WebSocket as SocketClient } from "websocket";
-import { gzipSync, gunzipSync } from "zlib";
 import { Button, Card, colors, DemoPage, mono } from "../ui";
 
+/** Keep native-only imports deferred even in the development host's single bundle. */
+async function nativeModules() {
+  const [{ Buffer }, { createHash, randomUUID }, { default: path }, { fileURLToPath, pathToFileURL }, { WebSocket: SocketClient }, { gzipSync, gunzipSync }] = await Promise.all([
+    import("buffer"), import("crypto"), import("path"), import("url"), import("websocket"), import("zlib"),
+  ]);
+  return { Buffer, createHash, randomUUID, path, fileURLToPath, pathToFileURL, SocketClient, gzipSync, gunzipSync };
+}
+
+/** Load the native API demo after its host has been selected. */
+export async function loadStandardNative() {
+  const modules = await nativeModules();
+  return () => nativeDemo(modules);
+}
+
 /** Each action calls the native APIs and displays its result or error. */
-export function StandardNative() {
+function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathToFileURL, SocketClient, gzipSync, gunzipSync }: Awaited<ReturnType<typeof nativeModules>>) {
   const results = signal<Record<string, string>>({});
   const busy = signal<Record<string, boolean>>({});
   let disposed = false;

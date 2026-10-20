@@ -23,7 +23,7 @@ pub(crate) use stub::Script;
 #[cfg(feature = "js")]
 mod imp {
     use std::{
-        cell::RefCell,
+        cell::{Cell, RefCell},
         rc::Rc,
         sync::{
             Arc,
@@ -42,6 +42,8 @@ mod imp {
     /// A JS app's VM.
     pub(crate) struct Script {
         host: Host,
+        /// An explicit app exit is delivered through the normal platform command path.
+        exit_requested: Rc<Cell<bool>>,
         symbolicator: Rc<RefCell<Symbolicator>>,
         /// Set when the engine stops: what JS was running is interrupted
         /// on purpose, which is not the app's error.
@@ -92,6 +94,9 @@ mod imp {
             host.set_system_paths(system.paths);
             host.set_system_wake(system.wake);
             host.set_stop_flag(stop.clone());
+            let exit_requested = Rc::new(Cell::new(false));
+            let request = exit_requested.clone();
+            host.set_exit_handler(Rc::new(move |_code| request.set(true)));
             let symbolicator = Rc::new(RefCell::new(Symbolicator::new(bundle.source_map.clone())));
             let (map, errors, stopping) = (symbolicator.clone(), sink.clone(), stop.clone());
             let package = bundle.package.clone();
@@ -122,6 +127,7 @@ mod imp {
             host.set_environment(environment);
             let script = Script {
                 host,
+                exit_requested,
                 symbolicator,
                 stop,
                 package: bundle.package.clone(),
@@ -221,6 +227,12 @@ mod imp {
 
         pub(crate) fn take_ops(&self, out: &mut Vec<Op>) {
             self.host.take_ops(out);
+            if self.exit_requested.replace(false) {
+                out.push(Op::Command {
+                    id: nsh_core::ROOT_ID,
+                    command: nsh_core::Command::ExitApp,
+                });
+            }
         }
 
         pub(crate) fn run_posted(&self) {

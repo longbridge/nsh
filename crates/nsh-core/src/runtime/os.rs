@@ -1,4 +1,5 @@
 //! Pure OS metadata. Returned directory paths confer no filesystem access.
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use crate::ui::module;
@@ -26,20 +27,29 @@ impl Os {
 
     /// The configured absolute native home directory. This grants no file access.
     pub(crate) fn homedir() -> Result<String, String> {
-        ["HOME", "USERPROFILE"]
-            .into_iter()
-            .filter_map(std::env::var_os)
-            .map(PathBuf::from)
-            .find(|path| path.is_absolute())
-            .map(|path| path.to_string_lossy().into_owned())
-            .ok_or_else(|| {
-                "os.homedir(): no absolute native home directory is configured".to_owned()
-            })
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("os.homedir(): no absolute native home directory is configured".to_owned())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            ["HOME", "USERPROFILE"]
+                .into_iter()
+                .filter_map(std::env::var_os)
+                .map(PathBuf::from)
+                .find(|path| path.is_absolute())
+                .map(|path| path.to_string_lossy().into_owned())
+                .ok_or_else(|| {
+                    "os.homedir(): no absolute native home directory is configured".to_owned()
+                })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]

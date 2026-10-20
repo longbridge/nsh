@@ -21,6 +21,10 @@ fn filesystem_completion_during_initial_evaluation_is_delivered_without_timers()
         &entry,
         r#"import { mount, signal, Text } from "nsh";
 import fs from "fs/promises";
+import process from "process";
+if (!process.dataDir || typeof process.env !== "object" || process !== globalThis.process) {
+  throw new Error(`Engine metadata missing: dataDir=${process.dataDir}, env=${typeof process.env}`);
+}
 const status = signal("waiting");
 const request = fs.readFile("${dataDir}/input.txt", "utf8");
 // Finish the native operation before the engine finishes evaluating this module.
@@ -31,14 +35,9 @@ mount(() => <Text>{status()}</Text>);
 "#,
     )
     .unwrap();
-    let bundled = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
-        entry,
-        minify: false,
-        split: false,
-        ui_sets: Vec::new(),
-    })
-    .unwrap();
-    let bundle = Bundle::source(bundled.code)
+    let bundled = nsh_bundler::bundle_hot(&entry, &[]).unwrap();
+    let (code, _) = bundled.script();
+    let bundle = Bundle::source(code)
         .with_app_id(Some("com.example.system"))
         .with_capabilities_json(Some(r#"{"fs":{"read":["${dataDir}"]}}"#))
         .unwrap();
@@ -164,5 +163,35 @@ mount(() => <Text>{status()}</Text>);"#,
     assert!(
         shown.iter().any(|text| text == "plugin|plugin|home"),
         "anchors never reached the VM: {shown:?}"
+    );
+}
+
+#[test]
+fn process_exit_requests_the_platform_to_close_the_app() {
+    let bundle = Bundle::source("import process from 'process'; process.exit(7);".to_owned())
+        .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))
+        .unwrap();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let engine = Engine::start(
+        EngineConfig::new(bundle),
+        || ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut closed = false;
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(batch) = rx.recv_timeout(remaining) else {
+            break;
+        };
+        if batch.items.iter().any(|item| matches!(item, MountItem::Command { id, command: nsh_core::Command::ExitApp } if *id == nsh_core::ROOT_ID)) {
+            closed = true;
+            break;
+        }
+    }
+    drop(engine);
+    assert!(
+        closed,
+        "process.exit did not reach the platform command path"
     );
 }

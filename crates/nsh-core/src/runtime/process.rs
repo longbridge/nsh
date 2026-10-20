@@ -122,10 +122,20 @@ impl Process {
     /// time.
     #[getter]
     pub(crate) fn env(sys: System) -> BTreeMap<String, String> {
-        std::env::vars_os()
-            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
-            .filter(|(name, _)| sys.access.allows_env(name))
-            .collect()
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = sys;
+            BTreeMap::new()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::env::vars_os()
+                .filter_map(|(name, value)| {
+                    Some((name.into_string().ok()?, value.into_string().ok()?))
+                })
+                .filter(|(name, _)| sys.access.allows_env(name))
+                .collect()
+        }
     }
 
     /// The app's own data directory, `null` when the host has none.

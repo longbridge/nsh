@@ -16,7 +16,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     title: "Apps",
     demos: [
       { name: "Stocks", detail: "A live watchlist and a stock: candles, depth, the tape, a tick every 50 ms", icon: "stocks", screen: lazy(() => import("./demos/Stocks").then((m) => m.Stocks)) },
-      { name: "AI Chat", detail: "Streaming replies, tools, reasoning, attachments, errors", icon: "chat", screen: lazy(() => import("./demos/Chat").then((m) => m.Chat)) },
+      { name: "AI Chat", detail: "Local Claude / Codex, streaming replies, web simulation", icon: "chat", screen: lazy(() => import("./demos/Chat").then((m) => m.Chat)) },
       { name: "Photos", detail: "A long recycled list: images, pull to refresh, paging", icon: "photos", screen: lazy(() => import("./demos/Photos").then((m) => m.Photos)) },
     ],
   },

@@ -41,6 +41,8 @@ The modules follow Node's names and shapes for the subset they export, and gpui-
 
 `os.platform(): string` and `os.arch(): string` report the actual native host OS and architecture; `os.EOL: string` is its line separator. `os.homedir(): string` returns a configured absolute host home path and throws when none is configured. Directory paths are metadata: file operations still require `fs.read` / `fs.write` grants.
 
+Browser apps read an empty `process.env` object and receive an error from `os.homedir()`, since home paths and environment variables belong to native hosts.
+
 `import console from "console"` shares the VM's global `console` object. The module has a default export only, supporting `log`, `info`, `debug`, `warn`, `error`, each with signature `(...values: unknown[]): void`. It uses NSH's logger formatting.
 
 ## Compression
@@ -100,6 +102,8 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 | Output in flight per VM | 8 MiB; readers wait for JS to take it |
 | Pending stdin per child | 1 MiB; `write` throws past it |
 | Listeners | 64 per event per child |
+
+`process.exit(code?)` requests that the host close this app surface. Grant it with `"exit": true` in `capabilities.process`; the engine forwards the request through the platform's app-exit command. On macOS, this closes the surface window. An embedding host controls how its surface handles the request. Gallery grants this capability for its explicit **Request host exit** action.
 
 ## Network permissions and boundaries
 
@@ -166,3 +170,5 @@ try {
 ## Gallery
 
 Open **Standard APIs** in `examples/gallery` to run file operations, child processes, TCP and both WebSocket interfaces, and inspect host metadata and queued jobs. The utilities action demonstrates buffers, hashing, compression and file URLs. Each action displays its result or error. Files stay in a temporary directory under the gallery's own data directory and are removed after the action. The TCP and WebSocket actions connect to local echo servers on ports 9876 and 9877.
+
+Gallery's **AI Chat** uses `process.spawn` to chat through a locally installed Claude or Codex CLI on desktop. Sign in through the CLI in a terminal, then choose the provider in the composer. Replies use the conversation as context; Stop and leaving the screen end the child process. Web and mobile run scripted streaming conversations, including reasoning, tool cards and error recovery.
