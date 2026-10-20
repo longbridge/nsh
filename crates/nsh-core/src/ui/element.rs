@@ -1477,80 +1477,76 @@ fn span(mut el: ElNode) -> ElNode {
 
 impl Text {
     /// At most `lines` lines (0: no limit), the last one truncated.
-    pub fn number_of_lines(mut self, lines: u32) -> Self {
-        self.0.attrs.number_of_lines = lines;
+    pub fn number_of_lines(mut self, lines: impl IntoReactive<u32>) -> Self {
+        self.0
+            .bind_attr(lines, |a, lines| a.number_of_lines = lines);
         self
     }
 
     /// Where a truncated line is cut.
-    pub fn ellipsize_mode(mut self, mode: crate::EllipsizeMode) -> Self {
-        super::host::set(&mut self.0, Prop::EllipsizeMode(mode));
+    pub fn ellipsize_mode(mut self, mode: impl IntoReactive<crate::EllipsizeMode>) -> Self {
+        super::host::bind_prop(&mut self.0, mode, Prop::EllipsizeMode);
         self
     }
 
     /// The user can select and copy it.
-    pub fn selectable(mut self, selectable: bool) -> Self {
-        super::host::set(&mut self.0, Prop::Selectable(Some(selectable)));
+    pub fn selectable(mut self, selectable: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(&mut self.0, selectable, |s| Prop::Selectable(Some(s)));
         self
     }
 
     /// The highlight of its selection, when it is selectable.
-    pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
-        super::host::set(
-            &mut self.0,
-            Prop::SelectionColor(Some(Color::from(color.into()))),
-        );
+    pub fn selection_color(mut self, color: impl IntoReactive<Hsla>) -> Self {
+        super::host::bind_prop(&mut self.0, color, |c: Hsla| {
+            Prop::SelectionColor(Some(Color::from(c)))
+        });
         self
     }
 
     /// Shrinks the font, down to `min_scale` of it, to fit its lines.
-    pub fn shrink_to_fit(mut self, min_scale: f32) -> Self {
+    pub fn shrink_to_fit(mut self, min_scale: impl IntoReactive<f32>) -> Self {
         super::host::set(&mut self.0, Prop::AdjustsFontSizeToFit(true));
-        super::host::set(&mut self.0, Prop::MinimumFontScale(min_scale));
+        super::host::bind_prop(&mut self.0, min_scale, Prop::MinimumFontScale);
         self
     }
 
     /// Whether its fonts follow the system's text size (true by default;
     /// TS: `allowFontScaling`).
-    pub fn allow_font_scaling(mut self, allow: bool) -> Self {
-        super::host::set(&mut self.0, Prop::AllowFontScaling(allow));
+    pub fn allow_font_scaling(mut self, allow: impl IntoReactive<bool>) -> Self {
+        super::host::bind_prop(&mut self.0, allow, Prop::AllowFontScaling);
         self
     }
 
     /// At most this multiple of its fonts' sizes with the system's text
     /// size (TS: `maxFontSizeMultiplier`; 0: no limit).
-    pub fn max_font_size_multiplier(mut self, multiplier: f32) -> Self {
-        super::host::set(&mut self.0, Prop::MaxFontSizeMultiplier(multiplier));
+    pub fn max_font_size_multiplier(mut self, multiplier: impl IntoReactive<f32>) -> Self {
+        super::host::bind_prop(&mut self.0, multiplier, Prop::MaxFontSizeMultiplier);
         self
     }
 }
 
 impl Image {
     /// How it fits its box (default: cover).
-    pub fn resize_mode(mut self, mode: crate::ResizeMode) -> Self {
-        super::host::set(&mut self.0, Prop::ResizeMode(mode));
+    pub fn resize_mode(mut self, mode: impl IntoReactive<crate::ResizeMode>) -> Self {
+        super::host::bind_prop(&mut self.0, mode, Prop::ResizeMode);
         self
     }
 
     /// Shown until it loads (a URL, an `asset:/` URI or an
     /// [`super::ImageAsset`]).
-    pub fn placeholder(mut self, src: impl Into<super::ImageSrc>) -> Self {
-        let src = src.into();
-        super::host::set(
-            &mut self.0,
+    pub fn placeholder(mut self, src: impl IntoReactive<super::ImageSrc>) -> Self {
+        super::host::bind_prop(&mut self.0, src, |src: super::ImageSrc| {
             Prop::Image(crate::ImageProp::DefaultSource(Some(ImageSource {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
-            }))),
-        );
+            })))
+        });
         self
     }
 
     /// Draws its opaque pixels in `color` (a template image, an icon).
-    pub fn tint_color(mut self, color: impl Into<super::AdaptiveColor>) -> Self {
-        self.style()
-            .color(&[crate::StyleKey::TintColor], color.into());
-        self
+    pub fn tint_color(self, color: impl IntoReactive<super::AdaptiveColor>) -> Self {
+        Styled::tint_color(self, color)
     }
 
     /// Blurs it.
@@ -1563,11 +1559,10 @@ impl Image {
     }
 
     /// Fades it in over `ms` milliseconds once loaded.
-    pub fn fade_duration(mut self, ms: f32) -> Self {
-        super::host::set(
-            &mut self.0,
-            Prop::Image(crate::ImageProp::FadeDuration(Some(ms))),
-        );
+    pub fn fade_duration(mut self, ms: impl IntoReactive<f32>) -> Self {
+        super::host::bind_prop(&mut self.0, ms, |ms| {
+            Prop::Image(crate::ImageProp::FadeDuration(Some(ms)))
+        });
         self
     }
 

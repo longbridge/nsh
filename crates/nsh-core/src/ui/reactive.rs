@@ -1099,6 +1099,13 @@ impl IntoReactive<String> for &str {
         Reactive::Static(self.to_owned())
     }
 }
+
+/// As `&str`: what setters that took a `&str` were given (`&url`).
+impl IntoReactive<String> for &String {
+    fn into_reactive(self) -> Reactive<String> {
+        Reactive::Static(self.clone())
+    }
+}
 static_reactive!(super::SharedString: super::SharedString, String, &'static str);
 
 impl<T: 'static> IntoReactive<Option<T>> for Option<T> {

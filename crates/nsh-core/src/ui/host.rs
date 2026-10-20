@@ -61,6 +61,9 @@ crate::static_reactive!(ModalPresentation: ModalPresentation);
 crate::static_reactive!(ResizeMode: ResizeMode);
 crate::static_reactive!(ReturnKeyType: ReturnKeyType);
 crate::static_reactive!(SubmitBehavior: SubmitBehavior);
+crate::static_reactive!(crate::EllipsizeMode: crate::EllipsizeMode);
+crate::static_reactive!(JsonValue: JsonValue);
+crate::static_reactive!(StatusBarSetting: StatusBarSetting, crate::StatusBarStyle);
 
 /// Sets `prop` among `props`, replacing one of its kind.
 fn set_in(props: &mut Vec<Prop>, prop: Prop) {
@@ -301,10 +304,11 @@ pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
 
 crate::static_reactive!(Painter: Painter, Drawing);
 
-/// A web view loading `url`.
-pub fn web_view(url: &str) -> WebView {
-    WebView(ElNode::new(Tag::WebView))
-        .set(Prop::Native(NativeProp::Source(WebSource::Uri(url.into()))))
+/// A web view loading `url` (a bound one loads again when it changes).
+pub fn web_view(url: impl IntoReactive<String>) -> WebView {
+    WebView(ElNode::new(Tag::WebView)).bind_prop(url, |url: String| {
+        Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
+    })
 }
 
 /// A web view showing the page `html`, its relative links resolved against
@@ -313,9 +317,12 @@ pub fn web_view_html(html: impl IntoReactive<String>, base_url: Option<&str>) ->
     WebView(ElNode::new(Tag::WebView)).html(html, base_url)
 }
 
-/// A video playing the file or stream at `url`.
-pub fn video(url: &str) -> Video {
-    Video(ElNode::new(Tag::Video)).set(Prop::Native(NativeProp::Source(WebSource::Uri(url.into()))))
+/// A video playing the file or stream at `url` (a bound one plays the new
+/// one when it changes).
+pub fn video(url: impl IntoReactive<String>) -> Video {
+    Video(ElNode::new(Tag::Video)).bind_prop(url, |url: String| {
+        Prop::Native(NativeProp::Source(WebSource::Uri(url.into())))
+    })
 }
 
 /// The embedder's native component registered as `name`.
@@ -984,9 +991,13 @@ impl Video {
 }
 
 impl NativeView {
-    /// Its prop `name` (any JSON value), as JS's `nativeComponent` passes it.
-    pub fn prop(self, name: &str, value: JsonValue) -> Self {
-        self.set(Prop::ComponentProp(name.into(), Some(value)))
+    /// Its prop `name` (any JSON value), as JS's `nativeComponent` passes it;
+    /// a bound one is passed again when it changes.
+    pub fn prop(self, name: &str, value: impl IntoReactive<JsonValue>) -> Self {
+        let name: Arc<str> = name.into();
+        self.bind_prop(value, move |value| {
+            Prop::ComponentProp(name.clone(), Some(value))
+        })
     }
 
     /// It emitted an event.
