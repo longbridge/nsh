@@ -709,8 +709,10 @@ declare const text: "export default ignored";
     #[test]
     fn references_skip_members_strings_and_declarations() {
         let (used, local) = references(
-            "/** A `Foo` */\nexport interface Bar<T> { a: JSX.Element; b: \"Baz\"; c: Qux<T> }",
+            "/** A `Foo` */\nexport interface Bar<T> { a: JSX.Element; b: \"Baz\"; c: Qux<T>; safeArea?: Quux }",
         );
+        assert!(used.contains(&"Quux".to_owned()));
+        assert!(!used.contains(&"safeArea".to_owned()));
         assert!(used.contains(&"JSX".to_owned()));
         assert!(used.contains(&"Qux".to_owned()));
         assert!(!used.contains(&"Element".to_owned()));

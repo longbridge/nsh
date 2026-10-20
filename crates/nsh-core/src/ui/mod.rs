@@ -111,7 +111,9 @@ pub use self::{
         AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,
         RustOp, TaskStart, ToJs,
     },
-    callback::{Callback, CallbackArgs, CallbackHandle, CallbackRet, JsCall, Trace, Tracer},
+    callback::{
+        Callback, CallbackArgs, CallbackHandle, CallbackRet, Exception, JsCall, Trace, Tracer,
+    },
     class::{
         Arg, AsyncCall, Class, ClassDef, ClassInstance, ClassRefs, ClassSpec, Instance, Member,
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,

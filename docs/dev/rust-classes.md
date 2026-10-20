@@ -293,7 +293,9 @@ impl Downloader {
   never holds back later posts), and what the ops JS sent before it post while the core applies them goes before
   it. So an op function posting and then a synchronous one posting arrive in that order, and a task posting while
   JS is still busy after the synchronous call arrives after it. Once the VM stops, queued calls and those posted later are
-  dropped and their replies say so. `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
+  dropped and their replies say so. `call_async_traced` is `call_async` with what was thrown whole (`Exception`: its
+  message and, for an `Error`, its stack), for a caller that says where it was thrown (`nsh test`'s failures).
+  `call` rethrows an uncatchable exception (the CPU budget's interrupt, running
   out of memory) when the synchronous call around it returns, whatever Rust made of its `Err`.
 - **In a finalizer:** a value whose JS object goes drops inside QuickJS's finalizer, where no JS may run. That is
   every finalizer, not only a collection's sweep: an object freed because its last reference went (a refcount
@@ -369,7 +371,8 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
   error: it can only be TS's). `new`
   is the constructor (a class without one cannot be made from JS, only returned); `&self` / `&mut self` methods,
   `#[getter]` / `#[setter]` (one name: `count` and `set_count` are the property `count`), functions without `self`
-  are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations':
+  are statics, `async fn` with `this: Instance<Self>` are async methods. A raw identifier is its name in TS
+  (`r#type` is `type`). Doc comments become the declarations':
   the struct's documents the class, as a module's struct (`#[module]` on it and on its `impl`, `ModuleDoc`) does
   the module and a component's `#[component] fn` the component; one on a `#[class]` or `#[module]` `impl` block is a
   compile error (TS would not show it). TS gets a doc comment up to its first heading (`nsh-macros` `docs`, outside

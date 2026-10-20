@@ -38,8 +38,9 @@ use std::{
 use nsh_core::{
     JsonValue,
     ui::{
-        CallbackHandle, ClassDef, ClassInstance, JsCall, JsHost, JsIn, JsKind, JsRaw, Member,
-        MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall, Thrown, Tracer,
+        CallbackHandle, ClassDef, ClassInstance, Exception, JsCall, JsHost, JsIn, JsKind, JsRaw,
+        Member, MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall, Thrown,
+        Tracer,
     },
 };
 use rquickjs::qjs;
@@ -1288,7 +1289,8 @@ impl CallbackHandle for JsCallback {
             call.reply(Err(
                 "a JS function cannot be called while JS collects garbage (a value dropped \
                  by the collector): use `post`"
-                    .to_owned(),
+                    .to_owned()
+                    .into(),
             ));
             return;
         }
@@ -1362,6 +1364,20 @@ fn message_of(ctx: Ctx, e: Raw) -> String {
     message
 }
 
+/// What `e`, thrown, is: its message and, for an `Error`, its stack.
+fn thrown_of(ctx: Ctx, e: Raw) -> Exception {
+    let stack = js::is_object(e)
+        .then(|| js::get(ctx, e, "stack").ok())
+        .flatten()
+        .and_then(|s| js::opt_string(ctx, s.raw()).ok().flatten())
+        .filter(|s| !s.is_empty());
+    let _ = js::take_exception(ctx);
+    Exception {
+        message: message_of(ctx, e),
+        stack,
+    }
+}
+
 /// A host for conversions outside a call.
 pub(crate) fn host_outside_calls<'a>(ctx: Ctx) -> CallHost<'a> {
     CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()))
@@ -1377,7 +1393,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
         .and_then(JsCallback::value)
         .filter(|(c, _)| *c == ctx);
     let Some((_, function)) = function else {
-        call.reply(Err("the function belongs to another VM".to_owned()));
+        call.reply(Err("the function belongs to another VM".to_owned().into()));
         return;
     };
     let function = V::dup(ctx, function);
@@ -1391,7 +1407,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
             if host.pending.get() {
                 let _ = js::take_exception(ctx);
             }
-            call.reply(Err(e.0));
+            call.reply(Err(e.0.into()));
             return;
         }
     };
@@ -1423,7 +1439,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
                     },
                     move |ctx, _, reason| {
                         if let Some(call) = rejected.borrow_mut().take() {
-                            call.reply(Err(message_of(ctx, reason)));
+                            call.reply(Err(thrown_of(ctx, reason)));
                         }
                         Ok(())
                     },
@@ -1445,9 +1461,9 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
                 // Kept for the call around it to rethrow.
                 let message = message_of(ctx, e.raw());
                 classes(ctx).uncatchable.borrow_mut().get_or_insert(e);
-                call.reply(Err(message));
+                call.reply(Err(message.into()));
             } else if call.wants_reply() {
-                call.reply(Err(message_of(ctx, e.raw())));
+                call.reply(Err(thrown_of(ctx, e.raw())));
             } else {
                 js::report(ctx, e);
             }

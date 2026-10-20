@@ -146,6 +146,8 @@ fn exported(vis: &syn::Visibility) -> bool {
 
 /// `accessibility_label` / `AccessibilityLabel` -> `accessibilityLabel`.
 fn camel(name: &str) -> String {
+    // A raw identifier is its name: `r#type` is `type`.
+    let name = name.strip_prefix("r#").unwrap_or(name);
     let mut out = String::with_capacity(name.len());
     let mut upper = false;
     for (i, c) in name.chars().enumerate() {

@@ -1,6 +1,6 @@
 ---
 title: 命令行
-description: NSH 的全部子命令与参数：init、build、trace、dev、run、package，以及签名相关的 keygen、certify、publish、verify、symbolicate 和 revoke。
+description: NSH 的全部子命令与参数：init、build、trace、test、dev、run、package，以及签名相关的 keygen、certify、publish、verify、symbolicate 和 revoke。
 order: 6
 group: start
 ---
@@ -15,6 +15,7 @@ nsh <COMMAND>
   init         Create an app
   build        Bundle an app and compile it to QuickJS bytecode
   trace        Run an app headless and print the mount instructions and timings
+  test         Run an app's tests headless
   dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
   run          Like dev, and also run the app in a development host
   package      Package an installable app from the prebuilt runtime
@@ -59,7 +60,7 @@ nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 
 | 模板 | 创建的内容 |
 |---|---|
-| `ts` | TSX 应用：`App.tsx`、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
+| `ts` | TSX 应用：`App.tsx`、它的测试 `App.test.tsx`（`nsh test`）、`nsh.json`、`tsconfig.json`、`.gitignore` 和 `.nsh/types`。已存在的文件会保留；只有当这些文件全部已存在时才会失败。 |
 | `rust` | 用 Rust 编写的应用：一个 Cargo 项目（`Cargo.toml`、包含根组件的 `src/lib.rs`、供 `cargo run` 使用的 `src/main.rs`），设置了 `"rust": "."` 和 `"root": "App"` 的 `nsh.json`、`.gitignore` 和 README（其中也说明了之后如何添加 TSX 入口）。`nsh run`、`nsh trace` 和 `nsh package` 在所有目标（包括浏览器）上挂载根组件，不使用 QuickJS（见[用 Rust 开发](./rust.md)）；`cargo run` 直接在 macOS、Windows 或 Linux 上启动它。 |
 | `mixed` | 带有自己 Rust crate 的 TSX 应用：`App.tsx`、`tsconfig.json`、设置了 `"rust": "native"` 的 `nsh.json`、`.gitignore`、`.nsh/types`、README，以及 `native/` 中的 crate，它的 `#[native_module("<name>/native")]` 导出一个组件、一个模块和一个类，供 `App.tsx` 使用。 |
 
@@ -113,6 +114,24 @@ nsh dev [ENTRY] [--port <PORT>] [--release] [--limits [<LIMITS>]]
 ```
 
 适合配合你自己启动的宿主使用，例如嵌入了开发版 SDK（`NativeShellDev.xcframework`、`nsh-dev.aar`）的应用。参数与 `nsh run` 相同。
+
+## nsh test
+
+```sh
+nsh test [PATH] [--filter <NAME>] [--trace]
+```
+
+以无界面方式运行应用的测试（[测试](./testing-and-trace.md)）：运行目录 `PATH`（默认为当前目录；跳过隐藏目录、`node_modules` 和 `target`）中的测试文件（`*.test.tsx`、`*.test.ts`，导入 `nsh/test`），或者测试文件 `PATH` 本身。每个测试文件在各自的引擎上运行，测试打开的每个应用又在另一个全新的引擎上运行。它为每个测试打印一行；失败时还会打印抛出的内容、它在测试文件中的位置和屏幕上的文字。只要有失败，就以非零退出码结束。如果传入的是应用入口（`nsh test App.tsx`），它会在真实网络下打开应用，让它运行 1.2 s，然后执行标准输入给出的步骤（`await app.press("Add")`，其中 `app` 就是这个应用）。
+
+```text
+✓ App.test.tsx › counts taps (321ms)
+✓ 1 test: 1 passed, 0 failed (343ms)
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--filter <NAME>` | 只运行名称包含 `NAME` 的测试。 |
+| `--trace` | 打印测试所打开应用的每个挂载批次，标注它所属的步骤（`── press(Add): 7 items`），以及每次 commit 的耗时，和 `nsh trace` 一样。 |
 
 ## nsh trace
 

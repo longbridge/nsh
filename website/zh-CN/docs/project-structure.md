@@ -12,6 +12,7 @@ group: start
 ```text
 my-app/
 ├── App.tsx            the entry module: calls mount()
+├── App.test.tsx       its tests (nsh test)
 ├── nsh.json           name, id, version, icon, Tailwind theme, capabilities
 ├── tsconfig.json      TypeScript settings for editors
 ├── .gitignore         .nsh/ and out/
@@ -20,7 +21,7 @@ my-app/
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
-├── .nsh/              generated: type declarations, development host builds
+├── .nsh/              generated: type declarations, development host builds, test entries
 └── out/               generated: nsh build / nsh package output
 ```
 

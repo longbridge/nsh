@@ -1,16 +1,123 @@
 ---
-title: Testing with nsh trace
-description: Run an app headless with nsh trace, read the native view operations and timings it prints, simulate taps and scrolling, and use it in CI; testID for UI tests.
+title: Testing
+description: Write tests in TypeScript and run them headless with nsh test - open the app, press, type, scroll and wait like a user, stub the network and storage - and read the native view operations and timings nsh trace prints; testID for UI tests.
 order: 61
 group: tools
 ---
 
-# Testing with nsh trace
+# Testing
 
-`nsh trace` runs an app **headless**: the real runtime (the same QuickJS VM, reactive graph, renderer, components,
-layout and list virtualization as on a device), but no simulator, no device and no window. Instead of drawing, it
-prints every operation the runtime would send to the native views, with timings. It runs anywhere the CLI runs,
-including Linux CI machines.
+NSH runs apps **headless**: the real runtime (the same QuickJS VM, reactive graph, renderer, components, layout and
+list virtualization as on a device), but no simulator, no device and no window. Two commands use it, and both run
+anywhere the CLI runs, including Linux CI machines:
+
+- `nsh test` runs tests written in TypeScript: each opens the app, takes the steps a user would (press, type,
+  scroll), and checks what is on screen.
+- `nsh trace` prints every operation the runtime would send to the native views, with timings.
+
+## Tests with nsh test
+
+A test file is a `*.test.tsx` or `*.test.ts` file next to your code. It imports `nsh/test`:
+
+```tsx
+// App.test.tsx
+import { expect, open, test } from "nsh/test";
+
+test("adds a todo", async () => {
+  const app = await open("./App.tsx", { storage: { todos: "[]" } });
+  await app.type("id:new-todo", "Buy milk");
+  await app.press("text:Add");
+  await app.waitFor("text:Buy milk");
+  expect(app.texts()).toContain("1 item left");
+});
+```
+
+```sh
+nsh test                      # every test file of the app in the current directory
+nsh test App.test.tsx         # one file
+nsh test --filter "adds"      # the tests whose name contains "adds"
+```
+
+```text
+✓ App.test.tsx › adds a todo (84ms)
+✗ App.test.tsx › keeps todos after a restart (312ms)
+    expected ["Todos","0 items left"] to contain "1 item left"
+    at <anonymous> (App.test.tsx:21:22)
+    on screen: "Todos", "0 items left"
+error 2 tests: 1 passed, 1 failed (0.9s)
+```
+
+A failing test shows what was thrown, where in the test file, and the texts on screen of the app it opened. Any failure
+makes `nsh test` exit with a non-zero code. `nsh init` creates an `App.test.tsx` with the app, and `nsh check` type
+checks test files with the rest (`.nsh/types` declares `nsh/test`).
+
+Each test file runs on an engine of its own, and its tests run one after the other, in order. `open` starts the app on
+another engine, a fresh one each time, so tests never share state; the apps a test opened are closed when it ends. A
+test fails when it throws, when the promise it returns rejects, and after 30 seconds. Apps with Rust crates of their own
+(`nsh.json` `"rust"`) are traced with `nsh trace`.
+
+### Opening the app
+
+`open(entry, options?)` builds the app at `entry` (relative to the test file; each entry is built once per run),
+starts it on a 390×844 viewport and resolves once it rendered and is quiet.
+
+| Option | Default | Description |
+|---|---|---|
+| `storage` | empty | What `nsh/storage` holds at the start: `{ todos: "[]" }`. |
+| `network` | none | The responses the app's requests get, by `"<METHOD> <URL>"` (a bare URL is a `GET`): `{ "GET https://api.example.com/todos": { status: 200, body: [] } }`. `body` is a string, or a value sent as JSON. A request not listed fails, so tests never reach the network unasked. `"live"`: the real network. |
+| `width`, `height` | 390, 844 | The viewport in points. |
+| `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
+
+### Steps
+
+Steps name views with **selectors**: `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` (a view
+id from `nsh trace`), or a bare string, matched as a `testID`, then a label, then a text. A selector finds the view a
+user would look at first: in the top modal, then on screen, and of a navigation stack only the top screen.
+
+| Step | Description |
+|---|---|
+| `await app.press(selector)` | Presses the view, or the nearest view around it that hears presses (the button around a text): `onPressIn`, `onPressOut`, `onPress`. |
+| `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) at the end of what it holds, key by key: it takes the focus, then each character is an `onKeyPress` and an `onChangeText`, within `maxLength`. A `\n` in a single-line input is the return key. |
+| `await app.submit(selector)` | The return key in the input, as its `submitBehavior` says: `onSubmitEditing` (and the focus leaves a single-line input), or a line break in a multiline one. |
+| `await app.scroll(selector, distance)` | Drags the scroll view or list (the view, the one around it, or the first inside it) by `distance` points along its axis, 10 points per frame, within its content. Negative scrolls back. |
+| `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. |
+| `await app.waitFor(selector, timeout?)` | Resolves once a view matches; rejects after `timeout` ms (5000). |
+| `app.shows(selector)` | Whether a view matches now. |
+| `app.texts()` | The texts on screen now, in order. |
+| `app.value(selector)` | The text of an input, `null` when none matches. |
+| `app.storage()` | What the app's storage holds now. |
+
+A step resolves once the app rendered nothing for 100 ms (2 s at most, for apps with a running animation), so what it
+changed is on screen when the next line runs; use `waitFor` for what comes later (a response, a timer). A step rejects,
+failing the test, when nothing matches its selector (the error lists the texts on screen) and when the app threw an
+exception meanwhile.
+
+### Expectations
+
+`expect(value)` compares values as JSON does (`undefined` is `null`, numbers by value), and each check throws when it
+does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`.
+
+| Check | Holds when |
+|---|---|
+| `toBe(expected)`, `toEqual(expected)` | The value equals `expected`, member by member. |
+| `toContain(item)` | An array holds `item`, or a string contains it. |
+| `toBeTruthy()`, `toBeFalsy()` | The value is truthy / falsy, as JS sees it. |
+
+### Steps from standard input
+
+Given the app's entry instead of tests, `nsh test` opens the app on the real network, lets it run for 1.2 s, then takes
+the steps standard input gives, with `app` the app:
+
+```sh
+echo 'await app.press("text:+1"); expect(app.texts()).toContain("1");' | nsh test App.tsx
+```
+
+`--trace` prints every mount batch of the apps the tests open, under the step it came in (`── press(text:+1): 7
+items`), and the timing of every commit, as `nsh trace` does below.
+
+## nsh trace
+
+`nsh trace` prints every operation the runtime would send to the native views, with timings.
 
 ```sh
 nsh trace App.tsx
@@ -23,7 +130,7 @@ Use it to:
 - measure the cost of the first frame, of a tap and of each scrolling frame;
 - catch regressions in CI.
 
-## What it does
+### What it does
 
 1. Bundles the entry (development settings, not minified) and compiles it to bytecode.
 2. Starts an engine with a 390×844 viewport and renders the first frame.
@@ -61,7 +168,7 @@ The runtime isolates data by app id beneath this root. `${dataDir}` grants still
 
 `--os linux` selects the Linux platform environment; `--data-dir` itself does not change platforms. Platform APIs such as processes also require a compatible actual native host; simulating a platform keeps mobile and browser hosts within their native capabilities.
 
-## Reading the output
+### Reading the output
 
 Here is the counter example (`examples/counter/App.tsx`), shortened:
 
@@ -95,7 +202,7 @@ perf commit: 10 ops, 248µs (list js 6µs), 8 mount items, 24 nodes
    Text { id: 34, text: "Recent values: 1", content: 342x17 @ 0,0 }
 ```
 
-### Batches and mount items
+#### Batches and mount items
 
 Each `── title: N items` block is one **mount batch**: everything the platform applies to native views for one frame,
 in one hop to the main thread. The lines in it are **mount items**:
@@ -115,7 +222,7 @@ in one hop to the main thread. The lines in it are **mount items**:
 Only what changed is sent: a tap that changes one number sends one `Text` item; views get no default style and no empty
 event mask; unchanged frames are not sent. A frame of scrolling that reveals no new row produces **no batch at all**.
 
-### The `perf` lines
+#### The `perf` lines
 
 | Line | Meaning |
 |---|---|
@@ -132,7 +239,7 @@ event mask; unchanged frames are not sent. A frame of scrolling that reveals no 
 Single-run timings depend a lot on the CPU's clock state (a machine that just woke from idle is slow). Compare runs on
 the same machine, look at the minimum of several runs, and trust the op and item counts more than the microseconds.
 
-## Scrolling
+### Scrolling
 
 ```sh
 nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0
@@ -152,7 +259,7 @@ For a [list](./lists.md), this shows the virtualization at work: which frames bi
 costs, and that frames revealing no new row produce nothing. Use it with a release build of the CLI
 (`./target/release/nsh` in a checkout) for meaningful timings.
 
-## Taps
+### Taps
 
 Name the views to tap with `--tap`, by `testID`, accessibility label or text, in the order to tap them. A match that is
 not pressable itself (a `Text` inside a button) taps its nearest pressable ancestor, and the views a tap brings in (a
@@ -180,7 +287,7 @@ nsh trace trace/AddItem.tsx --taps 5
 If a tap produces no update, `nsh trace` stops with `error tap #1 produced no update` and a non-zero exit code: that
 is how it catches handlers that stopped working, for example because the app's nodes were garbage-collected.
 
-## In CI
+### In CI
 
 `nsh trace` needs nothing but the CLI, so it runs on Linux runners. Errors in the app (a failed bundle evaluation, an
 uncaught exception, an unhandled promise rejection) are printed as `error` lines; a build failure, an app that renders nothing, or a tap that changes

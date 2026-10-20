@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Every NSH subcommand and flag - init, build, trace, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
+description: Every NSH subcommand and flag - init, build, trace, test, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
 order: 6
 group: start
 ---
@@ -15,6 +15,7 @@ nsh <COMMAND>
   init         Create an app
   build        Bundle an app and compile it to QuickJS bytecode
   trace        Run an app headless and print the mount instructions and timings
+  test         Run an app's tests headless
   check        Type check an app with TypeScript's native compiler
   dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
   run          Like dev, and also run the app in a development host
@@ -61,7 +62,7 @@ Creates an app in `DIR` (default: the current directory, created if missing) fro
 
 | Template | What it creates |
 |---|---|
-| `ts` | A TSX app: `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
+| `ts` | A TSX app: `App.tsx`, its test `App.test.tsx` (`nsh test`), `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
 | `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run`, `nsh trace` and `nsh package` mount the root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
 | `mixed` | A TSX app with a Rust crate of its own: `App.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "native"`, `.gitignore`, `.nsh/types`, a README, and the crate in `native/`, whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. |
 
@@ -115,6 +116,24 @@ Runs only the dev server: it builds the app, watches the entry's directory, and 
 ```
 
 Use it with hosts you start yourself, for example an app that embeds the development SDK (`NativeShellDev.xcframework`, `nsh-dev.aar`). Flags as for `nsh run`.
+
+## nsh test
+
+```sh
+nsh test [PATH] [--filter <NAME>] [--trace]
+```
+
+Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app).
+
+```text
+✓ App.test.tsx › counts taps (321ms)
+✓ 1 test: 1 passed, 0 failed (343ms)
+```
+
+| Flag | Description |
+|---|---|
+| `--filter <NAME>` | Runs only the tests whose name contains `NAME`. |
+| `--trace` | Prints every mount batch of the apps the tests open, under the step it came in (`── press(Add): 7 items`), and the time of every commit, as `nsh trace` does. |
 
 ## nsh trace
 

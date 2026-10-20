@@ -71,7 +71,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         if root {
             ui::done(format!("mounting the Rust app {}", ui::path(entry)));
         } else {
-            let (bytecode, map, release) = compile(entry)?;
+            let (bytecode, map, release) = compile_release(entry)?;
             request.release = release;
             let out = app.work_dir("trace");
             std::fs::create_dir_all(&out)?;
@@ -87,7 +87,7 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
         }
         return run_runner(&runner, &request);
     }
-    let (bytecode, map, release) = compile(entry)?;
+    let (bytecode, map, release) = compile_release(entry)?;
     // SAFETY: compiled just now by this runtime.
     let bundle = release.apply(unsafe { Bundle::bytecode(bytecode) });
     let app = nsh_engine::App::Js(match map {
@@ -109,11 +109,33 @@ pub(crate) fn trace(entry: &Path, options: TraceOptions) -> anyhow::Result<()> {
     .map_err(anyhow::Error::msg)
 }
 
-/// The app at `entry`, bundled and compiled to bytecode, with its source
-/// map and how it runs as its release build does (hardened: the
-/// capabilities it declares apply).
-fn compile(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>, Release)> {
-    let sets = crate::ui_sets();
+/// The app at `entry`, bundled and compiled to bytecode, with its source map.
+pub(crate) fn compile(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    compile_with(entry, &crate::ui_sets(), true)
+}
+
+/// The entry `entry` bundled against `sets` and compiled to bytecode, with
+/// its source map; `announce`: saying so.
+pub(crate) fn compile_with(
+    entry: &Path,
+    sets: &[nsh_core::ui::description::SetDescription],
+    announce: bool,
+) -> anyhow::Result<(Vec<u8>, Option<String>)> {
+    let (bytecode, map, _) = compile_with_release(entry, sets, announce)?;
+    Ok((bytecode, map))
+}
+
+/// The app compiled with the metadata that makes a trace run under its
+/// release capability policy, app identity and trusted plugin directory.
+fn compile_release(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>, Release)> {
+    compile_with_release(entry, &crate::ui_sets(), true)
+}
+
+fn compile_with_release(
+    entry: &Path,
+    sets: &[nsh_core::ui::description::SetDescription],
+    announce: bool,
+) -> anyhow::Result<(Vec<u8>, Option<String>, Release)> {
     let bundle = nsh_bundler::bundle(&BundleOptions {
         entry: entry.to_path_buf(),
         minify: false,
@@ -121,17 +143,19 @@ fn compile(entry: &Path) -> anyhow::Result<(Vec<u8>, Option<String>, Release)> {
         ui_sets: sets.to_vec(),
     })
     .map_err(|e| BuildError::from(e).into_error(entry))?;
-    // Exact numbers: traces are compared.
-    ui::done(format!(
-        "bundled {} {}",
-        ui::path(entry),
-        ui::dim(format!(
-            "({} B in {:.1} ms)",
-            bundle.code.len(),
-            bundle.elapsed_ms
-        ))
-    ));
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &sets)?;
+    if announce {
+        // Exact numbers: traces are compared.
+        ui::done(format!(
+            "bundled {} {}",
+            ui::path(entry),
+            ui::dim(format!(
+                "({} B in {:.1} ms)",
+                bundle.code.len(),
+                bundle.elapsed_ms
+            ))
+        ));
+    }
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, sets)?;
     let release = Release {
         capabilities: bundle.capabilities.clone(),
         app_id: crate::package::app_id(entry).ok(),
