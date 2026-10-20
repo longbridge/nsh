@@ -178,6 +178,7 @@ events! {
     FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
     HoverMove = "onHoverMove": "The mouse moved over a hovered view, with no button down (payload: [`EventPayload::Hover`]; at most one per frame).",
+    ContextMenu = "onContextMenu": "The secondary button was pressed over the view (payload: [`EventPayload::ContextMenu`]): the nearest listener around the view under the pointer hears it, unless a text input or selectable text is nearer.",
 }
 
 /// What an input holds, for the system's autofill and suggestions
@@ -335,6 +336,23 @@ pub struct HoverEvent {
     pub modifiers: crate::keymap::Modifiers,
 }
 
+/// Where a context menu was asked for ([`EventKind::ContextMenu`]), in
+/// points.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ContextMenuEvent {
+    /// Position in the view, its transforms undone.
+    pub location_x: f32,
+    /// Position in the view.
+    pub location_y: f32,
+    /// Position in the root view the view is in (the surface, or its
+    /// modal): where `Menu.popup` opens a menu.
+    pub page_x: f32,
+    /// Position in the root view.
+    pub page_y: f32,
+    /// The modifier keys held.
+    pub modifiers: crate::keymap::Modifiers,
+}
+
 /// Touches for the JS responder system.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TouchEvent {
@@ -472,6 +490,8 @@ pub enum EventPayload {
     Touch(Box<TouchEvent>),
     /// The mouse over a hovered view (`onHoverMove`).
     Hover(HoverEvent),
+    /// A context menu asked for over a view (`onContextMenu`).
+    ContextMenu(ContextMenuEvent),
     /// Local file URLs dropped by the user, in the platform's order.
     FileDrop(Vec<String>),
     /// The lines of a text block.

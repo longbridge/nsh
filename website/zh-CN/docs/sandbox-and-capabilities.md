@@ -20,11 +20,15 @@ bundle 中只有应用自己的代码：响应式图、渲染器以及应用导�
 
 ## 限制
 
-每个 VM 都有以下限制：
+嵌入在其他应用中的应用，在宿主应用决定的限制内运行。独立运行的应用（用 `nsh package` 打包的应用，包括 Web，以及用
+`nsh run` 运行的应用）是你自己的代码，和原生应用一样：它可以使用设备给它的内存和时间；4096 KB 的解释器栈让过深的递归
+抛出应用可以捕获的 `RangeError`。
+
+嵌入的应用有以下限制：
 
 | 限制 | 默认值 | 触发时 |
 |---|---|---|
-| JS 堆 | 独立运行的应用在 macOS、Windows 和 Linux（以及 Mac Catalyst）上为 1 GB，在 iOS 和 Android 上为 512 MB；嵌入在其他应用中的为 256 MB（嵌入方可另行设置） | VM 停止。 |
+| JS 堆 | 256 MB | VM 停止。 |
 | 解释器栈 | 4096 KB（也是上限） | 过深的递归抛出 `RangeError`，应用可以捕获。 |
 | 执行 bundle 的时间 | 10 s | 执行被中断。 |
 | 其他任意一次进入 JS 的调用的时间 | 2 s | 该调用被中断；应用继续运行。 |
@@ -52,8 +56,11 @@ VM 会继续运行：下一个事件、定时器或帧照常执行。
 > 对普通应用来说，这些限制相当宽松。如果你触到了 2 s 的调用预算，说明这项工作本来就不该放在一个事件里：它会让应用的
 > 更新冻结那么久。可以用 `setTimeout` 把它拆开，或者把它移出事件处理函数。
 
-宿主应用可以按视图修改限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
+宿主应用按视图设定限制：[iOS](./embedding-ios.md) 上用 `NshAppView.limits`，
 [Android](./embedding-android.md) 上用 `NshView.setLimits`，[GPUI 应用](./gpui.md) 里用 `AppOptions::limits` / `AppView::set_limits`。修改从下一次加载开始生效。
+
+开发时想看应用在宿主应用的限制下表现如何，用 [`--limits`](./cli.md#nsh-run) 运行它：`nsh run --limits` 使用上面的默认值，
+`nsh run --limits memory=128MB,call=500ms` 像宿主应用那样设置这两项，其余保持默认值。
 
 ## 加固
 
@@ -211,7 +218,7 @@ nsh.setGrantedCapabilities("{ \"network\": { \"hosts\": [\"api.example.com\"] } 
 
 | 层 | 由谁执行 | 由谁设定 |
 |---|---|---|
-| 限制（堆、栈、时间、节点） | 运行时，按 VM | 默认值；宿主应用按视图设定 |
+| 限制（堆、栈、时间、节点） | 运行时，按 VM | 宿主应用按视图设定（嵌入的应用） |
 | 加固 | 运行时，在加载时 | 开发环境之外始终开启 |
 | 能力 | 运行时（fetch、图片、视频、web view、状态栏） | 应用（`nsh.json`）和宿主应用（授权） |
 | 代码完整性 | 签名验证 | `nsh publish`；宿主应用信任的根密钥 |

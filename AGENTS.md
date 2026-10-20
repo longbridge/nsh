@@ -55,7 +55,7 @@ crates/
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the
-                       unknown-class check (`classes.rs`);
+                       unknown-class check (`classes.rs`); the warning of components taking their props apart (`props.rs`);
                        development bundles with hot module replacement (`hot.rs`); the bundler's part of `.nsh/types`
                        (`types.rs`: asset imports); feature `bundle` (default off in the workspace; the CLI turns it on) is
                        all of that, without it only `compile_module` (`compile.rs`: one module, no rolldown) is left, which
@@ -359,6 +359,16 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 5. **Text**: measurements are cached per constraint (`TextContext.cache`); platforms cache font objects (`FontCache`).
 6. **Changes to hot paths come with before / after `nsh trace` timings and item counts**, compared with the baselines
    in `docs/dev/performance.md` (update them when they move).
+
+## CI
+
+Each workflow runs only when what it builds changes: the Rust workflows list their crates one by one in `paths`,
+derived from the dependency graph. A new crate, a new path dependency or a new workflow updates those lists
+(`python3 .github/ci/paths.py --print`); the `CI paths` workflow fails when a list misses a crate its workflow builds.
+CI builds without incremental state or debug info, caches dependencies only (`Swatinem/rust-cache`, saved by `main`,
+restored by pull requests) and ignores the toolchain file's mobile targets (`RUSTUP_TOOLCHAIN=stable`) except in the
+release. Files a crate reads from outside its directory (`include_bytes!`, test fixtures) go into its workflows'
+`files` in `paths.py`.
 
 ## Verification after changes
 

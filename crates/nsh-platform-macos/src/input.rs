@@ -602,6 +602,15 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     let time = event.timestamp() * 1000.0;
     let input = &surface.input;
     match ty {
+        // Control-click is the secondary click on macOS.
+        NSEventType::LeftMouseDown
+            if event
+                .modifierFlags()
+                .contains(NSEventModifierFlags::Control) =>
+        {
+            context_menu(surface, x, y, event.modifierFlags());
+        }
+        NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
             // A title bar of the app's own moves the window.
             if crate::chrome::mouse_down(surface, event, x, y) {
@@ -646,9 +655,46 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         NSEventType::ScrollWheel => scroll_event(surface, event, x, y, time),
         NSEventType::Magnify => magnify(surface, event, x, y),
         NSEventType::Rotate => rotate(surface, event, x, y),
-        // Right and other buttons do nothing (no context menus), as on
-        // Linux.
         _ => {}
+    }
+}
+
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it. Text
+/// fields are AppKit's views, which show their own menu.
+fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return;
+    };
+    for v in chain(&hit.view) {
+        let (id, listens, input) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+            )
+        };
+        if listens {
+            let (location_x, location_y) = local(surface, &v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location_x,
+                location_y,
+                page_x: x,
+                page_y: y,
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: flags.contains(NSEventModifierFlags::Control),
+                    alt: flags.contains(NSEventModifierFlags::Option),
+                    shift: flags.contains(NSEventModifierFlags::Shift),
+                    cmd: flags.contains(NSEventModifierFlags::Command),
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return;
+        }
+        if input {
+            return;
+        }
     }
 }
 

@@ -9,8 +9,10 @@ name: Release
 #   their archives; publish it from the releases page.
 # - Running it by hand without a tag builds the archives only (workflow
 #   artifacts): a dry run before tagging. With a tag it releases that tag.
-# - Pull requests that change this workflow or xtask build the archives
-#   only, so a broken distribution shows before a release.
+# - Pull requests that change this workflow or how xtask builds the
+#   distribution build the archives only, so a broken distribution shows
+#   before a release (xtask's other tasks are checked by the Linux and
+#   Windows workflows).
 #
 # Asset names carry no version (`nsh-macos-arm64.tar.gz`, each with a
 # `.sha256`), so `releases/latest/download/<asset>` always resolves: the
@@ -26,7 +28,10 @@ on:
     paths:
       - ".github/workflows/release.yml"
       - ".github/packages/nsh.json"
-      - "crates/xtask/**"
+      - "crates/xtask/Cargo.toml"
+      - "crates/xtask/src/dist.rs"
+      - "crates/xtask/src/android.rs"
+      - "crates/xtask/src/ios.rs"
   workflow_dispatch:
     inputs:
       tag:
@@ -47,6 +52,11 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  # A pull request only checks that the distribution builds: without
+  # whole-program optimization it builds several times faster. Releases
+  # and runs by hand build it as shipped.
+  CARGO_PROFILE_RELEASE_LTO: ${{ github.event_name == 'pull_request' && 'false' || 'fat' }}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.event_name == 'pull_request' && '16' || '1' }}
   TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:

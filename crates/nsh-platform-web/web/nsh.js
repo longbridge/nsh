@@ -711,7 +711,10 @@ class Player {
    * settings), `harden` (with bytecode: the hardening's bytecode the CLI
    * ships, `harden.nshc`), `capabilities` (the app's `capabilities.json`),
    * `sourceMap` (JSON), `appId` (`nsh.json` `"id"`: the app's storage is
-   * kept under it; without one, under the page's path), and where a split bundle's chunks are: `chunks[id]`
+   * kept under it; without one, under the page's path), `limits` (the VM
+   * limits the page runs the app with, as an app embedding it sets them:
+   * `"memory=128MB,call=2s"`, `""` for the embedding defaults; without it
+   * the app runs on its own, with none), and where a split bundle's chunks are: `chunks[id]`
    * (a URL), else `id` relative to `chunkBase` (default: the page); the
    * chunks of a bytecode bundle are bytecode too.
    */
@@ -721,6 +724,7 @@ class Player {
     capabilities = "",
     sourceMap = "",
     appId = "",
+    limits = null,
     chunks = this.options.chunks,
     chunkBase = this.options.chunkBase,
   } = {}) {
@@ -731,6 +735,7 @@ class Player {
     this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? "", appId ?? ""], (cp, cl, mp, ml, ip, il) =>
       this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml, ip, il)));
     if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
+    if (limits != null) this.call(() => this.withStrings([limits], (p, l) => this.wasm.nsh_bundle_limits(p, l)));
     this.begin(width, (environment) => {
       this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
       const start = bytecode ? this.wasm.nsh_start_bytecode : this.wasm.nsh_start;
@@ -822,11 +827,11 @@ class Player {
     return ok ? { code: text } : { error: text };
   }
 
-  /** Compiles and runs `source`; the compile error, or null. */
-  runSource(source, name = "App.tsx") {
+  /** Compiles and runs `source` (with `run`'s `options`); the compile error, or null. */
+  runSource(source, name = "App.tsx", options = {}) {
     const result = this.compile(source, name);
     if (result.error) return result.error;
-    this.run(result.code);
+    this.run(result.code, options);
     return null;
   }
 
@@ -3604,7 +3609,7 @@ class Player {
     });
     // No page menu over the app (nor iOS's callout on a long press); fields
     // and selectable text keep theirs.
-    root.addEventListener("contextmenu", (e) => this.editable(e.target) || e.preventDefault());
+    root.addEventListener("contextmenu", (e) => this.contextMenu(e) || this.editable(e.target) || e.preventDefault());
     root.addEventListener("copy", (e) => this.copyText(e));
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
@@ -3633,6 +3638,37 @@ class Player {
     this.live.className = "nsh-live";
     this.live.setAttribute("aria-live", "polite");
     if (this.history) this.installHistory();
+  }
+
+  /**
+   * `onContextMenu` of the nearest view around `e`'s target that listens,
+   * unless a field or selectable text is nearer (it keeps the browser's
+   * menu); true when a view took it. The browser raises `contextmenu` for
+   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   */
+  contextMenu(e) {
+    const view = this.viewOf(e.target);
+    if (!view) return false;
+    for (const el of this.ancestors(view)) {
+      if (el._events?.has("onContextMenu")) {
+        e.preventDefault();
+        const [pageX, pageY] = this.point(e);
+        const r = el.getBoundingClientRect();
+        this.event(el._id, "onContextMenu", {
+          locationX: e.clientX - r.left,
+          locationY: e.clientY - r.top,
+          pageX,
+          pageY,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+        });
+        return true;
+      }
+      if (el.matches(".nsh-field, .nsh-selectable")) return false;
+    }
+    return false;
   }
 
   /** Whether the browser handles presses at `target` itself: fields,

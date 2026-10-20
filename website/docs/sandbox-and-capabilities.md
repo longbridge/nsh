@@ -22,11 +22,16 @@ around them.
 
 ## Limits
 
-Each VM has these limits:
+An app embedded in another app runs within limits its host app decides. An app on its own (packaged with
+`nsh package`, the web included, or run with `nsh run`) is your own code, as a native app is: it uses the memory and
+time the device gives it, and its interpreter stack of 4096 KB turns deep recursion into a `RangeError` the app can
+catch.
+
+An embedded app has these limits:
 
 | Limit | Default | When it is hit |
 |---|---|---|
-| JS heap | 1 GB for an app on its own on macOS, Windows and Linux (Mac Catalyst too); 512 MB on iOS and Android; 256 MB for an app embedded in another app (the embedder may set another) | The VM stops. |
+| JS heap | 256 MB | The VM stops. |
 | Interpreter stack | 4096 KB (also the maximum) | Deep recursion throws a `RangeError`, which the app can catch. |
 | Time to evaluate the bundle | 10 s | The evaluation is cut off. |
 | Time of any other call into JS | 2 s | The call is cut off; the app goes on. |
@@ -58,9 +63,13 @@ not cover: without them, an app could exhaust the device's memory through the UI
 > anyway: it would freeze the app's updates for that long. Split it with `setTimeout`, or move it out of the event
 > handler.
 
-Host apps can change the limits per view: `NshAppView.limits` on [iOS](./embedding-ios.md#limits),
+Host apps set the limits per view: `NshAppView.limits` on [iOS](./embedding-ios.md#limits),
 `NshView.setLimits` on [Android](./embedding-android.md#limits), `AppOptions::limits` / `AppView::set_limits` in a
 [GPUI app](./gpui.md#embedding-in-a-gpui-app). They apply from the next load.
+
+To see in development what an app does within a host app's limits, run it with
+[`--limits`](./cli.md#nsh-run): `nsh run --limits` uses the defaults above, and
+`nsh run --limits memory=128MB,call=500ms` sets those two as a host app would, the rest keeping their defaults.
 
 ## Hardening
 
@@ -225,7 +234,7 @@ them.
 
 | Layer | Enforced by | Set by |
 |---|---|---|
-| Limits (heap, stack, time, nodes) | the runtime, per VM | defaults; host app per view |
+| Limits (heap, stack, time, nodes) | the runtime, per VM | the host app per view (embedded apps) |
 | Hardening | the runtime, on load | always on outside development |
 | Capabilities | the runtime (fetch, images, video, web views, status bar) | the app (`nsh.json`) and the host app (grant) |
 | Code integrity | signature verification | `nsh publish`; the host app's trusted roots |

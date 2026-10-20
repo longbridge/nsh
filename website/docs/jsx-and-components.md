@@ -113,6 +113,14 @@ function Title(props: { text: string }) {
 }
 ```
 
+A component that takes its props apart in its parameter, `function Title({ text }: …)`, reads them the same once, and the build warns of it with the props to read instead:
+
+```text
+warn App.tsx:3:16: Title takes its props apart (`{ text }`): each is read once, when Title runs, and does not follow changes; take `props` and read `props.text` where it is used (`split(props, [...])` to pass the rest on)
+```
+
+A prop the component wants only once, such as an id it starts with, is read in the body (`const { id } = props;`), which says so.
+
 The same applies to default values: write `props.color ?? "#ddf4ff"` in the JSX rather than destructuring with a default. To compute something from props, use a function or [`computed`](./reactivity.md#computed):
 
 ```tsx
@@ -141,7 +149,7 @@ function Card(props: { title: string; children?: JSX.Element }) {
 </Card>
 ```
 
-Each read of `props.children` builds the children again (new native views). Read it once, in the place where the children go. Children can also be a function, a render callback the component calls with arguments:
+Each read of `props.children` builds the children again (new native views). Read it once, in the place where the children go. Among several children, one that changes (an `<If>`, an `<Each>`, `{cond() ? a : b}`) arrives as a function, and `{props.children}` updates that one alone: its siblings keep their views, an input its text and focus. Children can also be a function, a render callback the component calls with arguments:
 
 ```tsx
 function Repeat(props: { times: number; children: (i: number) => JSX.Element }) {
@@ -180,7 +188,12 @@ For long or infinite lists, use [`List`](./lists.md): it creates views only for 
 
 ## Refs
 
-`ref` gives you the native node of a host element, a `YNode`, for imperative calls: `focus()`, `blur()`, `scrollTo()`, `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... A variable is assigned, a function is called:
+`ref` gives you the native node of a host element, a `YNode`, for imperative calls: `focus()`, `blur()`, `scrollTo()`, `scrollToIndex()`, `measure()` ([where a view is](./touch-and-gestures.md#where-a-view-is-measure)), ... What `ref={…}` names receives the node:
+
+- a variable declared with `let` is assigned it;
+- a field (`ref={refs.input}`, `ref={refs[name]}`) is assigned it;
+- a [signal](./reactivity.md) is set to it, so what reads the signal follows it;
+- a function is called with it.
 
 ```tsx
 import type { YNode } from "nsh";
@@ -200,6 +213,8 @@ function Search() {
 
 <Scroll ref={(node) => (scroller = node)} />
 ```
+
+A `const` or an import holds a signal or a function, as in `const input = signal<YNode>()` with `<Input ref={input} />` and `input()?.focus()`; one holding anything else is reported when the element is made, with what to write.
 
 The ref is set when the element is created, before the component returns, so it is available in [effects](./reactivity.md#effect) and event handlers. Calls are sent to the view in order with the changes made before them. Components from `nsh/ui/mobile` accept `ref` too.
 

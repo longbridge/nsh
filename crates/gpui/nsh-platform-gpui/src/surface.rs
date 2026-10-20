@@ -22,7 +22,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{EventKind, EventPayload, MountBatch, MountItem, NodeId, ROOT_ID, Size};
-use nsh_engine::{Engine, EngineConfig, EngineControl, Environment, MountSink};
+use nsh_engine::{AppError, Engine, EngineConfig, EngineControl, Environment, MountSink};
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -35,7 +35,7 @@ use crate::{
 /// What the engine thread sends the main thread.
 enum Message {
     Batch(MountBatch),
-    Error(String),
+    Error(AppError),
     Frame,
     HotUpdateFailed,
 }
@@ -75,8 +75,8 @@ impl MountSink for Sink {
         self.send(Message::Batch(batch));
     }
 
-    fn report_error(&self, message: &str) {
-        self.send(Message::Error(message.to_owned()));
+    fn report(&self, error: &AppError) {
+        self.send(Message::Error(error.clone()));
     }
 
     fn request_frame(&self) {
@@ -98,8 +98,8 @@ pub(crate) type ResizeHandler = Box<dyn Fn(f32, f32)>;
 /// A window shortcut: true if it took the key (down).
 pub(crate) type ShortcutHandler = Box<dyn Fn(&crate::input::KeyEvent) -> bool>;
 
-/// Called when the app reports a fatal error (development hosts show it).
-pub(crate) type ErrorHandler = Box<dyn Fn(&str)>;
+/// Called when the app reports an error (development hosts show it).
+pub(crate) type ErrorHandler = Box<dyn Fn(&AppError)>;
 
 /// A handler as kept: shared, so it is called with nothing borrowed (it may
 /// restart the app or set another handler).
@@ -156,10 +156,10 @@ pub(crate) struct Surface {
     /// Frame statistics, while they are logged ([`crate::stats`]).
     pub(crate) stats: RefCell<Option<crate::stats::FrameStats>>,
     epoch: std::time::Instant,
-    on_error: Handler<dyn Fn(&str)>,
+    on_error: Handler<dyn Fn(&AppError)>,
     /// A dev session's error overlay: hears the errors besides `on_error`.
     #[cfg(feature = "dev")]
-    on_dev_error: Handler<dyn Fn(&str)>,
+    on_dev_error: Handler<dyn Fn(&AppError)>,
     on_hot_update_failed: Handler<dyn Fn()>,
     /// Counts the apps stopped ([`Surface::stop`]): what an engine sent
     /// before is not applied to the next one.
@@ -469,19 +469,19 @@ impl Surface {
                     applied = true;
                     self.batches.set(self.batches.get() + 1);
                 }
-                Message::Error(message) => {
-                    log::error!("{message}");
+                Message::Error(error) => {
+                    log::error!("{error}");
                     crate::script::app_error();
                     #[cfg(feature = "dev")]
                     {
                         let handler = self.on_dev_error.borrow().clone();
                         if let Some(f) = handler {
-                            f(&message);
+                            f(&error);
                         }
                     }
                     let handler = self.on_error.borrow().clone();
                     if let Some(f) = handler {
-                        f(&message);
+                        f(&error);
                     }
                 }
                 Message::Frame => self.js_frame.set(true),
@@ -602,6 +602,10 @@ pub(crate) fn flush_all(cx: &mut gpui::App) {
 mod tests {
     use super::*;
 
+    fn error(text: &str) -> AppError {
+        AppError::new(nsh_engine::AppErrorKind::Uncaught, text)
+    }
+
     /// A surface draining `messages` as if an engine had sent them.
     fn sent(surface: &Surface, messages: Vec<Message>) {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -654,7 +658,7 @@ mod tests {
         sent(
             &surface,
             vec![
-                Message::Error("boom".into()),
+                Message::Error(error("boom")),
                 Message::Batch(MountBatch::default()),
             ],
         );
@@ -671,9 +675,9 @@ mod tests {
         sent(
             &surface,
             vec![
-                Message::Error("first".into()),
+                Message::Error(error("first")),
                 Message::Batch(MountBatch::default()),
-                Message::Error("second".into()),
+                Message::Error(error("second")),
             ],
         );
         surface.drain();
@@ -691,8 +695,31 @@ mod tests {
         }));
         let dev = heard.clone();
         surface.set_dev_error_handler(Box::new(move |m| dev.borrow_mut().push(format!("dev {m}"))));
-        sent(&surface, vec![Message::Error("boom".into())]);
+        sent(&surface, vec![Message::Error(error("boom"))]);
         surface.drain();
         assert_eq!(*heard.borrow(), ["dev boom", "host boom"]);
+    }
+
+    #[test]
+    fn the_error_handler_hears_what_went_wrong_and_the_package() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let heard = Rc::new(RefCell::new(Vec::new()));
+        let seen = heard.clone();
+        surface.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.clone())));
+        let package = std::sync::Arc::new(nsh_engine::PackageInfo {
+            id: "com.example.app".into(),
+            name: "App".into(),
+            version: "1.0.0".into(),
+            build: 7,
+            sha256: "0".repeat(64),
+        });
+        let stopped = AppError::new(nsh_engine::AppErrorKind::Stopped, "out of memory")
+            .with_package(Some(package));
+        sent(&surface, vec![Message::Error(stopped.clone())]);
+        surface.drain();
+        let heard = heard.borrow();
+        assert_eq!(*heard, [stopped]);
+        assert!(heard[0].is_fatal());
+        assert_eq!(heard[0].package.as_ref().map(|p| p.build), Some(7));
     }
 }

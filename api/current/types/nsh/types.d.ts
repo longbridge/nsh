@@ -358,6 +358,21 @@ export interface HoverEvent {
   shiftKey: boolean;
 }
 
+/** Where a context menu was asked for: the payload of `onContextMenu`. */
+export interface ContextMenuEvent {
+  /** Position in the view (points, its transforms undone). */
+  locationX: number;
+  locationY: number;
+  /** Position in the root view the view is in: where `Menu.popup` opens a menu. */
+  pageX: number;
+  pageY: number;
+  altKey: boolean;
+  ctrlKey: boolean;
+  /** Command on Apple platforms, the Windows / Super key elsewhere. */
+  metaKey: boolean;
+  shiftKey: boolean;
+}
+
 /** Where a scroll view is: the payload of `onScroll`. */
 export interface ScrollEvent {
   x: number;
@@ -530,6 +545,8 @@ export interface HostProps {
   onHoverOut?: () => void;
   /** The mouse moved over the view (or a view inside it) with no button down, at most once per frame. */
   onHoverMove?: (e: HoverEvent) => void;
+  /** The secondary button (a right click, Control-click on Apple platforms) was pressed over the view: open a menu with `Menu.popup({ x: e.pageX, y: e.pageY })`. The nearest listener hears it; a text input or selectable text nearer shows its own menu instead. */
+  onContextMenu?: (e: ContextMenuEvent) => void;
   /** A local file drag entered this desktop destination. */
   onFileDragEnter?: () => void;
   /** A local file drag left this desktop destination. */

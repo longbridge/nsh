@@ -1,0 +1,41 @@
+name: CI paths
+
+# The Rust workflows run only when what they build changes, listed crate by
+# crate in their `paths`. This checks those lists against the workspace's
+# dependency graph whenever a manifest or a workflow changes, so a crate a
+# workflow tests can never be left out (.github/ci/paths.py).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - ".github/workflows/**"
+      - ".github/ci/**"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - ".github/workflows/**"
+      - ".github/ci/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-paths-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `cargo metadata --no-deps` only: no toolchain targets to install.
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the workflows' paths
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install pyyaml
+          python3 .github/ci/paths.py

@@ -120,7 +120,7 @@ impl AppView {
     /// The VM limits of the apps this view loads. Applies from the next
     /// [`AppView::load`].
     pub fn set_limits(&self, limits: nsh_engine::Limits) {
-        self.reconfigure(|options| options.limits = limits);
+        self.inner.set_limits(limits);
     }
 
     /// The directory the storage (`nsh/storage`) of the apps this view loads
@@ -160,12 +160,7 @@ impl AppView {
     }
 
     fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
-        let mut state = self.inner.state.borrow_mut();
-        change(&mut state.options);
-        // The next load starts a surface with the new options.
-        if let Some(old) = state.surface.take() {
-            old.view().removeFromSuperview();
-        }
+        self.inner.reconfigure(change);
     }
 
     /// Receives fatal app errors (bundle failed to load, uncaught JS
@@ -192,6 +187,23 @@ impl AppView {
 }
 
 impl Inner {
+    fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
+        let mut state = self.state.borrow_mut();
+        change(&mut state.options);
+        // The next load starts a surface with the new options.
+        if let Some(old) = state.surface.take() {
+            old.view().removeFromSuperview();
+        }
+    }
+
+    /// The VM limits of the apps loaded from now on (a change starts the
+    /// next load on a surface of its own).
+    pub(crate) fn set_limits(&self, limits: nsh_engine::Limits) {
+        if self.state.borrow().options.limits != limits {
+            self.reconfigure(|options| options.limits = limits);
+        }
+    }
+
     pub(crate) fn load(this: &Rc<Inner>, app: App) {
         let mut state = this.state.borrow_mut();
         if let Some(surface) = &state.surface {

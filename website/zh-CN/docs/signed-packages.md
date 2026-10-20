@@ -203,7 +203,8 @@ nsh revoke --root keys/root.secret --extend revocations.json --key 3428d7136788c
 ## 回滚保护
 
 宿主应用接受一个包后，其信任存储会记录该 app id 的构建号，此后拒绝更旧的构建。即使攻击者拿到了一个存在已知漏洞的
-旧签名包，也无法让应用运行它。这条记录保存在信任存储的状态目录中（`nsh-trust.json`），重启后依然有效。
+旧签名包，也无法让应用运行它。这条记录保存在信任存储的状态目录中（`nsh-trust.json`），重启后依然有效。在 GPUI 上，宿主应用可以等新包被证明健康之后再记录（先
+`verify_package`，再 `accept_package`，见下文）。
 
 ## 在宿主应用中加载包
 
@@ -230,6 +231,25 @@ trust.updateRevocations(latestListJson);
 NshPackage pkg = trust.openPackage(downloaded);   // off the UI thread; throws NshPackage.RefusedException
 runOnUiThread(() -> nsh.runPackage(pkg));
 ```
+
+**GPUI（Rust）**，宿主应用还可以等包被证明健康之后再接受它：
+
+```rust
+use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
+
+let mut trust = TrustStore::open(state_dir)?;
+trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
+
+// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
+let package = verify_package(&trust, &bytes, &packages_dir)?;
+view.read(cx).run_package(&package);
+// Later, once its first frame showed and no fatal error came for a while:
+accept_package(&mut trust, &package)?;
+```
+
+包被接受之前，此前接受过的构建依然能通过验证，所以新包出问题时宿主应用可以退回它之前运行的包（信号可以是
+`AppView::on_error` 收到的致命错误，或者在接受之前崩溃）。比已接受构建更旧的包仍会被拒绝，期间被吊销的包也不会被接受。
+`load_package` 会一次完成验证和接受，与 iOS、Android 上的 `openPackage` 相同。
 
 包声明的[能力](./sandbox-and-capabilities.md)随包一起传递：包只能做它声明的事，并且还要在宿主应用授予的范围之内。
 

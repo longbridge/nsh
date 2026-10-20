@@ -9,6 +9,7 @@
 //! the engine.
 
 mod access;
+mod error;
 #[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 pub mod headless;
 mod local_storage;
@@ -29,7 +30,7 @@ use nsh_core::{
 };
 pub use nsh_core::{
     access::{Access, Capabilities},
-    js::Limits,
+    js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
         HttpRequest, Idiom, Insets, Locale, Os,
@@ -46,6 +47,7 @@ use rustc_hash::FxHashMap;
 #[cfg(not(target_arch = "wasm32"))]
 pub use storage::{FileStorage, app_dir_name, data_dir};
 
+pub use crate::error::{AppError, AppErrorKind, PackageInfo};
 use crate::script::{NetworkQueue, RequestId, Script};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -128,6 +130,9 @@ pub struct Bundle {
     /// from application code, its manifest or a development server message.
     /// Missing anchors deny relative and corresponding placeholder grants.
     pub system_paths: nsh_core::access::TrustedPaths,
+    /// The signed package the bundle came from ([`Bundle::from_package`]),
+    /// named in the app's errors ([`AppError::package`]).
+    pub package: Option<Arc<PackageInfo>>,
 }
 
 /// A chunk of a split bundle (`nsh_bundler::Chunk`): app code that
@@ -252,6 +257,7 @@ impl Bundle {
             harden_bytecode: None,
             app_id: None,
             system_paths: nsh_core::access::TrustedPaths::default(),
+            package: None,
         }
     }
 
@@ -266,6 +272,7 @@ impl Bundle {
             harden_bytecode: None,
             app_id: None,
             system_paths: nsh_core::access::TrustedPaths::default(),
+            package: None,
         }
     }
 
@@ -395,6 +402,13 @@ impl Bundle {
             bundle.policy.declared = Some(declared);
         }
         bundle.app_id = Some(package.app.id.clone());
+        bundle.package = Some(Arc::new(PackageInfo {
+            id: package.app.id.clone(),
+            name: package.app.name.clone(),
+            version: package.app.version.clone(),
+            build: package.app.build,
+            sha256: package.sha256.clone(),
+        }));
         Ok(bundle)
     }
 }
@@ -406,7 +420,7 @@ fn read_app_id(path: &std::path::Path) -> Option<String> {
     json.get("id")?.as_str().map(str::to_owned)
 }
 
-/// A verified package, unpacked ([`load_package`]).
+/// A verified package, unpacked ([`load_package`], [`verify_package`]).
 #[cfg(feature = "js")]
 #[derive(Debug)]
 pub struct LoadedPackage {
@@ -416,14 +430,35 @@ pub struct LoadedPackage {
     pub assets: std::path::PathBuf,
     /// Its app.
     pub app: nsh_package::App,
+    /// What accepting it records ([`accept_package`]).
+    pub receipt: nsh_package::PackageReceipt,
 }
 
 /// Verifies the package `bytes` with `trust`, writes its assets under
 /// `assets_root` (`<root>/<app id>/<package hash>/`, once per package) and
-/// records its build (older builds of the app are refused from now on).
+/// records its build (older builds of the app are refused from now on):
+/// [`verify_package`], then [`accept_package`].
 #[cfg(feature = "js")]
 pub fn load_package(
     trust: &mut nsh_package::TrustStore,
+    bytes: &[u8],
+    assets_root: &std::path::Path,
+) -> Result<LoadedPackage, String> {
+    let package = verify_package(trust, bytes, assets_root)?;
+    accept_package(trust, &package)?;
+    Ok(package)
+}
+
+/// [`load_package`] without recording the build: the package is verified as
+/// strictly (signature, certificate, revocations, hashes, and its build not
+/// older than the highest accepted) and its assets written, but the builds
+/// accepted before keep verifying. An embedding app runs it, and once it
+/// decided the package is healthy (its first frame drawn, no fatal error for
+/// a while) calls [`accept_package`]; if it fails before, the app can go
+/// back to the package it ran before, which still verifies.
+#[cfg(feature = "js")]
+pub fn verify_package(
+    trust: &nsh_package::TrustStore,
     bytes: &[u8],
     assets_root: &std::path::Path,
 ) -> Result<LoadedPackage, String> {
@@ -446,10 +481,10 @@ pub fn load_package(
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         std::fs::write(&done, b"").map_err(|e| e.to_string())?;
     }
-    trust.accept(&package).map_err(|e| e.to_string())?;
     Ok(LoadedPackage {
         bundle,
         assets: dir.join("assets"),
+        receipt: package.receipt(),
         app: package.app,
     })
 }
@@ -461,6 +496,19 @@ pub fn load_package(
 #[cfg(feature = "js")]
 pub fn symbolicate(source_map: &str, text: &str) -> String {
     symbolicate::Symbolicator::new(Some(source_map.into())).rewrite(text)
+}
+
+/// Records the build of `package` ([`verify_package`]) in `trust`: older
+/// builds of its app are refused from now on. Refused if the package or its
+/// release key was revoked since it was verified.
+#[cfg(feature = "js")]
+pub fn accept_package(
+    trust: &mut nsh_package::TrustStore,
+    package: &LoadedPackage,
+) -> Result<(), String> {
+    trust
+        .accept_receipt(&package.receipt)
+        .map_err(|e| e.to_string())
 }
 
 /// Parses capabilities in their JSON form (`capabilities.json`, the dev
@@ -485,10 +533,19 @@ pub trait MountSink: Send + 'static {
     /// Called once per commit, in order.
     fn submit(&self, batch: MountBatch);
 
-    /// A fatal app error: the bundle failed to load, or an exception escaped
-    /// a JS callback. Errors are always logged; development hosts also show
-    /// them on screen.
+    /// An error of the app, as text (the message and the stack): the
+    /// bundle failed to load, an exception escaped a JS callback, the VM
+    /// was stopped. Errors are always logged; development hosts also show
+    /// them on screen. What [`MountSink::report`] calls unless it is
+    /// implemented.
     fn report_error(&self, _message: &str) {}
+
+    /// An error of the app, with its parts: what went wrong (whether the
+    /// app can go on), the message, the stack and the package it came
+    /// from. By default, [`MountSink::report_error`] with its text.
+    fn report(&self, error: &AppError) {
+        self.report_error(&error.to_string());
+    }
 
     /// JS or a component's task asked for a display frame
     /// (`requestAnimationFrame`, `ui::ambient::next_frame`): call
@@ -1101,7 +1158,10 @@ impl<M: TextEngine + 'static> Driver<M> {
             for font in root.fonts() {
                 if let Err(err) = core.register_font(font) {
                     log::error!("font failed: {err}");
-                    sink.report_error(&format!("font failed: {err}"));
+                    sink.report(&AppError::new(
+                        AppErrorKind::Asset,
+                        &format!("font failed: {err}"),
+                    ));
                 }
             }
         }
@@ -1119,7 +1179,12 @@ impl<M: TextEngine + 'static> Driver<M> {
             .and_then(|data| core.register_font(&data));
             if let Err(err) = result {
                 log::error!("font failed: {}: {err}", font.uri);
-                sink.report_error(&format!("font failed: {}: {err}", font.uri));
+                let message = format!("font failed: {}: {err}", font.uri);
+                let package = match &config.app {
+                    App::Js(bundle) => bundle.package.clone(),
+                    App::Rust(_) => None,
+                };
+                sink.report(&AppError::new(AppErrorKind::Asset, &message).with_package(package));
             }
         }
         // A task woken on any thread wakes the loop, and so does a JS call
@@ -1349,7 +1414,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             && let Some(reason) = script.fatal()
         {
             self.stopped = true;
-            script.report(&*self.sink, "stopped", &reason);
+            script.report(&*self.sink, AppErrorKind::Stopped, "stopped", &reason);
         }
     }
 }
@@ -1711,7 +1776,12 @@ impl<M: TextEngine> State<M> {
             }
             .and_then(|data| self.core.register_font(&data));
             if let Err(err) = result {
-                script.report(sink, "font failed", &format!("{uri}: {err}"));
+                script.report(
+                    sink,
+                    AppErrorKind::Asset,
+                    "font failed",
+                    &format!("{uri}: {err}"),
+                );
             }
         }
     }

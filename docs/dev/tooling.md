@@ -103,6 +103,9 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   (JSON text frames + binary frames).
 - Bytecode version negotiation: the client reports `BYTECODE_VERSION` in its handshake; on a mismatch the server sends JS source instead
   (an empty version, the web host's, asks for source without a warning).
+- Limits: hosts run the app on its own, without limits, unless `--limits` asks for an embedding app's
+  (`DevServer::set_limits`, the bundle message's `limits`, `HostLimits`' syntax; the hosts read it with
+  `Limits::development` and start the app with it, and an invalid one is shown over the app). `sandbox.md`.
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
   `/nsh.wasm`) when a web runtime exists; browsers connect to `/ws` on the same port. `nsh run --target web` builds the
   runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's web target").
@@ -402,8 +405,8 @@ Windows), plus the embedding SDKs alone (`nsh-embed-ios.zip`, `nsh-embed-android
 names carry no version, so `releases/latest/download/<asset>` always resolves; the installers and package managers
 rely on that. To release, set `version` in the root `Cargo.toml`, push the tag `v<version>` (a tag that does not
 match fails the run) and publish the draft release the run creates once every platform has built. Running the
-workflow by hand without a tag, or a pull request that changes it or xtask, builds the archives only (the run's
-artifacts). The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
+workflow by hand without a tag, or a pull request that changes it or how xtask builds the distribution (`dist.rs`,
+`android.rs`, `ios.rs`), builds the archives only (the run's artifacts). The binaries are not signed: macOS quarantines downloads from a browser (`xattr -dr
 com.apple.quarantine nsh`), and the Linux runtime needs glibc 2.39 and GTK 4.14 or newer (Ubuntu 24.04 and later).
 
 The same tag runs `.github/workflows/release-crate.yml`, which publishes the library crates to crates.io (secret

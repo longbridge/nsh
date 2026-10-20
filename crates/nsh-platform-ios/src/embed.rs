@@ -216,23 +216,16 @@ pub unsafe extern "C" fn nsh_app_set_limits(
 ) {
     // SAFETY: guaranteed by the caller.
     let app = unsafe { &*app };
-    let mut limits = nsh_engine::Limits::default();
-    if memory_mb > 0 {
-        limits.memory_bytes = (memory_mb as usize) << 20;
-    }
-    if stack_kb > 0 {
-        limits.stack_bytes = ((stack_kb as usize) << 10).min(limits.stack_bytes);
-    }
-    if load_ms > 0 {
-        limits.load_budget = std::time::Duration::from_millis(load_ms.into());
-    }
-    if call_ms > 0 {
-        limits.call_budget = std::time::Duration::from_millis(call_ms.into());
-    }
-    if max_nodes > 0 {
-        limits.max_nodes = max_nodes as usize;
-    }
-    app.view.set_limits(limits);
+    let set = |v: u32| (v > 0).then_some(v as usize);
+    let ms = |v: u32| (v > 0).then(|| std::time::Duration::from_millis(v.into()));
+    let limits = nsh_engine::HostLimits {
+        memory_bytes: set(memory_mb).map(|mb| mb << 20),
+        stack_bytes: set(stack_kb).map(|kb| kb << 10),
+        load_budget: ms(load_ms),
+        call_budget: ms(call_ms),
+        max_nodes: set(max_nodes),
+    };
+    app.view.set_limits(limits.limits());
 }
 
 /// The directory the storage (`nsh/storage`) of the apps `app` loads is

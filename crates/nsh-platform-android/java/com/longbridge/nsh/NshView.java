@@ -147,6 +147,11 @@ public class NshView extends FrameLayout {
         Native.setLimits(handle, memoryMb, stackKb, loadMs, callMs, maxNodes);
     }
 
+    /** Runs the apps loaded from now on as apps on their own, without limits (nsh's own activities). */
+    void useStandaloneLimits() {
+        Native.setStandaloneLimits(handle);
+    }
+
     /**
      * The directory the storage ({@code nsh/storage}) of the apps this view
      * loads from now on is kept in ({@code storage.json} in it). {@code null}

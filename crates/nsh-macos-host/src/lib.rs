@@ -37,7 +37,7 @@ pub fn main() -> std::process::ExitCode {
     // Named "nsh" unless `--name` names the app.
     // As the release runner runs the app: on its own.
     let mut options = AppOptions {
-        limits: Limits::standalone_desktop(),
+        limits: Limits::standalone(),
         ..AppOptions::default()
     };
     let mut args = env::args().skip(1);

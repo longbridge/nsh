@@ -878,6 +878,15 @@ pub(crate) unsafe extern "C" fn signal(
     object(ctx, class, id)
 }
 
+/// Whether `v` (borrowed) is a signal object (`signal()`), and whether
+/// it is a memo's (`memo()`, read-only).
+pub(crate) fn signal_kind(ctx: *mut JsContext, v: JsValue) -> (bool, bool) {
+    let classes = unsafe { graph(ctx) }.data.classes;
+    // SAFETY: reads the class of a live value.
+    let class = unsafe { qjs::JS_GetClassID(v) };
+    (class == classes.signal, class == classes.memo)
+}
+
 /// The signal `this` names, or a thrown `TypeError`.
 fn this_signal(ctx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
     let class = unsafe { graph(ctx) }.data.classes.signal;

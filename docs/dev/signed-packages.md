@@ -38,12 +38,21 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   an older list (sequence numbers), so an old list cannot be replayed. The state (newest list, accepted builds)
   persists in the store's directory (`nsh-trust.json`, written atomically).
 - `nsh_engine::load_package` verifies, extracts the assets once per package to `<root>/<app id>/<sha256>/assets`,
-  accepts the build and returns the bundle (with the package's declared capabilities) and the asset directory.
+  accepts the build and returns the bundle (with the package's declared capabilities) and the asset directory: it is
+  `verify_package` (all of that but accepting) then `accept_package`. Accepting after verifying is for hosts that run a
+  new package and record it only once it proved healthy: `LoadedPackage::receipt` (`VerifiedPackage::receipt`, a
+  `non_exhaustive` `PackageReceipt`: app, hash, key id; only a verified package makes one) goes to
+  `TrustStore::accept_receipt`, which re-checks the revocations (a package or key revoked since it was verified is not
+  accepted, so the floor never rises to a build the app cannot run) and only raises the accepted build. Rollback
+  protection is unchanged: `verify` still refuses builds below the accepted one, so before accepting the app can only
+  go back to what it accepted before, never further; a host that never accepts keeps the floor where it was.
 - **Embedding**: verifying (hashing, extracting assets) is done off the UI thread, running on it. iOS (Swift)
   `NshTrust(stateDirectory:)` / `addRoot` / `updateRevocations` / `openPackage(at:) async throws -> NshPackage` (its
   `info`: id, name, version, build) and `NshAppView.run(_:)`, or `loadPackage(at:trust:) async throws`; Android
   `NshTrust(stateDir)` / `addRoot` / `updateRevocations` / `openPackage(file) throws NshPackage.RefusedException`
-  (any thread) and `NshView.runPackage(pkg)`. A refused package throws; the running app stays. To try a package on a simulator / emulator: `nsh-ios-host --package <file> --root <root.pub>`, or
+  (any thread) and `NshView.runPackage(pkg)`; GPUI (Rust) `nsh_platform_gpui::verify_package` / `load_package` (off the
+  main thread), `AppView::run_package(&package)` (the package's assets become the view's asset base) and
+  `accept_package`. A refused package throws; the running app stays. To try a package on a simulator / emulator: `nsh-ios-host --package <file> --root <root.pub>`, or
   `DevActivity` with the `package` (path on the device) and `root` (base64) extras; their trust state persists in
   the temporary / cache directory, so older builds are refused there too.
 - Not done yet: delivering packages (an update server, OTA); the app decides where packages come from.

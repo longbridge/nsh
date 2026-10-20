@@ -302,7 +302,7 @@ impl Plugin for NshPlugin {
             }
         }
         let prologue = if entry { self.prologue() } else { None };
-        let (code, map) = compile_native(
+        let compiled = compile_native(
             path,
             source_type,
             args.code,
@@ -312,9 +312,15 @@ impl Plugin for NshPlugin {
             &self.modules,
         )
         .map_err(|detail| self.fail(path, &detail))?;
+        if !compiled.destructured.is_empty() {
+            let rel = self.rel(path);
+            for d in &compiled.destructured {
+                log::warn!(target: "nsh::build", "{rel}:{}:{}: {}", d.line, d.column, d.message());
+            }
+        }
         Ok(Some(HookTransformOutput {
-            code: Some(code),
-            map: map.into(),
+            code: Some(compiled.code),
+            map: compiled.map.into(),
             module_type: Some(ModuleType::Js),
             ..Default::default()
         }))

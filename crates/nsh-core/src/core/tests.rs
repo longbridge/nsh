@@ -10024,6 +10024,51 @@ fn hover_moves_reach_rust_listeners_with_their_positions_and_modifiers() {
     );
 }
 
+#[test]
+fn context_menus_reach_rust_listeners_with_their_positions() {
+    use crate::ui::prelude::*;
+    #[component]
+    fn Row() -> impl IntoElement {
+        let at = signal(String::new());
+        view()
+            .on_context_menu(move |e: &ContextMenuEvent| {
+                at.set(format!(
+                    "{} {} {} {}",
+                    e.location_x, e.location_y, e.page_x, e.page_y
+                ))
+            })
+            .child(text(move || at.get()))
+    }
+    let mut c = core();
+    c.mount_root(&crate::ui::Root::of::<Row>());
+    let batch = c.commit().unwrap();
+    let host = batch
+        .items
+        .iter()
+        .find_map(|item| match item {
+            MountItem::Events { id, events } if events.contains(EventKind::ContextMenu) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the listening view mounts ContextMenu in its event mask");
+    let event = crate::ContextMenuEvent {
+        location_x: 4.0,
+        location_y: 5.0,
+        page_x: 14.0,
+        page_y: 25.0,
+        ..Default::default()
+    };
+    assert!(c.component_event(
+        host,
+        EventKind::ContextMenu,
+        &EventPayload::ContextMenu(event)
+    ));
+    let delivered = c.commit().unwrap();
+    assert!(delivered.items.iter().any(|item| matches!(item,
+        MountItem::Text { text, .. } if text.text == "4 5 14 25")));
+}
+
 /// What builders take: listeners without arguments, children in an
 /// `Option`, a `Vec`, an array or an iterator.
 mod builders {

@@ -172,7 +172,9 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 `run(code, { chunks, chunkBase })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
 
-使用 `nsh-playground.wasm` 时，`player.runSource(tsx)` 会先编译 TSX，返回编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
+页面运行不属于自己的代码时（就像嵌入 NSH 的应用那样），可以给它设置限制：`run(code, { limits: "memory=128MB,call=500ms" })` 设置页面写出的这几项，其余保持[嵌入时的默认值](./sandbox-and-capabilities.md#限制)（`limits: ""`：全部使用默认值）。引擎运行在页面主线程上，所以调用预算也能让页面保持响应。不传 `limits` 时，应用像发布出去的应用一样独立运行。
+
+使用 `nsh-playground.wasm` 时，`player.runSource(tsx, name, options)` 会先编译 TSX，再用 `run` 的选项运行，返回编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。官网的 playground 用 `{ limits: "" }` 运行访客写的代码。
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 

@@ -155,11 +155,11 @@ NSH draws (`src/layers.rs`).
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on
   Space or Enter while focused (NSH's fields do not see those keys). It returns a focus handle of its own
   (`NativeComponent::focus_handle`; a wrapper's, since the `Switch` keeps its handle internal), so it is a Tab stop
-  among the app's text fields, and a click focuses that handle too. `AppView::on_error` hears
-  the app's fatal errors (also logged).
+  among the app's text fields, and a click focuses that handle too.
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
-  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps on their own, with `Limits::standalone()`
+  (`sandbox.md`).
 - **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
   (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
   (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
@@ -172,3 +172,12 @@ NSH draws (`src/layers.rs`).
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
   key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
   the session. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
+- **Errors.** `AppView::on_app_error` hears every error of the app (also logged) as an `AppError` (`nsh_engine`,
+  re-exported): its `kind` (`Load`: the bundle did not start; `Uncaught`: an exception escaped a callback, the app goes
+  on; `Stopped`: the VM was stopped, reported once; `HotUpdate`; `Asset`), `is_fatal()` (`Load` or `Stopped`: no JS
+  of that app runs again, where a host falls back to another build), the `message` and the `stack` apart (the stack
+  mapped to the sources when the bundle has a source map), and the signed `package` it came from (`PackageInfo`: id,
+  name, version, build, SHA-256; `Bundle::package`, set by `Bundle::from_package`). `AppView::on_error` is the same
+  handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
+  `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
+  `NshView.ErrorListener`) are unchanged.

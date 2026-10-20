@@ -891,18 +891,42 @@ fn collect_drag(
     });
 }
 
-/// A right click at `(x, y)`: the edit menu of the text field or the
-/// selectable text under it.
-fn context_menu(surface: &Rc<Surface>, x: f32, y: f32) {
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it,
+/// unless a text field or selectable text is nearer: that shows its edit
+/// menu.
+fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return;
     };
     let mut view = Some(hit.view);
     while let Some(v) = view {
-        let (input, selectable) = {
+        let (id, listens, input, selectable) = {
             let s = v.state();
-            (s.kind == ViewKind::Input, crate::text::selectable(&s))
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+                crate::text::selectable(&s),
+            )
         };
+        if listens {
+            let (location_x, location_y) = local(&v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location_x,
+                location_y,
+                page_x: x,
+                page_y: y,
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: modifiers.ctrl,
+                    alt: modifiers.alt,
+                    shift: modifiers.shift,
+                    cmd: modifiers.meta,
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return;
+        }
         if input {
             crate::text_input::context_menu(surface, &v);
             return;
@@ -929,8 +953,10 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
     let mouse = key == Key::Mouse;
     match event.kind {
         PointerKind::Down => {
+            // The secondary button (GPUI's macOS window already turns a
+            // Control-click into one).
             if mouse && event.button == 1 {
-                context_menu(surface, x, y);
+                context_menu(surface, x, y, event.modifiers);
                 return;
             }
             // Any press elsewhere clears a text selection.

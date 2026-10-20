@@ -3,9 +3,18 @@
 Each surface is one QuickJS VM. A bundle holds only the app's code (NSH's runtime is native), so nothing in JS is
 trusted: every limit and check is enforced in Rust, never in JS.
 
-- **Limits** (`nsh_js::Limits`, `EngineConfig::limits`, per VM): the QuickJS heap (`Limits::default`: 256 MB, for apps embedded in another app;
-  `Limits::standalone_desktop`: 1 GB, for the desktop hosts and runners and Catalyst; `Limits::standalone_mobile`: 512 MB, for
-  the iOS and Android hosts and runners) and stack, a
+- **Who sets the limits.** Only apps embedded in another app have limits, and the embedding app decides them
+  (`nsh_core::js::HostLimits` over `Limits::default`: 256 MB heap, 4 MB stack, 10 s to load, 2 s per call, 200 000
+  nodes); `nsh.json` has no say. An app on its own (every platform's hosts and runners, a web package, `nsh run`
+  without `--limits`) is its developer's code, as a native app's is, and runs with `Limits::standalone()`: no heap
+  limit (0), no time budget (`Duration::MAX`: no deadline), no quota (`usize::MAX`), only the interpreter stack's
+  4 MB, which turns deep recursion into a `RangeError` instead of a crash of the process (it is also the most an
+  embedder may set: the engine thread's stack is 8 MB). `nsh run` / `nsh dev --limits [memory=..,stack=..,load=..,call=..,nodes=..]`
+  run the app as an embedding app setting those would (alone: the embedding defaults): the dev server sends the spec in
+  its bundle message (`limits`) and the dev hosts start the app with `Limits::development(spec)`. On the web the page
+  decides (`run(code, { limits })`, `nsh_bundle_limits`); the website's playground runs its visitors' code with the
+  embedding defaults, since the engine runs on the page's main thread.
+- **Limits** (`nsh_js::Limits`, `EngineConfig::limits`, per VM): the QuickJS heap and stack, a
   time budget per call from Rust into JS (`sandbox.rs`: loading the bundle 10 s, any other call 2 s — one event with the
   rendering it causes, one list bind, one timer, one frame's callbacks, the microtask drain; nested calls share the
   outermost budget), and quotas for what the heap limit does not cover: changes at once (the op queue,
@@ -14,8 +23,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - An overrun call is cut off by the interrupt handler with an exception no `catch` swallows, reported with the budget it
   exceeded; the VM goes on. Running out of memory or going over a quota **stops the VM** (`Host::fatal`), also when the
   app catches the error: the heap's allocator (`HeapAllocator`) enforces the limit and records reaching it, since QuickJS
-  reports running out in several ways (an `InternalError`, a `null` exception). It is reported
-  once (`MountSink::report_error`, the embedder's error callback), no JS runs after that and the views stay as they were.
+  reports running out in several ways (an `InternalError`, a `null` exception). It is reported once
+  (`MountSink::report` with `AppErrorKind::Stopped`, the embedder's error callback), no JS runs after that and the
+  views stay as they were.
 - **Hardening** (`Policy::harden`, on unless the bundle came from a dev server): `eval` is deleted, the `Function`,
   `AsyncFunction` and generator constructors throw, and the shared prototypes (`Object`, `Array`, `Function`, `String`,
   `Number`, `Promise`, `Map`, typed arrays, ...) are frozen so one module cannot change them for the others.
@@ -70,8 +80,9 @@ trusted: every limit and check is enforced in Rust, never in JS.
   identity, paths or proxies, which can carry credentials), plus explicit `process.env` names (matched exactly, ignoring case only on Windows)
   allowed by both policies. `process.exit` requests a host handler and never exits the embedding process itself.
 - **Embedding limits**: `NshAppView.limits` (`NshLimits`) / `NshView.setLimits` (heap MB, stack KB, load / call
-  budgets, node quota; unset / 0 keeps a default), from the next load; on GPUI `AppOptions::limits` /
-  `AppView::set_limits` (a whole `Limits`), likewise from the next load.
+  budgets, node quota; unset / 0 keeps a default; both through `HostLimits`, as `--limits` is), from the next load;
+  on macOS, Windows, Linux and GPUI `AppOptions::limits` / `AppView::set_limits` (a whole `Limits`), likewise from
+  the next load. nsh's own Android activities run apps on their own (`NshView.useStandaloneLimits`, package-private).
 
 Implementation: `crates/nsh-js/src/sandbox.rs` (limits, budgets, hardening), `crates/nsh-core/src/access.rs`
 (capabilities), `crates/nsh-engine/src/access.rs` (`fetch` and redirects).

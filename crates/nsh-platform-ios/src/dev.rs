@@ -17,7 +17,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{BYTECODE_VERSION, Bundle, Policy};
+use nsh_engine::{BYTECODE_VERSION, Bundle, Limits, Policy};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
 };
@@ -246,6 +246,7 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             source_map,
             capabilities,
             app_id,
+            limits,
         } => {
             let mut bundle = match format {
                 // SAFETY: compiled for this runtime's bytecode version (the
@@ -274,6 +275,10 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
                 Ok(bundle) => bundle,
                 Err(err) => return show_error(ui, container, "Invalid capabilities", &err, true),
             };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => return show_error(ui, container, "Invalid limits", &err, true),
+            };
             hide_status(ui);
             let running = {
                 let mut ui = ui.borrow_mut();
@@ -286,6 +291,7 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             }
             log::info!("loading build {version}");
             hide_error(ui);
+            view.set_limits(limits);
             Inner::load(view, bundle.into());
         }
         DevEvent::Patch {

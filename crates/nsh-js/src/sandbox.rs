@@ -190,7 +190,10 @@ pub(crate) enum Phase {
 /// The clock of the call in progress, shared with the interrupt handler.
 pub(crate) struct Budget {
     limits: Limits,
-    /// When the running call must have returned.
+    /// Whether a call is running (nested calls share its budget).
+    running: Cell<bool>,
+    /// When the running call must have returned (`None`: no budget, as an
+    /// app on its own has none).
     deadline: Rc<Cell<Option<Instant>>>,
     /// The call that overran, until its error is reported.
     tripped: Rc<Cell<Option<Phase>>>,
@@ -214,6 +217,7 @@ impl Budget {
     pub(crate) fn new(limits: Limits) -> Self {
         Self {
             limits,
+            running: Cell::new(false),
             deadline: Rc::default(),
             tripped: Rc::default(),
             phase: Rc::new(Cell::new(Phase::Call)),
@@ -235,7 +239,7 @@ impl Budget {
     }
 
     fn begin(&self, phase: Phase) -> bool {
-        if self.deadline.get().is_some() {
+        if self.running.replace(true) {
             return false;
         }
         let budget = match phase {
@@ -244,12 +248,14 @@ impl Budget {
         };
         self.phase.set(phase);
         self.tripped.set(None);
+        // `Duration::MAX` (no limit) is past any instant: no deadline.
         self.deadline.set(Instant::now().checked_add(budget));
         true
     }
 
     fn end(&self, started: bool) {
         if started {
+            self.running.set(false);
             self.deadline.set(None);
         }
     }
@@ -455,5 +461,20 @@ mod tests {
         assert!(unwound.is_err());
         // No clock left running: the next call starts its own.
         assert!(budget.run(Phase::Call).started);
+    }
+
+    #[test]
+    fn calls_without_a_budget_are_never_interrupted() {
+        let budget = Budget::new(Limits::standalone());
+        let mut interrupt = budget.interrupt_handler(None);
+        let outer = budget.run(Phase::Load);
+        assert!(outer.started);
+        assert!(budget.deadline.get().is_none());
+        // Nested calls still share the outer one's (absent) budget.
+        assert!(!budget.run(Phase::Call).started);
+        assert!(!interrupt());
+        drop(outer);
+        assert!(budget.run(Phase::Call).started);
+        assert!(budget.take_trip().is_none());
     }
 }
