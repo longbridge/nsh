@@ -76,7 +76,7 @@ The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI'
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>] [--script <STEPS>]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>] [--script <STEPS>]
 ```
 
 Starts the dev server (as `nsh dev`), launches a development host that loads the app from it, and rebuilds on every save. Hot module replacement patches the running app in place; logs and errors from the app are printed in the terminal. Stop it with Ctrl-C (or by closing the Catalyst, macOS, Linux, Windows or GPUI window). However it ends (Ctrl-C, `kill` / `pkill`, an error), it stops the host it started: the Catalyst app, the macOS, Linux, Windows or GPUI host, the development host in the simulator, or on the Android device.
@@ -89,6 +89,7 @@ A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no d
 | `--device <DEVICE>` | | iOS simulator to use, by name (`"iPhone 16 Pro"`) or UDID. Default: a booted one, else the newest iPhone, which is booted. |
 | `--port <PORT>` | `8790` | Dev server port. If it is taken, the next free one is used. |
 | `--release` | | Minify and strip debug info. Release bundles have no hot module replacement: every save reloads the app. |
+| `--limits [<LIMITS>]` | | Runs the app as an app embedded in another one, within the limits its host app sets: `memory` and `stack` (in `KB`, `MB` or `GB`), `load` and `call` (in `ms` or `s`) and `nodes`, such as `--limits memory=128MB,call=500ms`. The ones left out keep the embedding defaults, which `--limits` alone runs with ([Sandbox and capabilities](./sandbox-and-capabilities.md#limits)). Without it the app runs on its own, as a packaged app does. TSX entries. |
 | `--trace` | | The host logs the timing of every commit (JS, layout, mount items) to the terminal. |
 | `--fps` | | Shows the performance monitor over the app: frame rate, what frames and commits cost, CPU, GPU and memory ([macOS](./macos.md#performance-monitor); `--target macos` only for now). |
 | `--name <NAME>` | `nsh.json` name | Application display name in the menu bar and initial window title (`--target macos`, TSX entries). |
@@ -100,7 +101,7 @@ With `--target android`, the first device `adb devices` lists is used; the dev s
 ## nsh dev
 
 ```sh
-nsh dev [ENTRY] [--port <PORT>] [--release]
+nsh dev [ENTRY] [--port <PORT>] [--release] [--limits [<LIMITS>]]
 ```
 
 Runs only the dev server: it builds the app, watches the entry's directory, and pushes every rebuild to the hosts connected to it. It prints the URL for hosts on this machine and one per LAN address for devices, and, when the web runtime is there, the page browsers open to run the app ([Web](./web.md#develop-in-the-browser)):

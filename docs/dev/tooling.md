@@ -103,6 +103,9 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
   (JSON text frames + binary frames).
 - Bytecode version negotiation: the client reports `BYTECODE_VERSION` in its handshake; on a mismatch the server sends JS source instead
   (an empty version, the web host's, asks for source without a warning).
+- Limits: hosts run the app on its own, without limits, unless `--limits` asks for an embedding app's
+  (`DevServer::set_limits`, the bundle message's `limits`, `HostLimits`' syntax; the hosts read it with
+  `Limits::development` and start the app with it, and an invalid one is shown over the app). `sandbox.md`.
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
   `/nsh.wasm`) when a web runtime exists; browsers connect to `/ws` on the same port. `nsh run --target web` builds the
   runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's web target").

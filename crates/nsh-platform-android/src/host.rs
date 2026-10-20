@@ -71,6 +71,11 @@ impl Host {
         self.engine.lock().ok()?.as_ref().map(Engine::control)
     }
 
+    /// The VM limits of the apps loaded from now on.
+    pub(crate) fn set_limits(&self, limits: nsh_engine::Limits) {
+        *self.limits.lock().expect("limits") = limits;
+    }
+
     /// Runs `app`, replacing the running app.
     pub(crate) fn load(self: &Arc<Self>, app: impl Into<App>) {
         let mut app = app.into();
@@ -437,24 +442,29 @@ extern "system" fn Java_com_longbridge_nsh_Native_setLimits(
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let mut limits = nsh_engine::Limits::default();
-    let pick = |v: jint| (v > 0).then_some(v as usize);
-    if let Some(mb) = pick(memory_mb) {
-        limits.memory_bytes = mb << 20;
-    }
-    if let Some(kb) = pick(stack_kb) {
-        limits.stack_bytes = (kb << 10).min(limits.stack_bytes);
-    }
-    if let Some(ms) = pick(load_ms) {
-        limits.load_budget = std::time::Duration::from_millis(ms as u64);
-    }
-    if let Some(ms) = pick(call_ms) {
-        limits.call_budget = std::time::Duration::from_millis(ms as u64);
-    }
-    if let Some(n) = pick(max_nodes) {
-        limits.max_nodes = n;
-    }
-    *host.limits.lock().expect("limits") = limits;
+    let set = |v: jint| (v > 0).then_some(v as usize);
+    let ms = |v: jint| set(v).map(|ms| std::time::Duration::from_millis(ms as u64));
+    let limits = nsh_engine::HostLimits {
+        memory_bytes: set(memory_mb).map(|mb| mb << 20),
+        stack_bytes: set(stack_kb).map(|kb| kb << 10),
+        load_budget: ms(load_ms),
+        call_budget: ms(call_ms),
+        max_nodes: set(max_nodes),
+    };
+    host.set_limits(limits.limits());
+}
+
+/// The apps loaded next run on their own, without limits (the standalone
+/// app's activities: `NshView.useStandaloneLimits`).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_setStandaloneLimits(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    host.set_limits(nsh_engine::Limits::standalone());
 }
 
 /// The directory the storage of the apps loaded next is kept in (null: each

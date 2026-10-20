@@ -29,7 +29,7 @@ use nsh_core::{
 };
 pub use nsh_core::{
     access::{Access, Capabilities},
-    js::Limits,
+    js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
         HttpRequest, Idiom, Insets, Locale, Os,

@@ -157,6 +157,9 @@ struct BundleOptions {
     /// The app's id (`nsh.json` `"id"`): it names where the app keeps its
     /// data ([`storage::LocalStorage`]).
     app_id: Option<String>,
+    /// The VM limits the page runs the app with ([`nsh_bundle_limits`]);
+    /// `None`: none, as an app on its own.
+    limits: Option<String>,
 }
 
 struct Running {
@@ -428,7 +431,13 @@ pub extern "C" fn nsh_start_rust(width: f32, height: f32, dark: u32, pixel_ratio
     };
     APP.with(|a| a.borrow_mut().take());
     let environment = environment(width, height, dark != 0, pixel_ratio);
-    run(App::Rust(root), width, height, environment)
+    run(
+        App::Rust(root),
+        width,
+        height,
+        environment,
+        Limits::standalone(),
+    )
 }
 
 /// Sets up logging and panics once.
@@ -474,13 +483,20 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
             return -1.0;
         }
     };
+    let limits = match Limits::development(options.limits.as_deref()) {
+        Ok(limits) => limits,
+        Err(err) => {
+            ffi::report_error(&format!("invalid limits: {err}"));
+            return -1.0;
+        }
+    };
     bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
     let bundle = bundle.with_app_id(options.app_id.as_deref());
-    run(App::Js(bundle), width, height, environment)
+    run(App::Js(bundle), width, height, environment, limits)
 }
 
 /// Starts `app` in the page's surface.
-fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
+fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limits) -> f64 {
     let storage =
         BASE_URL.with(|b| storage::LocalStorage::new(app.app_id(), b.borrow().as_deref()));
     let config = EngineConfig {
@@ -497,7 +513,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
         } else {
             (44.0, 96.0)
         },
-        limits: Limits::default(),
+        limits,
         ui_sets: ui_sets(),
         runtime: None,
         data_dir: None,
@@ -570,8 +586,26 @@ pub unsafe extern "C" fn nsh_bundle_options(
             source_map: (!map.is_empty()).then_some(map),
             harden: None,
             app_id: (!app_id.is_empty()).then_some(app_id),
+            limits: None,
         }
     });
+}
+
+/// Sets the VM limits the next [`nsh_start`] / [`nsh_start_bytecode`]
+/// (after [`nsh_bundle_options`]) runs the app with, as an embedding app
+/// sets them (`nsh_core::js::HostLimits`' syntax, `memory=128MB,call=2s`;
+/// empty: the embedding defaults): the page decides, as the playground
+/// does for the code it runs. Without a call: none, as an app on its own.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[cfg(feature = "js")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_bundle_limits(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let limits = unsafe { string(ptr, len) };
+    OPTIONS.with(|o| o.borrow_mut().limits = Some(limits));
 }
 
 /// Sets the hardening the next [`nsh_start`] / [`nsh_start_bytecode`] of a

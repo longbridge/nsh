@@ -77,8 +77,8 @@ pub struct AppOptions {
     pub appearance: Appearance,
     /// The VM limits of the apps it runs: [`Limits::default`] (an app
     /// embedded in a host app) unless set; the development host and the
-    /// release runner run apps on their own, with
-    /// [`Limits::standalone_desktop`].
+    /// release runner run apps on their own, with none
+    /// ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
     /// Where the apps it runs keep their data, each in `<dir>/<app id>`
     /// (`nsh.json` `"id"`, which travels with the bundle): `None` uses the
@@ -183,6 +183,14 @@ impl AppView {
     /// The widget to put in a window.
     pub fn widget(&self) -> gtk::Widget {
         self.outer.clone().upcast()
+    }
+
+    /// The VM limits ([`AppOptions::limits`]) of the apps loaded from now
+    /// on: the JS heap, the stack, the time budgets of loading and of every
+    /// other call into JS, and the quotas (nodes, ops). The running app
+    /// keeps the limits it was loaded with.
+    pub fn set_limits(&self, limits: Limits) {
+        self.options.borrow_mut().limits = limits;
     }
 
     /// Runs `app`, replacing what ran.

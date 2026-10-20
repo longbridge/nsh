@@ -77,6 +77,9 @@ final class Native {
     /** VM limits of the apps loaded next (0 keeps a default). */
     static native void setLimits(long handle, int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes);
 
+    /** No VM limits for the apps loaded next: they run on their own. */
+    static native void setStandaloneLimits(long handle);
+
     /** The directory the storage of the apps loaded next is kept in (null: each app's own in the data directory). */
     static native void setStorage(long handle, String dir);
 

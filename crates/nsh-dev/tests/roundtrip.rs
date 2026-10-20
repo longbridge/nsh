@@ -35,6 +35,7 @@ fn bundles_errors_and_logs_round_trip() {
         let _ = client_tx.send(event);
     })
     .unwrap();
+    server.set_limits(Some("memory=64MB,call=500ms".into()));
     server.publish(
         vec![1, 2, 3],
         "source v1".into(),
@@ -64,8 +65,10 @@ fn bundles_errors_and_logs_round_trip() {
             source_map,
             capabilities,
             app_id,
+            limits,
         } => {
             assert_ne!(session, 0, "the server names its run");
+            assert_eq!(limits.as_deref(), Some("memory=64MB,call=500ms"));
             assert_eq!(app_id.as_deref(), Some("com.example.roundtrip"));
             assert_eq!(bytes, [1, 2, 3]);
             assert_eq!(source_map.as_deref(), Some("{\"version\":3}"));

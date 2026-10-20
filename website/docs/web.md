@@ -190,7 +190,9 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 `run(code, { chunks, chunkBase })` also takes where the chunks of a [split bundle](#split-bundles) are.
 
-With `nsh-playground.wasm`, `player.runSource(tsx)` compiles TSX first and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
+A page that runs code it does not own, as an app embedding NSH does, gives it limits: `run(code, { limits: "memory=128MB,call=500ms" })` sets those the page names and keeps the [embedding defaults](./sandbox-and-capabilities.md#limits) for the rest (`limits: ""`: all of them). The engine runs on the page's main thread, so the call budget also keeps the page responsive. Without `limits` the app runs on its own, as a published one does.
+
+With `nsh-playground.wasm`, `player.runSource(tsx, name, options)` compiles TSX first, runs it with `run`'s options and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`. The website's playground runs its visitors' code with `{ limits: "" }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 

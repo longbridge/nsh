@@ -59,8 +59,9 @@ build to the same file) and takes `nsh.js` from the crate.
   bytes: the engine reads fonts synchronously, `Assets::read`, to measure text with them). Fonts the entry or the UI
   sets register are fetched before the app starts; one only chunks register (`font("asset:/…")` in their code) comes
   with the first of them, through `createPlayer`'s `prepareChunk(id)`, which `nsh.js` awaits with the chunk's download
-  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })` (`appId`: the
-  `nsh.json` id, the page's `app.id`; a Rust app's root carries its own); an app whose capabilities restrict `network`
+  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })`
+  (`appId`: the `nsh.json` id, the page's `app.id`; a Rust app's root carries its own), without `limits`: a published
+  app runs on its own, with none (`sandbox.md`); an app whose capabilities restrict `network`
   gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as bytecode

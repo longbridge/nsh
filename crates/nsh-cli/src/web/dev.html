@@ -120,7 +120,7 @@
         if (running?.session === session && running.version === message.version) return;
         running = { session, version: message.version };
         problem.hidden = true;
-        player.run(text(frames[0]), { capabilities: message.capabilities ?? "", sourceMap: text(frames[1]), appId: message.app_id ?? "" });
+        player.run(text(frames[0]), { capabilities: message.capabilities ?? "", sourceMap: text(frames[1]), appId: message.app_id ?? "", limits: message.limits ?? null });
         return;
       }
     }

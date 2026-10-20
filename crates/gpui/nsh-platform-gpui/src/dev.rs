@@ -32,7 +32,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
+use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Limits, Policy};
 
 use crate::{app::AppView, image::AssetBase, input::KeyEvent};
 
@@ -411,6 +411,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
             source_map,
             capabilities,
             app_id,
+            limits,
         } => {
             // A bundle reached through a hot update keeps its "Updated".
             if dev.running != Some((session, version)) {
@@ -448,6 +449,13 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
                     return None;
                 }
             };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => {
+                    dev.show_error("Invalid limits", &err, true);
+                    return None;
+                }
+            };
             dev.latest = Some((session, version, bundle.clone()));
             let running = dev.running.replace((session, version));
             // Already there through a hot update.
@@ -455,6 +463,7 @@ fn on_event(view: &AppView, dev: &mut DevSession, event: DevEvent) -> Option<Bun
                 return None;
             }
             log::info!("loading build {version}");
+            view.set_limits(limits);
             dev.error = None;
             if running.is_some() {
                 dev.show_status(Status::Reloaded);

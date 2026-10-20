@@ -159,7 +159,8 @@ NSH draws (`src/layers.rs`).
   the app's fatal errors (also logged).
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
-  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps on their own, with `Limits::standalone()`
+  (`sandbox.md`).
 - **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
   (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
   (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified

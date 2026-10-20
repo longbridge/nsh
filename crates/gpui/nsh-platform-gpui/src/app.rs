@@ -118,8 +118,8 @@ pub struct AppOptions {
     pub fps: bool,
     /// The VM limits of the apps it runs: [`Limits::default`] (an app
     /// embedded in a host app) unless set; the development host and the
-    /// release runner run apps on their own, with
-    /// [`Limits::standalone_desktop`]. See [`AppView::set_limits`].
+    /// release runner run apps on their own, with none
+    /// ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
     /// Where the apps it runs keep their data, each in `<dir>/<app id>`
     /// (`nsh.json` `"id"`, which travels with the bundle): `None` uses the

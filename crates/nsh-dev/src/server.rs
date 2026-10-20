@@ -120,6 +120,8 @@ struct Shared {
     web: Mutex<std::collections::HashMap<String, axum::body::Bytes>>,
     /// The commands that install the app's host, by platform.
     install: Mutex<std::collections::HashMap<HostPlatform, String>>,
+    /// The limits hosts run apps with ([`DevServer::set_limits`]).
+    limits: Mutex<Option<String>>,
     /// The state a newly connected client must see first.
     latest: Mutex<Option<Event>>,
     events: broadcast::Sender<Event>,
@@ -170,6 +172,7 @@ impl DevServer {
             files: Mutex::default(),
             web: Mutex::default(),
             install: Mutex::default(),
+            limits: Mutex::default(),
             latest: Mutex::new(None),
             events: broadcast::channel(16).0,
             bytecode_version: bytecode_version.into(),
@@ -226,6 +229,14 @@ impl DevServer {
     /// ([`ClientEvent::CannotRun`]).
     pub fn install_commands(&self, commands: impl IntoIterator<Item = (HostPlatform, String)>) {
         *self.shared.install.lock().expect("install lock") = commands.into_iter().collect();
+    }
+
+    /// The VM limits hosts run the apps with, from the next bundle on:
+    /// those an embedding app would set (`nsh_core::js::HostLimits`'
+    /// syntax, as `nsh run --limits` takes them; empty: the embedding
+    /// defaults), or `None` (the default): none, as an app on its own.
+    pub fn set_limits(&self, limits: Option<String>) {
+        *self.shared.limits.lock().expect("limits lock") = limits;
     }
 
     /// The bound address (useful with port 0).
@@ -657,6 +668,7 @@ async fn send_event(
             }
             host.refused = None;
             let format = host.format;
+            let limits = shared.limits.lock().expect("limits lock").clone();
             send(
                 socket,
                 &ServerMessage::Bundle {
@@ -665,6 +677,7 @@ async fn send_event(
                     source_map: bundle.source_map.is_some(),
                     capabilities: bundle.capabilities.clone(),
                     app_id: bundle.app_id.clone(),
+                    limits,
                 },
             )
             .await?;

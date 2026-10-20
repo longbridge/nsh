@@ -188,6 +188,14 @@ enum Command {
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
+        /// Run the app as an app embedded in another one would, with the
+        /// VM limits such an app sets: `memory` and `stack` (`KB`, `MB`,
+        /// `GB`), `load` and `call` (`ms`, `s`) and `nodes`, as in
+        /// `--limits memory=128MB,call=500ms`; the rest keep the embedding
+        /// defaults (256 MB, 4 MB, 10 s, 2 s, 200000), which `--limits`
+        /// alone runs with. Without it the app runs on its own, with none.
+        #[arg(long, value_name = "LIMITS", num_args = 0..=1, default_missing_value = "", value_parser = parse_limits)]
+        limits: Option<nsh_core::js::HostLimits>,
     },
     /// Package an installable app from the prebuilt runtime (no Rust
     /// needed). Metadata comes from `nsh.json` next to the entry, overridden
@@ -209,6 +217,14 @@ enum Command {
         /// Minify and strip debug info.
         #[arg(long)]
         release: bool,
+        /// Run the app as an app embedded in another one would, with the
+        /// VM limits such an app sets: `memory` and `stack` (`KB`, `MB`,
+        /// `GB`), `load` and `call` (`ms`, `s`) and `nodes`, as in
+        /// `--limits memory=128MB,call=500ms`; the rest keep the embedding
+        /// defaults (256 MB, 4 MB, 10 s, 2 s, 200000), which `--limits`
+        /// alone runs with. Without it the app runs on its own, with none.
+        #[arg(long, value_name = "LIMITS", num_args = 0..=1, default_missing_value = "", value_parser = parse_limits)]
+        limits: Option<nsh_core::js::HostLimits>,
         /// Log per-commit timings.
         #[arg(long)]
         trace: bool,
@@ -441,6 +457,25 @@ fn main() -> ExitCode {
     }
 }
 
+/// `--limits`' value ([`nsh_core::js::HostLimits::parse`]).
+fn parse_limits(spec: &str) -> Result<nsh_core::js::HostLimits, String> {
+    nsh_core::js::HostLimits::parse(spec)
+}
+
+/// Refuses `--limits` for an app of Rust only: they are its JS VM's, and it
+/// runs no JS.
+fn no_limits_for_rust(
+    entry: &std::path::Path,
+    limits: Option<nsh_core::js::HostLimits>,
+) -> anyhow::Result<()> {
+    if limits.is_some() && rust_app::is_root(entry) {
+        anyhow::bail!(
+            "--limits sets the limits of an app's JS VM, and an app of Rust only runs no JS"
+        );
+    }
+    Ok(())
+}
+
 fn run(mut command: Command) -> anyhow::Result<()> {
     let mut types = !matches!(command, Command::Trace { .. });
     if let Some(entry) = command.entry_mut() {
@@ -560,8 +595,10 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             entry,
             port,
             release,
+            limits,
         } => {
-            let session = dev::DevSession::start(&entry, port, release)?;
+            no_limits_for_rust(&entry, limits)?;
+            let session = dev::DevSession::start(&entry, port, release, limits)?;
             session.print_urls();
             session.watch(|| Ok(false))
         }
@@ -609,6 +646,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             entry,
             port,
             release,
+            limits,
             trace,
             fps,
             target,
@@ -616,19 +654,22 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             name,
             size,
             script,
-        } => run::run(
-            &entry,
-            port,
-            release,
-            run::HostFlags { trace, fps },
-            target,
-            device.as_deref(),
-            run::HostWindow {
-                name: name.as_deref(),
-                size: size.as_deref(),
-                script: script.as_deref(),
-            },
-        ),
+        } => {
+            no_limits_for_rust(&entry, limits)?;
+            run::run(
+                &entry,
+                port,
+                release,
+                run::HostFlags { limits, trace, fps },
+                target,
+                device.as_deref(),
+                run::HostWindow {
+                    name: name.as_deref(),
+                    size: size.as_deref(),
+                    script: script.as_deref(),
+                },
+            )
+        }
         Command::Keygen { name } => sign::keygen(&name),
         Command::Certify {
             root,
