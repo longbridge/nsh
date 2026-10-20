@@ -95,11 +95,11 @@ impl Bridge {
     }
 }
 
-fn send_chunk(stream: &mut impl Write, bytes: &[u8]) {
-    write!(stream, "{:x}\r\n", bytes.len()).unwrap();
-    stream.write_all(bytes).unwrap();
-    stream.write_all(b"\r\n").unwrap();
-    stream.flush().unwrap();
+fn send_chunk(stream: &mut impl Write, bytes: &[u8]) -> std::io::Result<()> {
+    write!(stream, "{:x}\r\n", bytes.len())?;
+    stream.write_all(bytes)?;
+    stream.write_all(b"\r\n")?;
+    stream.flush()
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn real_http_sse_streams_before_eof_and_abort_survives_llrt_async_host() {
     let address = listener.local_addr().unwrap();
     let (release_tx, release_rx) = channel();
     let server = std::thread::spawn(move || {
-        for _ in 0..2 {
+        for round in 0..2 {
             let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
@@ -124,11 +124,16 @@ fn real_http_sse_streams_before_eof_and_abort_survives_llrt_async_host() {
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").unwrap();
             let first = "data: first👋\n\n".as_bytes();
             // Split a UTF-8 scalar across actual HTTP chunks.
-            send_chunk(&mut stream, &first[..13]);
-            send_chunk(&mut stream, &first[13..]);
+            send_chunk(&mut stream, &first[..13]).unwrap();
+            send_chunk(&mut stream, &first[13..]).unwrap();
             release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            send_chunk(&mut stream, b"data: second\n\n");
-            stream.write_all(b"0\r\n\r\n").unwrap();
+            let rest = send_chunk(&mut stream, b"data: second\n\n")
+                .and_then(|()| stream.write_all(b"0\r\n\r\n"));
+            // The second request was aborted: the client may have closed
+            // the connection already (a broken pipe or a reset).
+            if round == 0 {
+                rest.unwrap();
+            }
         }
     });
     let mut bridge = Bridge::new();
