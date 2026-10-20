@@ -4,6 +4,9 @@
 //! steps ([`Selector`]) as a user's eyes would: the top screen of a stack
 //! and the top modal first.
 
+// What only the headless driver uses (it does not run in WebAssembly).
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -14,7 +17,7 @@ use nsh_core::{
     MountItem, NodeId, Points, Size, ViewKind, ui::PropEnum,
 };
 
-use super::selector::{Matcher, Selector, TextMatch};
+use crate::selector::{Matcher, Selector, TextMatch};
 
 /// The surface's root view: every app view hangs below it.
 const ROOT: NodeId = 1;
@@ -107,7 +110,7 @@ struct View {
 
 /// Which views a selector matched, for a step that acts on one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Pick {
+pub enum Pick {
     /// The view.
     One(NodeId),
     /// None matched.

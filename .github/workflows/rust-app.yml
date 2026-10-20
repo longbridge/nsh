@@ -172,6 +172,16 @@ jobs:
           for app in counter gallery rust-exports; do
             ./target/debug/nsh test "examples/$app"
           done
+      # The same tests in the runner's Chrome, headless, with the browser's
+      # trusted input (`nsh test --target web`): those a real platform runs
+      # (no stubbed routes or seeded storage, real time).
+      - name: Run the examples' tests in Chrome
+        run: |
+          ./target/debug/nsh test examples/counter --target web
+          for file in form navigation photos; do
+            ./target/debug/nsh test "examples/gallery/tests/$file.test.tsx" --target web
+          done
+          ./target/debug/nsh test examples/gallery/tests/environment.test.tsx --target web --filter appearance
       - name: Publish a TSX app with a Rust crate for the web
         run: |
           # A TSX entry and the app's crate: QuickJS runs App.tsx, the

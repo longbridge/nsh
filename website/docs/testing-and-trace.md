@@ -257,13 +257,13 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 
 ### On a real platform
 
-`nsh test --target macos` (or `gpui`) runs the same tests on the platform's development host instead of headless: each `open`
-starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's own input
-at the views their selectors name, as Playwright does in a browser:
+`nsh test --target macos` (or `gpui`, `web`) runs the same tests on the platform's development host instead of headless:
+each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
+own input at the views their selectors name, as Playwright does in a browser:
 
 - a press is a click at the view's middle, a long press a held click, `type` clicks the input and types its keys,
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS, the mouse's back
-  button in GPUI);
+  button in GPUI, the browser's back button on the web);
 - a view off screen is scrolled into view first, a gesture at a time;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
@@ -274,6 +274,7 @@ at the views their selectors name, as Playwright does in a browser:
 ```sh
 nsh test --target macos                       # the app's tests in macOS windows
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
+nsh test --target web                         # in a headless Chrome, Edge or Chromium
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
@@ -283,6 +284,11 @@ real time cannot do, reject. What a real platform cannot be given yet makes `ope
 out: stubbed `network` routes, `storage`, `clipboard`, `locale`, `reducedMotion` and `safeArea`; requests go to the
 network. `app.storage()` and `app.requests()` are headless only. An app with Rust crates of its own runs its tests
 headless for now.
+
+On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
+on this machine, or the executable `--browser <PATH>` names (a browser is needed: `nsh test` says where it looked
+when it finds none). One browser serves the run, and each `open` gets a page with storage of its own. The input is
+the browser's trusted input, as a user's: mouse clicks, wheel scrolling and keys.
 
 ### Steps from standard input
 

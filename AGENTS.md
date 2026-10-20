@@ -83,8 +83,9 @@ crates/
   nsh-platform-web/    WebAssembly backend (published web apps, `nsh run --target web`, the website's live demos): the engine on
                        the page's main thread (`LocalEngine`), text laid out with browser font metrics, batches as JSON + CSS
                        for the DOM runtime in `web/nsh.js`, the animator on requestAnimationFrame, fetch over the browser's
-                       (`net.rs`); feature `bytecode-only`: published apps' runtime (`nsh.wasm`, no QuickJS parser), default
-                       features: the development host's (`nsh-dev.wasm`, source and hot updates); `web/index.html` is the demo
+                       (`net.rs`); feature `bytecode-only`: published apps' runtime (`nsh.wasm`, no QuickJS parser), feature
+                       `dev`: the development host's (`nsh-dev.wasm`, source and hot updates, the model `nsh test --target web`
+                       asks about); `web/index.html` is the demo
                        player (`cargo xtask web`); feature `compiler`: the playground's TSX compiler (`nsh-playground.wasm`)
                        (docs/dev/web.md)
   nsh-platform-linux/  GTK 4 backend (Linux): one `NshView` widget per node drawn with GSK, Pango text engine (typeset on the engine
@@ -124,7 +125,8 @@ crates/
                        with a `describe` program, which prints the sets as data for the CLI to bundle, compile and declare with, the
                        hosts and runners, and the headless runner of `nsh test`; it takes nsh's crates where the app's crates do:
                        crates.io at the CLI's version, or the checkout they depend on by path; docs/dev/tooling.md); web packages and the
-                       browser host's pages (`web.rs`, `web/`); what it prints (`ui.rs`:
+                       browser host's pages (`web.rs`, `web/`); `nsh test --target web`'s headless browser (`cdp.rs`, `test_web.rs`);
+                       what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
                        `web` (the WebAssembly runtime and the website's demos), `api` (records `api/`; `--keep <app>`: a fixture app)
@@ -206,6 +208,7 @@ echo 'await app.scroll("id:photos", 3000)' | ./target/release/nsh test examples/
 echo 'await app.press("label:Plan"); await app.wait(500)' | ./target/debug/nsh test examples/hopper/App.tsx --trace   # steps from stdin (`app`: nsh/test's App)
 ./target/debug/nsh test examples/gallery                                   # the app's tests (`*.test.tsx`, `nsh/test`), headless; --trace prints batches
 ./target/debug/nsh test examples/gallery --target macos                    # the same tests in macOS windows: native input at the views (`nsh_testing::agent`)
+./target/debug/nsh test examples/gallery --target web                      # in a headless Chrome / Edge / Chromium (found, or --browser <PATH>): trusted input over CDP
 ./target/debug/nsh check examples/hopper                                   # type check (TypeScript 7's native tsc, downloaded once; no Node)
 ./target/debug/nsh run examples/counter --trace                            # dev server + Catalyst host (390×844), hot reload on save
 ./target/debug/nsh run examples/gallery --target ios                       # in an iOS simulator (boots one; needs the nsh-ios-host sim build)

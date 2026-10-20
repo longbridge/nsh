@@ -44,6 +44,7 @@ pub(crate) fn test(
     trace: bool,
     junit: Option<&Path>,
     target: Option<crate::run::Target>,
+    browser: Option<&Path>,
 ) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let work_dir = app_dir.join(".nsh/test");
@@ -73,13 +74,18 @@ pub(crate) fn test(
     };
     let start = Instant::now();
     let mut tally = Tally::default();
-    let host = target.map(crate::test_host::starter).transpose()?;
+    if target.is_some() && crate::rust_app::current().is_some() {
+        bail!(
+            "an app with Rust crates of its own runs its tests headless for now: leave out --target"
+        )
+    }
+    if browser.is_some() && target.is_none() {
+        bail!("--browser goes with --target web");
+    }
+    let host = target
+        .map(|target| crate::test_host::starter(target, browser))
+        .transpose()?;
     match crate::rust_app::current() {
-        Some(_) if host.is_some() => {
-            bail!(
-                "an app with Rust crates of its own runs its tests headless for now: leave out --target"
-            )
-        }
         Some(app) => {
             let request = TestRequest {
                 protocol: nsh_testing::PROTOCOL,

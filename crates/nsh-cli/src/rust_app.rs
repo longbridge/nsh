@@ -1237,7 +1237,9 @@ opt-level = 3
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
                  [features]\n# The runtime of published apps: bytecode only (nsh-platform-web).\n\
-                 bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\n\
+                 bytecode-only = [\"nsh-platform-web/bytecode-only\"]\n\
+                 # The development host's: what `nsh test --target web` asks about.\n\
+                 dev = [\"nsh-platform-web/dev\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\nnsh-platform-web = {}\n",
                 self.bin("web"),
@@ -1312,7 +1314,7 @@ opt-level = 3
         let features: &[&str] = match kind {
             _ if rust => &[],
             crate::runtime::WebKind::Release => &["--features", "bytecode-only"],
-            crate::runtime::WebKind::Dev => &[],
+            crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
             (

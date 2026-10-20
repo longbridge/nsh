@@ -618,6 +618,75 @@ class Player {
     this.installInput();
   }
 
+  // Tests ---------------------------------------------------------------
+
+  /**
+   * A test session runs (`nsh test --target web`): the module keeps the
+   * model of the app its agent asks about, from the next bundle on.
+   */
+  testStart() {
+    this.wasm.nsh_test_start?.();
+  }
+
+  /** Whether this runtime answers test steps (the development host's). */
+  get takesTests() {
+    return typeof this.wasm?.nsh_test_answer === "function";
+  }
+
+  /**
+   * Answers a test step (`nsh_dev::protocol::TestStep`) as an
+   * `nsh_dev::protocol::StepOutcome`: the module's model answers what it
+   * knows of the app, the page's views where they are.
+   */
+  testStep(step) {
+    if (!this.takesTests) return { outcome: "failed", message: "this runtime takes no test steps" };
+    const len = this.withStrings([JSON.stringify(step)], (p, l) => this.wasm.nsh_test_answer(p, l));
+    const answer = JSON.parse(this.str(this.wasm.nsh_test_answer_ptr(), len));
+    if ("done" in answer) return { outcome: "done", value: answer.done ?? null };
+    if ("failed" in answer) return { outcome: "failed", message: answer.failed };
+    try {
+      return { outcome: "done", value: this.testPage(step.query ?? {}) };
+    } catch (e) {
+      return { outcome: "failed", message: String(e?.message ?? e) };
+    }
+  }
+
+  /** What only the page's views answer of a test agent's question. */
+  testPage(query) {
+    switch (query.query) {
+      case "bounds": {
+        // CSS pixels from the viewport's top left: what the browser's input
+        // (the DevTools protocol's) takes.
+        const el = this.views.get(query.id);
+        if (!el?.isConnected) return null;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return null;
+        return [r.left, r.top, r.width, r.height];
+      }
+      case "viewport":
+        return [window.innerWidth, window.innerHeight];
+      case "input_text": {
+        const field = this.views.get(query.id)?._field;
+        return field ? field.value : null;
+      }
+      case "dialog_point": {
+        const backdrops = this.root.querySelectorAll(".nsh-dialog-backdrop");
+        const backdrop = backdrops[backdrops.length - 1];
+        if (!backdrop) throw new Error("no dialog is shown");
+        if (query.button == null) {
+          // Outside its card: the backdrop's corner.
+          const r = backdrop.getBoundingClientRect();
+          return [r.left + 2, r.top + 2];
+        }
+        const button = [...backdrop.querySelectorAll("button")].find((b) => b.textContent.trim() === query.button);
+        if (!button) throw new Error(`the dialog has no button ${JSON.stringify(query.button)}`);
+        const r = button.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2];
+      }
+    }
+    throw new Error(`the page cannot answer ${JSON.stringify(query)}`);
+  }
+
   // Memory --------------------------------------------------------------
 
   str(ptr, len) {

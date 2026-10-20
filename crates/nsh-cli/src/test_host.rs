@@ -4,7 +4,8 @@
 //! (`DevServer::test_session`) serving that build, and starts the host on
 //! it; the host's test agent (`nsh_testing::agent`) takes the test's steps
 //! at the views the selectors name, with the platform's own input. The
-//! host goes when the test closes the app.
+//! host goes when the test closes the app. The web's host is a page in a
+//! headless browser, whose agent runs in this process (`test_web.rs`).
 
 use std::{
     path::Path,
@@ -24,11 +25,18 @@ use crate::{build, run::Target, ui};
 /// How long a host may take to start and connect.
 const CONNECT: Duration = Duration::from_secs(60);
 
-/// Starts the apps tests open on `target`'s host.
-pub(crate) fn starter(target: Target) -> anyhow::Result<StartHost> {
+/// Starts the apps tests open on `target`'s host; `browser` is the one
+/// `--target web` runs them in (else the one found on this machine).
+pub(crate) fn starter(target: Target, browser: Option<&Path>) -> anyhow::Result<StartHost> {
+    if browser.is_some() && target != Target::Web {
+        anyhow::bail!("--browser goes with --target web");
+    }
+    if target == Target::Web {
+        return crate::test_web::starter(browser);
+    }
     if !matches!(target, Target::Macos | Target::Gpui) {
         anyhow::bail!(
-            "nsh test --target runs on macos and gpui for now (the other platforms' test agents follow)"
+            "nsh test --target runs on macos, gpui and web for now (the other platforms' test agents follow)"
         );
     }
     // Built (in a checkout) or found once, before the first test.
@@ -79,42 +87,8 @@ fn start(
     entry: &Path,
     options: &HostOptions,
 ) -> Result<TestHost, String> {
-    let built = build::compile(entry, false).map_err(|e| e.plain)?;
+    let server = serve(entry)?;
     let dir = entry.parent().unwrap_or(Path::new("."));
-    let server = DevServer::start(
-        "127.0.0.1:0".parse().expect("an address"),
-        nsh_js::BYTECODE_VERSION,
-        Some(dir.to_path_buf()),
-        |event| {
-            // The app's log lines, as `nsh run` shows them; the host's own
-            // coming and going is the test's business.
-            if let ClientEvent::Log(log) = event {
-                let level = match log.level {
-                    LogLevel::Error => log::Level::Error,
-                    LogLevel::Warn => log::Level::Warn,
-                    LogLevel::Info => log::Level::Info,
-                    LogLevel::Debug => log::Level::Debug,
-                    LogLevel::Trace => log::Level::Trace,
-                };
-                crate::logger::forward(level, &log.target, &log.message);
-            }
-        },
-    )
-    .map_err(|e| format!("cannot start a dev server: {e}"))?;
-    server.serve_files(build::crate_assets().map(|a| (a.path, a.source)));
-    server.test_session();
-    let capabilities = built.capabilities_json();
-    server.publish(
-        built.bytecode,
-        built.code,
-        built.source_map,
-        AppInfo {
-            capabilities,
-            id: crate::package::app_id(entry).ok(),
-        },
-        None,
-        built.ui_sets,
-    );
     let url = format!("ws://{}{WS_PATH}", server.local_addr());
     // A fresh data directory: what the app keeps (its storage) starts empty
     // in every test, as headless runs' does.
@@ -168,11 +142,54 @@ fn start(
     })
 }
 
+/// A dev server in a test session serving `entry`'s build, as `nsh run`
+/// serves it (the app's assets, its log lines shown as `nsh run` shows
+/// them).
+pub(crate) fn serve(entry: &Path) -> Result<DevServer, String> {
+    let built = build::compile(entry, false).map_err(|e| e.plain)?;
+    let dir = entry.parent().unwrap_or(Path::new("."));
+    let server = DevServer::start(
+        "127.0.0.1:0".parse().expect("an address"),
+        nsh_js::BYTECODE_VERSION,
+        Some(dir.to_path_buf()),
+        |event| {
+            // The app's log lines, as `nsh run` shows them; the host's own
+            // coming and going is the test's business.
+            if let ClientEvent::Log(log) = event {
+                let level = match log.level {
+                    LogLevel::Error => log::Level::Error,
+                    LogLevel::Warn => log::Level::Warn,
+                    LogLevel::Info => log::Level::Info,
+                    LogLevel::Debug => log::Level::Debug,
+                    LogLevel::Trace => log::Level::Trace,
+                };
+                crate::logger::forward(level, &log.target, &log.message);
+            }
+        },
+    )
+    .map_err(|e| format!("cannot start a dev server: {e}"))?;
+    server.serve_files(build::crate_assets().map(|a| (a.path, a.source)));
+    server.test_session();
+    let capabilities = built.capabilities_json();
+    server.publish(
+        built.bytecode,
+        built.code,
+        built.source_map,
+        AppInfo {
+            capabilities,
+            id: crate::package::app_id(entry).ok(),
+        },
+        None,
+        built.ui_sets,
+    );
+    Ok(server)
+}
+
 /// The apps started so far: each gets a data directory of its own.
 static NEXT_APP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// `text` (the host's output) on lines of its own, if there is any.
-fn indented(text: &str) -> String {
+pub(crate) fn indented(text: &str) -> String {
     if text.trim().is_empty() {
         String::new()
     } else {
