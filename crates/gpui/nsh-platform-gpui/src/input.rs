@@ -953,11 +953,9 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
     let mouse = key == Key::Mouse;
     match event.kind {
         PointerKind::Down => {
-            // The secondary button; on macOS also Control + the primary
-            // one.
-            let secondary = event.button == 1
-                || (cfg!(target_os = "macos") && event.button == 0 && event.modifiers.ctrl);
-            if mouse && secondary {
+            // The secondary button (GPUI's macOS window already turns a
+            // Control-click into one).
+            if mouse && event.button == 1 {
                 context_menu(surface, x, y, event.modifiers);
                 return;
             }
