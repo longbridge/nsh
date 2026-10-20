@@ -122,6 +122,8 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         viewport: Size::new(px(390.0), px(844.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment::default(),
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),

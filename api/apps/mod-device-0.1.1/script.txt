@@ -1,0 +1,33 @@
+# What a user does and sees (compat/apps.rs). The headless runtime is an
+# iOS phone at 1 pixel per point, in the light scheme, left to right.
+expect OS: ios
+expect Idiom: phone
+expect Pad: false TV: false Catalyst: false Desktop: false
+expect Version: 0.0
+expect Select: ios
+expect Select mobile: mobile
+expect Ratio: 1 font 1
+expect Pixels: 10 round 10
+expect Font scale: 1
+expect Window: 390x844
+expect Scheme: light
+expect RTL: false swap true constants false
+frame id:first 0 0 100 20
+tap id:dark
+expect Scheme: dark
+absent Scheme: light
+tap id:system
+expect Scheme: light
+tap id:rtl
+expect RTL: true swap true constants true
+frame id:first 290 0 100 20
+tap id:ltr
+expect RTL: false swap true constants false
+frame id:first 0 0 100 20
+covers [nsh/device] Platform
+covers [nsh/device] PixelRatio
+covers [nsh/device] I18nManager
+covers [nsh/device] colorScheme
+covers [nsh/device] setColorScheme
+covers [nsh/device] fontScale
+covers [nsh/device] windowSize

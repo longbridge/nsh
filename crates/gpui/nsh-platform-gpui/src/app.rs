@@ -79,6 +79,8 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
 }
 
 /// What [`run_app`] runs.
+// Made once per app and moved into it: the size of a bundle is no cost.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum AppSource {
     /// A Rust app: its root component.
@@ -271,6 +273,8 @@ impl AppView {
             viewport: nsh_core::Size::default(),
             trace: options.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
             header_heights: (

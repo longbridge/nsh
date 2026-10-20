@@ -35,7 +35,11 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   `context` (`Theme()`, `<Theme.Provider value>`), `split(props, keys)` (`[picked, rest]`, keeping getters), `mount`;
   the primitives `View`, `Text`, `Scroll`, `Input`.
 - `nsh:rt` (only compiled code imports it): `element`, `text`, `append`, `insert`, `prop`, `bindProp`, `spread`,
-  `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`.
+  `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`, `metaUrl`. The bundle shares one `import.meta`, so
+  the compiler turns each module's `import.meta.url` into `metaUrl("<its path in the app>")` (a module that mentions
+  `import.meta` goes through the compiler even without JSX), which `dom.rs` resolves against the app's directory
+  (`${pluginDir}` as a `file:` URL), else the page's URL (`HostOptions::base_url`), else `asset:/`. `import.meta`
+  itself is left as it is.
 - `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `locale`, `Platform`, `PixelRatio`, `I18nManager`) and
   `nsh/accessibility` (`reduceMotion`, `screenReaderEnabled`, `AccessibilityInfo`): the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.

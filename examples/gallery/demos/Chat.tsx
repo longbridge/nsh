@@ -1,4 +1,4 @@
-import { batch, computed, effect, Input, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
+import { batch, cleanup, computed, effect, Input, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { Platform } from "nsh/device";
@@ -6,6 +6,7 @@ import { List } from "nsh/list";
 import { keyboard, KeyboardAvoidingView, useSafeAreaInsets } from "nsh/ui/mobile";
 import { Icon, type IconName } from "../icons";
 import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
+import { localReply, type Provider } from "./chat/local";
 import { Glyph } from "./chat/glyphs";
 import { type Block, Markdown, parse } from "./chat/markdown";
 import { ActionButton, Avatar, Caret, DateSeparator, ErrorRow, FileChip, Photo, Spinner, ToolCard } from "./chat/parts";
@@ -20,6 +21,8 @@ const models = [
   { value: "Vision", label: "Vision" },
 ] as const;
 
+const providers = [{ value: "Claude", label: "Claude" }, { value: "Codex", label: "Codex" }] as const;
+
 const featured: { id: string; icon: IconName; note: string }[] = [
   { id: "guide", icon: "text", note: "Markdown, a table, code" },
   { id: "reason", icon: "spark", note: "Reasoning first" },
@@ -33,9 +36,8 @@ class Stopped extends Error {}
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * A simulated AI assistant: replies stream token by token (batched per
- * frame), think first, call tools, fail and recover; every scenario comes
- * from local scripts and timers. The desktop layout adds a list of
+ * A chat assistant backed by local Claude / Codex on desktop, and scripted
+ * streaming scenarios on web and mobile. The desktop layout adds a list of
  * conversations on the left and keeps messages and the composer in a
  * readable column.
  */
@@ -49,6 +51,9 @@ export function Chat() {
 
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
+  const native = Platform.isDesktop && Platform.OS !== "web";
+  const provider = signal<Provider>("Codex");
+  let cancelLocal: (() => void) | undefined;
   const draft = signal("");
   const inputHeight = signal(20);
   const attachment = signal<{ image: string; file: FileRef } | null>(null);
@@ -162,9 +167,9 @@ export function Chat() {
 
   /** Runs a scenario's reply; `at` replaces that message (retry, regenerate). */
   const reply = async (s: Scenario, at?: string) => {
-    const r: Run = { id: nextId(), model: s.model, script: s.id, cancelled: false, md: "", reason: "", thinkStart: performance.now(), thinkSeconds: null };
+    const r: Run = { id: nextId(), model: s.model, script: native ? `local:${provider()}` : s.id, cancelled: false, md: "", reason: "", thinkStart: performance.now(), thinkSeconds: null };
     run = r;
-    const placeholder: Assistant = { kind: "assistant", id: r.id, model: s.model, script: s.id, tools: [], md: "", blocks: [], status: "done" };
+    const placeholder: Assistant = { kind: "assistant", id: r.id, model: s.model, script: r.script, tools: [], md: "", blocks: [], status: "done" };
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     batch(() => {
       liveReason.set("");
@@ -174,6 +179,25 @@ export function Chat() {
       liveId.set(r.id);
       messages.set(at ? messages().map((m) => (m.id === at ? placeholder : m)) : [...messages(), placeholder]);
     });
+    if (native) {
+      const all = messages();
+      const conversation = all.slice(0, all.findIndex((m) => m.id === r.id)).filter((m) => m.kind === "user" || (m.kind === "assistant" && m.id !== r.id && m.id !== at));
+      const prompt = "You are a helpful chat assistant. Answer the final user message using the conversation below. Reply directly in Markdown. Do not use tools or modify files.\n\n" + conversation.map((m) => m.kind === "user" ? `User: ${m.text}` : m.kind === "assistant" ? `Assistant: ${m.md}` : "").join("\n\n");
+      try {
+        cancelLocal = localReply(provider(), prompt, (chunk) => {
+          if (run !== r || r.cancelled) return;
+          pendingText += chunk;
+          queue();
+        }, (error) => {
+          if (run !== r || r.cancelled) return;
+          cancelLocal = undefined;
+          freeze(r, error ? "error" : "done", error);
+        });
+      } catch (error) {
+        freeze(r, "error", `${provider()}: ${error instanceof Error ? error.message : String(error)}. Install and sign in to the CLI, then retry.`);
+      }
+      return;
+    }
     try {
       await wait(r, 450);
       for (const step of s.steps) {
@@ -213,8 +237,16 @@ export function Chat() {
   const stop = () => {
     if (!run) return;
     run.cancelled = true;
+    cancelLocal?.();
+    cancelLocal = undefined;
     freeze(run, "stopped");
   };
+
+  cleanup(() => {
+    if (run) run.cancelled = true;
+    cancelLocal?.();
+    stopTicker();
+  });
 
   const jumpToLatest = () => {
     toEnd();
@@ -225,7 +257,7 @@ export function Chat() {
     if (run) return;
     menu.set(false);
     following.set(true);
-    const offline = s.steps.find((step) => "offline" in step) as { offline: number } | undefined;
+    const offline = !native && s.steps.find((step) => "offline" in step) as { offline: number } | undefined;
     const user: User = { kind: "user", id: nextId(), text, image, file, waiting: !!offline };
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     batch(() => {
@@ -289,7 +321,8 @@ export function Chat() {
   const retry = (m: Assistant) => {
     if (run) return;
     following.set(true);
-    void reply(retried, m.id);
+    if (native) regenerate(m);
+    else void reply(retried, m.id);
   };
   const copy = (key: string, text: string) => {
     Clipboard.setString(text);
@@ -361,7 +394,7 @@ export function Chat() {
       <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 26 }}>
           <Avatar />
-          <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted }}>{m().model}</Text>
+          <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted }}>{m().script.startsWith("local:") ? m().script.slice(6) : m().model}</Text>
           <If when={!live() && m().status === "stopped"}>
             <Badge label="Stopped" tone="warn" />
           </If>
@@ -451,7 +484,7 @@ export function Chat() {
             <IconTile name="spark" tint={colors.accent} size={56} />
             <Text style={{ fontSize: 22, fontWeight: "600", color: colors.text }}>How can I help?</Text>
             <Text style={{ fontSize: 15, lineHeight: 21, color: colors.muted, textAlign: "center" }}>
-              A simulated assistant: every reply is scripted and streamed locally.
+              {native ? "Chat with your local Claude or Codex CLI. Sign in to the CLI in a terminal first." : "A simulated assistant: every reply is scripted and streamed locally."}
             </Text>
           </View>
         </Appear>
@@ -720,7 +753,7 @@ export function Chat() {
               onSubmitEditing={() => {
                 if (!streaming()) send();
               }}
-              placeholder={`Message ${model()}`}
+              placeholder={`Message ${native ? provider() : model()}`}
               placeholderTextColor={colors.faint}
               selectionColor={colors.accent}
               onFocus={() => menu.set(false)}
@@ -739,7 +772,9 @@ export function Chat() {
                 <RoundButton icon="plus" label="Add" variant="secondary" onPress={() => menu.set(!menu())} />
               </View>
               <View style={{ flex: 1 }}>
-                <Segmented size="small" options={models} value={model()} onChange={(v) => model.set(v)} />
+                <If when={native} else={<Segmented size="small" options={models} value={model()} onChange={(v) => model.set(v)} />}>
+                  <Segmented size="small" options={providers} value={provider()} onChange={(v) => { if (!run) provider.set(v); }} />
+                </If>
               </View>
               <If
                 when={streaming()}

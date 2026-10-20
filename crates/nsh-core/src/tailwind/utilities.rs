@@ -11,7 +11,7 @@ use crate::{
         BoxShadow, ColorStop, Filter, Gradient, GradientKind, GradientSize, KeyframeAnimation,
         Keyframes, Transition, TransitionProps,
     },
-    geometry::{DefiniteLength, REM_SIZE, deg, percentage, point, px},
+    geometry::{DefiniteLength, Points, REM_SIZE, Size, deg, percentage, point, px},
     ops::ResizeMode,
     props::PointerEvents,
     style::{
@@ -392,14 +392,14 @@ impl Parts {
         style: &mut Style,
         props: &mut ClassProps,
         theme: &Theme,
-        window: (f32, f32),
+        window: Size<Points>,
         only: u16,
     ) {
         let has = |group: u16| only & group != 0;
         for &(key, fw, fh) in self.screen.iter().filter(|_| has(touched::SCREEN)) {
             let _ = style.set_key(
                 key,
-                crate::style::StyleValue::Number(fw * window.0 + fh * window.1),
+                crate::style::StyleValue::Number(fw * window.width.0 + fh * window.height.0),
             );
         }
         if self.transform_set && has(touched::TRANSFORM) {

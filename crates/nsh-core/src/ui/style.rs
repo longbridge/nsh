@@ -3162,7 +3162,7 @@ mod tests {
                 dark,
                 ..Default::default()
             },
-            window: (390.0, 844.0),
+            window: crate::geometry::size_pt(390.0, 844.0),
             rtl: false,
             states,
             position: 0,
@@ -3316,7 +3316,7 @@ mod tests {
         list.apply(
             &Context {
                 env: ClassEnvironment::default(),
-                window: (390.0, 844.0),
+                window: crate::geometry::size_pt(390.0, 844.0),
                 rtl: false,
                 states: 0,
                 position: 0,

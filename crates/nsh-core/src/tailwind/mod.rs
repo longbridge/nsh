@@ -37,6 +37,7 @@ use self::{
     utilities::{Parts, touched},
 };
 use crate::{
+    geometry::{Points, Size},
     ops::ResizeMode,
     props::PointerEvents,
     style::{Color, EllipsizeMode, Style, TextShadow},
@@ -117,19 +118,22 @@ pub struct ClassEnvironment {
     pub reduce_motion: bool,
 }
 
-/// What a node's classes are matched against.
-pub(crate) struct Context<'a> {
-    pub(crate) env: ClassEnvironment,
+/// What a node's classes are matched against: the core builds it per
+/// node; tools resolve classes outside a tree with one of their own.
+pub struct Context<'a> {
+    /// The appearance, platform and motion setting.
+    pub env: ClassEnvironment,
     /// The window (root view) size.
-    pub(crate) window: (f32, f32),
-    pub(crate) rtl: bool,
+    pub window: Size<Points>,
+    /// Right-to-left layout.
+    pub rtl: bool,
     /// [`state`] bits of the node.
-    pub(crate) states: u8,
+    pub states: u8,
     /// [`position`] bits of the node.
-    pub(crate) position: u8,
+    pub position: u8,
     /// [`state`] bits of the nearest ancestor group with this name (`""`
     /// for unnamed groups).
-    pub(crate) group: &'a dyn Fn(&str) -> u8,
+    pub group: &'a dyn Fn(&str) -> u8,
 }
 
 /// Conditions of one rule (all must hold).
@@ -162,11 +166,11 @@ impl Condition {
             || self
                 .reduce_motion
                 .is_some_and(|r| r != cx.env.reduce_motion)
-            || self.min_width.is_some_and(|w| cx.window.0 < w)
-            || self.max_width.is_some_and(|w| cx.window.0 >= w)
+            || self.min_width.is_some_and(|w| cx.window.width.0 < w)
+            || self.max_width.is_some_and(|w| cx.window.width.0 >= w)
             || self
                 .landscape
-                .is_some_and(|l| l != (cx.window.0 > cx.window.1))
+                .is_some_and(|l| l != (cx.window.width > cx.window.height))
             || cx.states & self.states != self.states
             || cx.states & self.not_states != 0
         {
@@ -345,8 +349,10 @@ impl ClassList {
         self.rules.is_empty()
     }
 
-    /// Applies the matching rules to `style` and `props`.
-    pub(crate) fn apply(
+    /// Applies the rules matching `cx` to `style` and `props`, then
+    /// `inline` (the node's inline style, which only `!` utilities win
+    /// over).
+    pub fn apply(
         &self,
         cx: &Context<'_>,
         theme: &Theme,

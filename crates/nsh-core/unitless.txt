@@ -31,6 +31,9 @@ effects::Transition.duration                                     # time
 effects::Transition.easing                                       # easing curve coordinates (unit square)
 effects::Transition::EASE                                        # easing curve coordinates (unit square)
 effects::compose_color_matrices ->                               # color components
+filesystem::FileMetadata.atime_ms                                # time (milliseconds since the epoch)
+filesystem::FileMetadata.birthtime_ms                            # time (milliseconds since the epoch)
+filesystem::FileMetadata.mtime_ms                                # time (milliseconds since the epoch)
 js::host::Clamped::clamped(max)                                  # a generic number (a JS value, a recorded slot)
 js::host::Clamped::clamped(min)                                  # a generic number (a JS value, a recorded slot)
 js::host::HostInput::as_number ->                                # a generic number (a JS value, a recorded slot)
@@ -189,9 +192,13 @@ ui::host::Scroll::zoom_range(min)                                # a zoom scale 
 ui::host::Video::progress_interval(ms)                           # time
 ui::host::Video::rate(rate)                                      # a playback rate multiplier
 ui::host::Video::volume(volume)                                  # audio volume, 0..1
+ui::js::JsHost::date ->                                          # time (a JS Date's milliseconds since the epoch)
+ui::js::JsHost::new_date(millis)                                 # time (a JS Date's milliseconds since the epoch)
 ui::js::JsHost::new_number(n)                                    # a generic number (a JS value, a recorded slot)
 ui::js::JsHost::number ->                                        # a generic number (a JS value, a recorded slot)
+ui::js::JsIn::as_date ->                                         # time (a JS Date's milliseconds since the epoch)
 ui::js::JsIn::as_number ->                                       # a generic number (a JS value, a recorded slot)
+ui::module::ConstantValue::Number.0                              # a generic number (a module constant's JS value)
 ui::responder::PanGesture.vx                                     # a rate or a physical constant of an animation
 ui::responder::PanGesture.vy                                     # a rate or a physical constant of an animation
 ui::responder::ResponderEvent.timestamp                          # time

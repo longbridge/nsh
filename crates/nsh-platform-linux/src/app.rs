@@ -40,6 +40,10 @@ pub(crate) fn ui_sets() -> Vec<nsh_core::ui::Registry> {
 
 /// What [`run_app`] runs.
 #[derive(Debug)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one source per view; keep the public constructor API without allocation"
+)]
 pub enum AppSource {
     /// A Rust app: its root component.
     Rust(Root),
@@ -211,6 +215,8 @@ impl AppView {
             viewport: nsh_core::Size::new(px(0.0), px(0.0)),
             trace: options.trace,
             network: Some(crate::net::network()),
+            websocket: None,
+            filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
             header_heights: (

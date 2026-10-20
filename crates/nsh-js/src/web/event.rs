@@ -86,7 +86,7 @@ impl Target {
     }
 
     /// Sets event handler attribute `kind` (`null` removes it).
-    fn set_handler(&mut self, ctx: Ctx, kind: &str, value: Raw) {
+    pub(crate) fn set_handler(&mut self, ctx: Ctx, kind: &str, value: Raw) {
         let callable = js::is_object(value);
         match self.handlers.iter_mut().find(|(k, _)| k == kind) {
             Some((_, v)) if callable => *v = V::dup(ctx, value),
@@ -115,7 +115,7 @@ impl Target {
         }
     }
 
-    fn handler(&self, ctx: Ctx, kind: &str) -> V {
+    pub(crate) fn handler(&self, ctx: Ctx, kind: &str) -> V {
         self.handlers
             .iter()
             .find(|(k, _)| k == kind)
@@ -503,10 +503,16 @@ pub(crate) fn dispatch(ctx: Ctx, target_obj: Raw, e: Raw) -> R<bool> {
 
 /// Fires a trusted event `kind` at `target`.
 pub(crate) fn fire(ctx: Ctx, target_obj: Raw, kind: &str) -> R<bool> {
+    let e = trusted(ctx, kind)?;
+    dispatch(ctx, target_obj, e.raw())
+}
+
+/// A new trusted event `kind`, not dispatched yet.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn trusted(ctx: Ctx, kind: &str) -> R<V> {
     let mut data = new_event_data(ctx, kind.to_owned(), false, false, false);
     data.trusted = true;
-    let e = instance(ctx, js::UNDEFINED, Class::Event, data)?;
-    dispatch(ctx, target_obj, e.raw())
+    instance(ctx, js::UNDEFINED, Class::Event, data)
 }
 
 // --- AbortSignal ----------------------------------------------------------

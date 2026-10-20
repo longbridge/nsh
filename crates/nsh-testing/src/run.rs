@@ -26,10 +26,12 @@ use nsh_core::{
 };
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Edges, Engine, EngineConfig, Environment, MountSink,
-    headless::{DirectoryAssets, Headless, MemoryStorage, StubNetwork, UreqNetwork, print_batch},
 };
 
-use crate::module::{NetworkOption, OpenOptions};
+use crate::{
+    headless::{DirectoryAssets, Headless, MemoryStorage, StubNetwork, UreqNetwork, print_batch},
+    module::{NetworkOption, OpenOptions},
+};
 
 /// How long a test may take.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);

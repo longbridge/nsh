@@ -1,0 +1,10 @@
+# What a user does and sees (compat/apps.rs). Keys are listed in order,
+# a key set twice keeps its last value, and a missing key reads null.
+expect Storage empty
+tap id:set
+expect Storage set: a=1,b=two missing=null
+tap id:remove
+expect Storage removed: a=1 missing=null
+tap id:clear
+expect Storage cleared: none missing=null
+covers [nsh/storage] Storage

@@ -1,0 +1,31 @@
+# What a user does and sees (compat/apps.rs). The headless runtime has no
+# safe area insets and no keyboard.
+expect Safe area: 0 0 0 0
+expect Insets here: 0 0 0 0
+expect Keyboard: 0
+expect Calls: not called
+tap id:call
+expect Calls: done
+expect Card header
+expect Card body
+expect Card footer
+expect Elevated card
+expect Group header
+expect Group row one
+expect Group row two
+expect Group footer
+expect Row one
+expect Row two
+expect Row three
+frame id:safe 0 0 390 844
+frame id:inside 0 0 390 30
+covers [nsh/ui/mobile] Card
+covers [nsh/ui/mobile] Group
+covers [nsh/ui/mobile] ListView
+covers [nsh/ui/mobile] SafeAreaView
+covers [nsh/ui/mobile] KeyboardAvoidingView
+covers [nsh/ui/mobile] StatusBar
+covers [nsh/ui/mobile] Keyboard
+covers [nsh/ui/mobile] keyboard
+covers [nsh/ui/mobile] safeArea
+covers [nsh/ui/mobile] useSafeAreaInsets

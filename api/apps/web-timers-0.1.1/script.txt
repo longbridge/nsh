@@ -1,0 +1,27 @@
+# What a user does and sees (compat/apps.rs): a line per check, `<name>=<result>`.
+wait 2000
+expect order.tasks=[sync,microtask,promise,microtask2,timeout]
+expect order.delays=[0,10,20,30]
+expect order.fifo=abcd
+expect order.nested=[outer,outer-micro,sibling,inner]
+expect order.microtaskChain=[1,2,3]
+expect order.badDelays=[negative,nan,later]
+expect ids=[number,true,true,true]
+expect clearTimeout=[kept]
+expect clearFromTimer=[first]
+expect setInterval=3
+expect clearInterval=2|2
+expect clearIntervalUnknown=ok
+expect performance.now=[number,true,true]
+expect performance.delay=true
+expect performance.subMs=true
+expect console=[undefined,undefined,undefined,undefined,undefined]
+expect console.methods=[function,function,function,function,function]
+expect done
+covers [globals] setTimeout
+covers [globals] clearTimeout
+covers [globals] setInterval
+covers [globals] clearInterval
+covers [globals] queueMicrotask
+covers [globals] performance
+covers [globals] console

@@ -72,3 +72,42 @@ fn a_file_that_throws_as_it_loads_fails() {
     let error = run_file(&test_run(None), &todo().join("Broken.test.ts"), &mut |_| {}).unwrap_err();
     assert!(error.contains("the file is broken"), "{error}");
 }
+
+#[test]
+fn headless_preserves_environment_and_data_and_stops_on_process_exit() {
+    use std::time::{Duration, Instant};
+
+    use nsh_engine::{Bundle, EngineConfig, Os};
+    use nsh_testing::Headless;
+
+    let root = std::env::temp_dir().join(format!("nsh-trace-exit-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let expected = root.join("com.example.trace-exit");
+    let source = format!(
+        "import process from 'process'; import {{Platform}} from 'nsh/device';\n\
+         if (Platform.OS !== 'macos') throw new Error('trace OS was lost');\n\
+         if (process.dataDir !== {}) throw new Error('trace data directory was lost: ' + process.dataDir);\n\
+         process.exit(0);",
+        serde_json::to_string(&expected.to_string_lossy()).unwrap(),
+    );
+    let bundle = Bundle::source(source)
+        .with_app_id(Some("com.example.trace-exit"))
+        .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))
+        .unwrap();
+    let mut config = EngineConfig::new(bundle);
+    config.environment.os = Os::MacOs;
+    config.data_dir = Some(root.clone());
+    let started = Instant::now();
+    let mut app = Headless::start(config).unwrap();
+    let result = app.wait(Duration::from_secs(10));
+    let elapsed = started.elapsed();
+    let exited = app.screen().sent(&nsh_core::Command::ExitApp);
+    drop(app);
+    let _ = std::fs::remove_dir_all(root);
+    result.unwrap();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "headless ignored exit: {elapsed:?}"
+    );
+    assert!(exited, "process.exit did not reach the headless platform");
+}

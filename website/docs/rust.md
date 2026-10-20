@@ -311,8 +311,8 @@ test("a tap counts", async () => {
 ```
 
 Tests can also run the app headless in `cargo test`, with the same driver: on the real engine, without a window,
-with display frames at 60 Hz, so timers, tasks and animations run as on screen. `nsh_engine::headless::Headless`
-(nsh-engine's feature `headless`) starts the app, keeps a model of the views it shows (`app.screen()`: their texts,
+with display frames at 60 Hz, so timers, tasks and animations run as on screen. `nsh_testing::Headless` (nsh-testing's
+default features, without QuickJS) starts the app, keeps a model of the views it shows (`app.screen()`: their texts,
 the commands it sent) and takes the steps of `nsh test` (`press`, `type_text`, `submit`, `scroll`, `wait_for`), on
 views named by the same selectors (a text, an accessibility label or a test id; `text:`, `label:`, `id:`); a step
 returns an error with the texts on screen when it cannot be taken. A Rust app runs its root; `EngineConfig::new` is a
@@ -320,11 +320,13 @@ phone-sized engine with nothing else set:
 
 ```toml
 [dev-dependencies]
-nsh-engine = { version = "0.1", features = ["headless"] }
+nsh-engine = "0.1"
+nsh-testing = "0.1"
 ```
 
 ```rust
-use nsh_engine::{EngineConfig, headless::Headless};
+use nsh_engine::EngineConfig;
+use nsh_testing::Headless;
 
 #[test]
 fn a_tap_counts() {
@@ -335,12 +337,12 @@ fn a_tap_counts() {
 }
 ```
 
-A TSX entry is built with `nsh-testing` as `nsh run` builds it, against the UI sets its hosts serve: NSH's, and each
-crate's `registry()`, which `#[native_module]` makes:
+A TSX entry is built with `nsh-testing`'s feature `bundle` as `nsh run` builds it, against the UI sets its hosts
+serve: NSH's, and each crate's `registry()`, which `#[native_module]` makes:
 
 ```toml
 [dev-dependencies]
-nsh-testing = "0.1"
+nsh-testing = { version = "0.1", features = ["bundle"] }
 nsh-ui-mobile = "0.1"
 ```
 
@@ -353,7 +355,7 @@ fn the_module_formats_money() {
 }
 ```
 
-`nsh_testing::compile_tsx` builds the entry once for several tests, and `nsh_engine::headless::start` hands the
+`nsh_testing::compile_tsx` builds the entry once for several tests, and `nsh_testing::start` hands the
 batches to a test that keeps its own model of the screen. `examples/rust-exports` tests its TSX entry this way,
 `examples/gallery-rs` its Rust root.
 

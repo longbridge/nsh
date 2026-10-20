@@ -151,8 +151,9 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 - **Hot module replacement** (`nsh dev` / `nsh run` without `--release`): development bundles keep one CommonJS chunk per
   module (rolldown `preserveModules`, tree shaking off), each registered with the native hot runtime
   (`crates/nsh-js/src/hot.rs`, the `__nsh_hot` global that importing `nsh:hot` makes; only development bundles import
-  it). The script is an ES module importing `nsh:hot` and the namespaces of the native modules the app imports, for the
-  factories' `require`; an edit importing a native module the running script did not makes the host reload. After a
+  it). The script is an ES module importing `nsh:hot` and the namespaces of the native modules the app imports statically, for the
+  factories' `require`. Native `import()` expressions load on demand, so a platform branch can select its host's APIs;
+  the full import catalog still checks that the host serves every required UI set. An edit importing a native module the running script did not makes the host reload. After a
   rebuild the CLI compares the chunks with the last good build and publishes a patch (`ServerMessage::Patch`, protocol
   v2) before the full bundle; hosts running the patch's base apply it in place (`EngineControl::hot_update`,
   ~0.2–0.5ms) and otherwise load the bundle. The runtime runs the changed modules again, plus the importers of modules
@@ -189,7 +190,8 @@ package`, `publish`, the dev server) the bundle holds the whole app.
 
 ## Headless runs
 
-`nsh-engine`'s `headless` module (feature `headless`) runs apps without a platform, on its driver `headless::Headless`:
+`nsh-testing`'s `headless` module runs apps without a platform, on its driver `Headless` (the crate's default
+features, without QuickJS):
 the app on an engine (`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread), its batches
 applied to a model of the native views (`headless::Screen`, `headless/screen.rs`), and steps taken on what they show.
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
@@ -219,11 +221,11 @@ failure is the log's only). The model keeps inputs' text and edit count as platf
 edits than were typed is dropped. `headless::StubNetwork` (responses by `"<METHOD> <URL>"`, others fail) and
 `headless::MemoryStorage` (entries given up front) stand in for the device's services.
 
-Rust tests use the driver directly: `headless::start` (the engine with its frames, the batches to the caller), `headless::Screen`
-(texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `headless::Headless`.
-`EngineConfig::new(app)` is the phone-sized config the tests start from. `nsh-testing` adds what a TSX
-entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so that a Rust
-app's tests link neither the bundler nor QuickJS.
+Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
+`Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.
+`EngineConfig::new(app)` is the phone-sized config the tests start from. The features add the rest in layers, so a
+Rust app's tests link neither the bundler nor QuickJS: `js` is `nsh test`'s side (below), `bundle` builds a TSX entry
+against given sets in process (`compile_tsx`, `tsx`, `compiler`).
 
 ## `nsh test`
 
@@ -446,7 +448,7 @@ Windows' `nsh-windows-host.exe` / `nsh-windows-app.exe`; the distribution has GP
 `cargo xtask android --dev`), so `nsh run` never uses a missing or stale host; on a Mac without Xcode's Metal
 Toolchain it builds GPUI's hosts and runners with `nsh-platform-gpui/runtime-shaders` (`gpui.md`). The web runtimes (`runtime/web/nsh.wasm`
 for published apps, `nsh-dev.wasm` for the development host, and `nsh.js`: `docs/dev/web.md`) are always built with
-the `web` profile, into `target/wasm32-unknown-unknown/web/`.
+the `web` profile, into `target/wasm32-unknown-unknown/web/`. Every CLI wasm build, including an app's generated Rust runtime outside the checkout, selects `getrandom_backend="custom"` for the browser entropy bridge. `runtime::web_build_flags` appends it to explicit Rust flags or merges a Cargo target-config array, preserving the existing stack and user flags; generated web packages also retain their 8 MiB stack link argument.
 
 ## Releases
 

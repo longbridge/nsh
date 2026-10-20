@@ -35,7 +35,7 @@ builds keep their caches), and compiles each demo with `nsh build --release` int
 ignored by git), and publishes `examples/gallery` with `nsh package --target web` into `play/gallery/` (the website's
 Gallery page frames it; packaging builds `nsh.wasm`: `--target wasm32-unknown-unknown --profile web`, the release
 profile optimized for size, QuickJS still at `-O3`). Check the crate with `cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown`: off
-WebAssembly it is empty. `.cargo/config.toml` gives wasm32 an 8 MiB stack (QuickJS recursion).
+WebAssembly it is empty. `.cargo/config.toml` gives wasm32 an 8 MiB stack (QuickJS recursion) and selects getrandom's custom entropy backend. The CLI passes that backend flag to generated Rust-app builds as well, retaining existing compiler flags.
 
 QuickJS is C, so the build needs a clang that targets wasm32 and an `llvm-ar` (CI: Ubuntu's `clang` and `llvm`, with
 `AR_wasm32_unknown_unknown=llvm-ar`). Apple's clang has no WebAssembly target: on macOS point
@@ -62,7 +62,8 @@ build to the same file) and takes `nsh.js` from the crate.
   (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })`
   (`appId`: the `nsh.json` id, the page's `app.id`; a Rust app's root carries its own), without `limits`: a published
   app runs on its own, with none (`sandbox.md`); an app whose capabilities restrict `network`
-  gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
+  gets a CSP `connect-src` meta with `'self'` and explicit HTTP / WebSocket scheme, host and port sources
+  (`web::connect_src`; GET rules also admit their mapped `ws` / `wss` transport, and a host without a port uses
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as bytecode
   (`web::CODE`, `app.<digest>.nshc`), with the hardening's (`harden.<digest>.nshc`). The app is built split
@@ -197,6 +198,16 @@ prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5
   generation on 64-bit targets, 20 and 11 (under a set top bit) on 32-bit ones (`reactive.rs`, `pack`). Anything that
   stores more than a pointer's worth of bits in an opaque must do the same.
 - `nsh-package` cannot generate keys there (no `getrandom`); verifying works.
+
+## Standard modules in the browser
+
+All eleven standard modules load in the web runtime. `quickjs-jit-stdlib` compiles its portable Rust hashing, buffers and compression into WebAssembly, preserving synchronous APIs; cryptographic entropy comes from the player's `crypto.getRandomValues` bridge. The `path` module uses POSIX paths with virtual working directory `/`. NSH's URL classes retain their identity.
+
+`filesystem.rs` implements `FileSystem` through the player's Origin Private File System bridge. Rust checks the app's file grants, normalizes paths relative to its configured data directory and enforces quotas before sending an operation. OPFS persists files in an app-specific namespace within the page's origin and requires a secure context. File modification time comes from browser metadata; unknown access/birth times and modes are zero. `rename` uses the browser handle's atomic `move` operation, reporting `ENOTSUP` when that operation is unavailable. OPFS entries are files and directories; `readlink` reports `EINVAL`.
+
+`websocket.rs` implements the shared `WebSocketTransport` with browser WebSocket. Both the global constructor and `websocket.WebSocket.connect` use it, with HTTP capability checks, Rust queue/message/connection limits, deadlines and cancellation. Custom handshake headers report an explicit unsupported-option error. NSH checks the initial normalized URL; browser policy controls WebSocket redirects, mixed content and connection access. Native WebSocket handshakes reject redirects. Raw TCP and subprocess calls return typed platform errors; their modules and metadata exports still load.
+
+A granted `process.exit(code?)` follows the engine's `ExitApp` command to the player. The player queues `Player.reset()` in a microtask after the current mount batch returns, stopping the app and clearing its surface while retaining the host page. Deferring disposal avoids reentering and freeing the VM during its batch callback; the queued action checks the app identity so it cannot reset a replacement app.
 
 ## The playground's compiler
 

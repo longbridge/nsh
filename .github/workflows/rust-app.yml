@@ -108,7 +108,7 @@ jobs:
       - name: Check the native dependency graph
         run: |
           cargo tree -p gallery-native --locked -e normal > "$RUNNER_TEMP/rust-app-dependencies.txt"
-          if grep -E 'nsh-js |rquickjs' "$RUNNER_TEMP/rust-app-dependencies.txt"; then
+          if grep -E 'nsh-js |rquickjs|quickjs-jit' "$RUNNER_TEMP/rust-app-dependencies.txt"; then
             echo "The Rust executable unexpectedly links a JS runtime"
             exit 1
           fi
@@ -167,7 +167,7 @@ jobs:
             fi
           }
           ./target/debug/nsh test examples/gallery-rs
-          check describe '(rquickjs|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "a JS engine or the bundler"
+          check describe '(rquickjs|quickjs-jit|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "a JS engine or the bundler"
           check test '(nsh-bundler|rolldown|oxc_parser)([ _-]|$)' "the bundler"
       - name: Run the examples' tests
         run: |

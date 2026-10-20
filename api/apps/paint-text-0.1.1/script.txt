@@ -1,0 +1,90 @@
+# What a user does and sees (compat/apps.rs).
+expect Plain
+frame id:plain 0 64 39 17
+frame id:big 0 81 53 39
+style id:big fontSize 32
+style id:tall fontSize 10
+style id:tall lineHeight 30
+style id:tall-two lineHeight 20
+style id:wide letterSpacing 4
+style id:wide-em fontSize 20
+style id:wide-em letterSpacing 2
+style id:family fontFamily Georgia
+style id:italic fontStyle italic
+style id:upright fontStyle normal
+style id:variant fontVariant small-caps, tabular-nums
+style id:variant-old fontVariant oldstyle-nums, proportional-nums
+style id:variant-lining fontVariant lining-nums
+style id:underline textDecorationLine underline
+style id:underline textDecorationColor #ff3b30ff
+style id:struck textDecorationLine line-through
+style id:struck textDecorationStyle double
+style id:struck textDecorationThickness 2
+style id:both textDecorationLine underline line-through
+style id:both textDecorationStyle wavy
+style id:both textDecorationColor #0000ff80
+style id:both textUnderlineOffset 3
+style id:dotted textDecorationStyle dotted
+style id:dashed textDecorationStyle dashed
+style id:solid textDecorationStyle solid
+style id:undecorated textDecorationLine none
+expect UPPER CASE
+expect lower case
+expect Capital Words
+expect As written
+expect LOUD quiet
+style id:upper textTransform uppercase
+style id:lower textTransform lowercase
+style id:capital textTransform capitalize
+style id:untransformed textTransform none
+style id:align-auto textAlign auto
+style id:align-left textAlign left
+style id:align-center textAlign center
+style id:align-right textAlign right
+style id:align-justify textAlign justify
+style id:dir-auto writingDirection auto
+style id:dir-ltr writingDirection ltr
+style id:dir-rtl writingDirection rtl
+frame id:mark-top 23.1 12.8 4 4
+frame id:mark-auto 30.8 12.8 4 4
+frame id:mark-center 46.2 34.3 4 4
+frame id:mark-bottom 46.2 55.8 4 4
+style span:LOUD fontStyle italic
+style span:LOUD textTransform uppercase
+style span:quiet fontStyle normal
+style span:quiet textTransform none
+style span:Base fontSize 12
+nostyle span:Base fontFamily
+style span:mono fontFamily Menlo
+style span:mono fontSize 12
+style span:large fontSize 20
+style span:slanted fontStyle italic
+style span:slanted fontSize 12
+style span:"spaced leading" letterSpacing 2
+style span:leading lineHeight 24
+style span:"figures marked" fontVariant tabular-nums
+style span:marked textDecorationLine underline
+style span:marked textDecorationColor #008000ff
+style span:marked textDecorationStyle dashed
+style span:gone textDecorationLine line-through
+style span:gone textDecorationThickness 1.5
+style span:gone textUnderlineOffset 2
+style span:SHOUT textTransform uppercase
+style span:outer color #007affff
+style span:inner color #007affff
+style span:inner fontSize 16
+covers [styles] fontFamily
+covers [styles] fontSize
+covers [styles] fontStyle
+covers [styles] fontVariant
+covers [styles] letterSpacing
+covers [styles] lineHeight
+covers [styles] textAlign
+covers [styles] textAlignVertical
+covers [styles] textDecorationLine
+covers [styles] textDecorationColor
+covers [styles] textDecorationStyle
+covers [styles] textDecorationThickness
+covers [styles] textUnderlineOffset
+covers [styles] textTransform
+covers [styles] writingDirection

@@ -214,9 +214,9 @@ pub fn start_with(
     data_dir: Option<std::path::PathBuf>,
 ) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     logger();
-    // A phone-sized engine with display frames (`nsh_engine::headless`),
+    // A phone-sized engine with display frames (`nsh_testing::start`),
     // here in a window of `viewport`.
-    nsh_engine::headless::start(EngineConfig {
+    nsh_testing::start(EngineConfig {
         viewport,
         data_dir,
         ..EngineConfig::new(

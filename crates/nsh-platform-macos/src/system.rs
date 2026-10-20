@@ -391,9 +391,17 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
-            if let Some(window) = surface.root.ns().window() {
-                window.close();
-            }
+            // Closing calls the window delegate synchronously, which stops
+            // the surface and clears its mounter. Wait until this batch has
+            // released the mounter's mutable borrow.
+            let key = surface.key();
+            DispatchQueue::main().exec_async(move || {
+                if let Some(surface) = Surface::with_key(key)
+                    && let Some(window) = surface.root.ns().window()
+                {
+                    window.close();
+                }
+            });
         }
         // The status bar is a phone's; layout animations arrive as mount
         // items.

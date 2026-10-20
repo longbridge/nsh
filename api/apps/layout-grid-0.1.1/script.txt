@@ -1,0 +1,80 @@
+# What a user does and sees (compat/apps.rs).
+expect Grid layout
+frame id:tracks-a 0 0 100 20
+frame id:tracks-b 100 0 150 20
+frame id:tracks-c 250 0 50 20
+frame id:tracks-d 0 20 100 30
+frame id:fr-a 0 0 100 25
+frame id:fr-b 100 0 200 25
+frame id:fr-c 0 25 100 75
+frame id:percent-a 0 0 75 50
+frame id:percent-b 75 0 225 50
+frame id:repeat-a 0 0 100 40
+frame id:repeat-b 100 0 100 40
+frame id:repeat-c 200 0 100 40
+frame id:repeat-d 0 40 100 40
+frame id:fill-a 0 0 100 20
+frame id:fill-b 100 0 100 20
+frame id:fill-c 200 0 100 20
+frame id:fill-d 0 20 100 20
+frame id:auto-a 0 0 80 30
+frame id:auto-b 80 0 220 30
+frame id:minmax-a 0 0 200 30
+frame id:minmax-b 200 0 100 30
+frame id:flow-column-a 0 0 60 20
+frame id:flow-column-b 0 20 60 20
+frame id:flow-column-c 60 0 60 20
+frame id:flow-row-a 0 0 100 25
+frame id:flow-row-b 100 0 100 25
+frame id:flow-row-c 0 25 100 25
+frame id:sparse-a 0 0 200 20
+frame id:sparse-b 0 20 200 20
+frame id:sparse-c 200 20 100 20
+frame id:dense-a 0 0 200 20
+frame id:dense-b 0 20 200 20
+frame id:dense-c 200 0 100 20
+frame id:dense-only-a 0 0 200 20
+frame id:dense-only-b 0 20 200 20
+frame id:dense-only-c 200 0 100 20
+frame id:column-dense-a 0 0 50 40
+frame id:column-dense-b 50 0 50 40
+frame id:column-dense-c 0 40 50 20
+frame id:place-column 100 0 200 25
+frame id:place-row 0 25 100 50
+frame id:place-start 100 50 100 25
+frame id:place-end 200 75 100 25
+frame id:place-span 100 25 200 50
+frame id:items-a 30 30 40 20
+frame id:items-b 100 0 40 20
+frame id:items-c 260 15 40 20
+frame id:items-d 0 80 100 20
+frame id:items-e 130 50 40 50
+frame id:items-start-a 0 0 40 20
+frame id:items-start-b 150 0 0 20
+frame id:items-end-a 60 15 40 20
+frame id:items-stretch-a 0 0 100 50
+frame id:content-a 0 60 100 20
+frame id:content-b 200 60 100 20
+frame id:content-c 0 80 100 20
+frame id:gap-a 0 0 145 45
+frame id:gap-b 155 0 145 45
+frame id:gap-c 0 55 145 45
+frame id:gaps-a 0 0 147 40
+frame id:gaps-b 153 0 147 40
+frame id:gaps-c 0 60 147 40
+frame id:rtl-a 200 0 100 40
+frame id:rtl-b 0 0 200 40
+covers [styles] display
+covers [styles] gridTemplateColumns
+covers [styles] gridTemplateRows
+covers [styles] gridAutoColumns
+covers [styles] gridAutoRows
+covers [styles] gridAutoFlow
+covers [styles] gridColumn
+covers [styles] gridColumnStart
+covers [styles] gridColumnEnd
+covers [styles] gridRow
+covers [styles] gridRowStart
+covers [styles] gridRowEnd
+covers [styles] justifyItems
+covers [styles] justifySelf

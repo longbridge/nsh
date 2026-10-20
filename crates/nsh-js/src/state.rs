@@ -95,7 +95,7 @@ pub(crate) fn install(
         STATES.with(|m| m.borrow_mut().insert(rt as usize, state as usize));
         crate::dom::init(raw);
         crate::env::init(raw);
-        crate::modules::set_loader(rt, &(*state).modules);
+        crate::modules::install(ctx, &(*state).modules);
     }
 }
 
@@ -109,12 +109,15 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         if p.is_null() {
             return;
         }
+        state_system_cleanup(raw);
         // Unregistered first: the frees below finalize nodes and graph
         // objects, whose finalizers then only free their own data.
         let rt = qjs::JS_GetRuntime(raw);
         STATES.with(|m| m.borrow_mut().remove(&(rt as usize)));
         qjs::JS_SetContextOpaque(raw, ptr::null_mut());
         let mut state = Box::from_raw(p);
+        // The typed modules' objects (the global `process` among them).
+        state.modules.free_objects();
         // First: what the frees below finalize finds Rust's callbacks
         // released and their calls refused.
         state.classes.free_all();
@@ -132,4 +135,9 @@ pub(crate) fn uninstall(ctx: &Ctx<'_>) {
         state.dom.free_all(raw);
         crate::reactive::free_all(&mut state.graph, raw);
     }
+}
+
+/// Cancels native work while the context state is still reachable.
+fn state_system_cleanup(raw: *mut qjs::JSContext) {
+    crate::dom::shared(raw).system_locals.close_all();
 }

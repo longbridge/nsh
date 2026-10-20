@@ -107,7 +107,8 @@ An app declares what it may reach outside its VM in `nsh.json`:
   "capabilities": {
     "network": {
       "hosts": ["api.example.com", "*.cdn.example.com"],
-      "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }]
+      "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }],
+      "sockets": ["feed.example.com:7000"]
     },
     "webview": { "hosts": ["*.example.com"] },
     "statusBar": true,
@@ -117,28 +118,37 @@ An app declares what it may reach outside its VM in `nsh.json`:
 ```
 
 **An app without `"capabilities"` may do everything**: a standalone app is its developer's own, and nothing is
-restricted. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
+restricted. Raw TCP sockets are granted by name in every app, through `network.sockets`. **An app with `"capabilities"` may do only what it lists**: everything else is denied. Unknown keys are
 build errors, so a typo is caught when you build instead of becoming a missing permission at runtime. A [signed
 package](./signed-packages.md#packages-from-newer-versions-of-nsh) from a newer NSH may declare capabilities an older
 runtime does not know: they are not granted there.
 
 ### `network`
 
-Covers `fetch` (including every redirect), remote images (`<Image>`, `defaultSource`, canvas images,
-`Image.getSize` / `Image.prefetch`) and video sources.
+Covers `fetch` (including every redirect), WebSockets, remote images (`<Image>`, `defaultSource`, canvas images,
+`Image.getSize` / `Image.prefetch`), video sources and raw TCP sockets (`net.connect`).
 
 | Key | Type | Description |
 |---|---|---|
 | `hosts` | `string[]` | Hosts the app may reach with any method and scheme (`http`, `https`, `ws`, `wss`). |
-| `http` | `object[]` | Finer grants, one per host. |
-| `http[].host` | `string` | The host (required). |
-| `http[].methods` | `string[]` | Allowed methods, such as `["GET", "HEAD"]`. Empty or missing: any. |
-| `http[].schemes` | `string[]` | Allowed schemes. Empty or missing: any of `http`, `https`, `ws`, `wss`. |
-| `http[].pathPrefix` | `string` | The URL's path must start with it. |
+| `http` | `object[]` | Finer grants: a host, narrowed by any of the keys below. |
+| `http[].host` | `string` | The host or host pattern (required). |
+| `http[].methods` | `string[]` | Allowed methods, such as `["GET", "HEAD"]`. Missing: any. |
+| `http[].schemes` | `string[]` | Allowed schemes (`scheme`: one, as a string). Missing: any of `http`, `https`, `ws`, `wss`. |
+| `http[].port` | `number` | The port; a URL without one has its scheme's default (443 for `https`). Missing: any. |
+| `http[].paths` | `string[]` | Exact paths, such as `["/v1/quote"]` (the query is not part of the path). |
+| `http[].pathPrefixes` | `string[]` | Path prefixes covering whole segments: `/v1` covers `/v1` and `/v1/quote`, `/v1/` what follows it. `pathPrefix` (one, as a string) and `path_prefixes` read the same. |
+| `sockets` | `string[]` | Raw TCP destinations for [`net.connect`](../modules/standard-modules.md), each an exact `"host:port"` (`"[::1]:9000"` for IPv6). |
+
+An `http` rule covers every path when it lists no `paths` or `pathPrefixes`, and with both a path matching either.
 
 Host patterns are `*` (any host), `*.example.com` (any subdomain of `example.com`, not `example.com` itself) or an
 exact host name. Matching ignores case and the port. The host is taken after the last `@`, so
 `https://api.example.com@evil.io/` is checked as `evil.io`.
+
+A WebSocket handshake is an HTTP GET: `ws://` is checked as `http://` and `wss://` as `https://`, so the hosts and
+`http` grants that allow a GET of the URL allow the WebSocket. A raw socket reaches past every HTTP rule, so
+`sockets` lists each host and port exactly, and only `sockets` grants them.
 
 `asset:` URIs (the app's own files) are always allowed; images and videos may also use `data:` URIs and relative
 paths.

@@ -206,7 +206,7 @@ try {
 | 键 | 说明 |
 |---|---|
 | `network.hosts` | 可以用任何方法访问的主机：`"*"`（任意主机）、`"*.example.com"`（其子域名，不含 `example.com` 本身）或主机名。 |
-| `network.http` | 更精细的授权：一个 `host`，可以再限制 `methods`、`schemes` 和 `pathPrefix`。 |
+| `network.http` | 更精细的授权：一个 `host`，可以再限制 `methods`、`schemes`、`port`、精确的 `paths` 和 `pathPrefixes`。 |
 
 这些检查在 Rust 中、在你的 JS 之外执行，请求到达网络之前就已完成：
 
@@ -227,7 +227,7 @@ NSH 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 - **`data:` 和 `blob:` URL** 在本地应答。`URL.createObjectURL(blob)` 生成一个 `blob:` URL，在撤销之前 `fetch` 都可以读取它。
 - 浏览器专用的选项（`mode`、`credentials`、`cache`、`referrer`、`integrity`、`keepalive`、`priority`）为兼容各种库而被接受。
 
-基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`，也没有 WebSocket API。
+基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`；原生宿主提供全局 `WebSocket` 和 [`websocket` 模块](../modules/standard-modules.md)，按与 `fetch` 相同的授权检查。
 
 ## 在 Rust 组件中
 

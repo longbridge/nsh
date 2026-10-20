@@ -6,17 +6,22 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    Attribute, Fields, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type,
+    Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type,
     spanned::Spanned,
 };
 
 use crate::{
-    camel, decl, docs, exported, last_segment, module_cx, param_ts, result_ok, strip_args,
+    call_cx_param, camel, decl, docs, exported, last_segment, module_cx, param_ts, result_ok,
+    strip_args, sync_returns, system_param,
 };
 
-pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
+pub(crate) fn class(item: syn::Item, interface: bool) -> syn::Result<TokenStream2> {
     match item {
-        syn::Item::Struct(s) => class_struct(s),
+        syn::Item::Struct(s) => class_struct(s, interface),
+        syn::Item::Impl(i) if interface => Err(syn::Error::new(
+            i.span(),
+            "`interface` goes on the class's struct",
+        )),
         syn::Item::Impl(i) => class_impl(i),
         other => Err(syn::Error::new(
             other.span(),
@@ -25,7 +30,7 @@ pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     }
 }
 
-fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
+fn class_struct(item: ItemStruct, interface: bool) -> syn::Result<TokenStream2> {
     if !item.generics.params.is_empty() {
         return Err(syn::Error::new(
             item.generics.span(),
@@ -37,28 +42,24 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
     let doc = decl(&docs(&item.attrs));
     // Every field, traced when its type implements `Trace` (by its type,
     // not its name: aliases and wrappers that implement it are traced,
-    // other types skipped).
-    let members: Vec<TokenStream2> = match &item.fields {
-        Fields::Named(fields) => fields
-            .named
-            .iter()
-            .map(|f| {
-                let ident = f.ident.as_ref().expect("named");
-                quote!(#ident)
-            })
-            .collect(),
-        Fields::Unnamed(fields) => (0..fields.unnamed.len())
-            .map(|i| {
-                let index = syn::Index::from(i);
-                quote!(#index)
-            })
-            .collect(),
-        Fields::Unit => Vec::new(),
-    };
-    let traced: Vec<TokenStream2> = members
+    // other types skipped), under the field's own `#[cfg]`.
+    let fields: Vec<&syn::Field> = item.fields.iter().collect();
+    let traced: Vec<TokenStream2> = fields
         .iter()
-        .map(|m| quote!((&&#ui::__private::Field(&self.#m)).trace_field(tracer);))
+        .enumerate()
+        .map(|(i, f)| {
+            let member = match &f.ident {
+                Some(ident) => quote!(#ident),
+                None => {
+                    let index = syn::Index::from(i);
+                    quote!(#index)
+                }
+            };
+            let cfgs = f.attrs.iter().filter(|a| a.path().is_ident("cfg"));
+            quote!(#(#cfgs)* (&&#ui::__private::Field(&self.#member)).trace_field(tracer);)
+        })
         .collect();
+    // A field may be configured out: the tracer is used either way.
     let tracer = if traced.is_empty() {
         quote!(_tracer)
     } else {
@@ -70,6 +71,8 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
         // SAFETY: each field is reported through its own type's `Trace`,
         // once.
         unsafe impl #ui::Trace for #name {
+            // Unused when every traced field is configured out.
+            #[allow(unused_variables)]
             fn trace(&self, #tracer: &mut #ui::Tracer<'_>) {
                 #[allow(unused_imports)]
                 use #ui::__private::{SkipField as _, TraceField as _};
@@ -79,6 +82,7 @@ fn class_struct(item: ItemStruct) -> syn::Result<TokenStream2> {
 
         impl #ui::__private::ClassDoc for #name {
             const DOC: &'static str = #doc;
+            const INTERFACE: bool = #interface;
         }
 
         /// A new instance (a new JS object).
@@ -110,12 +114,19 @@ fn has_attr(attrs: &[Attribute], name: &str) -> bool {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Constructor,
-    Method { mutable: bool },
+    Method {
+        mutable: bool,
+    },
     Getter,
-    Setter { mutable: bool },
+    Setter {
+        mutable: bool,
+    },
     Static,
     AsyncMethod,
     AsyncStatic,
+    /// Not `async`, taking `this: Instance<Self>`: the handle, not a
+    /// borrow (a method returning its own object, `child.on(..)`).
+    ThisMethod,
 }
 
 /// The `&self` / `&mut self` receiver of `f`: `Some(mutable)`.
@@ -193,6 +204,7 @@ fn kind_of(f: &ImplItemFn) -> syn::Result<Kind> {
     Ok(match receiver {
         Some(mutable) => Kind::Method { mutable },
         None if f.sig.ident == "new" => Kind::Constructor,
+        None if f.sig.inputs.first().is_some_and(is_this) => Kind::ThisMethod,
         None => Kind::Static,
     })
 }
@@ -203,6 +215,10 @@ enum Param<'a> {
     Value(&'a Type),
     /// `&Other` / `&mut Other`: an instance borrowed for the call.
     Borrowed { elem: &'a Type, mutable: bool },
+    /// `System`: the VM the call comes from, not one JS passes.
+    System,
+    /// `CallCx`: what a synchronous call can do beyond computing.
+    Cx,
 }
 
 fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
@@ -223,6 +239,8 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
     let class_name = type_name.to_string();
     crate::no_block_doc(&item, "#[class]")?;
     let mut members = Vec::new();
+    // Whether JS would need the class's value: an interface has none.
+    let mut needs_value = false;
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
         if !exported(&f.vis) {
@@ -241,13 +259,20 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
             }
             continue;
         }
+        needs_value |= matches!(
+            kind_of(f)?,
+            Kind::Constructor | Kind::Static | Kind::AsyncStatic
+        );
         members.push(member_def(f, &class_name)?);
     }
     // The getters', setters' and callbacks' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
-            f.attrs
-                .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("setter"));
+            f.attrs.retain(|a| {
+                !a.path().is_ident("getter")
+                    && !a.path().is_ident("setter")
+                    && !a.path().is_ident("overload")
+            });
             strip_args(&mut f.sig);
         }
     }
@@ -261,8 +286,14 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
                 type_id: #ui::__private::type_id::<Self>,
                 type_name: #ui::__private::type_name::<Self>,
                 members: &[#(#members),*],
+                interface: <Self as #ui::__private::ClassDoc>::INTERFACE,
             };
         }
+
+        const _: () = ::core::assert!(
+            !(<#self_ty as #ui::__private::ClassDoc>::INTERFACE && #needs_value),
+            "a `#[class(interface)]` has no constructor or statics: JS has no value of it",
+        );
     })
 }
 
@@ -301,6 +332,9 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         ));
     }
     let doc = decl(&docs(&f.attrs));
+    // `#[overload(fn(event: Exit, handler: Callback<ExitResult>) -> Instance<Self>)]`:
+    // signatures declared instead, as a module function's.
+    let (overloads, overload_refs) = crate::overloads(f)?;
     // `#[cfg]` of the function applies to its entry too.
     let cfgs: Vec<_> = f
         .attrs
@@ -309,12 +343,17 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .collect();
     // The parameters JS passes (not the receiver nor `this`).
     let skip = match kind {
-        Kind::Method { .. } | Kind::Getter | Kind::Setter { .. } | Kind::AsyncMethod => 1,
+        Kind::Method { .. }
+        | Kind::Getter
+        | Kind::Setter { .. }
+        | Kind::AsyncMethod
+        | Kind::ThisMethod => 1,
         _ => 0,
     };
     let is_async = matches!(kind, Kind::AsyncMethod | Kind::AsyncStatic);
     let mut params = Vec::new();
     let mut names = Vec::new();
+    // Each parameter's attributes (`#[args(..)]`).
     let mut attrs = Vec::new();
     for arg in f.sig.inputs.iter().skip(skip) {
         let FnArg::Typed(t) = arg else {
@@ -334,6 +373,22 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             ));
         };
         names.push(camel(&name.ident.to_string()));
+        if system_param(&t.ty) {
+            attrs.push(&t.attrs);
+            params.push(Param::System);
+            continue;
+        }
+        if call_cx_param(&t.ty) {
+            if is_async {
+                return Err(syn::Error::new(
+                    t.span(),
+                    "`CallCx` is a synchronous call's (it borrows the call)",
+                ));
+            }
+            attrs.push(&t.attrs);
+            params.push(Param::Cx);
+            continue;
+        }
         attrs.push(&t.attrs);
         params.push(match &*t.ty {
             Type::Reference(_) if is_async => {
@@ -356,6 +411,9 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         if matches!(kind, Kind::Setter { .. }) {
             break;
         }
+        if matches!(params[i], Param::System | Param::Cx) {
+            continue;
+        }
         let is_option = matches!(&params[i], Param::Value(ty) if matches!(last_segment(ty), Some((id, _)) if id == "Option"));
         if !is_option {
             break;
@@ -367,27 +425,41 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .zip(&names)
         .zip(&optional)
         .zip(&attrs)
-        .map(|(((p, name), optional), attrs)| {
+        .filter_map(|(((p, name), optional), attrs)| {
             let ts = match p {
-                Param::Value(ty) => param_ts(ty, attrs)?,
+                Param::Value(ty) => param_ts(ty, attrs),
                 Param::Borrowed { elem, .. } => {
-                    param_ts(&syn::parse_quote!(#ui::Instance<#elem>), attrs)?
+                    param_ts(&syn::parse_quote!(#ui::Instance<#elem>), attrs)
                 }
+                Param::System | Param::Cx => return None,
             };
-            Ok(quote!((#name, #ts, #optional)))
+            Some(ts.map(|ts| quote!((#name, #ts, #optional))))
         })
         .collect::<syn::Result<_>>()?;
     // The classes the signature names, registered with this one.
     let mut refs: Vec<TokenStream2> = params
         .iter()
-        .map(|p| match p {
-            Param::Value(ty) => quote!(#private::arg_classes::<#ty>(__out);),
+        .filter_map(|p| match p {
+            Param::Value(ty) => Some(quote!(#private::arg_classes::<#ty>(__out);)),
             Param::Borrowed { elem, .. } => {
-                quote!(#private::arg_classes::<#ui::Instance<#elem>>(__out);)
+                Some(quote!(#private::arg_classes::<#ui::Instance<#elem>>(__out);))
             }
+            Param::System | Param::Cx => None,
         })
         .collect();
+    // A method or static returning `Later<T>` starts a task in the call.
+    let starts = matches!(kind, Kind::Method { .. } | Kind::Static | Kind::ThisMethod)
+        && sync_returns(&f.sig.output).2;
     let (returns, ok_ty, fallible) = match &f.sig.output {
+        ReturnType::Type(_, _) if starts => {
+            let (task, fallible, _) = sync_returns(&f.sig.output);
+            let task = task.expect("a type");
+            (
+                quote!(::core::option::Option::Some(#private::ret_ts::<#task>())),
+                Some(task.clone()),
+                fallible,
+            )
+        }
         ReturnType::Default => (quote!(::core::option::Option::None), None, false),
         ReturnType::Type(_, ty) => match result_ok(ty) {
             Some(ok) => (
@@ -404,7 +476,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     };
     let member_kind = match kind {
         Kind::Constructor => quote!(Constructor),
-        Kind::Method { .. } | Kind::AsyncMethod => quote!(Method),
+        Kind::Method { .. } | Kind::AsyncMethod | Kind::ThisMethod => quote!(Method),
         Kind::Getter => quote!(Getter),
         Kind::Setter { .. } => quote!(Setter),
         Kind::Static | Kind::AsyncStatic => quote!(Static),
@@ -424,7 +496,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     let call = if is_async {
         async_call(f, kind, &params, &names, &what, fallible)
     } else {
-        sync_call(f, kind, &params, &names, &what, fallible)
+        sync_call(f, kind, &params, &names, &what, fallible, starts)
     };
     Ok(quote! {
         #(#cfgs)*
@@ -437,8 +509,10 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             refs: |__out| {
                 let _ = &__out;
                 #(#refs)*
+                #(#overload_refs)*
             },
             call: #call,
+            overloads: &[#(#overloads),*],
         }
     })
 }
@@ -450,6 +524,7 @@ fn sync_call(
     names: &[String],
     what: &str,
     fallible: bool,
+    starts: bool,
 ) -> TokenStream2 {
     let ui = quote!(::nsh_core::ui);
     let private = quote!(#ui::__private);
@@ -458,9 +533,23 @@ fn sync_call(
     let mut borrow = Vec::new();
     let mut release = Vec::new();
     let mut args = Vec::new();
-    for (i, (p, name)) in params.iter().zip(names).enumerate() {
-        let local = format_ident!("__arg{}", i);
+    // JS's arguments, counted without the `System`.
+    let mut js = 0usize;
+    for (p, name) in params.iter().zip(names) {
+        let local = format_ident!("__arg{}", args.len());
+        let i = js;
+        if !matches!(p, Param::System | Param::Cx) {
+            js += 1;
+        }
         match p {
+            Param::System => {
+                decode.push(quote!(let #local = #private::system(host);));
+                args.push(quote!(#local));
+            }
+            Param::Cx => {
+                decode.push(quote!(let #local = #private::call_cx(host);));
+                args.push(quote!(#local));
+            }
             Param::Value(ty) => {
                 decode.push(quote! {
                     let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
@@ -517,10 +606,16 @@ fn sync_call(
             },
             Some(quote!(&*__value)),
         ),
+        Kind::ThisMethod => (
+            quote!(let __this = #private::this::<Self>(host, #what)?;),
+            Some(quote!(__this)),
+        ),
         _ => (quote!(), None),
     };
     let call_args = receiver.into_iter().chain(args);
     let finish = match (kind, fallible) {
+        _ if starts && fallible => quote!(#private::start_result(__result)),
+        _ if starts => quote!(#private::start(__result)),
         (Kind::Constructor, false) => quote!(#private::construct(host, __result)),
         (Kind::Constructor, true) => quote!(#private::construct_result(host, __result)),
         (_, false) => quote!(#private::ret(host, __result)),
@@ -534,8 +629,9 @@ fn sync_call(
     ) {
         release.push(quote!(::core::mem::drop(__value);));
     }
+    let variant = if starts { quote!(Start) } else { quote!(Sync) };
     quote! {
-        #ui::MemberCall::Sync(|host| {
+        #ui::MemberCall::#variant(|host| {
             #(#decode)*
             #this
             #(#borrow)*
@@ -559,13 +655,24 @@ fn async_call(
     let ident = &f.sig.ident;
     let mut decode = Vec::new();
     let mut args = Vec::new();
-    for (i, (p, name)) in params.iter().zip(names).enumerate() {
-        let local = format_ident!("__arg{}", i);
-        if let Param::Value(ty) = p {
-            decode.push(quote! {
-                let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
-            });
-            args.push(quote!(#local));
+    let mut js = 0usize;
+    for (p, name) in params.iter().zip(names) {
+        let local = format_ident!("__arg{}", args.len());
+        match p {
+            Param::Value(ty) => {
+                let i = js;
+                js += 1;
+                decode.push(quote! {
+                    let #local: #ty = #private::arg::<#ty>(host, #i, #what, #name)?;
+                });
+                args.push(quote!(#local));
+            }
+            Param::System => {
+                decode.push(quote!(let #local = #private::system(host);));
+                args.push(quote!(#local));
+            }
+            Param::Cx => {}
+            Param::Borrowed { .. } => js += 1,
         }
     }
     // The instance and the arguments are taken in the JS call; the task
@@ -601,10 +708,26 @@ mod tests {
 
     /// The error `#[class]` gives `item`.
     fn error(item: proc_macro2::TokenStream) -> String {
-        match super::class(syn::parse2(item).unwrap()) {
+        match super::class(syn::parse2(item).unwrap(), false) {
             Ok(_) => "no error".to_owned(),
             Err(e) => e.to_string(),
         }
+    }
+
+    #[test]
+    fn interface_goes_on_the_struct() {
+        let item = syn::parse2(quote!(impl T { fn get(&self) -> u32 { 0 } })).unwrap();
+        let error = super::class(item, true).err().unwrap().to_string();
+        assert!(
+            error.contains("`interface` goes on the class's struct"),
+            "{error}"
+        );
+        let item = syn::parse2(quote!(
+            struct T;
+        ))
+        .unwrap();
+        let made = super::class(item, true).unwrap().to_string();
+        assert!(made.contains("const INTERFACE : bool = true"), "{made}");
     }
 
     #[test]

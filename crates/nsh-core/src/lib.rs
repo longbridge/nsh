@@ -17,6 +17,7 @@ mod css_named;
 pub mod desktop;
 mod effects;
 mod fenwick;
+pub mod filesystem;
 pub mod geometry;
 mod grid;
 pub mod js;
@@ -36,6 +37,7 @@ mod text;
 pub mod time;
 mod transform;
 pub mod ui;
+pub mod websocket;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
 extern crate self as nsh_core;

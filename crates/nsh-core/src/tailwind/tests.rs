@@ -29,7 +29,7 @@ fn styled_with(
     let group = |_: &str| 0;
     let context = Context {
         env,
-        window,
+        window: crate::geometry::size_pt(window.0, window.1),
         rtl: false,
         states,
         position: 0,
@@ -201,7 +201,7 @@ fn tailwind_colors_win_over_tokens_and_tokens_come_from_the_theme() {
                 dark,
                 ..Default::default()
             },
-            window: (390.0, 844.0),
+            window: crate::geometry::size_pt(390.0, 844.0),
             rtl: false,
             states: 0,
             position: 0,
@@ -562,7 +562,7 @@ fn groups() {
     let group = |name: &str| if name == "card" { state::HOVERED } else { 0 };
     let context = Context {
         env: ClassEnvironment::default(),
-        window: (390.0, 844.0),
+        window: crate::geometry::size_pt(390.0, 844.0),
         rtl: false,
         states: 0,
         position: 0,

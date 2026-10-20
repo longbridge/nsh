@@ -463,6 +463,14 @@ pub(crate) fn range_error(ctx: Ctx, message: &str) -> Throw {
     Throw
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn syntax_error(ctx: Ctx, message: &str) -> Throw {
+    let m = cstr(message);
+    // SAFETY: as above.
+    unsafe { qjs::JS_ThrowSyntaxError(ctx, c"%s".as_ptr(), m.as_ptr()) };
+    Throw
+}
+
 /// Throws `value`.
 pub(crate) fn throw(ctx: Ctx, value: V) -> Throw {
     // SAFETY: the exception takes the value.

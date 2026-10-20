@@ -40,6 +40,8 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         viewport: Size::new(px(800.0), px(600.0)),
         trace: false,
         network: None,
+        websocket: None,
+        filesystem: None,
         assets: None,
         environment: Environment {
             os: Os::MacOs,

@@ -25,7 +25,7 @@ use nsh_core::{
     decl,
     ui::{ComponentSpec, DECLARATIONS, ModuleSpec, Registry, description::SetDescription},
 };
-use rquickjs::qjs;
+use rquickjs::{Ctx, JsLifetime, Module, qjs};
 
 use crate::{
     animated, canvas, components, desktop, dom, env, keymap, list, platform_modules,
@@ -403,6 +403,10 @@ enum Made {
     Module(Arc<ModuleSpec>),
     /// One function of a flat module.
     Function(Arc<ModuleSpec>, &'static str),
+    /// A constant projected from the same generated module object.
+    Constant(Arc<ModuleSpec>, &'static str),
+    /// The generated module object itself.
+    Default(Arc<ModuleSpec>),
     /// A Rust class (`#[class]`).
     Class(&'static nsh_core::ui::ClassDef),
     /// A runtime value a registry exports as it is (`safeArea`).
@@ -421,6 +425,10 @@ pub(crate) struct ModuleTable {
     /// it links imports by name and never runs the modules).
     declared: Vec<SetDescription>,
     pub(crate) chunks: RefCell<ChunkCodes>,
+    /// The objects of typed modules made so far, by specifier and module:
+    /// one per VM, so a module's default export, its flat exports and a
+    /// global made from it (`process`) are the same values.
+    objects: RefCell<HashMap<(String, &'static str), crate::web::js::V>>,
 }
 
 /// The code of a chunk.
@@ -457,7 +465,71 @@ impl ModuleTable {
             host,
             declared: Vec::new(),
             chunks: RefCell::default(),
+            objects: RefCell::default(),
         }
+    }
+
+    /// Frees the module objects (the VM is going).
+    pub(crate) fn free_objects(&self) {
+        let objects = std::mem::take(&mut *self.objects.borrow_mut());
+        drop(objects);
+    }
+
+    /// The values `nsh-js` makes for the registries of module `name`.
+    fn natives(&self, name: &str) -> Vec<&'static str> {
+        self.registries
+            .iter()
+            .filter(|r| r.specifier() == Some(name))
+            .flat_map(|r| r.native_value_names().iter().copied())
+            .collect()
+    }
+
+    /// The default object of the typed module `name` (its flat default
+    /// module's), made once per VM; `None`: it has none.
+    pub(crate) fn default_object(&self, ctx: *mut JsContext, name: &str) -> Option<JsValue> {
+        let spec = self
+            .registries
+            .iter()
+            .filter(|r| r.specifier() == Some(name))
+            .flat_map(|r| r.module_specs())
+            .find(|m| m.flat && m.default)?;
+        Some(self.object(ctx, name, &spec))
+    }
+
+    /// Module `spec`'s object (owned), made once per VM: its functions,
+    /// getters and constants, and on a flat default module the registry's
+    /// native values too.
+    fn object(&self, ctx: *mut JsContext, name: &str, spec: &ModuleSpec) -> JsValue {
+        let key = (name.to_owned(), spec.name);
+        if let Some(object) = self.objects.borrow().get(&key) {
+            // SAFETY: a live value the table holds.
+            return unsafe { qjs::JS_DupValue(ctx, object.raw()) };
+        }
+        let object = components::module(ctx, spec);
+        // SAFETY: inline tag check.
+        if unsafe { qjs::JS_IsException(object) } {
+            return object;
+        }
+        if spec.flat && spec.default {
+            for native in self.natives(name) {
+                let value = env::reexport(ctx, native);
+                // SAFETY: inline tag check.
+                if unsafe { qjs::JS_IsException(value) } {
+                    // SAFETY: ours.
+                    unsafe { qjs::JS_FreeValue(ctx, object) };
+                    return value;
+                }
+                let cname = CString::new(native).unwrap_or_default();
+                // SAFETY: the object takes the value.
+                unsafe { qjs::JS_SetPropertyStr(ctx, object, cname.as_ptr(), value) };
+            }
+        }
+        // SAFETY: the table keeps one reference, the caller gets another.
+        let kept = unsafe { qjs::JS_DupValue(ctx, object) };
+        self.objects
+            .borrow_mut()
+            .insert(key, crate::web::js::V::own(ctx, kept));
+        object
     }
 
     /// The table the bytecode compiler links against: nsh's own modules,
@@ -471,6 +543,7 @@ impl ModuleTable {
             registries,
             declared: ui_sets.to_vec(),
             chunks: RefCell::default(),
+            objects: RefCell::default(),
         }
     }
 
@@ -558,14 +631,29 @@ fn registry_exports(registry: &Registry, out: &mut Vec<(String, Made)>) {
             continue;
         }
         if m.flat {
-            for f in &m.functions {
+            // A getter reads the object's property; it is no export.
+            for f in m.functions.iter().filter(|f| !f.getter) {
                 out.push((f.name.to_owned(), Made::Function(m.clone(), f.name)));
+            }
+            for constant in &m.constants {
+                out.push((
+                    constant.name.to_owned(),
+                    Made::Constant(m.clone(), constant.name),
+                ));
             }
         } else {
             out.push((m.name.to_owned(), Made::Module(m.clone())));
         }
+        if m.default {
+            out.push(("default".to_owned(), Made::Default(m.clone())));
+        }
     }
-    for class in registry.class_specs() {
+    // An interface's objects come from members only: no value.
+    for class in registry
+        .class_specs()
+        .into_iter()
+        .filter(|c| !c.def.interface)
+    {
         out.push((class.name.to_owned(), Made::Class(class.def)));
     }
     for &value in registry
@@ -578,12 +666,111 @@ fn registry_exports(registry: &Registry, out: &mut Vec<(String, Made)>) {
     }
 }
 
-/// Makes runtime `rt` load the modules of `table` (which outlives it).
-pub(crate) fn set_loader(rt: *mut qjs::JSRuntime, table: *const ModuleTable) {
-    // SAFETY: a plain C loader; the default name normalization keeps bare
-    // specifiers as they are.
-    unsafe {
-        qjs::JS_SetModuleLoaderFunc(rt, None, Some(load), table as *mut c_void);
+/// The table is owned by State (or the bytecode compiler), and outlives
+/// every module load. No JS values are kept in this context-local handle.
+#[derive(Clone, Copy, JsLifetime)]
+struct ModuleTablePtr(*const ModuleTable);
+
+pub(crate) fn install(ctx: &Ctx<'_>, table: *const ModuleTable) {
+    assert!(ctx.store_userdata(ModuleTablePtr(table)).is_ok());
+}
+
+pub(crate) struct Resolver;
+impl rquickjs::loader::Resolver for Resolver {
+    fn resolve<'js>(
+        &mut self,
+        _ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<rquickjs::loader::ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
+        if let Some(name) = crate::standard::normalize(name) {
+            return Ok(name.to_owned());
+        }
+        Ok(normalize_chunk(base, name))
+    }
+}
+
+// Match QuickJS's default normalization: preserve bare names and only
+// consume leading ./ and ../ relative to the importing module's directory.
+fn normalize_chunk(base: &str, name: &str) -> String {
+    if !name.starts_with('.') {
+        return name.to_owned();
+    }
+    let mut directory = base.rsplit_once('/').map_or("", |(dir, _)| dir);
+    let mut rest = name;
+    loop {
+        if let Some(next) = rest.strip_prefix("./") {
+            rest = next;
+        } else if let Some(next) = rest.strip_prefix("../") {
+            let last = directory.rsplit('/').next().unwrap_or("");
+            if directory.is_empty() || matches!(last, "." | "..") {
+                break;
+            }
+            directory = directory.rsplit_once('/').map_or("", |(dir, _)| dir);
+            rest = next;
+        } else {
+            break;
+        }
+    }
+    if directory.is_empty() {
+        rest.to_owned()
+    } else {
+        format!("{directory}/{rest}")
+    }
+}
+
+pub(crate) struct Loader;
+impl rquickjs::loader::Loader for Loader {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<rquickjs::loader::ImportAttributes<'js>>,
+    ) -> rquickjs::Result<Module<'js>> {
+        // Framework typed registries own their native exports, including
+        // standard names migrated from handwritten adapters. LLRT providers
+        // remain on their original ModuleDef path in this same VM.
+        let registered = ctx
+            .userdata::<ModuleTablePtr>()
+            // SAFETY: `install`'s owner (the VM state or the bytecode
+            // compiler) keeps the table alive while the context loads.
+            .is_some_and(|table| unsafe { (&*table.0).exports(name).is_some() });
+        if !registered && let Some(name) = crate::standard::normalize(name) {
+            return crate::standard::load(ctx, name);
+        }
+        // SAFETY: the thunk uses this live context's registered table and
+        // returns exactly the module created by the existing native loader.
+        unsafe { Module::from_load_fn(ctx.clone(), name, load_native) }
+    }
+}
+
+/// Resolve an already-canonical native specifier through the same provider
+/// selection used by the runtime loader (also used by type discovery).
+#[cfg(not(feature = "bytecode-only"))]
+pub(crate) fn load_module<'js>(ctx: &Ctx<'js>, name: &str) -> rquickjs::Result<Module<'js>> {
+    rquickjs::loader::Loader::load(&mut Loader, ctx, name, None)
+}
+
+unsafe extern "C" fn load_native(
+    raw: *mut JsContext,
+    name: *const c_char,
+) -> *mut qjs::JSModuleDef {
+    // SAFETY: called by Module::from_load_fn while its runtime is locked;
+    // the temporary Ctx never escapes this callback.
+    let ctx = unsafe { Ctx::from_raw(std::ptr::NonNull::new_unchecked(raw)) };
+    let table = ctx.userdata::<ModuleTablePtr>().map(|table| table.0);
+    match table {
+        // SAFETY: install's owner keeps the table alive through this load.
+        Some(table) => unsafe { load(raw, name, table as *mut c_void) },
+        None => {
+            // SAFETY: throws on the live context of this callback; the
+            // message is a literal without format directives.
+            unsafe {
+                qjs::JS_ThrowInternalError(raw, c"native module table is not installed".as_ptr());
+            }
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -593,7 +780,7 @@ unsafe extern "C" fn load(
     opaque: *mut c_void,
 ) -> *mut qjs::JSModuleDef {
     // SAFETY: QuickJS passes a NUL-terminated module name; the table is the
-    // one `set_loader` was given.
+    // one `install` registered for this context.
     let (cname, table) = unsafe { (CStr::from_ptr(name), &*(opaque as *const ModuleTable)) };
     let exports = cname.to_str().ok().and_then(|n| table.export_names(n));
     // Taken first: compiling it loads its imports, here again.
@@ -615,7 +802,7 @@ unsafe extern "C" fn load(
         unsafe {
             qjs::JS_ThrowReferenceError(
                 ctx,
-                c"could not load module '%s' (only nsh's own modules can be imported at run time)"
+                c"could not load module '%s' (only registered native modules and bundle chunks can be imported at run time)"
                     .as_ptr(),
                 name,
             )
@@ -698,16 +885,22 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
             return -1;
         }
         let state = crate::state::state(ctx);
-        let exports = CStr::from_ptr(name)
-            .to_str()
-            .ok()
-            .and_then(|n| (*state).modules.exports(n));
+        let module_name = CStr::from_ptr(name).to_string_lossy().into_owned();
         qjs::JS_FreeCString(ctx, name);
-        let Some(exports) = exports else {
+        let Some(exports) = (*state).modules.exports(&module_name) else {
             return -1;
         };
+        let name = module_name;
+        // One object per typed module in the VM: default and flat named
+        // exports share its functions and values, as a global made from it
+        // does.
+        let table = &(*state).modules;
+        let default_spec = exports.iter().find_map(|(_, made)| match made {
+            Made::Default(spec) if spec.flat => Some(spec.clone()),
+            _ => None,
+        });
         for (export, made) in exports {
-            let value = make(ctx, &export, made);
+            let value = make(ctx, table, &name, default_spec.as_ref(), &export, made);
             if qjs::JS_IsException(value) {
                 return -1;
             }
@@ -720,8 +913,28 @@ unsafe extern "C" fn init(ctx: *mut JsContext, m: *mut qjs::JSModuleDef) -> c_in
     0
 }
 
-/// The value of export `export` (owned; an exception when making it threw).
-fn make(ctx: *mut JsContext, export: &str, made: Made) -> JsValue {
+/// The value of export `export` of module `name` (owned; an exception when
+/// making it threw). A typed module's object is the VM's one (`table`), and
+/// a value of a flat default module (`default_spec`) is that object's.
+fn make(
+    ctx: *mut JsContext,
+    table: &ModuleTable,
+    name: &str,
+    default_spec: Option<&Arc<ModuleSpec>>,
+    export: &str,
+    made: Made,
+) -> JsValue {
+    let member = |spec: &ModuleSpec, member: &str| {
+        let object = crate::web::js::V::own(ctx, table.object(ctx, name, spec));
+        // SAFETY: inline tag check; a property read of the live object.
+        unsafe {
+            if qjs::JS_IsException(object.raw()) {
+                return qjs::JS_EXCEPTION;
+            }
+            let member = CString::new(member).unwrap_or_default();
+            qjs::JS_GetPropertyStr(ctx, object.raw(), member.as_ptr())
+        }
+    };
     match made {
         Made::Own(Export::Function(f, length)) => {
             let cname = CString::new(export).unwrap_or_default();
@@ -729,13 +942,17 @@ fn make(ctx: *mut JsContext, export: &str, made: Made) -> JsValue {
         }
         Made::Own(Export::Value(make)) => make(ctx),
         Made::Component(spec, module) => components::component(ctx, spec, module),
-        Made::Module(spec) => components::module(ctx, &spec),
-        Made::Function(spec, f) => components::module_function(ctx, &spec, f),
+        Made::Module(spec) | Made::Default(spec) => table.object(ctx, name, &spec),
+        Made::Function(spec, f) if !spec.default => components::module_function(ctx, &spec, f),
+        Made::Function(spec, f) | Made::Constant(spec, f) => member(&spec, f),
         Made::Class(def) => match crate::classes::constructor(ctx, def) {
             Ok(ctor) => ctor.take(),
             Err(_) => qjs::JS_EXCEPTION,
         },
-        Made::Reexport(value) => env::reexport(ctx, value),
+        Made::Reexport(value) => match default_spec {
+            Some(spec) => member(spec, value),
+            None => env::reexport(ctx, value),
+        },
     }
 }
 
@@ -745,12 +962,17 @@ fn make(ctx: *mut JsContext, export: &str, made: Made) -> JsValue {
 pub(crate) fn host_module(ctx: *mut JsContext, specifier: &str) -> Option<JsValue> {
     // SAFETY: the state's table, by shared reference; it lives as long as
     // the context.
-    let exports = unsafe { &(*crate::state::state(ctx)).modules }.host_exports(specifier)?;
+    let table = unsafe { &(*crate::state::state(ctx)).modules };
+    let exports = table.host_exports(specifier)?;
+    let default_spec = exports.iter().find_map(|(_, made)| match made {
+        Made::Default(spec) if spec.flat => Some(spec.clone()),
+        _ => None,
+    });
     // SAFETY: a new object taking each new value; freed when one throws.
     unsafe {
         let object = qjs::JS_NewObject(ctx);
         for (export, made) in exports {
-            let value = make(ctx, &export, made);
+            let value = make(ctx, table, specifier, default_spec.as_ref(), &export, made);
             if qjs::JS_IsException(value) {
                 qjs::JS_FreeValue(ctx, object);
                 return Some(value);
@@ -793,5 +1015,53 @@ mod tests {
         let compiling = super::ModuleTable::compiling(&[]);
         assert!(compiling.export_names("nsh/ui/mobile").is_none());
         assert!(compiling.export_names("nsh").is_some());
+    }
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::normalize_chunk;
+
+    #[test]
+    fn typed_os_uses_one_object_in_source_bytecode_and_generated_types() {
+        let source = r#"
+            import os, {EOL,platform,arch,homedir} from 'os';
+            import {Buffer} from 'buffer';
+            import {Text} from 'nsh';
+            if (Object.keys(os).sort().join(',') !== 'EOL,arch,homedir,platform') throw Error('shape');
+            if (os.platform !== platform || os.arch !== arch || os.homedir !== homedir || os.EOL !== EOL) throw Error('identity');
+            if (typeof platform() !== 'string' || typeof arch() !== 'string') throw Error('sync result');
+            if (Buffer.from('os').toString() !== 'os' || typeof Text !== 'function') throw Error('mixed provider');
+        "#;
+        crate::Host::new().unwrap().eval_source(source).unwrap();
+        let bytecode = crate::compile_bytecode(source, false).unwrap();
+        crate::Host::new()
+            .unwrap()
+            .eval_bytecode(&bytecode)
+            .unwrap();
+        let declarations = crate::type_definitions(&[]);
+        let (_, generated) = declarations
+            .iter()
+            .find(|(path, _)| path == "os.d.ts")
+            .expect("registry declaration file");
+        assert!(generated.contains("export declare function platform(): string;"));
+        assert!(generated.contains("export declare const EOL: string;"));
+        assert!(generated.contains("export default defaultExport;"));
+        assert!(generated.contains("readonly EOL: string;"));
+    }
+
+    #[test]
+    fn relative_chunks_keep_quickjs_default_resolution() {
+        assert_eq!(normalize_chunk("bundle.js", "./chunk.js"), "chunk.js");
+        assert_eq!(normalize_chunk("a/b/main.js", "../chunk.js"), "a/chunk.js");
+        assert_eq!(
+            normalize_chunk("a/main.js", "../../chunk.js"),
+            "../chunk.js"
+        );
+        assert_eq!(normalize_chunk("a/main.js", "nsh/device"), "nsh/device");
+        assert_eq!(
+            normalize_chunk("a/main.js", "./x/../chunk.js"),
+            "a/x/../chunk.js"
+        );
     }
 }

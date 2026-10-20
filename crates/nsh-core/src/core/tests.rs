@@ -214,7 +214,7 @@ fn values_of_calls_into_rust_that_panic_as_they_drop_stay_in_the_core() {
         call: 0,
         run: RustCall::Op(Box::new(move |_| {
             let _ = &grenade;
-            Err(String::new())
+            Err(String::new().into())
         })),
     })]);
     assert!(js_events(&mut c).is_empty());
@@ -2985,6 +2985,49 @@ fn press_and_group_states() {
 }
 
 #[test]
+fn a_node_joining_a_group_in_a_state_reads_it() {
+    let mut c = core();
+    view_with_classes(&mut c, 2, "group");
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::Native(NativeProp::Disabled(true)),
+        }],
+    );
+    c.commit().unwrap();
+    // A row inserted into the group after it was disabled reads its state.
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 opacity-100 group-disabled:opacity-40"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 0.4);
+    // Moved out of the group, it drops it.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: ROOT_ID,
+            child: 3,
+            before: None,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 3).unwrap().opacity, 1.0);
+}
+
+#[test]
 fn untracked_states_are_forgotten() {
     use crate::tailwind::state::{HOVERED, PRESSED};
     // A sidebar row: `hover:` while not selected, plain once selected.
@@ -4481,6 +4524,40 @@ mod components {
         apply(&mut c, js_child(12, None));
         c.commit().unwrap();
         assert_eq!(child_ids(&c, 2), [10, 8, 12, 4]);
+    }
+
+    /// A footer slot whose presses show and hide a note after it.
+    #[component]
+    fn Toggler(props: PanelProps) -> impl IntoElement {
+        let shown = signal(false);
+        view()
+            .child(
+                props
+                    .footer
+                    .place(move |f| f.on_press(move |_: &()| shown.update(|s| *s = !*s))),
+            )
+            .child(If::new(shown, || view().h(px(10.0))))
+    }
+
+    /// What a view gives a slot's node (its handlers) stays while the node
+    /// is its slot, also once a region of the view runs again.
+    #[test]
+    fn a_slots_handlers_outlive_the_views_regions() {
+        let mut c = mount_host::<Toggler>();
+        apply(&mut c, fill_footer());
+        c.commit().unwrap();
+        assert_eq!(child_ids(&c, 2), [4]);
+        let press = |c: &mut Core<FakeEngine>| {
+            c.component_event(4, EventKind::Press, &EventPayload::None);
+            let _ = c.commit();
+        };
+        press(&mut c);
+        assert_eq!(child_ids(&c, 2).len(), 2, "the note shows");
+        // The region ran again: the slot still hears its presses.
+        press(&mut c);
+        assert_eq!(child_ids(&c, 2), [4], "the note is gone");
+        press(&mut c);
+        assert_eq!(child_ids(&c, 2).len(), 2, "and shows again");
     }
 
     #[test]

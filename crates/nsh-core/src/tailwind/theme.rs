@@ -107,6 +107,11 @@ impl Tokens {
         tokens
     }
 
+    /// The names of the colors and the numbers.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.colors.keys().chain(self.numbers.keys()).map(|n| &**n)
+    }
+
     /// Whether `self` and `other` have the same names (only their values
     /// may differ).
     pub(crate) fn same_names(&self, other: &Tokens) -> bool {
@@ -608,6 +613,47 @@ impl Theme {
     /// A color by name (`red-500`, `brand`).
     pub(crate) fn color(&self, name: &str) -> Option<Color> {
         self.colors.get(name).copied()
+    }
+
+    /// The names of every scale's entries (`red-500`, `lg`, `video`,
+    /// `snappy`, ...), sorted and without repeats: what utilities and
+    /// breakpoint variants take by name. Tools enumerate the classes a
+    /// theme offers with them (the engine's record of Tailwind classes).
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.breakpoints.iter().map(|(n, _)| &**n).collect();
+        let keys = [
+            self.colors.keys().collect::<Vec<_>>(),
+            self.containers.keys().collect(),
+            self.text.keys().collect(),
+            self.weights.keys().collect(),
+            self.fonts.keys().collect(),
+            self.tracking.keys().collect(),
+            self.leading.keys().collect(),
+            self.radius.keys().collect(),
+            self.shadows.keys().collect(),
+            self.inset_shadows.keys().collect(),
+            self.drop_shadows.keys().collect(),
+            self.text_shadows.keys().collect(),
+            self.blur.keys().collect(),
+            self.perspective.keys().collect(),
+            self.aspect.keys().collect(),
+            self.ease.keys().collect(),
+        ];
+        names.extend(keys.into_iter().flatten().map(|n| &**n));
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    /// The names of the component theme's tokens (`primary`,
+    /// `muted-foreground`, `radius`), sorted: what `bg-primary` and
+    /// `rounded-(--radius)` name.
+    pub fn token_names(&self) -> Vec<&str> {
+        let tokens = self.tokens();
+        let mut names: Vec<&str> = tokens.names().collect();
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
     /// The component theme's tokens classes name.
