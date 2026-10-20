@@ -36,6 +36,7 @@ pub mod storage;
 mod style;
 pub mod tailwind;
 mod text;
+pub mod text_edit;
 pub mod time;
 mod transform;
 pub mod ui;

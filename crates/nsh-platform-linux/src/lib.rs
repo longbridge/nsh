@@ -32,7 +32,6 @@ mod keymap;
 mod mount;
 mod native;
 mod navigation;
-mod net;
 mod scroll;
 mod selection_area;
 mod surface;

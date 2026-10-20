@@ -265,7 +265,7 @@ impl AppView {
             app,
             viewport: nsh_core::Size::default(),
             trace: options.trace,
-            network: Some(crate::net::network()),
+            network: Some(nsh_engine::net::network()),
             websocket: None,
             filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
