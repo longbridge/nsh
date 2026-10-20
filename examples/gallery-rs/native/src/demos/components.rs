@@ -45,8 +45,8 @@ fn field(focused: Signal<bool>) -> Input {
         })
         .rounded(px(radius::CONTROL))
         .finish(Finish::Inset)
-        .on_focus(move |_: &()| focused.set(true))
-        .on_blur(move |_: &()| focused.set(false))
+        .on_focus(move || focused.set(true))
+        .on_blur(move || focused.set(false))
 }
 
 /// A cell of a row of equal widths.

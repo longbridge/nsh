@@ -227,7 +227,7 @@ fn StatusBarCard() -> impl IntoElement {
                     .hidden(hidden.get())
                     .animated(true)
             })
-            .on_cancel(move |_: &()| open.set(false))
+            .on_cancel(move || open.set(false))
             .child(
                 view()
                     .flex_1()

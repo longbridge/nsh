@@ -770,7 +770,7 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
         .items_center()
         .gap_3()
         .px_4()
-        .on_press(move |_: &()| cx.emit(StockRowEvent::Press))
+        .on_press(move || cx.emit(StockRowEvent::Press))
         // Pressed, the row shows the surface under its content.
         .active(|s| s.bg(colors::SURFACE))
         .role(AccessibilityRole::Button)

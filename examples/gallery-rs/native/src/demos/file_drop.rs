@@ -25,8 +25,8 @@ pub(crate) fn FileDrop() -> impl IntoElement {
                         colors::BACKGROUND
                     }
                 })
-                .on_file_drag_enter(move |_: &()| hovering.set(true))
-                .on_file_drag_leave(move |_: &()| hovering.set(false))
+                .on_file_drag_enter(move || hovering.set(true))
+                .on_file_drag_leave(move || hovering.set(false))
                 .on_file_drop(move |event: &FileDropEvent| {
                     files.set(event.uris.clone());
                     hovering.set(false);

@@ -649,7 +649,7 @@ fn HitSlop() -> impl IntoElement {
                         .hit_slop(30.0)
                         .scale(0.8)
                         .label("Tiny dot")
-                        .on_press(move |_: &()| taps.update(|n| *n += 1))
+                        .on_press(move || taps.update(|n| *n += 1))
                         .child(
                             view()
                                 .size(px(12.0))
@@ -724,7 +724,7 @@ fn pointer_events() -> impl IntoElement {
                 .child(
                     press()
                         .scale(0.98)
-                        .on_press(move |_: &()| through.update(|n| *n += 1))
+                        .on_press(move || through.update(|n| *n += 1))
                         .flex_1()
                         .child(
                             view()
@@ -782,7 +782,7 @@ fn accessibility() -> impl IntoElement {
                         .role(AccessibilityRole::Button)
                         .label(label)
                         .hint(hint)
-                        .on_press(move |_: &()| last.set(Some(label)))
+                        .on_press(move || last.set(Some(label)))
                         .child(
                             Row::new(i == 0)
                                 // The tile's tint follows the press.

@@ -144,10 +144,10 @@ impl Field {
             .return_key_type(ReturnKeyType::Done)
             .multiline(self.multiline)
             .readonly(!self.editable)
-            .on_focus(move |_: &()| {
+            .on_focus(move || {
                 focus.timing(1.0, 160.0, Easing::EaseInOut);
             })
-            .on_blur(move |_: &()| {
+            .on_blur(move || {
                 focus.timing(0.0, 220.0, Easing::EaseInOut);
                 if let Some(on_blur) = &on_blur {
                     on_blur();

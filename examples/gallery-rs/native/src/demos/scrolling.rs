@@ -574,7 +574,7 @@ fn Zoom() -> impl IntoElement {
             .border_color(colors::BORDER)
             .p(px(6.0))
             .justify_between()
-            .on_press(move |_: &()| {
+            .on_press(move || {
                 // The tile's middle, in the content's (unzoomed) points.
                 let x = 6.0 + (i % 4) as f32 * 80.0 + 37.0;
                 let y = 6.0 + (i / 4) as f32 * 56.0 + 25.0;
@@ -805,7 +805,7 @@ pub(crate) fn Scrolling() -> impl IntoElement {
     let tap_me = move || {
         press()
             .label("Count a tap")
-            .on_press(move |_: &()| presses.update(|p| *p += 1))
+            .on_press(move || presses.update(|p| *p += 1))
             .child(
                 view()
                     .h(px(44.0))

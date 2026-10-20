@@ -182,7 +182,7 @@ impl IntoElement for PageHeader {
                 .label("Back")
                 .hover(|s| s.bg(colors::RAISED))
                 .active(|s| s.opacity(0.6))
-                .on_press(|_: &()| crate::nav::pop())
+                .on_press(crate::nav::pop)
                 .child(
                     view()
                         .rotate(deg(180.0))

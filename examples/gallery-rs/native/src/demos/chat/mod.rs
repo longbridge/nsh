@@ -965,7 +965,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
     };
     let backdrop = view()
         .pointer_events(pointer)
-        .on_press(move |_: &()| menu.set(false))
+        .on_press(move || menu.set(false))
         .absolute()
         .inset_0()
         .bg(rgb_a(0x000000, 0.45))
@@ -991,7 +991,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                             press()
                                 .hit_slop(4.0)
                                 .label(label)
-                                .on_press(move |_: &()| chat.play(id))
+                                .on_press(move || chat.play(id))
                                 .child(
                                     view()
                                         .h(px(36.0))
@@ -1088,7 +1088,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                         .placeholder(move || format!("Message {}", model.get().name()))
                         .placeholder_color(|| color(colors::FAINT))
                         .selection_color(|| color(colors::ACCENT))
-                        .on_focus(move |_: &()| menu.set(false))
+                        .on_focus(move || menu.set(false))
                         .on_content_size_change(move |size: &Size<Points>| {
                             input_height.set((size.height.clamp(px(20.0), px(100.0))).0);
                         })
@@ -1144,7 +1144,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
                                 press()
                                     .scale(0.9)
                                     .label("Stop generating")
-                                    .on_press(move |_: &()| chat.stop())
+                                    .on_press(move || chat.stop())
                                     .child(
                                         view()
                                             .size(px(44.0))
@@ -1213,7 +1213,7 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
             .find(|s| s.id == id)
             .map_or("Weeks of messages, loaded at once", |s| s.prompt);
         view()
-            .on_press(move |_: &()| open_chat(id))
+            .on_press(move || open_chat(id))
             .role(AccessibilityRole::Button)
             .label(label)
             .accessibility_state(move || AccessibilityState {
@@ -1249,31 +1249,28 @@ pub(crate) fn Chat(cx: Scope<NoEvent>) -> impl IntoElement {
         .p_3()
         .gap(px(2.0))
         .child(
-            press()
-                .label("New chat")
-                .on_press(move |_: &()| new_chat())
-                .child(
-                    view()
-                        .h(px(40.0))
-                        .rounded(px(radius::CONTROL))
-                        .border_curve(BorderCurve::Continuous)
-                        .flex_row()
-                        .items_center()
-                        .justify_center()
-                        .gap_2()
-                        .bg(colors::RAISED)
-                        .finish(Finish::Raised)
-                        .border_1()
-                        .border_color(colors::BORDER)
-                        .cursor_pointer()
-                        .child(icon().name(IconName::Plus).size(15.0).tint(colors::TEXT))
-                        .child(
-                            text("New chat")
-                                .text_size(px(14.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(colors::TEXT),
-                        ),
-                ),
+            press().label("New chat").on_press(new_chat).child(
+                view()
+                    .h(px(40.0))
+                    .rounded(px(radius::CONTROL))
+                    .border_curve(BorderCurve::Continuous)
+                    .flex_row()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .bg(colors::RAISED)
+                    .finish(Finish::Raised)
+                    .border_1()
+                    .border_color(colors::BORDER)
+                    .cursor_pointer()
+                    .child(icon().name(IconName::Plus).size(15.0).tint(colors::TEXT))
+                    .child(
+                        text("New chat")
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(colors::TEXT),
+                    ),
+            ),
         )
         .child(
             text("CONVERSATIONS")
@@ -1311,7 +1308,7 @@ impl ChatState {
             .enumerate()
             .map(|(i, (id, name, label))| {
                 view()
-                    .on_press(move |_: &()| {
+                    .on_press(move || {
                         self.menu.set(false);
                         if id == "attach" {
                             self.attachment.set(true);
@@ -1406,7 +1403,7 @@ impl ChatState {
                     let chip = all.iter().find(|s| s.id == id).map_or("", |s| s.chip);
                     view().w(relative(0.47)).flex_grow(1.0).child(
                         appear().index(i as u32 + 1).child(
-                            press().label(chip).on_press(move |_: &()| self.play(id))
+                            press().label(chip).on_press(move || self.play(id))
                             .child(
                                 view()
                                     .min_h(px(104.0))
@@ -1574,7 +1571,7 @@ impl ChatState {
                             .scale(0.98)
                             .label("Reasoning")
                             .selected(open)
-                            .on_press(move |_: &()| {
+                            .on_press(move || {
                                 if !is_live.get_untracked() {
                                     self.act(Action::Reasoning(id.get_untracked()));
                                 }

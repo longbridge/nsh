@@ -36,7 +36,7 @@ pub fn App() -> impl IntoElement {
                                 .rounded(px(10.0))
                                 .bg(move || theme().primary())
                                 .active(|s| s.opacity(0.6))
-                                .on_press(move |_: &()| count.update(|value| *value += 1))
+                                .on_press(move || count.update(|value| *value += 1))
                                 .child(
                                     text("Tap")
                                         .text_size(px(17.0))

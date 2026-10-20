@@ -356,7 +356,7 @@ fn contact_person(row: Memo<ContactRow>) -> impl IntoElement {
     let person = move || row.get().person();
     view()
         // A tap lights the row up and does nothing else.
-        .on_press(|_: &()| {})
+        .on_press(|| {})
         .active(|s| s.bg(colors::RAISED))
         .flex_row()
         .items_center()
@@ -738,7 +738,7 @@ fn ranges(range: Signal<&'static str>) -> Section {
             .role(PressRole::Tab)
             .selected(selected)
             .label(label)
-            .on_press(move |_: &()| range.set(label))
+            .on_press(move || range.set(label))
             .child(
                 view()
                     .h(px(36.0))

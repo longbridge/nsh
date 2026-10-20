@@ -56,7 +56,7 @@ fn pushed() -> AnyElement {
             let route = route.get_untracked();
             (route.screen)()
                 // The user popped it natively: it and what is above it go.
-                .on_dismiss(move |_: &()| nav::truncate(depth.get_untracked()))
+                .on_dismiss(move || nav::truncate(depth.get_untracked()))
         },
     )
     .into_element()
@@ -199,7 +199,7 @@ fn sidebar_row(demo: &'static Demo) -> AnyElement {
         .style_when(active, |s| s.bg(fill))
         .hover(|s| s.bg(move || if active() { fill } else { hover }))
         .active(|s| s.bg(fill))
-        .on_press(move |_: &()| select(demo))
+        .on_press(move || select(demo))
         .child(
             view()
                 .absolute()

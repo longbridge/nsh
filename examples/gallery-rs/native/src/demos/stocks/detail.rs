@@ -297,7 +297,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                 .when(is_desktop(), |m| {
                     m.presentation(ModalPresentation::FormSheet)
                 })
-                .on_cancel(move |_: &()| ticket.set(false))
+                .on_cancel(move || ticket.set(false))
                 .child(
                     view()
                         .flex_1()
