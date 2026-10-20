@@ -81,6 +81,16 @@ mod imp {
                 log::error!(target: "js", "uncaught exception: {message}");
                 errors.report_error(&message);
             }));
+            // Unhandled rejections are logged only, as browsers do: the
+            // app's error handler and the overlay get exceptions.
+            let (map, stopping) = (symbolicator.clone(), stop.clone());
+            host.set_rejection_handler(Box::new(move |err| {
+                if stopping.load(Ordering::Relaxed) {
+                    return;
+                }
+                let message = map.borrow_mut().rewrite(&err.message);
+                log::error!(target: "js", "unhandled rejection: {message}");
+            }));
             // Canvas `measureText` measures on this thread.
             host.set_text_measurer(Box::new(move |font, text| {
                 nsh_core::canvas::measure_line(&*text_engine, font, text)

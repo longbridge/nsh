@@ -28,6 +28,7 @@ mod js_touch;
 mod keymap;
 mod list;
 mod list_bench;
+mod logs;
 mod native;
 mod package;
 mod platform;

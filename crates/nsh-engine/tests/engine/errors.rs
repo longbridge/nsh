@@ -23,12 +23,10 @@ impl MountSink for Sink {
 /// Bundles an app whose timer throws on line 5 of `App.tsx` (in a
 /// directory of its own, named `name`).
 fn failing_app(name: &str, minify: bool) -> nsh_bundler::Bundle {
-    let dir = std::env::temp_dir().join(format!("nsh-{name}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let entry = dir.join("App.tsx");
     // The throw is on line 5, column 9.
-    std::fs::write(
-        &entry,
+    bundle_app(
+        name,
+        minify,
         "import { mount, View } from \"nsh\";\n\
          const message: string = \"boom\";\n\
          function fail(): void {\n\
@@ -38,7 +36,14 @@ fn failing_app(name: &str, minify: bool) -> nsh_bundler::Bundle {
          setTimeout(fail, 0);\n\
          mount(() => <View />);\n",
     )
-    .unwrap();
+}
+
+/// Bundles `source` as `App.tsx` in a directory of its own, named `name`.
+fn bundle_app(name: &str, minify: bool, source: &str) -> nsh_bundler::Bundle {
+    let dir = std::env::temp_dir().join(format!("nsh-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("App.tsx");
+    std::fs::write(&entry, source).unwrap();
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry,
         minify,
@@ -115,4 +120,41 @@ fn published_bytecode_keeps_positions_for_the_source_map() {
     let error = first_error(unsafe { Bundle::bytecode(stripped) }.with_source_map(map));
     assert!(error.contains("Error: boom"), "{error}");
     assert!(!error.contains("App.tsx:5:"), "{error}");
+}
+
+/// An unhandled rejection is logged with its stack mapped to the app's
+/// sources; the error overlay (the sink) gets exceptions only.
+#[test]
+fn unhandled_rejections_are_logged_at_app_sources() {
+    crate::logs::capture();
+    // The throw is on line 5; an exception follows it, a turn later.
+    let bundle = bundle_app(
+        "rejections",
+        false,
+        "import { mount, View } from \"nsh\";\n\
+         const message: string = \"nobody handles this\";\n\
+         async function load(): Promise<void> {\n\
+         \x20 // line 4\n\
+         \x20 throw new Error(message);\n\
+         }\n\
+         setTimeout(() => { load(); }, 0);\n\
+         setTimeout(() => { throw new Error(\"after the rejection\"); }, 20);\n\
+         mount(() => <View />);\n",
+    );
+    let bundle =
+        Bundle::source(bundle.code).with_source_map(bundle.source_map.expect("source map"));
+    let error = first_error(bundle);
+    assert!(error.contains("after the rejection"), "{error}");
+    let lines = crate::logs::wait_for("nobody handles this");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("unhandled rejection: Error: nobody handles this"),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("App.tsx:5:"),
+        "not symbolicated: {}",
+        lines[0]
+    );
 }

@@ -151,6 +151,20 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 objects and arrays as JSON. When the host is not connected, logs go to the platform's log (Xcode's console / the
 unified log on iOS, `adb logcat` on Android).
 
+A promise that is rejected and still has no handler once the work that rejected it is done (its microtasks ran) is
+logged as an error too, the way a browser reports it: an `async` function that throws while nobody awaits it, a
+`Promise.reject(…)` nobody catches, a call into Rust that fails with nothing waiting for it. The line goes wherever
+`console.error` goes (the terminal, the platform's log, the browser console on the web), with its stack pointing at
+your sources:
+
+```text
+error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
+          at loadProfile (App.tsx:12:11)
+```
+
+A handler attached later in the same turn (`const p = load(); …; p.catch(…)`) counts as handling it. Await the
+promise or give it a `.catch` where the failure matters.
+
 The rest of the terminal is one line per step (`✓` done, `→` where to connect, `•` what a device did); the output of
 the tools NSH runs (cargo, the hosts themselves) is only printed when one fails. `nsh run -v` (or `NSH_VERBOSE=1`)
 prints everything: every log line with its level and source, cargo's output and the hosts' own.

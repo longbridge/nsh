@@ -575,6 +575,29 @@ setTimeout(async () => {
 mount(() => <Text>{shown()}</Text>);
 "#;
 
+const UNAWAITED: &str = r#"import { mount, signal, Text } from "nsh";
+import { Tools } from "test/classes";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  // Nobody waits for the first: its `Err` is an unhandled rejection.
+  Tools.markOrFail("no");
+  Tools.markOrFail("no").catch(() => {});
+  await Tools.markOrFail("yes");
+  shown.set("done");
+}, 0);
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn an_op_failing_unawaited_logs_an_unhandled_rejection() {
+    crate::logs::capture();
+    let (_engine, rx) = start(UNAWAITED, vec![registry()]);
+    assert_eq!(shown(&rx, "done"), "done");
+    let lines = crate::logs::wait_for("refused \"no\"");
+    assert_eq!(lines, ["unhandled rejection: Error: refused \"no\""]);
+}
+
 #[test]
 fn ops_returning_nothing_are_plain_calls_and_others_promises() {
     let (_engine, rx) = start(VOID, vec![registry()]);

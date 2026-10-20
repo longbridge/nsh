@@ -168,7 +168,7 @@ is how it catches handlers that stopped working, for example because the app's n
 ## In CI
 
 `nsh trace` needs nothing but the CLI, so it runs on Linux runners. Errors in the app (a failed bundle evaluation, an
-uncaught exception) are printed as `error` lines; a build failure, an app that renders nothing, or a tap that changes
+uncaught exception, an unhandled promise rejection) are printed as `error` lines; a build failure, an app that renders nothing, or a tap that changes
 nothing make it exit with a non-zero code. Check both:
 
 ```sh

@@ -125,6 +125,18 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 `console.log` 像浏览器控制台一样格式化值：字符串原样输出，错误附带调用栈，函数显示名称，对象和数组输出为 JSON。宿主
 未连接时，日志会写入平台日志（iOS 上是 Xcode 控制台 / 统一日志，Android 上是 `adb logcat`）。
 
+被 reject 的 Promise，如果在引起它的那段工作结束（它的微任务都已运行）时仍然没有处理函数，也会像浏览器那样记录为一条错误：
+没人 await 的 `async` 函数抛出了异常、没人 catch 的 `Promise.reject(…)`、没有人等待结果的 Rust 调用失败了。这一行和
+`console.error` 去往同样的地方（终端、平台日志，Web 上是浏览器控制台），调用栈指向你的源码：
+
+```text
+error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
+          at loadProfile (App.tsx:12:11)
+```
+
+在同一轮中稍后附加的处理函数（`const p = load(); …; p.catch(…)`）也算作处理了它。失败需要处理的地方，请 await 这个
+Promise 或给它加上 `.catch`。
+
 终端里的其余内容是每个步骤一行（`✓` 完成，`→` 连接地址，`•` 设备的动态）；NSH 调用的工具（cargo、宿主本身）的输出
 只在出错时打印。`nsh run -v`（或 `NSH_VERBOSE=1`）打印全部内容：每条日志及其级别和来源、cargo 的输出以及宿主自己的输出。
 

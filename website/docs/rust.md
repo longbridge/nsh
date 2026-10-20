@@ -269,7 +269,8 @@ returns its value (`Portfolio.total()` is a number, `ledger.balance` a property)
 taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar), and so does a
 component's ref method; their return type decides what TSX gets: one returning `()` gives `void`, with no reply
 (TSX calls it and moves on); one returning `Result<(), E>` gives `Promise<void>`, which rejects with the `Err`'s
-message (the call runs with the UI's changes, after the TSX call returned, so the Promise carries its error); one
+message (the call runs with the UI's changes, after the TSX call returned, so the Promise carries its error; one
+nobody awaits or catches is logged as an [unhandled rejection](./dev-server-and-debugging.md#logs)); one
 returning a value gives `Promise<T>`. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
 (`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`; TS sees

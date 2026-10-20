@@ -31,6 +31,7 @@ mod net;
 mod platform_modules;
 mod protocol;
 mod reactive;
+mod rejections;
 mod sandbox;
 mod state;
 mod timers;

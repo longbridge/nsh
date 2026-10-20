@@ -151,7 +151,7 @@ nsh trace trace/AddItem.tsx --taps 5
 
 ## 在 CI 中
 
-`nsh trace` 只需要 CLI，因此可以在 Linux runner 上运行。应用中的错误（bundle 执行失败、未捕获的异常）会打印为 `error`
+`nsh trace` 只需要 CLI，因此可以在 Linux runner 上运行。应用中的错误（bundle 执行失败、未捕获的异常、未处理的 Promise rejection）会打印为 `error`
 行；构建失败、应用什么都没渲染，或者某次点击没有带来任何变化，都会使它以非零退出码退出。两者都要检查：
 
 ```sh
