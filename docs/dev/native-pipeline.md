@@ -73,7 +73,10 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   component path. Lowercase tags are errors with the import to write (`<view>`: write `<View>` and `import { View }
   from "nsh"`; for another, the closest binding, primitive or UI set component). Why: TypeScript checks a lowercase
   tag against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
-  Props keep their camelCase names.
+  Props keep their camelCase names. Only `<Text>` shows text (the core lays out raw text in a text block alone): text
+  written in another host element (`<View>Hi</View>`, a string, number or template literal) is an error saying where it
+  goes (`check_unshown_text`); a string an expression puts there is reported once per tag at run time (`dom.rs`
+  `report_unshown_text`), except in a Rust component's view or slots (`places`), which place what they get.
 - **Host elements** become one arrow function making the element and its host children: static props and children
   are set once (`prop`, `append`), changing ones are functions the renderer follows natively (`bindProp`, `insert`).
   An expression changes when it calls something or reads a member outside nested functions (Solid's rule). Event

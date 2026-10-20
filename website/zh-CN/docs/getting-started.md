@@ -87,7 +87,7 @@ mount(App);
 - **`mount(App)`** 把组件渲染到应用的界面上。
 
 > [!IMPORTANT]
-> 文本必须放在 `<Text>` 中。直接写在 `<View>` 里的字符串（`<View>Hello</View>`）不会显示。
+> 文字在 `<Text>` 中显示。直接写在 `<View>` 里的文字（`<View>Hello</View>`）会在构建时报错并指出位置；由表达式放进去的字符串（`<View>{name}</View>`）会在日志中提示。
 
 ## 开发
 

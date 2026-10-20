@@ -1120,6 +1120,31 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn strings_outside_a_text_are_reported_once_per_element() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"import { append, element, insert, prop, text } from "nsh:rt";
+            const view = element("view");
+            insert(view, () => "a");
+            insert(view, () => "b");
+            const label = element("text");
+            insert(label, () => "shown");
+            // A Rust component places what is put in it.
+            const card = element("view");
+            prop(card, "component", "Card");
+            insert(card, () => "placed");
+            const scroll = element("scroll");
+            append(scroll, text("c"));"#,
+        )
+        .unwrap();
+        let tags = host
+            .ctx
+            .with(|ctx| crate::dom::unshown_text_tags(ctx.as_raw().as_ptr()));
+        let bit = |t: nsh_core::Tag| 1u64 << t as u32;
+        assert_eq!(tags, bit(nsh_core::Tag::View) | bit(nsh_core::Tag::Scroll));
+    }
+
     fn ops(host: &Host) -> Vec<Op> {
         let mut out = Vec::new();
         host.take_ops(&mut out);

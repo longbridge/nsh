@@ -74,6 +74,9 @@ pub(crate) struct Dom {
     dismissed: RefCell<Vec<(NodeId, JsValue)>>,
     /// Whether the user's language is written right to left.
     env_rtl: Cell<bool>,
+    /// The tags (bits by `Tag as u32`; 63: the root) text was put in
+    /// without being shown, each reported once.
+    unshown_text: Cell<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -109,6 +112,10 @@ struct NodeData {
     /// `contentContainerClass`), one of `children` that takes the others
     /// ([`DETACHED`]: none).
     content: NodeId,
+    /// A Rust component's view or one of its slots (`component`,
+    /// `componentSlot`): the component places what is put in it, text in
+    /// a text of its own maybe.
+    places: bool,
     /// The node's object (not owned: the data goes with it).
     object: JsValue,
 }
@@ -238,6 +245,7 @@ impl Dom {
             desktop: Cell::new(false),
             rtl: Cell::new(None),
             env_rtl: Cell::new(false),
+            unshown_text: Cell::new(0),
             dismissed: RefCell::new(Vec::new()),
         }
     }
@@ -550,6 +558,7 @@ fn new_node(ctx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> Js
         children: Vec::new(),
         handlers: Vec::new(),
         content: DETACHED,
+        places: false,
         object: UNDEFINED,
     }));
     // SAFETY: a registered class; the opaque is the boxed data, freed by
@@ -904,6 +913,34 @@ fn is_ancestor(ctx: *mut JsContext, node: NodeId, of: NodeId) -> bool {
     false
 }
 
+/// Reports text put in an element of `tag` (`None`: the root), which does
+/// not show it, once per tag: only a `<Text>` shows text. Text the source
+/// holds is a compile error; this is a string an expression gives
+/// (`<View>{name}</View>`).
+#[cold]
+fn report_unshown_text(ctx: *mut JsContext, tag: Option<Tag>) {
+    let d = dom(ctx);
+    let bit = 1u64 << tag.map_or(63, |t| t as u32);
+    if d.unshown_text.get() & bit != 0 {
+        return;
+    }
+    d.unshown_text.set(d.unshown_text.get() | bit);
+    let place = match tag {
+        None => "the root".to_owned(),
+        Some(Tag::Cell) => "a <List> row".to_owned(),
+        Some(tag) => format!("a <{tag:?}>"),
+    };
+    d.shared.warnings.borrow_mut().warn(format!(
+        "a string in {place} is not shown: text shows in a <Text> (`<Text>{{name}}</Text>`)"
+    ));
+}
+
+/// The tags text was put in unshown ([`report_unshown_text`]'s bits).
+#[cfg(test)]
+pub(crate) fn unshown_text_tags(ctx: *mut JsContext) -> u64 {
+    dom(ctx).unshown_text.get()
+}
+
 /// Moves node `child` into `parent` before `before` (`None`: at the end).
 fn insert_before(
     ctx: *mut JsContext,
@@ -940,6 +977,10 @@ fn insert_before(
             ctx,
             "nsh: a node cannot be inserted into itself",
         ));
+    }
+    // SAFETY: live node data, read briefly.
+    if unsafe { (*c).text && !(*p).places && (*p).tag != Some(Tag::Text) } {
+        report_unshown_text(ctx, unsafe { (*p).tag });
     }
     let d = dom(ctx);
     // Out of its current parent (the core moves the view itself).
@@ -1146,6 +1187,8 @@ fn set_prop(
             apply_ref(ctx, value, node)?;
             return Ok(());
         }
+        // SAFETY: live node data.
+        "component" | "componentSlot" => unsafe { (*p).places = true },
         "ios" | "android" | "desktop" | "web" => {
             return platform_props(ctx, node, name, value, prev);
         }

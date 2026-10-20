@@ -357,6 +357,17 @@ fn without_wrappers(e: Expression<'_>) -> Expression<'_> {
     }
 }
 
+/// The part of `span` (`raw`'s, the source text) without the whitespace
+/// around it: what a label points at.
+fn trimmed_span(span: Span, raw: &str) -> Span {
+    if span.size() as usize != raw.len() {
+        return span;
+    }
+    let lead = (raw.len() - raw.trim_start().len()) as u32;
+    let trail = (raw.len() - raw.trim_end().len()) as u32;
+    Span::new(span.start + lead, span.end - trail)
+}
+
 /// Whether an expression's value may change: it calls something or reads a
 /// member, outside nested functions.
 fn is_dynamic(e: &Expression<'_>) -> bool {
@@ -764,8 +775,50 @@ impl<'a> Compiler<'a, '_> {
                 }
             }
         }
+        if core != "text" {
+            self.check_unshown_text(core, &el.children);
+        }
         self.host_children(&v, el.children, g, body);
         v
+    }
+
+    /// Text written in a host element other than `<Text>` (`<View>Hi</View>`,
+    /// `<View>{"Hi"}</View>`) is never shown: an error saying where it goes.
+    fn check_unshown_text(&mut self, core: &str, children: &[JSXChild<'a>]) {
+        let element = PRIMITIVES
+            .iter()
+            .find(|(.., c)| matches!(c, Compiled::Host(t) if *t == core))
+            .map_or(core, |(_, name, _)| name);
+        for child in children {
+            let (text, span) = match child {
+                JSXChild::Text(t) => match clean_text(&t.value) {
+                    Some(text) => (text, trimmed_span(t.span, &t.value)),
+                    None => continue,
+                },
+                JSXChild::ExpressionContainer(c) => match &c.expression {
+                    JSXExpression::StringLiteral(s) => (s.value.to_string(), s.span),
+                    JSXExpression::NumericLiteral(n) => (n.raw_str().to_string(), n.span),
+                    JSXExpression::TemplateLiteral(t) if t.expressions.is_empty() => (
+                        t.quasis
+                            .iter()
+                            .filter_map(|q| q.value.cooked.as_deref())
+                            .collect(),
+                        t.span,
+                    ),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            let text = text.trim();
+            let shown: String = text.chars().take(24).collect();
+            let more = if shown.len() < text.len() { "…" } else { "" };
+            self.error(
+                format!(
+                    "text in <{element}> is not shown: text shows in a <Text> (`<Text>{shown}{more}</Text>`)"
+                ),
+                span,
+            );
+        }
     }
 
     fn attr_name(&mut self, name: &JSXAttributeName<'a>) -> Option<String> {
@@ -1540,6 +1593,50 @@ mod tests {
             code.contains("_$ref(el, __nsh_hv4) || (el = __nsh_hv4);"),
             "{code}"
         );
+    }
+
+    #[test]
+    fn text_outside_text_is_an_error() {
+        for (source, message) in [
+            (
+                "<View>Hello world <Text>shown</Text></View>",
+                "text in <View> is not shown: text shows in a <Text> (`<Text>Hello world</Text>`)",
+            ),
+            (
+                r#"<Scroll>{"a string"}</Scroll>"#,
+                "text in <Scroll> is not shown: text shows in a <Text> (`<Text>a string</Text>`)",
+            ),
+            (
+                "<View>{42}</View>",
+                "text in <View> is not shown: text shows in a <Text> (`<Text>42</Text>`)",
+            ),
+            (
+                "<View>a sentence far longer than what the message shows</View>",
+                "(`<Text>a sentence far longer th…</Text>`)",
+            ),
+        ] {
+            let err = compile(&format!(
+                r#"import {{ Scroll, Text, View }} from "nsh"; export const a = {source};"#
+            ))
+            .unwrap_err();
+            // The report wraps long messages: compared without whitespace.
+            let bare = |s: &str| {
+                s.replace("\n  | ", " ")
+                    .split_whitespace()
+                    .collect::<String>()
+            };
+            assert!(bare(&err).contains(&bare(message)), "{source}: {err}");
+        }
+        // Text in a <Text>, whitespace, expressions and components' children stay.
+        compile(
+            r#"import { Text, View } from "nsh"; declare const Card: any, name: string;
+            export const a = <View>
+              <Text>Hi {name}</Text>
+              {name}
+              <Card>words</Card>
+            </View>;"#,
+        )
+        .unwrap();
     }
 
     #[test]

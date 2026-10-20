@@ -87,7 +87,7 @@ Line by line:
 - **`mount(App)`** renders the component into the app's surface.
 
 > [!IMPORTANT]
-> Text must be inside `<Text>`. A bare string in a `<View>` (`<View>Hello</View>`) is not displayed.
+> Text shows in a `<Text>`. Text written straight in a `<View>` (`<View>Hello</View>`) is a build error that points at it, and a string an expression puts there (`<View>{name}</View>`) is reported in the log.
 
 ## Develop it
 
