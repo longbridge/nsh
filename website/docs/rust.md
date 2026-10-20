@@ -335,6 +335,55 @@ in TypeScript (`App.test.tsx`), that press through the app and check what each o
 --target web` (or `ios`, `android`, …) runs its root, `nsh test examples/gallery-rs` runs its tests headless, and
 `cargo run -p gallery-native` starts it on the desktop backend.
 
+### Render functions and the app's classes
+
+A component draws content of the app's for values it has (a row of its data, a code block of a document) with a
+render function: a prop `Option<Renderer<T>>`, in TypeScript `(value: T) => JSX.Element`. The component calls
+`render(key, value)` where the content goes and gets a view it styles and places as any other (inside a `text(..)`, an
+inline view). The content is kept per key while the value stays equal, and rendered again when it changes. A Rust
+parent passes `Renderer::new(|value: &T| ..)`.
+
+Styles in a component are typed; the app's Tailwind classes reach one of its parts through a prop of classes and
+`.app_class(..)` on that part's element. They apply after the element's own styles, with the app's theme, `dark:` and
+the states, as `class` on an element does.
+
+```rust
+/// A quote: its symbol, then content of the app's.
+#[derive(Clone, Copy, PartialEq, Props)]
+pub struct QuoteProps {
+    /// The symbol.
+    pub symbol: Prop<SharedString>,
+    /// Tailwind classes of the symbol's text.
+    pub symbol_class: Prop<Option<SharedString>>,
+    /// Content of the app's after the symbol (a change, a badge).
+    pub render_badge: Prop<Option<Renderer<SharedString>>>,
+}
+
+/// A quote of a symbol.
+#[component]
+pub fn Quote(props: QuoteProps) -> impl IntoElement {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .child(text(props.symbol).app_class(props.symbol_class))
+        .child(dynamic(move || {
+            props.render_badge.get().map(|r| r.render("badge", props.symbol.get()).flex_1())
+        }))
+}
+```
+
+```tsx
+<Quote
+  symbol="NSH"
+  symbolClass="text-lg font-semibold"
+  renderBadge={(symbol) => <Text class="text-green-600">{`${symbol} ▲ 2.4%`}</Text>}
+/>
+```
+
+`TextView` in `nsh/base` is built this way: its `renderCodeBlock`, `renderMath`, ... are render functions, and its
+`classes` are the app's classes by part ([TextView](../elements/text-view.md)).
+
 ## Testing
 
 A Rust app's tests run it headless, in `cargo test` or in `nsh test`, with the same driver: on the real engine,

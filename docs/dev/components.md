@@ -10,7 +10,8 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button` and the modules `AlertDialog`,
+  `nsh_base::registry()`): `SafeAreaView`, `KeyboardAvoidingView`, `Button`, `SelectionArea` (texts that select
+  together, `text.md` "Selection areas"), `TextView` (`text-view.md`) and the modules `AlertDialog`,
   `Keyboard`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
   (`Registry::ui_set("nsh/base")`) every host serves by default (`set_ui_sets`' default; embedders with a list of their
@@ -21,7 +22,8 @@ come from two places:
   - it owns behavior, state, focus, keyboard handling and accessibility (roles, states, actions), or tells the
     platform (insets, the keyboard's height, the status bar's setting, a system dialog);
   - it has no look: no colors, paddings, radii, fonts or variants of its own; it takes the app's `class` / `style`
-    (and styles per state) and children;
+    (and styles per state) and children (the one exception is `TextView`'s default reading typography, colored with
+    the theme's tokens and overridable part by part: `docs/dev/text-view.md`);
   - its state is controlled: it reports changes (`onChange`, `onOpenChange`, ...), the app owns the value;
   - it exposes its parts (a trigger, a thumb, an item, as slots or child components) instead of fixed markup, so an
     app arranges and styles each.
@@ -36,7 +38,7 @@ come from two places:
 | `crates/nsh-core/src/ui/` | The API (`nsh_core::ui`, `prelude`): `Component`, `Module`, `Class` (`class.rs`, `callback.rs`; direct JS values: `js.rs`), elements, `Styled`, `Theme`, `Registry`, the status bar's layers (`status_bar.rs`), the declarations generator `typescript` |
 | `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
 | `crates/nsh-core/src/core/components.rs` | The core side: instances, children and slots, events; `core/views.rs`: views, their bindings' patches and regions |
-| `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`safe_area.rs`, `keyboard.rs`, `alert_dialog.rs`, `button.rs`), one `Registry` (`lib.rs`) |
+| `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`safe_area.rs`, `keyboard.rs`, `alert_dialog.rs`, `button.rs`; `TextView` a directory, `text_view/`), one `Registry` (`lib.rs`) |
 | `crates/nsh-core/src/runtime/` | The runtime's Rust modules (`nsh/android`, `nsh/accessibility`, `nsh/image`, `nsh/clipboard`, `nsh/desktop`), one `Registry` per JS module (`mod.rs`) |
 | `crates/nsh-js/src/components.rs` | The JS face of components and modules, made from their specs when a bundle imports the module; `classes.rs`: classes' (on the web classes' machinery), synchronous functions', callbacks |
 | `crates/nsh-js/src/declarations.rs` | `nsh/base.d.ts`, `app/native.d.ts`, ...: the declarations generated from each registry (`nsh_core::ui::declarations`) with the re-exports and the navigation |
@@ -169,6 +171,22 @@ reasons: `reactive-components.md`.
     `.children_each(props.children, |child, at| view().py_3().child(child))` wraps each one (an `Each` keyed by
     the child's node: a child that stays keeps its wrapper; `at` is a `Position`: `index()`, `count()`,
     `is_first()`, `is_last()`, signals read in bindings).
+  - `render_code: Prop<Option<Renderer<CodeBlock>>>`: a render function, `renderCode?: (value: CodeBlock) =>
+    JSX.Element` in TS (optional; `T`'s TS type, its named types declared), for content the app draws for values the
+    view has (a code block of a document, a mention). In a binding or region the view calls
+    `props.render_code.get().map(|r| r.render(key, value))`: a `Rendered`, a view to style and place as any (in a
+    `text(..)` an inline view), whose child is the content. A Rust parent passes `Renderer::new(|v| el)`, a closure
+    called on the spot. The app's JS function is called by JS: the element is a placeholder (a view of the core's,
+    `Attrs::render`), and after each commit the core sends `JsEvent::Render { host, prop, key, value }` for each
+    (prop, key) placed with a value JS has not rendered (the value compared with the one sent last, so an equal one
+    sends nothing) and `JsEvent::Unrender` once none of a (prop, key) is placed any more (its region left, the view
+    went, another key took its place). The JS face (`$render` / `$unrender`, the host's native-event handler) calls
+    the app's function in a root of its own under the component's owner (so context reaches it), inserts what it
+    returns into a holder view (`componentRender`: the prop, U+001F, the key) and the holder into the host, replacing
+    the key's previous one; the core places the holder as the only child of the key's placeholder (the last one placed
+    when a view places a key twice; none placed: it waits out of the tree for the `Unrender`). The roots go with their
+    holder or with the component (`core/renders.rs`; `nsh-js` `components.rs`). The decoded prop names its host, so a
+    view may pass it on to a nested component's prop. Keys are unique among a component's renders of one prop.
   - `items: Items`: virtualized rows. In JS the component takes `List`'s data props (`each`, the row renderer as
     children, `keyExtractor`, `onEndReached`, `header`, ... : `ListItemsProps<T>`, so the component is
     generic over the row type). `.list(props.items, |l| l.flex_1().estimated_item_size(px(48.0)), |row, at|
@@ -501,7 +519,11 @@ draw both, `.text_decoration_wavy()`, `.text_decoration_color(..)`), `.uppercase
 grids (`.grid_cols(3)`, `.col_span(2)`), `.flex_grow(n)`. Tailwind's palette is typed too
 (`ui::palette::SKY.shade(500)`). An element records declarations (`StyleRefinement`); the core lowers them into the
 same rules Tailwind classes compile to (`ClassList`), cached and shared between elements with the same styles. There
-is no string to parse and no `.class()`.
+is no string to parse and no `.class()`; the one way classes reach a view's element is the app's:
+`.app_class(props.heading_class)` (a prop of the app's Tailwind classes for one of the component's parts,
+`classes={{ heading: "text-2xl" }}`) resolves them as a host's `class` (the theme's tokens, `dark:`, states) and merges
+them after the element's own styles (on a root, before the app's `class` on the host); a bound one applies again when
+it changes, and they are resolved again when the tokens change (`Components::app_classes`).
 
 - A style method given a binding (`.bg(move || ..)`, `.opacity(props.dim)`, `.style_when(cond, |s| ..)`) is a bound
   part of the element's style: when one runs again, the core lowers the element's style with the new value and

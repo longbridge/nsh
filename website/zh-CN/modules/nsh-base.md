@@ -1,13 +1,13 @@
 ---
 title: nsh/base
-description: 应用界面的无样式基础组件：按钮、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
+description: 应用界面的无样式基础组件：按钮、Markdown 与 HTML 文档、跨文字的选区、导航栈与对话框、安全区、系统警告对话框、软键盘，以及页面和对话框的状态栏。
 order: 2.5
 demo: ui-navigation
 ---
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh` 和各个 `nsh/<module>` 模块）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`）、Markdown 或 HTML 文档（`TextView`）、跨文字的选区（`SelectionArea`）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）、安全区（`SafeAreaView`、`safeArea()` 和 `safeAreaInsets()`）、系统警告对话框（`AlertDialog`）、软键盘（`Keyboard`、`keyboardFrame()` 和 `KeyboardAvoidingView`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, safe_area_view, …}`）。
 
@@ -21,12 +21,12 @@ use nsh_base::{
 ```tsx tabs
 import {
   AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
-  SafeAreaView, safeArea, safeAreaInsets,
+  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, TextView,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
   DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
-  StatusBarForeground,
+  SelectionAreaProps, StatusBarForeground, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
 
@@ -55,6 +55,67 @@ import type {
 ### Button
 
 一个只负责行为、没有外观的按压目标：处理按压、禁用和选中状态，并向屏幕阅读器报告它的角色。它的外观是应用的 `class` 和 `style` 加上状态变体，内容是它的子元素。见 [Button](../elements/button.md)。
+
+<a id="documents"></a>
+
+## 文档
+
+### TextView
+
+`TextView` 用 [`Text`](../elements/text.md) 元素和视图显示 Markdown、HTML 或应用自己构建的文档块：标题、列表、代码、表格、图片、公式、脚注以及应用自己的语法。它为流式输出的 AI 聊天回复而设计（`options={{ streaming: true }}` 加上 `caret`），自带一套采用主题颜色的阅读排版，应用可按部件重新设定样式（`classes`、`styles`）。点击链接会通知应用（`onLinkPress`），渲染函数则把应用自己的内容放进文档：代码块及其操作、表格的操作、公式、图片和自定义节点。
+
+```tsx
+<TextView
+  markdown={reply()}
+  options={{ streaming: true }}
+  classes={{ heading: "font-semibold", code: "rounded bg-neutral-100 px-1", link: "text-blue-600" }}
+  onLinkPress={(url) => openLink(url)}
+/>
+```
+
+部件、流式输出、渲染函数、Markdown 扩展、文档模型以及在 Rust 中的用法见 [TextView](../elements/text-view.md)。
+
+<a id="selection"></a>
+
+## 选择
+
+<a id="selectionarea"></a>
+
+### SelectionArea
+
+`SelectionArea` 让其中的文字一起选择，就像网页上的文字一样：一个选区可以从一段文字中的某处延伸到另一段文字中的某处，跨越视图、[`Text`](../elements/text.md) 元素和 [`TextView`](../elements/text-view.md)，按阅读顺序排列。把聊天记录包在它里面，选区就能从一条消息开始、在下一条消息结束；复制会把选中的文字放进剪贴板，并排的文字之间用制表符连接，其他文字之间用换行连接。
+
+```tsx
+import { Text, View } from "nsh";
+import { SelectionArea, TextView } from "nsh/base";
+
+<SelectionArea class="gap-3 p-4">
+  <Text class="font-semibold">Release notes</Text>
+  <TextView markdown={notes} />
+  <View class="flex-row gap-2">
+    <Text selectable={false} class="text-neutral-500">Updated</Text>
+    <Text>October 21</Text>
+  </View>
+</SelectionArea>
+```
+
+| 平台 | 如何选择 |
+|---|---|
+| macOS、Windows、Linux、GPUI | 在文字上拖动；双击选中一个词，三击选中一个段落，之后的拖动按词或段落继续。Shift+点击扩展选区。Ctrl / Cmd+A 选中区域内的全部文字，Ctrl / Cmd+C 复制，Esc 或在区域外按下会清除选区。 |
+| iOS、Android | 长按选中一个词；用平台的选择手柄扩展选区，平台的编辑菜单提供“拷贝”和“全选”。 |
+| Web | 浏览器自己的选择，使用浏览器的手势、菜单和快捷键。 |
+
+| 属性 | 类型 | |
+|---|---|---|
+| `children` | `JSX.Element` | 内容：任意视图，文字可以在任意层级。 |
+| `class`、`style` | | 它的布局和外观，与 [View](../elements/view.md) 相同。 |
+
+- **不参与选择的文字**：设置了 `selectable={false}` 的文字（标签、按钮上的文字）会被选区及其手势跳过。
+- **嵌套的区域**：一个区域在另一个区域里面时属于外层区域，一个选区覆盖两者。
+- **TextView**：设置了 `selectable` 的 `TextView` 本身就是一个选择区域：它的段落、列表项、单元格和代码块一起选择。放在 `SelectionArea` 里时，它加入外层的选区。
+- **区域之外**：不在任何区域里的 `selectable` 文字单独选择，见 [Text](../elements/text.md#props)。
+- **外观**是平台的高亮，使用每段文字的 `selectionColor`（`selection:text-*`）；区域本身不绘制任何东西。
+- **列表**：在虚拟化的 [List](../elements/list.md) 中，选区覆盖已挂载的行；滚出视野被回收的行会离开选区。
 
 <a id="navigation"></a>
 
@@ -211,6 +272,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[SafeAreaView](../elements/safe-area-view.md)、[KeyboardAvoidingView](../elements/keyboard-avoiding-view.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [nsh/android](./nsh-android.md)：`BackHandler`、用于简短消息的 `Toast.show` 及其他 Android 专用 API。

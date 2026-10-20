@@ -307,6 +307,48 @@ Rust 用 `post` 调用的回调、`dispose()` 和 `using`），每个都有简�
 （或 `ios`、`android` 等）运行它的根组件，`nsh test examples/gallery-rs` 以无界面方式运行它的测试，`cargo run -p gallery-native`
 在桌面后端上启动它。
 
+### 渲染函数与应用的类
+
+组件用渲染函数为它拥有的值（它的一行数据、文档中的一个代码块）绘制应用的内容：一个 `Option<Renderer<T>>` 属性，在 TypeScript 中是 `(value: T) => JSX.Element`。组件在内容所在的位置调用 `render(key, value)`，得到一个视图，像其他视图一样设定样式并放置（在 `text(..)` 中是一个行内视图）。只要值不变，内容按 key 保留；值改变时重新渲染。Rust 父组件传入 `Renderer::new(|value: &T| ..)`。
+
+组件中的样式是类型化的；应用的 Tailwind 类通过一个类名属性和该部件元素上的 `.app_class(..)` 作用于组件的某个部件。它们在元素自身的样式之后应用，并使用应用的主题、`dark:` 和各种状态，就像元素上的 `class` 一样。
+
+```rust
+/// A quote: its symbol, then content of the app's.
+#[derive(Clone, Copy, PartialEq, Props)]
+pub struct QuoteProps {
+    /// The symbol.
+    pub symbol: Prop<SharedString>,
+    /// Tailwind classes of the symbol's text.
+    pub symbol_class: Prop<Option<SharedString>>,
+    /// Content of the app's after the symbol (a change, a badge).
+    pub render_badge: Prop<Option<Renderer<SharedString>>>,
+}
+
+/// A quote of a symbol.
+#[component]
+pub fn Quote(props: QuoteProps) -> impl IntoElement {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .child(text(props.symbol).app_class(props.symbol_class))
+        .child(dynamic(move || {
+            props.render_badge.get().map(|r| r.render("badge", props.symbol.get()).flex_1())
+        }))
+}
+```
+
+```tsx
+<Quote
+  symbol="NSH"
+  symbolClass="text-lg font-semibold"
+  renderBadge={(symbol) => <Text class="text-green-600">{`${symbol} ▲ 2.4%`}</Text>}
+/>
+```
+
+`nsh/base` 中的 `TextView` 就是这样构建的：它的 `renderCodeBlock`、`renderMath` 等是渲染函数，它的 `classes` 是应用按部件给出的类（[TextView](../elements/text-view.md)）。
+
 ## 测试
 
 Rust 应用的测试以无界面方式运行它，可以在 `cargo test` 中，也可以在 `nsh test` 中，使用同一个驱动：运行在真实的引擎上，没有窗口，以

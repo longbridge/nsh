@@ -22,7 +22,7 @@ NSH's UI is built in three layers, as GPUI Kit's is (`gpui`, `gpui-base`, `gpui-
 | Layer | Modules | What it gives an app |
 |---|---|---|
 | Primitives | `nsh`, `nsh/<module>` | Reactivity, the host elements, layout, lists, canvas, animation, gestures, device information and the platforms' own APIs |
-| Base components | [`nsh/base`](./nsh-base.md) | Unstyled components that own behavior, state, focus and accessibility: a button, navigation stacks and dialogs, safe areas, the system's dialogs and the software keyboard, on every platform |
+| Base components | [`nsh/base`](./nsh-base.md) | Unstyled components that own behavior, state, focus and accessibility: a button, Markdown and HTML documents, navigation stacks and dialogs, safe areas, the system's dialogs and the software keyboard, on every platform |
 | Component library | your app's, or one from the community | Buttons, cards, rows and screens with a look |
 
 The look of an app is the app's own. Its component library is the third layer: components it writes from the [host elements](../elements/index.md) and `nsh/base`, styled with `style`, [Tailwind](../docs/tailwind.md) classes and its theme, Rust components it ships in [its own crate](../docs/rust.md), or a library the community publishes on the same foundation.
@@ -36,7 +36,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | Module | Exports | Page |
 |---|---|---|
 | `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; the primitives `View`, `Text`, `Scroll`, `Input`, [`List`](./nsh-list.md), [`Image`](./nsh-image.md) (with `Image.getSize`, `Image.prefetch`), [`Canvas`](./nsh-canvas.md) (with `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient`), [`WebView`](./nsh-webview.md), [`Video`](./nsh-video.md); the types of elements, styles, events and JSX (`YNode`, `ViewStyle`, ...) | [nsh](./nsh.md) |
-| `nsh/base` | `Button`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
+| `nsh/base` | `Button`; `TextView`, `SelectionArea`; `createNavStack`, `NavStack`, `NavPage`, `Dialog`; `SafeAreaView`, `safeArea`, `safeAreaInsets`; `AlertDialog`; `Keyboard`, `keyboardFrame`, `KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
 | `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/device` | `windowSize`, `colorScheme`, `fontScale`, `Platform`, `PixelRatio`, `I18nManager` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |

@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, Markdown and HTML documents, selections across texts, navigation stacks and dialogs, safe areas, system alert dialogs, the software keyboard and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,8 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh` and the `nsh/<module>` modules) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`), navigation (a `NavStack` of `NavPage`s driven
+[Modules](./index.md#three-layers)). It provides controls (`Button`), documents of Markdown or HTML (`TextView`), selections across texts
+(`SelectionArea`), navigation (a `NavStack` of `NavPage`s driven
 by the state you create with `createNavStack`, and `Dialog` for content presented over everything else), safe areas
 (`SafeAreaView`, `safeArea()` and `safeAreaInsets()`), the system's alert dialogs (`AlertDialog`), the software
 keyboard (`Keyboard`, `keyboardFrame()` and `KeyboardAvoidingView`). Pages and dialogs also decide the status bar
@@ -31,12 +32,12 @@ use nsh_base::{
 ```tsx tabs
 import {
   AlertDialog, Button, createNavStack, Dialog, Keyboard, keyboardFrame, KeyboardAvoidingView, NavPage, NavStack,
-  SafeAreaView, safeArea, safeAreaInsets,
+  SafeAreaView, safeArea, safeAreaInsets, SelectionArea, TextView,
 } from "nsh/base";
 import type {
   AlertDialogAction, AlertDialogOptions, AlertDialogPresentation, AlertDialogRole, AvoidBehavior, ButtonProps,
   DialogChangeReason, DialogProps, Edge, HeaderStyle, Insets, NavPageProps, NavStackProps, NavStackState, StatusBar,
-  StatusBarForeground,
+  SelectionAreaProps, StatusBarForeground, TextViewProps, TextViewDocument, MarkdownExtension, MarkdownOptions,
 } from "nsh/base";
 ```
 
@@ -65,6 +66,75 @@ TSX's [theme classes](../docs/tailwind.md#theme-tokens) use.
 A press target that owns its behavior and has no look: presses, the disabled and selected states and its role for
 screen readers. Its look is the app's `class` and `style` with state variants, its content is its children. See
 [Button](../elements/button.md).
+
+## Documents
+
+### TextView
+
+`TextView` shows a document of Markdown, HTML or blocks the app builds, drawn with [`Text`](../elements/text.md) elements and views: headings,
+lists, code, tables, images, formulas, footnotes and the app's own syntax. It is made for AI chat replies that stream
+in (`options={{ streaming: true }}` and a `caret`). It comes with a reading typography in the theme's colors, which
+the app restyles part by part (`classes`, `styles`).
+Links report presses (`onLinkPress`), and render functions put the app's content in place: code blocks and their
+actions, tables' actions, formulas, images and custom nodes.
+
+```tsx
+<TextView
+  markdown={reply()}
+  options={{ streaming: true }}
+  classes={{ heading: "font-semibold", code: "rounded bg-neutral-100 px-1", link: "text-blue-600" }}
+  onLinkPress={(url) => openLink(url)}
+/>
+```
+
+See [TextView](../elements/text-view.md) for its parts, streaming, render functions, Markdown extensions, the
+document model and its use from Rust.
+
+## Selection
+
+### SelectionArea
+
+`SelectionArea` makes the texts inside it select together, as a web page's do: one selection runs from a place in one
+text to a place in another, across views, [`Text`](../elements/text.md) elements and [`TextView`](../elements/text-view.md)s,
+in reading order. Wrap a chat transcript in it and a selection can start in one message and end in the next; Copy
+puts the selected text on the clipboard, with texts side by side joined by a tab and the others by a line break.
+
+```tsx
+import { Text, View } from "nsh";
+import { SelectionArea, TextView } from "nsh/base";
+
+<SelectionArea class="gap-3 p-4">
+  <Text class="font-semibold">Release notes</Text>
+  <TextView markdown={notes} />
+  <View class="flex-row gap-2">
+    <Text selectable={false} class="text-neutral-500">Updated</Text>
+    <Text>October 21</Text>
+  </View>
+</SelectionArea>
+```
+
+| Platform | How a selection is made |
+|---|---|
+| macOS, Windows, Linux, GPUI | Drag across the texts; a double click selects a word, a triple click a paragraph, and a drag after them goes on by words or paragraphs. Shift+click extends the selection. Ctrl / Cmd+A selects everything in the area, Ctrl / Cmd+C copies, Escape or a press outside clears. |
+| iOS, Android | A long press selects a word; the platform's handles extend it, and its edit menu has Copy and Select All. |
+| Web | The browser's own selection, with its gestures, menu and shortcuts. |
+
+| Prop | Type | |
+|---|---|---|
+| `children` | `JSX.Element` | The content: any views, with texts at any depth. |
+| `class`, `style` | | Its layout and look, as a [View](../elements/view.md)'s. |
+
+- **Texts that stay out**: a text with `selectable={false}` (a label, a button's caption) is skipped by the selection
+  and its gestures.
+- **Nested areas**: an area inside another is part of the outer one, so one selection covers both.
+- **TextView**: a `TextView` with `selectable` is a selection area of its own: its paragraphs, list items, cells and
+  code blocks select together. Inside a `SelectionArea` it joins the outer selection.
+- **Outside areas**: a `selectable` text that is in no area selects on its own, as [Text](../elements/text.md#props)
+  describes.
+- **The look** is the platform's highlight in each text's `selectionColor` (`selection:text-*`); the area draws
+  nothing of its own.
+- **Lists**: in a virtualized [List](../elements/list.md), a selection covers the rows that are mounted; rows recycled
+  out of view leave it.
 
 ## Navigation
 
@@ -221,6 +291,7 @@ launch screen.
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
 - [Button](../elements/button.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [SafeAreaView](../elements/safe-area-view.md), [KeyboardAvoidingView](../elements/keyboard-avoiding-view.md),
-  [AlertDialog](../elements/alert-dialog.md) and [Input](../elements/input.md).
+  [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Text](../elements/text.md) and
+  [Input](../elements/input.md).
 - [Device and environment](../docs/device-and-environment.md).
 - [nsh/android](./nsh-android.md): `BackHandler`, `Toast.show` for short messages and other Android-only APIs.
