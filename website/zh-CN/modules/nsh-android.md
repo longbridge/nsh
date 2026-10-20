@@ -26,7 +26,7 @@ const isAvailable: boolean;
 
 ```ts
 const Toast: {
-  show(message: string, duration?: "short" | "long" | null): Promise<void>;
+  show(message: string, duration?: "short" | "long" | null): void;
 };
 ```
 
@@ -46,7 +46,7 @@ const notify = (message: string) =>
 ```ts
 const BackHandler: {
   addEventListener(event: "hardwareBackPress", listener: () => boolean | void): { remove(): void };
-  exitApp(): Promise<void>;
+  exitApp(): void;
 };
 ```
 
@@ -82,7 +82,7 @@ function Editor() {
 ## setStatusBarBackgroundColor
 
 ```ts
-function setStatusBarBackgroundColor(backgroundColor: string, animated?: boolean | null): Promise<void>;
+function setStatusBarBackgroundColor(backgroundColor: string, animated?: boolean | null): void;
 ```
 
 设置状态栏颜色，作为已渲染的 `<StatusBar android={{ backgroundColor }}>` 组件之下的基础值（最后挂载的 `StatusBar` 优先于该基础值）。它只在强制全面屏（edge-to-edge，API 35）之前的 Android 版本上生效；从 API 35 起状态栏是透明的，内容绘制在它下面。

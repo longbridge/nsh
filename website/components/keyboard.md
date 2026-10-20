@@ -16,7 +16,7 @@ import { Keyboard, keyboard } from "nsh/ui/mobile";
 ## Keyboard.dismiss
 
 ```ts
-Keyboard.dismiss(): Promise<void>
+Keyboard.dismiss(): void
 ```
 
 Unfocuses the focused input, which hides the keyboard. It does nothing if no input is focused.

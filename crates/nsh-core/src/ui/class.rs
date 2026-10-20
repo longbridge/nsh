@@ -1095,8 +1095,20 @@ export declare class Token {
             choose.call((0.0, 1.0)).unwrap_or(0.0)
         }
 
-        /// An op returning nothing: TS can still await it.
+        /// An op returning nothing: a plain call.
         pub(crate) fn beep(cx: &mut ModuleCx) {
+            let _ = cx;
+        }
+
+        /// An op that may fail: a promise, rejected with an `Err`.
+        pub(crate) fn check(cx: &mut ModuleCx) -> Result<(), String> {
+            let _ = cx;
+            Ok(())
+        }
+
+        /// `-> ()` written out: the same as no return type.
+        #[allow(clippy::unused_unit)]
+        pub(crate) fn hum(cx: &mut ModuleCx) -> () {
             let _ = cx;
         }
 
@@ -1138,8 +1150,12 @@ export interface ToolsModule {
   measure(text: string): Promise<number>;
   /** Picks with the app's choice, its arguments named. */
   pick(choose: (oldValue: number, newValue: number) => number): number;
-  /** An op returning nothing: TS can still await it. */
-  beep(): Promise<void>;
+  /** An op returning nothing: a plain call. */
+  beep(): void;
+  /** An op that may fail: a promise, rejected with an `Err`. */
+  check(): Promise<void>;
+  /** `-> ()` written out: the same as no return type. */
+  hum(): void;
   /** A task returning nothing. */
   settle(): Promise<void>;
   later(listener: (value: number) => string): Promise<string>;

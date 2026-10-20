@@ -15,9 +15,9 @@ export interface AccessibilitySettings {
 /** Screen reader and motion settings. */
 export interface AccessibilityInfoModule {
   /** The screen reader reads `message` (a VoiceOver announcement, TalkBack). */
-  announceForAccessibility(message: string): Promise<void>;
+  announceForAccessibility(message: string): void;
   /** Moves the screen reader's focus to `node` (a `ref`). */
-  setAccessibilityFocus(node: YNode): Promise<void>;
+  setAccessibilityFocus(node: YNode): void;
 }
 
 /** Whether the user asked for less motion (reactive; also `motion-reduce:`). */

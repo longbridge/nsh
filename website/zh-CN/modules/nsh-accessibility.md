@@ -45,8 +45,8 @@ const open = () => {
 
 ```ts
 const AccessibilityInfo: {
-  announceForAccessibility(message: string): Promise<void>;
-  setAccessibilityFocus(node: YNode): Promise<void>;
+  announceForAccessibility(message: string): void;
+  setAccessibilityFocus(node: YNode): void;
   isScreenReaderEnabled(): Promise<boolean>;
   isReduceMotionEnabled(): Promise<boolean>;
   addEventListener(

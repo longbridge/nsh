@@ -138,8 +138,19 @@ a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
 - **`fn` without a context:** synchronous, called directly in the JS call like a class's method (`parse(text)`,
   `checksum(bytes)`): TS gets the value, not a promise.
 - **`fn` taking `cx: &mut ModuleCx`:** an op, run in order with what JS set before it (a dialog, the status bar,
-  focus), a promise of its value (`Promise<void>` for `()`, settled once the op ran, so TS can await an op).
-- **`async fn`:** a task of the core, a promise.
+  focus). Its return type decides what TS gets:
+  - returning `()`, it gives `void`, with no reply: JS calls it and moves on, the op runs in order with the UI at
+    the commit, nothing answers it (`RustOp::call` 0, no `JsEvent::Reply`), and a wrong argument throws in the call;
+  - returning `Result<(), E>`, it gives `Promise<void>`: resolved once the op ran, rejected with the `Err`'s message.
+    It cannot throw instead, because the op runs at the commit, after the JS call returned;
+  - returning a value (`T`, `Result<T, E>`), it gives `Promise<T>`, and a wrong argument rejects it.
+- **`async fn`:** a task of the core; it gives a Promise (`Promise<void>` for `()`, resolved when the task ends).
+
+The same holds for a component's ref methods (`docs/dev/components.md`, "Methods"). An op returning `()` is
+`void` because the runtime modules released theirs as `void` (`Toast.show`, `Clipboard.setString`, `Window.close`,
+...) and a return type never changes (`docs/dev/compatibility.md`); a Rust function that can fail says so with
+`Result<(), E>`, and TS gets a promise to see the error. `FunctionSpec::promises` / `MethodSpec::promises` decide
+it for the declarations and the JS face alike; `-> ()` written out is the same as no return type.
 
 A plain `fn` that returns a value (today a promise in TS) becomes synchronous: no runtime module has one (theirs
 take `ModuleCx` or are `async`), and an app crate's are rebuilt with the app, whose types change with them.

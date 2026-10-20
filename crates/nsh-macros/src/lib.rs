@@ -1177,9 +1177,12 @@ pub fn style_helpers(input: TokenStream) -> TokenStream {
 /// `setValue`), documented by its doc comment; a function without one is a
 /// helper, Rust's only. A
 /// function takes `&self`, then [`JsValue`] parameters, and returns
-/// nothing or a [`JsValue`]: JS gets a `Promise` of it (`Promise<void>`
-/// for nothing, settled once the method ran), the call ordered with the
-/// props set before it. The view registers the API with
+/// nothing or a [`JsValue`] (or a `Result` of one: an `Err` rejects with
+/// its message), the call ordered with the props set before it. One
+/// returning a value gives JS a `Promise` of it (`Promise<void>` for
+/// `Result<(), E>`); one returning nothing gives `undefined` (`void`: JS
+/// calls it and moves on, and a wrong argument throws). The view
+/// registers the API with
 /// `cx.methods(api)`, and the component names it in its spec with
 /// `#[component(methods = StepperApi)]`.
 #[proc_macro_attribute]
@@ -1252,6 +1255,10 @@ fn methods_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
             call_args.push(quote!(#local));
         }
         let (returns, finish) = match &f.sig.output {
+            ReturnType::Type(_, ty) if is_unit(ty) => (
+                quote!(::core::option::Option::None),
+                quote!(#private::boxed(__result)),
+            ),
             ReturnType::Default => (
                 quote!(::core::option::Option::None),
                 quote!(#private::boxed(__result)),
@@ -1516,10 +1523,13 @@ fn module_cx(ty: &Type) -> bool {
 /// a function without a context runs in the JS call and returns its value
 /// (`checksum(bytes)`), as a class's method does; one whose last parameter
 /// is `cx: &mut ModuleCx` is an op, run in order with what JS set before it
-/// (a dialog, the status bar, focus), a `Promise` (`Promise<void>` when it
-/// returns nothing: settled once the op ran);
+/// (a dialog, the status bar, focus), a `Promise` when it returns a value
+/// (`Promise<void>` for `Result<(), E>`: an `Err` rejects it) and
+/// `undefined` (`void`) when it returns nothing (JS calls it and moves on,
+/// and a wrong argument throws);
 /// an `async fn` runs as a task of the core with the free functions views
-/// use (`dialog(..)`, `clipboard_string()`, ...), a `Promise`. Parameters
+/// use (`dialog(..)`, `clipboard_string()`, ...), a `Promise` (of `void`
+/// too). Parameters
 /// are [`JsValue`] types (a trailing `Option` is optional), instances
 /// (`Instance<T>`) and JS functions (`Callback<A, R>`; `#[args(name,
 /// amount)]` on the parameter names the function's arguments in TS); a
@@ -1635,6 +1645,12 @@ pub fn class(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// `Result<T, E>` -> `T`.
+/// Whether `ty` is `()`: a function written `-> ()` returns nothing, as
+/// one without a return type does.
+fn is_unit(ty: &Type) -> bool {
+    matches!(ty, Type::Tuple(t) if t.elems.is_empty())
+}
+
 fn result_ok(ty: &Type) -> Option<&Type> {
     match last_segment(ty)? {
         (id, ok) if id == "Result" => ok,
@@ -1856,6 +1872,7 @@ fn module_impl(mut item: ItemImpl, flat: bool, default: bool) -> syn::Result<Tok
             .map(|((ts, name), optional)| quote!((#name, #ts, #optional)));
         let (returns, fallible) = match &f.sig.output {
             ReturnType::Default => (quote!(::core::option::Option::None), false),
+            ReturnType::Type(_, ty) if is_unit(ty) => (quote!(::core::option::Option::None), false),
             ReturnType::Type(_, ty) => match result_ok(ty) {
                 Some(ok) => (
                     quote!(::core::option::Option::Some(#private::ret_ts::<#ok>())),

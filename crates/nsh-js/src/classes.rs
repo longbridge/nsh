@@ -433,16 +433,18 @@ unsafe extern "C" fn call_sync(
 
 /// Sends a call into Rust that runs as an op, with the call's `this` and
 /// `args`: `make` converts them in this call into what the op runs (the
-/// instances and callbacks among them ride in it). Returns a promise of
-/// its result (`undefined` for `()`: settled once the op ran, in order
-/// with the UI), rejected when they do not convert.
+/// instances and callbacks among them ride in it). With `promise`, a
+/// promise of its result, rejected when they do not convert; else (a
+/// call returning `()`) `undefined`, a conversion error throws, and the
+/// op asks for no reply.
 pub(crate) fn send(
     ctx: Ctx,
     this: Raw,
     args: js::Args<'_>,
+    promise: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(false, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(promise, false, make)
 }
 
 /// [`send`] of a call that starts its task in the JS call (`Later`): JS
@@ -453,7 +455,7 @@ pub(crate) fn start(
     args: js::Args<'_>,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(true, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(true, true, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -634,8 +636,12 @@ impl<'a> CallHost<'a> {
     fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(start) => self.send(false, |host| start(host).map(RustCall::Task)),
-            MemberCall::Start(start) => self.send(true, |host| start(host).map(RustCall::Task)),
+            MemberCall::Async(start) => {
+                self.send(true, false, |host| start(host).map(RustCall::Task))
+            }
+            MemberCall::Start(start) => {
+                self.send(true, true, |host| start(host).map(RustCall::Task))
+            }
         }
     }
 
@@ -652,10 +658,11 @@ impl<'a> CallHost<'a> {
     }
 
     /// Sends the call `make` converts this call's values into as an op
-    /// ([`send`]); with `throws`, what `make` throws throws instead of
-    /// rejecting the promise (a call starting its task: [`start`]).
+    /// ([`send`]); with `throws`, what `make` throws throws even when the
+    /// call returns a promise (a call starting its task: [`start`]).
     fn send(
         &self,
+        promise: bool,
         throws: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
@@ -675,20 +682,29 @@ impl<'a> CallHost<'a> {
                 // Thrown (or rethrown) as a synchronous call's error, then
                 // taken as the promise's unless the call throws.
                 let thrown = self.finish(Err(e));
-                return if throws {
-                    thrown
-                } else {
+                return if promise && !throws {
                     rejected_with_exception(ctx)
+                } else {
+                    thrown
                 };
             }
         };
-        let call = crate::components::next_call(ctx);
+        // 0: no promise waits, so the core sends no reply.
+        let call = if promise {
+            crate::components::next_call(ctx)
+        } else {
+            0
+        };
         // Not queued (over the op limit): the call and what it holds go
         // here, before any promise is made.
         if let Err(e) = crate::dom::push_op(ctx, nsh_core::Op::Rust(RustOp { call, run })) {
             return e;
         }
-        crate::components::promise(ctx, call)
+        if promise {
+            crate::components::promise(ctx, call)
+        } else {
+            UNDEFINED
+        }
     }
 
     /// Whether an operation threw (its exception is pending).
@@ -2716,6 +2732,56 @@ pub(crate) mod tests {
         host.run_posted_without_core();
         assert_eq!(run(&host, "show(heard.join(','));").unwrap(), ["hello"]);
         LISTENER.with(|l| l.borrow_mut().take());
+    }
+
+    /// An op returning `()` is a plain call: `undefined`, a wrong argument
+    /// throws in the call, and its op asks for no reply (call 0). One
+    /// returning a value is a promise, which a wrong argument rejects.
+    #[test]
+    fn ops_returning_nothing_are_plain_calls() {
+        use nsh_core::ui::RustOp;
+        let host = host();
+        host.eval_source(
+            "import { text as show } from \"nsh:rt\";\n\
+             import { Tally, Tools } from \"test/classes\";\n\
+             const msg = (f) => { try { return String(f()); } catch (e) { return `threw ${e.name}: ${e.message}`; } };\n\
+             show(msg(() => Tools.keepOp(new Tally(1))));\n\
+             show(msg(() => Tools.keepOp(5)));\n\
+             const measured = Tools.measure(5);\n\
+             show(String(measured instanceof Promise));\n\
+             measured.catch((e) => show(`rejected ${e.name}: ${e.message}`));",
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        host.run_jobs();
+        host.take_ops(&mut ops);
+        let calls: Vec<u32> = ops
+            .iter()
+            .filter_map(|op| match op {
+                nsh_core::Op::Rust(RustOp { call, .. }) => Some(*call),
+                _ => None,
+            })
+            .collect();
+        // Only the first `keepOp` is sent (the others did not convert).
+        assert_eq!(calls, [0]);
+        let shown: Vec<String> = ops
+            .iter()
+            .filter_map(|op| match op {
+                nsh_core::Op::CreateText { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "undefined",
+                "threw TypeError: Tools.keepOp: `tally`: expected a Tally, got 5",
+                "true",
+                "rejected TypeError: Tools.measure: `text`: expected a string, got 5",
+            ]
+        );
+        assert!(!host.has_exception());
     }
 
     #[test]

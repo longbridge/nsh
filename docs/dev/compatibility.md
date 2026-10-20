@@ -30,9 +30,11 @@ earlier versions made no promises.
    class object at run time), declared `@deprecated` with the new name, and kept for good. The same goes for moving an
    export between modules: the old module keeps exporting it.
 3. **Types only widen.** A union gains alternatives, a function gains overloads or trailing optional parameters, a
-   parameter becomes optional, a prop accepts more values, a function or method that returned `void` returns a value
-   (a callback an app passes in keeps returning `void`). Parameter names are not part of a type. Nothing narrows, a return type never changes, and what apps
-   pass in (props, styles, options, configs) gains optional members only.
+   parameter becomes optional, a prop accepts more values. Nothing narrows, a return type never changes, and what apps
+   pass in (props, styles, options, configs) gains optional members only. Parameter names are not part of a type:
+   TypeScript compares function types by structure, so `(data: number) => void` and `(value: number) => void` are one
+   type, and a function, method or callback may rename its parameters; their count, optionality and types may not
+   change.
 4. **Behavior is kept.** Defaults, units, coordinate spaces, the payload of an event and when it fires stay as they
    were. New behavior is opt-in, through a new prop, option or value. A bug fix that changes what a working app sees
    is a behavior change: fix it behind an opt-in, or make sure no app can rely on the old result.
@@ -71,7 +73,7 @@ The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pu
   shows up as a diff of `api/current/` in review. `cargo xtask api` records it.
 - `releases_are_still_offered`: everything every baseline offered is still offered, by rules 1 to 3: no name of
   `runtime.txt` is gone or changed kind, and every declaration of `types/` is kept, the same or widened (`compare.rs`
-  says exactly what counts as widening).
+  says exactly what counts as widening; it compares declarations with their parameters' names erased).
 - `apps_of_releases_still_run`: each kept app, as its release built it, starts on this runtime without an error and
   does what its script says. This is what catches what names cannot: `nsh:rt`'s calling conventions, props and
   styles that still parse, behavior.

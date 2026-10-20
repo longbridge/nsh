@@ -3,7 +3,7 @@
 /** The system clipboard's text. */
 export interface ClipboardModule {
   /** Puts `text` on the clipboard. */
-  setString(text: string): Promise<void>;
+  setString(text: string): void;
   /** The clipboard's text, `""` when it holds none. On iOS, reading it may show the system's paste notice. */
   getString(): Promise<string>;
   /** Whether the clipboard holds text, without reading it (no paste notice). */

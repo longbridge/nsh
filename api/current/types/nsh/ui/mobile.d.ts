@@ -186,9 +186,9 @@ export interface StatusBarProps extends ComponentHostProps {
 /** What the status bar shows while this renders: the most recently mounted `StatusBar` wins, prop by prop, over what the functions set. In an app embedded in a native one, the host app's view controller decides on iOS. */
 export declare const StatusBar: ((props: StatusBarProps) => JSX.Element) & {
   /** Sets the color of the status bar's content. */
-  setBarStyle(barStyle: BarStyle, animated?: boolean | null): Promise<void>;
+  setBarStyle(barStyle: BarStyle, animated?: boolean | null): void;
   /** Hides or shows the status bar. */
-  setHidden(hidden: boolean, animation?: BarAnimation | null): Promise<void>;
+  setHidden(hidden: boolean, animation?: BarAnimation | null): void;
 };
 
 /** The ref of `Stepper`: its methods. */
@@ -196,7 +196,7 @@ export interface StepperRef {
   /** The component's host node. */
   readonly node: YNode;
   /** Sets the value (on the step grid, within the bounds) and reports it as a press would. */
-  setValue(value: number): Promise<void>;
+  setValue(value: number): void;
   /** The value shown. */
   value(): Promise<number>;
 }
@@ -267,7 +267,7 @@ export declare const Alert: AlertModule;
 /** The software keyboard. */
 export interface KeyboardModule {
   /** Unfocuses the focused input, hiding the keyboard. */
-  dismiss(): Promise<void>;
+  dismiss(): void;
 }
 
 /** The software keyboard. */

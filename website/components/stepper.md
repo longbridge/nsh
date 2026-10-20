@@ -91,7 +91,7 @@ mount(App);
 
 | Member | Description |
 |---|---|
-| `setValue(value: number): Promise<void>` | Sets the value, rounded to the step's decimals and kept within the range, and reports it with `onChange` as a press would. On a controlled stepper, the number changes when you update `value`. |
+| `setValue(value: number): void` | Sets the value, rounded to the step's decimals and kept within the range, and reports it with `onChange` as a press would. On a controlled stepper, the number changes when you update `value`. |
 | `value(): Promise<number>` | The value shown. It is a promise because the value lives in the core, not in JS. |
 | `node: YNode` | The stepper's host node. |
 

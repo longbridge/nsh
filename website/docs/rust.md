@@ -265,9 +265,12 @@ prop keeps its value and the rest of the component renders.
 
 A function or a member runs the way its Rust signature says. One that is not `async` runs inside the TSX call and
 returns its value (`Portfolio.total()` is a number, `ledger.balance` a property): it computes and keeps state. An
-`async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs); a module function
-taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar) and returns a Promise
-of its value (`Promise<void>` for `()`, settled once it ran, so `await` waits for it). Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
+`async fn` returns a Promise and runs as a task with NSH's services (`fetch`, `timer`, dialogs). A module function
+taking `cx: &mut ModuleCx` reaches the platform in order with the UI (a toast, the status bar), and so does a
+component's ref method; their return type decides what TSX gets: one returning `()` gives `void`, with no reply
+(TSX calls it and moves on); one returning `Result<(), E>` gives `Promise<void>`, which rejects with the `Err`'s
+message (the call runs with the UI's changes, after the TSX call returned, so the Promise carries its error); one
+returning a value gives `Promise<T>`. Arguments and results are typed from the signature: numbers, strings, `Option`, `Vec`, your
 `#[derive(JsObject)]` structs and `#[derive(PropEnum)]` enums, instances of your classes, and TSX functions
 (`Callback<A, R>`, which Rust calls at once inside a call, or later with `post` and `call_async`; TS sees
 `(value: number) => void` for a `Callback<f64>`, and `#[args(balance)] listener: Callback<f64>` names the argument,
