@@ -42,7 +42,7 @@ fn url_utilities_match_the_shared_gpui_shell_reference_fixture() {
 
 /// Run the same fixture directly in pinned LLRT, without NSH option adaptation.
 fn reference_zlib(script: &str) -> String {
-    use rquickjs::{
+    use rquickjs_jit::{
         AsyncContext, AsyncRuntime, Module,
         loader::{BuiltinResolver, ModuleLoader},
     };

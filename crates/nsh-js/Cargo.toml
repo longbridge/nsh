@@ -21,29 +21,28 @@ serde_json.workspace = true
 log.workspace = true
 nsh-core.workspace = true
 nsh-animation.workspace = true
-rquickjs.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 percent-encoding.workspace = true
 url.workspace = true
-quickjs-jit-stdlib.workspace = true
 
 
-# Bindings are generated for the Apple and Android targets; WebAssembly uses
-# rquickjs' pregenerated ones (its bindgen run misses `JS_ToCStringLen2` there).
+# Native targets run quickjs-jit (`rquickjs-jit`, which `lib.rs` names
+# `rquickjs`) with LLRT's standard modules; its bindings are generated for
+# the Apple and Android targets.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# LLRT's `url` helpers need file paths, which WebAssembly lacks.
+rquickjs-jit = { workspace = true, features = ["bindgen"] }
 quickjs-jit-stdlib = { workspace = true, features = ["url"] }
-rquickjs = { workspace = true, features = ["bindgen"] }
 # The heap's allocator: the system's `malloc` (as QuickJS's own).
 libc.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "sync", "io-util", "macros"] }
 futures-util.workspace = true
 tokio-tungstenite.workspace = true
 
-# LLRT crypto uses rand 0.10/getrandom 0.4; browsers supply secure entropy.
+# The browser runs upstream rquickjs: the same QuickJS-NG, without the JIT
+# and without LLRT's standard modules.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom04 = { workspace = true, features = ["wasm_js"] }
+rquickjs.workspace = true
 
 [dev-dependencies]
 brotli.workspace = true

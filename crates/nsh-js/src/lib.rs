@@ -9,6 +9,12 @@
 //! A host is single-threaded (`!Send`): create and use it on the engine
 //! thread.
 
+// QuickJS is quickjs-jit on native targets and upstream rquickjs in the
+// browser: the same API and QuickJS-NG build, so every `rquickjs::` path
+// (and the macros' own) names whichever this target links.
+#[cfg(not(target_arch = "wasm32"))]
+extern crate rquickjs_jit as rquickjs;
+
 mod animated;
 mod bytecode;
 mod canvas;

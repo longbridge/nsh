@@ -112,9 +112,13 @@ messages); connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`,
 (`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
 and grant no file access.
 
-QuickJS comes through `quickjs-jit` (rquickjs 0.14's API, imported as `rquickjs`) and the LLRT modules through
-`quickjs-jit-stdlib`, which vendors LLRT `d9fd873e793c6551c5d92b2e31480f3279e3cd8d` with one feature per module:
-NSH turns on `buffer`, `crypto`, `path`, `zlib` and `zlib-zstd`, and `url` on native targets. The two crates are
+On native targets QuickJS comes through `quickjs-jit` (rquickjs 0.14's API and its JIT; the dependency
+`rquickjs-jit`, which `nsh-js`'s `lib.rs` names `rquickjs`) and the LLRT modules through `quickjs-jit-stdlib`,
+which vendors LLRT `d9fd873e793c6551c5d92b2e31480f3279e3cd8d` with one feature per module: NSH turns on `buffer`,
+`crypto`, `path`, `url`, `zlib` and `zlib-zstd`. WebAssembly links upstream `rquickjs` 0.14 (the same API and
+QuickJS-NG) and no LLRT: `standard::NATIVE_ONLY` (`buffer`, `crypto`, `path`, `url`, `zlib`, `websocket`) are
+not compiled there, an import of one throws an error naming it (the CLI compiles web apps natively, so their
+bytecode may import them), `Buffer` and `crypto` are not defined, and the declarations say so. The two crates are
 published together at one version and pinned exactly (`=0.14.0`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
 `third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The

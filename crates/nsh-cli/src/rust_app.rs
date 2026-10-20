@@ -836,7 +836,7 @@ lto = \"fat\"
 codegen-units = 1
 strip = true
 panic = \"abort\"
-[profile.web.package.quickjs-jit-sys]
+[profile.web.package.rquickjs-sys]
 opt-level = 3
 "),
             false,

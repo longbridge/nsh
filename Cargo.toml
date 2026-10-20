@@ -72,7 +72,6 @@ zstd = { version = "0.14", default-features = false }
 tar = { version = "0.4", default-features = false }
 base64 = "0.22"
 getrandom = "0.3"
-getrandom04 = { package = "getrandom", version = "0.4" }
 slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
@@ -140,12 +139,15 @@ taffy = { version = "0.15", default-features = false, features = ["std", "taffy_
 # Features per crate: the runtime's binaries get only what they use.
 tokio = { version = "1", default-features = false }
 
-# QuickJS through quickjs-jit (rquickjs 0.14's API under its own name, imported as `rquickjs`).
+# QuickJS: quickjs-jit on native targets (rquickjs 0.14's API, its JIT; `nsh-js` names it `rquickjs`),
+# upstream rquickjs 0.14 in the browser. Both build QuickJS-NG 0fdea21, so bytecode the CLI compiles
+# loads in the web runtime (`nsh_js::BYTECODE_VERSION`).
 # `full` is avoided on purpose: it enables `dyn-load` (dlopen2), which does not build for iOS / Catalyst.
-rquickjs = { package = "quickjs-jit", version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "macro"] }
+rquickjs-jit = { package = "quickjs-jit", version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "macro"] }
+rquickjs = { version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "macro"] }
 
-# The standard modules `buffer`, `crypto`, `path`, `url` and `zlib`: LLRT d9fd873e, vendored by
-# quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
+# The standard modules `buffer`, `crypto`, `path`, `url` and `zlib` (native targets): LLRT d9fd873e,
+# vendored by quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
 quickjs-jit-stdlib = { version = "=0.14.0", default-features = false, features = ["buffer", "crypto", "path", "zlib", "zlib-zstd"] }
 cap-std = "4.0.3"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -418,6 +420,8 @@ codegen-units = 1
 # Keep the interpreter and layout fast even in debug builds; they dominate runtime cost.
 [profile.dev.package.quickjs-jit-sys]
 opt-level = 3
+[profile.dev.package.rquickjs-sys]
+opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3
 
@@ -429,5 +433,5 @@ inherits = "release"
 opt-level = "z"
 strip = true
 panic = "abort"
-[profile.web.package.quickjs-jit-sys]
+[profile.web.package.rquickjs-sys]
 opt-level = 3
