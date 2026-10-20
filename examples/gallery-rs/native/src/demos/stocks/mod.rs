@@ -30,7 +30,7 @@ use nsh_core::{
     canvas::{CanvasGradient, Composite, LineCap, LineJoin},
     nsh_animation::{Curve, EaseMode},
     time::Instant,
-    ui::{AccessibilityState, NativeNode, View, prelude::*},
+    ui::{AccessibilityState, AnimatedNode, View, prelude::*},
 };
 
 use self::{
@@ -360,15 +360,12 @@ pub(crate) fn Stocks() -> impl IntoElement {
 fn MarketStrip() -> impl IntoElement {
     let live = live();
     let opened = signal(false);
-    let turn = native_value(0.0);
-    let toggle = {
-        let turn = turn.clone();
-        move |_: &()| {
-            animate_layout(RELAYOUT);
-            opened.update(|o| *o = !*o);
-            let to = if opened.get_untracked() { 1.0 } else { 0.0 };
-            let _ = turn.spring(to, motion::SETTLE);
-        }
+    let turn = animated_value(0.0);
+    let toggle = move |_: &()| {
+        animate_layout(RELAYOUT);
+        opened.update(|o| *o = !*o);
+        let to = if opened.get_untracked() { 1.0 } else { 0.0 };
+        let _ = turn.spring(to, motion::SETTLE);
     };
     let (composite, clock) = (live.composite, live.clock);
     let change = computed(move || (composite.get() - INDEX_BASE) / INDEX_BASE * 100.0);
@@ -574,10 +571,11 @@ const PULSE_GAP: Duration = Duration::from_millis(600);
 
 /// The newest point's pulse as a sparkline draws it: the ring's radius,
 /// the halo's and the ring's alpha (native: they move without a drawing).
+#[derive(Clone, Copy)]
 struct Ring {
-    radius: NativeNode,
-    halo: NativeNode,
-    stroke: NativeNode,
+    radius: AnimatedNode,
+    halo: AnimatedNode,
+    stroke: AnimatedNode,
 }
 
 /// Today in 104 × 38 pt: a smooth line through a moving average of the
@@ -729,9 +727,8 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
     };
     // The newest point's pulse: 0 → 1 on a change, at most every 600 ms so
     // each one plays out.
-    let ring = native_value(1.0);
+    let ring = animated_value(1.0);
     {
-        let ring = ring.clone();
         let seen = stored(quote.get_untracked().changed_at);
         let fired = stored(None::<Instant>);
         effect(move || {
@@ -746,11 +743,11 @@ fn StockRow(props: StockRowProps, cx: Scope<StockRowEvent>) -> impl IntoElement 
             }
         });
     }
-    let ring = Rc::new(Ring {
+    let ring = Ring {
         radius: ring.interpolate(&[0.0, 1.0], &[3.0, RING]),
         halo: ring.interpolate(&[0.0, 1.0], &[0.35, 0.0]),
         stroke: ring.interpolate(&[0.0, 1.0], &[0.9, 0.0]),
-    });
+    };
     let change = computed(move || quote.get().percent());
     let market = live.market;
     let active = props.active;

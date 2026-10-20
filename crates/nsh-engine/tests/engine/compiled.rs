@@ -49,12 +49,13 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         entry: dir.join("App.tsx"),
         minify: true,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     assert!(!bundle.code.contains("solid"), "only the app's code");
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, true, &[nsh_ui_mobile::registry()]).unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, true, &[nsh_ui_mobile::registry().into()])
+            .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -68,6 +69,8 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -184,11 +187,12 @@ fn start_app(app: &str) -> (Engine, Receiver<MountBatch>) {
         entry: dir.join("App.tsx"),
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry()]).unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry().into()])
+            .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -202,6 +206,8 @@ fn start_app(app: &str) -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_ui_mobile::registry()],
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -344,4 +350,48 @@ fn removed_modal_hears_its_dismissal() {
     control.dispatch_event(modal, EventKind::Dismiss, EventPayload::None);
     let batch = next(&rx, |b| text_id(b, "dismissed").is_some());
     assert!(text_id(&batch, "dismissed").is_some());
+}
+
+const BUILT_ONCE: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Modal, Screen, Stack, createNavigator } from "nsh/ui/mobile";
+
+const nav = createNavigator<{ name: string }>({ name: "home" });
+const built: Record<string, number> = {};
+const summary = signal("");
+setTimeout(() => summary.set(Object.keys(built).sort().map((k) => `${k} ${built[k]}`).join(", ")), 0);
+
+function Part(props: { name: string }) {
+  built[props.name] = (built[props.name] ?? 0) + 1;
+  return <Text>{props.name}</Text>;
+}
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <Stack navigator={nav} style={{ flex: 1 }}>
+      {() => (
+        <Screen title="home" headerRight={<Part name="header" />}>
+          <Part name="screen" />
+        </Screen>
+      )}
+    </Stack>
+    <Modal visible={true}>
+      <Part name="modal" />
+    </Modal>
+    <Text>{summary()}</Text>
+  </View>
+));
+"#;
+
+/// A screen's content, its header's items and a modal's content are built
+/// once each: the props a component spreads on its view leave `children`
+/// (a getter that builds them) unread.
+#[test]
+fn screens_and_modals_build_their_content_once() {
+    let (_engine, rx) = start_app(BUILT_ONCE);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t.starts_with("header ")));
+    let shown = texts(&batch);
+    assert!(
+        shown.contains(&"header 1, modal 1, screen 1".to_owned()),
+        "{shown:?}"
+    );
 }

@@ -396,6 +396,10 @@ impl RootView {
             limits: self.ivars().options.limits,
             ui_sets: crate::ui_sets(),
             runtime: None,
+            data_dir: self.ivars().options.data_dir.clone(),
+            storage: self.ivars().options.storage.as_ref().map(|dir| {
+                nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
+            }),
         };
         let sink = MainThreadSink {
             mounter: mounter.clone(),
@@ -449,7 +453,7 @@ fn header_heights(mtm: MainThreadMarker) -> (f32, f32) {
 }
 
 /// Options of a [`Surface`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SurfaceOptions {
     /// Log per-commit timings.
     pub trace: bool,
@@ -460,8 +464,37 @@ pub struct SurfaceOptions {
     /// What the embedding app grants the apps it runs at most (`None`: what
     /// each app declares).
     pub granted: Option<nsh_engine::Capabilities>,
+    /// Where the apps keep their data: each app in `<data_dir>/<app id>`
+    /// ([`nsh_engine::EngineConfig::data_dir`]). Default: `nsh` in the
+    /// app's Application Support; `None`: nothing is kept.
+    pub data_dir: Option<std::path::PathBuf>,
+    /// The directory the apps' storage (`nsh/storage`) is kept in
+    /// (`storage.json` in it), overriding their own in
+    /// [`SurfaceOptions::data_dir`]; `None`: theirs.
+    pub storage: Option<std::path::PathBuf>,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
+}
+
+impl Default for SurfaceOptions {
+    fn default() -> Self {
+        Self {
+            trace: false,
+            asset_base: None,
+            limits: nsh_engine::Limits::default(),
+            granted: None,
+            data_dir: data_dir(),
+            storage: None,
+            components: crate::component::Components::default(),
+        }
+    }
+}
+
+/// Where apps NSH runs on iOS keep their data: `nsh` in the (embedding or
+/// standalone) app's Application Support, each app in a directory named by
+/// its id.
+fn data_dir() -> Option<std::path::PathBuf> {
+    nsh_engine::data_dir().map(|dir| dir.join("nsh"))
 }
 
 /// One running nsh app hosted in a `UIView`.

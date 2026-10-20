@@ -129,11 +129,12 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 | Transitions | `transition.rs` | `LayoutAnimation`, style transitions and keyframes on frame callbacks (Linux's) |
 | Dialogs, toasts | `system.rs` | `NSAlert` as a sheet on the window. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. Toasts are a view the root hosts at its bottom |
 | Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls` |
-| Web views | `native.rs` | `WKWebView` (iOS's bridge: `ReactNativeWebView.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has); macOS's web view has no scroll view to turn off, so with `scrollEnabled={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
+| Web views | `native.rs` | `WKWebView` (iOS's bridge: `ReactNativeWebView.postMessage`, injected JS, the `webview` capability's navigation policy, every prop, event and command iOS has); a web view is transparent by default (`drawsBackground = false`), a page without a background showing the view behind it; macOS's web view has no scroll view to turn off, so with `scrollEnabled={false}` the root's `hitTest:` keeps wheel and trackpad scrolls from it (`passes_wheel`) and they scroll the app's scroll views around it (the page's own keys and scripts still scroll it; swipes between pages, `allowsBackForwardNavigationGestures`, are scrolls too) |
 | Native components | `native.rs` | `AppView::register_component(name, factory)`; a `NativeComponent`'s `NSView` fills the node's view; `ComponentContext::emit` / `set_size` from any thread |
 | Accessibility | `access.rs` | `NSAccessibility` setters on the views: roles and subroles, labels, values, states, `testID` as the identifier; `accessible={true}` hides the children; live regions announced |
 | Environment | `system.rs` | Color scheme: the app's appearance when it forces one, else the root's effective appearance (the root's appearance is set to the app's, so hosted controls follow); locale and RTL from `NSLocale`, reduce motion and VoiceOver from `NSWorkspace` (live), the backing scale factor, the OS version; `Platform.OS` `"macos"`, idiom `desktop`, font scale 1, safe area and keyboard height 0 |
-| Window chrome (`nsh/desktop`) | `chrome.rs` | `setTitle`; a hidden title bar is `FullSizeContentView` with a transparent, untitled title bar (the traffic lights stay), its area (the frame above `contentLayoutRect`, the zoom button's right edge + 8) reported as the environment's `title_bar`, 0 in full screen; a left press on a `windowDrag` view calls `performWindowDragWithEvent:` and a double click does what `AppleActionOnDoubleClick` says (zoom by default), the press never reaching the app; `setFrame` merges the fields given with the window's frame and calls `setFrame:display:animate:` (`x`/`y` are the bottom left corner's screen coordinates), `setLevel` maps to an `NSWindowLevel` (`desktopIcon` is `kCGDesktopIconWindowLevel`); the application menu replaces the main menu (its first submenu is the app menu; the replaced one comes back with `null`), context menus are `popUpMenuPositioningItem:atLocation:inView:` from the main queue (they track the mouse in a loop of their own); role items send AppKit's standard actions down the responder chain and are not reported, the others target an `NshMenuTarget` that reports their tag; AppKit validates the items (roles are enabled and titled by the responder chain: `Undo Typing`, `Exit Full Screen`), a disabled item's action is one nothing answers; the traffic lights are centered again whenever AppKit lays the title bar out (frame change notifications of the buttons and their container) |
+| Window chrome (`nsh/desktop`) | `chrome.rs` | `setTitle`; a hidden title bar is `FullSizeContentView` with a transparent, untitled title bar (the traffic lights stay), its area (native frame geometry, including `contentLayoutRect` for a toolbar, and the zoom button's right edge + 8) reported as the environment's `title_bar`, 0 in full screen; a left press on a `windowDrag` view calls `performWindowDragWithEvent:` and a double click does what `AppleActionOnDoubleClick` says (zoom by default), the press never reaching the app; `setFrame` merges the fields given with the window's frame and calls `setFrame:display:animate:` (`x`/`y` are the bottom left corner's screen coordinates; `anchorTop` keeps the top edge when `height` changes without a `y`), `setLevel` maps to an `NSWindowLevel` (`desktopIcon` is `kCGDesktopIconWindowLevel`, and it also makes the window stationary on every space, out of Mission Control and Cmd+`); `orderFront` deminiaturizes, activates the app and makes the window key; the application menu replaces the main menu (its first submenu is the app menu; the replaced one comes back with `null`), context menus are `popUpMenuPositioningItem:atLocation:inView:` from the main queue (they track the mouse in a loop of their own); role items send AppKit's standard actions down the responder chain and are not reported, the others target an `NshMenuTarget` that reports their tag; AppKit validates the items (roles are enabled and titled by the responder chain: `Undo Typing`, `Exit Full Screen`), a disabled item's action is one nothing answers; an app's bar height selects an empty `NSToolbar` (`UnifiedCompact` up to 44pt, `Unified` above), with AppKit laying out the traffic lights on every live-resize frame; `titleBar().height` reports the actual unobscured-content boundary from `contentLayoutRect`, refreshed after deferred layout; a host's existing toolbar and style stay untouched; NSH tracks its own toolbar by object identity and restores the window's previous style when removing it, moving between windows or dropping the surface |
+
 | Clipboard | `system.rs` | `NSPasteboard` |
 | Networking | `net.rs` | `NSURLSession` (the iOS backend's) |
 | Dev | `dev.rs` | The dev server client on its own thread; a status line and the error overlay above the surface (opaque; code frames keep their lines and scroll sideways; a click that selects no text dismisses it, in an inactive window too; its Copy button copies the error); Cmd+R reloads the latest build |
@@ -219,7 +220,7 @@ active first: WebKit takes left clicks only in the active app (in another, a cli
 
 ```sh
 nsh build examples/gallery -o /tmp/gallery
-./target/debug/nsh-macos-host --bundle /tmp/gallery/bundle.nshc --size 1200x800 \
+./target/debug/nsh-macos-host --bundle /tmp/gallery/bundle.nshc --window-size 1200x800 \
   --script "wait 1000; shot /tmp/a.png; tap 83 350; wait 500; shot /tmp/b.png; quit"
 ```
 
@@ -283,9 +284,23 @@ and CI compilation alone do not prove those runtime behaviors.
 
 A mounted non-input view listening to `onPress` participates in AppKit's key
 view loop alongside native text inputs. Disabled accessibility state, removed
-press listeners, hidden views and views leaving the tree exclude a control.
+press listeners, `focusable={false}` (a backdrop that closes an overlay),
+hidden views and views leaving the tree exclude a control (a focused one gives
+the focus to the root).
 Tab/Shift+Tab stay within the newest modal and advance from the currently
-focused control. The root and passive layout views stay outside that loop.
+focused control. The root and passive layout views stay outside that loop. A
+modal remembers the input or pressable view that had the focus when it was
+presented (`ModalNav::focus_before`, held weakly) and gives it back when it
+closes, if the focus fell to the root or the window meanwhile: Escape on a
+popover returns to its trigger. A field edits in the window's shared field
+editor, which leaves the tree when editing ends, so the input that owns the
+editor is what is remembered; it comes back through `focus()`, with the caret
+at the end and its text not selected. A view that can no longer take the focus
+(disabled, without press listeners, `pointerEvents` none, hidden, detached)
+is skipped, and so is one a newer modal still covers: nothing under the
+newest modal is focused. When a lower modal closes under a newer one, the
+newer one that remembered a view of it remembers the lower one's instead, so
+closing it later returns to the view that opened the stack.
 
 Focused controls update the existing `focus:` interaction state. Unmodified
 Return, keypad Enter and Space emit PressIn/PressOut/Press once on key-down;
@@ -299,7 +314,13 @@ resolve its surface through ancestors; pointer and drawing callbacks keep their
 existing root-only lookup. This avoids attaching per-button monitors or changing
 the public event protocol.
 
-No builds or tests were run for this change at the user's request. Native
-acceptance remains pending: mixed input/button traversal in both directions,
-modal isolation and restoration, disabling/deleting a focused control, repeat
-suppression, modifier shortcuts, screen-reader focus and window deactivation.
+Checked with `--script` (`key Tab`, `key Return`, `key space`, `key Escape`,
+`tap`): Tab between pressables, Return and Space pressing the focused one, Tab
+staying in a transparent modal, and the focus returning to the trigger after
+Escape or a click outside; a single-line and a secure field getting it back
+with the caret at the end (a character typed after Escape is appended); a
+trigger disabled meanwhile staying unfocused; a lower modal closing under a
+newer one leaving the focus alone, and the newer one's Escape returning it to
+the stack's trigger. Still to check natively: Shift+Tab, mixed inputs and
+buttons, disabling or deleting a focused control, repeat suppression, modifier
+shortcuts, screen-reader focus and window deactivation.

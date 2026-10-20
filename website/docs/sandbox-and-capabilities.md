@@ -152,6 +152,10 @@ allows them without allowing any remote page.
 
 `"clipboard": true` lets the app read and write the system clipboard ([`nsh/clipboard`](../modules/nsh-clipboard.md)). Copying from a selectable text's edit menu is the user's own act and needs no capability.
 
+### Storage
+
+Every app may keep its own data on the device with [`nsh/storage`](../modules/nsh-storage.md), with no capability: the storage holds only that app's data, and the embedding app decides where it is kept.
+
 ### What a refusal looks like
 
 | Request | Result |

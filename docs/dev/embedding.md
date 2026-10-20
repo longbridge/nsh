@@ -60,6 +60,23 @@
   the box is empty, so a component can size itself. Content masks are
   rectangles: rounded corners do not cut a component (videos follow them).
   `crates/gpui/nsh-platform-gpui/examples/embed.rs` runs `examples/embedded` with its badge as a GPUI element.
+- **Native modules** (`nsh/native`'s `nativeModule`; `platform_modules.rs`, `modules::host_module`): an embedding app
+  written in Rust gives its engines a UI set of its own (`Registry::ui_set("host/trading")` with its `#[module]`s,
+  `#[class]`es and Rust components) next to NSH's (`set_ui_sets` of the platform crate, `EngineConfig::ui_sets`), and
+  the app reaches it by name at run time: `nativeModule<{ Trading: TradingApi }>("host/trading")` is an object of
+  the set's exports, made as an import of the set makes them, once per specifier and engine. The app declares `T`
+  itself, so it is built with the stock `nsh build` and the CLI never needs the host's registry (an `import` of the
+  set needs a CLI built with it, `rust_app.rs`). Calls keep the typed machinery (`rust-classes.md`): plain functions
+  answer in the call, `cx` functions are ops, `async` ones tasks. Where the host gave no set under the specifier, it
+  throws a `ReferenceError` naming it.
+- **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
+  `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
+  change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
+  engine thread; tokio's channels need no runtime there, their wakers wake the engine) posts the current state, then
+  awaits each change and posts it (`Callback::post`, which runs the callback in the engine's next JS turn). The
+  host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
+  them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
+  selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -85,8 +102,10 @@
 ## GPUI and GPUI Kit apps
 
 Desktop apps built with GPUI or GPUI Kit (Longbridge Pro, Allsum Desktop) embed NSH with `nsh-platform-gpui`'s
-`AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two surfaces
-in a resizable split.
+`AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two order
+tickets in a resizable split, sharing the host's trading desk (`src/trading.rs`, `nativeModule("host/trading")`) with
+each other and with the host's sidebar and toolbar, and a "Show layers" toggle outlining what GPUI Kit draws and what
+NSH draws (`src/layers.rs`).
 
 - **One GPUI.** NSH draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
@@ -128,7 +147,10 @@ in a resizable split.
   colors and Tailwind palette names only: NSH also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
   reads gradients and `blue-500/50` that NSH rejects.
 - **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
-  (`AppView::register_component`): their events and commands, as on the other platforms. A component can render GPUI
+  (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
+  of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and
+  subscribe to the desk, whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
+  `changed()`), so the host and every ticket show the same symbol and orders. A component can render GPUI
   Kit widgets in its box (`NativeComponent::render`), which take their own input: the example's "Extended hours" is a
   GPUI Kit `Switch` (`src/switch.rs`, `host.switch`) that reports its natural size (`ComponentContext::set_size`: its
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on
@@ -139,6 +161,13 @@ in a resizable split.
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
   in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+- **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
+  (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
+  (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
+  package's id; `Root::app_id` in Rust apps' generated code). Platforms only give the data dir: the system's
+  (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
+  `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
+  override one app's place; all from the next load.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload

@@ -4,7 +4,8 @@ Status: implemented (`nsh_core::ui` `class.rs`, `callback.rs`, `call.rs`, `js.rs
 `nsh-js` `classes.rs`, `components.rs`); "Implementation notes" at the end says where it differs from the
 proposal.
 
-An app's Rust crate (`nsh.json` `"rust"`) exports components, modules (`#[module]`: functions) and classes. This
+An app's Rust crate (`nsh.json` `"rust"`) exports components, modules (`#[module]`: functions) and classes
+(`examples/rust-exports`: one of each, every member kind below, used from TSX and tested headless). This
 describes classes: a Rust type that TypeScript uses as a class, with a constructor, methods, getters and setters, statics and
 instances that keep their state in Rust; synchronous functions on the same footing; and how NSH's own standard
 library shares the machinery.
@@ -120,7 +121,8 @@ so a class's methods can run directly inside the JS call, as the web classes nsh
 - **One object per instance.** While both live, an instance has one JS object (`nsh-js` remembers it by the `Rc`'s
   address): a member returning an instance Rust keeps gives the object it has, so `a.badge === a.badge`.
 - **Errors.** `Result<T, E: Display>` throws (`Error` with the message) or rejects; a wrong argument throws a
-  `TypeError` naming the member and the parameter (``Tally.add: `by`: expected a number, got "x"``); a panic in
+  `TypeError` naming the member and the parameter (``Tally.add: `by`: expected a number, got "x"``), and so does a
+disposed or busy instance passed for a borrowed parameter (``Account.transfer: `to`: Account is disposed``); a panic in
   Rust is caught and thrown as an `Error`, or rejects (the engine stays up) where Rust unwinds: the web runtime is
   built with `panic = "abort"` (`[profile.web]`), so there a panic ends the page's engine. Integer parameters take
   whole numbers in their range (a fraction, `NaN` or a value out of range is a `TypeError`, not rounded or
@@ -130,13 +132,25 @@ so a class's methods can run directly inside the JS call, as the web classes nsh
 
 Rust exports functions through `#[module]` (an object, `Alert.alert(..)`, or `#[module(flat)]`, top-level
 functions). Every call used to be an op ordered with the UI's, so every result was a promise. The class's split
-applies to functions too, decided by the signature (`FunctionCall::Sync` / `Op` / `Async`):
+applies to functions too, decided by the signature (`FunctionCall::Sync` / `Op` / `Async`) of each function with
+a visibility (`pub fn`, `pub(crate) fn`; the others are the block's helpers):
 
 - **`fn` without a context:** synchronous, called directly in the JS call like a class's method (`parse(text)`,
   `checksum(bytes)`): TS gets the value, not a promise.
 - **`fn` taking `cx: &mut ModuleCx`:** an op, run in order with what JS set before it (a dialog, the status bar,
-  focus), a promise when it returns a value.
-- **`async fn`:** a task of the core, a promise.
+  focus). Its return type decides what TS gets:
+  - returning `()`, it gives `void`, with no reply: JS calls it and moves on, the op runs in order with the UI at
+    the commit, nothing answers it (`RustOp::call` 0, no `JsEvent::Reply`), and a wrong argument throws in the call;
+  - returning `Result<(), E>`, it gives `Promise<void>`: resolved once the op ran, rejected with the `Err`'s message.
+    It cannot throw instead, because the op runs at the commit, after the JS call returned;
+  - returning a value (`T`, `Result<T, E>`), it gives `Promise<T>`, and a wrong argument rejects it.
+- **`async fn`:** a task of the core; it gives a Promise (`Promise<void>` for `()`, resolved when the task ends).
+
+The same holds for a component's ref methods (`docs/dev/components.md`, "Methods"). An op returning `()` is
+`void` because the runtime modules released theirs as `void` (`Toast.show`, `Clipboard.setString`, `Window.close`,
+...) and a return type never changes (`docs/dev/compatibility.md`); a Rust function that can fail says so with
+`Result<(), E>`, and TS gets a promise to see the error. `FunctionSpec::promises` / `MethodSpec::promises` decide
+it for the declarations and the JS face alike; `-> ()` written out is the same as no return type.
 
 A plain `fn` that returns a value (today a promise in TS) becomes synchronous: no runtime module has one (theirs
 take `ModuleCx` or are `async`), and an app crate's are rebuilt with the app, whose types change with them.
@@ -148,8 +162,8 @@ What TSX imports from NSH is made two ways today:
 - **Runtime modules in Rust** (`crates/nsh-core/src/runtime/`: `nsh/accessibility`, `nsh/android`,
   `nsh/clipboard`, `nsh/desktop`, `nsh/image`'s functions) already use `#[module]` and `Registry`, the app crates'
   mechanism; they take the synchronous functions and classes as they come.
-- **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh/animated`'s `NativeValue` and
-  `NativeNode`, `nsh/canvas`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
+- **Hand-written in `nsh-js`:** the reactive graph and the renderer (`nsh`), `nsh/animated`'s `AnimatedValue` and
+  `AnimatedNode`, `nsh/canvas`'s `Path2D`, `CanvasGradient` and `CanvasRenderingContext2D`, the keymap, lists, and the
   web globals (`URL`, `Headers`, `Blob`, `fetch`, streams, events). Their classes already sit on one piece of
   machinery: a QuickJS class whose opaque is the Rust value in a `RefCell` (`nsh-js` `web/mod.rs`).
 
@@ -161,7 +175,7 @@ need beyond the first version:
 |---|---|---|
 | `Path2D`, `CanvasGradient` | plain values, called often | when calls convert QuickJS values directly (below) |
 | `CanvasRenderingContext2D` | 17 500 calls in ~1 ms (`docs/dev/performance.md`) | stays recorded natively: a class front adds nothing |
-| `NativeValue`, `NativeNode` | values the renderer reads from style props, ops ordered with the UI | stays: it is part of the renderer |
+| `AnimatedValue`, `AnimatedNode` | values the renderer reads from style props, ops ordered with the UI | stays: it is part of the renderer |
 | `URL`, `TextEncoder` | WebIDL coercion, `new.target`, iterators | after subclassing and iterators |
 | `Headers`, `Blob`, streams, `EventTarget` | callbacks, events, promises interleaved with JS | after callbacks and events |
 | `nsh` itself (signals, `View`, `mount`) | the reactive graph and the JSX compiler's calls | stays: it is the runtime |
@@ -193,7 +207,11 @@ For that, two choices of the first version change:
 ## Callbacks
 
 A parameter `Callback<A, R = ()>` takes a JS function: `A` is its argument (a `JsValue` type, or a tuple for
-several), `R` what it returns. TS: `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`.
+several), `R` what it returns. TS: `Callback<f64>` is `(value: number) => void`, `Callback<(String, f64), bool>`
+`(a: string, b: number) => boolean`; `#[args(..)]` on the parameter names the function's arguments, checked at
+compile time to name each (`#[args(name, amount)] check: Callback<(String, f64), bool>` is `check: (name: string,
+amount: number) => boolean`), in classes, modules and ref methods alike. The attribute is the macros': it is
+removed from the function they leave.
 
 ```rust
 #[class]
@@ -301,10 +319,19 @@ Nothing crosses between JS and the core as JSON for a Rust component, module or 
 
 ## The pieces
 
-- **`nsh-macros`:** `#[class]` on the struct (a marker; the type's name is the JS name) and on its `impl`: `new`
+- **`nsh-macros`:** `#[class]` on the struct (a marker; the type's name is the JS name) and on its `impl`. The
+  block's functions with a visibility (`pub fn`, `pub(crate) fn`) are exported; those without one are helpers,
+  Rust's only, as in `#[module]` and `#[methods]` blocks (a `#[getter]` / `#[setter]` without one is a compile
+  error: it can only be TS's). `new`
   is the constructor (a class without one cannot be made from JS, only returned); `&self` / `&mut self` methods,
   `#[getter]` / `#[setter]` (one name: `count` and `set_count` are the property `count`), functions without `self`
-  are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations'.
+  are statics, `async fn` with `this: Instance<Self>` are async methods. Doc comments become the declarations':
+  the struct's documents the class, as a module's struct (`#[module]` on it and on its `impl`, `ModuleDoc`) does
+  the module and a component's `#[component] fn` the component; one on a `#[class]` or `#[module]` `impl` block is a
+  compile error (TS would not show it). TS gets a doc comment up to its first heading (`nsh-macros` `docs`, outside
+  code fences): what follows `# Rust` (or rustdoc's `# Panics`, `# Examples`) is for Rust callers only, the place
+  for notes about `&self`, `cx` or how a call crosses. `Registry::undocumented` lists the exports TS sees without a doc comment;
+  the command line warns of an app's when it writes `.nsh/types`, and nsh's own sets are tested to have none.
   It implements `ui::Class` (`Class::DEF`, a `ClassDef`: name, doc, members, each a `Member` with its
   `MemberCall`), as `#[module]` implements `Module`; on the struct it implements `Trace` (the callbacks the fields
   keep) and `Ret` (a value of the struct is a new instance).

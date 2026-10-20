@@ -3,7 +3,8 @@
 
 use nsh_core::ui::{Dialog, DialogButton, DialogButtonStyle, prelude::*};
 
-/// Native alerts.
+/// Native alerts (UIAlertController / AlertDialog).
+#[module]
 #[derive(Debug)]
 pub struct Alert;
 
@@ -48,7 +49,6 @@ pub struct AlertOptions {
     pub cancelable: bool,
 }
 
-/// Native alerts (UIAlertController / AlertDialog).
 #[module]
 impl Alert {
     /// Shows an alert (at most three buttons on Android; one "OK" when
@@ -81,7 +81,9 @@ impl Alert {
     }
 }
 
-/// A sheet of actions.
+/// A sheet of actions (UIAlertController action sheet; a list dialog on
+/// Android).
+#[module]
 #[derive(Debug)]
 pub struct ActionSheet;
 
@@ -100,8 +102,6 @@ pub struct ActionSheetOptions {
     pub message: Option<SharedString>,
 }
 
-/// A sheet of actions (UIAlertController action sheet; a list dialog on
-/// Android).
 #[module]
 impl ActionSheet {
     /// Shows the sheet and resolves with the index of the action chosen

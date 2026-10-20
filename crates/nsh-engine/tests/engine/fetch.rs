@@ -109,7 +109,7 @@ fn fetch_round_trips_through_the_platform_network() {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let network = Arc::new(EchoNetwork::default());
@@ -129,6 +129,8 @@ fn fetch_round_trips_through_the_platform_network() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -209,7 +211,7 @@ fn fetch_stays_within_the_capabilities() {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -230,6 +232,8 @@ fn fetch_stays_within_the_capabilities() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     assert_eq!(
@@ -290,6 +294,8 @@ fn rust_components_fetch_through_the_platform_network() {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     let mut shown = Vec::new();

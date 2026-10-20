@@ -39,10 +39,10 @@ bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --size 1024x768   # in a checkout: target/debug/nsh-linux-host
+dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # in a checkout: target/debug/nsh-linux-host
 ```
 
-`--size` is the window's default size; tiling window managers may give the window another one.
+`--window-size` is the window's default size; tiling window managers may give the window another one.
 
 ## Packaging
 

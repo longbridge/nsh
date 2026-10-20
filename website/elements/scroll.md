@@ -46,7 +46,7 @@ Besides the [common props](./index.md#common-props) (with `style` typed as `View
 | `contentOffset` | `{ x?, y? }` | | Where it starts. |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | Whether a tap dismisses the keyboard: `never` (the tap only dismisses it), `always` (it stays up), `handled` (it stays up when something handles the tap). |
-| `scrollValue` | `NativeValue` | | A native value fed with the scroll offset (main axis), for scroll-linked animations. |
+| `scrollValue` | `AnimatedValue` | | An animated value fed with the scroll offset (main axis), for scroll-linked animations. |
 | `scrollEventThrottle` | `number` | | Minimum milliseconds between `onScroll` events (at most one per frame anyway). |
 
 ### Pull to refresh

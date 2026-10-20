@@ -191,20 +191,9 @@ impl Ord for Timer {
 }
 
 impl Executor {
-    /// The live node `key` (a node-making op, node 0) made.
-    pub(crate) fn derived(
-        &self,
-        key: &nsh_animation::AnimationOp,
-    ) -> Option<Rc<super::animated::Node>> {
-        self.derived.borrow_mut().get(key)
-    }
-
-    pub(crate) fn remember_derived(
-        &self,
-        key: nsh_animation::AnimationOp,
-        node: &Rc<super::animated::Node>,
-    ) {
-        self.derived.borrow_mut().0.push((key, Rc::downgrade(node)));
+    /// The derived nodes and their handles.
+    pub(crate) fn derived(&self) -> std::cell::RefMut<'_, super::animated::Derived> {
+        self.derived.borrow_mut()
     }
 
     /// Wakes `waker` at `at`.

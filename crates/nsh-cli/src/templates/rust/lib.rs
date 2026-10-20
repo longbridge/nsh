@@ -1,10 +1,12 @@
-//! The application's Rust UI, shared by the native and TSX entry points.
+//! The app's Rust UI: its root component, which `nsh run`, `nsh package`
+//! and `cargo run` mount.
 
 use nsh_core::ui::prelude::*;
 use nsh_ui_mobile::{Button, ButtonEvent, ButtonProps, SafeAreaView, SafeAreaViewProps};
 
-/// The components available to the TSX entry through `app/native`.
-#[native_module("app/native")]
+/// The app's UI set (`nsh.json` `"rust"`): what a TSX entry may import from
+/// `__SPECIFIER__` (`README.md`, "Adding a TSX entry").
+#[native_module("__SPECIFIER__")]
 fn native(registry: &mut Registry) {
     registry.register::<App>();
 }

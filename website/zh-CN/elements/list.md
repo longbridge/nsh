@@ -72,7 +72,7 @@ mount(App);
 | `refreshing` | `boolean` | | 显示下拉刷新的转圈。 |
 | `onRefresh` | `() => void` | | 用户下拉刷新。 |
 | `showsIndicator` | `boolean` | `true` | 显示滚动条。在桌面和桌面浏览器中，横向视图始终保留滚动条：它是鼠标的滚动条。 |
-| `scrollValue` | `NativeValue` | | 接收滚动偏移的原生值，用于随滚动变化的动画。 |
+| `scrollValue` | `AnimatedValue` | | 接收滚动偏移的动画值，用于随滚动变化的动画。 |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | 拖动时是否收起键盘。 |
 | `style` | `StyleProp<ViewStyle>` | | 列表自身的样式（需要有确定的尺寸：`flex: 1` 或高度）。 |
 | `ref` | `YNode \| (node: YNode) => void` | | 列表的节点（见 [Ref 方法](#ref-方法)）。 |

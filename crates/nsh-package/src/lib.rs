@@ -50,7 +50,9 @@ mod trust;
 
 pub use crate::{
     keys::{PublicKey, SecretKey},
-    package::{App, Contents, FileKind, Header, VerifiedPackage, build, verify_signature},
+    package::{
+        App, Contents, FileKind, Header, VerifiedPackage, build, source_map, verify_signature,
+    },
     trust::{Certificate, Revocations, TrustStore, certify, revoke},
 };
 

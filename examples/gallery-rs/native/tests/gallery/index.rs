@@ -23,6 +23,7 @@ fn every_demo_opens_from_the_index() {
         "Components",
         "Web and video",
         "System",
+        "Storage",
     ] {
         // `open` checks that the demo's screen is pushed with its title.
         let (_engine, _rx, screen) = crate::common::open(name);
@@ -53,7 +54,7 @@ fn the_index_groups_the_demos() {
         ("LAYOUT AND LISTS", "4"),
         ("TOUCH AND MOTION", "4"),
         ("DRAWING AND TYPE", "5"),
-        ("PLATFORM", "4"),
+        ("PLATFORM", "5"),
     ] {
         let at = screen.find(title).unwrap_or_else(|| panic!("no {title}"));
         // The count is the title's sibling.
@@ -67,7 +68,7 @@ fn the_index_groups_the_demos() {
         );
     }
     // Each row has its icon and its chevron drawn.
-    assert!(screen.drawings.len() >= 2 * 20, "{}", screen.drawings.len());
+    assert!(screen.drawings.len() >= 2 * 21, "{}", screen.drawings.len());
 }
 
 #[test]

@@ -1,6 +1,6 @@
 ---
 title: 画布
-description: 用 nsh/canvas 的 Canvas 绘图：2D 上下文子集、路径与 Path2D、渐变、文字、图片、根据 signal 重绘，以及用原生值驱动绘制动画。
+description: 用 nsh/canvas 的 Canvas 绘图：2D 上下文子集、路径与 Path2D、渐变、文字、图片、根据 signal 重绘，以及用动画值驱动绘制动画。
 order: 44
 group: ui
 demo: guide-canvas
@@ -78,7 +78,7 @@ const values = signal([12, 30, 22, 48, 36, 60]);
 | 成员 | 说明 |
 |---|---|
 | `save()`、`restore()` | 压入和弹出绘制状态（样式、变换、裁剪）。 |
-| `fillStyle`、`strokeStyle` | CSS 颜色、渐变，或插值为颜色的原生值。 |
+| `fillStyle`、`strokeStyle` | CSS 颜色、渐变，或插值为颜色的动画值。 |
 | `lineWidth`、`lineCap`、`lineJoin`、`miterLimit` | 描边形状。 |
 | `setLineDash(segments)`、`getLineDash()`、`lineDashOffset` | 虚线。 |
 | `globalAlpha` | 后续绘制的不透明度，0..1。 |
@@ -192,17 +192,17 @@ import logo from "./logo.png";
 
 九个参数的形式中，源矩形以图片的像素为单位。
 
-## 用原生值驱动动画
+## 用动画值驱动绘制
 
-绘制调用中的任何数字参数，以及 `fillStyle` / `strokeStyle`，都可以是[原生值](./animation.md#原生值)或由它派生的节点。这类参数在平台绘制时才被读取；当原生值在动画中时，平台会自行逐帧重绘，不运行 `draw`，也不运行任何其他 JS。
+绘制调用中的任何数字参数，以及 `fillStyle` / `strokeStyle`，都可以是[动画值](./animation.md#动画值)或由它派生的节点。这类参数在平台绘制时才被读取；当动画值在动画中时，平台会自行逐帧重绘，不运行 `draw`，也不运行任何其他 JS。
 
 ```tsx
 import { mount, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
 function Ring() {
-  const progress = createNativeValue(0.3);
+  const progress = createAnimatedValue(0.3);
   const label = signal(30);
   const go = (to: number) => {
     label.set(Math.round(to * 100));
@@ -222,7 +222,7 @@ function Ring() {
           ctx.stroke();
           ctx.strokeStyle = "#6366f1";
           ctx.beginPath();
-          // 终止角在每一帧读取原生值。
+          // 终止角在每一帧读取动画值。
           ctx.arc(cx, cy, r, -Math.PI / 2, progress.mul(Math.PI * 2).sub(Math.PI / 2));
           ctx.stroke();
           ctx.fillStyle = "#1f2328";
@@ -280,12 +280,12 @@ const strokes = signal<[number, number][][]>([]);
 ## 性能
 
 - JS 调用上下文时，绘制在 Rust 中录制，并作为一个操作发送给平台；不存在每次调用都跨越一次桥的开销。
-- `draw` 每次都重新录制全部内容。让 `draw` 中的工作量与显示的内容相称，把每帧都变化的数据放在原生值而不是 signal 中。
+- `draw` 每次都重新录制全部内容。让 `draw` 中的工作量与显示的内容相称，把每帧都变化的数据放在动画值而不是 signal 中。
 - 如果一幅绘制既有静态部分又有频繁变化的部分，把它拆成上下叠放的两个画布，这样只有一个需要重绘。
 - 在可缩放的滚动视图中，缩放结束后画布会按缩放后的分辨率重新绘制。
 
 ## 相关内容
 
 - [`Canvas` 元素](../elements/canvas.md) 与 [`nsh/canvas`](../modules/nsh-canvas.md)：参考。
-- [动画](./animation.md)：原生值、`interpolate` 和 `Easing`。
+- [动画](./animation.md)：动画值、`interpolate` 和 `Easing`。
 - [图片与资源](./images-and-assets.md)：导入图片。

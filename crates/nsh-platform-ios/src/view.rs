@@ -120,6 +120,16 @@ impl AppView {
         self.reconfigure(|options| options.limits = limits);
     }
 
+    /// The directory the storage (`nsh/storage`) of the apps this view loads
+    /// is kept in (`storage.json` in it), overriding each app's own in
+    /// [`SurfaceOptions::data_dir`] (`None`: theirs). A change applies from
+    /// the next [`AppView::load`].
+    pub fn set_storage_directory(&self, dir: Option<std::path::PathBuf>) {
+        if self.inner.state.borrow().options.storage != dir {
+            self.reconfigure(|options| options.storage = dir);
+        }
+    }
+
     fn reconfigure(&self, change: impl FnOnce(&mut SurfaceOptions)) {
         let mut state = self.inner.state.borrow_mut();
         change(&mut state.options);

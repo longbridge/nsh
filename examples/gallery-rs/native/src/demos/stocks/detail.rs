@@ -79,33 +79,30 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     let ticket = signal(false);
     // The confirmation: what it says, and its motion (0 hidden, 1 shown).
     let message = signal((SharedString::default(), SharedString::default(), Side::Buy));
-    let banner = native_value(0.0);
+    let banner = animated_value(0.0);
     let banner_run = stored(None::<Animation>);
     // The confirmation drops in from the top and leaves by itself.
-    let show_banner = {
-        let t = banner.clone();
-        move |title: SharedString, detail: SharedString, side: Side| {
-            message.set((title, detail, side));
-            let run = Animation::sequence([
-                Animation::spring(
-                    &t,
-                    1.0,
-                    Spring {
-                        stiffness: 260.0,
-                        damping: 22.0,
-                        ..Spring::default()
-                    },
-                ),
-                Animation::delay(2200.0),
-                Animation::timing(
-                    &t,
-                    0.0,
-                    Timing::new(260.0, Easing::Curve(Curve::Cubic, EaseMode::In)),
-                ),
-            ]);
-            let _ = run.start();
-            banner_run.replace(Some(run));
-        }
+    let show_banner = move |title: SharedString, detail: SharedString, side: Side| {
+        message.set((title, detail, side));
+        let run = Animation::sequence([
+            Animation::spring(
+                &banner,
+                1.0,
+                Spring {
+                    stiffness: 260.0,
+                    damping: 22.0,
+                    ..Spring::default()
+                },
+            ),
+            Animation::delay(2200.0),
+            Animation::timing(
+                &banner,
+                0.0,
+                Timing::new(260.0, Easing::Curve(Curve::Cubic, EaseMode::In)),
+            ),
+        ]);
+        let _ = run.start();
+        banner_run.replace(Some(run));
     };
     let trade = move |chosen: Side| {
         move |_: &()| {
@@ -273,7 +270,6 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
         );
     // The ticket: made fresh each time it opens.
     let ticket_view = move || {
-        let show_banner = show_banner.clone();
         Ticket::element(TicketProps {
             code: code.into(),
             tick,
@@ -366,9 +362,8 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
     let tone = computed(move || tone_of(change.get()));
     // The day is down: the arrow turns over.
     let down = computed(move || change.get() < 0.0);
-    let turn = native_value(if down.get_untracked() { 1.0 } else { 0.0 });
+    let turn = animated_value(if down.get_untracked() { 1.0 } else { 0.0 });
     {
-        let turn = turn.clone();
         let shown = stored(down.get_untracked());
         effect(move || {
             let down = down.get();
@@ -509,40 +504,34 @@ fn DayRange(props: StockProps) -> impl IntoElement {
         let q = quote.get();
         day_at(&q, tick, v(&q))
     };
-    let x = native_value(0.0);
+    let x = animated_value(0.0);
     // The track's width as laid out (0 before), and whether the knob was
     // placed (the first place jumps, later ones spring).
     let width = stored(0.0_f32);
     let placed = stored(false);
-    let place = {
-        let x = x.clone();
-        move |q: Quote| {
-            let width = width.with(|w| *w);
-            if width <= 0.0 {
-                return;
-            }
-            let to = day_at(&q, tick, q.last) * width;
-            if placed.replace(true) {
-                let _ = x.spring(
-                    to,
-                    Spring {
-                        stiffness: 220.0,
-                        damping: 24.0,
-                        ..Spring::default()
-                    },
-                );
-            } else {
-                x.set(to);
-            }
+    let place = move |q: Quote| {
+        let width = width.with(|w| *w);
+        if width <= 0.0 {
+            return;
+        }
+        let to = day_at(&q, tick, q.last) * width;
+        if placed.replace(true) {
+            let _ = x.spring(
+                to,
+                Spring {
+                    stiffness: 220.0,
+                    damping: 24.0,
+                    ..Spring::default()
+                },
+            );
+        } else {
+            x.set(to);
         }
     };
-    {
-        let place = place.clone();
-        effect(move || {
-            let q = quote.get();
-            untracked(|| place(q));
-        });
-    }
+    effect(move || {
+        let q = quote.get();
+        untracked(|| place(q));
+    });
     view()
         .flex_row()
         .items_center()

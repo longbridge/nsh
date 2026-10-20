@@ -45,7 +45,7 @@ it. Output goes to `out/` unless you pass `--out`.
 | Key | Type | Default | Used for |
 |---|---|---|---|
 | `name` | string | the entry's directory name | The display name under the icon (`CFBundleDisplayName`, Android `android:label`) and the output file name. |
-| `id` | string | `com.example.<name>` | The bundle identifier / Android package name. |
+| `id` | string | required | The bundle identifier / Android package name, in reverse-DNS form under a domain you own. It also names where the app keeps its [storage](../modules/nsh-storage.md), so each app has its own. `nsh package` and `nsh publish` warn about the `com.example.` placeholder. |
 | `version` | string | `"1.0.0"` | The user-visible version (`CFBundleShortVersionString`, `versionName`). |
 | `build` | number | `1` | The build number (`CFBundleVersion`, `versionCode`). Raise it for every release you upload. |
 | `icon` | string | none | A square PNG, ideally 1024×1024, relative to `nsh.json`. |

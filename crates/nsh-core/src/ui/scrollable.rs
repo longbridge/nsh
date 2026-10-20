@@ -3,7 +3,7 @@
 //! (`ScrollingHostProps`).
 
 use super::{
-    Element, IntoReactive, Listener, NativeValue, ScrollEvent, ScrollOffset,
+    AnimatedValue, Element, IntoListener, IntoReactive, Listener, ScrollEvent, ScrollOffset,
     events::{self, Decode},
     host,
 };
@@ -146,56 +146,70 @@ pub trait Scrollable: Element {
         self
     }
 
-    /// Follows the scroll offset (along its axis) with a native value:
+    /// Follows the scroll offset (along its axis) with an animated value:
     /// headers that shrink or fade, parallax, with no engine work per frame
     /// (TS: `scrollValue`).
-    fn scroll_value(mut self, value: &NativeValue) -> Self {
-        host::set(self.node(), Prop::ScrollValue(Some(value.node().id())));
-        self.node().attrs.bound.push(value.node().clone());
+    fn scroll_value(mut self, value: &AnimatedValue) -> Self {
+        if let Some(node) = value.node().live() {
+            host::set(self.node(), Prop::ScrollValue(Some(node.id())));
+            self.node().attrs.bound.push(node);
+        }
         self
     }
 
     /// Pulled down to refresh (enables pull to refresh).
-    fn on_refresh(self, listener: impl Into<Listener<()>>) -> Self {
-        self.listen_scroll(EventKind::Refresh, listener.into(), events::unit)
+    fn on_refresh<M>(self, listener: impl IntoListener<(), M>) -> Self {
+        self.listen_scroll(EventKind::Refresh, listener.into_listener(), events::unit)
     }
 
     /// It moved (at most once per frame, [`Self::event_throttle`]).
-    fn on_scroll(self, listener: impl Into<Listener<ScrollEvent>>) -> Self {
-        self.listen_scroll(EventKind::Scroll, listener.into(), events::scroll)
+    fn on_scroll<M>(self, listener: impl IntoListener<ScrollEvent, M>) -> Self {
+        self.listen_scroll(EventKind::Scroll, listener.into_listener(), events::scroll)
     }
 
     /// The user started dragging it.
-    fn on_scroll_begin_drag(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
-        self.listen_scroll(EventKind::ScrollBeginDrag, listener.into(), events::offset)
+    fn on_scroll_begin_drag<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+        self.listen_scroll(
+            EventKind::ScrollBeginDrag,
+            listener.into_listener(),
+            events::offset,
+        )
     }
 
     /// The user let go.
-    fn on_scroll_end_drag(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
-        self.listen_scroll(EventKind::ScrollEndDrag, listener.into(), events::offset)
+    fn on_scroll_end_drag<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+        self.listen_scroll(
+            EventKind::ScrollEndDrag,
+            listener.into_listener(),
+            events::offset,
+        )
     }
 
     /// It started gliding after a fling.
-    fn on_momentum_scroll_begin(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+    fn on_momentum_scroll_begin<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
         self.listen_scroll(
             EventKind::MomentumScrollBegin,
-            listener.into(),
+            listener.into_listener(),
             events::offset,
         )
     }
 
     /// It stopped gliding.
-    fn on_momentum_scroll_end(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
+    fn on_momentum_scroll_end<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
         self.listen_scroll(
             EventKind::MomentumScrollEnd,
-            listener.into(),
+            listener.into_listener(),
             events::offset,
         )
     }
 
     /// It came to rest.
-    fn on_scroll_end(self, listener: impl Into<Listener<ScrollOffset>>) -> Self {
-        self.listen_scroll(EventKind::ScrollEnd, listener.into(), events::offset)
+    fn on_scroll_end<M>(self, listener: impl IntoListener<ScrollOffset, M>) -> Self {
+        self.listen_scroll(
+            EventKind::ScrollEnd,
+            listener.into_listener(),
+            events::offset,
+        )
     }
 }
 

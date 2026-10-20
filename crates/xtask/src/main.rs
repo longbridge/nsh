@@ -11,8 +11,11 @@
 //!   `NativeShellDev.xcframework`) into `dist/nsh/embed/ios`.
 //! - `web`: the WebAssembly runtime, its player and the website's demos
 //!   (`website/public/play` by default).
+//! - `api`: records the API apps use in `api/current`; `--freeze` freezes
+//!   it in the baseline of a release's minor line (docs/dev/compatibility.md).
 
 mod android;
+mod api;
 mod dist;
 mod ios;
 mod run;
@@ -75,6 +78,14 @@ enum Task {
         #[arg(long, default_value = "website/public/play")]
         out: std::path::PathBuf,
     },
+    /// Record the API apps use in `api/current`.
+    Api {
+        /// Also freeze it for a release (the workspace's version by
+        /// default) in `api/v<major>.<minor>`: the API, and on the line's
+        /// first release the example apps built.
+        #[arg(long, value_name = "VERSION", num_args = 0..=1)]
+        freeze: Option<Option<String>>,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -132,5 +143,6 @@ fn task(task: Task) -> anyhow::Result<()> {
         Task::Dist => dist::dist(),
         Task::IosEmbed(options) => ios::build(options).map(|out| term::note(out.display())),
         Task::Web { out } => web::build(&out),
+        Task::Api { freeze } => api::api(freeze),
     }
 }

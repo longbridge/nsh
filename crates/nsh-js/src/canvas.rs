@@ -51,7 +51,7 @@ pub(crate) enum Rec {
     Num(f64),
     Str(Rc<str>),
     List(Rc<Vec<Rec>>),
-    /// A native animation node (`NativeNode.__nv`).
+    /// A native animation node (`AnimatedNode.__av`).
     Node(nsh_animation::NodeId),
 }
 
@@ -104,7 +104,7 @@ impl HostInput for Rec {
 
     fn field(&self, key: &str) -> Option<Self> {
         match self {
-            Rec::Node(id) if key == "__nv" => Some(Rec::Num(*id as f64)),
+            Rec::Node(id) if key == "__av" => Some(Rec::Num(*id as f64)),
             _ => None,
         }
     }
@@ -130,7 +130,7 @@ impl HostInput for Rec {
         }
     }
 
-    fn native_node(&self) -> Option<nsh_animation::NodeId> {
+    fn animated_node(&self) -> Option<nsh_animation::NodeId> {
         match self {
             Rec::Node(id) => Some(*id),
             _ => None,
@@ -218,7 +218,7 @@ fn canvases<'a>(ctx: *mut JsContext) -> &'a Canvases {
 /// What a context, a path or a gradient holds.
 struct Recording {
     out: Vec<Rec>,
-    /// Native values the recording uses (owned): kept with the view.
+    /// Animated values the recording uses (owned): kept with the view.
     used: Vec<JsValue>,
     /// Contexts: the drawing state (the properties' values, owned, for the
     /// getters) and the saved states.
@@ -478,7 +478,7 @@ fn rc_str(ctx: *mut JsContext, v: JsValue) -> Rc<str> {
     }
 }
 
-/// A JS value as a record (borrowed); the native values it holds are added
+/// A JS value as a record (borrowed); the animated values it holds are added
 /// to `used` (owned dups).
 fn to_rec(ctx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) -> Rec {
     // SAFETY: inline checks and reads of a live value; values got are freed.
@@ -504,7 +504,7 @@ fn to_rec(ctx: *mut JsContext, v: JsValue, used: &mut Vec<JsValue>, depth: u32) 
             used.extend(r.used.iter().map(|&u| qjs::JS_DupValue(ctx, u)));
             return Rec::List(Rc::new(r.out.clone()));
         }
-        let nv = qjs::JS_GetPropertyStr(ctx, v, c"__nv".as_ptr());
+        let nv = qjs::JS_GetPropertyStr(ctx, v, c"__av".as_ptr());
         if qjs::JS_IsNumber(nv) {
             let mut n = 0f64;
             qjs::JS_ToFloat64(ctx, &mut n, nv);
@@ -1046,7 +1046,7 @@ fn point_in(ctx: *mut JsContext, this: JsValue, a: &[JsValue], stroke: bool) -> 
     let Ok(drawing) = decode(&RecList(recorded), 0, len) else {
         return qjs::JS_FALSE;
     };
-    // JS does not see native values' current values: they count as 0.
+    // JS does not see animated values' current values: they count as 0.
     let slot = |_| 0.0;
     let hit = if stroke {
         point_in_stroke(&drawing.ops, path.as_deref(), x, y, slot)
@@ -1221,7 +1221,7 @@ fn class_function(
 
 /// `<Canvas draw={(ctx, size) => …}>`: a view drawn with a 2D context.
 /// `draw` runs once the size is known, and again when the size or the
-/// signals it reads change; native values passed as numbers or colors
+/// signals it reads change; animated values passed as numbers or colors
 /// animate without running it.
 unsafe extern "C" fn canvas(
     ctx: *mut JsContext,
@@ -1377,7 +1377,7 @@ unsafe extern "C" fn canvas_draw(
     }
 }
 
-/// Sends drawing `out` of `node`, which keeps the native values it reads
+/// Sends drawing `out` of `node`, which keeps the animated values it reads
 /// (`used`, owned) alive.
 fn send(ctx: *mut JsContext, node: JsValue, out: Rc<Vec<Rec>>, mut used: Vec<JsValue>) -> JsValue {
     let shared = dom::shared(ctx);
@@ -1449,7 +1449,7 @@ export interface Path2D extends CanvasPath {}"#,
             class_function(ctx, name, illegal_constructor, CONTEXT, 0)
         }),
         Ts::class(
-            "The 2D context `<Canvas draw>` gets (an HTML Canvas 2D subset). Calls only\nrecord operations; the platform draws them after `draw` returns (and again\nwhenever a native value they read changes). Coordinates are in points,\nthe origin at the canvas's top left.",
+            "The 2D context `<Canvas draw>` gets (an HTML Canvas 2D subset). Calls only\nrecord operations; the platform draws them after `draw` returns (and again\nwhenever an animated value they read changes). Coordinates are in points,\nthe origin at the canvas's top left.",
             r#" {
   #private;
   /** The canvas's size in points. */
@@ -1474,7 +1474,7 @@ export interface Path2D extends CanvasPath {}"#,
    * Whether (`x`, `y`) (in points, not transformed) is inside `path` under
    * the current transform, or inside the current path; answered natively
    * from what was recorded (after `draw` returned: everything it drew, so a
-   * kept context answers in press handlers). Native values count as 0.
+   * kept context answers in press handlers). Animated values count as 0.
    */
   isPointInPath(x: number, y: number, rule?: "nonzero" | "evenodd"): boolean;
   isPointInPath(path: Path2D, x: number, y: number, rule?: "nonzero" | "evenodd"): boolean;
@@ -1517,8 +1517,8 @@ export interface CanvasRenderingContext2D extends CanvasPath, CanvasContextMetho
 
 /// `nsh/canvas`'s types (with the recording methods' and properties' of
 /// `nsh_core::js::canvas::declarations`).
-pub(crate) const TYPES: &str = r#"/** A color, a gradient, or a native value interpolating colors. */
-export type CanvasPaint = string | CanvasGradient | NativeNode;
+pub(crate) const TYPES: &str = r#"/** A color, a gradient, or an animated value interpolating colors. */
+export type CanvasPaint = string | CanvasGradient | AnimatedNode;
 
 /** Path building, shared by the context (its current path) and `Path2D`. */
 export interface CanvasPath extends CanvasPathMethods {
@@ -1539,7 +1539,7 @@ export interface CanvasSize {
 export interface CanvasProps extends ViewProps {
   /**
    * Draws the canvas. Runs again when signals it reads change and when the
-   * canvas resizes (it first runs once the size is known); native values
+   * canvas resizes (it first runs once the size is known); animated values
    * passed as numbers or colors animate without running it.
    */
   draw: (ctx: CanvasRenderingContext2D, size: CanvasSize) => void;

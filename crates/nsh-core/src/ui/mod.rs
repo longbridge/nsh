@@ -23,7 +23,7 @@
 //! declarations ([`declarations`]) are made from them. In JS a component is one host node:
 //! the root of its expansion. The app's `class` is appended to the root's
 //! styles and its `style` stays the root's inline style. Colors come from
-//! the [`Theme`] (gpui-kit's fields), with a light and a dark value each.
+//! the [`Theme`], with a light and a dark value each.
 //!
 //! Node ids: JS allocates even ids, the core odd ones for the nodes it
 //! expands, so both stay dense. How the core runs components:
@@ -37,6 +37,7 @@ pub(crate) mod call;
 mod callback;
 pub(crate) mod class;
 mod component;
+pub mod description;
 pub mod desktop;
 pub(crate) mod element;
 mod element_ref;
@@ -91,10 +92,17 @@ pub use nsh_macros::{
     native_module,
 };
 
+pub(crate) use self::{
+    animated::LiveNode,
+    back::BackListener,
+    component::{AnyInstance, caught},
+    element::{ElKind, PlaceFn},
+    task::{Action, AnswerSlot, ClipboardRead, Executor},
+};
 pub use self::{
     animated::{
-        Animated, Animation, AnimationEnd, AnimationOperand, Interpolation, NativeNode,
-        NativeValue, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
+        Animated, AnimatedNode, AnimatedValue, Animation, AnimationEnd, AnimationOperand,
+        Interpolation, Spring, Timing, sample_decay, sample_decay_within, sample_spring,
     },
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     call::{
@@ -113,8 +121,9 @@ pub use self::{
     },
     element::{
         Accessible, AnyElement, Attrs, BoundListConfig, Child, Children, ComponentElement, ElNode,
-        Element, FluentBuilder, Image, Interactive, IntoElement, Items, ListConfig, ListElement,
-        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, View, image, text, view,
+        Element, FluentBuilder, Image, Interactive, IntoChild, IntoElement, IntoListener, Items,
+        ListConfig, ListElement, Listener, ParentElement, Position, Slot, SlotElement, Style, Text,
+        View, image, text, view,
     },
     element_ref::{ComponentRef, ElementRef},
     env::Environment,
@@ -153,12 +162,6 @@ pub use self::{
     value::{JsValue, NodeRef, PropEnum, PropError, SharedString, TsType, TsTypes, ts_of},
     virtual_list::{ListLayout, ViewableItems, VirtualList, virtual_list},
 };
-pub(crate) use self::{
-    back::BackListener,
-    component::{AnyInstance, caught},
-    element::{ElKind, PlaceFn},
-    task::{Action, AnswerSlot, ClipboardRead, Executor},
-};
 pub use crate::{
     AccessibilityRole, AccessibilityState, AutoCapitalize, AutoFill, BlendMode, BoxShadow, Cursor,
     Dialog, DialogButton, DialogButtonStyle, EdgeInsets, EllipsizeMode, EventKind, EventPayload,
@@ -183,6 +186,8 @@ pub mod prelude {
         Accessible,
         AdaptiveColor,
         Animated,
+        AnimatedNode,
+        AnimatedValue,
         Animation,
         AnimationOutput,
         AnyElement,
@@ -232,6 +237,7 @@ pub mod prelude {
         Interactive,
         Interpolation,
         IntoElement,
+        IntoListener,
         Items,
         JsObject,
         JsValue,
@@ -253,8 +259,6 @@ pub mod prelude {
         ModalPresentation,
         ModuleCx,
         NativeEvent,
-        NativeNode,
-        NativeValue,
         NativeView,
         NoEvent,
         Orientation,
@@ -331,15 +335,15 @@ pub mod prelude {
         Each, If, IntoElements, IntoReactive, Memo, Owner, Prop, Reactive, ReadSignal, Scope,
         Signal, SignalEquals, Stored,
         ambient::{
-            Delay, KeyOptions, Spawned, add_status_bar, allow_rtl, animate_layout,
+            Delay, KeyOptions, Spawned, add_status_bar, allow_rtl, animate_layout, animated_value,
             announce_for_accessibility, clipboard_has_string, clipboard_string, color,
             component_ref, dark, dialog, dismiss_keyboard, element_ref, fetch, font_scale,
             force_rtl, global, idiom, image_size, is_desktop, key_label, keyboard_duration,
-            keyboard_height, locale, measure_text, native_value, next_frame, on_back_press, on_key,
-            on_key_with, os, os_version, pixel_ratio, prefetch_image, reduce_motion,
-            request_animation_frame, round_to_nearest_pixel, rtl, safe_area, screen_reader,
-            set_clipboard, set_color_scheme, set_interval, set_timeout, spawn, theme, timer,
-            timer_until, toast, update_status_bar, window,
+            keyboard_height, locale, measure_text, next_frame, on_back_press, on_key, on_key_with,
+            os, os_version, pixel_ratio, prefetch_image, reduce_motion, request_animation_frame,
+            round_to_nearest_pixel, rtl, safe_area, screen_reader, set_clipboard, set_color_scheme,
+            set_interval, set_timeout, spawn, theme, timer, timer_until, toast, update_status_bar,
+            window,
         },
         batch, catch_error, cleanup, component, computed, dynamic, effect, provide_context, signal,
         signal_with, stored, untracked, use_context,
@@ -351,7 +355,7 @@ pub mod prelude {
 pub mod __private {
     pub use serde_json::Map as JsonMap;
 
-    pub use super::class::__private::*;
+    pub use super::{callback::NamedArgs, class::__private::*};
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`

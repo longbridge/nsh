@@ -421,6 +421,11 @@ function webBridge(token) {
 })();`;
 }
 
+/// Measurements between dropping the measuring context (see `measure_text`):
+/// 5000 ≈ 4 seconds for a table that measures on every frame, which holds
+/// Blink's shape cache around 5 MB.
+const MEASURE_ROUNDS = 5000;
+
 function measureContext() {
   const canvas = typeof OffscreenCanvas !== "undefined"
     ? new OffscreenCanvas(1, 1)
@@ -474,6 +479,7 @@ class Player {
     this.timer = 0;
     this.frame = 0;
     this.measure = measureContext();
+    this.measureUses = 0;
     this.metricsCache = new Map();
     this.layoutAnimation = null;
     // Views created and removed while a layout animation is configured.
@@ -500,6 +506,18 @@ class Player {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
         measure_text: (fp, fl, tp, tl) => {
+          // Blink keeps every shaped string in the measuring context's
+          // PlainTextPainter (a FrameShapeCache keyed by font), and drops it
+          // only under critical memory pressure: an app that measures strings
+          // it has not measured before — a price table measuring the numbers
+          // that changed, every frame — piles up `blink::PlainTextNode`s
+          // without bound (25 MB in 20s, 52 MB in 6 minutes for a 40-row
+          // table). A context is cheap, and a fresh one starts empty; the old
+          // one, its painter and its cache become unreachable and go.
+          if (++this.measureUses >= MEASURE_ROUNDS) {
+            this.measureUses = 0;
+            this.measure = measureContext();
+          }
           this.measure.font = this.str(fp, fl);
           return this.measure.measureText(this.str(tp, tl)).width;
         },
@@ -537,6 +555,31 @@ class Player {
         fetch_pause: (id, paused) => this.fetchPause(id, paused !== 0),
         fetch_cancel: (id) => this.fetchCancel(id),
         load_chunk: (p, l) => this.loadChunk(this.str(p, l)),
+        // The app's storage (`nsh/storage`): the entries of `localStorage`
+        // under the app's prefix. 1 when done, 0 when the browser refused
+        // (the error handed over with `nsh_storage_reply`).
+        storage_load: (pp, pl) => this.storage(() => {
+          const prefix = this.str(pp, pl);
+          const entries = Object.create(null);
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith(prefix)) entries[key.slice(prefix.length)] = localStorage.getItem(key);
+          }
+          return JSON.stringify(entries);
+        }),
+        storage_set: (pp, pl, kp, kl, vp, vl) =>
+          this.storage(() => localStorage.setItem(this.str(pp, pl) + this.str(kp, kl), this.str(vp, vl))),
+        storage_remove: (pp, pl, kp, kl) =>
+          this.storage(() => localStorage.removeItem(this.str(pp, pl) + this.str(kp, kl))),
+        storage_clear: (pp, pl) => this.storage(() => {
+          const prefix = this.str(pp, pl);
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith(prefix)) keys.push(key);
+          }
+          for (const key of keys) localStorage.removeItem(key);
+        }),
       },
     };
     const response = () => (typeof url === "string" || url instanceof URL ? fetch(url) : url);
@@ -578,6 +621,23 @@ class Player {
 
   bytes(ptr, len) {
     return new Uint8Array(this.wasm.memory.buffer, ptr, len);
+  }
+
+  /**
+   * Runs a `localStorage` call for the app's storage: 1 and what `f`
+   * returned (a string) handed over, or 0 and the error.
+   */
+  storage(f) {
+    let reply, done;
+    try {
+      reply = f();
+      done = 1;
+    } catch (e) {
+      reply = String(e?.message ?? e);
+      done = 0;
+    }
+    if (typeof reply === "string") this.withStrings([reply], (p, l) => this.wasm.nsh_storage_reply(p, l));
+    return done;
   }
 
   /** Calls `f(ptr, len, ...)` for each string, freeing them afterwards. */
@@ -648,7 +708,8 @@ class Player {
    * `release` (hardened, as packaged apps run; default: development
    * settings), `harden` (with bytecode: the hardening's bytecode the CLI
    * ships, `harden.nshc`), `capabilities` (the app's `capabilities.json`),
-   * `sourceMap` (JSON), and where a split bundle's chunks are: `chunks[id]`
+   * `sourceMap` (JSON), `appId` (`nsh.json` `"id"`: the app's storage is
+   * kept under it; without one, under the page's path), and where a split bundle's chunks are: `chunks[id]`
    * (a URL), else `id` relative to `chunkBase` (default: the page); the
    * chunks of a bytecode bundle are bytecode too.
    */
@@ -657,6 +718,7 @@ class Player {
     harden = null,
     capabilities = "",
     sourceMap = "",
+    appId = "",
     chunks = this.options.chunks,
     chunkBase = this.options.chunkBase,
   } = {}) {
@@ -664,8 +726,8 @@ class Player {
     const bytecode = typeof code !== "string";
     const [width, height] = this.reset();
     this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
-    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
-      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
+    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? "", appId ?? ""], (cp, cl, mp, ml, ip, il) =>
+      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml, ip, il)));
     if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
     this.begin(width, (environment) => {
       this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
@@ -1339,12 +1401,18 @@ class Player {
   }
 
   /** Pressables take the keyboard focus (Tab; Enter and Space press them),
-   * unless disabled or hidden from assistive technologies. */
+   * unless disabled, hidden from assistive technologies or `focusable`
+   * false. */
   updateFocusable(el) {
     const p = el._props;
-    const focusable = el._pressable && !p?.disabled && !p?.hidden;
+    const focusable = el._pressable && !p?.disabled && !p?.hidden && p?.focusable !== false;
     if (focusable) el.tabIndex = 0;
-    else if (el.hasAttribute("tabindex") && !el._a11yFocus) el.removeAttribute("tabindex");
+    // Programmatic focus only for what screen-reader focus moved to.
+    else if (el._a11yFocus) el.tabIndex = -1;
+    else if (el.hasAttribute("tabindex")) el.removeAttribute("tabindex");
+    // No longer a stop with the focus on it: it leaves, as on macOS (browsers
+    // move it without a `blur`, which would leave `focus:` on).
+    if (!focusable && !el._a11yFocus && document.activeElement === el) el.blur();
     if (focusable && !el._focusListeners) {
       el._focusListeners = true;
       // `focus:` classes follow the keyboard focus (the browser draws a
@@ -3783,7 +3851,7 @@ class Player {
     return true;
   }
 
-  /** Ctrl + wheel pinches the view under the pointer (native values),
+  /** Ctrl + wheel pinches the view under the pointer (animated values),
    * ending when the wheel stops for 150 ms. */
   wheelPinch(e) {
     let t = this.wheelPinchState;

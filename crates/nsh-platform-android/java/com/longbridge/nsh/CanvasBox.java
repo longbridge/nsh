@@ -24,7 +24,7 @@ import java.util.HashMap;
 
 /**
  * `<canvas>`: replays a drawing (`encode.rs` `canvas`) in {@link #onDraw}.
- * The drawing stays an int array (float bits, native value slots, string
+ * The drawing stays an int array (float bits, animated value slots, string
  * indices) interpreted on every draw, with no objects per operation.
  *
  * As in canvas (and unlike Android), the current path is built in the
@@ -37,7 +37,7 @@ import java.util.HashMap;
 final class CanvasBox extends Box {
     private int[] code = new int[0];
     private Object[] objects = new Object[0];
-    /** Native value slots (colors as ARGB bits). */
+    /** Animated value slots (colors as ARGB bits). */
     private float[] slots = new float[0];
     /** Images it draws, by URI, once loaded. */
     final HashMap<String, Images.Image> images = new HashMap<>();

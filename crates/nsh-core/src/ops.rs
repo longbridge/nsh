@@ -172,8 +172,8 @@ events! {
     Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds text, `text`: the text, unless only `has` was asked).",
     KeyCommand = "onKeyCommand": "A key matched a binding of `nsh/keymap` (root only; payload: the binding's id, [`crate::keymap::KeyBinding::id`]).",
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
-    HoverIn = "onHoverIn": "The mouse came over the view or a view inside it (macOS, Linux and GPUI; never on touches).",
-    HoverOut = "onHoverOut": "The mouse left the view and the views inside it, or the window (macOS, Linux and GPUI).",
+    HoverIn = "onHoverIn": "The mouse came over the view or a view inside it (desktop backends that track the pointer; never on touches).",
+    HoverOut = "onHoverOut": "The mouse left the view and the views inside it, or the window (desktop backends that track the pointer).",
     FileDragEnter = "onFileDragEnter": "A local file drag entered an eligible desktop drop destination.",
     FileDragLeave = "onFileDragLeave": "A local file drag left its desktop drop destination.",
     FileDrop = "onFileDrop": "Local files were dropped (payload: [`EventPayload::FileDrop`]).",
@@ -1189,12 +1189,12 @@ pub enum Prop {
     /// each bind, in the same batch as the cell's new content).
     #[prop(js = "cellIndex", internal)]
     CellIndex(u32),
-    /// `scrollValue`: a native value fed with the scroll offset (main axis), for
+    /// `scrollValue`: an animated value fed with the scroll offset (main axis), for
     /// scroll-linked effects.
-    #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "NativeValue", on = SCROLL | LIST)]
+    #[prop(js = "scrollValue", with = crate::js::host_values::scroll_value, reset = Prop::ScrollValue(None), ts = "AnimatedValue", on = SCROLL | LIST)]
     ScrollValue(Option<nsh_animation::NodeId>),
-    /// `pan`: drags drive these native values (points) on the UI thread.
-    #[prop(js = "pan", with = crate::js::host_values::pan, reset = Prop::PanValues(None, None), ts = "{ x?: NativeValue; y?: NativeValue }")]
+    /// `pan`: drags drive these animated values (points) on the UI thread.
+    #[prop(js = "pan", with = crate::js::host_values::pan, reset = Prop::PanValues(None, None), ts = "{ x?: AnimatedValue; y?: AnimatedValue }")]
     PanValues(Option<nsh_animation::NodeId>, Option<nsh_animation::NodeId>),
     /// `numberOfLines`: the most lines shown; 0 (default) is unlimited.
     #[prop(js = "numberOfLines", on = TEXT)]
@@ -1371,6 +1371,12 @@ pub enum Prop {
     /// a draggable view stay clickable without it.
     #[prop(desktop = "windowDrag")]
     WindowDrag(Option<bool>),
+    /// `focusable`: whether a view that takes presses is a stop of the
+    /// keyboard focus (Tab, on the platforms that move it between
+    /// pressables); `false` leaves it to the pointer (a backdrop that
+    /// closes a popover). Default true.
+    #[prop(js = "focusable")]
+    Focusable(Option<bool>),
     /// `allowFontScaling`: follow the system text size (default true).
     #[prop(js = "allowFontScaling", default = true, on = TEXT | INPUT)]
     AllowFontScaling(bool),
@@ -1390,10 +1396,10 @@ pub enum Prop {
     #[prop(js = "minimumFontScale", min = 0, max = 1, on = TEXT)]
     MinimumFontScale(f32),
     /// `pinch`: two-finger pinches drive `scale` natively.
-    #[prop(js = "pinch", with = crate::js::host_values::pinch, reset = Prop::PinchValue(None), ts = "{ scale?: NativeValue }")]
+    #[prop(js = "pinch", with = crate::js::host_values::pinch, reset = Prop::PinchValue(None), ts = "{ scale?: AnimatedValue }")]
     PinchValue(Option<nsh_animation::NodeId>),
     /// `rotation`: two-finger rotations drive `angle` (degrees) natively.
-    #[prop(js = "rotation", with = crate::js::host_values::rotation, reset = Prop::RotationValue(None), ts = "{ angle?: NativeValue }")]
+    #[prop(js = "rotation", with = crate::js::host_values::rotation, reset = Prop::RotationValue(None), ts = "{ angle?: AnimatedValue }")]
     RotationValue(Option<nsh_animation::NodeId>),
     /// A screen option.
     #[prop(nested)]

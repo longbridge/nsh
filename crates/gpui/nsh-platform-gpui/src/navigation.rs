@@ -1779,11 +1779,19 @@ impl Nav {
         };
         let Some(view) = m.view.clone() else { return };
         let scrim = m.scrim.as_ref().map(|s| s.view.clone());
+        // `present` hid it: a fade starts it transparent again, a slide
+        // moves it in as it is, without an animation it shows at once.
+        set_fade(&view, 1.0);
         match modal_motion(m.config.animation, reduce_motion(surface)) {
             Some((duration, fade)) => {
                 self.start(surface, duration, Motion::ModalIn { view, scrim, fade });
             }
-            None => surface.event(id, EventKind::Show, EventPayload::None),
+            None => {
+                if let Some(scrim) = &scrim {
+                    set_fade(scrim, 1.0);
+                }
+                surface.event(id, EventKind::Show, EventPayload::None);
+            }
         }
     }
 
@@ -2260,13 +2268,11 @@ pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     nav.style_modal(crate::system::dark(surface), id);
     nav.sheet_scrim(surface, id);
     nav.size_modal(surface, id);
-    // Animated in at the end of the batch, with the options it brings
-    // (until then it does not show).
-    if nav.modals[&id].config.animation != ModalAnimation::None {
-        set_fade(view, 0.0);
-        if let Some(scrim) = &nav.modals[&id].scrim {
-            set_fade(&scrim.view, 0.0);
-        }
+    // Shown at the end of the batch, as the options it brings say (its
+    // `ModalConfig` comes after this item); until then it does not show.
+    set_fade(view, 0.0);
+    if let Some(scrim) = &nav.modals[&id].scrim {
+        set_fade(&scrim.view, 0.0);
     }
     nav.presenting.push(id);
 }
@@ -2697,5 +2703,47 @@ mod tests {
         // A screen that leaves without a transition keeps nothing.
         nav.keep(&top, false);
         assert!(nav.keeping.is_empty());
+    }
+
+    /// A modal's options come after its insertion in the batch: it shows
+    /// as they say, whatever the default animation would have done.
+    #[test]
+    fn modals_show_as_the_options_after_their_insertion_say() {
+        for (animation, transparent) in [
+            (ModalAnimation::None, true),
+            (ModalAnimation::None, false),
+            (ModalAnimation::Slide, true),
+            (ModalAnimation::Fade, true),
+        ] {
+            let surface = Surface::new(nsh_engine::Environment::default());
+            let config = ModalConfig {
+                animation,
+                transparent,
+                ..ModalConfig::default()
+            };
+            for item in [
+                nsh_core::MountItem::Create {
+                    id: 8,
+                    kind: ViewKind::Modal,
+                },
+                nsh_core::MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: 8,
+                    before: None,
+                },
+                nsh_core::MountItem::ModalConfig { id: 8, config },
+            ] {
+                surface.mounter.borrow_mut().apply(&surface, &item);
+            }
+            surface.mounter.borrow_mut().end_batch(&surface);
+            let fade = surface.mounter.borrow().views.get(8).unwrap().state().fade;
+            // Only a fade starts transparent; a slide moves it in shown.
+            let expected = if animation == ModalAnimation::Fade {
+                0.0
+            } else {
+                1.0
+            };
+            assert_eq!(fade, expected, "{animation:?}, transparent: {transparent}");
+        }
     }
 }

@@ -4,7 +4,9 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A list of options ([`SelectListProps`]).
+/// A scrolling list of options with a check mark on the chosen one. With
+/// `value` the app controls the choice (it updates `value` from
+/// `onSelect`); without, the list keeps its own.
 #[component]
 pub fn SelectList(props: SelectListProps, cx: Scope<SelectListEvent>) -> impl IntoElement {
     // Our own choice, when the app does not control it.
@@ -59,9 +61,7 @@ pub fn SelectList(props: SelectListProps, cx: Scope<SelectListEvent>) -> impl In
     )
 }
 
-/// A scrolling list of options with a check mark on the chosen one. With
-/// `value` the app controls the choice (it updates `value` from
-/// `onSelect`); without, the list keeps its own.
+/// The props of [`SelectList`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct SelectListProps {
     /// The options.
@@ -74,5 +74,6 @@ pub struct SelectListProps {
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum SelectListEvent {
     /// An option was chosen (its index).
+    #[args(index)]
     Select(u32),
 }

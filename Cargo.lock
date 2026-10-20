@@ -882,6 +882,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "120339709b24832c07464b0838828361b735d793c409b8ca3147db0dae601542"
 
 [[package]]
+name = "example-embed-gpui"
+version = "0.1.1"
+
+[[package]]
 name = "fast-glob"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2268,6 +2272,7 @@ dependencies = [
  "rustc-hash",
  "serde_json",
  "tokio",
+ "ureq",
 ]
 
 [[package]]
@@ -2498,6 +2503,16 @@ dependencies = [
  "windows",
  "windows-core",
  "windows-numerics",
+]
+
+[[package]]
+name = "nsh-testing"
+version = "0.1.1"
+dependencies = [
+ "nsh-bundler",
+ "nsh-core",
+ "nsh-engine",
+ "nsh-js",
 ]
 
 [[package]]
@@ -4210,6 +4225,16 @@ checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
 dependencies = [
  "bindgen",
  "cc",
+]
+
+[[package]]
+name = "rust-exports-native"
+version = "0.1.1"
+dependencies = [
+ "nsh-core",
+ "nsh-engine",
+ "nsh-testing",
+ "nsh-ui-mobile",
 ]
 
 [[package]]

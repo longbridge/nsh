@@ -16,12 +16,12 @@
 //! the part that shows.
 //!
 //! Rasterizing never holds up a frame once a canvas has shown: a new
-//! drawing (or a native value change no area bounds) is rasterized and
+//! drawing (or an animated value change no area bounds) is rasterized and
 //! uploaded on a worker ([`spawn`]) while the last one keeps showing, and
 //! takes its place when done (a frame or two later; a live chart redrawn
 //! twenty times a second rasterized ~13 million pixels a second on the
 //! main thread, 15 ms of every frame of the Stocks demo at 1180 × 740
-//! points). An animation of native values rasterizes again only the area
+//! points). An animation of animated values rasterizes again only the area
 //! the operations reading them paint ([`DamageScan`], the union of before
 //! and after; [`patch`]), on the main thread, and uploads only the tiles it
 //! touches. Only the first rasterization at a transform (a canvas appearing,
@@ -111,7 +111,7 @@ const MAX_SIGMA: f64 = 256.0;
 pub(crate) struct CanvasState {
     /// The drawing.
     drawing: Option<Arc<Drawing>>,
-    /// Native value slots (`AnimationProp::CanvasArg`).
+    /// Animated value slots (`AnimationProp::CanvasArg`).
     args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI (premultiplied pixels): `None`
     /// while loading (or when they failed to load).
@@ -119,7 +119,7 @@ pub(crate) struct CanvasState {
     /// What was rasterized (made while drawing, which only sees the
     /// state).
     cache: RefCell<Option<Recorded>>,
-    /// What native value changes moved since it was rasterized (view
+    /// What animated value changes moved since it was rasterized (view
     /// coordinates): only that is rasterized again.
     damage: std::cell::Cell<Option<Damage>>,
     /// Scratch space of the damage scans.
@@ -139,7 +139,7 @@ impl CanvasState {
         self.damage.set(None);
     }
 
-    /// The value of native value slot `k`, as damage scans read it.
+    /// The value of animated value slot `k`, as damage scans read it.
     fn slot(args: &[Option<AnimationValue>], k: u16) -> f32 {
         args.get(k as usize)
             .copied()
@@ -161,7 +161,7 @@ struct Recorded {
     layers: Vec<Layer>,
     /// The canvas' version it was made at ([`CanvasState::version`]).
     version: u64,
-    /// The native values it was made with.
+    /// The animated values it was made with.
     args: Vec<Option<AnimationValue>>,
 }
 
@@ -282,7 +282,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     view.changed();
 }
 
-/// Native value slot `k` changed: draws again if the value did.
+/// Animated value slot `k` changed: draws again if the value did.
 pub(crate) fn set_arg(view: &NshView, k: u16, value: AnimationValue) {
     {
         let mut state = view.state_mut();
@@ -3061,7 +3061,7 @@ mod tests {
 
     #[test]
     fn a_patch_paints_what_a_full_replay_paints() {
-        // A background, a dot moved by native value 0 and text above, at
+        // A background, a dot moved by animated value 0 and text above, at
         // two device pixels per point.
         let ops = vec![
             CanvasOp::FillStyle(Paint::Color(BLUE)),

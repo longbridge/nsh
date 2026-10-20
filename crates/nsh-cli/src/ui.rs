@@ -65,12 +65,10 @@ pub(crate) fn init(verbose: bool) {
     #[cfg(unix)]
     // SAFETY: a zeroed `sigaction` is a valid value (no flags, an empty
     // mask) before the fields are set; the handler only uses
-    // async-signal-safe calls (`write`, `signal`, `raise`, `getppid`) and
-    // atomics.
+    // async-signal-safe calls (`write`, `signal`, `raise`) and atomics.
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
         action.sa_sigaction = on_signal as *const () as libc::sighandler_t;
-        action.sa_flags = libc::SA_SIGINFO;
         libc::sigemptyset(&mut action.sa_mask);
         libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut());
         libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
@@ -98,7 +96,7 @@ static STOP_SIGNAL: AtomicI32 = AtomicI32::new(0);
 /// Until dropped, Ctrl-C (SIGINT) and SIGTERM ask the command to stop
 /// ([`stop_requested`]) instead of ending the process, so that it undoes
 /// what it set up outside it on its way out (`nsh run`'s `adb reverse`);
-/// a second one ends the process. [`crate::main_with`] then ends it as the
+/// a second one ends the process. [`crate::main`] then ends it as the
 /// signal would have.
 pub(crate) struct Stoppable(());
 
@@ -120,26 +118,6 @@ pub(crate) fn stop_requested() -> bool {
     STOP_SIGNAL.load(Ordering::SeqCst) != 0
 }
 
-/// Passes a requested stop on to `child` (a command line this one runs,
-/// which is [`Stoppable`] itself): it may not have had the signal, if it
-/// was sent to this process alone. Once it did, the one passed on is not
-/// taken as a second.
-#[cfg(unix)]
-pub(crate) fn pass_stop_on(child: &std::process::Child) {
-    let signal = STOP_SIGNAL.load(Ordering::SeqCst);
-    if signal != 0
-        && let Ok(pid) = libc::pid_t::try_from(child.id())
-    {
-        // SAFETY: a plain syscall on a child that has not been waited for.
-        unsafe { libc::kill(pid, signal) };
-    }
-}
-
-/// Windows delivers Ctrl-C to every process of the console, the child
-/// included: nothing to pass on.
-#[cfg(windows)]
-pub(crate) fn pass_stop_on(_child: &std::process::Child) {}
-
 /// After a requested stop: ends the process as the signal would have
 /// (the shell sees an interrupted command).
 pub(crate) fn exit_if_stopped() {
@@ -150,7 +128,7 @@ pub(crate) fn exit_if_stopped() {
 }
 
 /// Ends the process with `signal`'s default action.
-pub(crate) fn exit_by_signal(signal: libc::c_int) {
+fn exit_by_signal(signal: libc::c_int) {
     // SAFETY: back to the default action, then raise it.
     unsafe {
         libc::signal(signal, libc::SIG_DFL);
@@ -160,23 +138,15 @@ pub(crate) fn exit_by_signal(signal: libc::c_int) {
 
 /// Ctrl-C (or a stop): asks a [`Stoppable`] command to stop, else (or the
 /// second time) clears a spinner's line and ends the process as the signal
-/// would have. A stop the parent passes on ([`pass_stop_on`]) after this
-/// one had it is not a second.
+/// would have.
 #[cfg(unix)]
-extern "C" fn on_signal(signal: libc::c_int, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
-    if STOPPABLE.load(Ordering::SeqCst) > 0 {
-        if STOP_SIGNAL
+extern "C" fn on_signal(signal: libc::c_int) {
+    if STOPPABLE.load(Ordering::SeqCst) > 0
+        && STOP_SIGNAL
             .compare_exchange(0, signal, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
-        {
-            return;
-        }
-        // SAFETY: the kernel passes a valid `siginfo_t` with SA_SIGINFO.
-        let sender = unsafe { info.as_ref() }.map_or(0, sender);
-        // SAFETY: `getppid` is async-signal-safe and cannot fail.
-        if sender != 0 && sender == unsafe { libc::getppid() } {
-            return;
-        }
+    {
+        return;
     }
     if SPINNER_DRAWN.load(Ordering::SeqCst) {
         let clear = b"\r\x1b[2K";
@@ -188,16 +158,6 @@ extern "C" fn on_signal(signal: libc::c_int, info: *mut libc::siginfo_t, _: *mut
         libc::signal(signal, libc::SIG_DFL);
         libc::raise(signal);
     }
-}
-
-/// The process that sent a signal (0: the kernel, the terminal's Ctrl-C).
-#[cfg(unix)]
-fn sender(info: &libc::siginfo_t) -> libc::pid_t {
-    #[cfg(target_os = "linux")]
-    // SAFETY: SIGINT and SIGTERM carry the sender's pid.
-    return unsafe { info.si_pid() };
-    #[cfg(not(target_os = "linux"))]
-    return info.si_pid;
 }
 
 /// The console's side of [`init`] and [`columns`] on Windows.
@@ -566,6 +526,70 @@ pub(crate) fn plain(message: impl Display) {
 pub(crate) fn debug(message: impl Display) {
     if verbose() {
         print(&dim(message));
+    }
+}
+
+/// Whether the command line may ask the user: stdin and stdout are a
+/// terminal (not a pipe, a CI job or an editor's task).
+pub(crate) fn interactive() -> bool {
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
+/// `? question`, then the `options` (a name and what it is), numbered:
+/// the index of the one the user picks by number or name. Enter (or the
+/// end of input) picks the first; anything else asks again.
+pub(crate) fn choose(question: &str, options: &[(&str, &str)]) -> anyhow::Result<usize> {
+    let name_width = options
+        .iter()
+        .map(|(name, _)| width(name))
+        .max()
+        .unwrap_or(0);
+    print(&format!("{} {question}", cyan("?")));
+    for (i, (name, what)) in options.iter().enumerate() {
+        let pad = " ".repeat(name_width - width(name));
+        print(&format!(
+            "  {} {name}{pad}  {}",
+            dim(format!("{}.", i + 1)),
+            dim(what)
+        ));
+    }
+    let default = options.first().map_or("", |(name, _)| name);
+    let stdin = std::io::stdin();
+    loop {
+        eprint!(
+            "{} {}",
+            cyan("?"),
+            dim(format!("1-{}, or Enter for {default}: ", options.len()))
+        );
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        if stdin
+            .lock()
+            .read_line(&mut line)
+            .context("read the answer")?
+            == 0
+        {
+            eprintln!();
+            return Ok(0);
+        }
+        let answer = line.trim();
+        if answer.is_empty() {
+            return Ok(0);
+        }
+        let picked = answer
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| n.checked_sub(1))
+            .filter(|&i| i < options.len())
+            .or_else(|| {
+                options
+                    .iter()
+                    .position(|(name, _)| name.eq_ignore_ascii_case(answer))
+            });
+        match picked {
+            Some(i) => return Ok(i),
+            None => warn(format!("{answer:?} is none of them")),
+        }
     }
 }
 

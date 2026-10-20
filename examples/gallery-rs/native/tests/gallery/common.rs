@@ -3,62 +3,14 @@
 
 #![allow(dead_code, unreachable_pub)]
 
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::Receiver;
 use nsh_core::{
-    ApproxTextEngine, AttributedText, Command, EventKind, EventMask, EventPayload, GestureValues,
-    MountBatch, MountItem, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing,
-    ui::Root,
+    AttributedText, Command, EventKind, EventMask, EventPayload, GestureValues, MountBatch,
+    MountItem, ROOT_ID, Size, TouchEvent, TouchPhase, TouchPoint, canvas::Drawing, ui::Root,
 };
-use nsh_engine::{App, Engine, EngineConfig, EngineControl, Environment, MountSink};
-
-/// Takes the engine's batches, and gives it display frames as a platform
-/// does (60 Hz while it asks for them), so what waits for a frame (a
-/// stream drawn per frame, `request_animation_frame`) runs as it does on
-/// screen.
-pub struct Sink {
-    batches: crossbeam_channel::Sender<MountBatch>,
-    /// Set once the engine runs.
-    control: Arc<OnceLock<EngineControl>>,
-}
-
-impl Sink {
-    pub fn new(batches: crossbeam_channel::Sender<MountBatch>) -> Self {
-        Self {
-            batches,
-            control: Arc::default(),
-        }
-    }
-
-    /// Starts `config`'s app with this sink driving its frames.
-    pub fn start(config: EngineConfig, batches: crossbeam_channel::Sender<MountBatch>) -> Engine {
-        let sink = Sink::new(batches);
-        let control = sink.control.clone();
-        let engine = Engine::start(config, || ApproxTextEngine, sink).unwrap();
-        let _ = control.set(engine.control());
-        engine
-    }
-}
-
-impl MountSink for Sink {
-    fn submit(&self, batch: MountBatch) {
-        let _ = self.batches.send(batch);
-    }
-
-    fn request_frame(&self) {
-        let control = self.control.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_micros(16_667));
-            if let Some(control) = control.get() {
-                control.frame();
-            }
-        });
-    }
-}
+use nsh_engine::{Engine, EngineConfig};
 
 /// What is on screen: texts by node and screens' titles.
 #[derive(Default)]
@@ -72,7 +24,7 @@ pub struct Screen {
     pub events: std::collections::HashMap<u32, EventMask>,
     /// Each canvas's drawing.
     pub drawings: std::collections::HashMap<u32, Arc<Drawing>>,
-    /// The native values gestures drive, by view.
+    /// The animated values gestures drive, by view.
     pub gestures: std::collections::HashMap<u32, GestureValues>,
     /// The commands sent, in order.
     pub commands: Vec<(u32, Command)>,
@@ -251,22 +203,26 @@ pub fn start() -> (nsh_engine::Engine, Receiver<MountBatch>) {
 /// A headless engine running the gallery in a window of `viewport`, and
 /// its batches.
 pub fn start_at(viewport: Size) -> (nsh_engine::Engine, Receiver<MountBatch>) {
+    start_with(viewport, None)
+}
+
+/// A headless engine running the gallery in a window of `viewport`,
+/// keeping its data in `data_dir` (`None`: in memory), and its batches.
+pub fn start_with(
+    viewport: Size,
+    data_dir: Option<std::path::PathBuf>,
+) -> (nsh_engine::Engine, Receiver<MountBatch>) {
     logger();
-    let (tx, rx) = crossbeam_channel::unbounded();
-    let config = EngineConfig {
-        app: App::Rust(Root::of::<gallery_native::Gallery>()),
+    // A phone-sized engine with display frames (`nsh_engine::headless`),
+    // here in a window of `viewport`.
+    nsh_engine::headless::start(EngineConfig {
         viewport,
-        trace: false,
-        network: None,
-        assets: None,
-        environment: Environment::default(),
-        header_heights: (44.0, 96.0),
-        limits: nsh_engine::Limits::default(),
-        ui_sets: Vec::new(),
-        runtime: None,
-    };
-    let engine = Sink::start(config, tx);
-    (engine, rx)
+        data_dir,
+        ..EngineConfig::new(
+            Root::of::<gallery_native::Gallery>().app_id("com.longbridge.nsh.galleryrs"),
+        )
+    })
+    .expect("the engine starts")
 }
 
 /// Presses what the text `label` is in (a row or a button: its nearest

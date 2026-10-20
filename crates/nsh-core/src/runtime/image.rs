@@ -4,6 +4,7 @@
 use crate::ui::{ImageSize, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, TsTypes, module};
 
 /// Image information and loading ahead.
+#[module]
 pub(crate) struct Image;
 
 /// An image's URI: a string or `{ uri }`.
@@ -32,7 +33,6 @@ impl JsValue for ImageUri {
     }
 }
 
-/// Image information and loading ahead.
 #[module]
 impl Image {
     /// The image's size in pixels; its bytes stay loaded for the views that

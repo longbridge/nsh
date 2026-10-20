@@ -35,7 +35,8 @@
 //! ([`menus`]), with keyboard access (F10, Alt + a menu's initial, arrows,
 //! Return, Escape). Window operations need the GPUI window, which batches
 //! and keys do not have: they are queued ([`Op`]) and carried out when the
-//! view renders next ([`render`]).
+//! view renders next ([`render`]). Activation instead runs in a main-thread
+//! window update, so a minimized window can be restored without a frame.
 //!
 //! Keys: the standalone app's reserved keys (Ctrl+Q / F11; on macOS Cmd+Q,
 //! Cmd+H, Opt+Cmd+H, Cmd+M, Ctrl+Cmd+F) and the open menu's come first
@@ -53,9 +54,9 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, Bounds, CursorStyle, DispatchPhase, Hitbox, HitboxBehavior, IntoElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, ResizeEdge,
-    Styled, Window, WindowControlArea, canvas, div, prelude::*, px,
+    AnyElement, AnyWindowHandle, App, Bounds, CursorStyle, DispatchPhase, Hitbox, HitboxBehavior,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    ResizeEdge, Styled, Window, WindowControlArea, canvas, div, prelude::*, px,
 };
 // Text fields' and selectable text's context menus (`text_input.rs`,
 // `text.rs`) show their items with these.
@@ -139,6 +140,8 @@ pub(crate) struct Chrome {
     /// The surface fills a window of its own ([`set_standalone`]); an
     /// embedded surface's host owns the window: only context menus work.
     standalone: Cell<bool>,
+    /// Activation must work even while the window is not rendering.
+    window: Cell<Option<AnyWindowHandle>>,
     style: Cell<TitleBarStyle>,
     /// The app's title bar's height (`Window.setTitleBar`'s).
     height: Cell<Option<f32>>,
@@ -169,9 +172,10 @@ pub(crate) struct Chrome {
 
 /// The surface fills a window of its own titled `title`: the window's
 /// chrome is the app's.
-pub(crate) fn set_standalone(surface: &Surface, title: &str) {
+pub(crate) fn set_standalone(surface: &Surface, title: &str, window: AnyWindowHandle) {
     let c = &surface.chrome;
     c.standalone.set(true);
+    c.window.set(Some(window));
     c.active.set(true);
     *c.title.borrow_mut() = title.to_owned();
     c.menu_changed.set(true);
@@ -242,6 +246,18 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         // GPUI's window bounds are chosen when the window opens, and it
         // has no window levels.
         DesktopCommand::SetFrame(_) | DesktopCommand::SetLevel(_) => {}
+        DesktopCommand::OrderFront => {
+            if let Some(handle) = c.window.get() {
+                // A minimized window may never render the queued chrome ops.
+                crate::rt::on_app(move |cx| {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        restore_minimized(window);
+                        cx.activate(true);
+                        window.activate_window();
+                    });
+                });
+            }
+        }
         DesktopCommand::Close => push(surface, Op::Close),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();
@@ -489,6 +505,29 @@ pub(crate) fn shortcut(surface: &Rc<Surface>, event: &KeyEvent) -> bool {
 }
 
 // --- The window -------------------------------------------------------------------------
+
+/// AppKit's activation does not restore a miniaturized window. Other
+/// platforms restore it through GPUI's native activation implementation.
+fn restore_minimized(_window: &Window) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSView;
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        if let Ok(handle) = HasWindowHandle::window_handle(_window)
+            && let RawWindowHandle::AppKit(handle) = handle.as_raw()
+        {
+            // SAFETY: GPUI owns this live NSView, and window updates run on
+            // AppKit's main thread. The borrowed reference stays in this call.
+            let view = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+            if let Some(window) = view.window()
+                && window.isMiniaturized()
+            {
+                window.deminiaturize(None);
+            }
+        }
+    }
+}
 
 /// Carries out the queued window operations.
 fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
@@ -1302,6 +1341,37 @@ mod tests {
     use nsh_core::desktop::{Key, Shortcut};
 
     use super::*;
+
+    #[gpui::test]
+    fn order_front_activates_without_rendering_and_leaves_embedded_windows_alone(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::AppContext;
+
+        let (surface, target, other, _app) = cx.update(|cx| {
+            let app = crate::rt::init_test_app(cx);
+            let target = cx
+                .open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
+                .unwrap();
+            let other = cx
+                .open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
+                .unwrap();
+            other
+                .update(cx, |_, window, _| window.activate_window())
+                .unwrap();
+            (Surface::new(Default::default()), target, other, app)
+        });
+        cx.run_until_parked();
+        command(&surface, &DesktopCommand::OrderFront);
+        cx.run_until_parked();
+        cx.update(|cx| assert_eq!(cx.active_window(), Some(other.into())));
+
+        set_standalone(&surface, "Target", target.into());
+        command(&surface, &DesktopCommand::OrderFront);
+        // No frame is rendered: activation must not depend on the render queue.
+        cx.run_until_parked();
+        cx.update(|cx| assert_eq!(cx.active_window(), Some(target.into())));
+    }
 
     #[test]
     fn title_bar_areas() {

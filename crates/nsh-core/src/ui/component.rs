@@ -51,6 +51,10 @@ pub trait Component: 'static {
     /// registers (`Methods::of::<StepperApi>()`; none by default).
     const METHODS: Methods = Methods::NONE;
 
+    /// Its documentation in TypeScript: the `#[component]` function's doc
+    /// comment (none by default).
+    const DOC: &'static str = "";
+
     /// What it shows: its elements, with bindings where values change (TS:
     /// a component's body). Runs once, under an owner of its own: what it
     /// makes (signals, effects, timers) goes with the component.
@@ -107,7 +111,8 @@ pub struct Method {
     /// Its parameters: JS names and TypeScript types.
     pub params: &'static [Param],
     /// The TypeScript type of its result (`None`: it returns nothing, and
-    /// JS does not wait for it).
+    /// JS gets `undefined`: the call runs in order with the props set
+    /// before it, with nothing to wait for).
     pub returns: Option<TsType>,
     /// The classes its parameters and result name.
     pub refs: super::ClassRefs,
@@ -180,10 +185,20 @@ pub struct MethodSpec {
     pub doc: &'static str,
     /// Its parameters: JS names and TypeScript types.
     pub params: Vec<(&'static str, String)>,
-    /// The TypeScript type of its result; `None`: nothing to wait for.
+    /// The TypeScript type of its result; `None`: nothing (`void`).
     pub returns: Option<String>,
     /// Its call (the arguments converted in the JS call).
     pub call: fn(&dyn JsHost) -> Result<MethodCall, Thrown>,
+}
+
+impl MethodSpec {
+    /// Whether JS gets a `Promise` of the result: when the method returns
+    /// a value (`Result<(), E>` too, rejected with an `Err`). One
+    /// returning `()` gives `undefined` (`void`): the call runs in order
+    /// with the UI and nothing answers it, and a wrong argument throws.
+    pub fn promises(&self) -> bool {
+        self.returns.is_some()
+    }
 }
 
 /// What a prop is to the glue.
@@ -228,6 +243,9 @@ pub struct PropSpec {
 pub struct EventSpec {
     /// Its name (`press`: the handler is `onPress`).
     pub name: &'static str,
+    /// The name of the handler's argument in TypeScript (`value`, or what
+    /// `#[args(..)]` on the variant says; unused without data).
+    pub arg: &'static str,
     /// The TypeScript type of its data (`void` for none).
     pub data: String,
     /// Documentation.
@@ -244,9 +262,6 @@ pub trait Props: Clone + PartialEq + 'static {
     /// (`#[prop(lazy)]`).
     #[doc(hidden)]
     const LAZY_CHILDREN: bool = false;
-
-    /// The component's documentation (the struct's doc comment).
-    fn doc() -> &'static str;
 
     /// The props (their named types declared in `types`).
     fn spec(types: &mut TsTypes) -> Vec<PropSpec>;
@@ -286,10 +301,6 @@ pub trait Props: Clone + PartialEq + 'static {
 
 /// The props of a component that has none (an app's root, say).
 impl Props for () {
-    fn doc() -> &'static str {
-        ""
-    }
-
     fn spec(_: &mut TsTypes) -> Vec<PropSpec> {
         Vec::new()
     }
@@ -374,7 +385,7 @@ impl ComponentSpec {
         Self {
             name,
             export: export_name(name).to_owned(),
-            doc: C::Props::doc(),
+            doc: C::DOC,
             props,
             events,
             methods,
@@ -466,6 +477,7 @@ pub struct Root {
     theme: Option<Arc<super::Theme>>,
     fonts: Vec<Arc<[u8]>>,
     appearance: Option<crate::platform::Appearance>,
+    app_id: Option<String>,
 }
 
 impl Root {
@@ -476,7 +488,20 @@ impl Root {
             theme: None,
             fonts: Vec::new(),
             appearance: None,
+            app_id: None,
         }
+    }
+
+    /// The app's id (`nsh.json` `"id"`, which nsh's generated code sets):
+    /// it names where the app keeps its data (`nsh/storage`).
+    pub fn app_id(mut self, id: impl Into<String>) -> Self {
+        self.app_id = Some(id.into());
+        self
+    }
+
+    /// The app's id ([`Root::app_id`]).
+    pub fn app_id_ref(&self) -> Option<&str> {
+        self.app_id.as_deref()
     }
 
     /// Renders with `theme` (by default the default one).
@@ -864,6 +889,64 @@ impl Registry {
         specs
     }
 
+    /// The exports of the set that TS sees without documentation, by
+    /// their TS names (`Gauge`, `Gauge.max`, `Gauge.onChange`,
+    /// `Ledger.copy`, `new Account`, `Account.balance`): what to give a
+    /// doc comment. A component is documented by its `#[component]`
+    /// function, a module or class by its struct, the rest by their own
+    /// (a setter needs none beside its getter's; a module merged into a
+    /// component of its name, or exported flat, by its component or its
+    /// functions).
+    pub fn undocumented(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let specs = self.specs();
+        for c in &specs {
+            if c.doc.is_empty() {
+                out.push(c.export.clone());
+            }
+            for p in c.props.iter().filter(|p| p.doc.is_empty()) {
+                out.push(format!("{}.{}", c.export, p.name));
+            }
+            for e in c.events.iter().filter(|e| e.doc.is_empty()) {
+                out.push(format!("{}.{}", c.export, handler_name(e.name)));
+            }
+            for m in c.methods.iter().filter(|m| m.doc.is_empty()) {
+                out.push(format!("{}.{}", c.export, m.name));
+            }
+        }
+        for m in self.module_specs() {
+            let merged = specs.iter().any(|c| c.export == m.name);
+            if m.doc.is_empty() && !merged && !m.flat {
+                out.push(m.name.to_owned());
+            }
+            for f in m.functions.iter().filter(|f| f.doc.is_empty()) {
+                out.push(if m.flat {
+                    f.name.to_owned()
+                } else {
+                    format!("{}.{}", m.name, f.name)
+                });
+            }
+        }
+        for c in self.class_specs() {
+            if c.doc.is_empty() {
+                out.push(c.name.to_owned());
+            }
+            let documented_getter = |name: &str| {
+                c.members
+                    .iter()
+                    .any(|m| m.kind == MemberKind::Getter && m.name == name && !m.doc.is_empty())
+            };
+            for m in c.members.iter().filter(|m| m.doc.is_empty()) {
+                match m.kind {
+                    MemberKind::Constructor => out.push(format!("new {}", c.name)),
+                    MemberKind::Setter if documented_getter(m.name) => {}
+                    _ => out.push(format!("{}.{}", c.name, m.name)),
+                }
+            }
+        }
+        out
+    }
+
     /// A new instance of component `name`.
     pub(crate) fn make(&self, name: &str) -> Option<(Arc<ComponentSpec>, Box<dyn AnyInstance>)> {
         self.types.get(name).map(|t| (t.spec.clone(), (t.make)()))
@@ -952,10 +1035,11 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             .map(|(n, ts, optional)| format!("{n}{}: {ts}", if *optional { "?" } else { "" }))
             .collect::<Vec<_>>()
             .join(", ");
-        let returns = match (&f.returns, f.kind) {
-            (Some(ts), super::module::FunctionKind::Sync) => ts.clone(),
-            (Some(ts), _) => format!("Promise<{ts}>"),
-            (None, _) => "void".to_owned(),
+        let value = f.returns.clone().unwrap_or_else(|| "void".to_owned());
+        let returns = if f.promises() {
+            format!("Promise<{value}>")
+        } else {
+            value
         };
         (params, returns)
     };
@@ -1024,7 +1108,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             let arg = if e.data == "void" {
                 String::new()
             } else {
-                format!("data: {}", e.data)
+                format!("{}: {}", e.arg, e.data)
             };
             let _ = writeln!(out, "  {handler}?: ({arg}) => void;");
         }
@@ -1159,6 +1243,7 @@ mod tests {
         Change {
             new_value: f64,
         },
+        #[args(limit)]
         Limit(u32),
         Reset,
     }
@@ -1168,12 +1253,18 @@ mod tests {
     #[methods]
     impl StepperApi {
         /// Jumps to `value`.
-        fn jump_to(&self, value: f64) {
+        pub(crate) fn jump_to(&self, value: f64) {
             let _ = value;
         }
 
-        fn value(&self) -> f64 {
+        pub(crate) fn value(&self) -> f64 {
             0.0
+        }
+
+        /// A helper without `pub`: not a method of the ref.
+        #[allow(dead_code)]
+        fn clamp(&self, value: f64) -> f64 {
+            value
         }
     }
 
@@ -1181,6 +1272,7 @@ mod tests {
         type Props = StepperProps;
         type Event = StepperEvent;
         const METHODS: Methods = Methods::of::<StepperApi>();
+        const DOC: &'static str = "Picks a number.";
 
         fn view(_: StepperProps, _: super::super::Scope<StepperEvent>) -> impl IntoElement {
             view()
@@ -1199,8 +1291,8 @@ mod tests {
             "  maxValue?: number | null;",
             "  /** Above the control. */\n  label?: JSX.Element;",
             "  children?: JSX.Element;",
-            "  /** The value changed. */\n  onChange?: (data: { newValue: number }) => void;",
-            "  onLimit?: (data: number) => void;",
+            "  /** The value changed. */\n  onChange?: (event: { newValue: number }) => void;",
+            "  onLimit?: (limit: number) => void;",
             "  onReset?: () => void;",
             "/** Picks a number. */",
             "export interface StepperRef {",
@@ -1211,6 +1303,8 @@ mod tests {
         ] {
             assert!(ts.contains(line), "missing {line:?} in\n{ts}");
         }
+        assert!(!ts.contains("clamp"), "a helper is not a method:\n{ts}");
+        assert_eq!(StepperApi::METHODS.len(), 2);
         let mut props = StepperProps::initial();
         let size = |json| {
             let specs = StepperProps::spec(&mut TsTypes::default());
@@ -1245,23 +1339,46 @@ mod tests {
         assert_eq!(StepperEvent::Reset.name(), "reset");
     }
 
+    #[test]
+    fn exports_without_docs_are_listed() {
+        let mut registry = Registry::new();
+        registry.register::<Stepper>();
+        // `size`, `maxValue`, `children`, `onLimit`, `onReset` and the
+        // ref's `value` have no doc comment.
+        assert_eq!(
+            registry.undocumented(),
+            [
+                "Stepper.size",
+                "Stepper.maxValue",
+                "Stepper.children",
+                "Stepper.onLimit",
+                "Stepper.onReset",
+                "Stepper.value",
+            ]
+        );
+        let mut r = Registry::ui_set("test/maker");
+        r.module::<Maker>();
+        assert_eq!(r.undocumented(), ["Maker.make", "new Lonely"]);
+    }
+
     /// A class no set registers.
     #[crate::ui::class]
     struct Lonely;
 
     #[crate::ui::class]
     impl Lonely {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Lonely
         }
     }
 
     /// Makes a `Lonely`.
+    #[crate::ui::module]
     struct Maker;
 
     #[crate::ui::module]
     impl Maker {
-        fn make() -> Instance<Lonely> {
+        pub(crate) fn make() -> Instance<Lonely> {
             Instance::new(Lonely)
         }
     }

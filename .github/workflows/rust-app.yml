@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "examples/gallery-rs/**"
+      - "examples/rust-exports/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
       - "crates/nsh-engine/**"
@@ -19,6 +20,7 @@ on:
   pull_request:
     paths:
       - "examples/gallery-rs/**"
+      - "examples/rust-exports/**"
       - "crates/nsh-cli/**"
       - "crates/nsh-core/**"
       - "crates/nsh-engine/**"
@@ -96,7 +98,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nsh-test-tmp"
           echo "TMPDIR=$RUNNER_TEMP/nsh-test-tmp" >> "$GITHUB_ENV"
       # QuickJS is C: bindgen needs libclang, its WebAssembly build clang
-      # and llvm-ar. The app's command line links the gallery's crate,
+      # and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
       - name: Install clang, LLVM and GTK 4
         run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev
@@ -127,9 +129,25 @@ jobs:
             echo "The Rust app's web runtime unexpectedly carries JS"
             exit 1
           fi
-      - name: Publish its TSX entry for the web
+      - name: Check that the Rust app builds no JS engine or bundler
         run: |
-          # The same crate under its TSX entry: QuickJS runs App.tsx.
-          ./target/debug/nsh package examples/gallery-rs/App.tsx --target web -o target/rust-app-web-tsx
-          site="target/rust-app-web-tsx/Rust Gallery"
+          # `nsh` describes the app's crates with the generated `describe`
+          # program and traces its root with `rust-trace`: neither links
+          # QuickJS, nsh-js, the bundler or its rolldown and Oxc.
+          for member in describe rust-trace; do
+            cargo tree --manifest-path examples/gallery-rs/.nsh/rust/Cargo.toml \
+              -p "nsh-app-gallery-native-$member" -e normal --target all \
+              > "$RUNNER_TEMP/$member-dependencies.txt"
+            if grep -E '(rquickjs|nsh-js|nsh-bundler|rolldown|oxc)([ _-]|$)' "$RUNNER_TEMP/$member-dependencies.txt"; then
+              echo "The Rust app's $member program unexpectedly links a JS engine or the bundler"
+              exit 1
+            fi
+          done
+      - name: Publish a TSX app with a Rust crate for the web
+        run: |
+          # A TSX entry and the app's crate: QuickJS runs App.tsx, the
+          # crate's set is compiled into the app's runtime.
+          ./target/debug/nsh package examples/rust-exports --target web -o target/rust-exports-web
+          site="target/rust-exports-web/Rust Exports"
           ls "$site"/app.*.nshc
+          grep -q rust-exports/native "$site"/nsh.*.wasm

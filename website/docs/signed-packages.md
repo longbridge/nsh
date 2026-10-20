@@ -99,6 +99,8 @@ next to the entry, overridden by the flags:
 | `--id <id>` | App id, such as `com.example.app`. |
 | `--app-version <version>` | Version, such as `1.2.0`. |
 | `--build <n>` | Build number. Required (here or in `nsh.json`); it must grow with every release. |
+| `--source-map <where>` | `package` (the default): in the package. `file`: in `<package>.map` next to it, not in the package. `none`: left out. See [Errors from published packages](#errors-from-published-packages). |
+| `--strip-debug` | Leave the line and column tables out of the bytecode: a smaller package whose error stacks have no positions. |
 
 `nsh publish` refuses to sign what a device would refuse: the certificate must cover the app id and the current time.
 
@@ -115,7 +117,7 @@ release key's Ed25519 signature over everything before it. The files are:
 - the app's JS source (always),
 - its bytecode, used only when the device's runtime has the same bytecode version (otherwise the source runs, so a
   package keeps working on newer runtimes),
-- its source map,
+- its source map (unless it was published with `--source-map file` or `none`),
 - the assets it imports (images, fonts).
 
 The package's identity, used for revocation, is the SHA-256 of the whole file.
@@ -213,6 +215,43 @@ declares, and only what the host app grants on top.
 
 Full API: [Embedding in iOS apps](./embedding-ios.md#signed-packages),
 [Embedding in Android apps](./embedding-android.md#signed-packages).
+
+## Errors from published packages
+
+The bytecode of a package keeps its line and column tables, so its errors have positions, and the runtime maps them
+to your sources with the package's source map before it hands them to the host app's error handler:
+
+```text
+Error: boom
+    at n (App.tsx:5:3)
+```
+
+The source map holds your app's original sources and is often the largest file in a package: about half of the
+gallery example's 2.6 MB. To keep it to yourself, publish it next to the package instead:
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --source-map file
+```
+
+```text
+✓ wrote the source map to out/com.example.counter-2.nshpkg.map (6.1 KB)
+```
+
+Devices then report the bundle's positions (`at n (bundle.js:1:80)`). Keep the map with the package it belongs to,
+and map what the host app reported with `nsh symbolicate`:
+
+```sh
+nsh symbolicate out/com.example.counter-2.nshpkg.map report.txt
+```
+
+```text
+Error: boom
+    at n (App.tsx:5:3)
+```
+
+`nsh symbolicate` reads the error text from a file or standard input and takes a map file or a package that holds
+one. The line tables add about a fifth to the bytecode (3–5% of a package with its map); `--strip-debug` leaves them
+out, and stacks then read `at n (<null>:0:1)`, with nothing to map.
 
 ## Trying a package in development
 

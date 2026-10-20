@@ -760,6 +760,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
     }
+    if p.focusable == Some(false) {
+        s.push_str(",\"focusable\":false");
+    }
     s.push('}');
     s
 }

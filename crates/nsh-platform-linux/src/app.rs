@@ -3,6 +3,7 @@
 
 use std::{
     cell::RefCell,
+    path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
 };
@@ -79,6 +80,14 @@ pub struct AppOptions {
     /// release runner run apps on their own, with
     /// [`Limits::standalone_desktop`].
     pub limits: Limits,
+    /// Where the apps it runs keep their data, each in `<dir>/<app id>`
+    /// (`nsh.json` `"id"`, which travels with the bundle): `None` uses the
+    /// system's data directory ([`nsh_engine::data_dir`]); an app that
+    /// embeds nsh gives its own (its data directory + `/nsh`, say).
+    pub data_dir: Option<PathBuf>,
+    /// The apps' storage (`nsh/storage`), overriding the `storage.json` in
+    /// their directory of [`data_dir`](Self::data_dir).
+    pub storage: Option<Arc<dyn nsh_engine::StorageBackend>>,
 }
 
 impl Default for AppOptions {
@@ -93,6 +102,8 @@ impl Default for AppOptions {
             components: Default::default(),
             appearance: Appearance::System,
             limits: Limits::default(),
+            data_dir: None,
+            storage: None,
         }
     }
 }
@@ -194,6 +205,8 @@ impl AppView {
             limits: options.limits,
             ui_sets: ui_sets(),
             runtime: None,
+            data_dir: options.data_dir.clone().or_else(nsh_engine::data_dir),
+            storage: options.storage.clone(),
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface

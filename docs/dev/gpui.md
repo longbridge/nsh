@@ -29,12 +29,16 @@ Off the three desktops the crates are empty.
 The three crates are a workspace of their own, `crates/gpui` (its own `Cargo.toml`, `Cargo.lock` and the dependencies
 only they use: GPUI, wry, GStreamer, tiny-skia, ...), excluded from the main workspace, so the main workspace's builds,
 `cargo test --workspace`, clippy and CI never build GPUI. It builds into the repository's `target/`
-(`crates/gpui/.cargo/config.toml`; the CLI and xtask pass `--manifest-path` and `--target-dir` from the root).
+(`crates/gpui/.cargo/config.toml`; the CLI and xtask pass `--manifest-path` and `--target-dir` from the root). The
+GPUI Kit example `examples/embed-gpui` is a workspace of its own too, built into `target/` the same way; its
+`build.rs` bundles its app, so `cargo run` there starts it, and the main workspace's member `example-embed-gpui`
+(`examples/embed-gpui/run`, std only) makes `cargo run -p example-embed-gpui` from the root run that command.
 
 ```sh
 cd crates/gpui
 cargo clippy --all-targets --features nsh-platform-gpui/dev -- -D warnings
 cargo test                                        # needs no display: tests open no window
+cargo test -p nsh-platform-gpui --features shot   # also windows of GPUI's test platform (no display either)
 cargo +nightly fmt --all                          # the main workspace's fmt does not reach it
 cargo build -p nsh-gpui-host                      # ../../target/debug/nsh-gpui-host
 ```
@@ -42,8 +46,9 @@ cargo build -p nsh-gpui-host                      # ../../target/debug/nsh-gpui-
 The GPUI binaries are built for the machine itself, so the CLI finds them in `target/<profile>` and builds them first
 in a checkout; `cargo xtask dist` puts them in `dist/nsh/runtime/gpui/` on each of the three OSes (`tooling.md`,
 `embedding.md`). CI: `.github/workflows/gpui.yml` (Ubuntu 24.04, macOS 15 and Windows: clippy with `-D warnings` and
-tests of the GPUI workspace), run when `crates/gpui` changes and daily, which catches what changes to the crates it
-shares with the main workspace (`nsh-core`, `nsh-engine`, ...) break.
+tests of the GPUI workspace; on Linux clippy of `examples/embed-gpui` too), run when `crates/gpui` or the example
+changes and daily, which catches what changes to the crates it shares with the main workspace (`nsh-core`,
+`nsh-engine`, ...) break.
 
 Features:
 
@@ -53,10 +58,13 @@ Features:
 | `webview` (default) | web views with wry (`native/web.rs`; GTK 3 and WebKitGTK on Linux) | yes | yes |
 | `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux | Linux |
 | `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes | no |
-| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`) | macOS, Windows | no |
+| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows | no |
 
-`shot` turns on GPUI's test support: never in the release runner. Cargo unifies features per build, so the
-distribution builds the host and the runner in separate `cargo build` runs (`cargo xtask dist`), never together.
+`shot` turns on GPUI's test support: never in the release runner. With it, the crate's tests include `tests.rs`:
+surfaces in windows of GPUI's test platform (`TestAppContext`), drawn and given GPUI's input with the engine on its
+own thread (`allow_parking`), such as keys reaching a field beside a native component; CI runs them on Linux. Cargo
+unifies features per build, so the distribution builds the host and the runner in separate `cargo build` runs (`cargo
+xtask dist`), never together.
 
 ### Looking at a change on Linux
 
@@ -67,7 +75,7 @@ Run the host on a rootful Xwayland display of its own, so nothing touches the de
 Xwayland :170 -noreset -shm -geometry 1400x1000 & sleep 1.5
 nsh build examples/gallery -o build
 DISPLAY=:170 WAYLAND_DISPLAY= WEBKIT_DISABLE_DMABUF_RENDERER=1 target/debug/nsh-gpui-host --bundle build/bundle.nshc \
-  --size 700x500 --script "wait 800; shot a.png; tap 100 200; shot b.png; quit"
+  --window-size 700x500 --script "wait 800; shot a.png; tap 100 200; shot b.png; quit"
 import -window root -display :170 whole.png        # the display, if the window's own shot is not enough
 ```
 
@@ -120,7 +128,10 @@ import -window root -display :170 whole.png        # the display, if the window'
 - **Events** (`events.rs`): GPUI's mouse, scroll-wheel, pinch and key listeners last one frame, so they are installed
   in the element's paint: presses on the surface's hitbox, moves and releases while a press that began there lasts
   (GPUI captures nothing), wheel and touchpad scrolls the hitbox should handle, keys while the surface's focus handle
-  is in the focus path. Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
+  is in the focus path. They are installed before the tree is drawn: a key listener belongs to the dispatch node
+  active when it is added, and painting a native component's element leaves that element's node active (GPUI enters
+  each element's node on paint and never leaves it), so listeners added after the tree heard keys only while focus
+  was inside the component. Positions become root coordinates and go to `input.rs` (hit testing, presses, the responder
   system, gestures) as on Windows. Keys become Windows virtual key codes (`keys.rs`), which the shared input,
   scrolling, keymap and editing code reads.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,
@@ -128,7 +139,8 @@ import -window root -display :170 whole.png        # the display, if the window'
   `open_app_window` opens one in a window of a running GPUI app; `run_app` runs the standalone app (one `AppView`
   filling a window, the process quits when the last window closes). `register_component` registers native
   components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
-  replaces the default `nsh/ui/mobile` set for apps with Rust components of their own. Several views are several
+  replaces the default `nsh/ui/mobile` set for apps with Rust components of their own, and gives the host's own sets,
+  which apps reach by name (`nativeModule`, `embedding.md` "Native modules"). Several views are several
   engines; nothing is global but the `rt` queue and the key bindings, which are per process. Windows showing surfaces
   are opened with `inactive_frame_interval: None` (GPUI draws unfocused windows at 30 fps by default); a host must set
   it in its own `WindowOptions` too. Embedding in a GPUI Kit app (one GPUI, focus and Tab, overlays, themes, frame
@@ -229,3 +241,9 @@ shots of macOS and Windows.
 
 The host chooses window bounds and level when opening a GPUI window.
 `Window.setFrame` and `Window.setLevel` commands leave those host settings intact.
+
+`Window.orderFront` activates a standalone window through a main-thread
+window update, including while it is minimized and no frames are drawn. macOS
+restores miniaturized windows before activation; Windows restores minimized
+windows through GPUI. Linux window managers decide whether to grant activation.
+Embedded views leave window activation to their host.

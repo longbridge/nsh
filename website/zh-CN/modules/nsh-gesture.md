@@ -13,7 +13,7 @@ import { PanResponder, type PanResponderGestureState } from "nsh/gesture";
 ```
 
 > [!TIP]
-> `PanResponder` 会把每一次移动都交给 JS，适合会改变应用状态的手势（拖动排序、判断是否滑动删除）。如果只是让视图跟随手指移动，`pan={{ x, y }}`、`pinch` 和 `rotation` 属性更快：拖动在 UI 线程上直接写入[原生值](./nsh-animated.md)，JS 只会收到 `onPanStart` / `onPanEnd`。见[触摸与手势](../docs/touch-and-gestures.md)。
+> `PanResponder` 会把每一次移动都交给 JS，适合会改变应用状态的手势（拖动排序、判断是否滑动删除）。如果只是让视图跟随手指移动，`pan={{ x, y }}`、`pinch` 和 `rotation` 属性更快：拖动在 UI 线程上直接写入[动画值](./nsh-animated.md)，JS 只会收到 `onPanStart` / `onPanEnd`。见[触摸与手势](../docs/touch-and-gestures.md)。
 
 ## PanResponder.create
 

@@ -38,7 +38,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: dir.join("App.tsx"),
         minify: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
         split: false,
     })
     .unwrap();
@@ -56,6 +56,8 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

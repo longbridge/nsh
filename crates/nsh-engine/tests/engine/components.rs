@@ -47,11 +47,12 @@ fn start_with(
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry()]).unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_ui_mobile::registry().into()])
+            .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -69,6 +70,8 @@ fn start_with(
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_ui_mobile::registry()],
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -517,8 +520,12 @@ const shown = signal("waiting");
 let stepper!: StepperRef;
 setTimeout(async () => {
   let refused = "";
-  try { (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
-  stepper.setValue(42.4);
+  // A method returning nothing is a plain call: `undefined`, and a wrong
+  // argument throws in the call.
+  try { (stepper.setValue as any)("x"); refused = "no throw"; } catch (e) { refused = `${e.name}: ${e.message}`; }
+  const set = stepper.setValue(42.4);
+  if (set !== undefined) refused = `returned ${set}`;
+  // One returning a value is a promise, settled after the call before it ran.
   const value = await stepper.value();
   shown.set(`got ${value} | ${refused}`);
 }, 0);

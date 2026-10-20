@@ -53,7 +53,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -68,6 +68,8 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

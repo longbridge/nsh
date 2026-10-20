@@ -4,10 +4,10 @@
 
 use crate::ui::{ModuleCx, module};
 
-/// The system clipboard.
+/// The system clipboard's text.
+#[module]
 pub(crate) struct Clipboard;
 
-/// The system clipboard's text.
 #[module]
 impl Clipboard {
     /// Puts `text` on the clipboard.

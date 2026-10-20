@@ -20,7 +20,7 @@ List every public item this pull request adds, changes or removes, grouped by cr
 
 ## Breaking Changes
 
-Describe any breaking changes introduced by this pull request. If none, remove this section.
+Describe any breaking changes introduced by this pull request. If none, remove this section. What apps use (JS exports, elements, props, style keys, Tailwind utilities, their types and behavior) is never broken: see [compatibility](../docs/dev/compatibility.md).
 
 ```diff
 - Old code snippet
@@ -40,4 +40,5 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 - [ ] I have read the [CONTRIBUTING](../CONTRIBUTING.md) document and followed the guidelines.
 - [ ] Reviewed the changes in this PR and confirmed AI generated code (if any) is accurate.
 - [ ] Passed `cargo test --workspace`, `cargo +nightly fmt --all` and clippy (including the Catalyst and Android runs for platform code).
+- [ ] Changes to what apps use are additive and recorded in `api/current` (`cargo xtask api`); `api/v*` is untouched.
 - [ ] Ran the related `examples/gallery` demos on iOS and Android (if the change is visible or platform-specific).

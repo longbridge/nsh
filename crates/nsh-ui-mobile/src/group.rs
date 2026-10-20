@@ -2,7 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// Rows in a rounded box, divided by hairlines: each JSX child is a row.
+/// The props of [`Group`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct GroupProps {
     /// Above the box: a short caption.
@@ -13,7 +13,7 @@ pub struct GroupProps {
     pub children: Prop<Children>,
 }
 
-/// Rows in a rounded box ([`GroupProps`]).
+/// Rows in a rounded box, divided by hairlines: each JSX child is a row.
 #[component]
 pub fn Group(props: GroupProps) -> impl IntoElement {
     view()

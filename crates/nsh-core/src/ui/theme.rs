@@ -1,8 +1,8 @@
 //! The theme of Rust components: semantic colors with a light and a dark
-//! value, corner radii and the base font size. Field names and the JSON
-//! format follow gpui-kit's themes (`primary.background`,
-//! `primary.active.background`, ...), so a gpui-kit theme file styles the
-//! mobile components too; keys only desktop components use are ignored.
+//! value, corner radii and the base font size. A theme file names the
+//! colors by role and state (`primary.background`,
+//! `primary.active.background`, ...); keys only desktop components use are
+//! ignored.
 //!
 //! The app's theme is `nsh.json`'s `"theme"`: a theme file's path or its
 //! content, `{ "themes": [{ "mode": "light", "colors": { … } }, { "mode":
@@ -16,7 +16,7 @@ use crate::{JsonValue, style::Color, tailwind};
 
 macro_rules! theme_colors {
     ($( $(#[doc = $doc:literal])* $field:ident = $key:literal $(| $alias:literal)* ),* $(,)?) => {
-        /// The theme's semantic colors (gpui-kit's names).
+        /// The theme's semantic colors.
         #[derive(Debug, Clone, Copy, PartialEq, Default)]
         pub struct ThemeColors {
             $( $(#[doc = $doc])* pub $field: AdaptiveColor, )*
@@ -240,8 +240,7 @@ fn mix(c: Color, level: u8, amount: f32) -> Color {
 static PALETTE: LazyLock<tailwind::Theme> = LazyLock::new(tailwind::Theme::default);
 
 impl Theme {
-    /// The default theme with `json` (a gpui-kit theme file's content)
-    /// over it.
+    /// The default theme with `json` (a theme file's content) over it.
     pub fn from_json(json: &str) -> Result<Self, ThemeError> {
         let mut theme = Self::default();
         theme.apply(json)?;
@@ -297,7 +296,7 @@ impl Theme {
                 let Some(field) = self.colors.by_key(key) else {
                     continue;
                 };
-                // gpui-kit writes the colors a theme leaves unset as null.
+                // A theme file may write the colors it leaves unset as null.
                 if value.is_null() {
                     continue;
                 }
@@ -352,8 +351,8 @@ mod tests {
     }
 
     #[test]
-    fn colors_a_gpui_kit_theme_leaves_unset_keep_their_value() {
-        // gpui-kit serializes unset colors (and numbers) as null.
+    fn colors_a_theme_leaves_unset_keep_their_value() {
+        // A theme file may write unset colors (and numbers) as null.
         let theme = Theme::from_json(
             r##"{ "themes": [{ "mode": "dark", "radius": null, "colors": {
                 "primary.background": null, "primary.active.background": null,
@@ -369,5 +368,43 @@ mod tests {
         assert_eq!(theme.ring.light, default.ring.light);
         // A null pressed color follows its base color.
         assert_eq!(theme.danger_active.dark, mix(rgb(0xff0000), 0xff, 0.12));
+    }
+
+    /// Text on the status colors, at rest and pressed, reads in both
+    /// appearances: a contrast of at least 4.5:1 (WCAG AA for text the
+    /// size of a button's label).
+    #[test]
+    fn text_on_status_colors_stands_out() {
+        let theme = Theme::default();
+        // WCAG's relative luminance.
+        let luminance = |c: Color| {
+            let channel = |shift: u32| {
+                let v = f32::from(((c.0 >> shift) & 0xff) as u8) / 255.0;
+                if v <= 0.039_28 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(24) + 0.7152 * channel(16) + 0.0722 * channel(8)
+        };
+        let contrast = |a: Color, b: Color| {
+            let (a, b) = (luminance(a), luminance(b));
+            (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        };
+        for (background, text) in [
+            (theme.danger, theme.danger_foreground),
+            (theme.danger_active, theme.danger_foreground),
+            (theme.info, theme.info_foreground),
+            (theme.info_active, theme.info_foreground),
+            (theme.success, theme.success_foreground),
+            (theme.success_active, theme.success_foreground),
+            (theme.warning, theme.warning_foreground),
+            (theme.warning_active, theme.warning_foreground),
+        ] {
+            for (b, t) in [(background.light, text.light), (background.dark, text.dark)] {
+                assert!(contrast(b, t) >= 4.5, "{b:?} / {t:?}: {}", contrast(b, t));
+            }
+        }
     }
 }

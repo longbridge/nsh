@@ -10,8 +10,10 @@
 //! the JS call (`classes.rs`); one with a context or `async`, and a
 //! component's method, converts its arguments in the JS call and sends
 //! what it runs to the core as an op, in order with the ops before it
-//! (`classes::send`); one with a result returns a promise, settled when
-//! the core's events bring the result ([`deliver`]).
+//! (`classes::send`). One with a result (`Result<(), E>` included) and
+//! every `async` one return a promise, settled when the core's events
+//! bring the result ([`deliver`]); an op or method returning `()` returns
+//! `undefined`, and nothing answers it.
 
 use std::{
     cell::{Cell, RefCell},
@@ -303,7 +305,7 @@ pub(crate) fn module_function(ctx: *mut JsContext, module: &ModuleSpec, function
             name.as_ptr(),
             None,
             length as c_int,
-            c_int::from(spec.returns.is_some()),
+            c_int::from(spec.promises()),
             opaque as *mut std::ffi::c_void,
         )
     }
@@ -338,7 +340,7 @@ unsafe extern "C" fn call_task(
     this: JsValue,
     argc: c_int,
     argv: *mut JsValue,
-    magic: c_int,
+    _magic: c_int,
     opaque: *mut std::ffi::c_void,
 ) -> JsValue {
     // SAFETY: `module_function` made the opaque from an `AsyncCall`, and
@@ -349,7 +351,7 @@ unsafe extern "C" fn call_task(
             crate::web::js::Args::new(argc, argv),
         )
     };
-    crate::classes::send(ctx, this, args, magic != 0, |host| {
+    crate::classes::send(ctx, this, args, true, |host| {
         start(host).map(RustCall::Task)
     })
 }
@@ -837,7 +839,7 @@ unsafe extern "C" fn call_method(
     let args = unsafe { crate::web::js::Args::new(argc, argv) };
     let make = method.call;
     // A wrong argument's error names the component (`Stepper.setValue`).
-    crate::classes::send(ctx, this, args, method.returns.is_some(), |host| {
+    crate::classes::send(ctx, this, args, method.promises(), |host| {
         make(host)
             .map(|call| RustCall::Method(id, call))
             .map_err(|e| match e {

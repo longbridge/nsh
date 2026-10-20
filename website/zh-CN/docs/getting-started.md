@@ -25,26 +25,30 @@ nsh init my-app
 |---|---|
 | `App.tsx` | 入口模块：用 `mount` 渲染应用 |
 | `nsh.json` | 应用的名称、id、版本和构建号（[项目结构](./project-structure.md#nshjson)） |
-| `tsconfig.json` | TypeScript 设置，把 `nsh` 解析到 `.nsh/types` 中的声明 |
+| `tsconfig.json` | 继承 `.nsh/tsconfig.json`，即 NSH 的 TypeScript 设置，它把 `nsh` 解析到 `.nsh/types` 中的声明 |
 | `.gitignore` | 忽略 `.nsh/` 和 `out/` |
 | `.nsh/types/` | 生成的所有 NSH 模块的声明，供编辑器使用 |
 
 显示名称默认是目录名；可以用 `--name "My App"` 指定其他名称。id 会是 `com.example.<name>`：发布前请在 `nsh.json` 中修改。已存在的文件会被保留，所以你可以在已经有部分文件的目录里运行 `nsh init`。
 
+在终端中，`nsh init` 会先询问应用用什么编写：`ts`（默认，即上文）、`rust` 或 `mixed`。用 `--template` 可以直接选择，不再询问。
+
 ### 从 Rust 开始
 
-使用 `nsh init my-app --rust` 创建带有原生 Rust UI 的 Cargo 项目：
+使用 `nsh init my-app --template rust` 创建用 Rust 编写的应用，即一个 Cargo 项目：
 
 ```sh
-nsh init my-app --rust
+nsh init my-app --template rust
 cd my-app
 nsh run            # --target ios、android、web、macos、linux、windows 或 gpui
 cargo run          # 同一个根组件，直接在桌面后端上运行
 ```
 
-`src/lib.rs` 包含界面、状态和事件处理函数，`nsh.json` 指定它的根组件（`"root": "App"`）：`nsh run` 和 `nsh package` 在所有平台（包括浏览器）上直接挂载它，不使用 QuickJS。`src/main.rs` 为 `cargo run` 在 macOS、Windows 或 Linux 上直接挂载同一个根组件。`App.tsx` 从 `app/native` 导入它：`nsh run App.tsx` 运行这个 TSX 入口，用于在 Rust 组件之上用 TSX 编写页面。Rust 开发需要 Rust 工具链（`cargo run` 还需要桌面后端的开发库）；`nsh` 命令使用 crates.io 上与 CLI 同版本的 NSH crate 构建应用的运行器。
+`src/lib.rs` 包含界面、状态和事件处理函数，`nsh.json` 指定它的根组件（`"root": "App"`）：`nsh run` 和 `nsh package` 在所有平台（包括浏览器）上直接挂载它，不使用 QuickJS。`src/main.rs` 为 `cargo run` 在 macOS、Windows 或 Linux 上直接挂载同一个根组件。项目的 README 说明了之后如何添加 TSX 入口，用于在 Rust 组件之上用 TSX 编写页面。
 
-详见[用 Rust 开发](./rust.md)、[CLI 参考](./cli.md#nsh-init)及仓库中的 `examples/gallery-rs`。
+`nsh init my-app --template mixed` 则创建带有自己 Rust crate 的 TSX 应用：`App.tsx` 从 `native/` 中的 crate 导入一个组件、一个模块和一个类。Rust 开发需要 Rust 工具链（`cargo run` 还需要桌面后端的开发库）；`nsh` 命令使用 crates.io 上与 CLI 同版本的 NSH crate 构建应用的运行器。
+
+详见[用 Rust 开发](./rust.md)、[CLI 参考](./cli.md#nsh-init)，以及仓库中的 `examples/gallery-rs`（Rust 应用）和 `examples/rust-exports`（带 crate 的 TSX 应用）。
 
 ### 入口模块
 

@@ -36,10 +36,10 @@ Ctrl-C 会关闭窗口，关闭窗口也会结束 `nsh run`。宿主也可以单
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --size 1024x768   # 源码仓库中：target/debug/nsh-linux-host
+dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # 源码仓库中：target/debug/nsh-linux-host
 ```
 
-`--size` 是窗口的默认尺寸；平铺式窗口管理器可能会给窗口另一个尺寸。
+`--window-size` 是窗口的默认尺寸；平铺式窗口管理器可能会给窗口另一个尺寸。
 
 ## 打包
 

@@ -13,7 +13,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [text.md](text.md) | Text blocks, spans, inline attachments |
 | [styles.md](styles.md) | Tailwind, effects, view styles, Android differences |
 | [scrolling-and-lists.md](scrolling-and-lists.md) | Scroll views, zooming, `List` |
-| [animation.md](animation.md) | Native values, composites, layout animation |
+| [animation.md](animation.md) | Animated values, composites, layout animation |
 | [canvas.md](canvas.md) | `Canvas` |
 | [images.md](images.md) | Loading, decoding, caching, animated images |
 | [sandbox.md](sandbox.md) | VM limits, hardening, capabilities |
@@ -25,6 +25,7 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [windows.md](windows.md) | The Windows backend (Win32, Direct2D): building, how each area maps to Windows, `--script` checks, what differs |
 | [gpui.md](gpui.md) | The GPUI backend (macOS, Windows, Linux): building, the surface element and `DrawCx`, embedding as a GPUI view, what differs |
 | [web.md](web.md) | The WebAssembly runtime of the website's demos: `LocalEngine`, the clock, the DOM protocol |
+| [compatibility.md](compatibility.md) | The backward compatibility contract: what apps depend on, the rules, `api/` and its tests |
 | [performance.md](performance.md) | Baselines |
 | [pitfalls.md](pitfalls.md) | Verified constraints and pitfalls, by area |
 

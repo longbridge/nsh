@@ -25,7 +25,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/release.yml"
-      - ".github/packages/**"
+      - ".github/packages/nsh.json"
       - "crates/xtask/**"
   workflow_dispatch:
     inputs:
@@ -79,6 +79,13 @@ jobs:
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           if [[ "$TAG" != "v$version" ]]; then
             echo "::error::tag $TAG does not match the workspace version $version"
+            exit 1
+          fi
+          # Every release freezes the API apps use in its minor line's
+          # baseline (docs/dev/compatibility.md).
+          line="v${version%.*}"
+          if [[ ! -f "api/$line/runtime.txt" ]] || ! diff -rq --exclude apps api/current "api/$line"; then
+            echo "::error::api/$line is not this release's API: run cargo xtask api --freeze"
             exit 1
           fi
 

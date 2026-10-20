@@ -235,6 +235,32 @@ pub unsafe extern "C" fn nsh_app_set_limits(
     app.view.set_limits(limits);
 }
 
+/// The directory the storage (`nsh/storage`) of the apps `app` loads is
+/// kept in (`storage.json` in it); `NULL`: each app's own,
+/// `nsh/<app id>` in the embedding app's Application Support (the id of
+/// `nsh.json`, `nsh/default` without one). Applies from the next load.
+/// Returns an error for a path that is not UTF-8, or `NULL`.
+///
+/// # Safety
+///
+/// `app` must come from [`nsh_app_create`]; `path` must be `NULL` or a
+/// NUL-terminated string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_app_set_storage_directory(
+    app: *mut NshApp,
+    path: *const c_char,
+) -> *mut c_char {
+    // SAFETY: guaranteed by the caller.
+    let app = unsafe { &*app };
+    let dir = if path.is_null() {
+        Ok(None)
+    } else {
+        // SAFETY: guaranteed by the caller.
+        unsafe { utf8(path, "the storage directory") }.map(|path| Some(PathBuf::from(path)))
+    };
+    status(dir.map(|dir| app.view.set_storage_directory(dir)))
+}
+
 /// Development: loads from a `nsh dev` server (`ws://host:port/ws`) and
 /// reloads on every change, showing errors over the app. Returns an error
 /// when the library was built without development support, or `NULL`.
@@ -252,7 +278,9 @@ pub unsafe extern "C" fn nsh_app_connect_dev_server(
     let (app, url) = unsafe { (&*app, utf8(url, "the dev server URL")) };
     #[cfg(feature = "dev")]
     {
-        status(url.map(|url| app.view.connect_dev_server(url.to_owned())))
+        status(url.map(|url| {
+            app.view.connect_dev_server(url.to_owned());
+        }))
     }
     #[cfg(not(feature = "dev"))]
     {

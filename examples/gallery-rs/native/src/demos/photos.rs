@@ -232,7 +232,7 @@ fn hero(
     refreshing: Signal<bool>,
     refresh: impl Into<Listener<()>>,
     refresh_key: Option<String>,
-    scroll_y: NativeValue,
+    scroll_y: AnimatedValue,
     wide: bool,
 ) -> impl IntoElement {
     view()
@@ -371,7 +371,7 @@ pub(crate) fn Photos() -> impl IntoElement {
     let refresh = stored(None::<Spawned<()>>);
     // The list's scroll offset, fed natively: the hero's parallax and fade
     // and the compact bar run without a binding per frame.
-    let scroll_y = native_value(0.0);
+    let scroll_y = animated_value(0.0);
     let on_refresh = move |_: &()| {
         refreshing.set(true);
         let task = set_timeout(Duration::from_millis(800), move || {
@@ -389,19 +389,16 @@ pub(crate) fn Photos() -> impl IntoElement {
         log::info!("loading more after {}", from - 1);
         photos.update(|p| Rc::make_mut(p).extend(make_photos(from, PAGE)));
     };
-    let header = {
-        let scroll_y = scroll_y.clone();
-        move |wide: bool| {
-            hero(
-                count,
-                refreshes,
-                refreshing,
-                on_refresh,
-                refresh_key.clone(),
-                scroll_y.clone(),
-                wide,
-            )
-        }
+    let header = move |wide: bool| {
+        hero(
+            count,
+            refreshes,
+            refreshing,
+            on_refresh,
+            refresh_key.clone(),
+            scroll_y,
+            wide,
+        )
     };
     let footer = || {
         text(format!("Loading {PAGE} more…"))
@@ -414,7 +411,7 @@ pub(crate) fn Photos() -> impl IntoElement {
     let photo_at =
         move |at: Position| computed(move || photos.with(|p| p.get(at.index()).cloned()));
     let phone = {
-        let (header, scroll_y) = (header.clone(), scroll_y.clone());
+        let header = header.clone();
         move || {
             virtual_list(count, move |at| row(photo_at(at)))
                 .estimated_item_size(76.0)
@@ -430,27 +427,22 @@ pub(crate) fn Photos() -> impl IntoElement {
     };
     // As many columns as fit, at least 200 pt each: the list follows the
     // window in place.
-    let grid = {
-        let scroll_y = scroll_y.clone();
-        move || {
-            let columns = computed(|| columns_for(200.0, 8, pane_width(), 16.0));
-            virtual_list(count, move |at| tile(photo_at(at)))
-                .columns(columns)
-                // A 4:3 picture across the column, its caption under it.
-                .estimated_item_size(move || {
-                    (pane_width() - 48.0) / columns.get() as f32 * 0.75 + 60.0
-                })
-                .flex_1()
-                .content_padding(24.0)
-                .row_gap(16.0)
-                .column_gap(16.0)
-                .scroll_value(&scroll_y)
-                .refreshing(refreshing)
-                .on_refresh(on_refresh)
-                .on_end_reached(load_more)
-                .header(header(true))
-                .footer(footer())
-        }
+    let grid = move || {
+        let columns = computed(|| columns_for(200.0, 8, pane_width(), 16.0));
+        virtual_list(count, move |at| tile(photo_at(at)))
+            .columns(columns)
+            // A 4:3 picture across the column, its caption under it.
+            .estimated_item_size(move || (pane_width() - 48.0) / columns.get() as f32 * 0.75 + 60.0)
+            .flex_1()
+            .content_padding(24.0)
+            .row_gap(16.0)
+            .column_gap(16.0)
+            .scroll_value(&scroll_y)
+            .refreshing(refreshing)
+            .on_refresh(on_refresh)
+            .on_end_reached(load_more)
+            .header(header(true))
+            .footer(footer())
     };
     view()
         .flex_1()

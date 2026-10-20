@@ -15,7 +15,7 @@ use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
 use rustc_hash::FxHashMap;
 
-use super::{Core, Kind, NO_KEY};
+use super::{Core, Kind, NO_KEY, views::Anchor};
 use crate::{
     ApplyError, Command, EdgeInsets, EventKind, EventMask, EventPayload, NodeId, Op, Prop, ROOT_ID,
     Tag, TextEngine,
@@ -100,12 +100,16 @@ struct VirtualListState {
 pub(super) enum Placement {
     /// Out of the tree (the view has no place for them).
     None,
-    /// In this node, before the view's node after its `Children` (their
-    /// anchor).
-    At(NodeId, Option<NodeId>),
+    /// In this node, before what the view puts after its `Children` (their
+    /// anchor: a node, or a region, whose nodes may come later).
+    At(NodeId, Anchor),
     /// Each in its own wrapper ([`ParentElement::children_each`]): placed
     /// by the view's region of wrappers.
     Each,
+    /// Passed on as the children of the nested component hosted by this
+    /// node (`<Inset>{children}</Inset>`), before the content after them
+    /// (their anchor, as [`Self::At`]'s): its view places them.
+    Nested(NodeId, Anchor),
 }
 
 /// A component instance on its host node.
@@ -137,7 +141,7 @@ pub(super) struct Instance {
     /// The view's parts in the touch responder, by node.
     pub(super) responders: Vec<(NodeId, Rc<ResponderEl>)>,
     /// The app's `style` on the host, applied after the root's own inline
-    /// style and native values.
+    /// style and animated values.
     pub(super) app_style: Option<crate::StylePatch>,
     dirty: bool,
     /// The nodes of its view with bindings: what was applied last.
@@ -155,6 +159,82 @@ pub(super) struct Instance {
     /// In a view: the owner where it places its JS children (a region's),
     /// which the components JS made among them are under.
     children_owner: Option<crate::ui::Owner>,
+    /// The component its view's root is, made on this host (its alias,
+    /// [`Core::alias`]): its view makes the host's node.
+    rooted: Option<NodeId>,
+    /// On such a component: the host (or alias) whose view's root it is.
+    pub(super) above: Option<NodeId>,
+    /// What the view this one is in fills its slots with ([`Fill`]).
+    pub(super) fills: Vec<Fill>,
+    /// What the view this one is in gives its element besides styles (its
+    /// inline style, animated values, insets): they apply to its root,
+    /// after the root's own, as the styles do.
+    pub(super) given: Option<Box<Attrs>>,
+    /// `given` changed since its root last took it.
+    given_changed: bool,
+    /// The insets its root's node has (its own, or given it).
+    pub(super) root_insets_applied: (Option<crate::EdgeInsets>, Option<crate::EdgeInsets>),
+}
+
+/// What a component's root takes from the components above it on its host
+/// and the views that place them ([`Core::root_context`]).
+pub(super) struct RootContext {
+    /// Their styles, after the root's (the outer last).
+    pub(super) user: Option<Arc<ClassList>>,
+    /// Whether `app` is what goes after the root's inline style (else the
+    /// component's own app style is).
+    pub(super) combined: bool,
+    /// The inline styles and animated values they give it (the inner
+    /// first), then the app's style on the top host.
+    pub(super) app: Option<crate::StylePatch>,
+    /// JS's events on the top host.
+    pub(super) js: Option<EventMask>,
+    /// The insets given it (the outer wins).
+    inset_padding: Option<crate::EdgeInsets>,
+    inset_margin: Option<crate::EdgeInsets>,
+    /// Whether any view gives it anything besides styles.
+    given: bool,
+}
+
+impl RootContext {
+    /// `attrs` (a root's) with the insets given it.
+    pub(super) fn over(&self, mut attrs: Attrs) -> Attrs {
+        if let Some(insets) = self.inset_padding {
+            attrs.inset_padding = Some(insets);
+        }
+        if let Some(insets) = self.inset_margin {
+            attrs.inset_margin = Some(insets);
+        }
+        attrs
+    }
+}
+
+/// What a view fills a nested component's slot with (`.fill(name, el)`, a
+/// tag's slot method): nodes of that view, which the nested view places as
+/// they are where it places the slot (a node of its own around them only
+/// where it styles the slot). A slot JS fills has a holder node instead
+/// (`Instance::slots`).
+pub(super) struct Fill {
+    pub(super) name: &'static str,
+    /// Its parts in order: nodes, regions whose nodes come and go, and
+    /// what fills the placing view's own slots.
+    parts: Vec<FillPart>,
+    /// The host of the view that fills it.
+    from: NodeId,
+    /// Where the nested view places them.
+    pub(super) at: Placement,
+    /// The slot of a component in the nested view whose fill places this
+    /// one (`.fill(name, props.slot.place(|s| s))`): its nodes go there.
+    forwarded: Option<(NodeId, &'static str)>,
+}
+
+/// A part of a [`Fill`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum FillPart {
+    Node(NodeId),
+    Region(u32),
+    /// What fills the placing view's own slot of this name, passed on.
+    Filled(&'static str),
 }
 
 impl Instance {
@@ -187,6 +267,12 @@ impl Instance {
             row_index: None,
             lazy_wanted: None,
             children_owner: None,
+            rooted: None,
+            above: None,
+            fills: Vec::new(),
+            given: None,
+            given_changed: false,
+            root_insets_applied: (None, None),
         }
     }
 }
@@ -209,6 +295,11 @@ pub(super) enum Part {
     /// A region of a view's children (no node of its own:
     /// [`super::views`]).
     Region(u32),
+    /// What this view fills a nested component's slot with (no node of
+    /// its own: its children are the nodes).
+    Fill(&'static str),
+    /// Where this view places what fills its slot (no node of its own).
+    Filled(&'static str),
 }
 
 /// The node's classes: its styles lowered, and what was merged after them.
@@ -228,7 +319,7 @@ pub(super) struct Expanded {
     /// A list's layout.
     list: ListConfig,
     pub(super) part: Part,
-    children: Vec<Expanded>,
+    pub(super) children: Vec<Expanded>,
 }
 
 impl Expanded {
@@ -250,11 +341,23 @@ impl Expanded {
     }
 }
 
+/// Whether a slot's place only places it: no styles, props, listeners or
+/// children of its own (what fills it then needs no node around it).
+fn is_plain(el: &ElNode) -> bool {
+    el.attrs == Attrs::default()
+        && el.style.is_empty()
+        && !el.is_bound()
+        && el.handlers.is_empty()
+        && el.responder.is_none()
+        && el.children.is_empty()
+        && el.text.is_none()
+}
+
 /// What a component's task waits for from the animation graph.
 enum Awaited {
     /// An animation's end: whether it finished.
     End(AnswerSlot<bool>),
-    /// A value read ([`crate::ui::NativeValue::value`]).
+    /// A value read ([`crate::ui::AnimatedValue::value`]).
     Value(AnswerSlot<f32>),
 }
 
@@ -287,6 +390,12 @@ pub(super) struct Components {
     /// Slot nodes in a host -> the host.
     slot_hosts: FxHashMap<NodeId, NodeId>,
     styles: FxHashMap<StyleRefinement, Arc<ClassList>>,
+    /// The styles a component on another's host gets from each above it,
+    /// merged (by the lists', which the entry keeps).
+    merges: FxHashMap<(usize, usize), [Arc<ClassList>; 3]>,
+    /// While a view's slot content is matched: the nested component's host
+    /// and the slot (its regions are the slot's).
+    pub(super) filling: Option<(NodeId, &'static str)>,
     /// The lists components place (the glue's, of `Items` props) -> the
     /// row function the component's view gave last, and the number of rows
     /// its wrappers last saw.
@@ -370,6 +479,8 @@ impl Default for Components {
             slot_names: FxHashMap::default(),
             slot_hosts: FxHashMap::default(),
             styles: FxHashMap::default(),
+            merges: FxHashMap::default(),
+            filling: None,
             lists: FxHashMap::default(),
             environment: Environment::default(),
             executor: Rc::new(Executor::default()),
@@ -427,7 +538,7 @@ impl Components {
         id
     }
 
-    fn mark(&mut self, host: NodeId) {
+    pub(super) fn mark(&mut self, host: NodeId) {
         if let Some(inst) = self.instances.get_mut(&host)
             && !inst.dirty
         {
@@ -455,11 +566,11 @@ impl Components {
 }
 
 /// The inline style of `id`: the declarations of its `Style` prop, then
-/// the native values bound to it, then (on a host) the app's style.
+/// the animated values bound to it, then (on a host) the app's style.
 fn inline_style(
     id: NodeId,
     inline: Option<&crate::StylePatch>,
-    animated: &[(crate::StyleDecl, crate::ui::NativeNode)],
+    animated: &[(crate::StyleDecl, crate::ui::LiveNode)],
     app: Option<&crate::StylePatch>,
 ) -> Op {
     let mut style = Box::<crate::Style>::default();
@@ -664,11 +775,19 @@ impl<M: TextEngine> Core<M> {
             Op::SetStyle { id, patch, .. } if self.is_host(id) => {
                 let inst = self.components.instances.get_mut(&id).expect("host");
                 inst.app_style = (!patch.is_empty()).then_some(patch);
-                let (inline, animated) = match &inst.root {
+                // The node's own style is the view's that makes it, then
+                // what is given it.
+                let base = self.base_of(id);
+                let ctx = self.root_context_of(base).expect("a host");
+                let app = if ctx.combined {
+                    ctx.app
+                } else {
+                    self.components.instances[&base].app_style.clone()
+                };
+                let (inline, animated) = match &self.components.instances[&base].root {
                     Some(root) => (root.attrs.inline.clone(), root.attrs.animated.clone()),
                     None => (None, Vec::new()),
                 };
-                let app = inst.app_style.clone();
                 Ok(Some(inline_style(
                     id,
                     inline.as_deref(),
@@ -817,11 +936,18 @@ impl<M: TextEngine> Core<M> {
                 match place {
                     // Before its next JS sibling, else before what the
                     // view puts after the children.
-                    Placement::At(p, anchor) => self.apply_op(Op::Insert {
-                        parent: p,
-                        child,
-                        before: at.and(before).or(anchor),
-                    })?,
+                    Placement::At(p, anchor) => {
+                        let anchor = self.anchor_node(anchor);
+                        self.apply_op(Op::Insert {
+                            parent: p,
+                            child,
+                            before: at.and(before).or(anchor),
+                        })?
+                    }
+                    Placement::Nested(nested, anchor) => {
+                        let anchor = self.anchor_node(anchor);
+                        self.join_nested_at(nested, child, at.and(before).or(anchor));
+                    }
                     // Its wrapper is the view's (a region of them).
                     Placement::Each => self.detach_id(child),
                     Placement::None => self.detach_id(child),
@@ -834,10 +960,11 @@ impl<M: TextEngine> Core<M> {
                 if let Some(children) = inst.js_kids {
                     children.set(inst.js_children.clone());
                 }
-                if inst.js_children.is_empty() || inst.children_at == Placement::Each {
+                let place = inst.children_at;
+                if inst.js_children.is_empty() || place == Placement::Each {
                     self.components.mark(parent);
                 }
-                self.detach_id(child);
+                self.unplace(place, child);
                 Ok(None)
             }
             Op::SetProp {
@@ -906,7 +1033,11 @@ impl<M: TextEngine> Core<M> {
             Op::Listen { id, event, enabled } if self.is_host(id) => {
                 let inst = self.components.instances.get_mut(&id).expect("host");
                 inst.js_events.set(event, enabled);
-                let own = inst.root.as_ref().is_some_and(|r| r.events.contains(event));
+                let base = self.base_of(id);
+                let own = self.components.instances[&base]
+                    .root
+                    .as_ref()
+                    .is_some_and(|r| r.events.contains(event));
                 Ok(Some(Op::Listen {
                     id,
                     event,
@@ -1239,7 +1370,7 @@ impl<M: TextEngine> Core<M> {
     /// takes its slots, children and styles; a list cell builds its row
     /// again); whether there were any.
     fn render_dirty(&mut self) -> bool {
-        // What handles asked for since (native values released, ...).
+        // What handles asked for since (animated values released, ...).
         for action in self.components.executor.take_actions() {
             self.apply_action(action);
         }
@@ -1274,16 +1405,66 @@ impl<M: TextEngine> Core<M> {
     /// Applies the root styles of the view on `host` again over the app's
     /// (or its parent's) styles, which may have changed.
     fn restyle_view(&mut self, host: NodeId, inst: &mut Instance) {
-        let user = inst.user.clone();
-        if let Some(node) = inst.bound.get_mut(&host) {
+        // The component its root is applies them to the node.
+        if let Some(rooted) = inst.rooted {
+            if std::mem::take(&mut inst.given_changed)
+                && let Some(rooted) = self.components.instances.get_mut(&rooted)
+            {
+                rooted.given_changed = true;
+            }
+            self.components.mark(rooted);
+            return;
+        }
+        let ctx = self.root_context(inst);
+        let given_changed = std::mem::take(&mut inst.given_changed);
+        let attrs = if let Some(node) = inst.bound.get_mut(&host) {
             let (style, classes) = (node.style.clone(), node.classes.clone());
-            let classes = self.apply_styles(host, &style, &style, classes, user);
+            let classes = self.apply_styles(host, &style, &style, classes, ctx.user.clone());
             if let Some(node) = inst.bound.get_mut(&host) {
                 node.classes = classes;
+                given_changed.then(|| node.attrs.clone())
+            } else {
+                None
             }
         } else if let Some(root) = inst.root.as_mut() {
             let (style, classes) = (root.style.clone(), root.classes.clone());
-            root.classes = self.apply_styles(host, &style, &style, classes, user);
+            root.classes = self.apply_styles(host, &style, &style, classes, ctx.user.clone());
+            given_changed.then(|| root.attrs.clone())
+        } else {
+            None
+        };
+        // What the views above give it changed: applied again over its
+        // root's own.
+        if let Some(attrs) = attrs {
+            let app = if ctx.combined {
+                ctx.app.as_ref()
+            } else {
+                inst.app_style.as_ref()
+            };
+            let _ = self.apply_op(inline_style(
+                host,
+                attrs.inline.as_deref(),
+                &attrs.animated,
+                app,
+            ));
+            let applied = inst.root_insets_applied;
+            let insets = (
+                ctx.inset_padding.or(attrs.inset_padding),
+                ctx.inset_margin.or(attrs.inset_margin),
+            );
+            if insets.0 != applied.0 {
+                let _ = self.apply_op(Op::SetProp {
+                    id: host,
+                    prop: Prop::InsetPadding(insets.0.unwrap_or_default()),
+                });
+            }
+            if insets.1 != applied.1 {
+                let _ = self.apply_op(Op::SetProp {
+                    id: host,
+                    prop: Prop::InsetMargin(insets.1.unwrap_or_default()),
+                });
+            }
+            inst.root_insets_applied = insets;
         }
     }
 
@@ -1390,7 +1571,10 @@ impl<M: TextEngine> Core<M> {
                                 && self
                                     .key(*node)
                                     .is_ok_and(|k| !self.nodes[k as usize].children.is_empty())
-                        });
+                        }) || inst
+                            .fills
+                            .iter()
+                            .any(|f| f.name == name && !self.fill_nodes(f).is_empty());
                         inner.set_slot(name, filled);
                     }
                 }
@@ -1594,8 +1778,18 @@ impl<M: TextEngine> Core<M> {
     /// Applies a view's root `el` to `host` itself (over a list cell's
     /// previous row) and expands its children. A view's root can be any
     /// element: the host becomes its node (a screen, a modal, a text, a
-    /// list), or holds it (a region, a component).
+    /// list), holds it (a region), or is the host of a component as the
+    /// root ([`Self::expand_rooted`]).
     fn expand_root(&mut self, host: NodeId, inst: &mut Instance, mut el: ElNode) {
+        if matches!(el.kind, ElKind::Component(_))
+            && matches!(inst.inner, Inner::Component(_))
+            && inst
+                .root
+                .as_ref()
+                .is_none_or(|r| matches!(r.part, Part::Component(_)))
+        {
+            return self.expand_rooted(host, inst, el);
+        }
         let node = matches!(el.kind, ElKind::Plain | ElKind::VirtualList(_));
         if !node || (el.tag != Tag::View && !self.retag(host, el.tag)) {
             if node {
@@ -1622,6 +1816,7 @@ impl<M: TextEngine> Core<M> {
         inst.event_handlers.clear();
         inst.responders.clear();
         let old = inst.root.take();
+        let first = old.is_none();
         let old_place = std::mem::replace(&mut inst.children_at, Placement::None);
         // The root is the host itself.
         let (old_attrs, old_style, old_classes, old_events, old_children, old_text, old_list) =
@@ -1639,8 +1834,37 @@ impl<M: TextEngine> Core<M> {
                     ListConfig::default(),
                 ),
             };
-        self.apply_attrs_over(host, &el.attrs, &old_attrs, inst.app_style.as_ref());
-        let user = inst.user.clone();
+        // What the views above give it and the components on its host, the
+        // outer last.
+        let ctx = self.root_context(inst);
+        let app = if ctx.combined {
+            ctx.app.as_ref()
+        } else {
+            inst.app_style.as_ref()
+        };
+        let attrs = ctx.over(el.attrs.clone());
+        // As it was applied: with the insets its node got.
+        let mut old_over = old_attrs.clone();
+        (old_over.inset_padding, old_over.inset_margin) = inst.root_insets_applied;
+        self.apply_attrs_over(host, &attrs, &old_over, app);
+        inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+        // Given an inline style or animated values while its own did not
+        // change: they go now.
+        let given_changed = std::mem::take(&mut inst.given_changed) || first;
+        if ctx.given
+            && given_changed
+            && attrs.inline == old_over.inline
+            && attrs.animated == old_over.animated
+        {
+            let _ = self.apply_op(inline_style(
+                host,
+                attrs.inline.as_deref(),
+                &attrs.animated,
+                app,
+            ));
+        }
+        let user = ctx.user.clone();
+        let top_js = ctx.js;
         let classes = self.apply_styles(host, &el.style, &old_style, old_classes, user);
         let text = self.reconcile_text(host, host, el.text.take(), old_text);
         if bound.is_some() {
@@ -1654,7 +1878,7 @@ impl<M: TextEngine> Core<M> {
             );
         }
         // The host listens to its component's events and to JS's.
-        let js = inst.js_events;
+        let js = top_js.unwrap_or(inst.js_events);
         self.apply_handlers(host, &el, old_events | js, js, inst);
         let mut events = EventMask::default();
         for (kind, _) in &el.handlers {
@@ -1669,7 +1893,7 @@ impl<M: TextEngine> Core<M> {
         let (list, part) = match std::mem::replace(&mut el.kind, ElKind::Plain) {
             ElKind::VirtualList(list) => {
                 let config = list.config;
-                self.update_virtual_list(host, host, *list, &old_list);
+                self.update_virtual_list(self.native_id(host), host, *list, &old_list);
                 (config, Part::VirtualList)
             }
             _ => (ListConfig::default(), Part::Node),
@@ -1690,6 +1914,164 @@ impl<M: TextEngine> Core<M> {
         self.children_placed(host, inst, old_place);
     }
 
+    /// [`Self::expand_root`] of a view whose root is component element
+    /// `el`: that component is made on `host` itself, under an alias of its
+    /// node ([`Core::alias`]), and its view makes the node, with what this
+    /// view gives it (props, styles, listeners, ref, content) and what the
+    /// app gives this one (styles, events): no node of its own.
+    fn expand_rooted(&mut self, host: NodeId, inst: &mut Instance, el: ElNode) {
+        let ElKind::Component(c) = &el.kind else {
+            return;
+        };
+        let part = Part::Component(c.name);
+        inst.handlers.clear();
+        inst.event_handlers.clear();
+        inst.responders.clear();
+        let old_place = std::mem::replace(&mut inst.children_at, Placement::None);
+        let prev = match inst.root.take() {
+            Some(old) if old.part == part => old,
+            old => {
+                if let Some(old) = old {
+                    self.release_expanded(old);
+                }
+                let id = self.components.alloc();
+                if let Err(e) = self.alias(id, host) {
+                    log::error!(target: "js", "a view's root component is not made: {e:?}");
+                    return;
+                }
+                self.components.owners.insert(id, host);
+                self.create_instance_of(id, c.name, c.make, c.spec);
+                if let Some(rooted) = self.components.instances.get_mut(&id) {
+                    // The app's style is the top host's.
+                    rooted.app_style = None;
+                    rooted.above = Some(host);
+                }
+                Expanded::js(id, part)
+            }
+        };
+        inst.rooted = Some(prev.id);
+        let root = self.reconcile_node(Some(prev), el, part, host, inst);
+        inst.root = Some(root);
+        self.children_placed(host, inst, old_place);
+    }
+
+    /// The component whose view makes host `id`'s node: its own, or the
+    /// one its view's root is (as deep as roots are components).
+    pub(super) fn base_of(&self, id: NodeId) -> NodeId {
+        let mut at = id;
+        while let Some(next) = self.components.instances.get(&at).and_then(|i| i.rooted) {
+            at = next;
+        }
+        at
+    }
+
+    /// What `inst`'s root takes besides its own: the styles, inline styles,
+    /// animated values and insets the views above give it and the
+    /// components whose views' roots it is (the outer last), the app's
+    /// style and JS's events on the top host.
+    pub(super) fn root_context(&mut self, inst: &Instance) -> RootContext {
+        let mut ctx = RootContext {
+            user: inst.user.clone(),
+            combined: false,
+            app: None,
+            js: None,
+            inset_padding: None,
+            inset_margin: None,
+            given: false,
+        };
+        if inst.above.is_none() && inst.given.is_none() {
+            return ctx;
+        }
+        ctx.combined = true;
+        let mut decls: Vec<crate::StyleDecl> = Vec::new();
+        let mut take = |ctx: &mut RootContext, given: &Attrs| {
+            ctx.given = true;
+            if let Some(inline) = &given.inline {
+                decls.extend(inline.decls().iter().cloned());
+            }
+            decls.extend(given.animated.iter().map(|(d, _)| d.clone()));
+            ctx.inset_padding = given.inset_padding.or(ctx.inset_padding);
+            ctx.inset_margin = given.inset_margin.or(ctx.inset_margin);
+        };
+        if let Some(given) = &inst.given {
+            take(&mut ctx, given);
+        }
+        let mut app = inst.app_style.clone();
+        let mut at = inst.above;
+        while let Some(id) = at {
+            let Some(above) = self.components.instances.get(&id) else {
+                break;
+            };
+            let (outer, given) = (above.user.clone(), above.given.clone());
+            app = above.app_style.clone();
+            ctx.js = Some(above.js_events);
+            at = above.above;
+            if let Some(given) = &given {
+                take(&mut ctx, given);
+            }
+            ctx.user = self.merge_user(ctx.user.take(), outer);
+        }
+        if let Some(app) = &app {
+            decls.extend(app.decls().iter().cloned());
+        }
+        if !decls.is_empty() {
+            let mut style = crate::Style::default();
+            let mut patch = crate::StylePatch::default();
+            for decl in decls {
+                let _ = patch.push(&mut style, decl);
+            }
+            ctx.app = Some(patch);
+        }
+        ctx
+    }
+
+    /// [`Self::root_context`] of the component hosted by `host`.
+    pub(super) fn root_context_of(&mut self, host: NodeId) -> Option<RootContext> {
+        let inst = self.components.instances.remove(&host)?;
+        let ctx = self.root_context(&inst);
+        self.components.instances.insert(host, inst);
+        Some(ctx)
+    }
+
+    /// What the view `host` is in gives its element besides styles is `attrs`:
+    /// its root takes them.
+    pub(super) fn set_given(&mut self, host: NodeId, mut attrs: Attrs) {
+        attrs.element_ref = None;
+        let given = (attrs != Attrs::default()).then(|| Box::new(attrs));
+        let Some(inst) = self.components.instances.get_mut(&host) else {
+            return;
+        };
+        if inst.given != given {
+            inst.given = given;
+            inst.given_changed = true;
+            self.components.mark(host);
+        }
+    }
+
+    /// `inner`'s rules, then `outer`'s (one list per pair, kept).
+    fn merge_user(
+        &mut self,
+        inner: Option<Arc<ClassList>>,
+        outer: Option<Arc<ClassList>>,
+    ) -> Option<Arc<ClassList>> {
+        match (inner, outer) {
+            (Some(a), Some(b)) => {
+                let key = (Arc::as_ptr(&a) as usize, Arc::as_ptr(&b) as usize);
+                if let Some([_, _, merged]) = self.components.merges.get(&key) {
+                    return Some(merged.clone());
+                }
+                if self.components.merges.len() >= STYLE_CACHE {
+                    self.components.merges.clear();
+                }
+                let merged = Arc::new(a.merged(&b));
+                self.components.merges.insert(key, [a, b, merged.clone()]);
+                Some(merged)
+            }
+            (a, None) => a,
+            (None, b) => b,
+        }
+    }
+
     /// Where the JS children of `host` go changed from `old_place`: they
     /// leave the tree when nothing places them, and lazy ones are asked for
     /// or dropped.
@@ -1702,7 +2084,7 @@ impl<M: TextEngine> Core<M> {
         // No `Children` any more: the JS children leave the tree.
         if inst.children_at == Placement::None && old_place != Placement::None {
             for &child in &inst.js_children {
-                self.detach_id(child);
+                self.unplace(old_place, child);
             }
         }
         // Lazy children are made while the view places them: by JS, or by
@@ -1735,6 +2117,20 @@ impl<M: TextEngine> Core<M> {
             .get_or_insert_with(|| crate::ui::signal(inst.children_wanted))
     }
 
+    /// JS child `child`, placed at `place`, leaves the tree (and the
+    /// nested component it was passed on to).
+    fn unplace(&mut self, place: Placement, child: NodeId) {
+        match place {
+            Placement::Nested(nested, _) if self.is_host(nested) => {
+                let _ = self.intercept(Op::Remove {
+                    parent: nested,
+                    child,
+                });
+            }
+            _ => self.detach_id(child),
+        }
+    }
+
     fn detach_id(&mut self, id: NodeId) {
         if let Ok(key) = self.key(id)
             && self.nodes[key as usize].parent != NO_KEY
@@ -1756,13 +2152,15 @@ impl<M: TextEngine> Core<M> {
         old: &Attrs,
         app: Option<&crate::StylePatch>,
     ) {
+        // An element's ref names its node by its own id.
+        let node = self.native_id(id);
         if old.element_ref != new.element_ref
             && let Some(r) = &old.element_ref
         {
-            r.detach(id);
+            r.detach(node);
         }
         if let Some(r) = &new.element_ref {
-            r.attach(id);
+            r.attach(node);
         }
         let mut props = std::mem::take(&mut self.components.props);
         new.changes(old, &mut props);
@@ -1824,6 +2222,12 @@ impl<M: TextEngine> Core<M> {
         inst: &mut Instance,
     ) -> EventMask {
         let mut mask = extra;
+        // A node made again (its region ran again) hears what this run
+        // gives it, not also what the runs before gave it.
+        if old.bits() != 0 {
+            inst.handlers.retain(|(n, _, _)| *n != id);
+            inst.responders.retain(|(n, _)| *n != id);
+        }
         for (kind, handler) in &el.handlers {
             mask.set(*kind, true);
             inst.handlers.push((id, *kind, handler.clone()));
@@ -1861,31 +2265,27 @@ impl<M: TextEngine> Core<M> {
         let new = new.into_iter().map(|el| (None, el)).collect();
         let (out, placeholder) = self.match_children(parent, old, new, host, inst);
         // A region's nodes go before what follows it.
-        for (i, e) in out.iter().enumerate() {
-            if let Part::Region(region) = e.part {
-                let anchor = out[i + 1..]
-                    .iter()
-                    .find_map(|n| match n.part {
-                        Part::Region(r) => Some(super::views::Anchor::Region(r)),
-                        Part::Children => inst
-                            .js_children
-                            .first()
-                            .map(|&c| super::views::Anchor::Node(c)),
-                        _ if n.id != 0 => Some(super::views::Anchor::Node(n.id)),
-                        _ => None,
-                    })
-                    .unwrap_or(super::views::Anchor::End);
-                self.set_region_anchor(region, anchor);
-            }
-        }
+        self.set_region_anchors(&out, inst, Anchor::End);
         let nested = parent != host && self.is_host(parent);
         if nested {
-            self.join_nested(parent, &out);
+            if let Some(at) = placeholder {
+                let anchor = self.anchor_after(&out[at + 1..], inst, Anchor::End);
+                inst.children_at = Placement::Nested(parent, anchor);
+            }
+            self.place_filled(&out, inst, Anchor::End, |anchor| {
+                Placement::Nested(parent, anchor)
+            });
+            self.fill_nested(parent, &out, host, inst);
+            self.join_nested(parent, &out, inst);
             return out;
         }
         if let Some(at) = placeholder {
-            inst.children_at = Placement::At(parent, out.get(at + 1).map(|e| e.id));
+            let anchor = self.anchor_after(&out[at + 1..], inst, Anchor::End);
+            inst.children_at = Placement::At(parent, anchor);
         }
+        self.place_filled(&out, inst, Anchor::End, |anchor| {
+            Placement::At(parent, anchor)
+        });
         // The native children in the view's order: the JS children in the
         // placeholder's place, a region's nodes in its (moves only when the
         // order changed).
@@ -1893,6 +2293,10 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .flat_map(|e| match e.part {
                 Part::Children => inst.js_children.clone(),
+                Part::Filled(name) => self
+                    .fill_of(inst, name)
+                    .map(|f| self.fill_nodes(f))
+                    .unwrap_or_default(),
                 Part::Region(region) => self.region_nodes(region),
                 _ => vec![e.id],
             })
@@ -2031,9 +2435,17 @@ impl<M: TextEngine> Core<M> {
         // component's view places it.
         let nested = parent != host && self.is_host(parent);
         for o in old.into_iter().flatten() {
-            if nested {
+            // What fills a slot this view placed there stays (another
+            // view's): it leaves first.
+            self.unplace_filled(&o, inst);
+            if nested && o.part == Part::Children {
+                // The JS children passed on stay (JS's): they leave.
+                for &child in &inst.js_children {
+                    let _ = self.intercept(Op::Remove { parent, child });
+                }
+            } else if nested {
                 for node in self.placed(&o) {
-                    self.leave_nested(parent, node);
+                    self.forget_nested(parent, node);
                 }
             }
             self.release_expanded(o);
@@ -2055,7 +2467,50 @@ impl<M: TextEngine> Core<M> {
         placeholder: &mut Option<usize>,
         cursor: &mut usize,
     ) {
+        // A slot a view fills: placed as it is (`Filled`), or in a node of
+        // this view's own when the view styles it.
+        if let ElKind::Slot(name) = el.kind
+            && inst.fills.iter().any(|f| f.name == name)
+        {
+            if is_plain(&el) {
+                el.kind = ElKind::Filled(name);
+            } else {
+                el.kind = ElKind::Plain;
+                let mut filled = ElNode::new(Tag::View);
+                filled.kind = ElKind::Filled(name);
+                el.children = vec![filled];
+                el.key.get_or_insert_with(|| format!("slot:{name}").into());
+            }
+        }
         match std::mem::replace(&mut el.kind, ElKind::Plain) {
+            ElKind::Filled(name) => {
+                if let Some(j) = old
+                    .iter()
+                    .position(|o| o.as_ref().is_some_and(|o| o.part == Part::Filled(name)))
+                {
+                    old[j] = None;
+                }
+                out.push(Expanded::js(0, Part::Filled(name)));
+            }
+            ElKind::Fill(name) => {
+                // Content of the nested component `parent`, as its children
+                // are: nodes of this view, its regions bound here.
+                let prev = old
+                    .iter()
+                    .position(|o| o.as_ref().is_some_and(|o| o.part == Part::Fill(name)))
+                    .and_then(|j| old[j].take());
+                let old_children = prev.map(|p| p.children).unwrap_or_default();
+                let new = std::mem::take(&mut el.children)
+                    .into_iter()
+                    .map(|c| (None, c))
+                    .collect();
+                let filling = self.components.filling.replace((parent, name));
+                let (children, _) = self.match_children(parent, old_children, new, host, inst);
+                self.components.filling = filling;
+                let mut e = Expanded::js(0, Part::Fill(name));
+                e.children = children;
+                out.push(e);
+            }
             ElKind::Slot(name) => {
                 // The slot's own node, while the app passes one.
                 let Some(&(_, node)) = inst.slots.iter().find(|(s, _)| *s == name) else {
@@ -2224,23 +2679,43 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// Node `child` of this view is no longer content of the nested
-    /// component hosted by `nested`.
-    fn leave_nested(&mut self, nested: NodeId, child: NodeId) {
+    /// Node `child` of this view, about to be released, is no longer
+    /// content of the nested component hosted by `nested`: it leaves the
+    /// component's children with no native removal (deleting a view
+    /// detaches it, as a plain element's does).
+    fn forget_nested(&mut self, nested: NodeId, child: NodeId) {
         if self.components.slot_names.remove(&child).is_some() {
             self.unslot(child);
-        } else if let Ok(Some(op)) = self.intercept(Op::Remove {
-            parent: nested,
-            child,
-        }) {
-            let _ = self.apply_op(op);
+            return;
+        }
+        let Some(inst) = self.components.instances.get_mut(&nested) else {
+            return;
+        };
+        let count = inst.js_children.len();
+        inst.js_children.retain(|&c| c != child);
+        if inst.js_children.len() == count {
+            return;
+        }
+        if let Some(children) = inst.js_kids {
+            children.set(inst.js_children.clone());
+        }
+        let place = inst.children_at;
+        if inst.js_children.is_empty() || place == Placement::Each {
+            self.components.mark(nested);
+        }
+        // Passed on deeper, it leaves those components' children too.
+        if let Placement::Nested(deeper, _) = place
+            && self.is_host(deeper)
+        {
+            self.forget_nested(deeper, child);
         }
     }
 
     /// The content `out` of the nested component hosted by `nested`, in
-    /// order: its children as the host's JS children, its slots' holders
+    /// order: its children as the host's JS children (`js_children`, the
+    /// view's own JS children, where it passes them on), its slots' holders
     /// in their slots (inserted only when that changed).
-    fn join_nested(&mut self, nested: NodeId, out: &[Expanded]) {
+    fn join_nested(&mut self, nested: NodeId, out: &[Expanded], inst: &Instance) {
         let insert = |core: &mut Self, child: NodeId, before: Option<NodeId>| {
             if let Ok(Some(op)) = core.intercept(Op::Insert {
                 parent: nested,
@@ -2252,7 +2727,16 @@ impl<M: TextEngine> Core<M> {
         };
         let (slots, children): (Vec<NodeId>, Vec<NodeId>) = out
             .iter()
-            .flat_map(|e| self.placed(e))
+            .flat_map(|e| match e.part {
+                Part::Children => inst.js_children.clone(),
+                Part::Filled(name) => self
+                    .fill_of(inst, name)
+                    .map(|f| self.fill_nodes(f))
+                    .unwrap_or_default(),
+                // A slot's: placed by the nested view where it places it.
+                Part::Fill(_) => Vec::new(),
+                _ => self.placed(e),
+            })
             .partition(|id| self.components.slot_names.contains_key(id));
         for slot in slots {
             if self.components.slot_hosts.get(&slot) != Some(&nested) {
@@ -2270,6 +2754,365 @@ impl<M: TextEngine> Core<M> {
                 insert(self, child, before);
                 before = Some(child);
             }
+        }
+    }
+
+    /// The fill of slot `name` among `inst`'s.
+    pub(super) fn fill_of<'a>(&self, inst: &'a Instance, name: &'static str) -> Option<&'a Fill> {
+        inst.fills.iter().find(|f| f.name == name)
+    }
+
+    /// The nodes of `fill` now, in order.
+    pub(super) fn fill_nodes(&self, fill: &Fill) -> Vec<NodeId> {
+        self.fill_nodes_with(fill, None)
+    }
+
+    /// [`Self::fill_nodes`], with `out`'s instance for its host (one taken
+    /// out of the instances while its view is reconciled).
+    fn fill_nodes_with(&self, fill: &Fill, out: Option<(NodeId, &Instance)>) -> Vec<NodeId> {
+        let mut nodes = Vec::with_capacity(fill.parts.len());
+        for part in &fill.parts {
+            match *part {
+                FillPart::Node(id) => nodes.push(id),
+                FillPart::Region(region) => self.fill_region_nodes(region, out, &mut nodes),
+                FillPart::Filled(name) => self.passed_nodes(fill.from, name, out, &mut nodes),
+            }
+        }
+        nodes
+    }
+
+    /// Adds the nodes of region `region` of a fill to `nodes`, what fills
+    /// a slot of the region's view passed on among them.
+    fn fill_region_nodes(
+        &self,
+        region: u32,
+        out: Option<(NodeId, &Instance)>,
+        nodes: &mut Vec<NodeId>,
+    ) {
+        let Some(state) = self.components.regions.get(&region) else {
+            return;
+        };
+        for e in &state.children {
+            match e.part {
+                Part::Filled(name) => self.passed_nodes(state.host, name, out, nodes),
+                Part::Region(inner) => self.fill_region_nodes(inner, out, nodes),
+                _ => nodes.extend(self.placed(e)),
+            }
+        }
+    }
+
+    /// Adds the nodes of what fills slot `name` of the component on `host`
+    /// to `nodes` (`out`: an instance taken out of the instances).
+    fn passed_nodes(
+        &self,
+        host: NodeId,
+        name: &'static str,
+        out: Option<(NodeId, &Instance)>,
+        nodes: &mut Vec<NodeId>,
+    ) {
+        let inst = match out {
+            Some((h, inst)) if h == host => Some(inst),
+            _ => self.components.instances.get(&host).map(|i| &**i),
+        };
+        if let Some(fill) = inst.and_then(|i| self.fill_of(i, name)) {
+            nodes.extend(self.fill_nodes_with(fill, out));
+        }
+    }
+
+    /// The slots of the view on `host` whose fills `parts` pass on (as they
+    /// are, or in a region of them).
+    fn passed_slots(&self, parts: &[FillPart], host: NodeId, names: &mut Vec<&'static str>) {
+        fn of_region<M: TextEngine>(
+            core: &Core<M>,
+            region: u32,
+            host: NodeId,
+            names: &mut Vec<&'static str>,
+        ) {
+            let Some(state) = core.components.regions.get(&region) else {
+                return;
+            };
+            for e in &state.children {
+                match e.part {
+                    Part::Filled(name) if state.host == host => names.push(name),
+                    Part::Region(inner) => of_region(core, inner, host, names),
+                    _ => {}
+                }
+            }
+        }
+        for part in parts {
+            match *part {
+                FillPart::Filled(name) => names.push(name),
+                FillPart::Region(region) => of_region(self, region, host, names),
+                FillPart::Node(_) => {}
+            }
+        }
+    }
+
+    /// Notes on the view on `host` (`inst`) which of its slots' fills go
+    /// on into the fill of slot `name` of the nested component `nested`.
+    pub(super) fn note_passed(
+        &self,
+        nested: NodeId,
+        name: &'static str,
+        host: NodeId,
+        inst: &mut Instance,
+    ) {
+        let mut passed = Vec::new();
+        if let Some(fill) = self
+            .components
+            .instances
+            .get(&nested)
+            .and_then(|t| self.fill_of(t, name))
+        {
+            self.passed_slots(&fill.parts, host, &mut passed);
+        }
+        for fill in &mut inst.fills {
+            if passed.contains(&fill.name) {
+                fill.forwarded = Some((nested, name));
+            } else if fill.forwarded == Some((nested, name)) {
+                fill.forwarded = None;
+            }
+        }
+    }
+
+    /// Where `out` (a view's children, or a region's, `end` after them)
+    /// places what fills its slots: `place` of what follows each.
+    pub(super) fn place_filled(
+        &self,
+        out: &[Expanded],
+        inst: &mut Instance,
+        end: Anchor,
+        place: impl Fn(Anchor) -> Placement,
+    ) {
+        if inst.fills.is_empty() {
+            return;
+        }
+        for (i, e) in out.iter().enumerate() {
+            let Part::Filled(name) = e.part else {
+                continue;
+            };
+            let at = place(self.anchor_after(&out[i + 1..], inst, end));
+            if let Some(fill) = inst.fills.iter_mut().find(|f| f.name == name) {
+                fill.at = at;
+            }
+        }
+    }
+
+    /// `e` and what it holds leave this view: what fills a slot it placed
+    /// leaves its place (it stays: another view's).
+    pub(super) fn unplace_filled(&mut self, e: &Expanded, inst: &mut Instance) {
+        if inst.fills.is_empty() {
+            return;
+        }
+        match e.part {
+            Part::Filled(name) => {
+                let Some(fill) = inst.fills.iter_mut().find(|f| f.name == name) else {
+                    return;
+                };
+                let at = std::mem::replace(&mut fill.at, Placement::None);
+                if at == Placement::None {
+                    return;
+                }
+                let nodes = self.fill_nodes(self.fill_of(inst, name).expect("a fill"));
+                for node in nodes {
+                    self.unplace(at, node);
+                }
+            }
+            Part::Region(region) => {
+                let children = self
+                    .components
+                    .regions
+                    .get_mut(&region)
+                    .map(|s| std::mem::take(&mut s.children))
+                    .unwrap_or_default();
+                for c in &children {
+                    self.unplace_filled(c, inst);
+                }
+                if let Some(state) = self.components.regions.get_mut(&region) {
+                    state.children = children;
+                }
+            }
+            _ => {
+                for c in &e.children {
+                    self.unplace_filled(c, inst);
+                }
+            }
+        }
+    }
+
+    /// The slots the view on `host` (its instance `inst`) fills of the
+    /// nested component hosted by `nested`, from its content `out`: they
+    /// replace the ones before (a fill gone was released with its nodes,
+    /// what was passed on and no longer is leaves its place), and go where
+    /// the nested view places them.
+    fn fill_nested(&mut self, nested: NodeId, out: &[Expanded], host: NodeId, inst: &mut Instance) {
+        let fills: Vec<(&'static str, Vec<FillPart>)> = out
+            .iter()
+            .filter_map(|e| match e.part {
+                Part::Fill(name) => Some((
+                    name,
+                    e.children
+                        .iter()
+                        .filter_map(|c| match c.part {
+                            Part::Region(region) => Some(FillPart::Region(region)),
+                            Part::Filled(name) => Some(FillPart::Filled(name)),
+                            _ if c.id != 0 => Some(FillPart::Node(c.id)),
+                            _ => None,
+                        })
+                        .collect(),
+                )),
+                _ => None,
+            })
+            .collect();
+        // What fills this view's own slots goes where they are passed on.
+        for fill in &mut inst.fills {
+            if fill.forwarded.is_some_and(|(n, _)| n == nested) {
+                fill.forwarded = None;
+            }
+        }
+        for (name, parts) in &fills {
+            let mut passed = Vec::new();
+            self.passed_slots(parts, host, &mut passed);
+            for fill in inst.fills.iter_mut().filter(|f| passed.contains(&f.name)) {
+                fill.forwarded = Some((nested, name));
+            }
+        }
+        let Some(target) = self.components.instances.get_mut(&nested) else {
+            return;
+        };
+        if fills.is_empty() && target.fills.is_empty() {
+            return;
+        }
+        let mut changed = target.fills.len() != fills.len();
+        let old = std::mem::take(&mut target.fills);
+        for (name, parts) in fills {
+            let (at, forwarded, same) = match old.iter().find(|f| f.name == name) {
+                Some(f) => (f.at, f.forwarded, f.parts == parts),
+                None => (Placement::None, None, false),
+            };
+            changed |= !same;
+            target.fills.push(Fill {
+                name,
+                parts,
+                from: host,
+                at,
+                forwarded,
+            });
+        }
+        if !changed {
+            return;
+        }
+        // What was passed on and is no longer leaves its place (it stays:
+        // the view above's); what was released went with its Delete.
+        let out = Some((host, &*inst));
+        let mut leaving = Vec::new();
+        for fill in &old {
+            let at = self.fill_place(nested, fill.name);
+            let now = self
+                .components
+                .instances
+                .get(&nested)
+                .and_then(|t| self.fill_of(t, fill.name))
+                .map(|f| self.fill_nodes_with(f, out))
+                .unwrap_or_default();
+            for node in self.fill_nodes_with(fill, out) {
+                if !now.contains(&node) && self.key(node).is_ok() {
+                    leaving.push((at, node));
+                }
+            }
+        }
+        for (at, node) in leaving {
+            self.unplace(at, node);
+        }
+        // Its slot props follow (`Some` while a fill has nodes).
+        self.components.mark(nested);
+        let names: Vec<&'static str> = self.components.instances[&nested]
+            .fills
+            .iter()
+            .map(|f| f.name)
+            .collect();
+        for name in names {
+            self.place_fill_with(nested, name, Some((host, &*inst)));
+        }
+    }
+
+    /// Where the nodes of the fill of slot `name` of the nested component
+    /// hosted by `nested` are placed: where its view places them, or where
+    /// the slot it is passed on to is.
+    fn fill_place(&self, nested: NodeId, name: &'static str) -> Placement {
+        let Some(fill) = self
+            .components
+            .instances
+            .get(&nested)
+            .and_then(|inst| self.fill_of(inst, name))
+        else {
+            return Placement::None;
+        };
+        match (fill.at, fill.forwarded) {
+            (Placement::None, Some((deeper, slot))) => self.fill_place(deeper, slot),
+            (at, _) => at,
+        }
+    }
+
+    /// Puts the nodes of the fill of slot `name` of the nested component
+    /// hosted by `nested` where its view places them (a region of the fill
+    /// changed, or the fill), and where it passes them on to.
+    pub(super) fn place_fill(&mut self, nested: NodeId, name: &'static str) {
+        self.place_fill_with(nested, name, None);
+    }
+
+    /// [`Self::place_fill`], with `out`'s instance for its host (one taken
+    /// out of the instances while its view is reconciled).
+    fn place_fill_with(
+        &mut self,
+        nested: NodeId,
+        name: &'static str,
+        out: Option<(NodeId, &Instance)>,
+    ) {
+        let Some(fill) = self
+            .components
+            .instances
+            .get(&nested)
+            .and_then(|inst| self.fill_of(inst, name))
+        else {
+            return;
+        };
+        let (nodes, at, forwarded) = (self.fill_nodes_with(fill, out), fill.at, fill.forwarded);
+        if let Some((deeper, slot)) = forwarded {
+            // Passed on: the deeper slot's fill holds them, and its prop
+            // follows.
+            self.components.mark(deeper);
+            self.place_fill_with(deeper, slot, out);
+        }
+        match at {
+            Placement::At(parent, anchor) => {
+                let parent_key = self.key(parent).ok();
+                // An anchor that left the parent: at the end.
+                let mut before = self.anchor_node(anchor).filter(|&a| {
+                    self.key(a)
+                        .is_ok_and(|k| Some(self.nodes[k as usize].parent) == parent_key)
+                });
+                for &child in nodes.iter().rev() {
+                    if !self.precedes(parent, child, before) {
+                        let _ = self.apply_op(Op::Insert {
+                            parent,
+                            child,
+                            before,
+                        });
+                    }
+                    before = Some(child);
+                }
+            }
+            Placement::Nested(other, anchor) => {
+                let mut before = self.anchor_node(anchor);
+                for &child in nodes.iter().rev() {
+                    if !self.nested_precedes(other, child, before) {
+                        self.join_nested_at(other, child, before);
+                    }
+                    before = Some(child);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -2353,6 +3196,9 @@ impl<M: TextEngine> Core<M> {
         // own and the app's).
         let nested_style = (matches!(el.kind, ElKind::Component(_)) && el.style.is_bound())
             .then(|| el.style.clone());
+        // So are its bound attributes (insets).
+        let nested_attrs = (matches!(el.kind, ElKind::Component(_)) && !el.bound_attrs.is_empty())
+            .then(|| (el.attrs.clone(), el.bound_attrs.clone()));
         let bound = if matches!(el.kind, ElKind::Component(_)) {
             el.resolve_once();
             None
@@ -2374,6 +3220,7 @@ impl<M: TextEngine> Core<M> {
             el.children.insert(0, raw);
         }
         let old_list = prev.as_ref().map(|p| p.list).unwrap_or_default();
+        let kept = prev.is_some();
         let (id, old_attrs, old_style, old_classes, old_events, old_children, old_text) = match prev
         {
             Some(p) => (
@@ -2418,9 +3265,12 @@ impl<M: TextEngine> Core<M> {
                 let user = (!el.style.is_empty()).then(|| self.components.lowered(&el.style));
                 self.set_user(id, user);
             }
-            if let Some(listener) = c.on_event {
-                inst.event_handlers.push((id, listener));
+            // Made again, it hears this run's listeners only.
+            if kept {
+                inst.event_handlers.retain(|(n, _)| *n != id);
             }
+            inst.event_handlers
+                .extend(c.on_event.into_iter().map(|listener| (id, listener)));
             // Its `ComponentRef`.
             let element_ref = el.attrs.element_ref.take();
             if old_attrs.element_ref != element_ref
@@ -2431,6 +3281,14 @@ impl<M: TextEngine> Core<M> {
             if let Some(r) = &element_ref {
                 r.attach(id);
             }
+            // The rest goes on its root, after the root's own.
+            if self.is_host(id) {
+                let given = match nested_attrs {
+                    Some((base, parts)) => self.bind_nested_attrs(id, base, parts),
+                    None => std::mem::take(&mut el.attrs),
+                };
+                self.set_given(id, given);
+            }
             // The content this view passes it (`.child`, `.fill`): nodes of
             // this view, inserted into its host as JS inserts its children,
             // so the nested component places them where its view says.
@@ -2438,10 +3296,11 @@ impl<M: TextEngine> Core<M> {
             // makes the app's (`$children`); slots and rows always are.
             let mut content = std::mem::take(&mut el.children);
             let is_slot = |c: &ElNode| {
-                c.attrs
-                    .props
-                    .iter()
-                    .any(|p| matches!(p, Prop::ComponentSlot(_)))
+                matches!(c.kind, ElKind::Fill(_))
+                    || c.attrs
+                        .props
+                        .iter()
+                        .any(|p| matches!(p, Prop::ComponentSlot(_)))
             };
             let lazy = self
                 .components
@@ -2921,6 +3780,11 @@ impl<M: TextEngine> Core<M> {
 
     fn release_id(&mut self, id: NodeId) {
         self.components.owners.remove(&id);
+        // A root component's host is its view's: only the name goes.
+        if self.is_alias(id) {
+            self.unalias(id);
+            return;
+        }
         let _ = self.apply_op(Op::Release { id });
     }
 
@@ -2932,8 +3796,16 @@ impl<M: TextEngine> Core<M> {
                 self.detach_id(e.id);
                 return;
             }
-            // The JS children are placed (or detached) by the view.
-            Part::Children => return,
+            // The JS children are placed (or detached) by the view, and
+            // what fills a slot by the view that fills it.
+            Part::Children | Part::Filled(_) => return,
+            // Its nodes are its children's.
+            Part::Fill(_) => {
+                for c in e.children {
+                    self.release_expanded(c);
+                }
+                return;
+            }
             // A JS child leaves the wrapper being released.
             Part::JsChild => {
                 self.detach_id(e.id);
@@ -2943,7 +3815,12 @@ impl<M: TextEngine> Core<M> {
                 self.release_id(e.id);
                 return;
             }
-            Part::Component(_) => self.release_instance(e.id),
+            // Its content is this view's, released below: deleting it
+            // detaches it.
+            Part::Component(_) => {
+                let content: Vec<NodeId> = e.children.iter().flat_map(|c| self.placed(c)).collect();
+                self.release_component(e.id, &content);
+            }
             // Its nodes are the region's.
             Part::Region(region) => {
                 self.release_region(region);
@@ -2964,8 +3841,17 @@ impl<M: TextEngine> Core<M> {
         self.release_id(e.id);
     }
 
-    /// Frees what a component made (not its host nor its JS children).
+    /// Frees what a component made (not its host nor its JS children,
+    /// which leave its view).
     fn release_instance(&mut self, host: NodeId) {
+        self.release_component(host, &[]);
+    }
+
+    /// [`Self::release_instance`], but of its JS children and slots, those
+    /// in `content` are released right after (a view's content of a nested
+    /// component: deleting them detaches them); the others leave its view
+    /// natively (they stay: JS's, or passed on by the view).
+    fn release_component(&mut self, host: NodeId, content: &[NodeId]) {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
@@ -2981,18 +3867,28 @@ impl<M: TextEngine> Core<M> {
             owner.dispose();
         }
         for &child in &inst.js_children {
-            self.detach_id(child);
+            if !content.contains(&child) {
+                self.detach_id(child);
+            }
         }
         for (_, node) in inst.slots {
             self.components.slot_hosts.remove(&node);
-            self.detach_id(node);
+            if !content.contains(&node) {
+                self.detach_id(node);
+            }
         }
         if let Some(root) = inst.root {
+            // The component its root is, with its alias.
+            if matches!(root.part, Part::Component(_)) {
+                self.release_expanded(root);
+                return;
+            }
+            let node = self.native_id(host);
             if let Some(r) = &root.attrs.element_ref {
-                r.detach(host);
+                r.detach(node);
             }
             if root.part == Part::VirtualList {
-                self.release_virtual_list(host);
+                self.release_virtual_list(node);
             }
             if let Some((_, raw)) = root.text {
                 self.release_id(raw);
@@ -3053,7 +3949,9 @@ impl<M: TextEngine> Core<M> {
             return true;
         }
         if self.is_host(id) {
-            return self.handle(id, id, kind, payload);
+            // The component whose view makes the host's node handles them.
+            let base = self.base_of(id);
+            return self.handle(base, base, kind, payload);
         }
         // A component's own list reports its viewable rows as they settle.
         if kind == EventKind::ViewableItemsChanged
@@ -3080,18 +3978,19 @@ impl<M: TextEngine> Core<M> {
         (slot_of.is_some() || owner.is_some()) && id % 2 == 1
     }
 
-    /// The host of the component whose view has node `id` (itself for a
-    /// host).
+    /// The host of the component whose view has node `id` (for a host, the
+    /// component whose view makes its node: itself, or its root
+    /// component's).
     pub(super) fn host_of(&self, id: NodeId) -> Option<NodeId> {
         if self.is_host(id) {
-            Some(id)
+            Some(self.base_of(id))
         } else {
             self.components.owners.get(&id).copied()
         }
     }
 
-    /// Runs `host`'s component's handler of `kind` on its node `id`; false
-    /// when it has none.
+    /// Runs `host`'s component's handlers of `kind` on its node `id`, in
+    /// the order the element was given them; false when it has none.
     fn handle(
         &mut self,
         host: NodeId,
@@ -3099,30 +3998,45 @@ impl<M: TextEngine> Core<M> {
         kind: EventKind,
         payload: &EventPayload,
     ) -> bool {
-        let Some(listener) = self.handler(host, id, kind) else {
-            return false;
-        };
-        self.run_listener(host, &listener, payload)
+        let mut handled = false;
+        let mut from = 0;
+        while let Some((at, listener)) = self.next_handler(host, id, kind, from) {
+            from = at + 1;
+            // A listener may release the component: the rest go with it.
+            if !self.run_listener(host, &listener, payload) {
+                break;
+            }
+            handled = true;
+        }
+        handled
     }
 
-    /// `host`'s component's handler of `kind` on its node `id`.
-    pub(super) fn handler(
+    /// The first of `host`'s component's handlers of `kind` on its node `id`
+    /// at or after index `from`, with its index: a dispatch walks them in
+    /// order (an element given several listeners of one event calls them
+    /// all) with no list of its own. The handlers stay as they are while it
+    /// does: a view's regions change them when they are reconciled, in the
+    /// commit, not as listeners run.
+    pub(super) fn next_handler(
         &self,
         host: NodeId,
         id: NodeId,
         kind: EventKind,
-    ) -> Option<Listener<EventPayload>> {
-        self.components
-            .instances
-            .get(&host)?
-            .handlers
+        from: usize,
+    ) -> Option<(usize, Listener<EventPayload>)> {
+        let id = self.base_of(id);
+        let inst = self.components.instances.get(&host)?;
+        inst.handlers
             .iter()
-            .find(|(n, k, _)| *n == id && *k == kind)
-            .map(|(_, _, l)| l.clone())
+            .enumerate()
+            .skip(from)
+            .find(|(_, (n, k, _))| *n == id && *k == kind)
+            .map(|(at, (_, _, l))| (at, l.clone()))
     }
 
     /// The part of `host`'s node `id` in the touch responder.
     pub(super) fn responder_el(&self, host: NodeId, id: NodeId) -> Option<Rc<ResponderEl>> {
+        let id = self.base_of(id);
         self.components
             .instances
             .get(&host)?
@@ -3565,7 +4479,7 @@ impl<M: TextEngine> Core<M> {
         safe
     }
 
-    /// Applies what handlers, handles (element refs, native values) and
+    /// Applies what handlers, handles (element refs, animated values) and
     /// services asked for, in order.
     pub(super) fn apply_actions(&mut self) {
         for action in self.components.executor.take_actions() {
@@ -3583,22 +4497,27 @@ impl<M: TextEngine> Core<M> {
     ) {
         match self.components.owners.get(&host).copied() {
             Some(parent) => {
-                let Some(listener) = self
-                    .components
-                    .instances
-                    .get(&parent)
-                    .and_then(|inst| inst.event_handlers.iter().find(|(n, _)| *n == host))
-                    .map(|(_, l)| l.clone())
-                else {
+                let Some(owner) = self.state_owner(parent) else {
                     return;
                 };
-                let Some(parent) = self.state_owner(parent) else {
-                    return;
-                };
-                if let Err(message) = caught(|| listener.call(event.as_any())) {
-                    self.component_failed(parent, message);
+                // In order, found one at a time (no list per event).
+                let mut from = 0;
+                while let Some((at, listener)) =
+                    self.components.instances.get(&parent).and_then(|inst| {
+                        inst.event_handlers
+                            .iter()
+                            .enumerate()
+                            .skip(from)
+                            .find(|(_, (n, _))| *n == host)
+                            .map(|(at, (_, l))| (at, l.clone()))
+                    })
+                {
+                    from = at + 1;
+                    if let Err(message) = caught(|| listener.call(event.as_any())) {
+                        self.component_failed(owner, message);
+                    }
+                    self.apply_actions();
                 }
-                self.apply_actions();
             }
             None => self.events.push(JsEvent::Component { host, event }),
         }

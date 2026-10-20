@@ -13,12 +13,15 @@ use nsh_engine::MountSink;
 
 mod canvas;
 mod class_bench;
+mod compat;
 mod compiled;
 mod component_bench;
 mod components;
 mod counter;
 mod errors;
 mod fetch;
+mod handle_bench;
+mod host_modules;
 mod hot;
 mod hover;
 mod js_touch;
@@ -37,6 +40,7 @@ mod rust_styles;
 mod rust_touch;
 mod shutdown;
 mod split;
+mod storage;
 mod theme;
 
 /// Hands the engine's batches to the test.

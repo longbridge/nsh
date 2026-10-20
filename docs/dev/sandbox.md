@@ -26,7 +26,8 @@ trusted: every limit and check is enforced in Rust, never in JS.
 - **Capabilities** (`nsh_core::access`): an app declares what it may reach in `nsh.json` `"capabilities"` — `network`
   (`hosts`: `*`, `*.example.com` or a host, any method; `http`: a host with `methods` / `schemes` / `pathPrefix`),
   `webview` (`hosts` a web view may show and navigate to), `statusBar`, `clipboard` (`nsh/clipboard`: reading and
-  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). Everything not listed is denied and unknown keys
+  writing the system clipboard; the copy menu of selectable text is the user's own act and needs none). `nsh/storage`
+  is no capability: an app's storage holds only its own data, and the host decides where it is kept. Everything not listed is denied and unknown keys
   are build errors; an app without the key may do everything (a standalone app is its developer's own). The embedding app
   may grant less (`NshAppView.grantCapabilities` / `NshView.setGrantedCapabilities`, the same JSON): a request must be
   allowed by both (`Access`). The declaration travels with the bundle (`capabilities.json` next to it, written by

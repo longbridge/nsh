@@ -50,6 +50,11 @@ The reviewer should be able to judge the API from the description without readin
 Changes to existing public items go under `## Breaking Changes` with a `diff` block showing the old and the new
 usage, even when the old form still works. Additive changes are not breaking, but they are still listed.
 
+What apps use — JS exports, `nsh:rt`, globals, elements, props, events, style keys, Tailwind utilities, their
+declarations and behavior — is never broken: apps built for an earlier release keep running unchanged
+([docs/dev/compatibility.md](docs/dev/compatibility.md)). Such a change adds and deprecates instead of removing, and
+commits its record in `api/current` (`cargo xtask api`); the tests compare it with every release's baseline.
+
 Well-prepared pull requests are easier for us to review and may be merged very quickly. If a contribution is already
 in good shape, maintainers may directly help polish small details and move it forward.
 

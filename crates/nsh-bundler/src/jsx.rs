@@ -1163,7 +1163,7 @@ mod tests {
             source,
             None,
             None,
-            &crate::compile::NativeModules::new(&[nsh_ui_mobile::registry()]),
+            &crate::compile::NativeModules::new(&[nsh_ui_mobile::registry().into()]),
         )
         .map(|(code, _)| code)
     }

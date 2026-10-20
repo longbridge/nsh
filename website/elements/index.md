@@ -113,6 +113,25 @@ const hovered = signal<string | null>(null);
 </View>
 ```
 
+### Keyboard focus
+
+On macOS and the web, Tab moves the keyboard focus between the views that take presses (and the inputs), Return or
+Space presses the focused view, and `focus:` classes style it. A click presses a view without focusing it, so `focus:`
+shows for keyboard focus only.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `focusable` | `boolean` | `true` | Whether a view that takes presses is a stop of Tab; `false` leaves it to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
+
+```tsx
+<View class="rounded-lg p-3 focus:bg-sky-100" onPress={open}>
+  <Text>Open</Text>
+</View>
+
+{/* An overlay's backdrop: a click closes it, Tab goes past it to the content. */}
+<View class="absolute inset-0" focusable={false} onPress={close} />
+```
+
 ### Layout and identity
 
 | Prop | Type | Description |
@@ -122,19 +141,19 @@ const hovered = signal<string | null>(null);
 | `nativeID` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 
-### Gestures driving native values
+### Gestures driving animated values
 
 These props bind a gesture to [native animated values](../modules/nsh-animated.md) that move on the UI thread, with no
 JS per frame. See [touch and gestures](../docs/touch-and-gestures.md).
 
 | Prop | Type | Description |
 |---|---|---|
-| `pan` | `{ x?: NativeValue; y?: NativeValue }` | Drags drive these values (points). |
+| `pan` | `{ x?: AnimatedValue; y?: AnimatedValue }` | Drags drive these values (points). |
 | `onPanStart` | `(e: PanEvent) => void` | A drag started. |
 | `onPanEnd` | `(e: PanEvent) => void` | A drag ended, with the release velocity (e.g. to start a `decay`). |
-| `pinch` | `{ scale?: NativeValue }` | Two-finger pinches drive `scale`. |
+| `pinch` | `{ scale?: AnimatedValue }` | Two-finger pinches drive `scale`. |
 | `onPinchStart` / `onPinchEnd` | `(e: { scale: number; velocity: number }) => void` | A pinch started / ended. |
-| `rotation` | `{ angle?: NativeValue }` | Two-finger rotations drive `angle` (degrees). |
+| `rotation` | `{ angle?: AnimatedValue }` | Two-finger rotations drive `angle` (degrees). |
 | `onRotationStart` / `onRotationEnd` | `(e: { rotation: number; velocity: number }) => void` | A rotation started / ended. |
 
 `PanEvent` is `{ translationX, translationY, velocityX, velocityY, valueX?, valueY? }`: the translation since the start,

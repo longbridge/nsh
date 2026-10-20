@@ -17,7 +17,7 @@ const TEXT_COLOR: f32 = 12.0;
 const SHADOW_COLOR: f32 = 13.0;
 /// The shadow's radius (points).
 const SHADOW_RADIUS: f32 = 14.0;
-/// Canvas native value slot `n` is `CANVAS_ARG + n` (a color as ARGB bits).
+/// Canvas animated value slot `n` is `CANVAS_ARG + n` (a color as ARGB bits).
 const CANVAS_ARG: f32 = 1000.0;
 /// A color value as Java's ARGB bits.
 fn argb(value: AnimationValue) -> f32 {
@@ -135,7 +135,7 @@ impl UiAnimation {
         true
     }
 
-    /// Whether view `id` is dragged by native values.
+    /// Whether view `id` is dragged by animated values.
     pub(crate) fn has_pan(&self, id: u32) -> bool {
         self.gestures
             .get(&id)

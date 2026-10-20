@@ -2,7 +2,7 @@
 
 use nsh_core::ui::prelude::*;
 
-/// A rounded surface with an optional header and footer around its content.
+/// The props of [`Card`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct CardProps {
     /// `elevated` (default): a border and a soft shadow; `outlined`: a
@@ -27,7 +27,7 @@ pub enum CardVariant {
     Outlined,
 }
 
-/// A rounded surface ([`CardProps`]).
+/// A rounded surface with an optional header and footer around its content.
 #[component]
 pub fn Card(props: CardProps) -> impl IntoElement {
     let has_header = move || props.header.with(Option::is_some);

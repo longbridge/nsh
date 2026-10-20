@@ -19,7 +19,7 @@
 //!
 //! Text is laid out with Pango (layouts cached per canvas). Images are
 //! loaded through [`crate::image::load`] when a drawing names them, kept as
-//! Cairo surfaces per canvas and drawn once loaded. Native value slots
+//! Cairo surfaces per canvas and drawn once loaded. Animated value slots
 //! ([`CanvasState::args`]) are read while replaying: an animation only
 //! queues a redraw, without JS.
 
@@ -52,7 +52,7 @@ const MAX_SHADOW_SIZE: f64 = 4096.0;
 pub(crate) struct CanvasState {
     /// The drawing.
     pub(crate) drawing: Option<Arc<Drawing>>,
-    /// Native value slots (`AnimationProp::CanvasArg`).
+    /// Animated value slots (`AnimationProp::CanvasArg`).
     pub(crate) args: Vec<Option<AnimationValue>>,
     /// The images the drawing names, by URI: `None` while loading (or
     /// when they failed to load).
@@ -114,7 +114,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, drawing: Arc<Drawing>) 
     view.changed();
 }
 
-/// Native value slot `k` changed: draws again if the value did.
+/// Animated value slot `k` changed: draws again if the value did.
 pub(crate) fn set_arg(view: &NshView, k: u16, value: AnimationValue) {
     {
         let mut state = view.state_mut();

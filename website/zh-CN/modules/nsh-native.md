@@ -1,15 +1,15 @@
 ---
 title: nsh/native
-description: nativeComponent：把宿主应用注册的原生视图变成带类型的组件。
+description: nativeComponent 与 nativeModule：把你的应用连接到宿主应用注册的原生视图和 Rust 函数。
 order: 9
 ---
 
 # nsh/native
 
-`nsh/native` 把你的应用与宿主应用提供的原生视图连接起来。嵌入了 NSH 的 iOS 或 Android 应用可以按名称注册自己的视图（地图、图表、相机预览等）；`nativeComponent` 为其中一个视图生成带类型的组件。由于 NSH 使用真正的原生视图渲染，这样的组件和其他视图一样位于视图层级中：由 NSH 布局，随父视图裁剪和滚动，层叠关系也正确。
+`nsh/native` 在运行时按名称把你的应用与宿主应用提供的能力连接起来。嵌入了 NSH 的 iOS 或 Android 应用可以按名称注册自己的视图（地图、图表、相机预览等）；`nativeComponent` 为其中一个视图生成带类型的组件。由于 NSH 使用真正的原生视图渲染，这样的组件和其他视图一样位于视图层级中：由 NSH 布局，随父视图裁剪和滚动，层叠关系也正确。用 Rust 嵌入 NSH 的应用还可以注册函数、类和 Rust 组件；`nativeModule` 把它们作为一个带类型的对象交给你。两种方式下应用都用标准的 `nsh build` 构建：宿主在运行应用时接上它提供的内容。
 
 ```ts
-import { nativeComponent } from "nsh/native";
+import { nativeComponent, nativeModule } from "nsh/native";
 ```
 
 原生侧的注册方法见[原生组件](../docs/native-components.md)，以及 [iOS 嵌入](../docs/embedding-ios.md) / [Android 嵌入](../docs/embedding-android.md)。
@@ -93,5 +93,62 @@ function App() {
 mount(App);
 ```
 
+## nativeModule
+
+```ts
+function nativeModule<T extends object>(specifier: string): T;
+```
+
+返回嵌入应用以 `specifier` 注册的套件的导出：其中的模块、类、函数和 Rust 组件，合成一个对象。类型 `T` 由应用自己声明，因此构建应用时不需要了解宿主。
+
+```ts
+import { nativeModule } from "nsh/native";
+
+interface TradingApi {
+  quote(symbol: string): number;
+  placeOrder(symbol: string, quantity: number, side: "Buy" | "Sell"): Promise<Order>;
+  subscribe(onChange: (state: Desk) => void): Promise<void>;
+}
+
+const { Trading } = nativeModule<{ Trading: TradingApi }>("host/trading");
+
+const price = Trading.quote("AAPL");
+```
+
+- 调用方式与导入套件时相同：普通 Rust 函数立即返回结果，`async` 函数返回 Promise，传入的函数是 Rust 之后可以调用的回调。Rust 检查每个参数，参数类型不对时抛出 `TypeError`。
+- 同一个 `specifier` 每次调用都返回同一个对象。
+- `specifier` 下没有注册内容时，`nativeModule` 抛出注明该名称的 `ReferenceError`。请在应用能处理这种情况的地方调用它，或只在为之开发的宿主中使用。
+
+宿主用 Rust 注册套件：在创建视图之前调用平台 crate 的 `set_ui_sets`（与 NSH 自己的套件放在一起），或使用 `EngineConfig::ui_sets`：
+
+```rust
+use nsh_core::ui::prelude::*;
+
+pub struct Trading;
+
+#[module]
+impl Trading {
+    /// A sample price.
+    pub fn quote(symbol: String) -> Result<f64, String> { /* ... */ }
+
+    /// Calls `on_change` with the desk now and on every change.
+    pub async fn subscribe(on_change: Callback<Desk>) {
+        let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
+        loop {
+            on_change.post(desk.borrow_and_update().clone());
+            if desk.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
+let mut trading = Registry::ui_set("host/trading");
+trading.module::<Trading>();
+nsh_platform_gpui::set_ui_sets(vec![nsh_ui_mobile::registry(), trading]);
+```
+
+`subscribe` 让宿主的数据与每个应用保持同步：它的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有订阅了的应用。
+
 > [!NOTE]
-> 属性、事件和命令参数都以 JSON 形式传到原生侧。注册的组件是宿主应用自己的代码：NSH 的[沙箱限制与权限](../docs/sandbox-and-capabilities.md)不约束它们的行为。
+> 属性、事件和命令参数都以 JSON 形式传到原生侧。注册的组件和函数是宿主应用自己的代码：NSH 的[沙箱限制与权限](../docs/sandbox-and-capabilities.md)不约束它们的行为。

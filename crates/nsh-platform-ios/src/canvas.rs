@@ -5,7 +5,7 @@
 //! space with the transform current when each piece is added (as in
 //! canvas), and survives `fill` / `stroke`; strokes apply the current
 //! transform again so line widths and dashes scale with it; gradients fill
-//! by clipping to the shape. Native value slots are read from
+//! by clipping to the shape. Animated value slots are read from
 //! [`CanvasViewIvars::values`], which the mounter updates on animation
 //! frames.
 
@@ -39,7 +39,7 @@ use crate::native_view::NshView;
 #[derive(Default)]
 pub(crate) struct CanvasViewIvars {
     drawing: RefCell<Option<Arc<Drawing>>>,
-    /// Current values of the drawing's native value slots.
+    /// Current values of the drawing's animated value slots.
     values: RefCell<Vec<AnimationValue>>,
     /// Images it draws, by URI, once loaded.
     images: RefCell<FxHashMap<Arc<str>, Retained<UIImage>>>,
@@ -116,7 +116,7 @@ impl CanvasView {
         self.setNeedsDisplay();
     }
 
-    /// Sets the drawing's native value slots (`(slot, value)`, every
+    /// Sets the drawing's animated value slots (`(slot, value)`, every
     /// bound slot on each frame) and draws again what changed: only the
     /// operations reading a slot whose value changed, where they were and
     /// where they are now ([`DamageScan`]).

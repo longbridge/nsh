@@ -45,6 +45,44 @@ after `nsh trace` timings and item counts. Current baselines (Apple Silicon):
   300 static rows and a counter text, one press per frame): the press and the binding it runs take ~0.3µs, the commit
   ~82µs (the text's relayout and the tree's layout pass), one mount item. The former model rendered the whole view
   again and diffed it: ~312µs per commit for the same view.
+- Rust components' handles (`handle_bench`: `cargo test --release -p nsh-engine --test engine bench_handles --
+  --ignored --nocapture --test-threads=1`, 1000 calls in one press, the minimum of 200 presses, per call; steady
+  state of five runs). In brackets, when `AnimatedValue` was an `Rc` of its node and `ElementRef` an `Rc` of its
+  slot rather than `Copy` handles their owner keeps (an access is a thread-local, an index and a generation check):
+
+  | call | per call |
+  |---|---|
+  | `AnimatedValue::set` | 8.3–9.2ns [8.2–9.7ns] |
+  | `AnimatedValue::timing` (its end dropped) | 14.6–16.9ns [13.0–14.2ns] |
+  | `AnimatedValue::interpolate` of a node made before (the handle the current owner keeps of it) | 26.5–27.5ns [20.3–20.9ns] |
+  | `ElementRef::node` | 1.2ns [0.2ns] |
+  | `ElementRef::focus` | 12.5–14.4ns [8.8–9.1ns] |
+
+  Deriving a node again under an owner that keeps a handle of it returns that handle (30–31ns while it made a new
+  slot each time). They are used when a view is made and on events, never per frame (the graph runs by node id), and left
+  `component_bench` and `nsh trace` of the Rust gallery's Animations and Gestures pages (taps on their controls) where
+  they were: the same ops and mount items in every commit (Animations: 2029 items on the page's first frame, then
+  4 / 10 / 9 / 9 / 3 / 3 / 17 for Release, Stagger, Sequence, Loop, Stop, Reset and a curve; Gestures: 815, then
+  4 / 14 / 3 / 10 / 4 / 2), the commits' times within their run-to-run spread.
+- Rust components' structure (`origin/main` against these changes: `Copy` handles, listeners and tasks under their
+  owner, every listener of an event walked in place, Delete with no Remove for what leaves a nested component,
+  children passed on to a nested component, a component rooted in another made on its host, slots filled with no
+  holder and passed on, what a view gives a component's element on its root; release, minimum / median):
+  `component_bench` GridRust first frame JS 392–395µs / core 0.97–0.98ms before, 408–415µs / 1.01–1.02ms after,
+  200 titles JS 135µs / core 412–422µs before, 145–146µs / 428µs after, RowsRust first frame core 209–211µs before,
+  232µs after, scrolling 5.75µs / 6.07–6.11µs per rebinding frame core, JS 1.43µs / 1.51–1.54µs; the same ops and
+  mount items (1015 / 2217, 200 / 400, 500 / 617). The renaming commit alone, the same code as before, measured right
+  after gives the later numbers (GridRust core 1.01ms, RowsRust 229µs and 6.0–6.1µs), so the difference is the
+  machine's drift between the runs, not the changes. `handle_bench` (two runs each): `set` 8.0–8.4ns before,
+  8.8–9.6ns after; `timing` 11.9–14.8 / 15.2–15.8ns; `interpolate` of a node made before 18.8–24.6 / 29.5–29.9ns;
+  `ElementRef::node` 0.2 / 1.2ns; `focus` 8.0–8.1 / 9.5–9.7ns. Release `nsh trace` (nine interleaved runs):
+  `Bench.tsx --scroll 3000` the same 1205 ops / 1008 items first and 1064 ops / 914 items over 39 commits (first
+  commit 1.33 / 1.65ms before, 1.35 / 1.64ms after; the scrolling 14.8 / 15.9ms against 15.4 / 16.2ms). The Rust
+  gallery (its app's command line built release, five interleaved runs, the index and each demo page opened with
+  `--wait 1500`): the same mount items in every commit of every page (index 1012, Stocks 1102, AI Chat 793, Lists
+  900, Animations 2029, Form 1293, ...), but for the Stocks page's ticks after it opens, which follow a generator
+  seeded by the clock; a page's first commit 1.0–5.0ms either way, inside the run-to-run spread (index 1.16 / 1.86ms
+  before, 1.46 / 2.03ms after).
 - Calls into Rust from JS (`class_bench`: `cargo test --release -p nsh-engine --test engine bench_calls -- --ignored
   --nocapture --test-threads=1`, min / median of 20 runs, per call, the JS loop included). A member or function that
   is not `async` runs in the call and converts its values directly (`docs/dev/rust-classes.md`); one awaited
@@ -126,7 +164,7 @@ draw a panel.
   ~150 per wheel event in Lists, ~3.5 ms each event in a debug build), and canvases out of sight are not redrawn by
   their animations.
 
-  Partial canvas redraws (`nsh_core::canvas::DamageScan`, `docs/dev/canvas.md`): an animation of a canvas's native
+  Partial canvas redraws (`nsh_core::canvas::DamageScan`, `docs/dev/canvas.md`): an animation of a canvas's animated
   values redraws only what the operations reading them cover (Stocks: the chart's ring ~31×31 pt of its 524×340, the
   sparklines' ~23×25 of 124×58; whole only on the ticks). With `drawRect:` this halved the main-thread frame (Stocks
   idle `main` p50 ~3.0 → ~2.0 ms, CPU ~62% → ~44%). On top of content layers drawn asynchronously the gain is within

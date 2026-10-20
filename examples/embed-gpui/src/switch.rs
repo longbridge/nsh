@@ -2,7 +2,8 @@
 //! component. nsh lays its box out like any view, at the size the switch
 //! reports (its track and label); the switch draws, takes its own clicks
 //! and keys (Space or Enter while focused), is a Tab stop among the app's
-//! text fields, and tells JS (`onChange`, `{ checked }`).
+//! text fields, and tells JS (`onChange`, `{ checked }`). While the
+//! layers show it is framed as a GPUI widget ([`crate::layers`]).
 
 use std::{cell::Cell, rc::Rc};
 
@@ -70,10 +71,17 @@ impl NativeComponent for HostSwitch {
                 .text_system()
                 .shape_line(self.label.clone().into(), font_size, &[run], None);
         let line_height = f32::from(window.line_height().max(px(TRACK.1)));
-        let wanted = (
+        let mut wanted = (
             (TRACK.0 + GAP + f32::from(label.width) + 2.0 * BORDER).ceil(),
             (line_height + 2.0 * BORDER).ceil(),
         );
+        if crate::layers::shown(cx) {
+            let frame = 2.0 * crate::layers::WIDGET_BORDER;
+            wanted = (
+                wanted.0 + crate::layers::WIDGET_TAG + frame,
+                wanted.1 + frame,
+            );
+        }
         if wanted != self.reported {
             self.reported = wanted;
             self.cx.set_size(wanted.0, wanted.1);
@@ -98,31 +106,29 @@ impl NativeComponent for HostSwitch {
         let ring = cx.theme().ring;
         let radius = cx.theme().radius;
         let click_focus = focus.clone();
-        Some(
-            div()
-                .size_full()
-                .rounded(radius)
-                .track_focus(&focus)
-                // A ring while focused (the switch's own shows for its own
-                // handle only).
-                .border_1()
-                .border_color(gpui_kit::transparent_black())
-                .focus(move |s| s.border_color(ring))
-                .on_key_down(toggle)
-                // The switch focuses its own handle on a press; the focus
-                // that Tab and the keys use is this one.
-                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                    window.focus(&click_focus, cx);
-                })
-                .child(
-                    Switch::new("host-switch")
-                        .checked(self.checked.get())
-                        .label(self.label.clone())
-                        .tab_stop(false)
-                        .on_change(move |value: &bool, _, _| set(*value)),
-                )
-                .into_any_element(),
-        )
+        let switch = div()
+            .size_full()
+            .rounded(radius)
+            .track_focus(&focus)
+            // A ring while focused (the switch's own shows for its own
+            // handle only).
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
+            .focus(move |s| s.border_color(ring))
+            .on_key_down(toggle)
+            // The switch focuses its own handle on a press; the focus
+            // that Tab and the keys use is this one.
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                window.focus(&click_focus, cx);
+            })
+            .child(
+                Switch::new("host-switch")
+                    .checked(self.checked.get())
+                    .label(self.label.clone())
+                    .tab_stop(false)
+                    .on_change(move |value: &bool, _, _| set(*value)),
+            );
+        Some(crate::layers::widget_frame(switch, cx).into_any_element())
     }
 
     fn focus_handle(&self) -> Option<FocusHandle> {

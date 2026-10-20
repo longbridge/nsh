@@ -1,3 +1,4 @@
+use nsh_core::ui::description::SetDescription;
 use rquickjs::{
     CatchResultExt, Context, Module, Runtime,
     module::{WriteOptions, WriteOptionsEndianness},
@@ -14,28 +15,53 @@ pub const BYTECODE_VERSION: &str = "rquickjs-0.14.0/quickjs-ng-0.16.2/le64";
 /// it as `bundle.js:LINE:COL`.
 pub const BUNDLE_NAME: &str = nsh_core::js::ENTRY_CHUNK;
 
+/// What compiled bytecode leaves out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Strip {
+    /// Keeps everything: the functions' source text (`Function.prototype
+    /// .toString`) and the line and column tables of stack traces.
+    #[default]
+    Nothing,
+    /// Drops the functions' source text but keeps the line and column
+    /// tables: stack frames still read `bundle.js:LINE:COL`, which the
+    /// bundle's source map turns into app source locations.
+    Source,
+    /// Drops both: the smallest bytecode, whose stack frames have no
+    /// position (`<null>:0:1`).
+    All,
+}
+
+impl From<bool> for Strip {
+    /// `true`: [`Strip::All`] (release builds), `false`: [`Strip::Nothing`].
+    fn from(strip: bool) -> Self {
+        if strip { Strip::All } else { Strip::Nothing }
+    }
+}
+
 /// Compiles a bundle to QuickJS bytecode.
 ///
 /// The bytecode is only valid for the exact QuickJS version linked into
 /// this crate, which is why the CLI and the runtime share it.
-/// `strip` removes source and debug info (smaller, but stacks lose line
-/// numbers): use it for release builds only.
-pub fn compile_bytecode(source: &str, strip: bool) -> Result<Vec<u8>, JsError> {
+/// `strip` ([`Strip`], or `true` for [`Strip::All`]) removes source and
+/// debug info (smaller, but [`Strip::All`] stacks lose line numbers).
+pub fn compile_bytecode(source: &str, strip: impl Into<Strip>) -> Result<Vec<u8>, JsError> {
     compile_bytecode_with(source, strip, &[])
 }
 
 /// [`compile_bytecode`] for a bundle that may import the native modules of
-/// `ui_sets` (as [`crate::HostOptions::ui_sets`]).
+/// `ui_sets`, the sets the hosts that run it serve
+/// ([`crate::HostOptions::ui_sets`]): imports link by name, so their
+/// descriptions are all it takes.
 pub fn compile_bytecode_with(
     source: &str,
-    strip: bool,
-    ui_sets: &[nsh_core::ui::Registry],
+    strip: impl Into<Strip>,
+    ui_sets: &[SetDescription],
 ) -> Result<Vec<u8>, JsError> {
     compile(
         BUNDLE_NAME,
         source,
-        crate::modules::ModuleTable::new(ui_sets),
-        strip,
+        crate::modules::ModuleTable::compiling(ui_sets),
+        strip.into(),
     )
 }
 
@@ -47,13 +73,14 @@ pub fn compile_bytecode_with(
 pub fn compile_chunk_bytecode(
     entry: &str,
     chunks: &[(&str, &str)],
-    strip: bool,
-    ui_sets: &[nsh_core::ui::Registry],
+    strip: impl Into<Strip>,
+    ui_sets: &[SetDescription],
 ) -> Result<Vec<Vec<u8>>, JsError> {
+    let strip = strip.into();
     chunks
         .iter()
         .map(|&(id, source)| {
-            let table = crate::modules::ModuleTable::new(ui_sets);
+            let table = crate::modules::ModuleTable::compiling(ui_sets);
             {
                 let mut code = table.chunks.borrow_mut();
                 let others = chunks.iter().filter(|(other, _)| *other != id);
@@ -73,7 +100,7 @@ fn compile(
     name: &str,
     source: &str,
     modules: crate::modules::ModuleTable,
-    strip: bool,
+    strip: Strip,
 ) -> Result<Vec<u8>, JsError> {
     let rt = Runtime::new()?;
     let ctx = Context::full(&rt)?;
@@ -91,8 +118,8 @@ fn compile(
             .map_err(JsError::caught)?;
         let options = WriteOptions {
             endianness: WriteOptionsEndianness::Little,
-            strip_source: strip,
-            strip_debug: strip,
+            strip_source: strip != Strip::Nothing,
+            strip_debug: strip == Strip::All,
             ..WriteOptions::default()
         };
         module

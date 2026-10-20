@@ -101,4 +101,10 @@ mod tests {
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();
         assert_eq!(modules, ["ActionSheet", "Alert", "Keyboard", "StatusBar"]);
     }
+
+    /// Every export TS sees has a doc comment (the declarations show it).
+    #[test]
+    fn every_export_is_documented() {
+        assert_eq!(super::registry().undocumented(), Vec::<String>::new());
+    }
 }

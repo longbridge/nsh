@@ -1,7 +1,8 @@
 name: GPUI
 
 # Builds, lints and tests the GPUI backend (the workspace in `crates/gpui`) on
-# macOS, Windows and Linux. The main workspace's CI covers the CLI that runs
+# macOS, Windows and Linux, and lints the GPUI Kit example
+# (`examples/embed-gpui`, a workspace of its own) on Linux. The main workspace's CI covers the CLI that runs
 # it (`nsh run --target gpui`, `nsh package --target gpui`).
 
 on:
@@ -11,10 +12,12 @@ on:
     branches: [main]
     paths:
       - "crates/gpui/**"
+      - "examples/embed-gpui/**"
       - ".github/workflows/gpui.yml"
   pull_request:
     paths:
       - "crates/gpui/**"
+      - "examples/embed-gpui/**"
       - ".github/workflows/gpui.yml"
   schedule:
     - cron: "0 3 * * *"
@@ -84,7 +87,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-gpui-cargo-${{ hashFiles('crates/gpui/Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ runner.os }}-gpui-cargo-${{ hashFiles('crates/gpui/Cargo.lock', 'examples/embed-gpui/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-gpui-cargo-
 
@@ -98,3 +101,16 @@ jobs:
       - name: Test
         working-directory: crates/gpui
         run: cargo test
+
+      # With the tests in windows of GPUI's test platform (feature `shot`, GPUI's
+      # test support): still no display.
+      - name: Test (GPUI's test platform)
+        if: runner.os == 'Linux'
+        working-directory: crates/gpui
+        run: cargo test -p nsh-platform-gpui --features shot
+
+      # The GPUI Kit example: its `build.rs` bundles its app.
+      - name: Clippy (examples/embed-gpui)
+        if: runner.os == 'Linux'
+        working-directory: examples/embed-gpui
+        run: cargo clippy --all-targets -- -D warnings

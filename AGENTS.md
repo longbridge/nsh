@@ -26,7 +26,8 @@ crates/
                        the reactive graph both sides run on (`reactive.rs`, Solid's algorithm, generic over the host);
                        Rust components that run once (`ui/`: signals, elements, bindings, typed styles, the theme;
                        `core/components.rs`, `core/views.rs`), classes TS uses with `new` (`ui/class.rs`), JS's calls into
-                       Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); the runtime's Rust
+                       Rust and what comes back, typed (`ui/call.rs`: ops carrying closures, the event stream, posts); UI sets as data for the
+                       toolchain (`ui/description.rs`: exports, declarations, files; JSON for apps' describe programs); the runtime's Rust
                        modules (`runtime/`: `nsh/android`'s Toast, `nsh/image`, ...; their JS face is made from their specs)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
                        `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
@@ -44,7 +45,8 @@ crates/
                        decoding JS values into core types (`protocol.rs`); the web APIs of TS apps (`web/`: fetch, streams,
                        Blob / FormData, URL, encoding, events), native classes; the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
-  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
+  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform; feature
+                       `headless`: headless runs (`headless/`: what `nsh trace` does, fetch on ureq, the runner of apps with Rust crates)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
@@ -55,6 +57,8 @@ crates/
                        all of that, without it only `compile_module` (`compile.rs`: one module, no rolldown) is left, which
                        also builds for WebAssembly (the website's playground)
   nsh-dev/             Dev tooling: dev server protocol, server (CLI, feature `server`), client (host, feature `client`)
+  nsh-testing/         Headless tests of an app's TSX entry (`cargo test`): built against UI sets as `nsh run` builds it, run on
+                       `nsh_engine::headless::Headless` (an engine without a window, display frames, a model of the views, presses)
   nsh-platform-ios/    UIKit backend (iOS / simulator / Mac Catalyst): native view mounting, CoreText text engine, input, AppView, standalone app;
                        feature `dev`: dev server client, log forwarding, error overlay; feature `embed`: the C ABI (`embed.rs`,
                        `include/nsh.h`) under the `NativeShell` Swift module (`swift/NativeShell.swift`) iOS apps embed nsh with
@@ -98,25 +102,34 @@ crates/
   gpui/nsh-gpui-app/   Release runner on GPUI: the executable of apps built by `nsh package --target gpui`
   nsh-ios-host/        Development host app (Catalyst / iOS simulator); connects to a dev server or runs a local bundle
   nsh-ios-app/         Release runner: the executable of iOS apps built by `nsh package`
-  nsh-cli/             The `nsh` command line (a library: `main_with(ui_sets)`): init / build / trace / check / dev / run / package; keygen /
+  nsh-cli/             The `nsh` command line (a binary): init / build / trace / check / dev / run / package; keygen /
                        certify / publish / verify / revoke; apps with Rust components of their own (`rust_app.rs`: each crate
-                       nsh.json `"rust"` names, one or a list, has a `#[native_module("…")]` fn; its hosts take nsh's crates where the app's crates do:
+                       nsh.json `"rust"` names, one or a list, has a `#[native_module("…")]` fn; a generated workspace in `.nsh/rust`
+                       with a `describe` program, which prints the sets as data for the CLI to bundle, compile and declare with, the
+                       hosts and runners, and the headless runner of `nsh trace`; it takes nsh's crates where the app's crates do:
                        crates.io at the CLI's version, or the checkout they depend on by path; docs/dev/tooling.md); web packages and the
                        browser host's pages (`web.rs`, `web/`); what it prints (`ui.rs`:
                        one line per step, tools' output only on failure, `-v` for everything; docs/dev/tooling.md "Output")
   xtask/               Maintainer tasks: `cargo xtask android` (Android runtime), `ios-embed` (the iOS SDK), `dist` (the distribution),
-                       `web` (the WebAssembly runtime and the website's demos)
+                       `web` (the WebAssembly runtime and the website's demos), `api` (records `api/current`; `--freeze`: a release's baseline)
+api/                  What apps depend on, held by the engine's `compat` tests: `current/` (this checkout's module exports, globals and
+                      declarations), `v<major>.<minor>/` (one per minor line, frozen by its releases, with the example apps its first built
+                      and scripts of their use)
 docs/                 Documentation; `docs/dev/`: for developers of nsh (architecture, internals, decisions, pitfalls)
 website/              The documentation site (Astro; guides, element / component / API reference in English and zh-CN) and its
                       runnable demos (`website/demos/*.tsx`, live on the site through the WebAssembly runtime); see its README
 examples/             Example apps (gallery: a demo index, one module per demo; gallery-rs: the same in Rust, the app's crate in
-                      `native/`; counter), embedding samples (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace)
-                      and the app they run (embedded: uses a native component the samples register); bench: component benchmarks
+                      `native/`; rust-exports: a TSX app using one of each export of its crate, the reference for exporting
+                      components, modules and classes, with headless tests of the TSX entry; counter), embedding samples
+                      (embed-ios, embed-android; embed-gpui: a GPUI Kit app, its own workspace; `run/` the root's
+                      `cargo run -p example-embed-gpui`) and the app they run (embedded: uses a native component the samples
+                      register); bench: component benchmarks
 ```
 
 Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ←
 `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host` / `nsh-gpui-app`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-ui-mobile` depends
-on `nsh-core` only and is used by the bundler (declarations), the platforms and the CLI (registry). `nsh-core` must not depend
+on `nsh-core` only and is used by the bundler (declarations), the platforms and the CLI (registry). An app's own crates
+are never linked into the CLI: it reads their UI sets as data (`nsh_core::ui::description`). `nsh-core` must not depend
 on any platform or JS crate.
 
 ## Documentation
@@ -138,6 +151,7 @@ on any platform or JS crate.
 | the macOS backend (`nsh-platform-macos`, AppKit) | `docs/dev/macos.md` |
 | the Windows backend (`nsh-platform-windows`, Win32 / Direct2D) | `docs/dev/windows.md` |
 | the GPUI backend (`nsh-platform-gpui`, macOS / Windows / Linux) | `docs/dev/gpui.md` |
+| anything apps use: exports, `nsh:rt`, props, events, style keys, Tailwind, declarations, behavior, formats | `docs/dev/compatibility.md` |
 | a hot path | `docs/dev/performance.md` (baselines) |
 | anything platform-specific | `docs/dev/pitfalls.md` (verified constraints, by area) |
 | components (`nsh/ui/mobile`) | `docs/dev/components.md`, `crates/nsh-ui-mobile/README.md` |
@@ -154,7 +168,7 @@ Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing document
 cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
 cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
-./target/debug/nsh init my-app                                                     # new app: App.tsx, nsh.json, tsconfig.json, .nsh/types
+./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX with a crate in native/; asks on a terminal without --template
 cargo build -p nsh-ios-host --target aarch64-apple-ios-macabi                          # the Catalyst development host (nsh run builds it in a checkout)
 cargo build -p nsh-ios-host --target aarch64-apple-ios-sim                             # the iOS simulator host (`nsh run --target ios`)
 cargo build -p nsh-ios-app --target aarch64-apple-ios-sim                              # the release runner (`nsh package --target ios-simulator`)
@@ -162,6 +176,7 @@ cargo build -p nsh-linux-host                                                   
 cargo build -p nsh-macos-host                                                          # the macOS (AppKit) development host (`nsh run --target macos` builds it in a checkout)
 cargo build -p nsh-windows-host                                                        # the Windows development host (`nsh run` on Windows builds it in a checkout)
 cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-host                    # the GPUI development host (`nsh run --target gpui` builds it in a checkout)
+cargo run -p example-embed-gpui                                                        # the GPUI Kit embedding example (a std-only runner that only runs `cargo run` in its own workspace)
 ./target/debug/nsh trace examples/counter                                  # headless run: prints mount items and the time of every commit
 ./target/release/nsh trace examples/gallery/Bench.tsx --scroll 3000 --taps 0       # headless scrolling (10pt per frame): per-frame list cost
 ./target/debug/nsh trace examples/hopper --tap label:Plan --wait 500 --safe-area 47,0,34,0   # tap by testID / label / text, run timers, insets
@@ -196,6 +211,9 @@ cargo clippy --workspace --all-targets
 cargo clippy -p nsh-platform-ios -p nsh-ios-host -p nsh-ios-app --target aarch64-apple-ios-macabi --features nsh-platform-ios/embed,nsh-platform-ios/dev
 cargo xtask ios-embed [--dynamic] [--x86-64-simulator] [--no-catalyst] [--no-dev]   # NativeShell(Dev).xcframework into dist/nsh/embed/ios
 cargo xtask web                                                                 # nsh.wasm + player + website demos into website/public/play
+cargo xtask api                                                                 # record the API apps use in api/current (after an additive change)
+cargo xtask api --freeze                                                        # freeze a release's API in api/v<major>.<minor> (with the version bump)
+cargo test -p nsh-engine --test engine compat::                                 # the API against every release's baseline, and the apps they built
 cargo clippy -p nsh-platform-web --target wasm32-unknown-unknown --features compiler   # the web backend (empty off WebAssembly)
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets      # the Linux backend (on Linux; empty elsewhere)
 cargo clippy -p nsh-platform-macos -p nsh-macos-host -p nsh-macos-app --all-targets --features nsh-platform-macos/dev   # the macOS backend (on macOS)
@@ -227,7 +245,15 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   every UI set builds on; `nsh/ui/<set>` is a whole UI for one form factor (`nsh/ui/mobile`; a desktop set will be
   separate, never an abstraction over both). Shared vs one form factor decides the layer, not JS vs native. Platform-only APIs go to
   `nsh/ios` / `nsh/android`, platform-only props into `ios={{…}}` / `android={{…}}` / `desktop={{…}}`. `nsh` has no
-  catch-all re-exports; moved APIs get no compatibility re-exports.
+  catch-all re-exports.
+- **Backward compatible, always.** Apps are delivered to host apps as plugins and may never be built again, so every
+  release runs every app built for an earlier one (from v0.1.2 on). Nothing released is removed or renamed: modules,
+  exports and their members, `nsh:rt` (what compiled JSX calls: append-only, signatures and semantics kept), globals,
+  props, events and payload keys, style keys and values, Tailwind utilities. A rename or move keeps the old name as a
+  `@deprecated` alias of the same implementation, for good. Types only widen; inputs gain optional members only;
+  behavior and defaults stay (new behavior is opt-in); formats (`.nshpkg`, certificates) are read forever. Every API
+  change, additive ones included, is recorded in `api/current` (`cargo xtask api`); `api/v*` only changes when a
+  release freezes it (`docs/dev/compatibility.md`).
 - **Primitives only.** The runtime adds capabilities, not widgets: components are drawn with the primitives in a UI
   set and look the same on every platform; no platform-styled widgets. React Native is a reference for which
   capabilities exist, not an API to be compatible with.
@@ -321,7 +347,9 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
 ## Verification after changes
 
 1. `cargo test --workspace`, plus fmt and clippy as listed above (including the Catalyst target, the macOS crates, `cargo xtask clippy-android`, on Linux the Linux crates, on Windows the Windows crates; for changes in `crates/gpui` or to what it uses, its own tests and clippy there).
-2. Changes to the runtime (`nsh-js`), engine or core: run `nsh trace` and check item counts and timings.
+2. Changes to the runtime (`nsh-js`), engine or core: run `nsh trace` and check item counts and timings. Changes to
+   anything apps use: `cargo test -p nsh-engine --test engine compat::` passes with `api/v*` untouched, and
+   `api/current` records the change (`docs/dev/compatibility.md`).
 3. Changes to the platform layer: launch with `nsh run`, check screenshots and simulate input where needed (the terminal needs the Screen
    Recording and Accessibility permissions; while the screen is locked the frontmost app is `loginwindow` and clicks fail, but window
    screenshots still work). iOS simulator: `xcrun simctl io booted screenshot`, `xcrun simctl ui booted appearance dark`.

@@ -394,7 +394,7 @@ struct Node {
     component: Option<Box<ComponentState>>,
     /// Recycling slot (or role) of a list cell.
     slot: Option<CellSlot>,
-    /// Native values driven by gestures on the view.
+    /// Animated values driven by gestures on the view.
     gestures: GestureValues,
     /// The native view exists.
     created: bool,
@@ -796,6 +796,14 @@ impl<M: TextEngine> Core<M> {
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {
         self.access = access;
+    }
+
+    /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
+    /// memory, for the core's life.
+    pub fn set_storage(&mut self, backend: Option<Arc<dyn crate::storage::StorageBackend>>) {
+        self.components
+            .runtime
+            .set_storage(crate::storage::Store::new(backend));
     }
 
     /// Logs (once) that the app was refused `what`.
@@ -1237,6 +1245,7 @@ impl<M: TextEngine> Core<M> {
                 _ => {}
             }
             let node = &self.nodes[key as usize];
+            let id = node.id;
             match command {
                 Command::ScrollToEnd { animated } => {
                     let Some(content) = node.scroll.as_ref().and_then(|s| s.content) else {
@@ -1282,6 +1291,42 @@ impl<M: TextEngine> Core<M> {
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
         self.slots[idx] = key + 1;
         Ok(key)
+    }
+
+    /// Makes `alias` another name of node `id`: a component whose view's
+    /// root is another component makes that one on its own host, under a
+    /// name of its own (the nested component's host), with no node of its
+    /// own. What the core sends names the node by its own id.
+    pub(super) fn alias(&mut self, alias: NodeId, id: NodeId) -> Result<(), ApplyError> {
+        let key = self.key(id)?;
+        let idx = alias as usize;
+        if idx > self.slots.len().saturating_add(self.max_nodes) {
+            return Err(ApplyError::IdOutOfRange(alias));
+        }
+        if idx >= self.slots.len() {
+            self.slots.resize((idx + 1).next_power_of_two(), 0);
+        } else if self.slots[idx] != 0 {
+            return Err(ApplyError::DuplicateNode(alias));
+        }
+        self.slots[idx] = key + 1;
+        Ok(())
+    }
+
+    /// Whether `id` is another name of a node ([`Self::alias`]).
+    pub(super) fn is_alias(&self, id: NodeId) -> bool {
+        self.key(id).is_ok_and(|k| self.nodes[k as usize].id != id)
+    }
+
+    /// Forgets alias `id` (its node stays).
+    pub(super) fn unalias(&mut self, id: NodeId) {
+        if self.is_alias(id) {
+            self.slots[id as usize] = 0;
+        }
+    }
+
+    /// The id node `id` has natively (another for an alias).
+    pub(super) fn native_id(&self, id: NodeId) -> NodeId {
+        self.key(id).map_or(id, |k| self.nodes[k as usize].id)
     }
 
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
@@ -1333,6 +1378,7 @@ impl<M: TextEngine> Core<M> {
         if node.kind == kind {
             return true;
         }
+        let id = node.id;
         let unsent = self
             .mount
             .iter()
@@ -2152,6 +2198,13 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::Focusable(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.focusable != value {
+                    props.focusable = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::Accessibility(prop) => {
                 // A label changing on mounted props goes alone: it is
                 // the one that follows app state (a count, a value).
@@ -2510,9 +2563,10 @@ impl<M: TextEngine> Core<M> {
             if parent_created {
                 self.ensure_created(child);
                 let before = self.native_before(parent, child);
+                // By the nodes' own ids (the ops may name an alias).
                 self.mount.push(MountItem::Insert {
-                    parent: parent_id,
-                    child: child_id,
+                    parent: self.nodes[parent as usize].id,
+                    child: self.nodes[child as usize].id,
                     before,
                 });
             }

@@ -63,7 +63,8 @@ import { Button, Card, Group, Sheet, Stack, Screen, createNavigator } from "nsh/
 
 所有组件的颜色都取自同一个主题，从不使用写死的颜色值。每种颜色都有浅色和深色两个值。系统在浅色与深色外观之间切换时，组件会在原生层直接换色，无需重新渲染，也不经过 JS。
 
-默认主题是 gpui-kit 的默认主题，一套中性的黑白配色，圆角半径针对移动端做了调整。要使用自己的主题，在 `nsh.json` 中设置 `"theme"`，值为主题文件的路径（相对于 `nsh.json`）：
+默认主题基于 gpui-kit 的默认主题，一套中性的黑白配色，圆角半径针对移动端做了调整，状态色（`danger`、`info`、`success`、`warning`）
+上的文字在浅色和深色外观下都达到 WCAG AA 的对比度。要使用自己的主题，在 `nsh.json` 中设置 `"theme"`，值为主题文件的路径（相对于 `nsh.json`）：
 
 ```json
 {

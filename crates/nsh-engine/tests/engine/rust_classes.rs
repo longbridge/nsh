@@ -119,7 +119,13 @@ mod other {
     }
 }
 
+thread_local! {
+    /// What `Tools.mark` recorded (on the engine's thread).
+    static MARKS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Functions of the three kinds.
+#[module]
 pub(crate) struct Tools;
 
 #[module]
@@ -163,6 +169,27 @@ impl Tools {
         heard.post("task".to_owned());
     }
 
+    /// Records `word` as an op, returning nothing.
+    pub(crate) fn mark(word: String, cx: &mut ModuleCx) {
+        let _ = cx;
+        MARKS.with_borrow_mut(|marks| marks.push(word));
+    }
+
+    /// Records `word` as an op that may fail: it fails on "no".
+    pub(crate) fn mark_or_fail(word: String, cx: &mut ModuleCx) -> Result<(), String> {
+        let _ = cx;
+        if word == "no" {
+            return Err(format!("refused {word:?}"));
+        }
+        MARKS.with_borrow_mut(|marks| marks.push(word));
+        Ok(())
+    }
+
+    /// The words recorded so far, at once.
+    pub(crate) fn marks() -> Vec<String> {
+        MARKS.with_borrow(Clone::clone)
+    }
+
     /// An op that panics.
     pub(crate) fn explode(cx: &mut ModuleCx) -> i64 {
         let _ = cx;
@@ -178,6 +205,7 @@ impl Tools {
 }
 
 /// Takes a `u32` in every kind of call.
+#[module]
 pub(crate) struct Ints;
 
 #[module]
@@ -309,6 +337,7 @@ impl Twin {
 }
 
 /// Makes `Lonely`s.
+#[module]
 pub(crate) struct Maker;
 
 #[module]
@@ -371,10 +400,11 @@ pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<Moun
         entry,
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &ui_sets).unwrap();
+    let described: Vec<_> = ui_sets.iter().map(Into::into).collect();
+    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &described).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -388,6 +418,8 @@ pub(crate) fn start(app: &str, ui_sets: Vec<Registry>) -> (Engine, Receiver<Moun
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -517,6 +549,43 @@ setTimeout(() => shown.set(`done ${heard.join(",")}`), 200);
 mount(() => <Text>{shown()}</Text>);
 "#;
 
+const VOID: &str = r#"import { mount, signal, Text } from "nsh";
+import { Tools } from "test/classes";
+
+const shown = signal("waiting");
+const msg = (f) => { try { return String(f()); } catch (e) { return `threw ${e.name}: ${e.message}`; } };
+setTimeout(async () => {
+  const lines = [];
+  // An op returning nothing is a plain call: `undefined`, run in order
+  // with the ops before it once the turn ends; a wrong argument throws.
+  const first = Tools.mark("a");
+  lines.push(`${first} ${msg(() => Tools.mark(1))} ${Tools.marks().join(",") || "none"}`);
+  // An op returning `Result<(), E>` is a promise: resolved once it ran
+  // (after the ones before it), rejected with an `Err`.
+  const fine = Tools.markOrFail("b");
+  lines.push(`${fine instanceof Promise} ${await fine} ${Tools.marks().join(",")}`);
+  try { await Tools.markOrFail("no"); lines.push("resolved"); } catch (e) { lines.push(`${e.name}: ${e.message}`); }
+  // A task returning nothing is a promise, resolved when it ends.
+  const heard = [];
+  const later = Tools.postLater((w) => heard.push(w), 5);
+  lines.push(`${later instanceof Promise} ${await later} ${heard.join(",") || "none"}`);
+  shown.set(`done ${lines.join("|")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn ops_returning_nothing_are_plain_calls_and_others_promises() {
+    let (_engine, rx) = start(VOID, vec![registry()]);
+    // A task's posts reach JS before its result.
+    assert_eq!(
+        shown(&rx, "done"),
+        "done undefined threw TypeError: Tools.mark: `word`: expected a string, got 1 none|\
+         true undefined a,b|Error: refused \"no\"|true undefined task"
+    );
+}
+
 #[test]
 fn a_post_in_a_synchronous_call_keeps_its_place_before_later_ones() {
     let (_engine, rx) = start(ORDER, vec![registry()]);
@@ -639,10 +708,10 @@ fn classes_a_signature_names_are_exported_with_it() {
 }
 
 const FRAMED: &str = r#"import { mount } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { Framed } from "test/classes";
 
-const v = createNativeValue(0.25);
+const v = createAnimatedValue(0.25);
 mount(() => (
   <Framed inner={[{ transform: [{ translateX: 7 }, { scale: 2 }] }, { shadowOffset: { width: 1, height: 2 }, opacity: v }]} />
 ));
@@ -653,7 +722,7 @@ fn a_style_prop_takes_what_a_host_elements_style_does() {
     let (_engine, rx) = start(FRAMED, vec![registry()]);
     let (_, items) = mounted(&rx, 500);
     // The transforms and the shadow offset (objects and arrays), and the
-    // native value bound to the inner view.
+    // animated value bound to the inner view.
     assert!(
         items.contains(
             "transform: [TransformOp { kind: TranslateX, value: 7.0 }, TransformOp { kind: Scale, value: 2.0 }]"

@@ -1,5 +1,5 @@
 import { type GestureResponderEvent, signal, Text, View } from "nsh";
-import { Animated, createNativeValue, Easing, type NativeValue } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing, type AnimatedValue } from "nsh/animated";
 import { Canvas, type CanvasRenderingContext2D, Path2D } from "nsh/canvas";
 import logo from "../logo@2x.png";
 import { alpha, Button, Caption, Card, colors, DemoPage, Figure, finish, hint, isDark, Legend, type Palette, Segmented, Stat } from "../ui";
@@ -50,7 +50,7 @@ function dashed(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: numbe
 
 /** A value that sweeps 0 → 1 once mounted (and again on `replay`): canvases clip to it. */
 function reveal(duration = 900) {
-  const t = createNativeValue(0);
+  const t = createAnimatedValue(0);
   const replay = () => {
     t.set(0);
     t.timing(1, { duration, easing: Easing.out(Easing.cubic) });
@@ -61,7 +61,7 @@ function reveal(duration = 900) {
 
 // ---------------------------------------------------------------------------
 // A dial: a tick ring, a hatched red zone, a gradient sweep and a needle, all
-// bound to one native value. Springing it moves the needle on the UI thread.
+// bound to one animated value. Springing it moves the needle on the UI thread.
 
 const presets = [
   { value: "idle", label: "Idle", load: 18 },
@@ -73,7 +73,7 @@ type Preset = (typeof presets)[number]["value"];
 function Dial() {
   const preset = signal<Preset>("cruise");
   const load = () => presets.find((p) => p.value === preset())!.load;
-  const needle = createNativeValue(0);
+  const needle = createAnimatedValue(0);
   needle.spring(load(), { stiffness: 90, damping: 9 });
   const choose = (p: Preset) => {
     preset.set(p);
@@ -84,7 +84,7 @@ function Dial() {
   const angle = needle.interpolate({ inputRange: [0, 100], outputRange: [a0, a1] });
   const zone = () => (load() >= 85 ? "danger" : load() >= 60 ? "warn" : "up");
   return (
-    <Card icon="spark" title="Turbine 3 load" subtitle="Needle and sweep on one native value">
+    <Card icon="spark" title="Turbine 3 load" subtitle="Needle and sweep on one animated value">
       <Canvas
         style={{ height: 230 }}
         draw={(ctx, { width, height }) => {
@@ -388,7 +388,7 @@ function Ridgeline() {
 const levels = () => [colors.raised, accentA(0.22), accentA(0.45), accentA(0.7), colors.accent];
 
 function DotMatrix() {
-  const pulse = createNativeValue(0);
+  const pulse = createAnimatedValue(0);
   Animated.loop(Animated.timing(pulse, { toValue: 1, duration: 1400, easing: Easing.out(Easing.quad) })).start();
   return (
     <Card icon="bell" title="Beacon uptime" subtitle="Dot matrix, one column a day">
@@ -450,7 +450,7 @@ const routes = [
 ];
 
 function Dumbbell() {
-  const t: NativeValue = createNativeValue(0);
+  const t: AnimatedValue = createAnimatedValue(0);
   const play = () => {
     t.set(0);
     t.timing(1, { duration: 1500, easing: Easing.out(Easing.cubic) });
@@ -528,7 +528,7 @@ function Dumbbell() {
 // A clock: transforms, save / restore, a second hand rotating natively.
 
 function Clock() {
-  const seconds = createNativeValue(0);
+  const seconds = createAnimatedValue(0);
   Animated.loop(Animated.timing(seconds, { toValue: 60, duration: 60_000, easing: Easing.linear })).start();
   return (
     <Card icon="search" title="Transforms" subtitle="translate · rotate · save / restore">

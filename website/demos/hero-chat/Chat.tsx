@@ -1,5 +1,5 @@
 import { batch, computed, effect, Input, Scroll, signal, Text, View, type YNode } from "nsh";
-import { createNativeValue, LayoutAnimation } from "nsh/animated";
+import { createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Clipboard } from "nsh/clipboard";
 import { List } from "nsh/list";
 import { keyboard, KeyboardAvoidingView, useSafeAreaInsets } from "nsh/ui/mobile";
@@ -295,11 +295,11 @@ export function Chat(props: { autoplay?: string } = {}) {
   };
 
   // Motion, run natively when the state changes.
-  const jump = createNativeValue(0);
+  const jump = createAnimatedValue(0);
   effect(() => void jump.spring(following() ? 0 : 1, motion.settle));
-  const menuValue = createNativeValue(0);
+  const menuValue = createAnimatedValue(0);
   effect(() => void menuValue.spring(menu() ? 1 : 0, motion.settle));
-  const bannerValue = createNativeValue(0);
+  const bannerValue = createAnimatedValue(0);
   effect(() => void bannerValue.spring(banner() ? 1 : 0, motion.settle));
 
   const streaming = () => liveId() !== null;

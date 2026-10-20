@@ -52,6 +52,36 @@ pub(crate) struct Applied {
     text: Option<Arc<AttributedText>>,
     /// The `testID` set as the identifier.
     test_id: Option<Arc<str>>,
+    /// Whether the view was an accessibility element last time: AppKit is
+    /// only called for a role or a hidden flag that changed, since writing
+    /// all fifteen attributes per changed text is what a ticking table
+    /// spends most of its main-thread time on.
+    ax: AxState,
+}
+
+/// What `apply` last wrote, field by field.
+///
+/// Each attribute is its own entry: AppKit lets every one of them change while
+/// the role stays put (a slider becomes disabled, a checkbox becomes checked, a
+/// container's children are hidden). Grouping them under the role would leave
+/// VoiceOver reporting the old state.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct AxState {
+    element: bool,
+    hidden: bool,
+    role: Option<u8>,
+    help: Option<String>,
+    label: Option<String>,
+    /// The value and its description, as one comparable pair: a range's
+    /// `text` changes without `now` changing.
+    value: (ValueKind, Option<String>),
+    enabled: bool,
+    selected: bool,
+    expanded: bool,
+    /// The children are hidden as a group (`grouped`, or the view is hidden).
+    grouped: bool,
+    /// The value's lower and upper bounds.
+    range: (Option<u64>, Option<u64>),
 }
 
 /// The kinds of element nsh makes.
@@ -247,7 +277,8 @@ fn update(view: &NshView) -> bool {
         }
         (spec, s.access.spec.take(), a.live_region)
     };
-    apply(view.ns(), &spec);
+    let written = apply(view.ns(), &spec, &view.state().access.ax);
+    view.state_mut().access.ax = written;
     let label_changed = old.is_some_and(|o| o.label != spec.label);
     let is_text = view.state().text.is_some();
     if label_changed
@@ -266,46 +297,133 @@ fn is_pressable(events: EventMask) -> bool {
     events.contains(EventKind::Press) || events.contains(EventKind::LongPress)
 }
 
-/// Sets `spec` on `view`'s attributes.
-fn apply(view: &NSView, spec: &Spec) {
+/// Writes what changed of `spec` on `view`'s attributes, and returns what it
+/// wrote.
+///
+/// AppKit has no "unchanged" notion here: every setter stores an object in
+/// its attribute table. A price that changes every frame would otherwise
+/// rewrite all fifteen attributes of its text block per frame — measured at
+/// 182 µs of main-thread time in a 40-row table, half the frame's mount cost.
+fn apply(view: &NSView, spec: &Spec, was: &AxState) -> AxState {
     let element = spec.role != Ax::Generic && !spec.hidden;
-    view.setAccessibilityElement(element);
-    view.setAccessibilityHidden(spec.hidden);
-    let (role, subrole) = ax_role(spec.role);
-    view.setAccessibilityRole(role.as_deref());
-    view.setAccessibilitySubrole(subrole.as_deref());
-    let label = spec.label.as_deref().map(NSString::from_str);
-    let help = spec.help.as_deref().map(NSString::from_str);
-    view.setAccessibilityLabel(label.as_deref());
-    view.setAccessibilityHelp(help.as_deref());
-    let number = |v: Option<f32>| v.map(|v| NSNumber::new_f64(v as f64));
-    let (value, description): (Option<Retained<AnyObject>>, _) = match &spec.value {
+    let label: Option<String> = spec.label.as_deref().map(str::to_owned);
+    let help: Option<String> = spec.help.as_deref().map(str::to_owned);
+
+    // The value and its description, as `accessibilityValue` and
+    // `accessibilityValueDescription` take them.
+    let (value, description): (Option<Retained<AnyObject>>, Option<String>) = match &spec.value {
         Value::None => (None, None),
         Value::Text(t) => (Some(NSString::from_str(t).into()), None),
         Value::Checked(c) => (Some(NSNumber::new_i32(*c).into()), None),
         Value::Range { now, text, .. } => (
-            number(*now).map(Into::into),
-            text.as_deref().map(NSString::from_str),
+            now.map(|v| NSNumber::new_f64(v as f64)).map(Into::into),
+            text.as_deref().map(str::to_owned),
         ),
     };
     let (min, max) = match &spec.value {
-        Value::Range { min, max, .. } => (number(*min), number(*max)),
+        Value::Range { min, max, .. } => (
+            min.map(|v| v.to_bits() as u64),
+            max.map(|v| v.to_bits() as u64),
+        ),
         _ => (None, None),
     };
-    // SAFETY: the value attributes take numbers or strings.
-    unsafe {
-        view.setAccessibilityValue(value.as_deref());
-        view.setAccessibilityMinValue(min.as_deref().map(|n| n.as_ref()));
-        view.setAccessibilityMaxValue(max.as_deref().map(|n| n.as_ref()));
+    let enabled = !spec.disabled;
+    let selected = spec.selected;
+    let expanded = spec.expanded.unwrap_or(false);
+    let grouped = spec.grouped || spec.hidden;
+
+    // The role group: a different role is a different kind of element.
+    if was.element != element
+        || was.hidden != spec.hidden
+        || was.role != Some(spec.role as u8)
+        || was.help != help
+    {
+        view.setAccessibilityElement(element);
+        view.setAccessibilityHidden(spec.hidden);
+        let (role_name, subrole) = ax_role(spec.role);
+        view.setAccessibilityRole(role_name.as_deref());
+        view.setAccessibilitySubrole(subrole.as_deref());
+        view.setAccessibilityHelp(help.as_deref().map(NSString::from_str).as_deref());
     }
-    view.setAccessibilityValueDescription(description.as_deref());
-    view.setAccessibilityEnabled(!spec.disabled);
-    view.setAccessibilitySelected(spec.selected);
-    view.setAccessibilityExpanded(spec.expanded.unwrap_or(false));
-    // An empty list hides the subtree; `None` gives the subviews back.
-    let children = (spec.grouped || spec.hidden).then(NSArray::<AnyObject>::new);
-    // SAFETY: an array of accessibility elements (none).
-    unsafe { view.setAccessibilityChildren(children.as_deref()) };
+    if was.range != (min, max) {
+        // SAFETY: the bounds take numbers.
+        unsafe {
+            view.setAccessibilityMinValue(
+                min.map(|v| NSNumber::new_f64(f32::from_bits(v as u32) as f64))
+                    .as_deref()
+                    .map(|n| n.as_ref()),
+            );
+            view.setAccessibilityMaxValue(
+                max.map(|v| NSNumber::new_f64(f32::from_bits(v as u32) as f64))
+                    .as_deref()
+                    .map(|n| n.as_ref()),
+            );
+        }
+    }
+    if was.label.as_deref() != label.as_deref() {
+        let text = label.as_deref().map(NSString::from_str);
+        view.setAccessibilityLabel(text.as_deref());
+    }
+    if was.value != (value_kind(&spec.value), description.clone()) {
+        // SAFETY: the value attributes take numbers or strings.
+        unsafe { view.setAccessibilityValue(value.as_deref()) };
+        view.setAccessibilityValueDescription(
+            description.as_deref().map(NSString::from_str).as_deref(),
+        );
+    }
+    if was.enabled != enabled {
+        view.setAccessibilityEnabled(enabled);
+    }
+    if was.selected != selected {
+        view.setAccessibilitySelected(selected);
+    }
+    if was.expanded != expanded {
+        view.setAccessibilityExpanded(expanded);
+    }
+    if was.grouped != grouped {
+        let children = grouped.then(NSArray::<AnyObject>::new);
+        // SAFETY: an array of accessibility elements (none).
+        unsafe { view.setAccessibilityChildren(children.as_deref()) };
+    }
+    AxState {
+        element,
+        hidden: spec.hidden,
+        role: Some(spec.role as u8),
+        help,
+        label,
+        value: (value_kind(&spec.value), description),
+        enabled,
+        selected,
+        expanded,
+        grouped,
+        range: (min, max),
+    }
+}
+
+/// The value as it compares: which kind of value AppKit was given, and its
+/// contents — without the description (`apply` compares that next to it).
+///
+/// The kind matters as much as the contents: a checkbox's value must be an
+/// `NSNumber`, and `accessibilityValue={{ text: "1" }}` on a view that later
+/// becomes `checked` keeps the same contents while changing what AppKit must
+/// be handed. Comparing the contents alone left the `NSString` in place.
+#[derive(Debug, Clone, PartialEq, Default)]
+enum ValueKind {
+    #[default]
+    None,
+    Text(String),
+    Checked(i32),
+    Range(Option<u64>),
+}
+
+fn value_kind(v: &Value) -> ValueKind {
+    match v {
+        Value::None => ValueKind::None,
+        Value::Text(t) => ValueKind::Text(t.clone()),
+        Value::Checked(c) => ValueKind::Checked(*c),
+        // The bits, so NaN compares equal to itself.
+        Value::Range { now, .. } => ValueKind::Range(now.map(|n| n.to_bits() as u64)),
+    }
 }
 
 /// The AppKit role and subrole of `role`.
@@ -588,5 +706,44 @@ mod tests {
         };
         let s = spec_for(&button, ViewKind::View, false, None);
         assert_eq!(s.value, Value::Text("3 of 10".into()));
+    }
+    /// The reviewer's case: `accessibilityValue={{ text: "1" }}` on a view
+    /// that later becomes checked. The contents are `1` both times; what
+    /// AppKit must be handed changes from an NSString to an NSNumber.
+    #[test]
+    fn a_checkbox_value_compared_by_kind_not_contents() {
+        let text_value = ValueKind::Text("1".into());
+        let checked = ValueKind::Checked(1);
+        assert_ne!(
+            text_value, checked,
+            "a checkbox's number must replace the string"
+        );
+
+        // The same contents on the same kind is unchanged.
+        assert_eq!(ValueKind::Text("1".into()), ValueKind::Text("1".into()));
+        assert_eq!(ValueKind::Checked(1), ValueKind::Checked(1));
+    }
+
+    /// A hidden container's `element` is false either way, so `hidden` has to
+    /// be compared on its own: mounting hidden and then unhiding must reach
+    /// AppKit, or its children stay out of reach.
+    #[test]
+    fn a_hidden_change_reaches_appkit_without_a_role_change() {
+        let hidden = AxState {
+            element: false,
+            hidden: true,
+            role: Some(Ax::Group as u8),
+            ..Default::default()
+        };
+        let shown = AxState {
+            hidden: false,
+            ..hidden.clone()
+        };
+        assert_eq!(
+            hidden.element, shown.element,
+            "an accessible=false container is never an element"
+        );
+        assert_eq!(hidden.role, shown.role, "and its role does not change");
+        assert_ne!(hidden, shown, "so hidden itself must differ");
     }
 }

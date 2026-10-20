@@ -40,7 +40,7 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -59,6 +59,8 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let batch = rx

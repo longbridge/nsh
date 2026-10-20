@@ -100,15 +100,12 @@ fn Header(props: HeaderProps, cx: Scope<HeaderEvent>) -> impl IntoElement {
             }
         })
     };
-    let ask = {
-        let own = own.clone();
-        move |_: &ButtonEvent| {
-            // Methods of a Rust component, called from Rust.
-            if let Some(stepper) = own.api::<StepperApi>() {
-                let value = stepper.value();
-                stepper.set_value(5.0);
-                asked.set(format!("It was {value}; reset to 5"));
-            }
+    let ask = move |_: &ButtonEvent| {
+        // Methods of a Rust component, called from Rust.
+        if let Some(stepper) = own.api::<StepperApi>() {
+            let value = stepper.value();
+            stepper.set_value(5.0);
+            asked.set(format!("It was {value}; reset to 5"));
         }
     };
     view()

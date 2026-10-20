@@ -215,7 +215,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - **GTK delivers pointer events by allocation**, ignoring NSH's clipping (`overflow: hidden` in `snapshot`), `hidden`
   and `pointerEvents`: a hosted widget (a web view's page) gets clicks and wheels outside what is drawn of it unless
   the root's capture controller stops them (`input.rs`'s `shields_page`).
-- **Tiling window managers ignore the host's `--size`** (the window's default size): scripted screenshots have the size
+- **Tiling window managers ignore the host's `--window-size`** (the window's default size): scripted screenshots have the size
   the window got, and the script's `resize` too (it resizes on X11 and floating windows).
 
 ## macOS, AppKit

@@ -20,6 +20,10 @@ on every backend (macOS, Windows, Linux, and GPUI, a separate platform backend i
 yet: on macOS, Windows and Linux apps use `nsh/ui/mobile`, whose components render there as on phones, or their own
 layouts from the primitives.
 
+An app's crate exports components, modules and classes of its own the same way (`#[native_module("…")]`,
+`docs/dev/tooling.md`): `examples/rust-exports` exports one of each to TSX, each kind of prop, event, function and
+member once, with headless tests of its TSX entry.
+
 ## The API
 
 ```rust
@@ -47,7 +51,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
         .rounded(move || px(theme().radius))
         .bg(move || theme().primary)
         .active(|s| s.bg(move || theme().primary_active))
-        .on_press(move |_: &()| cx.emit(ButtonEvent::Press))
+        .on_press(move || cx.emit(ButtonEvent::Press))
         .child(text(props.title).text_color(move || theme().primary_foreground))
 }
 ```
@@ -58,7 +62,10 @@ reactive graph of `crate::reactive`, instantiated for Rust in `ui/reactive.rs`).
 style or a text given a closure, a signal, a memo or a `Prop` (anything `IntoReactive<T>`) is a binding, run again
 when what it read changes, and the core applies only what that one binding produced. Nothing renders again and
 nothing is diffed. Releasing the host disposes the owner: its bindings, effects, tasks, timers, back listeners and
-child components go with it. The design and its reasons: `reactive-components.md`.
+child components go with it. What leaves goes as one `Delete` per view the core made, as a plain element's does
+(every platform takes a deleted view out of its parent), with no `Remove` before it, also for content that leaves
+another component's children; only JS's children placed in a component are removed and kept. The design and its
+reasons: `reactive-components.md`.
 
 - **Names come from the type**: `Registry::register::<Button>()` registers it under `std::any::type_name`
   (`nsh_ui_mobile::button::Button`: the key the JS face sets as the host's `component` prop and the core finds it
@@ -70,7 +77,11 @@ child components go with it. The design and its reasons: `reactive-components.md
   too (`#[module] impl Alert`: `Alert`).
 - **Props** are a struct, **events** an enum; the derives produce a decoder per prop (`PropSpec::decode`: the JS
   value into the field's Rust type, when JS sets it), the conversion of an event's data to JS (`Event::data_js`),
-  defaults, and the TypeScript types (doc comments included). Field and variant names become camel case in JS. Value types
+  defaults, and the TypeScript types (doc comments included: the fields' and variants', while the component's is
+  its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's, and so does
+  any part of a doc comment from its first heading on, `# Rust` for notes meant for Rust callers). Field and variant names become camel case in JS. An
+  event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
+  variant names it (`onSelect?: (index: number) => void`). Value types
   implement `JsValue` (numbers, `bool`, strings, `Color`, `Option`, `Vec`, `JsonValue`, `ui::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
@@ -107,7 +118,9 @@ child components go with it. The design and its reasons: `reactive-components.md
   `canvas(painter)`, `web_view(url)` / `web_view_html(html, base_url)`, `video(url)`,
   `input_accessory_view(native_id)` (iOS's bar over the keyboard; empty on Android), `native(name)` for the
   embedder's components; `ui/host.rs`), strings (as texts) and other components (`Button::element(props)`, whose
-  `.on_event(move |e: &ButtonEvent| ..)` handles their typed events instead of the app; `.child(..)` / `.children(..)`
+  `.on_event(move |e: &ButtonEvent| ..)` handles their typed events instead of the app; `.child(..)` (an element, or
+  an `Option`, a `Vec`, an array or an iterator of them: `IntoChild<M>`, its marker telling an element from what holds
+  elements) / `.children(..)`
   pass it content and `.fill("header", ..)` fills a slot, as JSX children and slot props do: the content is nodes of
   this view, placed where the nested component's view places the app's; regions in it join its children in place).
   Their abilities are traits: `Styled`, `Accessible`, `Interactive` (`active` / `hover` / `focus` styles, `disabled`,
@@ -119,9 +132,22 @@ child components go with it. The design and its reasons: `reactive-components.md
   `virtual_list(..)` and a placed `ListElement`: snapping, `scroll_enabled`, `keyboard_dismiss_mode`,
   `scroll_value(&v)`, refresh, the scroll events); `on(kind, listener)` takes any native event with its raw
   payload. Host props are the core's `Prop`s, kept one per property and diffed by kind against what the binding
-  applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured.
+  applied last. A listener is a closure (`Listener<E>`: `impl Fn(&E)`) that writes the signals it captured; listener
+  methods take `impl IntoListener<E, M>`: a closure of the event, for an event without data also one without
+  arguments (`move || ..`), or a `Listener` (a type may implement `Fn()` and `Fn(&())`, so one `From` could not take
+  both: the marker `M`, inferred, tells them apart; a helper passing a listener on takes `impl IntoListener<E, M>`
+  too). It runs
+  under the owner current when it was made (the component, region or row whose view made it: `Owner::scope`, no
+  batch, so writes notify as they happen), so the signals, animated values, refs and tasks it makes are that owner's
+  and go with it rather than living as long as the surface. Once that owner is disposed the listener no longer runs
+  (its view is gone). When the owner is disposed while a listener or task runs under it (a press closing the view it
+  is in, then going on), the graph's current owner becomes `reactive::DISPOSED` rather than the freed slot's id, and
+  what is made from then on goes at once: signals and memos are disposed (using them panics, as with any disposed
+  signal), effects never run, cleanups run at once (a task spawned there is cancelled), animated values and refs do
+  nothing. An owner put back after a nested run that was disposed meanwhile is `DISPOSED` too
+  (`Graph::enter_owner` / `leave_owner` keep its generation).
 - **What comes and goes is a region** (`ui/flow.rs`): `If::new(cond, || el).otherwise(|| el)` makes a branch when
-  the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option` or a `Vec`) is made
+  the condition flips to it and drops the other; `dynamic(move || ..)` (an element, an `Option`, a `Vec` or an array) is made
   again whenever what it read changes (a component in it is a new one: it runs once per element made, as in TSX);
   `Each::new(items, |item| key, |item, index| row)` makes a row when its key comes and keeps it, its `item` and
   `index` signals updated, while the key stays; `catch_error(|| view, |error,
@@ -129,10 +155,10 @@ child components go with it. The design and its reasons: `reactive-components.md
   component's view: the failed part is disposed; `reset.reset()` makes the view again; unhandled errors are logged,
   `js` target). A modal is presented while it is in the view (an `If` of it), a screen pushed while it is in its
   stack (an `Each` of the routes: the screens below keep their state; `on_dismiss` reports a native pop). The root
-  can be any element: the host becomes it (a screen, a modal, a text, a list); a region or a component as the root
-  goes in the host view.
+  can be any element: the host becomes it (a screen, a modal, a text, a list); a component as the root is made on
+  the host itself (no view of its own); a region as the root goes in the host view.
 - **Canvases** draw what a `Painter` recorded (the Canvas 2D operations: `.fill_style(..)` / `.stroke_style(..)` take
-  colors, `CanvasGradient::linear` / `radial` / `conic` and native values; `.stroke_path(&canvas::svg_path(d))`;
+  colors, `CanvasGradient::linear` / `radial` / `conic` and animated values; `.stroke_path(&canvas::svg_path(d))`;
   `measure_text(font, text)` is `measureText`; operations built by hand take `painter.num(&v)` / `.paint(..)` and go
   in with `.op(..)`; `isPointInPath` / `isPointInStroke` are `painter.is_point_in_path(x, y, rule)` /
   `.is_point_in_stroke(x, y)` and, with a `Path2D`, `.path_contains(&path, x, y, rule)` / `.stroke_contains(&path, x,
@@ -160,12 +186,13 @@ child components go with it. The design and its reasons: `reactive-components.md
   | `import logo from "./logo@2x.png"`, `import font from "./a.ttf"` | `const LOGO: ImageAsset = asset!("logo@2x.png");` (`image(LOGO)` lays out at its natural size), `const A: FontAsset = asset!("a.ttf");` (`.font_family(A.family)`), with `registry.assets(assets!())` (below) |
   | `Image.getSize(uri)`, `Image.prefetch(uri)` | `image_size(uri)` / `prefetch_image(uri)`: answers to await in a task |
   | `Clipboard.setString(text)`, `await Clipboard.getString()` / `hasString()` (`nsh/clipboard`) | `set_clipboard(text)`, `clipboard_string()` / `clipboard_has_string()`: answers to await in a task (the app's `capabilities.clipboard` applies as for JS) |
+  | `await Storage.getItem(k)`, `setItem(k, v)`, `removeItem(k)`, `getAllKeys()`, `clear()` (`nsh/storage`) | `nsh_core::storage::Storage::get_item(k)`, `set_item(k, v)` (`Err(StorageFull)` past the quota), `remove_item(k)`, `get_all_keys()`, `clear()`: synchronous (the entries are in memory on the engine thread), and the same entries the app's JS uses, so a TSX entry and a Rust entry of one app read each other's data |
   | `AccessibilityInfo.announceForAccessibility`, `setAccessibilityFocus(ref)` | `announce_for_accessibility(msg)`, `note.set_accessibility_focus()` (an `ElementRef`) |
   | `Toast.show(msg, "long")` (`nsh/android`) | `toast(msg, ToastDuration::Long)` (nothing happens off Android) |
   | `useSafeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
-  | `createNativeValue`, `Animated.spring`, `interpolate` | `native_value(0.0)` (`Clone`); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_shadow_color(..)` / `.bind_shadow_opacity(..)` / `.bind_shadow_radius(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `ui::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
+  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_shadow_color(..)` / `.bind_shadow_opacity(..)` / `.bind_shadow_radius(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `ui::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh/keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`ui/keys.rs`) |
   | `BackHandler.addEventListener("hardwareBackPress", f)`, `.remove()` | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`ui/back.rs`) |
@@ -194,25 +221,43 @@ child components go with it. The design and its reasons: `reactive-components.md
   bar (below); they are actions the core applies in order with the view's other changes (`ui/services.rs`,
   `core/services.rs`). They work wherever the core runs Rust code: a view's body, its bindings, listeners and tasks,
   and modules.
-- **Native values** (`ui/animated.rs`) are nodes of the platform's animation graph with odd ids (JS's are even,
-  like node ids: the graph indexes nodes by id, so both must stay dense; ids from 2^31 are the graph's own
-  composite steps); the last handle released frees the node. Deriving the same node again gets the live one. Colors
-  interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK, colors::ACCENT])`, any
-  `AdaptiveColor`) follow the appearance: a binding of the view gives the node the other appearance's colors in
-  place when it changes (`AnimationOp::SetOutput`), so nothing is made again and its bindings stay. Bound
-  style properties go into the element's inline style, before the app's `style` on a host (the core keeps the app's
-  and composes the two). The animations' ends come back through `Core::animations_finished` (the engine hands JS
-  the rest). An `Animation` is sent whole as one `AnimationOp::StartComposite` and runs in the graph step after step;
+- **Animated values** (`ui/animated.rs`) are nodes of the platform's animation graph with odd ids (JS's are even, like
+  node ids: the graph indexes nodes by id, so both must stay dense; ids from 2^31 are the graph's own composite steps).
+  `AnimatedValue` and `AnimatedNode` are `Copy` handles, as signals are: the owner current when one is made (the
+  component, a region, a row; `reactive::Kept`, a slot of the graph holding the node's `Rc`) keeps the node and releases
+  it when it is disposed, so closures share a value with no clone. Used after that, a handle does nothing (its
+  animations end at once, unfinished; a derivation of it is no node; a drawing reads it as 0) and never panics. What
+  binds a node holds it while bound (`LiveNode`: an element's bound styles, `pan_values` / `pinch_value` /
+  `rotation_value` / `scroll_value`, a drawing's slots, a composite's values, a derived node's inputs), so a binding in
+  a region that outlives the handle's owner goes on moving, and so does an animation running on it; the node is released
+  when the last of these goes. Deriving the same node again gets the live one, through the handle the current owner
+  keeps of it (made the first time: `Derived`), so a derivation run over and over adds no slot. Made with no owner at
+  all (outside any component), a handle lives as long as the surface, as a signal made there does. Colors interpolated from theme colors (`v.interpolate_colors(&[0.0, 1.0], &[colors::TRACK,
+  colors::ACCENT])`, any `AdaptiveColor`) follow the appearance: a binding of the view gives the node the other
+  appearance's colors in place when it changes (`AnimationOp::SetOutput`), so nothing is made again and its bindings
+  stay; such a node is derived again by both appearances' colors (`DerivedKey`), so interpolations that share their
+  light colors, or a constant one and a theme one, are different nodes. Bound style properties go into the element's inline style, before the app's `style` on a host (the core keeps
+  the app's and composes the two). The animations' ends come back through `Core::animations_finished` (the engine hands
+  JS the rest). An `Animation` is sent whole as one `AnimationOp::StartComposite` and runs in the graph step after step;
   its composite key (odd, JS's even) is what `reset()` restores by, and dropping the last handle releases it (a run
   going on goes on).
-- **Element refs** (`ui/element_ref.rs`) hold the node of the element that carries them, set when the element is
-  applied and cleared when it goes; their commands go out through the executor, and an event's handling applies them
-  right after its own changes, so they keep their order. A measurement (`measure()`) waits in the core for the layout
-  of the commit it goes out with, as JS's `Command::Measure` does, and is answered there (`Core::measure`); none goes
-  to the platform.
+- **Element refs** (`ui/element_ref.rs`) hold the node of the element that carries them, set when the element is applied
+  and cleared when it goes; their commands go out through the executor, and an event's handling applies them right after
+  its own changes, so they keep their order. `ElementRef` and `ComponentRef` are `Copy` handles kept by the owner
+  current when they are made, as animated values are; the element carrying one holds what it names (`RefTarget`) while
+  it is mounted, so mounting and unmounting it never reach the ref's owner. Once that owner is gone, `node()` is `None`
+  and commands do nothing, as with no element carrying it. A measurement (`measure()`) waits in the core for the layout
+  of the commit it goes out with, as JS's `Command::Measure` does, and is answered there (`Core::measure`); none goes to
+  the platform.
 - **Element attributes for system UI**: `.inset_padding(insets)` / `.inset_margin(insets)` add to the padding /
   margin the styles resolve to (what `SafeAreaView` and `KeyboardAvoidingView` use, so the app's own padding stays),
   `.inline_style(props.content_container_style)` applies a `ui::Style` prop (a value or a binding) (`KeyboardAvoidingView`'s `contentContainerStyle`).
+- **What a view gives a nested component's element** (`Button::element(props)`) goes on the component's root, after
+  the root's own, as its styles do: an inline style (`.inline_style(..)`), animated values (`.bind_opacity(&v)`,
+  `.bind_translate_y(&v)`), insets (bound ones are a binding, applied again when they change), on a rooted
+  component's host as on any (`Instance::given`, `RootContext`: the inner first, the outer last, then the app's style
+  on the top host). Listeners and accessibility are not on it (`ComponentElement` is not `Interactive` or
+  `Accessible`): a component says what it hears and is through its events and props.
 - An app's own types become static values for setters with `nsh_core::static_reactive!(Tone: Tone);`. A closure
   returning a bare float literal for an `f32` setter needs its type: `move || if on { 0.5_f32 } else { 1.0 }`.
 
@@ -223,16 +268,19 @@ write: `#[methods] impl StepperApi { pub fn set_value(&self, v: f64) {..} pub fn
 implements `Api`, the view registers it with `cx.methods(StepperApi { .. })` for as long as it lives, and
 `#[component(methods = StepperApi)]` (`Component::METHODS = Methods::of::<StepperApi>()`) names it in the spec, so the
 JS face builds the ref (`StepperRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
-written. A call converts its arguments in the JS call (a wrong one throws, or rejects the promise of a method that
-returns a value) into a closure an op carries (`RustCall::Method`), so it runs in order with the props JS set
-before it, with the API the view registered. A method returning nothing is called and forgotten; one returning a
-value gives JS a `Promise`, settled from the core's events (`JsEvent::Reply`, the boxed value converted then) in
-the same frame's commit rounds. Rust calls them directly: `ComponentRef::api::<StepperApi>()`.
+written. A call converts its arguments in the JS call into a closure an op carries (`RustCall::Method`), so it runs
+in order with the props JS set before it, with the API the view registered. Its return type decides what TS gets:
+a method returning `()` gives `void`, with no reply (JS calls it and moves on, a wrong argument throws in the call);
+one returning `Result<(), E>` gives `Promise<void>` (rejected with the `Err`'s message: the method runs at the
+commit, after the JS call returned, so it cannot throw); one returning a value gives `Promise<T>` (a wrong argument
+rejects it). Promises settle from the core's events (`JsEvent::Reply`, the boxed value converted then) in the same
+frame's commit rounds. Rust calls the methods directly: `ComponentRef::api::<StepperApi>()`.
 
 ## Modules
 
 Functions a UI set exports without a component (`Alert.alert`, `Keyboard.dismiss`, `StatusBar.setHidden`) are a
-`#[module]` `impl` block of a unit struct: `pub fn`s are the functions, typed from their signatures (`Option`
+unit struct and its `impl` block, both `#[module]` (the struct's doc comment documents the module; a component of the
+same name stands for the struct, `StatusBar`): `pub fn`s are the functions, typed from their signatures (`Option`
 parameters at the end may be left out). The signature decides how a call runs (`FunctionCall`):
 
 - **No context, not `async`** (`Sync`): it runs inside the JS call, as a class's method does (below), converting
@@ -240,11 +288,12 @@ parameters at the end may be left out). The signature decides how a call runs (`
   (signals, `dialog`, `theme()`) are not there (the reactive graph is not entered).
 - **A last `cx: &mut ModuleCx`** (`Op`): the platform's services, applied in order right after the call (a dialog,
   the status bar, focus). Its arguments are converted in the JS call into a closure an op carries
-  (`RustCall::Op`, in order with the ops before it); one returning a value gives JS a `Promise`, settled like a
-  method's, and a conversion error rejects it.
+  (`RustCall::Op`, in order with the ops before it). As for a method: returning `()`, it gives `void`, with no
+  reply (a conversion error throws); returning `Result<(), E>`, `Promise<void>`; returning a value, `Promise<T>`,
+  settled like a method's (a conversion error rejects it).
 - **`async fn`** (`Async`): no context; it runs as a root task, reaching the platform with the same free functions
-  views use (`Alert.alert` awaits `dialog(..)`), sent as the op above; a `Promise` of its value, rejected with an
-  `Err`'s message or a panic's.
+  views use (`Alert.alert` awaits `dialog(..)`), sent as the op above; it gives a Promise of its value
+  (`Promise<void>` for `()`), rejected with an `Err`'s message or a panic's.
 
 Parameters are `Arg`s: the `JsValue` types, instances (`Instance<T>`) and `Callback`s; results are `Ret`s. In an op
 or a task, instances and functions ride in its closure as they are (`docs/dev/rust-classes.md`, "How calls
@@ -332,7 +381,8 @@ tokio timer wakes the engine from another thread, which the OS may run late); aw
 `background`), a `Delay` is tokio's. A task changes what it wants by writing
 signals, inside the graph like any other Rust code of the view; the patches that makes go out with the next commit.
 `spawn`, `set_timeout`, `set_interval` and `request_animation_frame` return a `Spawned`: the task belongs to the owner
-current when it was made and ends with it (or at `.cancel()`); awaiting a `Spawned` gives its output.
+current when it was made and ends with it (or at `.cancel()`), and is polled under it, so what it makes is that
+owner's; awaiting a `Spawned` gives its output.
 
 ## Environment
 
@@ -353,7 +403,7 @@ in points: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.tt
 font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
 crate again (`include_bytes!`). The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
-built, kind), which the app's command line (`rust_app.rs`, the registry is in-process) serves in development and
+built, kind), which `nsh` (`rust_app.rs`, from the description of the set: each file's path and source) serves in development and
 copies into packages next to the imported assets, and whose fonts the engine registers before the first view
 (`EngineConfig::ui_sets`, read through `EngineConfig::assets`).
 
@@ -419,7 +469,18 @@ intercepts the ops on the host (`intercept`): the host is the root of the compon
 root become nodes the core creates itself. Apps without components pay one check per op. The root can be any
 element: at the view's first mount, before the host's native view is sent, the core gives the host the root's kind
 (`Core::retag`: a text, a screen, a modal, a list), so the root's props and children apply to it; a root that is a
-region or a component goes in the host view.
+region goes in the host view.
+
+A root that is a component (a view that is `Press::element(..)`) is made on the same host, as a TSX function component returning
+another is that one: the nested instance's host is an alias of the host's node (`Core::alias`: another id naming the
+same node, no node of its own; what the core sends names the node by its own id, `native_id`), and its view makes
+the node (`expand_rooted`; `Instance::rooted` / `above` link the two, as deep as roots are components). The node gets
+the innermost view's root, then the styles each component above gives the one below (the outer last, then the app's
+`class` on the top host and its `style`); it listens to that root's events and to JS's on the host; the host's
+native events, touches and responder go to the innermost component (`base_of`), whose events reach the view above as
+a nested component's do. The props, listener, ref and content the outer view gives it are a nested component's;
+the JS children it passes on are placed by the inner view. Releasing the host releases them all, the aliases only
+forgotten.
 
 A view JS made (`<Button>` in TSX) is made when its host is first in the root's tree, so it is under the view that
 placed it: it adopts the owner of the nearest component above it (where that one places its JS children, else its
@@ -460,10 +521,26 @@ what changed.
   shown). The core sets the `Prop<Children>` when JS adds the first child or removes the last, so
   `props.children.get().is_empty()` in a binding follows it. With `children_each`, the children are an `Each` keyed by the child's node over a signal of the host's JS
   children: one wrapper per child, so a child added or removed leaves the others' wrappers in place.
+- A view passes its children on by placing its `Children` among a nested component's (`<Inset>{children}</Inset>`):
+  they become that component's children (`Placement::Nested`), in that place among the content the view gives it,
+  so its view places them, as deep as they are passed on; JS's insertions and removals follow them there, and content
+  of the view above that is released leaves the children of every level it was passed on to. When the nested
+  component goes, they leave its view and stay (JS's, or the content of the view above).
 - Named slots: the JS face creates one holder view per slot **the app passes** (`componentSlot`), filled with that
   prop's JSX. `Prop<Option<Slot>>` is `Some` while the holder has children (the core sets it when it fills or
   empties); `place(..)` is a region of it, and the slot's element *is* the holder: its styles and handlers apply to
   it, the core places it but never releases it (it is JS's).
+- A slot a Rust view fills (`.fill(name, el)`) has no holder: its content is
+  nodes of that view (an element, or a region whose nodes come and go), which the nested component keeps as the
+  slot's `Fill` and its view places where it places the slot, as JS children are placed (`Placement`). A place that
+  only places it (`place(|s| s)`) puts the nodes there as they are (`ElKind::Filled`); a place that styles it
+  (`place(|h| h.px_4())`) makes a node of the nested view's own with those styles around them. The slot's prop is
+  `Some` while the fill has nodes. The fill is the placing view's content: reconciled whenever that view reconciles
+  the nested element (a new element replaces the old in its place), released with it, and taken out of a place that
+  goes before that place's node is deleted. A view passes a slot it is given on to a nested component's slot by
+  filling that one with the place (`.fill("corner", props.corner.place(|c| c))`): the deeper fill's part is what
+  fills the passing view's slot (`FillPart::Filled`, also inside the place's region), resolved through it as deep as
+  it goes, and a change to the outer fill reaches the deeper slot (`Fill::forwarded`).
 - Rows: the JS face makes a `List` of the app's data and row renderer and hands it to the host as the slot of the
   `Items` prop. The view places it like a slot and sends its layout (`ListConfig`: estimated size, columns,
   direction, padding, gaps; its bound parts as `Patch::Layout`). Each item cell of that list gets the component's row
@@ -495,8 +572,13 @@ what changed.
 ## Events
 
 - Handlers sit on the elements; the native event of a made node, or of the host, goes to the component first
-  (`Core::component_event`, called by the engine before JS). Events of made nodes never reach JS. A listener runs in
-  the graph like any other Rust code of the view: the signals it writes run their bindings once it returns.
+  (`Core::component_event`, called by the engine before JS). Events of made nodes never reach JS. An element given
+  several listeners of one event (`.on_press(a).on_press(b)`, `.on_event(..)` twice on a nested component) calls them
+  all, in that order (touch listeners too); a listener that releases its component ends the rest. A dispatch walks
+  the instance's handlers in place (`Core::next_handler`, by index: no list per event), which stay as they are while
+  it does: regions change them when they are reconciled. A node a region makes again (kept, the same id) drops the
+  handlers, responders and `on_event` listeners its last run gave it, so it hears the new run's only. A listener runs
+  in the graph like any other Rust code of the view: the signals it writes run their bindings once it returns.
 - A slot's node (JS's holder, the app's list of an `Items` prop, or another component's content) gets the
   handlers of the component it is a slot of, then its maker's: JS's (the app's `onEndReached` on a `ListView`)
   or the view's that passed it.

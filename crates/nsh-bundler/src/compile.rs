@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use nsh_core::ui::description::{ExportKind, SetDescription};
 use oxc::{
     allocator::Allocator,
     codegen::{Codegen, CodegenOptions},
@@ -26,7 +27,7 @@ pub(crate) struct NativeModules {
 }
 
 impl NativeModules {
-    pub(crate) fn new(ui_sets: &[nsh_core::ui::Registry]) -> Self {
+    pub(crate) fn new(ui_sets: &[SetDescription]) -> Self {
         let mut out = Self {
             specifiers: nsh_core::js::NATIVE_MODULES
                 .iter()
@@ -34,20 +35,16 @@ impl NativeModules {
                 .collect(),
             ..Self::default()
         };
-        for r in nsh_core::runtime::registries().iter().chain(ui_sets) {
-            let Some(spec) = r.specifier() else {
-                continue;
-            };
-            out.specifiers.insert(spec.to_owned());
+        for r in nsh_core::runtime::registries() {
+            if let Some(spec) = r.specifier() {
+                out.specifiers.insert(spec.to_owned());
+            }
         }
-        for r in ui_sets {
-            let Some(spec) = r.specifier() else {
-                continue;
-            };
+        for set in ui_sets {
+            out.specifiers.insert(set.specifier.clone());
             out.components.extend(
-                r.specs()
-                    .iter()
-                    .map(|s| (s.export.clone(), spec.to_owned())),
+                set.exports_of(ExportKind::Component)
+                    .map(|export| (export.to_owned(), set.specifier.clone())),
             );
         }
         out

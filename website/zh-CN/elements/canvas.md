@@ -69,10 +69,10 @@ const values = signal([12, 40, 28, 64]);
 数字和颜色也可以是[原生动画值](../modules/nsh-animated.md)（`CanvasNumber`、`CanvasPaint`）：这些值动画时，平台会自行重绘，不需要执行 `draw`，每帧也不运行任何 JS。
 
 ```tsx
-import { Animated, createNativeValue } from "nsh/animated";
+import { Animated, createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
-const angle = createNativeValue(0);
+const angle = createAnimatedValue(0);
 Animated.timing(angle, { toValue: Math.PI * 2, duration: 1000 }).start();
 
 <Canvas

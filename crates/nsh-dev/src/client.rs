@@ -60,6 +60,9 @@ pub enum DevEvent {
         source_map: Option<String>,
         /// What the app declares it may reach (JSON), if it declares it.
         capabilities: Option<String>,
+        /// The app's id (`nsh.json` `"id"`): give it to the bundle
+        /// (`Bundle::with_app_id`), as it names where the app keeps its data.
+        app_id: Option<String>,
     },
 }
 
@@ -167,6 +170,7 @@ fn session(
         format: BundleFormat,
         source_map: bool,
         capabilities: Option<String>,
+        app_id: Option<String>,
         bytes: Option<Vec<u8>>,
     }
     let mut pending: Option<Pending> = None;
@@ -203,6 +207,7 @@ fn session(
                     format,
                     source_map,
                     capabilities,
+                    app_id,
                 }) => {
                     pending = Some(Pending {
                         version,
@@ -210,6 +215,7 @@ fn session(
                         format,
                         source_map,
                         capabilities,
+                        app_id,
                         bytes: None,
                     })
                 }
@@ -224,6 +230,7 @@ fn session(
                         format: BundleFormat::Source,
                         source_map,
                         capabilities: None,
+                        app_id: None,
                         bytes: None,
                     })
                 }
@@ -261,6 +268,7 @@ fn session(
                         bytes,
                         source_map,
                         capabilities: p.capabilities,
+                        app_id: p.app_id,
                     }),
                 }
             }

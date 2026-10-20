@@ -106,7 +106,8 @@ public class NshView extends FrameLayout {
         // sets no soft input mode, this makes the system resize (and report
         // the keyboard as insets) instead of panning the window.
         setScrollContainer(true);
-        handle = Native.create(this, density, trace);
+        // Apps keep their data in nsh/<app id> in the files directory.
+        handle = Native.create(this, density, trace, new File(context.getFilesDir(), "nsh").getPath());
     }
 
     /**
@@ -147,6 +148,33 @@ public class NshView extends FrameLayout {
     }
 
     /**
+     * The directory the storage ({@code nsh/storage}) of the apps this view
+     * loads from now on is kept in ({@code storage.json} in it). {@code null}
+     * (the default): each app's own, {@code nsh/<app id>} in the Context's
+     * files directory (the id of {@code nsh.json}, {@code nsh/default}
+     * without one).
+     *
+     * @param dir the directory, or null
+     */
+    public void setStorageDirectory(File dir) {
+        Native.setStorage(handle, dir == null ? null : dir.getPath());
+    }
+
+    /** The contents of {@code file}, or null when it does not exist. */
+    private static String readText(File file) throws java.io.IOException {
+        return file.exists() ? new String(Net.readAll(new FileInputStream(file)), StandardCharsets.UTF_8) : null;
+    }
+
+    /** The contents of asset {@code path}, or null when the APK has none. */
+    private String readAssetText(String path) {
+        try {
+            return new String(Net.readAll(getContext().getAssets().open(path)), StandardCharsets.UTF_8);
+        } catch (java.io.IOException none) {
+            return null;
+        }
+    }
+
+    /**
      * Runs a JS bundle written by `nsh build` (`bundle.js`); assets come from
      * `assets/` next to it. Bytecode only loads from the APK's own assets
      * ({@link #loadAssetBundle}) or a signed package ({@link #runPackage}):
@@ -165,13 +193,12 @@ public class NshView extends FrameLayout {
             String map = null;
             File mapFile = new File(file.getParentFile(), "bundle.js.map");
             if (mapFile.exists()) map = new String(Net.readAll(new FileInputStream(mapFile)), StandardCharsets.UTF_8);
-            File declared = new File(file.getParentFile(), "capabilities.json");
-            String capabilities = declared.exists()
-                    ? new String(Net.readAll(new FileInputStream(declared)), StandardCharsets.UTF_8) : null;
+            String capabilities = readText(new File(file.getParentFile(), "capabilities.json"));
+            String app = readText(new File(file.getParentFile(), "app.json"));
             assetHttp = null;
             assetApk = null;
             assetDir = new File(file.getParentFile(), "assets");
-            Native.load(handle, code, false, map, capabilities);
+            Native.load(handle, code, false, map, capabilities, app);
             return true;
         } catch (Exception e) {
             reportError("cannot read bundle " + file + ": " + e);
@@ -189,17 +216,13 @@ public class NshView extends FrameLayout {
     public boolean loadAssetBundle(String dir) {
         try {
             byte[] code = Net.readAll(getContext().getAssets().open(dir + "/bundle.nshc"));
-            String capabilities = null;
-            try {
-                capabilities = new String(Net.readAll(getContext().getAssets().open(dir + "/capabilities.json")),
-                        StandardCharsets.UTF_8);
-            } catch (java.io.IOException none) {
-                // The app declares no capabilities.
-            }
+            // Null when the app declares no capabilities / has no id.
+            String capabilities = readAssetText(dir + "/capabilities.json");
+            String app = readAssetText(dir + "/app.json");
             assetHttp = null;
             assetDir = null;
             assetApk = dir + "/assets/";
-            Native.load(handle, code, true, null, capabilities);
+            Native.load(handle, code, true, null, capabilities, app);
             return true;
         } catch (Exception e) {
             reportError("cannot read the app bundle: " + e);
@@ -228,7 +251,8 @@ public class NshView extends FrameLayout {
      * @param pkg the package
      */
     public void runPackage(NshPackage pkg) {
-        Native.runPackage(handle, pkg.take());
+        long taken = pkg.take();
+        Native.runPackage(handle, taken);
     }
 
     /** Called by {@code Native.runPackage} before the package starts. */
@@ -487,7 +511,7 @@ public class NshView extends FrameLayout {
         if (handle != 0) mounter.outputs(Native.tick(handle, nanos));
     }
 
-    /** Keeps frames coming while native values animate. */
+    /** Keeps frames coming while animated values animate. */
     void requestFrames() {
         if (!ticking) {
             ticking = true;

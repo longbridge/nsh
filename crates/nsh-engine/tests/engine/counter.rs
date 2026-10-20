@@ -24,7 +24,7 @@ fn config() -> EngineConfig {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
@@ -40,6 +40,8 @@ fn config() -> EngineConfig {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     }
 }
 

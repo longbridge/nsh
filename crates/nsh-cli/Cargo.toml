@@ -20,7 +20,7 @@ dunce.workspace = true
 semver.workspace = true
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-core.workspace = true
-nsh-engine = { workspace = true, features = ["js"] }
+nsh-engine = { workspace = true, features = ["js", "headless"] }
 nsh-dev = { workspace = true, features = ["server"] }
 nsh-js.workspace = true
 nsh-ui-mobile.workspace = true

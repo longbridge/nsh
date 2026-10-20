@@ -37,10 +37,10 @@ outlives `nsh`, however it ends. The host also runs a built bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --size 390x844   # in a checkout: target\debug\nsh-windows-host
+dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-size 390x844   # in a checkout: target\debug\nsh-windows-host
 ```
 
-`--size` is the window's size in points (`<width>x<height>`).
+`--window-size` is the window's size in points (`<width>x<height>`).
 
 ## Packaging
 

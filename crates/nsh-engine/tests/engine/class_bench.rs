@@ -57,6 +57,7 @@ impl Meter {
 }
 
 /// Functions of the three kinds.
+#[module]
 pub(crate) struct Calc;
 
 #[module]

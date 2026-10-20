@@ -1,4 +1,4 @@
-//! Typed styles of Rust components ([`Styled`]): GPUI-style methods
+//! Typed styles of Rust components ([`Styled`]): chained methods
 //! (`.px_4()`, `.rounded_xl()`, `.bg(color)`) recording declarations that
 //! lower into the same rules Tailwind classes compile to, without strings
 //! to parse. Values follow Tailwind's default scales (4pt spacing steps),
@@ -902,8 +902,9 @@ pub enum BorderCurve {
     Continuous,
 }
 
-/// Styling methods, named as in GPUI and Tailwind. Implemented by the
-/// elements and by [`StyleRefinement`] (in `.active(|s| …)`).
+/// Styling methods, named after the utility classes they match (`.p_4()` is
+/// `p-4`). Implemented by the elements and by [`StyleRefinement`] (in
+/// `.active(|s| …)`).
 pub trait Styled: Sized {
     /// The styles being built.
     fn style(&mut self) -> &mut StyleRefinement;

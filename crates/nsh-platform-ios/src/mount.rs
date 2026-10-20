@@ -607,6 +607,9 @@ impl Mounter {
             MountItem::Delete { id } => {
                 self.remove_hosted(id);
                 self.sticky.remove(&id);
+                // A removal animation it was running ends with it: its end
+                // must not find the id, which a new view may take.
+                self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
                     // A modal deleted while presented (its subtree released

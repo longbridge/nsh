@@ -17,7 +17,7 @@ fn counter(build_number: u64, bytecode_version: &str) -> Contents {
         entry,
         minify: true,
         split: false,
-        ui_sets: vec![nsh_ui_mobile::registry()],
+        ui_sets: vec![nsh_ui_mobile::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, true).unwrap();
@@ -50,6 +50,8 @@ fn first_texts(bundle: nsh_engine::Bundle) -> Vec<String> {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     let first = rx

@@ -1,6 +1,6 @@
 //! Canvas drawings as JSON for `CanvasRenderingContext2D` (`web/nsh.js`,
 //! `draw`): one array per operation, named after the 2D context's method
-//! or property. A native value is `["$", slot]`, filled in by JS with the
+//! or property. An animated value is `["$", slot]`, filled in by JS with the
 //! latest value of the slot (animation outputs `canvas:<slot>`).
 
 use std::fmt::Write as _;

@@ -122,7 +122,7 @@ interface ViewabilityConfig {
 | `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | Whether a tap dismisses the keyboard (`"never"`: the tap only dismisses it). |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `scrollEventThrottle` | `number` | | Minimum milliseconds between `onScroll` events (at most one per frame anyway). |
-| `scrollValue` | `NativeValue` | | A [native value](./nsh-animated.md) fed with the scroll offset (main axis) on the UI thread, for scroll-linked effects. |
+| `scrollValue` | `AnimatedValue` | | A [animated value](./nsh-animated.md) fed with the scroll offset (main axis) on the UI thread, for scroll-linked effects. |
 
 ### Scroll events
 

@@ -23,7 +23,9 @@ use std::{
     ptr,
 };
 
-use nsh_core::reactive::{self as r, Equals, Kind, NONE, UNOWNED};
+#[cfg(test)]
+use nsh_core::reactive::UNOWNED;
+use nsh_core::reactive::{self as r, Equals, Kind};
 #[cfg(test)]
 use rquickjs::Ctx;
 use rquickjs::qjs;
@@ -666,11 +668,11 @@ unsafe extern "C" fn get_owner(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let owner = unsafe { graph(ctx) }.owner();
-    if owner == NONE || owner == UNOWNED {
-        UNDEFINED
+    let g = unsafe { graph(ctx) };
+    if g.has_owner() {
+        handle_value(ctx, g.owner())
     } else {
-        handle_value(ctx, owner)
+        UNDEFINED
     }
 }
 
@@ -1038,8 +1040,7 @@ pub(crate) fn with_root<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> (u32, 
 /// Whether something owns what runs now (a component, an effect, a
 /// root): its cleanups run when it goes.
 pub(crate) fn has_owner(ctx: *mut JsContext) -> bool {
-    let owner = unsafe { graph(ctx) }.owner();
-    owner != NONE && owner != UNOWNED
+    unsafe { graph(ctx) }.has_owner()
 }
 
 /// The current owner (for [`with_root_under`] later).
