@@ -4,6 +4,7 @@
 // the steps after it are that case's. Kept with
 // `cargo xtask api --keep api/cases/events`.
 import { type JSX, View, mount, signal } from "nsh";
+import EventsComposition from "./events-composition";
 import EventsContextMenu from "./events-context-menu";
 import EventsGestures from "./events-gestures";
 import EventsInput from "./events-input";
@@ -14,6 +15,7 @@ import EventsScroll from "./events-scroll";
 import EventsTouch from "./events-touch";
 
 const cases: Record<string, () => JSX.Element> = {
+  "events-composition": EventsComposition,
   "events-context-menu": EventsContextMenu,
   "events-gestures": EventsGestures,
   "events-input": EventsInput,

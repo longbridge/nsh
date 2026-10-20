@@ -11,6 +11,7 @@ import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputConnectionWrapper;
@@ -35,6 +36,17 @@ final class InputBox extends FrameLayout implements Node {
     private int submit = SUBMIT_AND_BLUR;
     private boolean applying;
     private boolean configured;
+    /** The composition last seen (`onCompositionChange` reports its changes). */
+    private boolean inComposition;
+    private String composed = "";
+    /**
+     * A value JS set during a composition, applied when it ends: setting the
+     * text restarts the input method, which commits the pre-edit text.
+     */
+    private String pendingText;
+    private int pendingCount;
+    /** Inside the text watcher, where replacing the text would corrupt the IME's edit. */
+    private boolean watching;
 
     InputBox(Context context, Mounter mounter, int id) {
         super(context);
@@ -93,10 +105,22 @@ final class InputBox extends FrameLayout implements Node {
                 // Reconfiguring (filters, input type) sets the same text
                 // again: only real edits count.
                 String text = s.toString();
-                if (text.equals(known)) return;
-                known = text;
-                InputBox.this.count++;
-                mounter.event(id, Native.CHANGE_TEXT, s.toString(), InputBox.this.count, 0, 0);
+                // A composition that starts or changes is reported before
+                // the text holding it, one that ends after the text it
+                // committed, as browsers order them.
+                boolean composingNow = BaseInputConnection.getComposingSpanStart(s) >= 0;
+                watching = true;
+                try {
+                    if (composingNow) syncComposition();
+                    if (!text.equals(known)) {
+                        known = text;
+                        InputBox.this.count++;
+                        mounter.event(id, Native.CHANGE_TEXT, text, InputBox.this.count, 0, 0);
+                    }
+                    if (!composingNow) syncComposition();
+                } finally {
+                    watching = false;
+                }
             }
         });
         edit.setOnEditorActionListener((v, action, event) -> {
@@ -113,6 +137,12 @@ final class InputBox extends FrameLayout implements Node {
             return true;
         });
         edit.setOnFocusChangeListener((v, focused) -> {
+            if (!focused) {
+                // A composition does not outlive the focus: what was composed
+                // stays, committed (the keyboard may not say so).
+                edit.clearComposingText();
+                syncComposition();
+            }
             mounter.inputFocused(this, focused);
             mounter.reportState(id, Mounter.STATE_FOCUSED, focused);
             if (mounter.wants(id, focused ? Native.FOCUS : Native.BLUR)) {
@@ -221,6 +251,42 @@ final class InputBox extends FrameLayout implements Node {
     }
 
     /**
+     * Reports a change of the composition (`onCompositionChange`) and applies
+     * the value JS set during it once it ends. Read from the composing span
+     * after every edit rather than from the connection's calls: keyboards
+     * start, change and end compositions in many ways (`setComposingText`,
+     * `setComposingRegion`, commits, batch edits, focus changes).
+     */
+    private void syncComposition() {
+        Editable text = edit.getText();
+        int start = text == null ? -1 : BaseInputConnection.getComposingSpanStart(text);
+        int end = text == null ? -1 : BaseInputConnection.getComposingSpanEnd(text);
+        boolean now = start >= 0 && end >= 0 && start != end;
+        String composedNow = now ? text.subSequence(Math.min(start, end), Math.max(start, end)).toString() : "";
+        if (now == inComposition && composedNow.equals(composed)) return;
+        inComposition = now;
+        composed = composedNow;
+        if (mounter.wants(id, Native.COMPOSITION_CHANGE)) {
+            mounter.eventMap(id, Native.COMPOSITION_CHANGE, new String[] {"composing", "text"},
+                    new Object[] {now, composedNow});
+        }
+        if (!now && pendingText != null) {
+            // Not from inside the text watcher: the edit that ended the
+            // composition is still in progress there.
+            if (watching) post(this::applyPending);
+            else applyPending();
+        }
+    }
+
+    /** The value JS set during the composition, unless the user typed since (or composes again). */
+    private void applyPending() {
+        if (inComposition || pendingText == null) return;
+        String text = pendingText;
+        pendingText = null;
+        setValue(text, pendingCount);
+    }
+
+    /**
      * Reports the keys of soft keyboards, which edit through the input
      * connection rather than with key events.
      */
@@ -238,13 +304,24 @@ final class InputBox extends FrameLayout implements Node {
             if (text.length() > before) key(text.subSequence(text.length() - 1, text.length()).toString());
             else if (text.length() < before) key("Backspace");
             composing = text;
-            return super.setComposingText(text, position);
+            boolean done = super.setComposingText(text, position);
+            syncComposition();
+            return done;
+        }
+
+        @Override
+        public boolean setComposingRegion(int start, int end) {
+            boolean done = super.setComposingRegion(start, end);
+            syncComposition();
+            return done;
         }
 
         @Override
         public boolean finishComposingText() {
             composing = null;
-            return super.finishComposingText();
+            boolean done = super.finishComposingText();
+            syncComposition();
+            return done;
         }
 
         @Override
@@ -261,13 +338,30 @@ final class InputBox extends FrameLayout implements Node {
                 submit();
                 return true;
             }
-            return super.commitText(text, position);
+            boolean done = super.commitText(text, position);
+            syncComposition();
+            return done;
         }
 
         @Override
         public boolean deleteSurroundingText(int before, int after) {
             if (before > 0 || after > 0) key("Backspace");
-            return super.deleteSurroundingText(before, after);
+            boolean done = super.deleteSurroundingText(before, after);
+            syncComposition();
+            return done;
+        }
+
+        @Override
+        public boolean endBatchEdit() {
+            boolean more = super.endBatchEdit();
+            syncComposition();
+            return more;
+        }
+
+        @Override
+        public void closeConnection() {
+            super.closeConnection();
+            syncComposition();
         }
     }
 
@@ -291,8 +385,19 @@ final class InputBox extends FrameLayout implements Node {
         }
     }
 
-    /** Sets the text from JS unless the user typed since JS saw `count`. */
+    /**
+     * Sets the text from JS unless the user typed since JS saw `count`. During
+     * a composition the newest value waits for its end (see
+     * {@link #syncComposition}), where `count` is checked again.
+     */
     void setValue(String text, int count) {
+        if (inComposition) {
+            pendingText = text;
+            pendingCount = count;
+            return;
+        }
+        // A newer value replaces one still waiting for the composition's end.
+        pendingText = null;
         if (count != this.count || text.contentEquals(edit.getText())) return;
         applying = true;
         known = text;

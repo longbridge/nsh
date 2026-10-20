@@ -1158,6 +1158,7 @@ impl Mounter {
             return;
         };
         input.count += 1;
+        input.known.clone_from(&text);
         input.update_placeholder();
         let count = input.count;
         self.control.dispatch_event(
@@ -1167,7 +1168,71 @@ impl Mounter {
         );
     }
 
+    /// The user edited input `id` to `text`, with the marked text `marked`
+    /// (`None`: no composition). A composition that starts or changes is
+    /// reported before the `onChangeText` of the text holding it, and one
+    /// that ends after the `onChangeText` of the text it committed, as
+    /// browsers order them.
+    pub(crate) fn input_edited(&mut self, id: NodeId, text: String, marked: Option<String>) {
+        if marked.is_some() {
+            if let Some(Slot {
+                native: Native::Input(input),
+                ..
+            }) = self.slot_mut(id)
+                && let Some(change) = input.compose(marked)
+            {
+                self.composition_changed(id, change);
+            }
+            self.input_changed(id, text);
+        } else {
+            self.input_changed(id, text.clone());
+            self.input_composition(id, text, marked);
+        }
+    }
+
+    /// A UIKit callback of input `id` saw `text` with the marked text
+    /// `marked` (`None`: no composition). Ignored while `text` is an edit
+    /// not reported yet: the callback reporting it follows, so a commit's
+    /// `onChangeText` comes before the composition's end.
+    pub(crate) fn input_composition(&mut self, id: NodeId, text: String, marked: Option<String>) {
+        let Some(Slot {
+            native: Native::Input(input),
+            ..
+        }) = self.slot_mut(id)
+        else {
+            return;
+        };
+        if text != input.known {
+            return;
+        }
+        if let Some(change) = input.compose(marked) {
+            self.composition_changed(id, change);
+        }
+    }
+
+    /// `onCompositionChange` of input `id`, if it listens.
+    fn composition_changed(&self, id: NodeId, (composing, text): (bool, String)) {
+        self.input_event(
+            id,
+            EventKind::CompositionChange,
+            EventPayload::Map(vec![
+                ("composing", nsh_core::PayloadValue::Bool(composing)),
+                ("text", nsh_core::PayloadValue::Str(text)),
+            ]),
+        );
+    }
+
     pub(crate) fn input_focused(&mut self, id: NodeId, focused: bool) {
+        // Leaving an input ends its composition.
+        if !focused
+            && let Some(Slot {
+                native: Native::Input(input),
+                ..
+            }) = self.slot_mut(id)
+            && let Some(change) = input.compose(None)
+        {
+            self.composition_changed(id, change);
+        }
         self.report_state(id, nsh_core::tailwind::state::FOCUSED, focused);
         let Some(s) = self.slot(id) else { return };
         let event = if focused {

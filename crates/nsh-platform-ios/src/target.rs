@@ -138,8 +138,9 @@ define_class!(
         fn handle_editing_changed(&self, field: &UITextField) {
             // Read now: a deferred call must report this edit's text.
             let text = field.text().map(|t| t.to_string()).unwrap_or_default();
+            let marked = input::marked_text(field);
             let id = field.tag() as NodeId;
-            self.with_mounter(move |m| m.input_changed(id, text));
+            self.with_mounter(move |m| m.input_edited(id, text, marked));
         }
     }
 
@@ -174,6 +175,9 @@ define_class!(
         #[unsafe(method(textFieldDidChangeSelection:))]
         fn text_field_did_change_selection(&self, field: &UITextField) {
             self.selection_changed(field);
+            // Unmarking keeps the text and only moves the selection.
+            let text = field.text().map(|t| t.to_string()).unwrap_or_default();
+            self.composition(field, text);
         }
 
         #[unsafe(method(textFieldShouldReturn:))]
@@ -205,13 +209,15 @@ define_class!(
         #[unsafe(method(textViewDidChange:))]
         fn text_view_did_change(&self, view: &UITextView) {
             let text = view.text().to_string();
+            let marked = input::marked_text(view);
             let id = view.tag() as NodeId;
-            self.with_mounter(move |m| m.input_changed(id, text));
+            self.with_mounter(move |m| m.input_edited(id, text, marked));
         }
 
         #[unsafe(method(textViewDidChangeSelection:))]
         fn text_view_did_change_selection(&self, view: &UITextView) {
             self.selection_changed(view);
+            self.composition(view, view.text().to_string());
         }
 
         #[unsafe(method(textViewDidBeginEditing:))]
@@ -554,6 +560,14 @@ impl EventTarget {
                 ]),
             )
         });
+    }
+
+    /// The composition of the input `view` belongs to, as it is with
+    /// `text` in it.
+    fn composition(&self, view: &UIView, text: String) {
+        let id = view.tag() as NodeId;
+        let marked = input::marked_text(view);
+        self.with_mounter(move |m| m.input_composition(id, text, marked));
     }
 
     /// A press event on a pressable text span.

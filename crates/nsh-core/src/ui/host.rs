@@ -10,7 +10,7 @@ use std::sync::Arc;
 use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     element::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
-    events::{self, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
+    events::{self, Composition, NativeEvent, Selection, VideoInfo, VideoProgress, WebNavigation},
 };
 use crate::{
     AutoCapitalize, AutoFill, Color, EventKind, HeaderSlot, Hsla, JsonValue, KeyboardAppearance,
@@ -477,6 +477,17 @@ impl Input {
     /// A key was pressed: the character, `Backspace` or `Enter`.
     pub fn on_key_press<M>(self, listener: impl IntoListener<str, M>) -> Self {
         self.listen(EventKind::KeyPress, listener.into_listener(), events::key)
+    }
+
+    /// An input method's composition started, changed or ended (the text
+    /// being composed, empty once it ends): the text is the input's only
+    /// once committed, reported by [`Self::on_change`] first.
+    pub fn on_composition_change<M>(self, listener: impl IntoListener<Composition, M>) -> Self {
+        self.listen(
+            EventKind::CompositionChange,
+            listener.into_listener(),
+            events::composition,
+        )
     }
 
     /// The text's size changed (multiline inputs growing).

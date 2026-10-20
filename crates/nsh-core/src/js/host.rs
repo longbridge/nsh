@@ -631,6 +631,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "Before the text changes: `key` is the typed text, `Backspace` or `Enter`.",
     ),
     (
+        EventKind::CompositionChange,
+        on::INPUT,
+        "(e: { composing: boolean; text: string }) => void",
+        "An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen), empty once it ends. The committed text reaches `onChange` before the composition's end; while composing, the platform holds the `value` the app sets and shows it once the composition ends.",
+    ),
+    (
         EventKind::ContentSizeChange,
         on::INPUT,
         "(e: { width: number; height: number }) => void",

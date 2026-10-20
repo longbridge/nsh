@@ -130,8 +130,8 @@ pub use self::{
     element_ref::{ComponentRef, ElementRef},
     env::Environment,
     events::{
-        FileDropEvent, GestureEvent, ImageProgress, NativeEvent, PanEvent, ScrollEvent, Selection,
-        VideoInfo, VideoProgress, WebNavigation,
+        Composition, FileDropEvent, GestureEvent, ImageProgress, NativeEvent, PanEvent,
+        ScrollEvent, Selection, VideoInfo, VideoProgress, WebNavigation,
     },
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic},
     host::{
@@ -223,6 +223,7 @@ pub mod prelude {
         ComponentElement,
         ComponentError,
         ComponentRef,
+        Composition,
         ContextMenuEvent,
         Corners,
         Cursor,

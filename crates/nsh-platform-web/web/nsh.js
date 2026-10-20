@@ -2363,6 +2363,10 @@ class Player {
       field = document.createElement(tag);
       field.className = "nsh-field";
       field._count = 0;
+      // The text last reported or set: an `input` event that leaves it
+      // (a composition's end in Safari, after the text it committed was
+      // reported) reports nothing.
+      field._known = "";
       this.wireInput(el, field);
       el._field = field;
       el.append(field);
@@ -2397,9 +2401,25 @@ class Player {
   }
 
   wireInput(el, field) {
-    field.addEventListener("input", () => {
-      field._count++;
-      this.event(el._id, "onChangeText", { text: field.value, count: field._count });
+    field.addEventListener("input", () => this.textChanged(el, field));
+    // An input method's composition: the app's value is held while it
+    // lasts (`op_iv`), since setting a field's value ends the composition
+    // and commits its text as typed (pinyin letters instead of the
+    // characters chosen).
+    field.addEventListener("compositionstart", (e) => {
+      field._composing = true;
+      this.compositionChanged(el, field, e.data ?? "");
+    });
+    field.addEventListener("compositionupdate", (e) => this.compositionChanged(el, field, e.data ?? ""));
+    field.addEventListener("compositionend", () => {
+      field._composing = false;
+      // The committed text is reported before the end (browsers differ in
+      // whether its `input` event comes before or after).
+      this.textChanged(el, field);
+      this.compositionChanged(el, field, "");
+      const pending = field._pending;
+      field._pending = null;
+      if (pending) this.op_iv([, el._id, ...pending]);
     });
     field.addEventListener("keydown", (e) => {
       if (el._events.has("onKeyPress")) {
@@ -2430,6 +2450,21 @@ class Player {
     field.addEventListener("pointerup", () => this.selectionChanged(el, field));
   }
 
+  textChanged(el, field) {
+    if (field.value === field._known) return;
+    field._known = field.value;
+    field._count++;
+    this.event(el._id, "onChangeText", { text: field.value, count: field._count });
+  }
+
+  compositionChanged(el, field, text) {
+    const composing = !!field._composing;
+    const last = field._composition;
+    if (last && last[0] === composing && last[1] === text) return;
+    field._composition = [composing, text];
+    if (el._events.has("onCompositionChange")) this.event(el._id, "onCompositionChange", { composing, text });
+  }
+
   selectionChanged(el, field) {
     if (!el._events.has("onSelectionChange")) return;
     const sel = [field.selectionStart ?? 0, field.selectionEnd ?? 0];
@@ -2441,6 +2476,11 @@ class Player {
   op_iv([, id, text, count]) {
     const field = this.view(id)?._field;
     if (!field || count < field._count) return;
+    if (field._composing) {
+      field._pending = [text, count];
+      return;
+    }
+    field._known = text;
     if (field.value !== text) field.value = text;
   }
 

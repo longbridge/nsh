@@ -61,6 +61,28 @@ mount(App);
 
 既然值由你控制，就可以变换用户输入的内容：`onChange={(t) => code.set(t.replace(/[^0-9]/g, ""))}` 只保留数字，`onChange={(t) => tag.set(t.toUpperCase())}` 转为大写。
 
+### 输入法
+
+中文、日文、韩文输入法先组字再上屏：拼音在选字后变成“腾”。`onCompositionChange` 随组字报告其状态：用户输入时为 `{ composing: true, text: "teng" }`，结束时为 `{ composing: false, text: "" }`；上屏的文本先经 `onChange` 报告，然后才报告结束。在 iOS、Android、macOS 和 Web 上，系统把正在组的字放在输入框里，`onChange` 也会报告它；在 Windows、Linux 和 GPUI 上，`onChange` 报告上屏后的文本。受控输入框无论应用如何处理值，组字都会继续：用户组字时设置的 `value` 在组字结束后显示，因此转大写或过滤文本的输入框也能正常输入拼音。
+
+只搜索上屏文本的搜索框：
+
+```tsx
+const query = signal("");
+let composing = false;
+<Input
+  value={query()}
+  onChange={(text) => {
+    query.set(text);
+    if (!composing) search(text);
+  }}
+  onCompositionChange={(e) => {
+    composing = e.composing;
+    if (!e.composing) search(query());
+  }}
+/>
+```
+
 不传 `value` 时输入框是**非受控**的：它自己保存文本，初始值为 `defaultValue`，需要时从 `onChange` 或 `onSubmit` 读取。只在提交时读取的字段（例如密码）适合这样用。
 
 > [!NOTE]
@@ -102,6 +124,7 @@ mount(App);
 | `onSelectionChange` | `{ start, end }` | 光标或选区移动（UTF-16 码元）。 |
 | `onKeyPress` | `{ key }` | 文本改变之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
 | `onContentSizeChange` | `{ width, height }` | 文本尺寸改变（多行时按输入框的宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
+| `onCompositionChange` | `{ composing, text }` | 输入法的组字开始、变化或结束（见[输入法](#输入法)）。 |
 
 输入框的样式与文本相同：`fontSize`、`color`、`fontFamily`、`textAlign`、`letterSpacing` 以及其余[文本样式](./text.md)，再加上边框、内边距和背景。Tailwind 的 `focus:` 变体（或 `focusStyle`）在输入框获得焦点时生效。占位文字的颜色是样式键 `placeholderColor`（`placeholder:text-*`），光标和选区的颜色是 `selectionColor`（`selection:text-*`）：
 

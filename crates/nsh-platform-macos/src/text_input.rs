@@ -26,6 +26,13 @@
 //! never overwritten. Programmatic changes (JS values, swapping editors)
 //! report nothing. Offsets and lengths are UTF-16 units, as `NSString`'s.
 //!
+//! An input method's composition (the editor's marked text) is followed
+//! natively and reported as `onCompositionChange`: as it starts and
+//! changes, and as it ends, after the `onChangeText` of the committed
+//! text. A value from JS that comes during a composition waits for its
+//! end: setting the text then would end the input method's session and
+//! commit what it composes.
+//!
 //! Focus follows desktop habits: Tab moves between fields (the window
 //! recalculates its key view loop), Escape leaves the field, and clicking
 //! a field places the caret there; `focus()` puts the caret at the end
@@ -126,6 +133,29 @@ impl Editor {
         self.ns_text().to_string()
     }
 
+    /// The text an input method is composing in the editor (its marked
+    /// text), while a composition is in progress.
+    fn marked_text(&self) -> Option<String> {
+        let editing = self.editing()?;
+        let view = editing.downcast_ref::<NSTextView>()?;
+        if !view.hasMarkedText() {
+            return None;
+        }
+        let range = view.markedRange();
+        let string = view.string();
+        // An empty marked range composes nothing (marking an empty string
+        // unmarks).
+        if range.length == 0
+            || range
+                .location
+                .checked_add(range.length)
+                .is_none_or(|end| end > string.length())
+        {
+            return None;
+        }
+        Some(string.substringWithRange(range).to_string())
+    }
+
     fn is_empty(&self) -> bool {
         self.ns_text().length() == 0
     }
@@ -222,6 +252,18 @@ pub(crate) struct InputState {
     selection: Cell<(u32, u32)>,
     /// A selection set while the field was not edited, applied when it is.
     pending_selection: Cell<Option<(u32, u32)>>,
+    /// The text the engine knows the input has: the last one reported
+    /// (`onChangeText`) or set from JS. A callback that sees another text
+    /// comes before the change that reports it.
+    known: RefCell<String>,
+    /// The text an input method is composing, while a composition is in
+    /// progress.
+    composition: RefCell<Option<String>>,
+    /// A value from JS (text, count) that came during a composition,
+    /// applied when it ends.
+    pending_value: RefCell<Option<(String, u32)>>,
+    /// A user edit was allowed and is not reported yet.
+    editing: Cell<bool>,
     /// A field is taking the focus.
     focusing: Cell<bool>,
     /// The modifiers of the key a text view is handling (its commands do
@@ -280,12 +322,22 @@ impl Ctx {
             return;
         };
         input.update_placeholder();
+        input.editing.set(false);
         if input.applying.get() {
             return;
         }
         let count = input.count.get() + 1;
         input.count.set(count);
         let text = input.editor.borrow().text();
+        input.known.borrow_mut().clone_from(&text);
+        // A composition that starts or changes is reported before the text
+        // holding it, one that ends after the text it committed, as
+        // browsers order them.
+        let marked = input.editor.borrow().marked_text();
+        let composing = marked.is_some();
+        if composing {
+            self.compose(&input, marked);
+        }
         // Always reported: the engine keeps the text for layout and for
         // dropping stale values, whether JS listens or not.
         surface.event(
@@ -293,7 +345,53 @@ impl Ctx {
             EventKind::ChangeText,
             EventPayload::Text { text, count },
         );
+        if !composing {
+            self.composition_changed();
+        }
         self.selection_changed();
+    }
+
+    /// The editor's composition may have started, changed or ended
+    /// (unmarking leaves the text as it is: the selection or the commands
+    /// that unmark come here too).
+    fn composition_changed(&self) {
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        if input.applying.get() || input.editing.get() {
+            return;
+        }
+        let editor = input.editor.borrow().clone();
+        // An edit not reported yet: `changed` reports it, then comes here.
+        if *input.known.borrow() != editor.text() {
+            return;
+        }
+        self.compose(&input, editor.marked_text());
+    }
+
+    /// Records the composition `marked` (`None`: none) and reports it if
+    /// it changed; its end applies a value JS wrote meanwhile.
+    fn compose(&self, input: &InputState, marked: Option<String>) {
+        if *input.composition.borrow() == marked {
+            return;
+        }
+        let text = marked.clone().unwrap_or_default();
+        let composing = marked.is_some();
+        *input.composition.borrow_mut() = marked;
+        if !composing && let Some((value, count)) = input.pending_value.take() {
+            // Only if JS saw every edit (a commit that changed the text was
+            // reported before).
+            let seen = input.editor.borrow().text() == *input.known.borrow();
+            if seen {
+                input.apply_value(&value, count);
+            }
+        }
+        self.send(EventKind::CompositionChange, || {
+            EventPayload::Map(vec![
+                ("composing", PayloadValue::Bool(composing)),
+                ("text", PayloadValue::Str(text)),
+            ])
+        });
     }
 
     /// The caret or selection may have moved.
@@ -345,6 +443,11 @@ impl Ctx {
                 input.editor.borrow().select(start, end);
             }
         }
+        if !focused {
+            // Leaving the input ends its composition.
+            input.editing.set(false);
+            self.compose(&input, None);
+        }
         if input.focused.replace(focused) == focused {
             return;
         }
@@ -390,6 +493,7 @@ impl Ctx {
             // the input method's and never gets here; one that comes
             // anyway only commits it, as theirs does.
             text_view.unmarkText();
+            self.composition_changed();
             return true;
         }
         // Shift+Return still breaks the line of a multiline input that
@@ -448,6 +552,9 @@ impl Ctx {
             // Attribute changes only.
             return true;
         };
+        // Until `changed` reports the edit, the composition it changes is
+        // not looked at (the editor may unmark before it replaces).
+        input.editing.set(true);
         let mut text = replacement.to_string();
         if text.is_empty() {
             if range.length > 0 {
@@ -476,6 +583,9 @@ impl Ctx {
         if fit.len() == text.len() && !flattened {
             return true;
         }
+        // The edit as asked never happens (a clipped one, made here, is
+        // reported as it is made).
+        input.editing.set(false);
         if !fit.is_empty() {
             // The clipped (or flattened) insertion, as a user edit (undo,
             // change notifications), but not checked again.
@@ -507,6 +617,7 @@ impl Ctx {
         if command == sel!(insertNewlineIgnoringFieldEditor:) || command == sel!(insertLineBreak:) {
             if text_view.hasMarkedText() {
                 text_view.unmarkText();
+                self.composition_changed();
             } else if multiline {
                 // SAFETY: NSTextView's action; in a text view that is not a
                 // field editor it inserts a newline character.
@@ -677,6 +788,7 @@ macro_rules! define_field {
                         };
                     }
                     if let Some(ctx) = self.ivars().get() {
+                        ctx.composition_changed();
                         ctx.selection_changed();
                     }
                 }
@@ -768,6 +880,17 @@ define_class!(
                 ctx.focus_changed(false);
             }
             ok
+        }
+
+        /// An input method that accepts its marked text as it is changes
+        /// neither the text nor always the selection.
+        #[unsafe(method(unmarkText))]
+        fn unmark_text(&self) {
+            // SAFETY: NSTextView's own method (NSTextInputClient).
+            let _: () = unsafe { msg_send![super(self), unmarkText] };
+            if let Some(ctx) = self.ivars().get() {
+                ctx.composition_changed();
+            }
         }
     }
 );
@@ -937,6 +1060,7 @@ define_class!(
 
         #[unsafe(method(textViewDidChangeSelection:))]
         fn did_change_selection(&self, _notification: &NSNotification) {
+            self.ivars().composition_changed();
             self.ivars().selection_changed();
         }
 
@@ -959,6 +1083,7 @@ impl InputState {
     /// Sets the text without reporting it, keeping the caret where it was
     /// (at the end if it was there).
     fn replace_text(&self, text: &str) {
+        *self.known.borrow_mut() = text.to_owned();
         let editor = self.editor.borrow().clone();
         let old_len = editor.ns_text().length() as u32;
         let caret = editor.selection().map(|(_, end)| end);
@@ -976,6 +1101,14 @@ impl InputState {
         self.applying.set(false);
         self.update_placeholder();
         self.ctx.selection_changed();
+    }
+
+    /// JS's text, unless the user typed since JS saw `count`.
+    fn apply_value(&self, text: &str, count: u32) {
+        if count < self.count.get() || self.editor.borrow().text() == text {
+            return;
+        }
+        self.replace_text(text);
     }
 
     /// The text color: an animated one over the config's.
@@ -1053,6 +1186,10 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
             focused: Cell::new(false),
             selection: Cell::new((0, 0)),
             pending_selection: Cell::new(None),
+            known: RefCell::new(String::new()),
+            composition: RefCell::new(None),
+            pending_value: RefCell::new(None),
+            editing: Cell::new(false),
             focusing: Cell::new(false),
             key_mods: Cell::new(NSEventModifierFlags::empty()),
             anim_color: Cell::new(None),
@@ -1380,15 +1517,19 @@ fn place(view: &NshView, input: &InputState) {
 /// How far a borderless field's cell insets its text horizontally.
 const FIELD_PADDING: f32 = 2.0;
 
-/// `InputValue`: JS's text, unless the user typed since JS saw `count`.
+/// `InputValue`: JS's text, unless the user typed since JS saw `count`;
+/// during a composition it waits for the composition to end.
 pub(crate) fn value(view: &NshView, text: &str, count: u32) {
     let Some(input) = view.state().input.clone() else {
         return;
     };
-    if count < input.count.get() || input.editor.borrow().text() == text {
+    let editor = input.editor.borrow().clone();
+    if input.composition.borrow().is_some() || editor.marked_text().is_some() {
+        *input.pending_value.borrow_mut() = Some((text.to_owned(), count));
         return;
     }
-    input.replace_text(text);
+    *input.pending_value.borrow_mut() = None;
+    input.apply_value(text, count);
 }
 
 /// The view's animated values changed (a frame of a native animation):

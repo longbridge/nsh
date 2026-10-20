@@ -778,6 +778,8 @@ export interface InputHostProps {
   onSelectionChange?: (e: { start: number; end: number }) => void;
   /** Before the text changes: `key` is the typed text, `Backspace` or `Enter`. */
   onKeyPress?: (e: { key: string }) => void;
+  /** An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen), empty once it ends. The committed text reaches `onChange` before the composition's end; while composing, the platform holds the `value` the app sets and shows it once the composition ends. */
+  onCompositionChange?: (e: { composing: boolean; text: string }) => void;
   /** The size of the text (at the input's width when `multiline`; one empty line's while it is empty, whatever its placeholder): grow a multiline input with it. */
   onContentSizeChange?: (e: { width: number; height: number }) => void;
 }

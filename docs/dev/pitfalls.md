@@ -160,7 +160,11 @@ Things that were found the hard way. Read the section of the area you change bef
   Soft keyboards edit through the input connection (`KeyConnection`: composing text, commits, deletes), hardware keys arrive
   as key events; both feed `onKeyPress`. A hardware Enter reports its down and its up — act on the down only and consume the up, or the up advances
   focus again in the next field; blur by focusing the (focusable, highlight-free) `NshView`, as `clearFocus()` hands focus to the
-  first focusable view; set the typeface after the input type (password types reset it to monospace).
+  first focusable view; set the typeface after the input type (password types reset it to monospace). The composition
+  (`onCompositionChange`) is read from the composing span (`BaseInputConnection.getComposingSpanStart` / `End`) after every
+  edit, connection call and batch end, since keyboards start and end it in many ways (`setComposingRegion` included); a
+  value JS sets meanwhile waits for its end (`setText` restarts the keyboard, which commits the pre-edit text), and is
+  never applied from inside the text watcher.
 - **Android, keyboard avoidance**: the keyboard's height becomes bottom padding of the scroll around the focused input, and
   `ScrollBox.reveal` scrolls it into view; `requestRectangleOnScreen` cannot, as ScrollView ignores its padding when it decides
   whether a rectangle is visible. `NshView` is a scroll container (`setScrollContainer(true)`) so that windows without a soft

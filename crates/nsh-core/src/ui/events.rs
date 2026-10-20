@@ -79,6 +79,18 @@ pub struct Selection {
     pub end: u32,
 }
 
+/// An input method's composition in an input (`on_composition_change`):
+/// the text being composed (pinyin before a character is chosen, kana
+/// before conversion), not yet the input's text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Composition {
+    /// A composition is in progress.
+    pub composing: bool,
+    /// The text being composed, empty once the composition ends.
+    pub text: String,
+}
+
 /// Where a web view is (`on_navigation_state_change`, `on_load`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WebNavigation {
@@ -216,6 +228,13 @@ pub(crate) fn selection(p: &EventPayload) -> Option<Cow<'_, Selection>> {
     Some(Cow::Owned(Selection {
         start: number(p, "start") as u32,
         end: number(p, "end") as u32,
+    }))
+}
+
+pub(crate) fn composition(p: &EventPayload) -> Option<Cow<'_, Composition>> {
+    Some(Cow::Owned(Composition {
+        composing: flag(p, "composing"),
+        text: string(p, "text").unwrap_or_default().to_owned(),
     }))
 }
 
@@ -384,6 +403,26 @@ mod tests {
                 .unwrap()
                 .uris,
             uris
+        );
+    }
+
+    #[test]
+    fn composition_reads_its_state_and_text() {
+        use crate::{EventPayload, PayloadValue};
+        let composing = EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(true)),
+            ("text", PayloadValue::Str("teng".into())),
+        ]);
+        let c = super::composition(&composing).unwrap();
+        assert!(c.composing);
+        assert_eq!(c.text, "teng");
+        let ended = EventPayload::Map(vec![
+            ("composing", PayloadValue::Bool(false)),
+            ("text", PayloadValue::Str(String::new())),
+        ]);
+        assert_eq!(
+            super::composition(&ended).unwrap().into_owned(),
+            super::Composition::default()
         );
     }
 }

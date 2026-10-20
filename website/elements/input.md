@@ -112,6 +112,7 @@ The placeholder's color and the color of the caret and the selection are style k
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `{ width, height }` | The size of the text changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
+| `onCompositionChange` | `{ composing, text }` | An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen, kana before conversion), `""` once it ends. The committed text reaches `onChange` before the end. |
 
 A multiline input that grows with its text:
 

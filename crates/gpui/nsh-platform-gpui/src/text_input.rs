@@ -123,6 +123,13 @@ pub(crate) struct InputState {
     count: Cell<u32>,
     /// Selection as last reported (UTF-16).
     reported: Cell<(u32, u32)>,
+    /// The composition as last reported (`onCompositionChange`): its text
+    /// while one is in progress.
+    composed: RefCell<Option<String>>,
+    /// A value from JS (text, count) that arrived while the input method
+    /// composed, applied when the composition ends: replacing the text
+    /// under a composition would drop it without the input method knowing.
+    pending: RefCell<Option<(String, u32)>>,
     /// The animated text color, if a native animation sets one.
     anim_color: Cell<Option<Color>>,
     /// It has the surface's focus.
@@ -158,6 +165,8 @@ impl InputState {
             size: Cell::new((0.0, 0.0)),
             count: Cell::new(0),
             reported: Cell::new((0, 0)),
+            composed: RefCell::new(None),
+            pending: RefCell::new(None),
             anim_color: Cell::new(None),
             focused: Cell::new(false),
             active: Cell::new(true),
@@ -654,6 +663,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
             // (the handler that would commit it is no longer registered).
             input.model.borrow_mut().composition = None;
             input.relayout();
+            report_composition(surface, old, &input);
         }
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = None);
         crate::input::set_state(surface, old, state::FOCUSED, false);
@@ -823,6 +833,7 @@ pub(crate) mod ime {
         } else {
             insert(surface, &view, &input, &text, true);
         }
+        report_composition(surface, &view, &input);
     }
 
     /// `replace_text_in_range`: typed or committed text replaces the
@@ -850,10 +861,15 @@ pub(crate) mod ime {
             if composed {
                 input.reveal();
                 view.changed();
+                report_composition(surface, &view, &input);
             }
             return;
         }
         insert(surface, &view, &input, &text, true);
+        if composed {
+            // After the committed text's `onChangeText`.
+            report_composition(surface, &view, &input);
+        }
     }
 
     /// `replace_and_mark_text_in_range`: the composition becomes
@@ -890,6 +906,7 @@ pub(crate) mod ime {
         input.wake_caret();
         input.reveal();
         view.changed();
+        report_composition(surface, &view, &input);
     }
 
     /// `bounds_for_range`: where the range shows, in window coordinates
@@ -1081,6 +1098,35 @@ fn report_selection(surface: &Surface, view: &NshView, input: &InputState) {
     });
 }
 
+/// Reports the composition if it started, changed or ended since last
+/// reported (and JS listens); once it ended, applies the value JS set
+/// meanwhile. Called after every change of the composition, after the
+/// `onChangeText` of what it committed.
+fn report_composition(surface: &Surface, view: &NshView, input: &InputState) {
+    let now = input
+        .model
+        .borrow()
+        .composition
+        .as_ref()
+        .filter(|c| !c.text.is_empty())
+        .map(|c| c.text.clone());
+    if *input.composed.borrow() != now {
+        input.composed.replace(now.clone());
+        send(surface, view, EventKind::CompositionChange, || {
+            EventPayload::Map(vec![
+                ("composing", PayloadValue::Bool(now.is_some())),
+                ("text", PayloadValue::Str(now.unwrap_or_default())),
+            ])
+        });
+    }
+    if input.composed.borrow().is_none() {
+        let pending = input.pending.borrow_mut().take();
+        if let Some((text, count)) = pending {
+            set_value(view, input, &text, count);
+        }
+    }
+}
+
 /// After a user edit (`changed`: the text changed) or a caret movement:
 /// reports the text with a new edit count, then the selection, and shows
 /// the caret.
@@ -1242,10 +1288,29 @@ fn place(view: &NshView, input: &Rc<InputState>) {
 }
 
 /// `InputValue`: JS's text, unless the user typed since JS saw `count`.
+/// While the input method composes, the value waits for the composition
+/// to end (the newest one; whether it is stale is decided then).
 pub(crate) fn value(view: &NshView, text: &str, count: u32) {
     let Some(input) = input_of(view) else {
         return;
     };
+    if input.composing() {
+        input.pending.replace(Some((text.to_owned(), count)));
+        return;
+    }
+    set_value(view, &input, text, count);
+}
+
+/// The value JS set that waits for the composition to end (tests).
+#[cfg(all(test, feature = "shot"))]
+pub(crate) fn pending_value(view: &NshView) -> Option<String> {
+    let input = input_of(view)?;
+    let pending = input.pending.borrow();
+    pending.as_ref().map(|(text, _)| text.clone())
+}
+
+/// Applies JS's `text` unless the user edited since JS saw `count`.
+fn set_value(view: &NshView, input: &InputState, text: &str, count: u32) {
     if count < input.count.get() || input.model.borrow().text() == text {
         return;
     }

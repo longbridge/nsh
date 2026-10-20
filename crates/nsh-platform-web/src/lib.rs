@@ -983,6 +983,7 @@ pub unsafe extern "C" fn nsh_event(
                             "bottom" => "bottom",
                             "left" => "left",
                             "text" => "text",
+                            "composing" => "composing",
                             "has" => "has",
                             "uri" => "uri",
                             "files" => "files",

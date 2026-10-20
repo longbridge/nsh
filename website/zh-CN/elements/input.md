@@ -109,6 +109,7 @@ function NameField() {
 | `onSelectionChange` | `{ start, end }` | 光标或选区移动（UTF-16 单位）。 |
 | `onKeyPress` | `{ key }` | 文本变化之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
 | `onContentSizeChange` | `{ width, height }` | 文本尺寸变化（多行时按输入框宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
+| `onCompositionChange` | `{ composing, text }` | 输入法的组字开始、变化或结束：`text` 是正在组的字（选字前的拼音、变换前的假名），结束时为 `""`。上屏的文本先经 `onChange` 报告，然后才报告结束。 |
 
 随文本增高的多行输入框：
 

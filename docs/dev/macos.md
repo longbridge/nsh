@@ -158,6 +158,12 @@ any layout; the dev host's Cmd+R is a local key monitor (`dev.rs`).
   only), Tab / Shift+Tab / Ctrl+Tab (`tab`: the next field or pressable view on screen within the newest dialog, skipping the clip view
   of a text view, which hands the focus back to it) and Escape (leaves the field). Keys a field uses never reach the
   root, so Option+Left moves the caret and Cmd+[ does nothing there.
+- **Input method compositions** (`text_input.rs` `Ctx::composition_changed`): the editing view's marked text is
+  followed after each change, selection change and unmark, and reported as `onCompositionChange` (as it starts and
+  changes, and as it ends, after the `onChangeText` of the committed text; leaving the field ends it too). A value
+  from JS that arrives during a composition is held and applied when the composition ends, if JS has seen every edit
+  by then, so the input method's session continues undisturbed. The script's `mark <text>` drives it, and a
+  `key Return` commits the marked text.
 - **At the root** (`view.rs` `keyDown:` → `input::key`): the selected text's Cmd+A / Cmd+C / Escape (`text.rs`;
   also the root's `selectAll:` / `copy:` for the menu), going back (`navigation::key_pressed`: Escape, Option+Left,
   Cmd+[), Tab / Shift+Tab into fields and pressable views, and scrolling the scroll view around the focused view or under the mouse:
@@ -211,7 +217,7 @@ lines (`script.rs`, whose module doc lists them all): `wait <ms>`, `shot <file.p
 (`tap shift 10 20`: a shift-click), `down` / `up` (a held press, for pressed states), `rtap`,
 `drag <x0> <y0> <x1> <y1> [ms]`, `wheel <x> <y> <dx> <dy> [ms]` (a trackpad gesture), `fling <x> <y> <dx> <dy> [ms]`
 (a 120 Hz trackpad flick with momentum), `notch` (a mouse wheel), `hover`, `type <text>`, `mark <text>` (an input
-method's marked text), `key <name>` (with modifiers: `cmd+a`, `shift+Tab`; `Escape`, `F5`, ...: through the
+method's marked text; empty removes it), `key <name>` (with modifiers: `cmd+a`, `shift+Tab`; `Escape`, `F5`, ...: through the
 application, as real keys, so key monitors see them), `dark` / `light`, `resize <w> <h>`,
 `zoom` (AppKit's animated zoom), `fullscreen` (enter or leave), `quit`. Mouse events are posted to the application's
 queue, so they take the path real ones take (and become `NSApp.currentEvent`); wheels are handed to the window, and the root's

@@ -192,6 +192,13 @@ pub(crate) struct InputState {
     focused: Cell<bool>,
     /// Selection as last reported (UTF-16).
     selection: Cell<(u32, u32)>,
+    /// The input method's composition (its preedit text) while one is in
+    /// progress: GTK shows it in the editor, outside the text.
+    composition: RefCell<Option<String>>,
+    /// JS's value set during a composition, with its count: setting the
+    /// text then would reset the input method, so it is applied when the
+    /// composition ends.
+    held: RefCell<Option<(String, u32)>>,
     /// The handlers' context, for reports after programmatic changes.
     ctx: std::cell::OnceCell<Ctx>,
     /// The window whose focus widget is watched, and the handler.
@@ -368,6 +375,60 @@ impl Ctx {
         self.focus_changed();
     }
 
+    /// The input method's preedit text changed: empty when its
+    /// composition ends (committed or cancelled).
+    fn preedit_changed(&self, text: &str) {
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        if text.is_empty() {
+            self.composition_ended();
+            return;
+        }
+        if input.composition.borrow().as_deref() == Some(text) {
+            return;
+        }
+        *input.composition.borrow_mut() = Some(text.to_owned());
+        self.send_composition(true, text);
+    }
+
+    /// The composition ended. The text it committed is inserted around the
+    /// same time, so its end is reported once idle, after that text's
+    /// `onChangeText`; then the value JS set meanwhile applies.
+    fn composition_ended(&self) {
+        let Some(input) = self.input.upgrade() else {
+            return;
+        };
+        if input.composition.borrow_mut().take().is_none() {
+            return;
+        }
+        let c = self.clone();
+        glib::idle_add_local_once(move || {
+            let Some((_, view, input)) = c.get() else {
+                return;
+            };
+            if input.composition.borrow().is_some() {
+                // Another composition started: this one's value waits for it.
+                return;
+            }
+            c.flush_change();
+            c.send_composition(false, "");
+            let held = input.held.borrow_mut().take();
+            if let Some((text, count)) = held {
+                value(&view, &text, count);
+            }
+        });
+    }
+
+    fn send_composition(&self, composing: bool, text: &str) {
+        self.send(EventKind::CompositionChange, || {
+            EventPayload::Map(vec![
+                ("composing", PayloadValue::Bool(composing)),
+                ("text", PayloadValue::Str(text.to_owned())),
+            ])
+        });
+    }
+
     /// Focus entered or left the editor.
     fn focus_changed(&self) {
         let Some((surface, view, input)) = self.get() else {
@@ -384,6 +445,10 @@ impl Ctx {
             return;
         }
         self.flush_change();
+        if !focused {
+            // GTK resets the input method when the focus leaves.
+            self.composition_ended();
+        }
         crate::input::set_state(&surface, &view, state::FOCUSED, focused);
         let kind = if focused {
             EventKind::Focus
@@ -497,6 +562,8 @@ pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
         pending: Cell::new(false),
         focused: Cell::new(false),
         selection: Cell::new((0, 0)),
+        composition: RefCell::new(None),
+        held: RefCell::new(None),
         ctx: std::cell::OnceCell::new(),
         window: RefCell::new(None),
         auto_focus: RefCell::new(None),
@@ -571,6 +638,8 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
             let c = ctx.clone();
             t.connect_changed(move |_| c.changed());
             let c = ctx.clone();
+            t.connect_preedit_changed(move |_, text| c.preedit_changed(text));
+            let c = ctx.clone();
             t.connect_local("activate", false, move |_| {
                 c.submitted();
                 None
@@ -620,6 +689,8 @@ fn attach(ctx: &Ctx, editor: &Editor, input: &InputState) {
             });
             let c = ctx.clone();
             buffer.connect_changed(move |_| c.changed());
+            let c = ctx.clone();
+            view.connect_preedit_changed(move |_, text| c.preedit_changed(text));
             let c = ctx.clone();
             buffer.connect_mark_set(move |b, _, mark| {
                 if *mark == b.get_insert() || *mark == b.selection_bound() {
@@ -1002,6 +1073,10 @@ pub(crate) fn value(view: &NshView, text: &str, count: u32) {
         return;
     };
     if count < input.count.get() || input.editor.borrow().text() == text {
+        return;
+    }
+    if input.composition.borrow().is_some() {
+        *input.held.borrow_mut() = Some((text.to_owned(), count));
         return;
     }
     input.replace_text(text);

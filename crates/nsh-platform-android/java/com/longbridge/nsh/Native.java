@@ -66,6 +66,7 @@ final class Native {
     static final int FILE_DROP = 55;
     static final int HOVER_MOVE = 56;
     static final int CONTEXT_MENU = 57;
+    static final int COMPOSITION_CHANGE = 58;
 
     /** A host whose apps keep their data in {@code dataDir}, each in a directory named by its id. */
     static native long create(NshView view, float density, boolean trace, String dataDir);

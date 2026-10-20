@@ -137,6 +137,13 @@ pub(crate) struct InputState {
     count: Cell<u32>,
     /// Selection as last reported (UTF-16).
     reported: Cell<(u32, u32)>,
+    /// The composition as last reported (`onCompositionChange`): its text
+    /// while one is in progress.
+    composed: RefCell<Option<String>>,
+    /// A value from JS (text, count) that arrived while the IME composed,
+    /// applied when the composition ends: replacing the text under a
+    /// composition would drop it without the IME knowing.
+    pending: RefCell<Option<(String, u32)>>,
     /// The animated text color, if a native animation sets one.
     anim_color: Cell<Option<Color>>,
     /// It has the surface's focus.
@@ -171,6 +178,8 @@ impl InputState {
             size: Cell::new((0.0, 0.0)),
             count: Cell::new(0),
             reported: Cell::new((0, 0)),
+            composed: RefCell::new(None),
+            pending: RefCell::new(None),
             anim_color: Cell::new(None),
             focused: Cell::new(false),
             active: Cell::new(true),
@@ -190,6 +199,16 @@ impl InputState {
 
     fn secure(&self) -> bool {
         self.config.borrow().secure
+    }
+
+    /// The text being composed, while there is any.
+    fn composed_text(&self) -> Option<String> {
+        self.model
+            .borrow()
+            .composition
+            .as_ref()
+            .filter(|c| !c.text.is_empty())
+            .map(|c| c.text.clone())
     }
 
     /// The text changed what it shows.
@@ -794,6 +813,7 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
             input.drag.set(None);
             input.model.borrow_mut().composition = None;
             input.relayout();
+            report_composition(surface, old, &input);
         }
         FOCUS.with(|f| f.borrow_mut().entry(surface.key()).or_default().view = None);
         crate::input::set_state(surface, old, state::FOCUSED, false);
@@ -1022,6 +1042,8 @@ pub(crate) fn ime(
             }
             input.model.borrow_mut().composition = Some(Composition::default());
             place_ime(surface);
+            // Reported once there is text: the IME may open a composition
+            // and end it with nothing composed.
             Some(LRESULT(0))
         }
         WM_IME_COMPOSITION => {
@@ -1033,17 +1055,25 @@ pub(crate) fn ime(
                 (result, composition)
             });
             let (result, composition) = read.unwrap_or_default();
+            if let Some(result) = result.filter(|r| !r.is_empty()) {
+                // A commit ends the composition it came from, even when
+                // the IME starts the next one in the same message (as
+                // GPUI's input handler brings them, one call each): the
+                // committed text's `onChangeText`, the end, then the
+                // composition that follows.
+                input.model.borrow_mut().composition = Some(Composition::default());
+                input.relayout();
+                insert(surface, &view, &input, &result, true);
+                report_composition(surface, &view, &input);
+            }
             input.model.borrow_mut().composition = composition
                 .filter(|c| !c.text.is_empty())
                 .or(Some(Composition::default()));
             input.relayout();
-            if let Some(result) = result.filter(|r| !r.is_empty()) {
-                insert(surface, &view, &input, &result, true);
-            } else {
-                input.wake_caret();
-                input.reveal();
-                view.changed();
-            }
+            input.wake_caret();
+            input.reveal();
+            view.changed();
+            report_composition(surface, &view, &input);
             place_ime(surface);
             Some(LRESULT(0))
         }
@@ -1052,6 +1082,7 @@ pub(crate) fn ime(
             input.relayout();
             input.reveal();
             view.changed();
+            report_composition(surface, &view, &input);
             Some(LRESULT(0))
         }
         _ => None,
@@ -1102,6 +1133,29 @@ fn report_selection(surface: &Surface, view: &NshView, input: &InputState) {
             ("end", PayloadValue::Number(range.1 as f64)),
         ])
     });
+}
+
+/// Reports the composition if it started, changed or ended since last
+/// reported (and JS listens); once it ended, applies the value JS set
+/// meanwhile. Called after every change of the composition, after the
+/// `onChangeText` of what it committed.
+fn report_composition(surface: &Surface, view: &NshView, input: &InputState) {
+    let now = input.composed_text();
+    if *input.composed.borrow() != now {
+        input.composed.replace(now.clone());
+        send(surface, view, EventKind::CompositionChange, || {
+            EventPayload::Map(vec![
+                ("composing", PayloadValue::Bool(now.is_some())),
+                ("text", PayloadValue::Str(now.unwrap_or_default())),
+            ])
+        });
+    }
+    if input.composed.borrow().is_none() {
+        let pending = input.pending.borrow_mut().take();
+        if let Some((text, count)) = pending {
+            set_value(view, input, &text, count);
+        }
+    }
 }
 
 /// After a user edit (`changed`: the text changed) or a caret movement:
@@ -1271,14 +1325,34 @@ fn place(view: &NshView, input: &Rc<InputState>) {
 }
 
 /// `InputValue`: JS's text, unless the user typed since JS saw `count`.
+/// While the IME composes, the value waits for the composition to end
+/// (the newest one; whether it is stale is decided then).
 pub(crate) fn value(view: &NshView, text: &str, count: u32) {
     let Some(input) = input_of(view) else {
         return;
     };
+    if input.composed_text().is_some() {
+        input.pending.replace(Some((text.to_owned(), count)));
+        return;
+    }
+    set_value(view, &input, text, count);
+}
+
+/// Applies JS's `text` unless the user edited since JS saw `count`.
+fn set_value(view: &NshView, input: &InputState, text: &str, count: u32) {
     if count < input.count.get() || input.model.borrow().text() == text {
         return;
     }
-    input.model.borrow_mut().set_text(text);
+    {
+        let mut model = input.model.borrow_mut();
+        // A composition the IME opened with nothing in it yet stays open
+        // (a click or a return still completes it).
+        let open = model.composition.is_some();
+        model.set_text(text);
+        if open {
+            model.composition = Some(Composition::default());
+        }
+    }
     input.relayout();
     if input.focused.get() {
         input.reveal();
@@ -1423,6 +1497,7 @@ pub(crate) fn mark(surface: &Rc<Surface>, text: &str) {
     input.relayout();
     input.reveal();
     view.changed();
+    report_composition(surface, &view, &input);
 }
 
 /// The window got (or lost) the keyboard focus: the focused field keeps

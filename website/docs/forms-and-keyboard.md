@@ -61,6 +61,28 @@ mount(App);
 
 Because you control the value, you can transform what the user types: `onChange={(t) => code.set(t.replace(/[^0-9]/g, ""))}` keeps digits only, `onChange={(t) => tag.set(t.toUpperCase())}` uppercases.
 
+### Input methods
+
+Chinese, Japanese and Korean input methods compose text before committing it: pinyin turns into 腾 once a character is chosen. `onCompositionChange` reports the composition as it goes, `{ composing: true, text: "teng" }` while the user types and `{ composing: false, text: "" }` when it ends; the committed text reaches `onChange` before the end. On iOS, Android, macOS and the web, `onChange` also reports the text being composed, as those systems keep it in the input; on Windows, Linux and GPUI it reports the committed text. A controlled input keeps the composition going whatever the app does with the value: a `value` set while the user composes is shown once the composition ends, so an input that uppercases or filters its text takes pinyin as typed.
+
+A search box that searches the committed text only:
+
+```tsx
+const query = signal("");
+let composing = false;
+<Input
+  value={query()}
+  onChange={(text) => {
+    query.set(text);
+    if (!composing) search(text);
+  }}
+  onCompositionChange={(e) => {
+    composing = e.composing;
+    if (!e.composing) search(query());
+  }}
+/>
+```
+
 An input is **uncontrolled** without `value`: it keeps its own text, starting at `defaultValue`, and you read it from `onChange` or `onSubmit` when you need it. Use this for fields you only read on submit, such as a password.
 
 > [!NOTE]
@@ -102,6 +124,7 @@ Events:
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
 | `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
+| `onCompositionChange` | `{ composing, text }` | An input method's composition started, changed or ended (see [Input methods](#input-methods)). |
 
 An input is styled like text: `fontSize`, `color`, `fontFamily`, `textAlign`, `letterSpacing` and the rest of [text styles](./text.md), plus borders, padding and backgrounds. The `focus:` Tailwind variant (or `focusStyle`) applies while the input has focus. The placeholder's color is the
 `placeholderColor` style key (`placeholder:text-*`), and the caret and selection's color is `selectionColor`
