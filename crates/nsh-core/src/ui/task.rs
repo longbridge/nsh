@@ -108,6 +108,24 @@ pub(crate) enum ClipboardRead {
     Text(AnswerSlot<String>),
     /// Whether it holds text.
     Has(AnswerSlot<bool>),
+    /// The image (`None` when it holds none).
+    Image(AnswerSlot<Option<ClipboardImage>>),
+    /// Whether it holds an image.
+    HasImage(AnswerSlot<bool>),
+    /// The `file:` URLs of the local files on it.
+    Files(AnswerSlot<Vec<String>>),
+}
+
+/// An image read from the system clipboard (`Clipboard.getImage`).
+#[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
+pub struct ClipboardImage {
+    /// The image as a `data:` URI (`data:image/png;base64,…`): an image's
+    /// source, and `fetch(uri)` gives its bytes.
+    pub uri: String,
+    /// Width in pixels.
+    pub width: f64,
+    /// Height in pixels.
+    pub height: f64,
 }
 
 /// An image's size in pixels (`Image.getSize`).
@@ -191,20 +209,9 @@ impl Ord for Timer {
 }
 
 impl Executor {
-    /// The live node `key` (a node-making op, node 0) made.
-    pub(crate) fn derived(
-        &self,
-        key: &nsh_animation::AnimationOp,
-    ) -> Option<Rc<super::animated::Node>> {
-        self.derived.borrow_mut().get(key)
-    }
-
-    pub(crate) fn remember_derived(
-        &self,
-        key: nsh_animation::AnimationOp,
-        node: &Rc<super::animated::Node>,
-    ) {
-        self.derived.borrow_mut().0.push((key, Rc::downgrade(node)));
+    /// The derived nodes and their handles.
+    pub(crate) fn derived(&self) -> std::cell::RefMut<'_, super::animated::Derived> {
+        self.derived.borrow_mut()
     }
 
     /// Wakes `waker` at `at`.

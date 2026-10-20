@@ -52,7 +52,8 @@ use std::{
 
 use nsh_core::{
     Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
-    ROOT_ID, Rect, platform::Appearance,
+    ROOT_ID, Rect,
+    platform::{Appearance, clipboard},
 };
 use nsh_engine::{ColorScheme, Environment, Insets, Locale};
 use windows::{
@@ -230,6 +231,13 @@ fn settings() -> Settings {
         screen_reader: spi_bool(SPI_GETSCREENREADER) == Some(true),
         locale: user_locale(user_locale_name().as_deref()),
     }
+}
+
+/// The embedding app set its locale or text size
+/// ([`crate::AppView::set_locale`]): the system's settings are read again,
+/// with the host's over them.
+pub(crate) fn host_environment_changed(surface: &Surface) {
+    update(surface, settings());
 }
 
 /// Writes `settings` and the surface's own values into its environment.
@@ -447,6 +455,29 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 clipboard_answer(*id, has, text),
             );
         }
+        Command::SetClipboardImage(uri) => match clipboard::decode_data_uri(uri) {
+            Some(("image/png", bytes)) => {
+                if !set_clipboard_bytes(png_format(), &bytes) {
+                    log::debug!("windows: cannot set the clipboard");
+                }
+            }
+            _ => log::warn!("Clipboard.setImage: Windows takes a base64 PNG data: URI"),
+        },
+        Command::ReadClipboardImage { id, has_only } => {
+            let has = clipboard_has_image();
+            let bytes = (has && !*has_only).then(clipboard_image).flatten();
+            let image = bytes.as_deref().and_then(clipboard::Image::sniff);
+            surface.event(
+                ROOT_ID,
+                EventKind::Clipboard,
+                clipboard::image_answer(*id, has, image),
+            );
+        }
+        Command::ReadClipboardFiles { id } => surface.event(
+            ROOT_ID,
+            EventKind::Clipboard,
+            clipboard::files_answer(*id, &clipboard_files()),
+        ),
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
@@ -1807,6 +1838,168 @@ pub(crate) fn clipboard_text() -> Option<String> {
     }
 }
 
+/// The clipboard format browsers, Office and the Snipping Tool put PNG
+/// images in.
+fn png_format() -> u32 {
+    use windows::{Win32::System::DataExchange::RegisterClipboardFormatW, core::w};
+    // SAFETY: a plain registration of a constant name.
+    unsafe { RegisterClipboardFormatW(w!("PNG")) }
+}
+
+/// The bytes of clipboard `format`, if it holds that format.
+fn clipboard_bytes(format: u32) -> Option<Vec<u8>> {
+    use windows::Win32::{
+        Foundation::HGLOBAL,
+        System::{
+            DataExchange::{
+                CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+            },
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+        },
+    };
+    // SAFETY: the clipboard is opened and closed here; the data is read
+    // while locked and copied out.
+    unsafe {
+        IsClipboardFormatAvailable(format).ok()?;
+        OpenClipboard(None).ok()?;
+        let bytes = GetClipboardData(format).ok().and_then(|h| {
+            let memory = HGLOBAL(h.0);
+            let ptr = GlobalLock(memory) as *const u8;
+            if ptr.is_null() {
+                return None;
+            }
+            let bytes = std::slice::from_raw_parts(ptr, GlobalSize(memory)).to_vec();
+            let _ = GlobalUnlock(memory);
+            Some(bytes)
+        });
+        let _ = CloseClipboard();
+        bytes
+    }
+}
+
+/// Puts `bytes` on the clipboard as `format`, replacing what it holds.
+fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> bool {
+    use windows::Win32::{
+        Foundation::{GlobalFree, HANDLE, HGLOBAL},
+        System::{
+            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        },
+    };
+    // SAFETY: as in `set_clipboard_text`: the memory is the clipboard's once
+    // `SetClipboardData` succeeds, freed here otherwise.
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return false;
+        }
+        let mut ok = false;
+        if EmptyClipboard().is_ok()
+            && let Ok(memory) = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1))
+        {
+            let ptr = GlobalLock(memory) as *mut u8;
+            if !ptr.is_null() {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                let _ = GlobalUnlock(memory);
+                ok = SetClipboardData(format, Some(HANDLE(memory.0))).is_ok();
+            }
+            if !ok {
+                let _ = GlobalFree(Some(HGLOBAL(memory.0)));
+            }
+        }
+        let _ = CloseClipboard();
+        ok
+    }
+}
+
+/// True when the clipboard has an image (a PNG or a bitmap).
+fn clipboard_has_image() -> bool {
+    use windows::Win32::System::{DataExchange::IsClipboardFormatAvailable, Ole::CF_DIB};
+    // SAFETY: plain queries.
+    unsafe {
+        IsClipboardFormatAvailable(png_format()).is_ok()
+            || IsClipboardFormatAvailable(u32::from(CF_DIB.0)).is_ok()
+    }
+}
+
+/// The clipboard's image: its PNG, else its bitmap as a BMP file.
+fn clipboard_image() -> Option<Vec<u8>> {
+    use windows::Win32::System::Ole::CF_DIB;
+    clipboard_bytes(png_format())
+        .or_else(|| clipboard_bytes(u32::from(CF_DIB.0)).and_then(|dib| bmp_file(&dib)))
+}
+
+/// A BMP file of a packed device-independent bitmap (`CF_DIB`): the file
+/// header, which says where the pixels start, before it.
+fn bmp_file(dib: &[u8]) -> Option<Vec<u8>> {
+    let u32_at = |i: usize| Some(u32::from_le_bytes(dib.get(i..i + 4)?.try_into().ok()?));
+    let header = u32_at(0)? as usize;
+    let bit_count = u32::from(u16::from_le_bytes(dib.get(14..16)?.try_into().ok()?));
+    let compression = u32_at(16)?;
+    let colors_used = u32_at(32)? as usize;
+    // BI_BITFIELDS after a BITMAPINFOHEADER: three masks follow it.
+    let masks = if header == 40 && compression == 3 {
+        12
+    } else {
+        0
+    };
+    let palette = match colors_used {
+        0 if bit_count <= 8 => (1usize << bit_count) * 4,
+        n => n * 4,
+    };
+    let offset = 14 + header + masks + palette;
+    let size = 14 + dib.len();
+    let mut file = Vec::with_capacity(size);
+    file.extend_from_slice(b"BM");
+    file.extend_from_slice(&u32::try_from(size).ok()?.to_le_bytes());
+    file.extend_from_slice(&[0; 4]);
+    file.extend_from_slice(&u32::try_from(offset).ok()?.to_le_bytes());
+    file.extend_from_slice(dib);
+    Some(file)
+}
+
+/// The `file:` URLs of the files on the clipboard (`CF_HDROP`: files
+/// copied in Explorer).
+fn clipboard_files() -> Vec<String> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
+
+    use windows::Win32::{
+        System::{
+            DataExchange::{
+                CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+            },
+            Ole::CF_HDROP,
+        },
+        UI::Shell::{DragQueryFileW, HDROP},
+    };
+    let mut files = Vec::new();
+    // SAFETY: the clipboard is opened and closed here; the HDROP is the
+    // clipboard's and only read while it is open.
+    unsafe {
+        if IsClipboardFormatAvailable(u32::from(CF_HDROP.0)).is_err()
+            || OpenClipboard(None).is_err()
+        {
+            return files;
+        }
+        if let Ok(handle) = GetClipboardData(u32::from(CF_HDROP.0)) {
+            let drop = HDROP(handle.0);
+            for index in 0..DragQueryFileW(drop, u32::MAX, None) {
+                let length = DragQueryFileW(drop, index, None);
+                let mut name = vec![0; length as usize + 1];
+                let copied = DragQueryFileW(drop, index, Some(&mut name));
+                if copied == 0 || copied != length {
+                    continue;
+                }
+                let path = PathBuf::from(OsString::from_wide(&name[..copied as usize]));
+                if path.is_absolute() {
+                    files.push(clipboard::file_url(&path.to_string_lossy()));
+                }
+            }
+        }
+        let _ = CloseClipboard();
+    }
+    files
+}
+
 /// True when the clipboard has text.
 pub(crate) fn clipboard_has_text() -> bool {
     use windows::Win32::System::{DataExchange::IsClipboardFormatAvailable, Ole::CF_UNICODETEXT};
@@ -1817,6 +2010,23 @@ pub(crate) fn clipboard_has_text() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bitmaps_become_bmp_files() {
+        // A BITMAPINFOHEADER of a 2x1 32-bit bitmap, then its pixels.
+        let mut dib = vec![0u8; 40];
+        dib[0] = 40;
+        dib[4] = 2;
+        dib[8] = 1;
+        dib[12] = 1;
+        dib[14] = 32;
+        dib.extend([0xFF; 8]);
+        let file = bmp_file(&dib).unwrap();
+        assert_eq!(&file[..2], b"BM");
+        assert_eq!(u32::from_le_bytes(file[2..6].try_into().unwrap()), 62);
+        assert_eq!(u32::from_le_bytes(file[10..14].try_into().unwrap()), 54);
+        assert_eq!(clipboard::image_size(&file), Some((2, 1)));
+    }
 
     #[test]
     fn locales() {

@@ -281,6 +281,9 @@ define_class!(
             let Some(ctx) = UIGraphicsGetCurrentContext() else { return };
             let c = Some(&*ctx);
             CGContext::save_g_state(c);
+            if let Some(t) = self.ivars().text.borrow().as_ref().filter(|t| t.has_backgrounds()) {
+                crate::text::draw_backgrounds(&ctx, t, text, *content);
+            }
             // CoreText draws in a y-up space with the origin at the bottom of
             // the box.
             CGContext::set_text_matrix(c, CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: 0.0, ty: 0.0 });

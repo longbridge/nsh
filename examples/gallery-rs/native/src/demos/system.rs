@@ -334,103 +334,90 @@ fn Dialogs() -> impl IntoElement {
     // What the last dialog answered.
     let answer = signal(None::<Toned>);
     // Pops the answer in each time it changes.
-    let pop = native_value(1.0);
+    let pop = animated_value(1.0);
     let owner = Owner::current();
     // Shows `dialog`, then what `answered` makes of the index chosen (-1:
     // dismissed), popping it in.
-    let ask = {
-        let pop = pop.clone();
-        move |dialog: Dialog, answered: fn(i32) -> Toned| {
-            let chosen = nsh_core::ui::prelude::dialog(dialog);
-            let pop = pop.clone();
-            owner.run(|| {
-                spawn(async move {
-                    let index = chosen.await;
-                    answer.set(Some(answered(index)));
-                    pop.set(0.85);
-                    pop.spring(
-                        1.0,
-                        Spring {
-                            stiffness: 380.0,
-                            damping: 18.0,
-                            ..Spring::default()
-                        },
-                    );
-                })
-            });
-        }
-    };
-    let alert = {
-        let ask = ask.clone();
-        move |_: &()| {
-            let dialog = Dialog {
-                id: 0,
-                title: Some("Saved".into()),
-                message: Some("Your changes were saved.".into()),
-                buttons: vec![choice("OK", DialogButtonStyle::Default)],
-                cancelable: false,
-                sheet: false,
-            };
-            ask(dialog, |_| Toned {
-                text: "OK".to_owned(),
-                tone: Tone::Up,
-            });
-        }
-    };
-    let confirm = {
-        let ask = ask.clone();
-        move |_: &()| {
-            let dialog = Dialog {
-                id: 0,
-                title: Some("Delete the photo?".into()),
-                message: Some("This cannot be undone.".into()),
-                buttons: vec![
-                    choice("Cancel", DialogButtonStyle::Cancel),
-                    choice("Delete", DialogButtonStyle::Destructive),
-                ],
-                cancelable: true,
-                sheet: false,
-            };
-            ask(dialog, |i| {
-                let text = chosen(&["Cancel", "Delete"], i);
-                Toned {
-                    tone: if text == "Delete" {
-                        Tone::Danger
-                    } else {
-                        Tone::Neutral
+    let ask = move |dialog: Dialog, answered: fn(i32) -> Toned| {
+        let chosen = nsh_core::ui::prelude::dialog(dialog);
+        owner.run(|| {
+            spawn(async move {
+                let index = chosen.await;
+                answer.set(Some(answered(index)));
+                pop.set(0.85);
+                pop.spring(
+                    1.0,
+                    Spring {
+                        stiffness: 380.0,
+                        damping: 18.0,
+                        ..Spring::default()
                     },
-                    text,
-                }
-            });
-        }
+                );
+            })
+        });
     };
-    let three = {
-        let ask = ask.clone();
-        move |_: &()| {
-            let dialog = Dialog {
-                id: 0,
-                title: Some("Update available".into()),
-                message: Some("Install it now?".into()),
-                buttons: vec![
-                    choice("Later", DialogButtonStyle::Default),
-                    choice("Never", DialogButtonStyle::Cancel),
-                    choice("Install", DialogButtonStyle::Default),
-                ],
-                cancelable: false,
-                sheet: false,
-            };
-            ask(dialog, |i| {
-                let text = chosen(&["Later", "Never", "Install"], i);
-                Toned {
-                    tone: if text == "Install" {
-                        Tone::Info
-                    } else {
-                        Tone::Neutral
-                    },
-                    text,
-                }
-            });
-        }
+    let alert = move |_: &()| {
+        let dialog = Dialog {
+            id: 0,
+            title: Some("Saved".into()),
+            message: Some("Your changes were saved.".into()),
+            buttons: vec![choice("OK", DialogButtonStyle::Default)],
+            cancelable: false,
+            sheet: false,
+        };
+        ask(dialog, |_| Toned {
+            text: "OK".to_owned(),
+            tone: Tone::Up,
+        });
+    };
+    let confirm = move |_: &()| {
+        let dialog = Dialog {
+            id: 0,
+            title: Some("Delete the photo?".into()),
+            message: Some("This cannot be undone.".into()),
+            buttons: vec![
+                choice("Cancel", DialogButtonStyle::Cancel),
+                choice("Delete", DialogButtonStyle::Destructive),
+            ],
+            cancelable: true,
+            sheet: false,
+        };
+        ask(dialog, |i| {
+            let text = chosen(&["Cancel", "Delete"], i);
+            Toned {
+                tone: if text == "Delete" {
+                    Tone::Danger
+                } else {
+                    Tone::Neutral
+                },
+                text,
+            }
+        });
+    };
+    let three = move |_: &()| {
+        let dialog = Dialog {
+            id: 0,
+            title: Some("Update available".into()),
+            message: Some("Install it now?".into()),
+            buttons: vec![
+                choice("Later", DialogButtonStyle::Default),
+                choice("Never", DialogButtonStyle::Cancel),
+                choice("Install", DialogButtonStyle::Default),
+            ],
+            cancelable: false,
+            sheet: false,
+        };
+        ask(dialog, |i| {
+            let text = chosen(&["Later", "Never", "Install"], i);
+            Toned {
+                tone: if text == "Install" {
+                    Tone::Info
+                } else {
+                    Tone::Neutral
+                },
+                text,
+            }
+        });
     };
     let sheet = move |_: &()| {
         let dialog = Dialog {
@@ -559,15 +546,12 @@ fn FramesAndTimers() -> impl IntoElement {
     // Seconds since the page opened, counted by an interval.
     let ticks = signal(0_u32);
     // Flashes the beat dot once per tick (the fade runs natively).
-    let beat = native_value(0.0);
-    {
-        let beat = beat.clone();
-        set_interval(Duration::from_secs(1), move || {
-            ticks.update(|t| *t += 1);
-            beat.set(1.0);
-            beat.timing(0.0, 700.0, Easing::Curve(Curve::Quad, EaseMode::Out));
-        });
-    }
+    let beat = animated_value(0.0);
+    set_interval(Duration::from_secs(1), move || {
+        ticks.update(|t| *t += 1);
+        beat.set(1.0);
+        beat.timing(0.0, 700.0, Easing::Curve(Curve::Quad, EaseMode::Out));
+    });
     // Counts the display frames while it runs ("Count frames").
     let frames = stored(None::<Spawned<()>>);
     let running = signal(false);
@@ -720,54 +704,60 @@ fn FramesAndTimers() -> impl IntoElement {
 /// Three posts loaded over HTTP, and a log line.
 #[component]
 fn Network() -> impl IntoElement {
-    // The posts loaded: id and title.
-    let posts = signal(Vec::<(u64, String)>::new());
-    // How the last request went.
-    let status = signal(None::<Toned>);
-    // A request is in progress.
-    let loading = signal(false);
-    let owner = Owner::current();
-    // Loads three posts (TS: `fetch`) with the engine's network stack: the
+    // Loads once asked, and again on each press after (TS: `resource`): it
+    // keeps the posts while it loads again, and a failure next to them. The
+    // request goes with the engine's network stack (TS: `fetch`): the
     // platform's, or the browser's on the web.
-    let load = move |_: &()| {
-        batch(|| {
-            status.set(Some(Toned {
+    let asked = signal(false);
+    let result = resource(
+        move || asked.get().then_some(()),
+        |(), _| async move {
+            let started = Instant::now();
+            let response = fetch(POSTS).await?;
+            let (code, posts) = (response.status(), parse_posts(&response.text())?);
+            let ms = started.elapsed().as_millis();
+            Ok::<_, String>((code, posts, ms))
+        },
+    );
+    // The posts loaded: id and title.
+    let posts = computed(move || {
+        result
+            .with(|r| r.map(|(_, posts, _)| posts.clone()))
+            .unwrap_or_default()
+    });
+    // How the last request went.
+    let status = computed(move || {
+        if result.loading() {
+            return Some(Toned {
                 text: "loading…".to_owned(),
                 tone: Tone::Neutral,
-            }));
-            loading.set(true);
-        });
-        owner.run(|| {
-            spawn(async move {
-                let started = Instant::now();
-                let result = fetch(POSTS)
-                    .await
-                    .map(|response| (response.status(), response.text()));
-                let ms = started.elapsed().as_millis();
-                batch(|| {
-                    loading.set(false);
-                    status.set(Some(
-                        match result.and_then(|(code, body)| Ok((code, parse_posts(&body)?))) {
-                            Ok((code, loaded)) => {
-                                posts.set(loaded);
-                                Toned {
-                                    text: format!("HTTP {code} · {ms} ms"),
-                                    tone: if (200..300).contains(&code) {
-                                        Tone::Up
-                                    } else {
-                                        Tone::Danger
-                                    },
-                                }
-                            }
-                            Err(error) => Toned {
-                                text: error,
-                                tone: Tone::Danger,
-                            },
-                        },
-                    ));
-                });
+            });
+        }
+        if let Some(error) = result.error() {
+            return Some(Toned {
+                text: error,
+                tone: Tone::Danger,
+            });
+        }
+        result.with(|r| {
+            r.map(|(code, _, ms)| Toned {
+                text: format!("HTTP {code} · {ms} ms"),
+                tone: if (200..300).contains(code) {
+                    Tone::Up
+                } else {
+                    Tone::Danger
+                },
             })
-        });
+        })
+    });
+    // A request is in progress.
+    let loading = computed(move || result.loading());
+    let load = move |_: &()| {
+        if asked.get_untracked() {
+            result.refetch();
+        } else {
+            asked.set(true);
+        }
     };
     let list = If::new(
         move || posts.with(Vec::is_empty),

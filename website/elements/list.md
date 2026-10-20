@@ -82,9 +82,10 @@ stay with the cell and show up on another item.
 | `refreshing` | `boolean` | | The pull-to-refresh spinner shows. |
 | `onRefresh` | `() => void` | | The user pulled to refresh. |
 | `showsIndicator` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
-| `scrollValue` | `NativeValue` | | A native value fed with the scroll offset, for scroll-linked animations. |
+| `scrollValue` | `AnimatedValue` | | An animated value fed with the scroll offset, for scroll-linked animations. |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `style` | `StyleProp<ViewStyle>` | | The list's own style (it needs a bounded size: `flex: 1` or a height). |
+| `testID` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
 | `ref` | `YNode \| (node: YNode) => void` | | The list's node (see [ref methods](#ref-methods)). |
 
 Lists also take the scrolling props of [`<Scroll>`](./scroll.md#scrolling): `pagingEnabled`, `snapToInterval`,

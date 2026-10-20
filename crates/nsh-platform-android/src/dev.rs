@@ -10,7 +10,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{BYTECODE_VERSION, Bundle, Policy};
+use nsh_engine::{BYTECODE_VERSION, Bundle, Limits, Policy};
 
 use crate::host::Host;
 
@@ -126,6 +126,8 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             bytes,
             source_map,
             capabilities,
+            app_id,
+            limits,
         } => {
             let mut bundle = match format {
                 // SAFETY: compiled for this runtime's bytecode version (the
@@ -146,9 +148,14 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
+            bundle = bundle.with_app_id(app_id.as_deref());
             bundle = match bundle.with_capabilities_json(capabilities.as_deref()) {
                 Ok(bundle) => bundle,
                 Err(err) => return host.dev_error(Some(("Invalid capabilities", &err)), true),
+            };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => return host.dev_error(Some(("Invalid limits", &err)), true),
             };
             host.dev_status(None);
             let running = {
@@ -162,6 +169,7 @@ fn handle(host: &Arc<Host>, state: &Mutex<DevState>, event: DevEvent) {
             }
             log::info!("loading build {version}");
             host.dev_error(None, false);
+            host.set_limits(limits);
             host.load(bundle);
         }
         DevEvent::Patch {

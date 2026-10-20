@@ -137,6 +137,16 @@ pub enum ServerMessage {
         /// with the same capabilities as the release.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capabilities: Option<String>,
+        /// The app's id (`nsh.json` `"id"`), which names where it keeps its
+        /// data.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
+        /// The VM limits to run the app with, as an embedding app would
+        /// set them (`nsh run --limits`, in `nsh_core::js::HostLimits`'
+        /// syntax: `memory=128MB,call=500ms`; empty: the embedding
+        /// defaults). `None`: none, as an app on its own has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limits: Option<String>,
     },
 }
 
@@ -189,6 +199,8 @@ mod tests {
             format: BundleFormat::Bytecode,
             source_map: true,
             capabilities: None,
+            app_id: None,
+            limits: None,
         };
         // No declaration: the field is left out (older hosts read the same).
         assert_eq!(

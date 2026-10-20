@@ -15,10 +15,10 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
     ));
 }
 
-/// The app's window.
+/// The app's window (desktops; its functions do nothing elsewhere).
+#[module]
 pub(crate) struct Window;
 
-/// The app's window (desktops; its functions do nothing elsewhere).
 #[module]
 impl Window {
     /// Sets the window's title (the title bar, the taskbar / Dock, the
@@ -33,7 +33,10 @@ impl Window {
     /// `desktop={{ windowDrag: true }}`; the system's window controls stay,
     /// in the area `titleBar()` reports. `height` is the app's bar's height
     /// in points: the controls are centered in it (Windows' caption buttons
-    /// fill it); the platform's own without it.
+    /// fill it); the platform's own without it. On macOS, it selects compact
+    /// chrome up to 44 points and regular chrome above; use `titleBar().height`
+    /// to lay out the bar at AppKit's actual height. An embedding host's
+    /// existing toolbar keeps its own style and height.
     pub(crate) fn set_title_bar(style: TitleBarStyle, height: Option<f32>, cx: &mut ModuleCx) {
         let height = crate::desktop::title_bar_height(height);
         desktop(cx, DesktopCommand::SetTitleBar { style, height });
@@ -69,6 +72,7 @@ impl Window {
             width: frame.width.filter(|v| v.is_finite() && *v > 0.0),
             height: frame.height.filter(|v| v.is_finite() && *v > 0.0),
             animated: frame.animated,
+            anchor_top: frame.anchor_top,
         };
         desktop(cx, DesktopCommand::SetFrame(frame));
     }
@@ -80,6 +84,13 @@ impl Window {
     /// Elsewhere the level is left to the host and the window manager.
     pub(crate) fn set_level(level: WindowLevel, cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::SetLevel(level));
+    }
+
+    /// Brings the window to the front of its level and focuses it (the app
+    /// activates). The window keeps its level. On macOS, desktop-level
+    /// surfaces stay behind other windows.
+    pub(crate) fn order_front(cx: &mut ModuleCx) {
+        desktop(cx, DesktopCommand::OrderFront);
     }
 
     /// Closes the window; the app ends with it.

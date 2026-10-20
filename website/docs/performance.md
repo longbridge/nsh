@@ -1,6 +1,6 @@
 ---
 title: Performance
-description: How NSH keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh trace.
+description: How NSH keeps apps fast (native runtime, batched crossings, native animations, virtualized lists), what that means for your code, and how to measure with nsh test --trace.
 order: 62
 group: tools
 ---
@@ -83,7 +83,7 @@ function Price(props: { quote: Accessor<Quote> }) {
   again on each change.
 - Derive values with `computed` when several bindings use them, so they are computed once per change.
 
-Appending a fourth item to a three-item list, as `nsh trace` shows it:
+Appending a fourth item to a three-item list, as `nsh test --trace` shows it:
 
 ```tsx
 {items().map((n) => <Text>{`row ${n}`}</Text>)}                   // 22 mount items: 3 views removed, 4 created
@@ -96,7 +96,7 @@ See [Reactivity](./reactivity.md).
 
 The core sends only what changed: new views get no default style and no empty event mask, unchanged styles and frames
 are not sent, a change of text color does not lay the text out again. A tap that changes one number sends one text
-item. You can see this in `nsh trace` output (below).
+item. You can see this in `nsh test --trace` output (below).
 
 ### 5. Animate natively
 
@@ -105,10 +105,10 @@ stutters when the engine thread is busy. [`nsh/animated`](./animation.md) runs a
 
 ```tsx
 import { View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { List } from "nsh/list";
 
-const scrollY = createNativeValue(0);
+const scrollY = createAnimatedValue(0);
 
 <View
   style={{
@@ -122,7 +122,7 @@ const scrollY = createNativeValue(0);
 ```
 
 - `timing`, `spring` and `decay` run on the platform's UI thread, frame by frame, with no JS per frame.
-- `scrollValue` writes a scroll offset into a native value in the same frame; `pan={{ x, y }}` lets drags move a view
+- `scrollValue` writes a scroll offset into an animated value in the same frame; `pan={{ x, y }}` lets drags move a view
   directly. JS hears about the end (the promise resolves, `onPanEnd` gets the velocity).
 - `Animated.sequence` / `parallel` / `stagger` / `loop` run as one native tree: each step starts the moment the
   previous one ends, with no gap waiting for JS.
@@ -145,11 +145,11 @@ frame that binds one new row of the gallery's photo list is 4 operations and 4 m
 
 ## Measuring
 
-### Headless: `nsh trace`
+### Headless: `nsh test --trace`
 
 ```sh
-nsh trace App.tsx                                   # first frame + 2 taps
-nsh trace App.tsx --scroll 3000 --taps 0            # scrolling, 10 pt per frame
+echo 'await app.press("Add")' | nsh test App.tsx --trace                 # first frame + a press
+echo 'await app.scroll("id:feed", 3000)' | nsh test App.tsx --trace       # scrolling, 10 pt per frame
 ```
 
 ```text
@@ -167,7 +167,7 @@ What to look at:
 - **commit**: the core's cost of rendering components, layout and diffing.
 - **list js**: JS spent binding list rows during that commit.
 
-Full guide: [Testing with nsh trace](./testing-and-trace.md).
+Full guide: [Testing](./testing-and-trace.md).
 
 ### On a device: `--trace`
 
@@ -210,7 +210,7 @@ From NSH's own baselines (Apple silicon unless noted):
 
 - Interactions: a tap changes a handful of mount items, not dozens.
 - Lists: `List` for anything long, with `estimatedItemSize`; per-item state in data.
-- Animations: native values, not signals written every frame.
+- Animations: animated values, not signals written every frame.
 - Scroll effects: `scrollValue`, not `onScroll`.
 - Handlers: no heavy work per keystroke or per scroll event; cache in `computed`.
 - Components: write the components an app uses most in Rust, in the app's own crate ([Building with Rust](./rust.md)); they cost
@@ -219,5 +219,5 @@ From NSH's own baselines (Apple silicon unless noted):
 ## See also
 
 - [Architecture](./architecture.md)
-- [Testing with nsh trace](./testing-and-trace.md)
+- [Testing](./testing-and-trace.md)
 - [Lists](./lists.md), [Animation](./animation.md), [Reactivity](./reactivity.md)

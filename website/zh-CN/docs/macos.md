@@ -32,10 +32,10 @@ nsh run my-app --target macos
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --size 1200x800   # 源码仓库中：target/debug/nsh-macos-host
+dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # 源码仓库中：target/debug/nsh-macos-host
 ```
 
-`--size` 是窗口的初始尺寸；窗口可以调整大小。
+`--window-size` 是窗口的初始尺寸；窗口可以调整大小。
 
 ### 性能监视器
 
@@ -105,6 +105,8 @@ fn show(window: &NSWindow) -> Rc<AppView> {
 只能从你自己应用的文件中加载。如果应用只是一个 NSH 应用，`run_app(source, options)` 会在窗口中打开一个 `AppView`，带有标准菜单
 （关于、隐藏、退出、编辑、最小化、缩放、进入全屏、关闭），应用可以用 `Menu.setApplicationMenu`
 （[`nsh/desktop`](../modules/nsh-desktop.md)）替换它，并运行到窗口关闭为止。
+
+`AppView::set_locale(Some(locale))` 和 `AppView::set_font_scale(Some(scale))` 用你的应用的语言和文字大小代替系统的设置（`None` 恢复跟随系统）：`locale()`、`Intl`、`fontScale()` 和文字立即跟随（[设备与环境](./device-and-environment.md#在嵌入它的应用中)）。
 
 原生组件通过 `AppView::register_component` 注册，见[原生组件](./native-components.md#在-macos-上注册rust)。
 

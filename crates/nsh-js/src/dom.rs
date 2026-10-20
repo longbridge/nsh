@@ -74,6 +74,9 @@ pub(crate) struct Dom {
     dismissed: RefCell<Vec<(NodeId, JsValue)>>,
     /// Whether the user's language is written right to left.
     env_rtl: Cell<bool>,
+    /// The tags (bits by `Tag as u32`; 63: the root) text was put in
+    /// without being shown, each reported once.
+    unshown_text: Cell<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -109,6 +112,10 @@ struct NodeData {
     /// `contentClass`), one of `children` that takes the others
     /// ([`DETACHED`]: none).
     content: NodeId,
+    /// A Rust component's view or one of its slots (`component`,
+    /// `componentSlot`): the component places what is put in it, text in
+    /// a text of its own maybe.
+    places: bool,
     /// The node's object (not owned: the data goes with it).
     object: JsValue,
 }
@@ -238,6 +245,7 @@ impl Dom {
             desktop: Cell::new(false),
             rtl: Cell::new(None),
             env_rtl: Cell::new(false),
+            unshown_text: Cell::new(0),
             dismissed: RefCell::new(Vec::new()),
         }
     }
@@ -550,6 +558,7 @@ fn new_node(ctx: *mut JsContext, id: NodeId, text: bool, tag: Option<Tag>) -> Js
         children: Vec::new(),
         handlers: Vec::new(),
         content: DETACHED,
+        places: false,
         object: UNDEFINED,
     }));
     // SAFETY: a registered class; the opaque is the boxed data, freed by
@@ -598,7 +607,7 @@ pub(crate) fn node_id(ctx: *mut JsContext, v: JsValue) -> Option<NodeId> {
 }
 
 /// Keeps `value` (borrowed; objects only) alive with node `node` under
-/// `key`, replacing what it kept there: the native values a view reads.
+/// `key`, replacing what it kept there: the animated values a view reads.
 pub(crate) fn retain(ctx: *mut JsContext, node: JsValue, key: &'static str, value: JsValue) {
     let p = node_ptr(ctx, node);
     if !p.is_null() {
@@ -904,6 +913,34 @@ fn is_ancestor(ctx: *mut JsContext, node: NodeId, of: NodeId) -> bool {
     false
 }
 
+/// Reports text put in an element of `tag` (`None`: the root), which does
+/// not show it, once per tag: only a `<Text>` shows text. Text the source
+/// holds is a compile error; this is a string an expression gives
+/// (`<View>{name}</View>`).
+#[cold]
+fn report_unshown_text(ctx: *mut JsContext, tag: Option<Tag>) {
+    let d = dom(ctx);
+    let bit = 1u64 << tag.map_or(63, |t| t as u32);
+    if d.unshown_text.get() & bit != 0 {
+        return;
+    }
+    d.unshown_text.set(d.unshown_text.get() | bit);
+    let place = match tag {
+        None => "the root".to_owned(),
+        Some(Tag::Cell) => "a <List> row".to_owned(),
+        Some(tag) => format!("a <{tag:?}>"),
+    };
+    d.shared.warnings.borrow_mut().warn(format!(
+        "a string in {place} is not shown: text shows in a <Text> (`<Text>{{name}}</Text>`)"
+    ));
+}
+
+/// The tags text was put in unshown ([`report_unshown_text`]'s bits).
+#[cfg(test)]
+pub(crate) fn unshown_text_tags(ctx: *mut JsContext) -> u64 {
+    dom(ctx).unshown_text.get()
+}
+
 /// Moves node `child` into `parent` before `before` (`None`: at the end).
 fn insert_before(
     ctx: *mut JsContext,
@@ -940,6 +977,10 @@ fn insert_before(
             ctx,
             "nsh: a node cannot be inserted into itself",
         ));
+    }
+    // SAFETY: live node data, read briefly.
+    if unsafe { (*c).text && !(*p).places && (*p).tag != Some(Tag::Text) } {
+        report_unshown_text(ctx, unsafe { (*p).tag });
     }
     let d = dom(ctx);
     // Out of its current parent (the core moves the view itself).
@@ -1163,19 +1204,11 @@ fn set_prop(
     match name {
         "children" => return Ok(()),
         "ref" => {
-            // SAFETY: a borrowed function, called untracked with the node.
-            if unsafe { qjs::JS_IsFunction(ctx, value) } {
-                let mut args = [node];
-                let r = reactive::untracked_with(ctx, || unsafe {
-                    qjs::JS_Call(ctx, value, UNDEFINED, 1, args.as_mut_ptr())
-                });
-                if unsafe { qjs::JS_IsException(r) } {
-                    return Err(r);
-                }
-                unsafe { qjs::JS_FreeValue(ctx, r) };
-            }
+            apply_ref(ctx, value, node)?;
             return Ok(());
         }
+        // SAFETY: live node data.
+        "component" | "componentSlot" => unsafe { (*p).places = true },
         "ios" | "android" | "desktop" | "web" => {
             return platform_props(ctx, node, name, value, prev);
         }
@@ -1598,6 +1631,19 @@ unsafe extern "C" fn spread_run(
         let mut failed = None;
         for i in 0..len as usize {
             let atom = (*tab.add(i)).atom;
+            let name = qjs::JS_AtomToCStringLen(ctx, std::ptr::null_mut(), atom);
+            if name.is_null() {
+                failed = Some(qjs::JS_EXCEPTION);
+                break;
+            }
+            let name_str = CStr::from_ptr(name).to_string_lossy().into_owned();
+            qjs::JS_FreeCString(ctx, name);
+            // Left-out keys are never read: `children` is a getter that
+            // builds the content, which the component renders itself (and a
+            // read here would also make this effect track the content).
+            if skip.contains(&name_str) {
+                continue;
+            }
             let v = qjs::JS_GetProperty(ctx, props, atom);
             if qjs::JS_IsException(v) {
                 failed = Some(v);
@@ -1608,20 +1654,6 @@ unsafe extern "C" fn spread_run(
             } else {
                 UNDEFINED
             };
-            let name = qjs::JS_AtomToCStringLen(ctx, std::ptr::null_mut(), atom);
-            if name.is_null() {
-                qjs::JS_FreeValue(ctx, old);
-                qjs::JS_FreeValue(ctx, v);
-                failed = Some(qjs::JS_EXCEPTION);
-                break;
-            }
-            let name_str = CStr::from_ptr(name).to_string_lossy().into_owned();
-            qjs::JS_FreeCString(ctx, name);
-            if skip.contains(&name_str) {
-                qjs::JS_FreeValue(ctx, old);
-                qjs::JS_FreeValue(ctx, v);
-                continue;
-            }
             let r = if qjs::JS_IsStrictEqual(ctx, old, v) {
                 Ok(())
             } else {
@@ -1798,20 +1830,19 @@ fn insert_value(
     marker: Option<JsValue>,
 ) -> Result<(), JsValue> {
     if is_dynamic(ctx, value, 0) {
-        // A run of children (`{a()}{b()}`, one insert): each function gets
-        // a memo of its own, so a change in one runs only that one and the
-        // others' nodes stay (not made again).
-        let memos = memoize_run(ctx, value);
-        let value = memos.unwrap_or(value);
-        let mut data = [parent, marker.unwrap_or(UNDEFINED), value];
-        // SAFETY: the function keeps dups of `data`.
-        let func =
-            unsafe { qjs::JS_NewCFunctionData(ctx, Some(insert_run), 1, 0, 3, data.as_mut_ptr()) };
-        if let Some(memos) = memos {
-            unsafe { qjs::JS_FreeValue(ctx, memos) };
-        }
-        let r = reactive::render_effect(ctx, func);
-        unsafe { qjs::JS_FreeValue(ctx, r) };
+        // What the insert shows now, which its effects update.
+        let shown = new_array(ctx, Vec::new());
+        let r = if unsafe { qjs::JS_IsFunction(ctx, value) } {
+            insert_effect(
+                ctx,
+                insert_run,
+                [parent, marker.unwrap_or(UNDEFINED), value, shown],
+            )
+        } else {
+            insert_items(ctx, parent, marker.unwrap_or(UNDEFINED), value, shown)
+        };
+        unsafe { qjs::JS_FreeValue(ctx, shown) };
+        r?;
         // A throw in the effect is the round's error.
         let r = reactive::finish_value(ctx, UNDEFINED);
         return if unsafe { qjs::JS_IsException(r) } {
@@ -1837,6 +1868,53 @@ fn insert_value(
     });
     free_values(ctx, keep);
     result
+}
+
+/// A render effect of an insert running `run` with `data` (borrowed:
+/// the parent, the marker, the value and the array of the nodes shown).
+fn insert_effect(
+    ctx: *mut JsContext,
+    run: unsafe extern "C" fn(
+        *mut JsContext,
+        JsValue,
+        c_int,
+        *mut JsValue,
+        c_int,
+        *mut JsValue,
+    ) -> JsValue,
+    mut data: [JsValue; 4],
+) -> Result<(), JsValue> {
+    // SAFETY: the function keeps dups of `data`.
+    let func = unsafe { qjs::JS_NewCFunctionData(ctx, Some(run), 0, 0, 4, data.as_mut_ptr()) };
+    if unsafe { qjs::JS_IsException(func) } {
+        return Err(func);
+    }
+    let r = reactive::render_effect(ctx, func);
+    unsafe { qjs::JS_FreeValue(ctx, r) };
+    Ok(())
+}
+
+/// The insert of an array holding functions (`items`, borrowed): each
+/// function gets a memo of its own, so a change in one runs only that one
+/// and the others' nodes stay (not made again), and one render effect
+/// shows them all.
+fn insert_items(
+    ctx: *mut JsContext,
+    parent: JsValue,
+    marker: JsValue,
+    items: JsValue,
+    shown: JsValue,
+) -> Result<(), JsValue> {
+    let memos = memoize_run(ctx, items);
+    let r = insert_effect(
+        ctx,
+        insert_items_run,
+        [parent, marker, memos.unwrap_or(items), shown],
+    );
+    if let Some(memos) = memos {
+        unsafe { qjs::JS_FreeValue(ctx, memos) };
+    }
+    r
 }
 
 /// For an array of children holding functions, a copy with a memo for each
@@ -1911,27 +1989,84 @@ fn new_array(ctx: *mut JsContext, mut values: Vec<JsValue>) -> JsValue {
     unsafe { qjs::JS_NewArrayFrom(ctx, values.len() as c_int, values.as_mut_ptr()) }
 }
 
-/// A run of a dynamic insert: the nodes inserted last time (an array) in,
-/// the nodes inserted now out.
+/// A run of a dynamic insert of a function: calls it, and the functions it
+/// returns, tracked by this effect. An array holding functions gets an
+/// effect of its own ([`insert_items`]), made again only when this one
+/// runs again: a component's `children` getter makes every node of the
+/// array, and a change in one of its functions (an `<If>`, a ternary)
+/// must run only that one, not the getter.
 unsafe extern "C" fn insert_run(
     ctx: *mut JsContext,
     _this: JsValue,
-    argc: c_int,
-    argv: *mut JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
     _magic: c_int,
     data: *mut JsValue,
 ) -> JsValue {
-    // SAFETY: three data values (`insert_value`).
-    let (parent, marker, value) = unsafe { (*data, *data.add(1), *data.add(2)) };
+    // SAFETY: four data values (`insert_effect`).
+    let (parent, marker, value, shown) =
+        unsafe { (*data, *data.add(1), *data.add(2), *data.add(3)) };
+    // SAFETY: a dup of a live value; each call's result replaces it.
+    let mut value = unsafe { qjs::JS_DupValue(ctx, value) };
+    let mut depth = 0;
+    while unsafe { qjs::JS_IsFunction(ctx, value) } && node_ptr(ctx, value).is_null() {
+        if depth > MAX_DEPTH {
+            unsafe { qjs::JS_FreeValue(ctx, value) };
+            return throw_type(ctx, "nsh: children nested too deeply");
+        }
+        let r = unsafe { qjs::JS_Call(ctx, value, UNDEFINED, 0, ptr::null_mut()) };
+        unsafe { qjs::JS_FreeValue(ctx, value) };
+        if unsafe { qjs::JS_IsException(r) } {
+            return r;
+        }
+        value = r;
+        depth += 1;
+    }
+    let r = if unsafe { qjs::JS_IsArray(value) } && is_dynamic(ctx, value, 0) {
+        insert_items(ctx, parent, marker, value, shown)
+    } else {
+        show(ctx, parent, marker, value, shown)
+    };
+    unsafe { qjs::JS_FreeValue(ctx, value) };
+    r.err().unwrap_or(UNDEFINED)
+}
+
+/// A run of the effect of [`insert_items`]: shows the array, its functions
+/// called (tracked by this effect).
+unsafe extern "C" fn insert_items_run(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: four data values (`insert_effect`).
+    let (parent, marker, items, shown) =
+        unsafe { (*data, *data.add(1), *data.add(2), *data.add(3)) };
+    show(ctx, parent, marker, items, shown)
+        .err()
+        .unwrap_or(UNDEFINED)
+}
+
+/// Shows `value` (borrowed; its functions are called) in `parent` before
+/// `marker` in place of the nodes `shown` holds, which then holds the new
+/// ones.
+fn show(
+    ctx: *mut JsContext,
+    parent: JsValue,
+    marker: JsValue,
+    value: JsValue,
+    shown: JsValue,
+) -> Result<(), JsValue> {
     let marker = (!node_ptr(ctx, marker).is_null()).then_some(marker);
-    let old = array_items(ctx, arg(argc, argv, 0));
     let mut items = Vec::new();
     let mut keep = Vec::new();
     if let Err(e) = resolve(ctx, value, &mut items, &mut keep, 0) {
         free_values(ctx, keep);
-        free_values(ctx, old);
-        return e;
+        return Err(e);
     }
+    let old = array_items(ctx, shown);
     // A lone text node shown again as text is updated in place.
     let reuse = match old.as_slice() {
         [only] => Some(*only),
@@ -1943,7 +2078,7 @@ unsafe extern "C" fn insert_run(
         Err(e) => {
             free_values(ctx, keep);
             free_values(ctx, old);
-            return e;
+            return Err(e);
         }
     };
     free_values(ctx, keep);
@@ -1952,10 +2087,25 @@ unsafe extern "C" fn insert_run(
     // alive until then.
     free_values(ctx, old);
     match result {
-        Ok(()) => new_array(ctx, new),
+        Ok(()) => {
+            set_shown(ctx, shown, new);
+            Ok(())
+        }
         Err(e) => {
             free_values(ctx, new);
-            e
+            Err(e)
+        }
+    }
+}
+
+/// Makes array `shown` hold `nodes` (taken) alone.
+fn set_shown(ctx: *mut JsContext, shown: JsValue, nodes: Vec<JsValue>) {
+    // SAFETY: writes to a live array, which takes the values.
+    unsafe {
+        let len = qjs::JS_NewFloat64(0.0);
+        qjs::JS_SetPropertyStr(ctx, shown, c"length".as_ptr(), len);
+        for (i, node) in nodes.into_iter().enumerate() {
+            qjs::JS_SetPropertyUint32(ctx, shown, i as u32, node);
         }
     }
 }
@@ -3023,6 +3173,72 @@ pub(crate) fn install_globals(ctx: *mut JsContext) {
     }
 }
 
+/// Gives `node` (borrowed) to ref `target` (borrowed): a signal is set to
+/// it, a function called with it (untracked). False for other values,
+/// which the compiled code assigns the node to (`ref={el}` with `let el`,
+/// `ref={refs.input}`).
+pub(crate) fn apply_ref(
+    ctx: *mut JsContext,
+    target: JsValue,
+    node: JsValue,
+) -> Result<bool, JsValue> {
+    match reactive::signal_kind(ctx, target) {
+        (true, _) => {
+            // SAFETY: a dup the signal takes.
+            reactive::set_signal(ctx, target, unsafe { qjs::JS_DupValue(ctx, node) });
+            return Ok(true);
+        }
+        (_, true) => {
+            return Err(throw_type(
+                ctx,
+                "a ref cannot be a memo, which is read-only: give a signal, a function or a variable",
+            ));
+        }
+        _ => {}
+    }
+    // SAFETY: a borrowed function, called untracked with the node.
+    if unsafe { !qjs::JS_IsFunction(ctx, target) } {
+        return Ok(false);
+    }
+    let mut args = [node];
+    let r = reactive::untracked_with(ctx, || unsafe {
+        qjs::JS_Call(ctx, target, UNDEFINED, 1, args.as_mut_ptr())
+    });
+    if unsafe { qjs::JS_IsException(r) } {
+        return Err(r);
+    }
+    unsafe { qjs::JS_FreeValue(ctx, r) };
+    Ok(true)
+}
+
+/// `ref(target, node, name)`: what compiled `ref={…}` calls with the
+/// element (or a component's ref): [`apply_ref`], whether it took the
+/// node. With `name`, the binding the ref names cannot be assigned (a
+/// `const`, an import), so a target that takes no node is an error.
+unsafe extern "C" fn ref_(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    argc: c_int,
+    argv: *mut JsValue,
+) -> JsValue {
+    let (target, node, name) = (arg(argc, argv, 0), arg(argc, argv, 1), arg(argc, argv, 2));
+    match apply_ref(ctx, target, node) {
+        Ok(true) => qjs::JS_TRUE,
+        Ok(false) if unsafe { qjs::JS_IsString(name) } => {
+            let name = to_string(ctx, name).unwrap_or_default();
+            throw_type(
+                ctx,
+                &format!(
+                    "ref={{{name}}}: `{name}` cannot be assigned (a const or an import) and is neither \
+                     a signal nor a function: declare it with `let`, or give a signal or a function"
+                ),
+            )
+        }
+        Ok(false) => qjs::JS_FALSE,
+        Err(e) => e,
+    }
+}
+
 /// The exports of `nsh:rt`.
 pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("element", Export::Function(element, 1), Ts::Internal),
@@ -3039,6 +3255,7 @@ pub(crate) const RT_EXPORTS: &[crate::modules::Item] = &[
     ("list", Export::Function(crate::list::list, 1), Ts::Internal),
     ("setup", Export::Function(setup, 4), Ts::Internal),
     ("font", Export::Function(font, 2), Ts::Internal),
+    ("ref", Export::Function(ref_, 3), Ts::Internal),
 ];
 
 /// `font(uri, family)`: what `import Inter from "./Inter.ttf"` evaluates

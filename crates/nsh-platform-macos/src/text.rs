@@ -55,6 +55,15 @@ pub(crate) fn decoration_key() -> &'static CFString {
         .0
 }
 
+/// Attribute marking the characters of a span background (the node that
+/// set it, a `CFNumber`): CoreText splits runs where it changes, so
+/// [`draw`] fills each background behind its own runs.
+fn background_key() -> &'static CFString {
+    static KEY: std::sync::OnceLock<CFStringKey> = std::sync::OnceLock::new();
+    &KEY.get_or_init(|| CFStringKey(CFString::from_static_str("NshBackground")))
+        .0
+}
+
 struct CFStringKey(CFRetained<CFString>);
 // SAFETY: CFStrings are immutable and thread-safe.
 unsafe impl Send for CFStringKey {}
@@ -417,6 +426,10 @@ impl CoreTextEngine {
             }
             if style.decoration.line_through {
                 set(range, strikethrough_key(), decoration.as_ref());
+            }
+            if let Some(b) = style.background {
+                let node = CFNumber::new_i64(b.node as i64);
+                set(range, background_key(), node.as_ref());
             }
         }
         // Attachments: their placeholders take the attachment's size (on the
@@ -985,6 +998,9 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
     let content = drawn.content;
     let c = Some(ctx);
     CGContext::save_g_state(c);
+    if drawn.text.has_backgrounds() {
+        draw_backgrounds(ctx, &drawn.text, text, content);
+    }
     if let Some(range) = drawn.selection.as_ref().and_then(|s| s.range.get()) {
         // iOS tints the selection with the view's tint at about 30%.
         let tint = drawn.text.selection_color.unwrap_or(SYSTEM_BLUE);
@@ -1049,6 +1065,99 @@ pub(crate) fn draw(ctx: &CGContext, state: &crate::view::ViewState) {
         CGContext::end_transparency_layer(c);
     }
     CGContext::restore_g_state(c);
+}
+
+/// Fills the span backgrounds of `layout` (view coordinates, y down),
+/// behind the selection and the glyphs: per line, its runs (CoreText
+/// splits them where a background starts or ends) joined by
+/// [`nsh_core::BackgroundBox::join`], as tall as their fonts.
+fn draw_backgrounds(
+    ctx: &CGContext,
+    text: &AttributedText,
+    layout: &CoreTextLayout,
+    content: nsh_core::Rect,
+) {
+    let c = Some(ctx);
+    let bottom = (content.y + content.height) as CGFloat;
+    let mut pieces = Vec::new();
+    for line in &layout.lines {
+        pieces.clear();
+        // SAFETY: the line's own run array (of CTRuns), valid out pointers
+        // and a one-glyph range inside each non-empty run.
+        let (width, trailing) = unsafe {
+            let runs = line.line.glyph_runs();
+            for i in 0..runs.count() {
+                let run = &*runs.value_at_index(i).cast::<CTRun>();
+                if run.glyph_count() == 0 {
+                    continue;
+                }
+                let mut first = CGPoint::new(0.0, 0.0);
+                run.positions(
+                    CFRange {
+                        location: 0,
+                        length: 1,
+                    },
+                    NonNull::from(&mut first),
+                );
+                let (mut ascent, mut descent) = (0.0, 0.0);
+                let width =
+                    run.typographic_bounds(WHOLE, &mut ascent, &mut descent, std::ptr::null_mut());
+                let index = run.string_range().location.max(0) as u32;
+                // An attachment's placeholder is as tall as it: the text
+                // around it sets the box.
+                if text.attachments.iter().any(|a| a.index == index) {
+                    (ascent, descent) = (0.0, 0.0);
+                }
+                pieces.push(nsh_core::LinePiece {
+                    x: (line.origin.x + first.x) as f32,
+                    width: width as f32,
+                    background: text.background_at(index),
+                    ascent: ascent as f32,
+                    descent: descent as f32,
+                });
+            }
+            (
+                line.line.typographic_bounds(
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+                line.line.trailing_whitespace_width(),
+            )
+        };
+        pieces.sort_by(|a, b| a.x.total_cmp(&b.x));
+        // Whitespace hanging past the line's end: on its left right to left.
+        let x = line.origin.x as f32;
+        let (left, right) = if text.rtl {
+            (x + trailing as f32, x + width as f32)
+        } else {
+            (x, x + (width - trailing) as f32)
+        };
+        let baseline = bottom - line.origin.y;
+        nsh_core::BackgroundBox::join(pieces.iter().copied(), (left, right), |b| {
+            let rect = CGRect::new(
+                CGPoint::new(
+                    content.x as CGFloat + b.x as CGFloat,
+                    baseline - b.ascent as CGFloat,
+                ),
+                CGSize::new(b.width as CGFloat, (b.ascent + b.descent) as CGFloat),
+            );
+            let r = b.radius();
+            let path = crate::decor::rounded(
+                rect,
+                nsh_core::CornerRadii {
+                    top_left: r,
+                    top_right: r,
+                    bottom_right: r,
+                    bottom_left: r,
+                    continuous: false,
+                },
+            );
+            CGContext::set_fill_color_with_color(c, Some(&cg_color(b.background.color)));
+            CGContext::add_path(c, Some(&path));
+            CGContext::fill_path(c);
+        });
+    }
 }
 
 /// A laid out line in view coordinates (y down).

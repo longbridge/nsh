@@ -204,16 +204,15 @@ fn face(
 /// Two faces back to back: each hides while turned away.
 #[component]
 fn FlipCard() -> impl IntoElement {
-    let angle = native_value(0.0);
+    let angle = animated_value(0.0);
     // Turned to its back (nothing displays it: the angle shows it).
     let flipped = stored(false);
-    let spring = angle.clone();
     let flip = move |_: &()| {
         let to = flipped.with(|flipped| {
             *flipped = !*flipped;
             if *flipped { 180.0 } else { 0.0 }
         });
-        spring.spring(
+        angle.spring(
             to,
             Spring {
                 stiffness: 140.0,
@@ -528,7 +527,7 @@ fn layers() -> Card {
     let clip = signal(true);
     let front = signal(0_usize);
     let level = signal(1_u32);
-    let opacity = native_value(0.45);
+    let opacity = animated_value(0.45);
     let switch = move |_: &()| clip.update(|c| *c = !*c);
     let next = move |_: &()| front.update(|f| *f = (*f + 1) % 3);
     let squares = [colors::DANGER, colors::INFO, colors::UP]
@@ -554,7 +553,6 @@ fn layers() -> Card {
                 .shadow_radius(6.0)
                 .shadow_offset(0.0, 3.0)
         });
-    let fade = opacity.clone();
     Card::new()
         .icon(IconName::Lists)
         .title("Clipping and layers")
@@ -638,7 +636,7 @@ fn layers() -> Card {
                                 move |event: &SegmentedEvent| {
                                     let SegmentedEvent::Change(to) = *event;
                                     level.set(to);
-                                    fade.timing(
+                                    opacity.timing(
                                         LEVELS[to as usize].1,
                                         260.0,
                                         Easing::Curve(Curve::Cubic, EaseMode::Out),
@@ -654,7 +652,7 @@ fn layers() -> Card {
 fn transforms() -> Card {
     // A slow native sway, so the perspective reads as depth (kept with
     // the page: dropping the last handle releases it).
-    let sway = native_value(-30.0);
+    let sway = animated_value(-30.0);
     let sin = Easing::Curve(Curve::Sin, EaseMode::InOut);
     let sway_loop = Animation::sequence([
         Animation::timing(&sway, 30.0, Timing::new(2200.0, sin)),

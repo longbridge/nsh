@@ -99,15 +99,15 @@ impl<'js> Reader<'_, 'js> {
         items.iter::<f64>().map(|v| v.map(|v| v as f32)).collect()
     }
 
-    /// A math operand: a number or a native value.
+    /// A math operand: a number or an animated value.
     fn operand(&mut self) -> rquickjs::Result<Operand> {
         let v = self.value()?;
-        match (v.as_number(), native_value(&v)) {
+        match (v.as_number(), animated_value(&v)) {
             (Some(n), _) => Ok(Operand::Const(n as f32)),
             (_, Some(node)) => Ok(Operand::Node(node)),
             _ => Err(Exception::throw_type(
                 self.ctx,
-                "nsh/animated: expected a number or native value",
+                "nsh/animated: expected a number or animated value",
             )),
         }
     }
@@ -238,11 +238,11 @@ pub(crate) fn decode_command<'js>(
     }))
 }
 
-/// Reads the node id of a native value object (`{ __nv: id }`).
-fn native_value(value: &Value<'_>) -> Option<nsh_animation::NodeId> {
+/// Reads the node id of an animated value object (`{ __av: id }`).
+fn animated_value(value: &Value<'_>) -> Option<nsh_animation::NodeId> {
     value
         .as_object()?
-        .get::<_, Option<u32>>("__nv")
+        .get::<_, Option<u32>>("__av")
         .ok()
         .flatten()
 }
@@ -482,7 +482,7 @@ fn decode_style<'js>(
             let _ = patch.push(&mut style, StyleDecl::ShadowOffset(offset));
             continue;
         }
-        if let Some(node) = native_value(&value) {
+        if let Some(node) = animated_value(&value) {
             match AnimationProp::from_name(&key) {
                 Some(prop) => {
                     let _ = patch.push(&mut style, StyleDecl::Animated(prop, node));
@@ -519,7 +519,7 @@ fn decode_style<'js>(
     Ok((style, patch))
 }
 
-/// `transform: [{ translateX: 10 }, { rotate: "45deg" }, { scale: nativeValue }]`.
+/// `transform: [{ translateX: 10 }, { rotate: "45deg" }, { scale: animatedValue }]`.
 fn decode_transform(
     value: &Value<'_>,
     style: &mut Style,
@@ -538,9 +538,9 @@ fn decode_transform(
                 warnings.warn(format!("unsupported transform `{key}`"));
                 continue;
             };
-            // Animated entries keep their place in the list; the native value
+            // Animated entries keep their place in the list; the animated value
             // replaces the placeholder amount.
-            let (amount, node) = match native_value(&value) {
+            let (amount, node) = match animated_value(&value) {
                 Some(node) => (Some(kind.identity()), Some(node)),
                 None => (
                     match value.as_string() {

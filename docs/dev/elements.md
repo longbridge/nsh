@@ -13,7 +13,7 @@ Every tag is a component in scope, imported from its one home (`native-pipeline.
 | `<Scroll>` | UIScrollView | `horizontal`, `contentStyle` / `contentClass`, `refreshing` + `onRefresh`, `scrollValue`, `onScrollEnd`, `keyboardDismissMode`, zooming, see [scrolling-and-lists.md](scrolling-and-lists.md) |
 | `<Canvas draw>` | `CanvasView` (drawRect replay) | see [canvas.md](canvas.md) |
 | `<List each>` | UIScrollView + recycled cells | see [scrolling-and-lists.md](scrolling-and-lists.md) |
-| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caretHidden`, `onContentSizeChange` (the text's size, for growing inputs); ref `setSelection(start, end)` |
+| `<Input>` | UITextField / UITextView in a container | `value` / `defaultValue` / `onChange` / `onSubmit` / `onFocus` / `onBlur`, `placeholder` (its color: the `placeholderColor` style key, `placeholder:text-*`), `masked`, `keyboardType` (React Native's values: `number-pad` digits only, `decimal-pad`, `numeric` = iOS's decimal pad / Android's signed decimal, `numbers-and-punctuation` = iOS's numbers and punctuation / Android's signed decimal, `email-address`, `phone-pad`, `url`), `ios={{ keyboardAppearance }}` (`default` / `light` / `dark`; Android's keyboards follow the system theme), `returnKeyType`, `autoCapitalize`, `autoCorrect`, `multiline`, `maxLength`, `readonly`, `autoFocus`, the `selectionColor` style key (`selection:text-*`), `submitBehavior` (`submit` / `blurAndSubmit` / `newline`, resolved with `multiline` by `InputConfig::submit()`, which is all platforms read; a multiline input that submits takes no line break from return, but does from Shift / Option / Alt+Return on hardware keyboards, and a return that commits an IME composition never submits), `selectedRange` + `onSelectionChange` (UTF-16 `start` / `end`), `onKeyPress` (`key`: the text, `Backspace`, `Enter`), `autoComplete` (autofill; `ios={{ textContentType }}` for iOS's names), `caretHidden`, `onContentSizeChange` (the value's size, for growing inputs: reported by the core after any layout that follows a change of the text or the content width, one empty line's for an empty input though it is sized by its placeholder); ref `setSelection(start, end)` |
 | `<NavStack>` / `<NavPage>` | UINavigationController | `createNavStack(routes)`: `push` / `pop` / `popToRoot` / `replace` / `setRoutes` / `remove`; pages keep their state while stacked; on iOS and Android the system header (content below the header UIKit shows: the platform measures it, `Core::set_screen_header`; `title`, `headerLeft` / `headerRight` / `headerTitle` elements, `headerTransparent`, `headerShown`, `headerBackVisible`, `headerLargeTitle`, `headerBackTitle`, colors from `headerStyle` / `headerClass`); on the desktops and the web the page's `header` slot (the app's element, which the core places at the top of the page, full width, with the content below it; NSH draws nothing else there); swipe back (`popOnSwipe`: the interactive gesture only); `statusBar` (below); `popOnBack={false}` keeps the user on a page (no swipe; the back buttons and keys send `onBackPress` instead of popping); `onBackPress` is sent on every back press while the app listens; `onDismiss` after the user popped it |
 | `<Dialog>` | presented UIViewController | `open` (default true), `animation`, `onOpen`, `onClose`, `onCancel` (every close attempt), `onOpenChange(open, reason)` (`"cancel"` / `"backdropPress"` / `"swipe"`); `closeOnEscape` / `closeOnBackdropPress` / `closeOnSwipe` (default true; iOS sheets swipe away, Escape and Android back close natively, then `onCancel` + `onOpenChange(false, reason)` + `onClose`; the renderer keeps a removed dialog's `onClose` until the platform reports it, `dom.rs` `dismissed`); `class` / `style` style the popup (the view holding the children), `backdropClass` / `backdropStyle` add a backdrop part behind it (none otherwise) whose presses are close attempts; `presentation` (iOS: `fullScreen` over a clear background, `pageSheet` / `formSheet` keep the system's sheet background; ignored on Android, the desktops and the web, where a dialog is a transparent layer over the whole window); `statusBar` (below); `ios={{ supportedOrientations }}`, `android={{ statusBarTranslucent }}` (otherwise the content starts below the status bar) |
 | `<InputAccessoryView>` | a NshView set as `inputAccessoryView` | `nativeID`; inputs name it with `ios={{ inputAccessoryViewID }}`. A layout root as wide as the window and as tall as its content; the core resolves the id (`InputConfig::accessory`). Renders nothing on Android |
@@ -81,23 +81,47 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   underlay of their own. Background colors that would be hidden by a gradient replace it (`docs/dev/styles.md`,
   Effects). `KeyboardAvoidingView` (Rust; `behavior`: `padding` → inset padding, `height` → inset margin; `offset`).
 - **Platform modules**: `Platform` (`OS`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
-  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh trace` is iOS); `isDesktop`,
+  `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `isDesktop`,
   `Version`, `isPad`, `isTV`, `isMacCatalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); `isDesktop`, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `PixelRatio`, `AccessibilityInfo` (`isScreenReaderEnabled`,
   `isReduceMotionEnabled`, `addEventListener("screenReaderChanged" | "reduceMotionChanged")`, `announceForAccessibility`,
   `setAccessibilityFocus(ref)`: Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
 - **`disabled`** on any element applies `disabled:` classes and removes its press listeners from what is mounted (no press,
   no feedback).
-- **`onHoverIn` / `onHoverOut`** (any element; macOS, Linux and GPUI) tell JS, after the fact, that the mouse came over a view
-  or left it. They follow the same hover tracking as `hover:` classes: the views along the chain under the mouse
-  (innermost first) whose classes read `HOVERED` or that listen to either event are the hovered ones, so ancestors
-  hear `onHoverIn` too, as with CSS `:hover` and the DOM's `pointerenter`; a handler alone makes its view take part
-  (`input.rs` `hoverable`, the view's mounted event mask), and a view that does not listen gets no event. When the set
-  changes, the views left hear `onHoverOut` from the inside out, then the views entered `onHoverIn` from the outside
-  in. The mouse leaving the window (while no button is down on macOS) unhovers everything; on macOS and GPUI hover is
-  picked again after every batch (on macOS also after every scroll), so a view removed or moved from under a still mouse hears `onHoverOut` and one
-  that arrives there `onHoverIn`; on Linux that waits for the next mouse move. Touches never hover. Other platforms do
-  not raise them yet (iOS, Android, Windows and the web track `hover:` styles only).
+- **`onHoverIn` / `onHoverOut` / `onHoverMove`** (any element) tell JS, after the fact, that the mouse came over a view,
+  left it, or moved over it with no button down. On the desktops they follow the same hover tracking as `hover:`
+  classes: the views along the chain under the mouse (innermost first) whose classes read `HOVERED` or that listen to
+  any of the three are the hovered ones, so ancestors hear `onHoverIn` too, as with CSS `:hover` and the DOM's
+  `pointerenter`; a handler alone makes its view take part (`input.rs` `hoverable`, the view's mounted event mask), and
+  a view that does not listen gets no event. When the set changes, the views left hear `onHoverOut` from the inside
+  out, then the views entered `onHoverIn` from the outside in; then each hovered view with `onHoverMove` hears where
+  the mouse is (`EventPayload::Hover`: `locationX` / `locationY` in the view, its transforms undone, `pageX` / `pageY`
+  in the root view as touches have them, the modifier keys). The mouse leaving the window (while no button is down on
+  macOS) unhovers everything; on macOS and GPUI hover is picked again after every batch (on macOS also after every
+  scroll), so a view removed or moved from under a still mouse hears `onHoverOut` and one that arrives there
+  `onHoverIn`; on Linux and Windows that waits for the next mouse move. Moves with a button down are touches
+  (`onTouchMove`, the responder), not hovers, and touches never hover. The web uses the browser's `pointerenter` /
+  `pointerleave` / `pointermove` of mice (`nsh.js` `installHover`); iOS a `UIHoverGestureRecognizer` per view (iPad
+  pointers, Mac Catalyst's mouse), Android the view's hover listener (mice, styluses): there each view is tracked by
+  the system, not along a chain. The engine merges moves (`State::hover_moves`): the latest per view, delivered at most
+  once per `HOVER_MOVE_INTERVAL` (8 ms) and always before the next other event, so a view hears where the mouse went
+  before it hears it leave; mice report up to 1000 moves a second, and a crosshair needs one per frame.
+- **`onContextMenu`** (any element): the secondary button was pressed over a view (a right click; Control-click on
+  macOS, in GPUI on macOS too; the browser's `contextmenu`, which its keyboard menu key raises too). The platform
+  decides on the main thread from the mounted event masks, walking out from the view under the pointer: the first
+  view that listens hears it (`EventPayload::ContextMenu`: `locationX` / `locationY` in it, `pageX` / `pageY` in its
+  root view, which is where `Menu.popup` takes its point, and the modifier keys); a text field nearer, or selectable
+  text with an edit menu of its own (Windows, GPUI, the web), shows that menu instead and the app hears nothing.
+  JS cannot cancel the system's menu after the fact (the main thread never waits for JS), so the rule is what is
+  mounted. iOS: a `UITapGestureRecognizer` for the secondary button per listening view (iPad pointers, Mac
+  Catalyst's mouse). On touchscreens a menu belongs on `onLongPress`; Android raises `onContextMenu` for no input yet.
+- **Keyboard focus**: on macOS and the web, views that take presses are stops of Tab (the keyboard focus) and Return /
+  Space press the focused one; a click presses without focusing, so a pressable's `FOCUSED` state (`focus:` classes,
+  `.focus(..)`) is keyboard focus, and `focus-visible:` is the same variant. `focusable={false}` (`Prop::Focusable`,
+  `ViewProps::focusable`; Rust `.focusable(false)`) keeps a pressable out of the stops: a backdrop that closes a
+  popover, rows a list moves between with the arrow keys. Inputs are always stops; `focusable` changes only views
+  that take presses (unlike React Native's, `true` makes nothing focusable that is not). Windows, Linux and GPUI move the focus between fields and
+  native components only so far.
 - **`onPanEnd` / `onPanStart`** carry `valueX` / `valueY`: the bound pan values at that moment (a drag may grab a value mid
   animation), for snapping.
 - **Imperative calls**: nodes have `focus()`, `blur()` and `scrollTo({ x, y, animated })` (use `ref`); lists also

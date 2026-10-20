@@ -18,6 +18,7 @@ mod photos;
 mod physics;
 mod scrolling;
 mod stocks;
+mod storage;
 mod styles;
 mod system;
 mod text_demo;

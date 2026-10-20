@@ -5,10 +5,10 @@ use crate::{
     ui::{ModuleCx, NodeRef, module, task::Action},
 };
 
-/// The screen reader's commands (the queries and listeners are JS's).
+/// Screen reader and motion settings.
+#[module]
 pub(crate) struct AccessibilityInfo;
 
-/// Screen reader and motion settings.
 #[module]
 impl AccessibilityInfo {
     /// The screen reader reads `message` (a VoiceOver announcement, TalkBack).

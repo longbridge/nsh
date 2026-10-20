@@ -3,7 +3,9 @@
 An app is TSX importing NSH's modules. The bundler compiles each module with NSH's JSX compiler and rolldown bundles
 them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of NSH's modules stay imports, and `nsh-js` serves them
 natively. The reactive graph, the renderer and every API apps import are Rust; nothing of NSH is JS. Apps cannot
-import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...).
+import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...). It also refuses a named import a
+native module does not export, as the names `nsh-js` serves say (`native_module_exports`), when the code uses it as a
+value (types need no `type` keyword), with the place in the source and the closest export's name.
 
 ```tsx
 import { computed, mount, signal, Text, View } from "nsh";
@@ -34,7 +36,7 @@ loader). Where each one is implemented and declared: `js-modules.md`.
   the primitives `View`, `Text`, `Scroll`, `Input`.
 - `nsh:rt` (only compiled code imports it): `element`, `text`, `append`, `insert`, `prop`, `bindProp`, `spread`,
   `component`, `cond`, `each`, `merge`, `list`, `setup`, `font`.
-- `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `Platform`, `PixelRatio`, `I18nManager`) and
+- `nsh/device` (`windowSize`, `colorScheme`, `fontScale`, `locale`, `Platform`, `PixelRatio`, `I18nManager`) and
   `nsh/accessibility` (`reduceMotion`, `screenReaderEnabled`, `AccessibilityInfo`): the environment (`env.rs`), one
   signal per part written when the platform reports a change, read through read-only accessors.
 - `nsh/list`, `nsh/gesture`, `nsh/animated`, `nsh/canvas`, `nsh/webview`, `nsh/video`, `nsh/native`, `nsh/ios`,
@@ -53,7 +55,11 @@ loader). Where each one is implemented and declared: `js-modules.md`.
 
 QuickJS-NG resolves imports when it compiles a module, so the bytecode compiler installs the same loader
 (`compile_bytecode_with` with the app's UI sets); names are checked when the module links (evaluation). The exports are made
-on first import.
+on first import. The compiler only needs the names a module exports, so it takes the UI sets as data
+(`nsh_core::ui::description::SetDescription`: specifier, exports and their kinds, declarations, re-exports, files),
+as the bundler and `.nsh/types` do: `ModuleTable::compiling` serves nsh's own modules and the runtime's registries in
+full and the sets by name. That is how the prebuilt `nsh` compiles an app whose crates it does not link
+(`tooling.md`, "Apps with Rust components of their own").
 
 ## The compiler (`crates/nsh-bundler/src/jsx.rs`)
 
@@ -70,14 +76,27 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   component path. Lowercase tags are errors with the import to write (`<view>`: write `<View>` and `import { View }
   from "nsh"`; for another, the closest binding, primitive or registry component). Why: TypeScript checks a lowercase
   tag against one global type per name, so generic components (`List`, `Each`) and local ones would lose their types.
-  Props keep their camelCase names.
+  Props keep their camelCase names. Only `<Text>` shows text (the core lays out raw text in a text block alone): text
+  written in another host element (`<View>Hi</View>`, a string, number or template literal) is an error saying where it
+  goes (`check_unshown_text`); a string an expression puts there is reported once per tag at run time (`dom.rs`
+  `report_unshown_text`), except in a Rust component's view or slots (`places`), which place what they get.
 - **Host elements** become one arrow function making the element and its host children: static props and children
   are set once (`prop`, `append`), changing ones are functions the renderer follows natively (`bindProp`, `insert`).
   An expression changes when it calls something or reads a member outside nested functions (Solid's rule). Event
-  handlers are set once when they are a function or a name, followed otherwise. `ref={el}` assigns the variable,
-  `ref={fn}` calls it. Consecutive dynamic children share one `insert`, before the next static child.
+  handlers are set once when they are a function or a name, followed otherwise. `ref={…}` goes through `nsh:rt`'s `ref`
+  (`dom::apply_ref`), which sets a signal or calls a function: a `let` variable or a field (`ref={refs.input}`,
+  `ref={refs[k]}`, object and key evaluated once) is assigned the node otherwise (`ref(el, n) || (el = n)`); a `const`
+  or an import, which cannot be assigned, passes its name, so a value that is neither is an error saying what to write.
+  Other expressions are the `ref` prop, which `apply_ref` handles likewise; a component's `ref` is a method doing the
+  same with what the component gives. Consecutive dynamic children share one `insert`, before the next static child.
+- **Components** that take their props apart in their first parameter (`function Title({ text })`, top-level
+  functions and arrows with JSX and a PascalCase name, as `hot.rs` finds them) get a build warning naming the props
+  to read instead (`props.rs`, logged by the plugin with the module's path, target `nsh::build`): each would be read
+  once. Taking them apart in the body (`const { id } = props;`) is left alone, as a choice the code states.
 - **Components** are called untracked with a props object: static props as values, the others as getters, children as
-  the `children` getter; spreads go through `merge`, which keeps getters.
+  the `children` getter; spreads go through `merge`, which keeps getters. Among several children, an expression that
+  changes is a function of its own (`["one ", () => s()]`), so the getter, which makes every sibling, reads none of
+  them; a lone child is the getter's (`get children() { return s(); }`).
 - **Text** follows Babel's algorithm (what React renders): lines are trimmed except at the text's ends, whitespace-only
   lines dropped, the rest joined with a space; whitespace on one line is kept (`{a} {b}` keeps its space).
 - Code is generated as JS text with holes, parsed, and the app's expressions are moved into the holes: they keep their
@@ -96,15 +115,22 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   once); the engine takes them after the JS turn for one `Core::commit`. Props are decoded from the JS value by
   `protocol::decode_prop`. Events go from `Host::dispatch_event` to the handler the node holds (`dom::handler`);
   touches to the responder system (`touch.rs`).
-- Dynamic children are a render effect whose value is the array of nodes it inserted, reconciled with Solid's
-  `reconcileArrays` against the renderer's mirror of the tree; a node that comes again later is moved, never removed
-  and inserted (the core would remake its view), and an insert that would not move a node is skipped.
-  A run of dynamic children (one `insert` of an array, `{spans()}{tail()}`) gives each function in it a memo of its
-  own (`memoize_run`): a change in one re-runs only that one, and the others' nodes stay where they are.
+- Dynamic children are a render effect updating the nodes the insert shows (an array the insert's effects share),
+  reconciled with Solid's `reconcileArrays` against the renderer's mirror of the tree; a node that comes again later
+  is moved, never removed and inserted (the core would remake its view), and an insert that would not move a node is
+  skipped. An insert of a function (`insert_run`) calls it, and the functions it returns, tracked by its effect; when
+  that gives an array holding functions (a component's `children`: `[element, cond(…)]`), the array gets an effect of
+  its own (`insert_items`, Solid's nested effect in `insertExpression`), made again only when the outer one runs: a
+  change in an `<If>`, an `<Each>` or a ternary among the children runs that effect, never the getter, so the siblings
+  it made stay (an input keeps its text and focus). Each function in such an array (also a run of dynamic children,
+  one `insert` of an array, `{spans()}{tail()}`) gets a memo of its own (`memoize_run`): a change in one re-runs only
+  that one, and the others' nodes stay where they are.
 - `each` keys rows (`key(item, index)`, the index for `key="index"`, else the item; objects by identity, primitives by
   value) and updates the item and index signals of kept rows (rows get accessors: `item()`, `index()`); each row has
   its own owner. `cond` renders a
-  branch per change of truthiness.
+  branch per change of truthiness. An `<If>` whose child is a function written in place compiles to
+  `((w) => cond(w, () => (fn)(w), …))(() => when)`: the function gets an accessor of `when`'s value (Solid's `<Show>`),
+  read through the same thunk the condition is.
 - Platform-only props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`): only the current platform's object is sent, each
   key as a prop of its own (`platform_props`).
 - The reactive graph and the renderer share one per-context state (`state.rs`); natives reach each part by shared or

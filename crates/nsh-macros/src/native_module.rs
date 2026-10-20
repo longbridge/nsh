@@ -11,6 +11,11 @@ use syn::{FnArg, ItemFn, LitStr, ReturnType, spanned::Spanned};
 /// `rust_app.rs`.
 const ENTRY: &str = "__nsh_native_module";
 
+/// The public function that makes the set, at the crate's root, for tests
+/// and other Rust code (`my_app_native::registry()`, as
+/// `nsh_base::registry()`).
+const PUBLIC: &str = "registry";
+
 pub(crate) fn expand(specifier: LitStr, item: ItemFn) -> syn::Result<TokenStream2> {
     check_specifier(&specifier.value()).map_err(|e| syn::Error::new(specifier.span(), e))?;
     let sig = &item.sig;
@@ -79,16 +84,27 @@ pub(crate) fn expand(specifier: LitStr, item: ItemFn) -> syn::Result<TokenStream
             }
         };
     };
+    let public = syn::Ident::new(PUBLIC, span);
+    let doc = format!(
+        " The crate's UI set: what TSX imports as `{}` (`#[native_module]` on `{ident}`), as \
+         `nsh` serves it: what tests run next to nsh's own sets (`nsh_base::registry()`).",
+        specifier.value()
+    );
     Ok(quote! {
         #item
+
+        #[doc = #doc]
+        pub fn #public() -> #ui::Registry {
+            let mut registry = #ui::Registry::ui_set(#specifier);
+            #ident(&mut registry);
+            registry
+        }
 
         /// The app's UI set, which nsh's generated workspace calls
         /// (`#[native_module]`).
         #[doc(hidden)]
         pub fn #entry() -> #ui::Registry {
-            let mut registry = #ui::Registry::ui_set(#specifier);
-            #ident(&mut registry);
-            registry
+            #public()
         }
 
         #at_root

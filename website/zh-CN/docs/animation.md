@@ -1,6 +1,6 @@
 ---
 title: 动画
-description: 样式过渡与关键帧动画，原生值的 timing、spring 和 decay，插值，组合动画，Easing，LayoutAnimation，以及哪些部分运行在 UI 线程上。
+description: 样式过渡与关键帧动画，动画值的 timing、spring 和 decay，插值，组合动画，Easing，LayoutAnimation，以及哪些部分运行在 UI 线程上。
 order: 43
 group: ui
 demo: guide-animation
@@ -16,7 +16,7 @@ NSH 中的所有动画都运行在 UI 线程上。你在 JS 中描述一次，�
 |---|---|
 | [过渡](#过渡) | 样式变化时以动画代替跳变：颜色、不透明度、变换。 |
 | [关键帧动画](#关键帧动画) | 加载指示器、闪烁的占位块、跳动的提示。 |
-| [原生值](#原生值) | 任何由随时间变化的值驱动的效果：弹簧、手势、滚动位置、动画序列。 |
+| [动画值](#动画值) | 任何由随时间变化的值驱动的效果：弹簧、手势、滚动位置、动画序列。 |
 | [LayoutAnimation](#layoutanimation) | 重新渲染后尺寸与位置的变化：条目插入、删除、重新排序，面板展开。 |
 
 ## 过渡
@@ -88,17 +88,17 @@ mount(App);
 
 Tailwind：`animate-spin`、`animate-ping`、`animate-pulse`、`animate-bounce`、`animate-none`。
 
-## 原生值
+## 动画值
 
-原生值是一个存在于 UI 线程上的数字。用 `nsh/animated` 中的 `createNativeValue` 创建，把它绑定到样式，再让它动起来；绑定它的视图每一帧都跟随它，而无需重新渲染。
+动画值是一个存在于 UI 线程上的数字。用 `nsh/animated` 中的 `createAnimatedValue` 创建，把它绑定到样式，再让它动起来；绑定它的视图每一帧都跟随它，而无需重新渲染。
 
 ```tsx
 import { mount, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 
 function App() {
-  const x = createNativeValue(0);
-  const opacity = createNativeValue(1);
+  const x = createAnimatedValue(0);
+  const opacity = createAnimatedValue(1);
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 24 }}>
       <View style={{ width: 60, height: 60, borderRadius: 12, backgroundColor: "#0969da", opacity, transform: [{ translateX: x }] }} />
@@ -119,11 +119,11 @@ function App() {
 mount(App);
 ```
 
-**可以绑定的属性：** `opacity`、`backgroundColor`（通过插值得到颜色），以及 `transform` 中的 `translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`、`rotateX`、`rotateY` 和 `rotateZ`。原生值还可以驱动[画布绘制](./canvas.md#用原生值驱动动画)，接收滚动偏移（[`scrollValue`](./scrolling.md#滚动联动效果scrollvalue)）和手势（[`pan`、`pinch`、`rotation`](./touch-and-gestures.md#原生手势拖动捏合与旋转)）。
+**可以绑定的属性：** `opacity`、`backgroundColor`（通过插值得到颜色），以及 `transform` 中的 `translateX`、`translateY`、`scale`、`scaleX`、`scaleY`、`rotate`、`rotateX`、`rotateY` 和 `rotateZ`。动画值还可以驱动[画布绘制](./canvas.md#用动画值驱动绘制)，接收滚动偏移（[`scrollValue`](./scrolling.md#滚动联动效果scrollvalue)）和手势（[`pan`、`pinch`、`rotation`](./touch-and-gestures.md#原生手势拖动捏合与旋转)）。
 
-原生值由绑定它的视图保持存活，所以不会因为某个 JS 变量超出作用域而解除绑定。在拥有它的组件中创建原生值（如果每个实例都需要自己的值，就不要放在模块顶层）。
+动画值由绑定它的视图保持存活，所以不会因为某个 JS 变量超出作用域而解除绑定。在拥有它的组件中创建动画值（如果每个实例都需要自己的值，就不要放在模块顶层）。
 
-### NativeValue 的方法
+### AnimatedValue 的方法
 
 | 方法 | 说明 |
 |---|---|
@@ -149,7 +149,7 @@ x.spring(200, { stiffness: 400, damping: 30 });  // 干脆，不过冲
 `value.interpolate({ inputRange, outputRange })` 通过分段线性映射把值转换为数字、颜色或角度，并返回一个可以绑定的新节点。一个值可以驱动多个属性。
 
 ```tsx
-const t = createNativeValue(0);
+const t = createAnimatedValue(0);
 
 <View
   style={{
@@ -181,7 +181,7 @@ const t = createNativeValue(0);
 `node.diffClamp(min, max)` 跟随节点的*变化量*，同时把结果限制在 `min..max` 之内。把它用在滚动偏移上，就得到内容上滑时隐藏、一往下滑就重新出现的标题栏：
 
 ```tsx
-const scroll = createNativeValue(0);
+const scroll = createAnimatedValue(0);
 const header = scroll.diffClamp(0, 56);
 
 <Scroll style={{ flex: 1 }} scrollValue={scroll}>…</Scroll>
@@ -193,10 +193,10 @@ const header = scroll.diffClamp(0, 56);
 `Animated` 用步骤搭建动画，并在原生端运行整棵动画树：每个步骤在上一步结束的那一刻就在 UI 线程上开始，没有间隙，中间也没有 JS。
 
 ```tsx
-import { Animated, createNativeValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh/animated";
 
-const ys = [0, 1, 2, 3, 4].map(() => createNativeValue(0));
-const fade = createNativeValue(1);
+const ys = [0, 1, 2, 3, 4].map(() => createAnimatedValue(0));
+const fade = createAnimatedValue(1);
 
 const hop = Animated.stagger(
   80,
@@ -305,7 +305,7 @@ LayoutAnimation.configureNext({
 | LayoutAnimation | UI 线程 | 无 |
 | `requestAnimationFrame` 循环、`onScroll` 处理函数、`PanResponder` | JS，然后重新渲染 | 每一帧 |
 
-`requestAnimationFrame`（跟随屏幕刷新的全局函数）只用于无法事先描述的情况，例如在 JS 中运行的物理模拟。凡是能用原生值表达的，都应该用原生值。
+`requestAnimationFrame`（跟随屏幕刷新的全局函数）只用于无法事先描述的情况，例如在 JS 中运行的物理模拟。凡是能用动画值表达的，都应该用动画值。
 
 ## 减少动态效果
 
@@ -325,7 +325,7 @@ const open = () => (reduceMotion() ? panel.set(0) : panel.spring(0));
 ## 相关内容
 
 - [`nsh/animated`](../modules/nsh-animated.md)：参考。
-- [触摸与手势](./touch-and-gestures.md)：用手指驱动原生值。
+- [触摸与手势](./touch-and-gestures.md)：用手指驱动动画值。
 - [滚动](./scrolling.md#滚动联动效果scrollvalue)：`scrollValue`。
-- [画布](./canvas.md#用原生值驱动动画)：在绘制中使用原生值。
+- [画布](./canvas.md#用动画值驱动绘制)：在绘制中使用动画值。
 - [样式参考](../modules/style-reference.md)：`transition*` 与 `animation*` 键。

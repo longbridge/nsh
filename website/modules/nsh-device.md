@@ -6,10 +6,10 @@ order: 6
 
 # nsh/device
 
-`nsh/device` tells the app about the device and its environment. `windowSize`, `colorScheme` and `fontScale` are reactive accessors: read them in JSX, `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size).
+`nsh/device` tells the app about the device and its environment. `windowSize`, `colorScheme`, `fontScale` and `locale` are reactive accessors: read them in JSX, `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language).
 
 ```ts
-import { colorScheme, fontScale, I18nManager, PixelRatio, Platform, windowSize } from "nsh/device";
+import { colorScheme, fontScale, I18nManager, locale, PixelRatio, Platform, windowSize } from "nsh/device";
 ```
 
 See [Device and environment](../docs/device-and-environment.md) for the guide.
@@ -48,7 +48,15 @@ const dark = () => colorScheme() === "dark";
 const fontScale: Accessor<number>;
 ```
 
-The user's preferred text size relative to the default (`1` is the default size; Dynamic Type on iOS, font size on Android). Reactive. Text already scales with it unless `allowFontScaling={false}`; read it when other sizes should follow, such as icons next to text.
+The user's preferred text size relative to the default (`1` is the default size; Dynamic Type on iOS, font size on Android), or the text size the embedding app sets in its place. Reactive. Text already scales with it unless `allowFontScaling={false}`; read it when other sizes should follow, such as icons next to text.
+
+## locale
+
+```ts
+const locale: Accessor<string>;
+```
+
+The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the embedding app sets in its place. Reactive. `Intl` formats for it by default; read it to choose the strings of your own translations ([Device and environment](../docs/device-and-environment.md#language-and-region)).
 
 ## Platform
 

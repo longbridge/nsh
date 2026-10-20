@@ -115,6 +115,14 @@ function Title(props: { text: string }) {
 }
 ```
 
+在参数里直接解构 props 的组件（`function Title({ text }: …)`）同样只读取一次，构建时会给出警告，并说明应该改读哪些 props：
+
+```text
+warn App.tsx:3:16: Title takes its props apart (`{ text }`): each is read once, when Title runs, and does not follow changes; take `props` and read `props.text` where it is used (`split(props, [...])` to pass the rest on)
+```
+
+组件确实只需要读取一次的 prop（比如初始化时用的 id），在函数体里读取（`const { id } = props;`），这种写法表明了意图。
+
 默认值也是一样：在 JSX 中写 `props.color ?? "#ddf4ff"`，而不是用带默认值的解构。要从 props 计算出某个值，使用一个函数或 [`computed`](./reactivity.md#computed)：
 
 ```tsx
@@ -143,7 +151,7 @@ function Card(props: { title: string; children?: JSX.Element }) {
 </Card>
 ```
 
-每读取一次 `props.children` 都会重新构建一遍子元素（新的原生视图）。只在子元素应该出现的位置读取一次。children 也可以是函数，即组件带参数调用的渲染回调：
+每读取一次 `props.children` 都会重新构建一遍子元素（新的原生视图）。只在子元素应该出现的位置读取一次。多个子元素中会变化的那一个（`<If>`、`<Each>`、`{cond() ? a : b}`）以函数的形式传入，`{props.children}` 只更新它自己：其他子元素保留各自的视图，输入框保留输入的文字和焦点。children 也可以是函数，即组件带参数调用的渲染回调：
 
 ```tsx
 function Repeat(props: { times: number; children: (i: number) => JSX.Element }) {
@@ -161,7 +169,7 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 
 ```tsx
 <If when={user()} else={<Text>Signed out</Text>}>
-  <Text>Hello, {user()!.name}</Text>
+  {(u) => <Text>Hello, {u().name}</Text>}
 </If>
 
 <Each of={todos()} key={(t) => t.id}>
@@ -173,7 +181,7 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 </Each>
 ```
 
-- **`<If when else>`** 在 `when` 为真值时渲染子元素，否则渲染 `else` 元素。只有当条件的真假发生变化时才会重新渲染分支，而不是每次重新计算 `when` 都渲染。
+- **`<If when else>`** 在 `when` 为真值时渲染子元素，否则渲染 `else` 元素。只有当条件的真假发生变化时才会重新渲染分支，而不是每次重新计算 `when` 都渲染。子元素写成函数时，它会收到 `when` 值的访问器，类型中已去掉 `null` 和 `undefined`：分支显示期间 `u()` 就是当前用户，用户变化时它也随之更新。
 - **`<Each of key>`** 为每一项渲染它唯一的子节点（一个函数）。行按 `key(item)` 保留（默认是项本身：对象按引用，原始值按值）：数组变化时，保留下来的行会被移动而不是重建，只有新的 key 才会创建新行。函数接收的是**访问器** `todo()` 和 `index()`，因为保留下来的行，其对应的项和位置都可能改变。
 
 在 JSX 中使用三元表达式或 `&&` 也可以（`{busy() ? <Spinner /> : <Content />}`），但只要它读取的任何值变化，就会重建分支。分支包含较多元素时，优先使用 `<If>`。
@@ -182,7 +190,12 @@ Fragment（`<>…</>`）可以把多个元素组合在一起而不产生视图�
 
 ## ref
 
-`ref` 让你拿到宿主元素的原生节点（一个 `YNode`），用于命令式调用：`focus()`、`blur()`、`scrollTo()`、`scrollToIndex()` 等。传入变量时会给它赋值，传入函数时会调用它：
+`ref` 让你拿到宿主元素的原生节点（一个 `YNode`），用于命令式调用：`focus()`、`blur()`、`scrollTo()`、`scrollToIndex()` 等。`ref={…}` 指向的目标会收到这个节点：
+
+- 用 `let` 声明的变量：把节点赋给它；
+- 对象字段（`ref={refs.input}`、`ref={refs[name]}`）：把节点赋给它；
+- [signal](./reactivity.md)：把它设为这个节点，读取这个 signal 的地方会跟着更新；
+- 函数：以节点为参数调用它。
 
 ```tsx
 import type { YNode } from "nsh";
@@ -202,6 +215,8 @@ function Search() {
 
 <Scroll ref={(node) => (scroller = node)} />
 ```
+
+`const` 或 import 的绑定应当持有 signal 或函数，例如 `const input = signal<YNode>()` 配合 `<Input ref={input} />` 和 `input()?.focus()`；持有其他值时，会在元素创建时报错，并说明该怎么写。
 
 ref 在元素创建时就被设置，早于组件返回，因此在 [effect](./reactivity.md#effect) 和事件处理函数中都可以使用。调用会按顺序发送给视图，排在它之前的修改之后。`SafeAreaView`、`KeyboardAvoidingView` 以及你自己 crate 中的 Rust 组件同样接受 `ref`。
 

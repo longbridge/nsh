@@ -357,6 +357,7 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         let target_dir = target_dir.to_string_lossy();
         if matches!(platform, Platform::Gpui) {
             args.extend(["--manifest-path", &manifest, "--target-dir", &target_dir]);
+            args.extend(gpui_features());
         }
         if let Some(triple) = platform.triple() {
             args.extend(["--target", triple]);
@@ -386,6 +387,33 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
     built.push(profile);
     built.push(file_name);
     existing(built, platform, name)
+}
+
+/// The cargo arguments a build of a GPUI host or runner adds: on a Mac
+/// where Xcode cannot run `metal`, which GPUI's build script precompiles
+/// its shaders with, `nsh-platform-gpui`'s `runtime-shaders` feature, so
+/// GPUI compiles them when the app starts. Every GPUI host and runner,
+/// the checkout's and those of apps with Rust crates, depends on
+/// `nsh-platform-gpui`.
+pub(crate) fn gpui_features() -> &'static [&'static str] {
+    if !metal_toolchain_missing() {
+        return &[];
+    }
+    crate::ui::note(
+        "no Metal Toolchain: GPUI compiles its shaders when the app starts \
+         (`xcodebuild -downloadComponent MetalToolchain` installs one to precompile them)",
+    );
+    &["--features", "nsh-platform-gpui/runtime-shaders"]
+}
+
+/// Whether this is a Mac where Xcode cannot run `metal` (no Metal
+/// Toolchain).
+fn metal_toolchain_missing() -> bool {
+    cfg!(target_os = "macos")
+        && !Command::new("xcrun")
+            .args(["metal", "--version"])
+            .output()
+            .is_ok_and(|out| out.status.success())
 }
 
 /// The workspace of a cargo checkout of nsh this CLI was built in

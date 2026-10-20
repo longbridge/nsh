@@ -22,7 +22,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Policy};
+use nsh_engine::{App, BYTECODE_VERSION, Bundle, HotUpdate, Limits, Policy};
 use rustc_hash::FxHashMap;
 
 use crate::{app::AppView, image::AssetBase};
@@ -229,6 +229,8 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             bytes,
             source_map,
             capabilities,
+            app_id,
+            limits,
         } => {
             hide_status(ui);
             let mut bundle = match format {
@@ -253,9 +255,16 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
-            bundle = match bundle.with_capabilities_json(capabilities.as_deref()) {
+            bundle = match bundle
+                .with_app_id(app_id.as_deref())
+                .with_capabilities_json(capabilities.as_deref())
+            {
                 Ok(bundle) => bundle,
                 Err(err) => return show_error(ui, "Invalid capabilities", &err, true),
+            };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => return show_error(ui, "Invalid limits", &err, true),
             };
             let (view, running) = {
                 let mut ui = ui.borrow_mut();
@@ -269,6 +278,7 @@ fn handle(ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             let Some(view) = view else { return };
             log::info!("loading build {version}");
             hide_error(ui);
+            view.set_limits(limits);
             view.load(App::Js(bundle));
         }
         DevEvent::Patch {

@@ -33,6 +33,10 @@ says how.
 ## Requirements
 
 - macOS, Windows or Linux, with a GPU GPUI can draw with (Metal on macOS, DirectX on Windows, Vulkan on Linux).
+- On macOS, building the runtime from a checkout uses Xcode's Metal Toolchain (`xcodebuild -downloadComponent
+  MetalToolchain`), which compiles GPUI's shaders ahead of time. On a Mac without it, `nsh run` and `nsh package` build
+  the runtime with GPUI's `runtime-shaders` feature and say so: the shaders are compiled when the app starts (a fraction
+  of a second the first time, cached by macOS after that).
 - On Linux: a Vulkan driver, Wayland or X11 with `libxkbcommon`, GTK 3 and WebKitGTK 4.1 (web views) and GStreamer
   1.20 or later with its base and good plug-ins (videos). Web views need X11: on a Wayland desktop run the app under
   Xwayland (`WAYLAND_DISPLAY=` empty), else they show a placeholder. Building the runtime from a checkout also needs
@@ -57,10 +61,10 @@ bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/gpui/nsh-gpui-host --bundle build/bundle.nshc --size 390x844   # in a checkout: target/debug/nsh-gpui-host
+dist/nsh/runtime/gpui/nsh-gpui-host --bundle build/bundle.nshc --window-size 390x844   # in a checkout: target/debug/nsh-gpui-host
 ```
 
-`--size` is the window's size in points (`<width>x<height>`).
+`--window-size` is the window's size in points (`<width>x<height>`).
 
 ## Packaging
 
@@ -117,10 +121,23 @@ so only load it from your own app's files.
   ([Native components](./native-components.md)).
 - `AppOptions::limits` (or `AppView::set_limits`, for the apps loaded next) sets the VM limits: the JS heap, the
   stack, the time budgets and the node quota ([Sandbox and capabilities](./sandbox-and-capabilities.md)). Embedded apps get `Limits::default()` (a
-  256 MB heap); the development host and the release runner run apps with `Limits::standalone_desktop()`.
+  256 MB heap); the development host and the release runner run apps on their own, with `Limits::standalone()`.
 - `AppView::connect_dev_server(url, cx)` (feature `dev`) loads the app from `nsh dev` and reloads it as you edit,
   with the error overlay over the view; `AppView::on_error` keeps hearing the app's errors.
-- `set_ui_sets(sets)` sets the UI sets every engine serves, for apps with Rust components of their own ([Rust](./rust.md)).
+- `AppView::on_app_error(|error| …)` hears the app's errors: `error.kind` (the app failed to load, an uncaught
+  exception, the VM stopped), `error.is_fatal()` when no JS of the app runs again, `error.message`, `error.stack`
+  and `error.package` (the id and build of the signed package it came from). `AppView::on_error` gets the same
+  errors as text.
+- `AppView::set_locale(locale, cx)` and `AppView::set_font_scale(scale, cx)` give the app your app's language and
+  text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+  follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
+- `AppView::run_package(&package)` runs a [signed package](./signed-packages.md#loading-packages-in-a-host-app)
+  from `verify_package` or `load_package`; `accept_package` records it once your app decided it is healthy.
+- `set_ui_sets(sets)` sets the UI sets every engine serves, for apps with Rust components of their own ([Rust](./rust.md)), and gives
+  your app's own sets: an app reaches the functions and classes of one by name with
+  [`nativeModule`](../modules/nsh-native.md#nativemodule) and is built with the stock `nsh build`. The repository's
+  `examples/embed-gpui` keeps a trading desk in the host this way, which two embedded order tickets and the host's
+  own widgets share.
 
 ## Differences
 

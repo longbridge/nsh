@@ -27,9 +27,9 @@ pub struct BundleOptions {
     /// otherwise the bundle holds the whole app, dynamically imported
     /// modules included.
     pub split: bool,
-    /// The UI sets the hosts serve (`nsh_base::registry()`, the app's own):
-    /// their modules stay imports.
-    pub ui_sets: Vec<nsh_core::ui::Registry>,
+    /// The UI sets the hosts serve, described (`nsh_base::registry()`
+    /// and an app's own, as `SetDescription`s): their modules stay imports.
+    pub ui_sets: Vec<nsh_core::ui::description::SetDescription>,
 }
 
 /// A failed build, formatted for people.
@@ -139,6 +139,121 @@ pub fn capabilities(
         .transpose()
 }
 
+/// How bare imports resolve: the `"resolve"` of the `nsh.json` next to the
+/// entry, checked.
+#[derive(Debug, Default)]
+struct ResolveSetup {
+    /// The export conditions of npm packages (`None`: `browser`).
+    conditions: Option<Vec<String>>,
+    /// Specifiers replaced: by a path or another specifier (`None`: an
+    /// empty module).
+    alias: Vec<(String, Vec<Option<String>>)>,
+}
+
+impl ResolveSetup {
+    fn read(dir: &std::path::Path) -> Result<Self, BundleError> {
+        let Ok(text) = std::fs::read_to_string(dir.join("nsh.json")) else {
+            return Ok(Self::default());
+        };
+        let config: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| BundleError::other(format!("nsh.json: {e}")))?;
+        let Some(resolve) = config.get("resolve") else {
+            return Ok(Self::default());
+        };
+        let error = |m: &str| BundleError::other(format!("nsh.json: resolve: {m}"));
+        let resolve = resolve
+            .as_object()
+            .ok_or_else(|| error("expected an object"))?;
+        let mut setup = Self::default();
+        for (key, value) in resolve {
+            match key.as_str() {
+                "conditions" => {
+                    let list = value
+                        .as_array()
+                        .and_then(|a| a.iter().map(|c| c.as_str().map(str::to_owned)).collect())
+                        .ok_or_else(|| error("conditions: expected an array of strings"))?;
+                    setup.conditions = Some(list);
+                }
+                "alias" => {
+                    let map = value
+                        .as_object()
+                        .ok_or_else(|| error("alias: expected an object"))?;
+                    for (from, to) in map {
+                        let to = match to {
+                            serde_json::Value::Bool(false) => None,
+                            // Paths are relative to `nsh.json`.
+                            serde_json::Value::String(to)
+                                if to.starts_with("./") || to.starts_with("../") =>
+                            {
+                                Some(dir.join(to).to_string_lossy().into_owned())
+                            }
+                            serde_json::Value::String(to) => Some(to.clone()),
+                            _ => {
+                                return Err(error(&format!(
+                                    "alias: `{from}`: expected a path, a module or false"
+                                )));
+                            }
+                        };
+                        setup.alias.push((from.clone(), vec![to]));
+                    }
+                }
+                other => return Err(error(&format!("unknown key `{other}`"))),
+            }
+        }
+        Ok(setup)
+    }
+
+    /// Sets `options`' platform and resolution (`production`: the value of
+    /// `process.env.NODE_ENV`, as rolldown sets it for the browser).
+    fn apply(&self, options: &mut BundlerOptions, production: bool) {
+        // npm packages resolve their browser builds by default: the runtime
+        // has the web APIs (fetch, streams, ...), not Node's.
+        let browser = self
+            .conditions
+            .as_ref()
+            .is_none_or(|c| c.iter().any(|c| c == "browser"));
+        options.platform = Some(if browser {
+            Platform::Browser
+        } else {
+            Platform::Neutral
+        });
+        let mut resolve = rolldown_common::ResolveOptions::default();
+        if let Some(conditions) = &self.conditions {
+            // `module` as rolldown's default conditions have it.
+            let mut names = conditions.clone();
+            names.push("module".into());
+            resolve.condition_names = Some(names);
+        }
+        if !browser {
+            // What the browser platform has besides its condition and the
+            // `browser` field.
+            resolve.main_fields = Some(vec!["module".into(), "main".into()]);
+            let env = if production {
+                "'production'"
+            } else {
+                "'development'"
+            };
+            options.define = Some(
+                [("process.env.NODE_ENV".to_owned(), env.to_owned())]
+                    .into_iter()
+                    .collect(),
+            );
+            options.optimization = Some(rolldown_common::OptimizationOption {
+                pife_for_module_wrappers: Some(true),
+                ..Default::default()
+            });
+        }
+        if !self.alias.is_empty() {
+            resolve.alias = Some(self.alias.clone());
+        }
+        options.resolve = Some(resolve);
+        // tsconfig.json is the type checker's: its `paths` lead to `.nsh/types`'
+        // declarations and it extends `.nsh/tsconfig.json`, which may not be
+        // written yet. Aliases come from nsh.json, the JSX transform is nsh's.
+        options.tsconfig = Some(rolldown_common::TsConfig::Auto(false));
+    }
+}
+
 /// The `"tailwind"`, `"theme"`, `"appearance"` and `"statusBar"` of the
 /// `nsh.json` next to the entry, checked. `"theme"` is a gpui-kit theme file's path (relative
 /// to `nsh.json`) or its content.
@@ -162,8 +277,10 @@ fn tailwind_setup(dir: &std::path::Path) -> Result<Arc<plugin::ThemeSetup>, Bund
                 .map_err(|e| BundleError::other(format!("nsh.json: theme: {file}: {e}")))?,
             v => v.to_string(),
         };
-        nsh_core::ui::Theme::from_json(&json)
+        let ui = nsh_core::ui::Theme::from_json(&json)
             .map_err(|e| BundleError::other(format!("nsh.json: theme: {e}")))?;
+        // Its tokens are classes too (`bg-primary`).
+        setup.theme.set_tokens(&ui);
         setup.ui = Some(json);
     }
     if let Some(appearance) = config.get("appearance") {
@@ -208,39 +325,39 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     let cwd_root = cwd.clone();
     let tailwind = tailwind_setup(&cwd)?;
     let capabilities = capabilities(&cwd)?;
+    let resolve = ResolveSetup::read(&cwd)?;
     let plugin_error = Arc::new(Mutex::new(None));
     let assets = Arc::new(Mutex::new(Vec::new()));
     let natives = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
-    let mut bundler = Bundler::with_plugins(
-        BundlerOptions {
-            input: Some(vec![InputItem {
-                import: entry.to_string_lossy().into_owned(),
-                ..Default::default()
-            }]),
-            cwd: Some(cwd),
-            // Nothing is written; this only makes source map paths relative
-            // to the entry directory (`App.tsx`, not `../App.tsx`).
-            dir: Some(".".into()),
-            // Imports of the native modules stay.
-            format: Some(OutputFormat::Esm),
-            // npm packages resolve their browser builds: the runtime has the
-            // web APIs (fetch, streams, ...), not Node's.
-            platform: Some(Platform::Browser),
-            minify: Some(RawMinifyOptions::Bool(options.minify)),
-            // Kept out of the code; used to symbolicate stack traces.
-            sourcemap: Some(SourceMapType::Hidden),
-            // Split: the entry is the module every chunk imports as
-            // `./bundle.js`, chunks keep their names (packagers add
-            // digests). Else dynamic imports are inlined.
-            entry_filenames: options
-                .split
-                .then(|| ChunkFilenamesOutputOption::String(nsh_core::js::ENTRY_CHUNK.into())),
-            chunk_filenames: options
-                .split
-                .then(|| ChunkFilenamesOutputOption::String("[name].js".into())),
-            code_splitting: (!options.split).then_some(CodeSplittingMode::Bool(false)),
+    let mut bundler_options = BundlerOptions {
+        input: Some(vec![InputItem {
+            import: entry.to_string_lossy().into_owned(),
             ..Default::default()
-        },
+        }]),
+        cwd: Some(cwd),
+        // Nothing is written; this only makes source map paths relative
+        // to the entry directory (`App.tsx`, not `../App.tsx`).
+        dir: Some(".".into()),
+        // Imports of the native modules stay.
+        format: Some(OutputFormat::Esm),
+        minify: Some(RawMinifyOptions::Bool(options.minify)),
+        // Kept out of the code; used to symbolicate stack traces.
+        sourcemap: Some(SourceMapType::Hidden),
+        // Split: the entry is the module every chunk imports as
+        // `./bundle.js`, chunks keep their names (packagers add
+        // digests). Else dynamic imports are inlined.
+        entry_filenames: options
+            .split
+            .then(|| ChunkFilenamesOutputOption::String(nsh_core::js::ENTRY_CHUNK.into())),
+        chunk_filenames: options
+            .split
+            .then(|| ChunkFilenamesOutputOption::String("[name].js".into())),
+        code_splitting: (!options.split).then_some(CodeSplittingMode::Bool(false)),
+        ..Default::default()
+    };
+    resolve.apply(&mut bundler_options, options.minify);
+    let mut bundler = Bundler::with_plugins(
+        bundler_options,
         vec![Pluginable::new_shared(plugin::NshPlugin {
             split: options.split,
             root: cwd_for_errors,
@@ -459,7 +576,7 @@ fn append_module(
 /// the current thread (`ui_sets` as in [`BundleOptions::ui_sets`]).
 pub fn bundle_hot(
     entry: &std::path::Path,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[nsh_core::ui::description::SetDescription],
 ) -> Result<HotBundle, BundleError> {
     tokio::runtime::Builder::new_current_thread()
         .build()
@@ -470,7 +587,7 @@ pub fn bundle_hot(
 /// Bundles an app for development with hot module replacement.
 pub async fn bundle_hot_async(
     entry: &std::path::Path,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[nsh_core::ui::description::SetDescription],
 ) -> Result<HotBundle, BundleError> {
     let start = Instant::now();
     let entry = dunce::canonicalize(entry)
@@ -484,27 +601,29 @@ pub async fn bundle_hot_async(
     let assets = Arc::new(Mutex::new(Vec::new()));
     let tailwind = tailwind_setup(&cwd)?;
     let capabilities = capabilities(&cwd)?;
-    let mut bundler = Bundler::with_plugins(
-        BundlerOptions {
-            input: Some(vec![InputItem {
-                import: entry.to_string_lossy().into_owned(),
-                ..Default::default()
-            }]),
-            cwd: Some(cwd.clone()),
-            dir: Some(".".into()),
-            // One CommonJS chunk per module: modules can be replaced one by
-            // one, and imports are read at use (`dep.name`), so a module run
-            // again in place is seen by its importers.
-            format: Some(OutputFormat::Cjs),
-            preserve_modules: Some(true),
-            // Every statement stays. Rolldown still leaves out the exports
-            // no module imports: an edit that starts using one changes the
-            // exporting module too, which then runs again.
-            treeshake: rolldown_common::TreeshakeOptions::Boolean(false),
-            platform: Some(Platform::Browser),
-            sourcemap: Some(SourceMapType::Hidden),
+    let resolve = ResolveSetup::read(&cwd)?;
+    let mut bundler_options = BundlerOptions {
+        input: Some(vec![InputItem {
+            import: entry.to_string_lossy().into_owned(),
             ..Default::default()
-        },
+        }]),
+        cwd: Some(cwd.clone()),
+        dir: Some(".".into()),
+        // One CommonJS chunk per module: modules can be replaced one by
+        // one, and imports are read at use (`dep.name`), so a module run
+        // again in place is seen by its importers.
+        format: Some(OutputFormat::Cjs),
+        preserve_modules: Some(true),
+        // Every statement stays. Rolldown still leaves out the exports
+        // no module imports: an edit that starts using one changes the
+        // exporting module too, which then runs again.
+        treeshake: rolldown_common::TreeshakeOptions::Boolean(false),
+        sourcemap: Some(SourceMapType::Hidden),
+        ..Default::default()
+    };
+    resolve.apply(&mut bundler_options, false);
+    let mut bundler = Bundler::with_plugins(
+        bundler_options,
         vec![Pluginable::new_shared(plugin::NshPlugin {
             root: cwd.clone(),
             error: plugin_error.clone(),
@@ -695,6 +814,223 @@ mod tests {
         let (code, _) = bundle_hot(&dir.join("App.tsx"), &[]).unwrap().script();
         assert!(code.contains("require(\"./Screen.js\")"), "{code}");
         assert!(!code.contains("import("), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn bundles_ignore_the_apps_tsconfig() {
+        // As an app is before any nsh command wrote `.nsh/tsconfig.json`, with
+        // `paths` only the type checker may follow.
+        let dir = app("tsconfig");
+        std::fs::write(
+            dir.join("tsconfig.json"),
+            r#"{ "extends": "./.nsh/tsconfig.json",
+                 "compilerOptions": { "paths": { "./shared": ["./missing.d.ts"] } } }"#,
+        )
+        .unwrap();
+        let code = bundle_app(&dir, false).code;
+        assert!(code.contains("second screen"), "{code}");
+        let hot = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        assert!(
+            hot.modules.iter().any(|m| m.id.contains("shared")),
+            "{:?}",
+            hot.modules
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An app importing a package whose browser build uses the DOM, a module
+    /// an alias replaces and one it leaves out; `resolve` is its nsh.json's.
+    fn resolving_app(name: &str, resolve: Option<&str>) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-resolve-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pkg = dir.join("node_modules/entities");
+        std::fs::create_dir_all(&pkg).unwrap();
+        let files = [
+            (
+                "App.tsx",
+                "import { decode } from \"entities\";\n\
+                 import { name } from \"dom-only\";\n\
+                 import \"polyfill\";\n\
+                 console.log(decode(\"amp\"), name, process.env.NODE_ENV);\n",
+            ),
+            ("shim.ts", "export const name = \"shimmed\";\n"),
+            (
+                "node_modules/entities/package.json",
+                r#"{ "name": "entities", "browser": "./dom.js",
+                     "exports": { ".": { "browser": "./dom.js", "default": "./plain.js" } } }"#,
+            ),
+            (
+                "node_modules/entities/dom.js",
+                "export const decode = (s) => document.title + s;\n",
+            ),
+            (
+                "node_modules/entities/plain.js",
+                "export const decode = (s) => \"plain build \" + s;\n",
+            ),
+        ];
+        for (file, code) in files {
+            std::fs::write(dir.join(file), code).unwrap();
+        }
+        if let Some(resolve) = resolve {
+            std::fs::write(
+                dir.join("nsh.json"),
+                format!("{{ \"resolve\": {resolve} }}"),
+            )
+            .unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn packages_resolve_their_browser_builds_by_default() {
+        let dir = resolving_app(
+            "default",
+            Some(r#"{ "alias": { "dom-only": "./shim.ts", "polyfill": false } }"#),
+        );
+        let code = bundle_app(&dir, false).code;
+        assert!(code.contains("document.title"), "{code}");
+        assert!(code.contains("shimmed"), "{code}");
+        assert!(code.contains("production"), "{code}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolve_conditions_replace_the_browser_condition() {
+        let dir = resolving_app(
+            "conditions",
+            Some(
+                r#"{ "conditions": ["worker"], "alias": { "dom-only": "./shim.ts", "polyfill": false } }"#,
+            ),
+        );
+        let code = bundle_app(&dir, false).code;
+        assert!(code.contains("plain build"), "{code}");
+        assert!(!code.contains("document"), "{code}");
+        assert!(code.contains("shimmed"), "{code}");
+        // `process.env.NODE_ENV` is still defined, as for the browser.
+        assert!(code.contains("production"), "{code}");
+        assert!(!code.contains("process.env"), "{code}");
+        let hot = bundle_hot(&dir.join("App.tsx"), &[]).unwrap();
+        let module = hot
+            .modules
+            .iter()
+            .find(|m| m.id.contains("plain"))
+            .map(|m| &m.code);
+        assert!(
+            module.is_some_and(|c| c.contains("plain build")),
+            "{:?}",
+            hot.modules
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolve_options_are_checked() {
+        for (resolve, message) in [
+            (
+                r#"{ "conditionz": [] }"#,
+                "nsh.json: resolve: unknown key `conditionz`",
+            ),
+            (
+                r#"{ "conditions": "worker" }"#,
+                "nsh.json: resolve: conditions: expected an array of strings",
+            ),
+            (
+                r#"{ "alias": { "a": 1 } }"#,
+                "nsh.json: resolve: alias: `a`: expected a path, a module or false",
+            ),
+        ] {
+            let dir = resolving_app("checked", Some(resolve));
+            let error = bundle(&BundleOptions {
+                entry: dir.join("App.tsx"),
+                minify: true,
+                split: false,
+                ui_sets: Vec::new(),
+            })
+            .unwrap_err();
+            assert_eq!(error.plain, message);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// An app whose entry is `code`.
+    fn single(name: &str, code: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nsh-import-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("App.tsx"), code).unwrap();
+        dir
+    }
+
+    fn bundling(dir: &std::path::Path) -> Result<Bundle, BundleError> {
+        bundle(&BundleOptions {
+            entry: dir.join("App.tsx"),
+            minify: false,
+            split: false,
+            ui_sets: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn named_imports_the_module_does_not_export_fail_the_build() {
+        let dir = single(
+            "missing",
+            "import { mount, Text } from \"nsh\";\n\
+             import { AnimatedValu } from \"nsh/animated\";\n\
+             mount(() => <Text>{String(AnimatedValu)}</Text>);\n",
+        );
+        let error = bundling(&dir).unwrap_err().plain;
+        assert!(error.contains("App.tsx"), "{error}");
+        assert!(
+            error.contains("`nsh/animated` has no export `AnimatedValu`"),
+            "{error}"
+        );
+        assert!(error.contains("2:"), "{error}");
+        assert!(error.contains("did you mean `AnimatedValue`?"), "{error}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn named_imports_of_what_a_module_exports_and_types_bundle() {
+        let dir = single(
+            "present",
+            "import { mount, Text, type NoSuchType, NoSuchProps } from \"nsh\";\n\
+             let props: NoSuchProps | NoSuchType | undefined;\n\
+             import { AnimatedValue as V } from \"nsh/animated\";\n\
+             import type { Gone } from \"nsh/animated\";\n\
+             import * as animated from \"nsh/animated\";\n\
+             mount(() => <Text>{String(V)}{String(animated)}</Text>);\n",
+        );
+        bundling(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn development_bundles_refuse_what_a_ui_set_does_not_export() {
+        let dir = single(
+            "hot",
+            "import { mount } from \"nsh\";\n\
+             import { Buton } from \"nsh/base\";\n\
+             mount(() => <Buton title=\"Go\" />);\n",
+        );
+        let ui_sets = [nsh_base::registry().into()];
+        let Err(error) = bundle_hot(&dir.join("App.tsx"), &ui_sets) else {
+            panic!("bundled");
+        };
+        let error = error.plain;
+        assert!(
+            error.contains("`nsh/base` has no export `Buton`"),
+            "{error}"
+        );
+        assert!(error.contains("did you mean `Button`?"), "{error}");
+        std::fs::write(
+            dir.join("App.tsx"),
+            "import { mount } from \"nsh\";\n\
+             import { Button } from \"nsh/base\";\n\
+             mount(() => <Button title=\"Go\" />);\n",
+        )
+        .unwrap();
+        bundle_hot(&dir.join("App.tsx"), &ui_sets).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -1,6 +1,6 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, layout direction) written when the platform reports a
+//! reduced motion, layout direction, locale) written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`Platform`,
 //! `PixelRatio`, `I18nManager`) and `nsh/accessibility`; the insets
 //! context screens and modals provide (`safeAreaInsets`).
@@ -36,9 +36,10 @@ enum Part {
     ReduceMotion,
     Rtl,
     TitleBar,
+    Locale,
 }
 
-const PARTS: usize = 9;
+const PARTS: usize = 10;
 
 /// The environment's part of a context's state.
 pub(crate) struct Env {
@@ -282,6 +283,9 @@ pub(crate) fn set_environment(ctx: *mut JsContext, next: &Environment) -> Result
     }
     if changed(&|p| p.font_scale == next.font_scale) {
         writes.push((Part::FontScale, number(next.font_scale)));
+    }
+    if changed(&|p| p.locale == next.locale) {
+        writes.push((Part::Locale, string(ctx, next.locale.as_str())));
     }
     let screen_reader = changed(&|p| p.screen_reader == next.screen_reader);
     if screen_reader {
@@ -697,8 +701,16 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         "fontScale",
         Export::Value(|ctx| accessor(ctx, Part::FontScale)),
         Ts::value(
-            "The user's preferred text size relative to the default (reactive).",
+            "The user's preferred text size relative to the default (reactive):\nthe system's, unless the embedding app set its own.",
             "Accessor<number>",
+        ),
+    ),
+    (
+        "locale",
+        Export::Value(|ctx| accessor(ctx, Part::Locale)),
+        Ts::value(
+            "The user's locale as a BCP 47 tag (`\"en-US\"`, `\"zh-Hans-CN\"`), which\n`Intl` formats for by default (reactive): the system's, unless the\nembedding app set its own.",
+            "Accessor<string>",
         ),
     ),
     (

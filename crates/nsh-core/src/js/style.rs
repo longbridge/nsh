@@ -16,18 +16,18 @@ export type DimensionValue = number | `${number}%` | "auto";
 export type LengthValue = number | `${number}%`;
 
 /** One transform step; angles are degrees (`"45deg"`, `"0.5rad"` or a
- * number). Native values (and nodes derived from them) animate a step
+ * number). Animated values (and nodes derived from them) animate a step
  * natively. */
 export type TransformStep =
-  | { translateX: number | NativeNode }
-  | { translateY: number | NativeNode }
-  | { scale: number | NativeNode }
-  | { scaleX: number | NativeNode }
-  | { scaleY: number | NativeNode }
-  | { rotate: number | string | NativeNode }
-  | { rotateZ: number | string | NativeNode }
-  | { rotateX: number | string | NativeNode }
-  | { rotateY: number | string | NativeNode }
+  | { translateX: number | AnimatedNode }
+  | { translateY: number | AnimatedNode }
+  | { scale: number | AnimatedNode }
+  | { scaleX: number | AnimatedNode }
+  | { scaleY: number | AnimatedNode }
+  | { rotate: number | string | AnimatedNode }
+  | { rotateZ: number | string | AnimatedNode }
+  | { rotateX: number | string | AnimatedNode }
+  | { rotateY: number | string | AnimatedNode }
   | { skewX: number | string }
   | { skewY: number | string }
   | { perspective: number };

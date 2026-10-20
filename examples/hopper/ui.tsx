@@ -1,5 +1,5 @@
 import { effect, type GestureResponderEvent, type JSX, signal, Text, View, type YNode } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Icon, type IconName } from "./icons";
 import { color, mono, radius } from "./theme";
 
@@ -188,7 +188,7 @@ export function Caption(props: { label: JSX.Element; value?: JSX.Element; tint?:
 /** A bar that grows to `value` (0…1) on the UI thread when it appears and
  * when the value changes; past `warnAbove` it turns amber. */
 export function Gauge(props: { value: number; warnAbove?: number }) {
-  const fill = createNativeValue(0);
+  const fill = createAnimatedValue(0);
   effect(() => {
     fill.timing(props.value, { duration: 650, easing: Easing.out(Easing.cubic) });
   });
@@ -250,7 +250,7 @@ export function Line(props: { first?: boolean; selected?: boolean; children: JSX
 
 /** An on / off switch; a disabled one is dimmed and ignores presses. */
 export function Switch(props: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
-  const on = createNativeValue(props.value ? 1 : 0);
+  const on = createAnimatedValue(props.value ? 1 : 0);
   effect(() => {
     on.spring(props.value ? 1 : 0, { stiffness: 380, damping: 28 });
   });

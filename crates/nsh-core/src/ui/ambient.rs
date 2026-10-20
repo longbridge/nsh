@@ -21,7 +21,7 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Theme, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, DialogAnswer, Executor, ImageSize},
+    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Size,
@@ -44,6 +44,8 @@ pub(crate) struct Ambient {
     /// The insets of the screens or modals components are on, by host.
     insets: FxHashMap<NodeId, Signal<EdgeInsets>>,
     measure: Option<MeasureFn>,
+    /// The app's key-value storage (`nsh/storage`).
+    storage: Option<crate::storage::Store>,
 }
 
 impl Ambient {
@@ -106,6 +108,12 @@ impl super::Runtime {
     pub(crate) fn set_services(&self, executor: Rc<Executor>) {
         let _entered = self.enter();
         with_data(|d| d.ambient.executor = Some(executor));
+    }
+
+    /// Where the app's storage is kept.
+    pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
+        let _entered = self.enter();
+        with_data(|d| d.ambient.storage = Some(storage));
     }
 
     /// How text is measured (the core's text engine).
@@ -355,6 +363,18 @@ pub fn announce_for_accessibility(message: impl Into<String>) {
     act(super::services::announce(message.into()));
 }
 
+/// Runs `f` with the app's storage (`nsh/storage`, [`crate::storage::Storage`]):
+/// the one the engine was given, or one in memory when it was given none.
+pub(crate) fn with_storage<R>(f: impl FnOnce(&crate::storage::Store) -> R) -> R {
+    let storage = with_data(|d| {
+        d.ambient
+            .storage
+            .get_or_insert_with(|| crate::storage::Store::new(None))
+            .clone()
+    });
+    f(&storage)
+}
+
 /// Puts `text` on the system clipboard (TS: `Clipboard.setString`).
 pub fn set_clipboard(text: impl Into<String>) {
     act(super::services::set_clipboard(text.into()));
@@ -371,6 +391,36 @@ pub fn clipboard_string() -> Answer<String> {
 /// Whether the system clipboard holds text (TS: `Clipboard.hasString`).
 pub fn clipboard_has_string() -> Answer<bool> {
     let (answer, action) = super::services::clipboard_has_string();
+    act(action);
+    answer
+}
+
+/// Puts the image of a `data:` URI (as [`clipboard_image`] gives) on the
+/// system clipboard (TS: `Clipboard.setImage`).
+pub fn set_clipboard_image(uri: impl Into<String>) {
+    act(super::services::set_clipboard_image(uri.into()));
+}
+
+/// The image on the system clipboard, `None` when it holds none (TS:
+/// `Clipboard.getImage`), to await in a task.
+pub fn clipboard_image() -> Answer<Option<ClipboardImage>> {
+    let (answer, action) = super::services::clipboard_image();
+    act(action);
+    answer
+}
+
+/// Whether the system clipboard holds an image, without reading it (TS:
+/// `Clipboard.hasImage`).
+pub fn clipboard_has_image() -> Answer<bool> {
+    let (answer, action) = super::services::clipboard_has_image();
+    act(action);
+    answer
+}
+
+/// The `file:` URLs of the local files on the system clipboard (files
+/// copied in a file manager; TS: `Clipboard.getFiles`), to await in a task.
+pub fn clipboard_files() -> Answer<Vec<String>> {
+    let (answer, action) = super::services::clipboard_files();
     act(action);
     answer
 }
@@ -450,13 +500,39 @@ impl<T> Future for Spawned<T> {
 }
 
 /// Runs `future` on the engine thread (TS: an `async` function): it changes
-/// what it wants by writing signals, and ends with the current owner.
+/// what it wants by writing signals, and ends with the current owner. It
+/// runs under that owner: what it makes is the owner's.
 pub fn spawn<T: 'static>(future: impl Future<Output = T> + 'static) -> Spawned<T> {
     let executor = executor();
-    let task = task::spawn_future(&executor, future);
+    let owner = Owner::current();
+    let task = task::spawn_future(
+        &executor,
+        Owned {
+            owner,
+            future: Box::pin(future),
+        },
+    );
     let handle = task.handle();
     cleanup(move || handle.cancel());
     Spawned(task)
+}
+
+/// A future polled under `owner` ([`Owner::scope`]).
+struct Owned<F> {
+    owner: Owner,
+    future: std::pin::Pin<Box<F>>,
+}
+
+impl<F: Future> Future for Owned<F> {
+    type Output = F::Output;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<F::Output> {
+        let this = self.get_mut();
+        this.owner.scope(|| this.future.as_mut().poll(cx))
+    }
 }
 
 /// Runs `f` once after `delay` (TS: `setTimeout`; cancelling the task is
@@ -593,16 +669,17 @@ where
 
 // --- Handles -----------------------------------------------------------------
 
-/// A native animation value starting at `value` (TS: `createNativeValue`):
-/// bind it to styles, drags, scroll offsets or drawings, animate it from
-/// handlers and tasks.
-pub fn native_value(value: f32) -> super::NativeValue {
-    super::NativeValue::new(&executor(), value)
+/// An animated value starting at `value` (TS: `createAnimatedValue`): bind
+/// it to styles, drags, scroll offsets or drawings, animate it from handlers
+/// and tasks. A `Copy` handle the current owner keeps, as a signal is (with
+/// no owner, it lives as long as the surface).
+pub fn animated_value(value: f32) -> super::AnimatedValue {
+    super::AnimatedValue::new(&executor(), value)
 }
 
 /// A handle for an element (TS: `ref`): put it on the element with
 /// [`super::Element::element_ref`], call its commands from handlers and
-/// tasks.
+/// tasks. A `Copy` handle the current owner keeps, as a signal is.
 pub fn element_ref() -> super::ElementRef {
     super::ElementRef::new(&executor())
 }
@@ -610,7 +687,7 @@ pub fn element_ref() -> super::ElementRef {
 /// A handle for a component this view renders (TS: a `ref` to a
 /// component): put it on the component's element with
 /// [`super::ComponentElement::component_ref`]; [`super::ComponentRef::api`]
-/// is the API its view registered.
+/// is the API its view registered. A `Copy` handle the current owner keeps.
 pub fn component_ref<C: super::Component>() -> super::ComponentRef<C> {
     super::ComponentRef::new(&executor())
 }

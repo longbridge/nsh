@@ -61,6 +61,9 @@ pub(super) enum Patch {
         host: NodeId,
         style: StyleRefinement,
     },
+    /// The attributes a view gives a nested component (its host) besides
+    /// styles, the bound parts read again.
+    NestedAttrs { host: NodeId, attrs: Box<Attrs> },
     /// A list's rows, its bound count or keys read again.
     Rows {
         list: NodeId,
@@ -74,7 +77,7 @@ pub(super) type Patches = Rc<RefCell<Vec<Patch>>>;
 
 /// What was last applied to a node with bindings.
 pub(super) struct BoundNode {
-    attrs: Attrs,
+    pub(super) attrs: Attrs,
     pub(super) style: StyleRefinement,
     pub(super) classes: Classes,
     /// Its text's content and raw text node.
@@ -83,16 +86,20 @@ pub(super) struct BoundNode {
 
 /// A region of a parent's children.
 pub(super) struct RegionState {
-    host: NodeId,
+    pub(super) host: NodeId,
     parent: NodeId,
     /// What its nodes go before.
     anchor: Anchor,
     /// Its elements, as applied.
-    children: Vec<Expanded>,
+    pub(super) children: Vec<Expanded>,
+    /// The slot whose fill it is part of, in content of the nested
+    /// component `parent`.
+    fill: Option<&'static str>,
 }
 
-/// What a region's nodes go before in their parent.
-#[derive(Debug, Clone, Copy)]
+/// What a region's nodes (or a host's JS children) go before in their
+/// parent.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Anchor {
     /// The end.
     End,
@@ -267,6 +274,33 @@ impl<M: TextEngine> Core<M> {
         first.take().unwrap_or_default()
     }
 
+    /// Binds the attributes a view gives nested component `host` (`base`
+    /// with the bound `parts`) under the current owner: them now; later
+    /// changes are patches.
+    pub(super) fn bind_nested_attrs(
+        &mut self,
+        host: NodeId,
+        base: Attrs,
+        parts: Vec<crate::ui::element::BoundAttrs>,
+    ) -> Attrs {
+        let patches = self.components.patches.clone();
+        let (runs, first) = Runs::new();
+        let resolve = base.clone();
+        render_effect(move || {
+            let mut attrs = resolve.clone();
+            for part in &parts {
+                part(&mut attrs);
+            }
+            runs.run(attrs, |attrs| {
+                patches.borrow_mut().push(Patch::NestedAttrs {
+                    host,
+                    attrs: Box::new(attrs),
+                });
+            });
+        });
+        first.take().unwrap_or(base)
+    }
+
     /// Binds the bound parts of list `list`'s layout over `base` under the
     /// current owner: the layout now, to apply; later changes are patches.
     pub(super) fn bind_list_layout(
@@ -304,6 +338,11 @@ impl<M: TextEngine> Core<M> {
                 parent,
                 anchor: Anchor::End,
                 children: Vec::new(),
+                fill: self
+                    .components
+                    .filling
+                    .filter(|&(nested, _)| nested == parent)
+                    .map(|(_, name)| name),
             },
         );
         let patches = self.components.patches.clone();
@@ -336,23 +375,79 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn placed(&self, e: &Expanded) -> Vec<NodeId> {
         match e.part {
             Part::Region(region) => self.region_nodes(region),
+            Part::Fill(_) => e.children.iter().flat_map(|c| self.placed(c)).collect(),
+            Part::Filled(_) => Vec::new(),
             _ => vec![e.id],
         }
     }
 
+    /// The first node region `region` puts in its parent now, if any,
+    /// without collecting the others ([`Self::region_nodes`]).
+    fn first_node(&self, region: u32) -> Option<NodeId> {
+        let state = self.components.regions.get(&region)?;
+        // (Its host's JS children and fills: known but while its view is
+        // reconciled, when its instance is out of the instances.)
+        let inst = self.components.instances.get(&state.host).map(|i| &**i);
+        state.children.iter().find_map(|e| self.node_of(e, inst))
+    }
+
+    /// The node an element of `inst`'s view puts first in its parent now.
+    fn node_of(&self, e: &Expanded, inst: Option<&Instance>) -> Option<NodeId> {
+        match e.part {
+            Part::Children => inst?.js_children.first().copied(),
+            Part::Filled(name) => self
+                .fill_of(inst?, name)
+                .and_then(|f| self.fill_nodes(f).first().copied()),
+            Part::Region(region) => self.first_node(region),
+            // A slot's: placed by the nested view where it places it.
+            Part::Fill(_) => None,
+            _ => (e.id != 0).then_some(e.id),
+        }
+    }
+
+    /// What follows the elements before `elements` (some of `inst`'s view,
+    /// all in one parent): the first node among them, the first region
+    /// (empty now, it may fill), or `end` past them all (what follows the
+    /// region they are, or the end).
+    pub(super) fn anchor_after(
+        &self,
+        elements: &[Expanded],
+        inst: &Instance,
+        end: Anchor,
+    ) -> Anchor {
+        elements
+            .iter()
+            .find_map(|e| match e.part {
+                Part::Region(region) => Some(Anchor::Region(region)),
+                _ => self.node_of(e, Some(inst)).map(Anchor::Node),
+            })
+            .unwrap_or(end)
+    }
+
+    /// Anchors each region among `out` (`inst`'s view's children, or a
+    /// region's) to what follows it: past `out`'s end, `end` (a region in
+    /// a region resolves to what follows the outer one, as its nodes do).
+    pub(super) fn set_region_anchors(&mut self, out: &[Expanded], inst: &Instance, end: Anchor) {
+        for (i, e) in out.iter().enumerate() {
+            if let Part::Region(region) = e.part {
+                let anchor = self.anchor_after(&out[i + 1..], inst, end);
+                self.set_region_anchor(region, anchor);
+            }
+        }
+    }
+
     /// The node a region's nodes go before (`None`: the end).
-    fn anchor_node(&self, anchor: Anchor) -> Option<NodeId> {
+    pub(super) fn anchor_node(&self, anchor: Anchor) -> Option<NodeId> {
         let mut anchor = anchor;
         loop {
             match anchor {
                 Anchor::End => return None,
                 Anchor::Node(id) => return Some(id),
                 Anchor::Region(region) => {
-                    let state = self.components.regions.get(&region)?;
-                    if let Some(first) = self.region_nodes(region).first() {
-                        return Some(*first);
+                    if let Some(first) = self.first_node(region) {
+                        return Some(first);
                     }
-                    anchor = state.anchor;
+                    anchor = self.components.regions.get(&region)?.anchor;
                 }
             }
         }
@@ -387,6 +482,11 @@ impl<M: TextEngine> Core<M> {
         match patch {
             Patch::Region { region, elements } => self.reconcile_region(region, elements),
             Patch::Rows { list, count, keys } => self.set_list_rows(list, count, keys),
+            Patch::NestedAttrs { host, attrs } => {
+                if self.is_host(host) {
+                    self.set_given(host, *attrs);
+                }
+            }
             Patch::Nested { host, style } => {
                 if self.is_host(host) {
                     let user = (!style.is_empty()).then(|| self.components.lowered(&style));
@@ -424,22 +524,47 @@ impl<M: TextEngine> Core<M> {
                 }
             }
             Patch::Attrs { host, id, attrs } => {
+                // The root: what the views and components above give it
+                // goes after its own.
+                let ctx = if id == host {
+                    self.root_context_of(host)
+                } else {
+                    None
+                };
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
                 };
-                let app = (id == host).then(|| inst.app_style.clone()).flatten();
+                let app = match &ctx {
+                    Some(ctx) if ctx.combined => ctx.app.clone(),
+                    Some(_) => inst.app_style.clone(),
+                    None => None,
+                };
                 let Some(node) = inst.bound.get_mut(&id) else {
                     return;
                 };
                 let attrs = *attrs;
                 let old = std::mem::replace(&mut node.attrs, attrs.clone());
+                let (attrs, old) = match &ctx {
+                    Some(ctx) => {
+                        let mut old = old;
+                        (old.inset_padding, old.inset_margin) = inst.root_insets_applied;
+                        let attrs = ctx.over(attrs);
+                        inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+                        (attrs, old)
+                    }
+                    None => (attrs, old),
+                };
                 self.apply_attrs_over(id, &attrs, &old, app.as_ref());
             }
             Patch::Style { host, id, style } => {
+                let user = if id == host {
+                    self.root_context_of(host).and_then(|ctx| ctx.user)
+                } else {
+                    None
+                };
                 let Some(inst) = self.components.instances.get_mut(&host) else {
                     return;
                 };
-                let user = if id == host { inst.user.clone() } else { None };
                 let Some(node) = inst.bound.get_mut(&id) else {
                     return;
                 };
@@ -486,26 +611,39 @@ impl<M: TextEngine> Core<M> {
         let (out, placeholder) = self.match_children(parent, state.children, new, host, &mut inst);
         self.forget_released(host, &mut inst);
         // The JS children's place went with what the region released.
-        if let Placement::At(at, _) = inst.children_at
-            && at != host
-            && !self.components.owners.contains_key(&at)
-        {
+        let gone = match inst.children_at {
+            Placement::At(at, _) => at != host && !self.components.owners.contains_key(&at),
+            Placement::Nested(nested, _) => !self.is_host(nested),
+            _ => false,
+        };
+        if gone {
             inst.children_at = Placement::None;
         }
-        let anchor = self.anchor_node(state.anchor);
+        // A nested component's content joins it as JS children do.
+        let nested = parent != host && self.is_host(parent);
+        let place = |after| {
+            if nested {
+                Placement::Nested(parent, after)
+            } else {
+                Placement::At(parent, after)
+            }
+        };
+        // What it holds resolves past its end to what follows it: its
+        // regions, the JS children, what fills a slot.
+        self.set_region_anchors(&out, &inst, state.anchor);
         if let Some(at) = placeholder {
-            let after = out[at + 1..]
-                .iter()
-                .find(|e| e.id != 0)
-                .map(|e| e.id)
-                .or(anchor);
-            inst.children_at = Placement::At(parent, after);
+            inst.children_at = place(self.anchor_after(&out[at + 1..], &inst, state.anchor));
         }
+        self.place_filled(&out, &mut inst, state.anchor, place);
         // In place: from the last, each before the next, from the anchor.
         let nodes: Vec<NodeId> = out
             .iter()
             .flat_map(|e| match e.part {
                 Part::Children => inst.js_children.clone(),
+                Part::Filled(name) => self
+                    .fill_of(&inst, name)
+                    .map(|f| self.fill_nodes(f))
+                    .unwrap_or_default(),
                 _ => self.placed(e),
             })
             .collect();
@@ -518,11 +656,23 @@ impl<M: TextEngine> Core<M> {
                 parent,
                 anchor: state.anchor,
                 children: out,
+                fill: state.fill,
             },
         );
-        // A nested component's content joins it as JS children do.
-        let nested = parent != host && self.is_host(parent);
-        let mut before = anchor;
+        // Part of what fills a nested component's slot: it goes where the
+        // nested view places the slot, whose prop follows; what fills this
+        // view's own slots and it passes on goes there too.
+        if let Some(name) = state.fill {
+            if let Some(mut inst) = self.components.instances.remove(&host) {
+                self.note_passed(parent, name, host, &mut inst);
+                self.components.instances.insert(host, inst);
+            }
+            self.refill(parent, name);
+            return;
+        }
+        // (Resolved with the host's instance back: a region after this one
+        // may hold its JS children.)
+        let mut before = self.anchor_node(state.anchor);
         for &child in nodes.iter().rev() {
             if nested {
                 if !self.nested_precedes(parent, child, before) {
@@ -537,6 +687,14 @@ impl<M: TextEngine> Core<M> {
             }
             before = Some(child);
         }
+    }
+
+    /// A region of the fill of slot `name` of the nested component hosted
+    /// by `nested` changed: the nested view places the fill's nodes again,
+    /// and its slot prop follows whether there are any.
+    fn refill(&mut self, nested: NodeId, name: &'static str) {
+        self.components.mark(nested);
+        self.place_fill(nested, name);
     }
 
     /// Forgets what `host`'s view knew of the nodes released since: their

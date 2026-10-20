@@ -1,12 +1,12 @@
 import { mount, signal, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { PanResponder } from "nsh/gesture";
 import { tint, ui } from "./palette";
 
-/** A card dragged on the UI thread: `pan` drives two native values. */
+/** A card dragged on the UI thread: `pan` drives two animated values. */
 function DragCard() {
-  const x = createNativeValue(0);
-  const y = createNativeValue(0);
+  const x = createAnimatedValue(0);
+  const y = createAnimatedValue(0);
   const flings = signal(0);
   return (
     <View style={{ ...ui().inset, height: 150, borderRadius: 12, alignItems: "center", justifyContent: "center", overflow: "hidden" }}>

@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { Animated, createNativeValue, Easing, LayoutAnimation } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh/animated";
 import { ui } from "./palette";
 
 const TRACK = 250;
@@ -23,9 +23,9 @@ function App() {
   // 1. A style transition: change the style, the platform animates it.
   const on = signal(false);
 
-  // 2. Native values: timing and spring, driven on the UI thread.
-  const timed = createNativeValue(0);
-  const sprung = createNativeValue(0);
+  // 2. Animated values: timing and spring, driven on the UI thread.
+  const timed = createAnimatedValue(0);
+  const sprung = createAnimatedValue(0);
   let there = false;
   const run = () => {
     there = !there;
@@ -34,8 +34,8 @@ function App() {
   };
 
   // 3. A composite: a staggered hop, then all of them spin; runs natively end to end.
-  const ys = Array.from({ length: SWATCHES }, () => createNativeValue(0));
-  const spin = createNativeValue(0);
+  const ys = Array.from({ length: SWATCHES }, () => createAnimatedValue(0));
+  const spin = createAnimatedValue(0);
   const status = signal("idle");
   const show = Animated.sequence([
     Animated.stagger(

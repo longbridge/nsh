@@ -8,7 +8,7 @@ demo: guide-gestures
 
 # 触摸与手势
 
-NSH 的触摸处理分三个层次。**按压**（`onPress` 等）用于按钮、列表行和链接，按压反馈由原生绘制。**原生手势**（`pan`、`pinch`、`rotation`）在 UI 线程上驱动[原生值](./animation.md#原生值)，即使 JS 正忙，被拖动的卡片也能紧跟手指。**原始触摸与手势响应者系统**（`onTouchStart`、`onResponderMove`、`PanResponder`）把每根手指的位置都交给 JS，用来实现前两者表达不了的交互，例如手写绘图。
+NSH 的触摸处理分三个层次。**按压**（`onPress` 等）用于按钮、列表行和链接，按压反馈由原生绘制。**原生手势**（`pan`、`pinch`、`rotation`）在 UI 线程上驱动[动画值](./animation.md#动画值)，即使 JS 正忙，被拖动的卡片也能紧跟手指。**原始触摸与手势响应者系统**（`onTouchStart`、`onResponderMove`、`PanResponder`）把每根手指的位置都交给 JS，用来实现前两者表达不了的交互，例如手写绘图。
 
 选择能完成任务的最高层次：层次越高，从 UI 线程传到 JS 的工作就越少。
 
@@ -141,15 +141,15 @@ Tailwind 类 `pointer-events-none` 和 `pointer-events-auto` 设置的是同一�
 
 ## 原生手势：拖动、捏合与旋转
 
-要让拖动、捏合和旋转移动屏幕上的东西，就把[原生值](./animation.md#原生值)绑定到手势上。平台的手势识别器在 UI 线程上写入这些值，绑定了它们的视图在同一帧移动；JS 只在手势开始和结束时得到通知。
+要让拖动、捏合和旋转移动屏幕上的东西，就把[动画值](./animation.md#动画值)绑定到手势上。平台的手势识别器在 UI 线程上写入这些值，绑定了它们的视图在同一帧移动；JS 只在手势开始和结束时得到通知。
 
 ```tsx
 import { mount, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
 function App() {
-  const x = createNativeValue(0);
-  const y = createNativeValue(0);
+  const x = createAnimatedValue(0);
+  const y = createAnimatedValue(0);
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
       <View
@@ -170,9 +170,9 @@ mount(App);
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
-| `pan` | `{ x?: NativeValue; y?: NativeValue }` | 单指拖动驱动这些值，单位为点。 |
-| `pinch` | `{ scale?: NativeValue }` | 双指捏合驱动 `scale`（倍数）。 |
-| `rotation` | `{ angle?: NativeValue }` | 双指旋转驱动 `angle`，单位为度。 |
+| `pan` | `{ x?: AnimatedValue; y?: AnimatedValue }` | 单指拖动驱动这些值，单位为点。 |
+| `pinch` | `{ scale?: AnimatedValue }` | 双指捏合驱动 `scale`（倍数）。 |
+| `rotation` | `{ angle?: AnimatedValue }` | 双指旋转驱动 `angle`，单位为度。 |
 | `onPanStart` / `onPanEnd` | `(e: PanEvent) => void` | 拖动开始 / 结束。 |
 | `onPinchStart` / `onPinchEnd` | `(e: { scale; velocity }) => void` | 捏合开始 / 结束。 |
 | `onRotationStart` / `onRotationEnd` | `(e: { rotation; velocity }) => void` | 旋转开始 / 结束。 |
@@ -378,7 +378,7 @@ mount(Ball);
 ## 相关内容
 
 - [`View`](../elements/view.md)：基础元素上的所有触摸属性。
-- [动画](./animation.md)：用于手势驱动运动的原生值、弹簧和衰减。
+- [动画](./animation.md)：用于手势驱动运动的动画值、弹簧和衰减。
 - [滚动](./scrolling.md)：`keyboardShouldPersistTaps`、滚动视图与嵌套手势。
 - [`nsh/gesture`](../modules/nsh-gesture.md)：`PanResponder` 参考。
 - [无障碍](./accessibility.md)：可按压视图是无障碍元素；给它们设置角色和标签。

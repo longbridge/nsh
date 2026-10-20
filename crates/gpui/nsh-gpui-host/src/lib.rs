@@ -8,8 +8,12 @@
 //! - `--script "wait 800; shot a.png; tap 100 200; quit"` runs steps once
 //!   the window shows: screenshots and simulated input (on Linux under
 //!   X11, which shots need).
-//! - `--size 1200x800` sets the window size.
+//! - `--window-size 1200x800` sets the window size.
 //! - `--fps` logs frame statistics once a second (`nsh::perf fps …`).
+//! - `--app-id <id>` sets the application id (`com.example.app`); `nsh run`
+//!   passes the app's (`nsh.json` `"id"`). The app's data (`nsh/storage`)
+//!   is kept under the id its bundle carries, in the system's data
+//!   directory.
 //!
 //! Without arguments it connects to the dev server on this machine.
 //!
@@ -28,7 +32,7 @@ pub fn main() -> std::process::ExitCode {
     let mut source = None;
     // As the release runner runs the app: on its own.
     let mut options = AppOptions {
-        limits: Limits::standalone_desktop(),
+        limits: Limits::standalone(),
         ..AppOptions::default()
     };
     let mut args = env::args().skip(1);
@@ -53,9 +57,14 @@ pub fn main() -> std::process::ExitCode {
                 source = Some(AppSource::Bundle(bundle));
             }
             "--trace" => options.trace = true,
+            "--app-id" => {
+                if let Some(id) = args.next().filter(|id| !id.is_empty()) {
+                    options.app_id = id;
+                }
+            }
             "--fps" => options.fps = true,
             "--script" => options.script = args.next(),
-            "--size" => {
+            "--window-size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     options.size = (w.parse().unwrap_or(1200), h.parse().unwrap_or(800));
                 }

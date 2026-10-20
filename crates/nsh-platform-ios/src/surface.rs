@@ -108,6 +108,9 @@ pub(crate) struct RootViewIvars {
     keyboard: Cell<(f32, f32)>,
     /// Last environment sent to the engine.
     environment: Cell<Option<Environment>>,
+    /// The embedding app's locale and text size over the system's
+    /// ([`Surface::set_host_environment`]).
+    host: Cell<nsh_engine::HostEnvironment>,
     /// Keyboard notification registrations.
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
 }
@@ -174,6 +177,7 @@ impl RootView {
             on_hot_failed: Arc::new(MainThreadBound::new(RefCell::new(None), mtm)),
             keyboard: Cell::new((0.0, 0.25)),
             environment: Cell::new(None),
+            host: Cell::default(),
             observers: RefCell::new(Vec::new()),
         });
         // SAFETY: UIView's designated initializer.
@@ -194,7 +198,7 @@ impl RootView {
                 traits.displayScale(),
             )
         };
-        Environment {
+        let mut env = Environment {
             window: (size.width as f32, size.height as f32),
             safe_area: Insets {
                 top: insets.top as f32,
@@ -228,7 +232,10 @@ impl RootView {
             locale: current_locale(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
-        }
+        };
+        // The embedding app's settings over the system's.
+        self.ivars().host.get().apply(&mut env);
+        env
     }
 
     /// Sends the environment to the engine if it changed.
@@ -396,6 +403,10 @@ impl RootView {
             limits: self.ivars().options.limits,
             ui_sets: crate::ui_sets(),
             runtime: None,
+            data_dir: self.ivars().options.data_dir.clone(),
+            storage: self.ivars().options.storage.as_ref().map(|dir| {
+                nsh_engine::FileStorage::open(dir) as Arc<dyn nsh_engine::StorageBackend>
+            }),
         };
         let sink = MainThreadSink {
             mounter: mounter.clone(),
@@ -449,7 +460,7 @@ fn header_heights(mtm: MainThreadMarker) -> (f32, f32) {
 }
 
 /// Options of a [`Surface`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SurfaceOptions {
     /// Log per-commit timings.
     pub trace: bool,
@@ -460,8 +471,37 @@ pub struct SurfaceOptions {
     /// What the embedding app grants the apps it runs at most (`None`: what
     /// each app declares).
     pub granted: Option<nsh_engine::Capabilities>,
+    /// Where the apps keep their data: each app in `<data_dir>/<app id>`
+    /// ([`nsh_engine::EngineConfig::data_dir`]). Default: `nsh` in the
+    /// app's Application Support; `None`: nothing is kept.
+    pub data_dir: Option<std::path::PathBuf>,
+    /// The directory the apps' storage (`nsh/storage`) is kept in
+    /// (`storage.json` in it), overriding their own in
+    /// [`SurfaceOptions::data_dir`]; `None`: theirs.
+    pub storage: Option<std::path::PathBuf>,
     /// The native components the apps can use (`nsh/native`).
     pub components: crate::component::Components,
+}
+
+impl Default for SurfaceOptions {
+    fn default() -> Self {
+        Self {
+            trace: false,
+            asset_base: None,
+            limits: nsh_engine::Limits::default(),
+            granted: None,
+            data_dir: data_dir(),
+            storage: None,
+            components: crate::component::Components::default(),
+        }
+    }
+}
+
+/// Where apps NSH runs on iOS keep their data: `nsh` in the (embedding or
+/// standalone) app's Application Support, each app in a directory named by
+/// its id.
+fn data_dir() -> Option<std::path::PathBuf> {
+    nsh_engine::data_dir().map(|dir| dir.join("nsh"))
 }
 
 /// One running nsh app hosted in a `UIView`.
@@ -527,6 +567,14 @@ impl Surface {
             .on_hot_failed
             .get(self.view.mtm())
             .borrow_mut() = Some(Box::new(handler));
+    }
+
+    /// The embedding app's locale and text size, standing in for the
+    /// system's: sent to the running app at once, and to every app started
+    /// later.
+    pub fn set_host_environment(&self, host: nsh_engine::HostEnvironment) {
+        self.view.ivars().host.set(host);
+        self.view.publish_environment();
     }
 
     /// Replaces the running app with `app` (state is reset).

@@ -6,6 +6,7 @@ import { InputAccessoryView } from "nsh/ios";
 import { Dialog, KeyboardAvoidingView, NavPage, SafeAreaView } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
+import { TitleBar } from "../TitleBar";
 import {
   Appear,
   Badge,
@@ -304,6 +305,7 @@ function ModalOptions() {
         onOpenChange={(open) => visible.set(open)}
       >
         <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>
+          <TitleBar />
           <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
             <View style={{ flexDirection: "row", paddingTop: 8 }}>
               <Badge label={translucent() ? "translucent" : "opaque bar"} tone="accent" />

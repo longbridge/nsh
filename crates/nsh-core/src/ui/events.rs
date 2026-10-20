@@ -1,10 +1,12 @@
 //! Typed native events: what the `on_*` methods of elements hand their
 //! listeners, decoded from the platform's [`EventPayload`].
 
-use std::{borrow::Cow, rc::Rc, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
 use super::element::Listener;
-use crate::{EventPayload, JsonValue, PayloadValue, Rect, Size, TouchEvent};
+use crate::{
+    ContextMenuEvent, EventPayload, HoverEvent, JsonValue, PayloadValue, Rect, Size, TouchEvent,
+};
 
 /// Local files or directories dropped on an element (`on_file_drop`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,9 +70,9 @@ pub struct PanEvent {
     pub velocity_x: f32,
     /// Vertical velocity.
     pub velocity_y: f32,
-    /// The bound horizontal native value now (`Interactive::pan`).
+    /// The bound horizontal animated value now (`Interactive::pan`).
     pub value_x: Option<f32>,
-    /// The bound vertical native value now.
+    /// The bound vertical animated value now.
     pub value_y: Option<f32>,
 }
 
@@ -181,12 +183,11 @@ pub(crate) fn typed<T: ?Sized + ToOwned + 'static>(
     listener: Listener<T>,
     decode: Decode<T>,
 ) -> Listener<EventPayload> {
-    let inner = listener.0;
-    Listener(Rc::new(move |payload: &EventPayload| {
+    listener.wrap(move |inner, payload: &EventPayload| {
         if let Some(value) = decode(payload) {
             inner(&value);
         }
-    }))
+    })
 }
 
 /// Events without data.
@@ -374,6 +375,20 @@ pub(crate) fn native(p: &EventPayload) -> Option<Cow<'_, NativeEvent>> {
             name: name.clone(),
             data: data.clone(),
         })),
+        _ => None,
+    }
+}
+
+pub(crate) fn hover(p: &EventPayload) -> Option<Cow<'_, HoverEvent>> {
+    match p {
+        EventPayload::Hover(e) => Some(Cow::Borrowed(e)),
+        _ => None,
+    }
+}
+
+pub(crate) fn context_menu(p: &EventPayload) -> Option<Cow<'_, ContextMenuEvent>> {
+    match p {
+        EventPayload::ContextMenu(e) => Some(Cow::Borrowed(e)),
         _ => None,
     }
 }

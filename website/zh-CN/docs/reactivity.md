@@ -123,6 +123,52 @@ effect(() => {
 > [!TIP]
 > 不要用 effect 让一个 signal 与另一个保持同步（`effect(() => b.set(a() * 2))`）。请使用 `computed`：它永远不会过期，也不会引起第二轮更新。一个 effect 如果写入了它自己读取的 signal，就会反复触发自身，直到 NSH 以错误终止它。
 
+## resource
+
+`resource(source, fetcher)` 异步加载一个值，并记录加载进行到哪一步，这样组件不用自己管理，就能显示数据、加载中或错误：
+
+```tsx
+import { resource, signal, Text } from "nsh";
+import { List } from "nsh/list";
+
+type Post = { id: number; title: string };
+
+const url = signal("https://jsonplaceholder.typicode.com/posts?_limit=20");
+const posts = resource(url, async (u, { signal }) => {
+  const response = await fetch(u, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as Post[];
+});
+
+<If when={posts.error()}>
+  <Text>Failed: {String(posts.error())}</Text>
+</If>
+<List
+  each={posts() ?? []}
+  refreshing={posts.state() === "refreshing"}
+  onRefresh={posts.refetch}
+>
+  {(post) => <Text>{post().title}</Text>}
+</List>
+```
+
+`source` 是一个 accessor（signal 或函数）或者一个普通值，它会被追踪：每当它给出新值，就调用 `fetcher(value, info)` 重新加载。`source` 为 `undefined`、`null` 或 `false` 时不加载，适合"用户还没登录""还没选中"这类情况。不传 source 时，`resource(fetcher)` 只加载一次，调用 `fetcher(info)`。
+
+| 成员 | 含义 |
+|---|---|
+| `posts()` | 最新的值：第一次加载结束前为 `undefined`；重新加载时和加载失败后保留原值。 |
+| `posts.loading()` | 是否正在加载。 |
+| `posts.error()` | 上一次加载的错误；某次加载成功后变回 `undefined`。 |
+| `posts.state()` | `"unresolved"`（没有可加载的）、`"pending"`（首次加载）、`"ready"`、`"refreshing"`（重新加载，原值保留）、`"errored"`。 |
+| `posts.refetch()` | 用同一个 source 重新加载：重试、下拉刷新。 |
+| `posts.mutate(value)` | 不发请求，直接在本地设置值（乐观更新），并清除错误。 |
+
+这些成员都已绑定到各自的 resource，所以 `onRefresh={posts.refetch}`、`const loading = posts.loading` 都可以直接用。
+
+只有最新一次加载有效：新的加载会通过 `info.signal`（可直接传给 `fetch`）取消正在进行的那次，组件被移除时也会取消；被取代后才结束的加载不会改变任何东西。`info.refetching` 表示这次加载由 `refetch()` 发起。`fetcher` 可以返回 promise，也可以直接返回值；抛出异常即视为失败。传入 `{ initialValue }` 时，resource 从一开始就有值，它的类型里也就不含 `undefined`。
+
+Rust 组件有同样的 API：`resource(move || source(), |value, info| async move { .. })`，用 `Result` 表示结果（[用 Rust 开发](./rust.md)）。
+
 ## cleanup
 
 `cleanup(fn)` 注册 `fn`，在当前 effect 再次运行之前，或者在它所属的组件或 effect 被销毁时运行：
@@ -139,6 +185,15 @@ effect(() => {
   if (!running()) return;
   const id = setInterval(tick, 100);
   cleanup(() => clearInterval(id));       // before the next run, or on removal
+});
+```
+
+effect 也可以像 React 那样直接返回清理函数：`fn` 返回的函数和传给 `cleanup` 的函数在同样的时机运行。
+
+```tsx
+effect(() => {
+  const id = setInterval(tick, 100);
+  return () => clearInterval(id);
 });
 ```
 
@@ -256,4 +311,4 @@ function Good() {
 
 - [JSX 与组件](./jsx-and-components.md)：作为 getter 的 props、`<If>`、`<Each>`。
 - [`nsh` 模块参考](../modules/nsh.md)：每个函数的签名。
-- [动画](./animation.md)：不经过 signal、在 UI 线程上运行动画的原生值。
+- [动画](./animation.md)：不经过 signal、在 UI 线程上运行动画的动画值。

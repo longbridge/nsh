@@ -8,7 +8,7 @@ demo: guide-scrolling
 
 # Scrolling
 
-`<Scroll>` is the platform's own scroll view (UIScrollView on iOS, a ScrollView on Android): flings, bounces, the scroll indicator and pull to refresh are native, and so is snapping. JS hears about scrolling through events and can bind the offset to a [native value](./animation.md#native-values) for effects that follow the finger frame by frame.
+`<Scroll>` is the platform's own scroll view (UIScrollView on iOS, a ScrollView on Android): flings, bounces, the scroll indicator and pull to refresh are native, and so is snapping. JS hears about scrolling through events and can bind the offset to a [animated value](./animation.md#animated-values) for effects that follow the finger frame by frame.
 
 Use `<Scroll>` for content of a known, moderate size: a settings page, a form, an article, a row of chips. For long or unbounded data use [`List`](./lists.md), which recycles rows and accepts the same scrolling props.
 
@@ -179,14 +179,14 @@ const atBottom = signal(false);
 
 ## Scroll-linked effects: scrollValue
 
-`scrollValue` takes a [native value](./animation.md#native-values) and writes the scroll offset (along the main axis) into it natively, in the same frame the content moves. Bind that value, or nodes derived from it with `interpolate`, `diffClamp` or arithmetic, to styles.
+`scrollValue` takes a [animated value](./animation.md#animated-values) and writes the scroll offset (along the main axis) into it natively, in the same frame the content moves. Bind that value, or nodes derived from it with `interpolate`, `diffClamp` or arithmetic, to styles.
 
 ```tsx
 import { mount, Scroll, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
 function App() {
-  const offset = createNativeValue(0);
+  const offset = createAnimatedValue(0);
   return (
     <View style={{ flex: 1 }}>
       <View
@@ -222,7 +222,7 @@ mount(App);
 A header that slides away while the content scrolls up and comes back as soon as it scrolls down is `diffClamp` of the offset:
 
 ```tsx
-const offset = createNativeValue(0);
+const offset = createAnimatedValue(0);
 const header = offset.diffClamp(0, 56);
 
 <View style={{ flex: 1 }}>
@@ -345,5 +345,5 @@ A horizontal scroll view inside a vertical one works as expected: each takes the
 
 - [`Scroll`](../elements/scroll.md): the element reference, every prop and event.
 - [Lists](./lists.md): virtualized lists with the same scrolling props.
-- [Animation](./animation.md): native values, `interpolate` and `diffClamp` for scroll-linked effects.
+- [Animation](./animation.md): animated values, `interpolate` and `diffClamp` for scroll-linked effects.
 - [Forms and the keyboard](./forms-and-keyboard.md): inputs, focus and the keyboard.

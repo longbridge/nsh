@@ -8,7 +8,7 @@ demo: guide-scrolling
 
 # 滚动
 
-`<Scroll>` 就是平台自己的滚动视图（iOS 上的 UIScrollView，Android 上的 ScrollView）：惯性滑动、回弹、滚动条、下拉刷新以及吸附都是原生实现。JS 通过事件得知滚动情况，也可以把滚动偏移绑定到[原生值](./animation.md#原生值)上，做出逐帧跟随手指的效果。
+`<Scroll>` 就是平台自己的滚动视图（iOS 上的 UIScrollView，Android 上的 ScrollView）：惯性滑动、回弹、滚动条、下拉刷新以及吸附都是原生实现。JS 通过事件得知滚动情况，也可以把滚动偏移绑定到[动画值](./animation.md#动画值)上，做出逐帧跟随手指的效果。
 
 `<Scroll>` 适合尺寸已知、规模适中的内容：设置页、表单、文章、一排标签。长列表或无限数据请用 [`List`](./lists.md)，它会复用行，并接受同样的滚动属性。
 
@@ -169,14 +169,14 @@ const atBottom = signal(false);
 
 ## 滚动联动效果：scrollValue
 
-`scrollValue` 接收一个[原生值](./animation.md#原生值)，并在内容移动的同一帧，由原生把（主轴方向的）滚动偏移写进去。把这个值，或由它经 `interpolate`、`diffClamp`、算术运算得到的节点，绑定到样式上。
+`scrollValue` 接收一个[动画值](./animation.md#动画值)，并在内容移动的同一帧，由原生把（主轴方向的）滚动偏移写进去。把这个值，或由它经 `interpolate`、`diffClamp`、算术运算得到的节点，绑定到样式上。
 
 ```tsx
 import { mount, Scroll, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
 function App() {
-  const offset = createNativeValue(0);
+  const offset = createAnimatedValue(0);
   return (
     <View style={{ flex: 1 }}>
       <View
@@ -212,7 +212,7 @@ mount(App);
 内容上滑时隐藏、一往下滑就重新出现的标题栏，就是对偏移做 `diffClamp`：
 
 ```tsx
-const offset = createNativeValue(0);
+const offset = createAnimatedValue(0);
 const header = offset.diffClamp(0, 56);
 
 <View style={{ flex: 1 }}>
@@ -335,5 +335,5 @@ NSH 会自动让获得焦点的输入框保持可见：键盘出现时，输入�
 
 - [`Scroll`](../elements/scroll.md)：元素参考，包含所有属性和事件。
 - [列表](./lists.md)：使用相同滚动属性的虚拟化列表。
-- [动画](./animation.md)：用于滚动联动效果的原生值、`interpolate` 和 `diffClamp`。
+- [动画](./animation.md)：用于滚动联动效果的动画值、`interpolate` 和 `diffClamp`。
 - [表单与键盘](./forms-and-keyboard.md)：输入框、焦点和键盘。

@@ -6,9 +6,7 @@ use nsh_core::ui::prelude::*;
 
 use super::colors;
 
-/// A panel that slides up from the bottom over a dimmed backdrop while
-/// `open`; dragging it down, tapping the backdrop or the back button closes
-/// it (`onClose`: set `open` to false).
+/// The props of [`Sheet`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub(crate) struct SheetProps {
     /// Shown.
@@ -41,51 +39,44 @@ fn settle(velocity: Option<f32>) -> Spring {
     }
 }
 
-/// A bottom sheet ([`SheetProps`]).
+/// A panel that slides up from the bottom over a dimmed backdrop while
+/// `open`; dragging it down, tapping the backdrop or the back button closes
+/// it (`onClose`: set `open` to false).
 #[component]
 pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
     // How far down the panel is from where it rests.
-    let offset = native_value(0.0);
+    let offset = animated_value(0.0);
     // Closing: the panel slides away, then the app is told.
     let closing = stored(None::<Spawned<()>>);
     // Slides in from below the screen.
-    let open = {
-        let offset = offset.clone();
-        move || {
-            if let Some(task) = closing.replace(None) {
-                task.cancel();
-            }
-            offset.set(window().height);
-            offset.spring(0.0, settle(None));
+    let open = move || {
+        if let Some(task) = closing.replace(None) {
+            task.cancel();
         }
+        offset.set(window().height);
+        offset.spring(0.0, settle(None));
     };
     // Slides away, then tells the app.
-    let close = {
-        let offset = offset.clone();
-        move || {
-            if closing.with(|c| c.is_some()) {
-                return;
-            }
-            let end = offset.timing(untracked(window).height, 220.0, Easing::EaseIn);
-            closing.replace(Some(spawn(async move {
-                // Ended or interrupted: closed either way.
-                let _ = end.await;
-                closing.replace(None);
-                cx.emit(SheetEvent::Close);
-            })));
+    let close = move || {
+        if closing.with(|c| c.is_some()) {
+            return;
         }
+        let end = offset.timing(untracked(window).height, 220.0, Easing::EaseIn);
+        closing.replace(Some(spawn(async move {
+            // Ended or interrupted: closed either way.
+            let _ = end.await;
+            closing.replace(None);
+            cx.emit(SheetEvent::Close);
+        })));
     };
     effect(move || {
         if props.open.get() {
-            untracked(&open);
+            untracked(open);
         }
     });
     let children = props.children;
     view().child(If::new(props.open, move || {
         let height = untracked(window).height;
-        let (close_backdrop, close_drag, close_back) =
-            (close.clone(), close.clone(), close.clone());
-        let drag = offset.clone();
         modal()
             .animation(ModalAnimation::None)
             // The sheet slides away itself before it goes: nothing closes
@@ -93,7 +84,7 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
             .close_on_escape(false)
             .close_on_backdrop_press(false)
             .close_on_swipe(false)
-            .on_cancel(move |_: &()| close_back())
+            .on_cancel(move |_: &()| close())
             .child(
                 // The backdrop fades with the panel's position.
                 view()
@@ -102,7 +93,10 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
                     .bg(move || theme().overlay)
                     .bind_opacity(&offset.interpolate(&[0.0, height], &[1.0, 0.0]))
                     .label("Close")
-                    .on_press(move |_: &()| close_backdrop()),
+                    // For the pointer: Escape and the back button close it
+                    // from the keyboard, which goes straight to the panel.
+                    .focusable(false)
+                    .on_press(move |_: &()| close()),
             )
             .child(
                 view()
@@ -121,9 +115,9 @@ pub(crate) fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElemen
                     .pan_values(None, Some(&offset))
                     .on_pan_end(move |e: &PanEvent| {
                         if e.translation_y > CLOSE_DISTANCE || e.velocity_y > CLOSE_VELOCITY {
-                            close_drag();
+                            close();
                         } else {
-                            drag.spring(0.0, settle(Some(e.velocity_y)));
+                            offset.spring(0.0, settle(Some(e.velocity_y)));
                         }
                     })
                     // The grabber.

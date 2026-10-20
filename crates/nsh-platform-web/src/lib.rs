@@ -26,6 +26,7 @@ mod canvas;
 mod encode;
 mod ffi;
 mod net;
+mod storage;
 mod text;
 
 use std::{
@@ -44,10 +45,11 @@ use nsh_engine::{
 #[cfg(feature = "js")]
 use nsh_engine::{Bundle, BundleCode, Chunk, HotUpdate, Policy};
 
-pub use crate::net::{
-    nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head,
-};
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
+pub use crate::{
+    net::{nsh_fetch_body_wanted, nsh_fetch_data, nsh_fetch_end, nsh_fetch_failed, nsh_fetch_head},
+    storage::nsh_storage_reply,
+};
 
 thread_local! {
     static APP: RefCell<Option<Running>> = const { RefCell::new(None) };
@@ -152,6 +154,12 @@ struct BundleOptions {
     source_map: Option<String>,
     /// The hardening as bytecode ([`nsh_bundle_harden`]).
     harden: Option<Vec<u8>>,
+    /// The app's id (`nsh.json` `"id"`): it names where the app keeps its
+    /// data ([`storage::LocalStorage`]).
+    app_id: Option<String>,
+    /// The VM limits the page runs the app with ([`nsh_bundle_limits`]);
+    /// `None`: none, as an app on its own.
+    limits: Option<String>,
 }
 
 struct Running {
@@ -423,7 +431,13 @@ pub extern "C" fn nsh_start_rust(width: f32, height: f32, dark: u32, pixel_ratio
     };
     APP.with(|a| a.borrow_mut().take());
     let environment = environment(width, height, dark != 0, pixel_ratio);
-    run(App::Rust(root), width, height, environment)
+    run(
+        App::Rust(root),
+        width,
+        height,
+        environment,
+        Limits::standalone(),
+    )
 }
 
 /// Sets up logging and panics once.
@@ -469,12 +483,22 @@ fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32)
             return -1.0;
         }
     };
+    let limits = match Limits::development(options.limits.as_deref()) {
+        Ok(limits) => limits,
+        Err(err) => {
+            ffi::report_error(&format!("invalid limits: {err}"));
+            return -1.0;
+        }
+    };
     bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
-    run(App::Js(bundle), width, height, environment)
+    let bundle = bundle.with_app_id(options.app_id.as_deref());
+    run(App::Js(bundle), width, height, environment, limits)
 }
 
 /// Starts `app` in the page's surface.
-fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
+fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limits) -> f64 {
+    let storage =
+        BASE_URL.with(|b| storage::LocalStorage::new(app.app_id(), b.borrow().as_deref()));
     let config = EngineConfig {
         app,
         viewport: Size::new(width, height),
@@ -484,9 +508,11 @@ fn run(app: App, width: f32, height: f32, environment: Environment) -> f64 {
         environment,
         // NSH draws no header: a page's `header` sits at its top.
         header_heights: nsh_core::NO_NATIVE_HEADER,
-        limits: Limits::default(),
+        limits,
         ui_sets: ui_sets(),
         runtime: None,
+        data_dir: None,
+        storage: Some(std::sync::Arc::new(storage)),
     };
     let text = Rc::new(WebTextEngine::default());
     let Some(engine) = LocalEngine::start(config, text.clone(), Sink) else {
@@ -522,12 +548,13 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
 /// Sets how the next [`nsh_start`] runs its bundle: as a release
 /// (`release` 1: hardened, as `nsh package --target web` ships apps) or
 /// with development settings (0, the default), under the capabilities the
-/// app declares (`capabilities.json`; empty: no declaration) and with the
-/// bundle's source map (empty: none).
+/// app declares (`capabilities.json`; empty: no declaration), with the
+/// bundle's source map (empty: none) and the app's id (`nsh.json` `"id"`,
+/// which names where it keeps its data; empty: none, its page's path does).
 ///
 /// # Safety
 ///
-/// Both ranges are memory from [`nsh_alloc`].
+/// The three ranges are memory from [`nsh_alloc`].
 #[cfg(feature = "js")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn nsh_bundle_options(
@@ -536,18 +563,44 @@ pub unsafe extern "C" fn nsh_bundle_options(
     capabilities_len: usize,
     map: *const u8,
     map_len: usize,
+    app_id: *const u8,
+    app_id_len: usize,
 ) {
     // SAFETY: guaranteed by the caller.
-    let (capabilities, map) =
-        unsafe { (string(capabilities, capabilities_len), string(map, map_len)) };
+    let (capabilities, map, app_id) = unsafe {
+        (
+            string(capabilities, capabilities_len),
+            string(map, map_len),
+            string(app_id, app_id_len),
+        )
+    };
     OPTIONS.with(|o| {
         *o.borrow_mut() = BundleOptions {
             release: release != 0,
             capabilities: (!capabilities.is_empty()).then_some(capabilities),
             source_map: (!map.is_empty()).then_some(map),
             harden: None,
+            app_id: (!app_id.is_empty()).then_some(app_id),
+            limits: None,
         }
     });
+}
+
+/// Sets the VM limits the next [`nsh_start`] / [`nsh_start_bytecode`]
+/// (after [`nsh_bundle_options`]) runs the app with, as an embedding app
+/// sets them (`nsh_core::js::HostLimits`' syntax, `memory=128MB,call=2s`;
+/// empty: the embedding defaults): the page decides, as the playground
+/// does for the code it runs. Without a call: none, as an app on its own.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[cfg(feature = "js")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_bundle_limits(ptr: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let limits = unsafe { string(ptr, len) };
+    OPTIONS.with(|o| o.borrow_mut().limits = Some(limits));
 }
 
 /// Sets the hardening the next [`nsh_start`] / [`nsh_start_bytecode`] of a
@@ -663,7 +716,11 @@ pub unsafe extern "C" fn nsh_compile(
 ) -> u32 {
     // SAFETY: guaranteed by the caller.
     let (name, source) = unsafe { (string(name, name_len), string(ptr, len)) };
-    let result = nsh_bundler::compile_module(&name, &source, &ui_sets());
+    let sets: Vec<nsh_core::ui::description::SetDescription> = ui_sets()
+        .iter()
+        .filter_map(nsh_core::ui::description::SetDescription::of)
+        .collect();
+    let result = nsh_bundler::compile_module(&name, &source, &sets);
     let ok = result.is_ok();
     COMPILED.with(|c| *c.borrow_mut() = result.unwrap_or_else(|e| e));
     ok as u32
@@ -858,6 +915,36 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::Error => EventPayload::Error {
             message: text("message"),
         },
+        EventKind::HoverMove => {
+            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            EventPayload::Hover(nsh_core::HoverEvent {
+                location_x: num("locationX"),
+                location_y: num("locationY"),
+                page_x: num("pageX"),
+                page_y: num("pageY"),
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: flag("ctrlKey"),
+                    alt: flag("altKey"),
+                    shift: flag("shiftKey"),
+                    cmd: flag("metaKey"),
+                },
+            })
+        }
+        EventKind::ContextMenu => {
+            let flag = |k: &str| value.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+                location_x: num("locationX"),
+                location_y: num("locationY"),
+                page_x: num("pageX"),
+                page_y: num("pageY"),
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: flag("ctrlKey"),
+                    alt: flag("altKey"),
+                    shift: flag("shiftKey"),
+                    cmd: flag("metaKey"),
+                },
+            })
+        }
         EventKind::ChangeText | EventKind::SubmitEditing => EventPayload::Text {
             text: text("text"),
             count: num("count") as u32,
@@ -887,6 +974,8 @@ pub unsafe extern "C" fn nsh_event(
                             "left" => "left",
                             "text" => "text",
                             "has" => "has",
+                            "uri" => "uri",
+                            "files" => "files",
                             "error" => "error",
                             "url" => "url",
                             "title" => "title",
@@ -1107,7 +1196,7 @@ pub extern "C" fn nsh_pan(id: u32, phase: u32, tx: f32, ty: f32, vx: f32, vy: f3
 }
 
 /// A pinch (`rotation` 0; `amount`: the scale since it began) or rotation
-/// (1; degrees) on a view with native values (`phase`: 0 start, 1 move, 2
+/// (1; degrees) on a view with animated values (`phase`: 0 start, 1 move, 2
 /// end).
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_transform_gesture(id: u32, rotation: u32, phase: u32, amount: f32) -> f64 {

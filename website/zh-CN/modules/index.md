@@ -10,7 +10,7 @@ NSH 应用用到的一切都从一小组模块导入。这些模块全部是原�
 
 ```tsx
 import { mount, signal } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { windowSize } from "nsh/device";
 import { SafeAreaView } from "nsh/base";
 ```
@@ -31,7 +31,7 @@ NSH 的界面分为三层，与 GPUI Kit 的分层（`gpui`、`gpui-base`、`gpu
 
 NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方。平台专有的 API 位于 `nsh/ios`、`nsh/android` 和 `nsh/desktop`（macOS、Windows、Linux）；这些模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行（在其他平台上调用它们什么也不做，`isAvailable` 告诉你当前是否在该平台上）。
 
-类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh trace` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
+类型声明由运行时生成：`nsh init`、`nsh build`、`nsh dev` 和 `nsh test` 会在应用旁边写出 `.nsh/types`，所以 TypeScript 声明始终与你所用的运行时一致（见[项目结构](../docs/project-structure.md)）。
 
 ## 全部模块
 
@@ -39,15 +39,16 @@ NSH 没有“大而全”的汇总模块：每个 API 只存在于一个地方�
 |---|---|---|
 | `nsh` | `signal`、`computed`、`effect`、`batch`、`untracked`、`cleanup`、`context`、`split`、`mount`；`View`、`Text`、`Scroll`、`Input`；元素、样式、事件和 JSX 的类型（`YNode`、`ViewStyle` 等） | [nsh](./nsh.md) |
 | `nsh/base` | `Button`；`createNavStack`、`NavStack`、`NavPage`、`Dialog`；`SafeAreaView`、`safeArea`、`safeAreaInsets`；`AlertDialog`；`Keyboard`、`keyboardFrame`、`KeyboardAvoidingView` | [nsh/base](./nsh-base.md) |
-| `nsh/animated` | `createNativeValue`、`NativeValue`、`NativeNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
+| `nsh/animated` | `createAnimatedValue`、`AnimatedValue`、`AnimatedNode`、`Animated`、`Easing`、`LayoutAnimation` | [nsh/animated](./nsh-animated.md) |
 | `nsh/list` | `List`（虚拟化、可复用单元格的列表） | [nsh/list](./nsh-list.md) |
 | `nsh/canvas` | `Canvas`、`Path2D`、`CanvasRenderingContext2D`、`CanvasGradient` | [nsh/canvas](./nsh-canvas.md) |
 | `nsh/device` | `windowSize`、`colorScheme`、`fontScale`、`Platform`、`PixelRatio`、`I18nManager` | [nsh/device](./nsh-device.md) |
 | `nsh/gesture` | `PanResponder` | [nsh/gesture](./nsh-gesture.md) |
 | `nsh/image` | `Image`（元素）、`Image.getSize`、`Image.prefetch` | [nsh/image](./nsh-image.md) |
 | `nsh/clipboard` | `Clipboard.setString`、`Clipboard.getString`、`Clipboard.hasString` | [nsh/clipboard](./nsh-clipboard.md) |
+| `nsh/storage` | `Storage.getItem`、`Storage.setItem`、`Storage.removeItem`、`Storage.getAllKeys`、`Storage.clear` | [nsh/storage](./nsh-storage.md) |
 | `nsh/keymap` | `keymap.bind`（键盘快捷键：`mod+k`、`ctrl+shift+p` 等） | [nsh/keymap](./nsh-keymap.md) |
-| `nsh/native` | `nativeComponent`（宿主应用注册的原生组件） | [nsh/native](./nsh-native.md) |
+| `nsh/native` | `nativeComponent`、`nativeModule`（宿主应用注册的原生组件和函数） | [nsh/native](./nsh-native.md) |
 | `nsh/accessibility` | `AccessibilityInfo`、`screenReaderEnabled`、`reduceMotion` | [nsh/accessibility](./nsh-accessibility.md) |
 | `nsh/ios` | `isAvailable`、`InputAccessoryView` | [nsh/ios](./nsh-ios.md) |
 | `nsh/android` | `isAvailable`、`Toast`、`BackHandler` | [nsh/android](./nsh-android.md) |

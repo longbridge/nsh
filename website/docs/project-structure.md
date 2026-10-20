@@ -12,6 +12,7 @@ An NSH app is a directory with an entry module and an optional `nsh.json`. Every
 ```text
 my-app/
 ├── App.tsx            the entry module: calls mount()
+├── App.test.tsx       its tests (nsh test)
 ├── nsh.json           name, id, version, icon, Tailwind theme, capabilities
 ├── tsconfig.json      TypeScript settings for editors
 ├── .gitignore         .nsh/ and out/
@@ -20,7 +21,7 @@ my-app/
 ├── assets/
 │   ├── logo@2x.png    imported images
 │   └── Inter.ttf      imported fonts
-├── .nsh/              generated: type declarations, development host builds
+├── .nsh/              generated: type declarations, development host builds, test entries
 └── out/               generated: nsh build / nsh package output
 ```
 
@@ -67,21 +68,23 @@ mount(App);
 | Key | Type | Used by | Description |
 |---|---|---|---|
 | `name` | string | `package` | The display name under the app icon. Default: the entry directory's name. |
-| `id` | string | `package`, `publish` | Bundle identifier / application id, e.g. `com.example.app`. Default: `com.example.<name>`. |
+| `id` | string | `package`, `publish`, `nsh/storage` | Bundle identifier / application id in reverse-DNS form, e.g. `com.yourcompany.app`; required by `package` and `publish`. `nsh run` uses `com.example.<name>` without one. |
 | `version` | string | `package`, `publish` | The user-visible version, e.g. `1.2.0` (`CFBundleShortVersionString`, Android `versionName`). |
 | `build` | number | `package`, `publish` | The build number (`CFBundleVersion`, Android `versionCode`). Signed packages require it to grow with every release. |
+| `minRuntime` | string | `publish` | The lowest NSH runtime that runs the signed package, e.g. `0.2.0`. Default: the CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 | `icon` | string | `package` | A square PNG, ideally 1024×1024, relative to `nsh.json`. |
 | `tailwind` | object | every build | Extends the Tailwind theme your `class` strings resolve against ([Tailwind](./tailwind.md#theme)). |
 | `appearance` | string | every build, `package` | `"light"`, `"dark"` or `"system"` (the default): an app that is always light or dark says so here. `colorScheme()`, `dark:` classes, the components' theme and the platform's controls follow it from the start ([Device and environment](./device-and-environment.md#dark-mode)). |
 | `theme` | string or object | every build | The theme the app's Rust components draw with: a theme file's path relative to `nsh.json`, or the theme inline ([Building with Rust](./rust.md#theme)). |
 | `statusBar` | object | every build, `package` | The status bar's default under every page and dialog (iOS and Android): `{ "foreground": "auto" \| "light" \| "dark", "hidden": boolean }`, both optional. Packaged iOS apps show it from the launch screen on ([Status bar](../modules/nsh-base.md#status-bar)). |
 | `capabilities` | object | every build | What the app may reach outside its VM: network hosts, web view hosts, the status bar ([Sandbox and capabilities](./sandbox-and-capabilities.md)). |
+| `resolve` | object | every build | How bare imports resolve: the export conditions of npm packages and aliases ([npm packages](#npm-packages)). |
 | `rust` | string or string[] | every command | The app's Rust crate, or a list of them, relative to `nsh.json`: their components and modules, which TSX imports by each crate's `#[native_module]` specifier ([Building with Rust](./rust.md#several-crates)). |
 | `root` | string | `run`, `package` | A Rust app's root component, its path in the `rust` crate, the first one of a list (`App`, `shell::Gallery`): `nsh run` and `nsh package` of the app's directory mount it with no QuickJS, on every platform; `nsh run App.tsx` still runs the TSX entry ([Building with Rust](./rust.md)). |
 
-The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`) override the file's values ([CLI](./cli.md)).
+The flags of `nsh package` and `nsh publish` (`--name`, `--id`, `--app-version`, `--build`, `--icon`, `--min-runtime`) override the file's values ([CLI](./cli.md)).
 
-`tailwind`, `theme`, `appearance`, `statusBar` and `capabilities` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
+`tailwind`, `theme`, `appearance`, `statusBar`, `capabilities` and `resolve` are checked when the app is built. A typo is a build error rather than a setting that silently does nothing:
 
 ```text
 error building App.tsx failed
@@ -110,30 +113,16 @@ Without a `capabilities` key, an app may use the network, web views and the stat
 
 ## tsconfig.json and .nsh/types
 
-NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `trace`, `dev`, `run`, `package`, `publish`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and `tsconfig.json` points the `nsh` imports there:
+NSH does not need `node_modules`. Instead, every command that builds the app (`init`, `build`, `test`, `dev`, `run`, `package`, `publish`, `check`) writes the TypeScript declarations of everything NSH provides into `.nsh/types`, and NSH's TypeScript settings into `.nsh/tsconfig.json`. The app's `tsconfig.json` extends them:
 
 ```json
 {
-  "compilerOptions": {
-    "target": "ES2023",
-    "lib": ["ES2023"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "preserve",
-    "jsxImportSource": "nsh",
-    "strict": true,
-    "noEmit": true,
-    "isolatedModules": true,
-    "skipLibCheck": true,
-    "types": [],
-    "paths": {
-      "nsh": ["./.nsh/types/nsh/index.d.ts"],
-      "nsh/*": ["./.nsh/types/nsh/*.d.ts"]
-    }
-  },
-  "include": ["**/*.ts", "**/*.tsx", ".nsh/types/nsh/globals.d.ts", ".nsh/types/nsh/assets.d.ts"]
+  "extends": "./.nsh/tsconfig.json",
+  "include": ["**/*.ts", "**/*.tsx"]
 }
 ```
+
+`.nsh/tsconfig.json` points the `nsh` imports and your app's crates to `.nsh/types`, includes the globals and asset declarations, and sets the compiler options NSH apps use (`lib`, `jsx`, `strict`, ...). NSH keeps it current: when a new version adds a library or a path, your app has it with the next build, and your `tsconfig.json` stays as you wrote it. Options you add to `tsconfig.json` apply over NSH's.
 
 | File in `.nsh/types/nsh/` | Declares |
 |---|---|
@@ -145,9 +134,11 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | `list.d.ts`, `animated.d.ts`, `device.d.ts`, ... | One file per module (`nsh/list`, `nsh/animated`, `nsh/device`, ...) |
 | `base.d.ts` | `nsh/base` |
 
-`lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh trace App.tsx`.
+`lib` is `ES2023` without `DOM`: there is no `document` or `window`. The files in `.nsh` are regenerated (only when their contents change), so do not edit them and do not commit them; `.gitignore` already excludes `.nsh/`. If your editor shows `nsh` as missing after cloning a project, run any build command once, e.g. `nsh check`.
 
-`jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
+`.nsh/tsconfig.json` adds `"ESNext.Disposable"`, which declares `using` declarations and `Symbol.dispose`, which the runtime has: `using account = new Account()` frees a [Rust class](./rust.md)'s value at the end of the block. Its `jsxImportSource: "nsh"` and `jsx: "preserve"` only matter to the editor: NSH compiles JSX with its own compiler, whatever the `tsconfig.json` says. TypeScript is checked by your editor or by `nsh check`; the other commands strip types without checking them.
+
+An app made by an earlier `nsh init` gets the new `tsconfig.json` with its next build when its own is NSH's template, unchanged; NSH prints a line saying so. A `tsconfig.json` you changed is yours: `nsh check` points out when it does not extend `./.nsh/tsconfig.json`, and you add the `extends` line and remove the options it sets.
 
 ## Modules
 
@@ -190,14 +181,28 @@ Imports of `nsh` and `nsh/...` are not bundled: the runtime provides them native
 | `nsh/accessibility` | Screen reader and reduce motion state, announcements |
 | `nsh/image` | `Image` (the element), `Image.getSize`, `Image.prefetch` |
 | `nsh/webview`, `nsh/video` | `WebView`, `Video` |
-| `nsh/native` | Components the embedding app registers |
+| `nsh/native` | Components and functions the embedding app registers |
 | `nsh/ios`, `nsh/android` | Platform-only APIs |
 
-The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error.
+The [modules reference](../modules/index.md) documents each one. Importing a module NSH does not have (`nsh/foo`) is a build error. So is a name your code uses that the module does not export (`import { Buton } from "nsh/base"`): the error points at the import and names the closest export (``did you mean `Button`?``). Names used only as types are checked by `nsh check`.
 
 ### npm packages
 
 NSH needs nothing from npm, but the bundler resolves bare imports from a `node_modules` directory if you install packages with a package manager. Packages resolve their browser builds, because the runtime provides web APIs (`fetch`, streams, `URL`, `TextEncoder`, ...) and not Node's (`fs`, `Buffer`, `process`). Packages that touch the DOM do not work: there is none.
+
+A package whose browser build uses the DOM often has another build for workers or React Native. `resolve.conditions` picks the export conditions packages resolve with, in place of the default `["browser"]`: `import`, `require`, `module` and `default` always apply, and without `browser` packages resolve through their `module` and `main` fields. `resolve.alias` replaces an import: by a path relative to `nsh.json` (`./` or `../`), another package, or `false` for an empty module. TypeScript (`nsh check`, editors) types the import as written: a name that is not an installed package gets its types from a `.d.ts` file of the app.
+
+```json
+"resolve": {
+  "conditions": ["worker"],
+  "alias": { "dom-only-helper": "./shims/helper.ts", "node-polyfill": false }
+}
+```
+
+```ts
+// shims/aliases.d.ts
+declare module "node-polyfill";
+```
 
 `solid-js` cannot be imported: the bundler refuses it and points to `nsh`'s own `signal`, `computed` and `effect`, which replace it.
 

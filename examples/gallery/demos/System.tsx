@@ -1,5 +1,5 @@
-import { cleanup, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { cleanup, resource, signal, Text, View } from "nsh";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Toast } from "nsh/android";
 import { colorScheme, fontScale, windowSize } from "nsh/device";
 import { AlertDialog, Dialog, keyboardFrame, safeArea, type StatusBarForeground } from "nsh/base";
@@ -163,7 +163,7 @@ function ActionRow(props: { first?: boolean; icon: IconName; tint: string; title
 function Dialogs() {
   const answer = signal<{ text: string; tone: Tone } | null>(null);
   // The answer pops in each time it changes.
-  const pop = createNativeValue(1);
+  const pop = createAnimatedValue(1);
   const show = (text: string, tone: Tone = "neutral") => {
     answer.set({ text, tone });
     pop.set(0.85);
@@ -251,7 +251,7 @@ function FramesAndTimers() {
   const running = signal(false);
   const ticks = signal(0);
   // The beat dot flashes once per tick; the fade runs natively.
-  const beat = createNativeValue(0);
+  const beat = createAnimatedValue(0);
 
   // Frames per second, counted with requestAnimationFrame.
   let frame = 0;
@@ -368,22 +368,24 @@ function Shortcuts() {
 type Post = { id: number; title: string };
 
 function Network() {
-  const posts = signal<Post[]>([]);
-  const status = signal<{ text: string; tone: Tone } | null>(null);
-  const loading = signal(false);
-  const load = async () => {
-    loading.set(true);
-    status.set({ text: "loading…", tone: "neutral" });
+  // Loads once asked, and again on each press after: a resource keeps the
+  // posts while it loads again, and a failure next to them.
+  const asked = signal(false);
+  const result = resource(asked, async (_, { signal }) => {
     const started = performance.now();
-    try {
-      const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=3");
-      posts.set(await response.json());
-      status.set({ text: `HTTP ${response.status} · ${Math.round(performance.now() - started)} ms`, tone: response.ok ? "up" : "danger" });
-    } catch (e) {
-      status.set({ text: String(e), tone: "danger" });
-    }
-    loading.set(false);
+    const response = await fetch("https://jsonplaceholder.typicode.com/posts?_limit=3", { signal });
+    const posts: Post[] = await response.json();
+    return { posts, ok: response.ok, line: `HTTP ${response.status} · ${Math.round(performance.now() - started)} ms` };
+  });
+  const posts = () => result()?.posts ?? [];
+  const loading = result.loading;
+  const status = (): { text: string; tone: Tone } | null => {
+    if (result.loading()) return { text: "loading…", tone: "neutral" };
+    if (result.error()) return { text: String(result.error()), tone: "danger" };
+    const done = result();
+    return done ? { text: done.line, tone: done.ok ? "up" : "danger" } : null;
   };
+  const load = () => (asked() ? result.refetch() : asked.set(true));
   return (
     <Card icon="search" title="Network and logs" subtitle="fetch() · console.log">
       <If when={posts().length > 0} else={<Caption label="Three posts from jsonplaceholder.typicode.com" />}>

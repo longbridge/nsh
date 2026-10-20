@@ -185,7 +185,7 @@ sdkmanager "platforms;android-35" "build-tools;35.0.1" "platform-tools"
 
 | 命令 | macOS | Linux | Windows |
 |---|---|---|---|
-| `nsh init`, `nsh build`, `nsh trace`, `nsh dev`, `nsh check` | 可以 | 可以 | 可以 |
+| `nsh init`, `nsh build`, `nsh test`, `nsh dev`, `nsh check` | 可以 | 可以 | 可以 |
 | `nsh run`（Mac Catalyst，macOS 上的默认目标） | 可以 | 不可以 | 不可以 |
 | `nsh run --target macos`, `nsh package --target macos` | 可以 | 不可以 | 不可以 |
 | `nsh run --target linux`（Linux 上的默认目标）, `nsh package --target linux` | 不可以 | 可以 | 不可以 |

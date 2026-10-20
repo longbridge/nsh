@@ -63,6 +63,16 @@ JSX 中的文字遵循与 React 相同的规则：每一行首尾的空白被去
 </Text>
 ```
 
+### Span 的背景
+
+Span 的 `backgroundColor` 和 `borderRadius` 会在它所在的每一行、字符后面画一个与字体等高的方框；文字排版不变，复制时内容完整，所以行内代码就是一个 span（[Text 元素](../elements/text.md#片段背景)）：
+
+```tsx
+<Text>
+  先运行 <Text style={{ fontFamily: "ui-monospace", backgroundColor: "#eff1f3", borderRadius: 4 }}> npm test </Text>。
+</Text>
+```
+
 ### 文字中的视图和图片
 
 `<Text>` 中除 `<Text>` 以外的任何元素都会以行内方式布局在基线上，并随文字一起换行。它也可以有自己的按下处理：

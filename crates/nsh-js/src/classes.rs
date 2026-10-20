@@ -38,8 +38,9 @@ use std::{
 use nsh_core::{
     JsonValue,
     ui::{
-        CallbackHandle, ClassDef, ClassInstance, JsCall, JsHost, JsIn, JsKind, JsRaw, Member,
-        MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall, Thrown, Tracer,
+        CallbackHandle, ClassDef, ClassInstance, Exception, JsCall, JsHost, JsIn, JsKind, JsRaw,
+        Member, MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall, Thrown,
+        Tracer,
     },
 };
 use rquickjs::qjs;
@@ -433,17 +434,18 @@ unsafe extern "C" fn call_sync(
 
 /// Sends a call into Rust that runs as an op, with the call's `this` and
 /// `args`: `make` converts them in this call into what the op runs (the
-/// instances and callbacks among them ride in it). With `returns`, a
-/// promise of its result, rejected when they do not convert; else
-/// `undefined`, and a conversion error throws.
+/// instances and callbacks among them ride in it). With `promise`, a
+/// promise of its result, rejected when they do not convert; else (a
+/// call returning `()`) `undefined`, a conversion error throws, and the
+/// op asks for no reply.
 pub(crate) fn send(
     ctx: Ctx,
     this: Raw,
     args: js::Args<'_>,
-    returns: bool,
+    promise: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(ctx, this, UNDEFINED, args).send(returns, make)
+    CallHost::new(ctx, this, UNDEFINED, args).send(promise, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -621,7 +623,7 @@ impl<'a> CallHost<'a> {
     /// ([`send`]).
     fn send(
         &self,
-        returns: bool,
+        promise: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
         let ctx = self.ctx;
@@ -637,16 +639,18 @@ impl<'a> CallHost<'a> {
                 run
             }
             Err(e) => {
-                // Thrown (or rethrown) as a synchronous call's error.
+                // Thrown (or rethrown) as a synchronous call's error, then
+                // taken as the promise's.
                 let thrown = self.finish(Err(e));
-                return if returns {
+                return if promise {
                     rejected_with_exception(ctx)
                 } else {
                     thrown
                 };
             }
         };
-        let call = if returns {
+        // 0: no promise waits, so the core sends no reply.
+        let call = if promise {
             crate::components::next_call(ctx)
         } else {
             0
@@ -656,7 +660,7 @@ impl<'a> CallHost<'a> {
         if let Err(e) = crate::dom::push_op(ctx, nsh_core::Op::Rust(RustOp { call, run })) {
             return e;
         }
-        if returns {
+        if promise {
             crate::components::promise(ctx, call)
         } else {
             UNDEFINED
@@ -1061,7 +1065,8 @@ impl CallbackHandle for JsCallback {
             call.reply(Err(
                 "a JS function cannot be called while JS collects garbage (a value dropped \
                  by the collector): use `post`"
-                    .to_owned(),
+                    .to_owned()
+                    .into(),
             ));
             return;
         }
@@ -1135,6 +1140,20 @@ fn message_of(ctx: Ctx, e: Raw) -> String {
     message
 }
 
+/// What `e`, thrown, is: its message and, for an `Error`, its stack.
+fn thrown_of(ctx: Ctx, e: Raw) -> Exception {
+    let stack = js::is_object(e)
+        .then(|| js::get(ctx, e, "stack").ok())
+        .flatten()
+        .and_then(|s| js::opt_string(ctx, s.raw()).ok().flatten())
+        .filter(|s| !s.is_empty());
+    let _ = js::take_exception(ctx);
+    Exception {
+        message: message_of(ctx, e),
+        stack,
+    }
+}
+
 /// A host for conversions outside a call.
 pub(crate) fn host_outside_calls<'a>(ctx: Ctx) -> CallHost<'a> {
     CallHost::new(ctx, UNDEFINED, UNDEFINED, args(0, std::ptr::null_mut()))
@@ -1150,7 +1169,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
         .and_then(JsCallback::value)
         .filter(|(c, _)| *c == ctx);
     let Some((_, function)) = function else {
-        call.reply(Err("the function belongs to another VM".to_owned()));
+        call.reply(Err("the function belongs to another VM".to_owned().into()));
         return;
     };
     let function = V::dup(ctx, function);
@@ -1164,7 +1183,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
             if host.pending.get() {
                 let _ = js::take_exception(ctx);
             }
-            call.reply(Err(e.0));
+            call.reply(Err(e.0.into()));
             return;
         }
     };
@@ -1196,7 +1215,7 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
                     },
                     move |ctx, _, reason| {
                         if let Some(call) = rejected.borrow_mut().take() {
-                            call.reply(Err(message_of(ctx, reason)));
+                            call.reply(Err(thrown_of(ctx, reason)));
                         }
                         Ok(())
                     },
@@ -1218,9 +1237,9 @@ pub(crate) fn run_call(ctx: Ctx, mut call: JsCall) {
                 // Kept for the call around it to rethrow.
                 let message = message_of(ctx, e.raw());
                 classes(ctx).uncatchable.borrow_mut().get_or_insert(e);
-                call.reply(Err(message));
+                call.reply(Err(message.into()));
             } else if call.wants_reply() {
-                call.reply(Err(message_of(ctx, e.raw())));
+                call.reply(Err(thrown_of(ctx, e.raw())));
             } else {
                 js::report(ctx, e);
             }
@@ -1517,6 +1536,7 @@ pub(crate) mod tests {
     }
 
     /// Functions JS calls.
+    #[module]
     pub(crate) struct Tools;
 
     #[module]
@@ -1964,7 +1984,7 @@ pub(crate) mod tests {
             shown,
             [
                 "5",
-                "TypeError: Tally used re-entrantly",
+                "TypeError: Tally.absorb: `other`: Tally used re-entrantly",
                 "true 7",
                 "8 8",
                 "TypeError: Tally.absorb: `other`: expected a Tally, got a Token",
@@ -2467,6 +2487,56 @@ pub(crate) mod tests {
         host.run_posted_without_core();
         assert_eq!(run(&host, "show(heard.join(','));").unwrap(), ["hello"]);
         LISTENER.with(|l| l.borrow_mut().take());
+    }
+
+    /// An op returning `()` is a plain call: `undefined`, a wrong argument
+    /// throws in the call, and its op asks for no reply (call 0). One
+    /// returning a value is a promise, which a wrong argument rejects.
+    #[test]
+    fn ops_returning_nothing_are_plain_calls() {
+        use nsh_core::ui::RustOp;
+        let host = host();
+        host.eval_source(
+            "import { text as show } from \"nsh:rt\";\n\
+             import { Tally, Tools } from \"test/classes\";\n\
+             const msg = (f) => { try { return String(f()); } catch (e) { return `threw ${e.name}: ${e.message}`; } };\n\
+             show(msg(() => Tools.keepOp(new Tally(1))));\n\
+             show(msg(() => Tools.keepOp(5)));\n\
+             const measured = Tools.measure(5);\n\
+             show(String(measured instanceof Promise));\n\
+             measured.catch((e) => show(`rejected ${e.name}: ${e.message}`));",
+        )
+        .unwrap();
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        host.run_jobs();
+        host.take_ops(&mut ops);
+        let calls: Vec<u32> = ops
+            .iter()
+            .filter_map(|op| match op {
+                nsh_core::Op::Rust(RustOp { call, .. }) => Some(*call),
+                _ => None,
+            })
+            .collect();
+        // Only the first `keepOp` is sent (the others did not convert).
+        assert_eq!(calls, [0]);
+        let shown: Vec<String> = ops
+            .iter()
+            .filter_map(|op| match op {
+                nsh_core::Op::CreateText { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "undefined",
+                "threw TypeError: Tools.keepOp: `tally`: expected a Tally, got 5",
+                "true",
+                "rejected TypeError: Tools.measure: `text`: expected a string, got 5",
+            ]
+        );
+        assert!(!host.has_exception());
     }
 
     #[test]

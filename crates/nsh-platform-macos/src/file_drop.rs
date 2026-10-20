@@ -185,7 +185,7 @@ fn read_uris(sender: &ProtocolObject<dyn NSDraggingInfo>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn is_local_uri(uri: &NSString) -> bool {
+pub(crate) fn is_local_uri(uri: &NSString) -> bool {
     NSURL::URLWithString(uri).is_some_and(|url| {
         url.isFileURL()
             && url

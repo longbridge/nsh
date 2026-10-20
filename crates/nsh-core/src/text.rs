@@ -50,6 +50,115 @@ pub struct ResolvedTextStyle {
     pub transform: TextTransform,
     /// OpenType features (`fontVariant`).
     pub font_variant: FontVariant,
+    /// The background of the nested text this run is in (drawing only).
+    pub background: Option<TextBackground>,
+}
+
+/// The background of a nested `<Text>` (`backgroundColor` and
+/// `borderRadius` on a span): drawing only, behind its characters and
+/// those of the spans inside it, on each line it reaches as the font's
+/// ascent to descent around the baseline (as CSS paints inline boxes),
+/// every line's box rounded alike (`box-decoration-break: clone`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextBackground {
+    /// Fill color (never fully transparent).
+    pub color: Color,
+    /// Corner radius in points.
+    pub radius: f32,
+    /// The span that set it, so neighboring spans that look the same still
+    /// get a box each.
+    pub node: NodeId,
+}
+
+/// A piece of a laid out line, in visual order, for
+/// [`BackgroundBox::join`]: a cluster, glyph or run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinePiece {
+    /// Left edge.
+    pub x: f32,
+    /// Advance.
+    pub width: f32,
+    /// The background of its characters
+    /// ([`AttributedText::background_at`]).
+    pub background: Option<TextBackground>,
+    /// Its font's ascent above the baseline (0 for an attachment).
+    pub ascent: f32,
+    /// Its font's descent below the baseline.
+    pub descent: f32,
+}
+
+/// One box of a span's background on one line (see
+/// [`BackgroundBox::join`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BackgroundBox {
+    /// Left edge, in the coordinates of the pieces.
+    pub x: f32,
+    /// Width.
+    pub width: f32,
+    /// Top, above the baseline: the tallest ascent of its pieces.
+    pub ascent: f32,
+    /// Bottom, below the baseline.
+    pub descent: f32,
+    /// What fills it.
+    pub background: TextBackground,
+}
+
+impl BackgroundBox {
+    /// Calls `f` with the boxes of span backgrounds on one line, given its
+    /// `pieces` in visual order: neighboring pieces of one background join
+    /// into one box, cut to `(left, right)` (whitespace hanging past the
+    /// line's end is not painted).
+    pub fn join(
+        pieces: impl IntoIterator<Item = LinePiece>,
+        (left, right): (f32, f32),
+        mut f: impl FnMut(BackgroundBox),
+    ) {
+        let mut current: Option<BackgroundBox> = None;
+        let mut emit = |b: Option<BackgroundBox>| {
+            if let Some(mut b) = b {
+                let x1 = (b.x + b.width).min(right);
+                b.x = b.x.max(left);
+                b.width = x1 - b.x;
+                if b.width > 0.0 && b.ascent + b.descent > 0.0 {
+                    f(b);
+                }
+            }
+        };
+        for p in pieces {
+            let Some(background) = p.background else {
+                emit(current.take());
+                continue;
+            };
+            match &mut current {
+                Some(b) if b.background == background => {
+                    b.width = (p.x + p.width).max(b.x + b.width) - b.x;
+                    b.ascent = b.ascent.max(p.ascent);
+                    b.descent = b.descent.max(p.descent);
+                }
+                _ => {
+                    emit(current.take());
+                    current = Some(BackgroundBox {
+                        x: p.x,
+                        width: p.width,
+                        ascent: p.ascent,
+                        descent: p.descent,
+                        background,
+                    });
+                }
+            }
+        }
+        emit(current);
+    }
+
+    /// The radius of its corners: the background's, at most half its
+    /// width or height.
+    pub fn radius(&self) -> f32 {
+        self.background
+            .radius
+            .min(self.width / 2.0)
+            .min((self.ascent + self.descent) / 2.0)
+            .max(0.0)
+    }
 }
 
 impl Default for ResolvedTextStyle {
@@ -74,6 +183,7 @@ impl Default for ResolvedTextStyle {
             line_height_multiple: 0.0,
             transform: TextTransform::None,
             font_variant: FontVariant(0),
+            background: None,
         }
     }
 }
@@ -115,6 +225,7 @@ impl ResolvedTextStyle {
             underline_offset: style.underline_offset.or(self.underline_offset),
             transform: style.transform.unwrap_or(self.transform),
             font_variant: style.font_variant.unwrap_or(self.font_variant),
+            background: self.background,
         }
     }
 
@@ -220,6 +331,23 @@ impl AttributedText {
     /// Whether the text was made selectable (`selectable`, `select-text`).
     pub fn is_selectable(&self) -> bool {
         self.selectable == Some(true)
+    }
+
+    /// Whether a span has a background ([`TextBackground`]).
+    pub fn has_backgrounds(&self) -> bool {
+        self.spans.iter().any(|s| s.style.background.is_some())
+    }
+
+    /// The span containing the UTF-16 offset `index` (the last one past the
+    /// end).
+    pub fn span_at(&self, index: u32) -> Option<&TextSpan> {
+        let i = self.spans.partition_point(|s| s.end <= index);
+        self.spans.get(i.min(self.spans.len().saturating_sub(1)))
+    }
+
+    /// The background of the character at the UTF-16 offset `index`.
+    pub fn background_at(&self, index: u32) -> Option<TextBackground> {
+        self.span_at(index)?.style.background
     }
 
     /// Length of the text so far, in UTF-16 units.

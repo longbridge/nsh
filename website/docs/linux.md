@@ -39,10 +39,10 @@ bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --size 1024x768   # in a checkout: target/debug/nsh-linux-host
+dist/nsh/runtime/linux/nsh-linux-host --bundle build/bundle.nshc --window-size 1024x768   # in a checkout: target/debug/nsh-linux-host
 ```
 
-`--size` is the window's default size; tiling window managers may give the window another one.
+`--window-size` is the window's default size; tiling window managers may give the window another one.
 
 ## Packaging
 
@@ -102,6 +102,10 @@ fn main() -> gtk::glib::ExitCode {
 `AppView::load` replaces whatever ran; `stop` ends the app. `asset_base` tells it where `asset:/` URIs resolve
 (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`) load with `unsafe { Bundle::bytecode(bytes) }`:
 QuickJS bytecode is trusted input, so only load it from your own app's files.
+
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 
 Native components are registered with `AppView::register_component`; see [Native components](./native-components.md#registering-on-linux-rust).
 

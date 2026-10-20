@@ -28,7 +28,7 @@ requestAnimationFrame ──────────────┘             
 - **Layout is the core's.** Every view is an absolutely positioned element at the frame Taffy computed, so flexbox, grid, `aspectRatio` and percentages behave exactly as on devices. The browser's own layout is not involved.
 - **Styles are turned into CSS in Rust.** Background, borders, radii, shadows (`shadow*` and `boxShadow`), gradients, filters, `backdropFilter`, transforms, `transformOrigin`, `outline`, `mixBlendMode`, transitions and the built-in keyframe animations become CSS properties. Tailwind classes, `active:`, `hover:` and `focus:` states and `dark:` all resolve natively, as they do on devices.
 - **Text is laid out in Rust** with font measurements from the browser (`CanvasRenderingContext2D.measureText`) and drawn run by run at the positions the layout chose, so what was measured is what is drawn. Lines break after spaces, around CJK characters and at `\n`; `numberOfLines` truncates with an ellipsis.
-- **Native animations run in Rust** on `requestAnimationFrame`: `Animated` timing, spring and decay, `interpolate`, native values bound to `opacity`, `transform` and `backgroundColor`, drags bound with `pan`, scroll-linked values and canvas arguments. JS is not involved per frame, as on devices. `LayoutAnimation`, style transitions, the `animate-*` keyframes and screen transitions move as on the desktop backends, and `prefers-reduced-motion` turns them off (screens fade).
+- **Native animations run in Rust** on `requestAnimationFrame`: `Animated` timing, spring and decay, `interpolate`, animated values bound to `opacity`, `transform` and `backgroundColor`, drags bound with `pan`, scroll-linked values and canvas arguments. JS is not involved per frame, as on devices. `LayoutAnimation`, style transitions, the `animate-*` keyframes and screen transitions move as on the desktop backends, and `prefers-reduced-motion` turns them off (screens fade).
 - **Input:** presses with `activeStyle` / `active:` feedback and long presses, the responder system (`onTouch*`, `PanResponder`), native drags and two-finger pinch and rotation, scroll views (the browser's scrolling), pull to refresh, zooming scroll views (pinch, ctrl+wheel and touchpad pinches, `zoomTo`), `<Input>` with controlled values, focus and submit, `Canvas`, `NavStack` and `NavPage` with the page's `header`, `Dialog`.
 - **System UI is drawn in the page:** `AlertDialog` looks like the desktop backends' dialogs on desktop browsers and like iOS's on phones (with the `desktop` idiom, see below), and `Toast.show` shows a toast at the bottom. Custom fonts are measured again once the browser has loaded them, and an app waits for the fonts it imports before its first frame shows.
 - **Dialogs** are a layer over the whole app that shows the app's popup and backdrop, as on the desktop backends. Escape, the browser's back button and a press on the backdrop close them (`closeOnEscape`, `closeOnBackdropPress`), and `animation`, `onOpen`, `onClose`, `onCancel` and `onOpenChange` work as on devices.
@@ -190,7 +190,9 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 `run(code, { chunks, chunkBase })` also takes where the chunks of a [split bundle](#split-bundles) are.
 
-With `nsh-playground.wasm`, `player.runSource(tsx)` compiles TSX first and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`.
+A page that runs code it does not own, as an app embedding NSH does, gives it limits: `run(code, { limits: "memory=128MB,call=500ms" })` sets those the page names and keeps the [embedding defaults](./sandbox-and-capabilities.md#limits) for the rest (`limits: ""`: all of them). The engine runs on the page's main thread, so the call budget also keeps the page responsive. Without `limits` the app runs on its own, as a published one does.
+
+With `nsh-playground.wasm`, `player.runSource(tsx, name, options)` compiles TSX first, runs it with `run`'s options and returns the compile error, or `null`; `player.compile(tsx)` returns `{ code }` or `{ error }`. The website's playground runs its visitors' code with `{ limits: "" }`.
 
 The container's size is the app's window (`windowSize()`); resizing the container resizes the app. `player.setDark(true)` switches the appearance at run time, which apps observe through `colorScheme()` and `dark:` classes.
 
@@ -271,4 +273,4 @@ The player and the dev server run apps with development settings (no hardening);
 
 - [Packaging](./packaging.md): the other targets of `nsh package`.
 - [Architecture](./architecture.md): the engine, the core and the mount batches the web build reuses.
-- [Testing and trace](./testing-and-trace.md): `nsh trace` runs the same engine headless, with an approximate text engine.
+- [Testing](./testing-and-trace.md): `nsh test` runs the same engine headless, with an approximate text engine.

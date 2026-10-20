@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples/gallery-rs/native"]
+members = ["crates/*", "examples/gallery-rs/native", "examples/rust-exports/native", "examples/embed-gpui/run"]
 # The GPUI backend is a workspace of its own (`crates/gpui/Cargo.toml`).
 exclude = ["crates/gpui"]
 # `cargo run` runs the gallery (`crates/xtask/src/run.rs`).
@@ -39,6 +39,7 @@ nsh-platform-linux = { version = "0.1.1", path = "crates/nsh-platform-linux", de
 nsh-platform-macos = { version = "0.1.1", path = "crates/nsh-platform-macos", default-features = false }
 nsh-platform-windows = { version = "0.1.1", path = "crates/nsh-platform-windows", default-features = false }
 nsh-dev = { version = "0.1.1", path = "crates/nsh-dev" }
+nsh-testing = { version = "0.1.1", path = "crates/nsh-testing" }
 
 anyhow = "1"
 thiserror = "2"
@@ -388,6 +389,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
   "NSTextInputContext",
   "NSTextStorage",
   "NSTextView",
+  "NSToolbar",
   "NSTrackingArea",
   "NSUserInterfaceItemIdentification",
   "NSView",

@@ -59,7 +59,9 @@ build to the same file) and takes `nsh.js` from the crate.
   bytes: the engine reads fonts synchronously, `Assets::read`, to measure text with them). Fonts the entry or the UI
   sets register are fetched before the app starts; one only chunks register (`font("asset:/…")` in their code) comes
   with the first of them, through `createPlayer`'s `prepareChunk(id)`, which `nsh.js` awaits with the chunk's download
-  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, chunks })`; an app whose capabilities restrict `network`
+  (`web::font_loads`). It runs the bundle with `run(code, { release: true, harden, capabilities, appId, chunks })`
+  (`appId`: the `nsh.json` id, the page's `app.id`; a Rust app's root carries its own), without `limits`: a published
+  app runs on its own, with none (`sandbox.md`); an app whose capabilities restrict `network`
   gets a CSP `connect-src` meta with `'self'` and the declared hosts (`web::connect_src`, a host without a port as
   `host:*`), as the browser follows redirects before NSH could check them. Relative URLs resolve against the page
   (`document.baseURI`, `nsh_set_base_url`). The app's code ships as bytecode
@@ -72,14 +74,14 @@ build to the same file) and takes `nsh.js` from the crate.
   `nsh.wasm` next to it, all `no-cache`), from `crates/nsh-cli/src/web/dev.html`. `nsh dev` serves it whenever a web
   runtime exists (`runtime::web(false)`), `nsh run --target web` builds one first and prints the page's address (the user opens it). The page
   speaks the dev protocol over the same port's WebSocket: its hello has platform `web` and an empty
-  `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it applies
-  patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
+  `bytecode_version` (the server then sends JS source, without the warning a mismatched version gets), it runs
+  each bundle with its message's `app_id` (the app's storage), applies patches with `player.hotUpdate` (`nsh_hot_update`; when it reports a failure, `nsh_hot_failed`, the bundle that
   follows loads from scratch), shows build errors and `CannotRun` over the app, sends the app's log lines back, and
   reads fonts with a synchronous `XMLHttpRequest` from `/assets/`.
 
 `nsh_bundle_options` sets how the next `nsh_start` / `nsh_start_bytecode` runs: development settings by default (the
-player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities and
-a source map; `nsh_bundle_harden` the hardening's bytecode.
+player, the playground, the dev host), hardened (`Policy::default()`) for published apps, the declared capabilities,
+a source map and the app's id (for its storage); `nsh_bundle_harden` the hardening's bytecode.
 
 ### What a published app downloads
 
@@ -151,7 +153,7 @@ the crate's `build.rs` passes the 8 MiB stack as a link argument of its own (nsh
 where the app builds, and target-wide `rustflags` would rebuild every dependency instead of sharing nsh's builds).
 Both kinds build to `target/wasm32-unknown-unknown/web/nsh_app_<package>_web.wasm` and are copied to
 `.nsh/rust/web-runtime/nsh.wasm` / `nsh-dev.wasm`; `nsh.js` is nsh's. Everything else (bundling, bytecode, the
-crate's assets, the dev server) already knows the set, as the app's command line does.
+crate's assets, the dev server) already knows the set, from its description (`docs/dev/tooling.md`).
 
 `web::ui_sets` (the sets the runtime serves, which `package` checks the app's imports against and the dev page sends
 in its hello) are the command line's own (`crate::ui_sets`). The dev host's files include `nsh.version` (a digest of
@@ -173,7 +175,7 @@ server greets it; the dev session publishes no bundles (`DevSession::rust_root`)
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
 (`nsh_core::ui::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no QuickJS, so smaller than the
-prebuilt runtime; under its TSX entry (`App.tsx`, QuickJS) 5.26 MB (1.75 / 1.27 MB).
+prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5.26 MB (1.75 / 1.27 MB).
 
 ## What WebAssembly changes in the shared crates
 
@@ -246,13 +248,13 @@ of the Android animator); bound properties go out as `["a", id, prop, value]` af
 What moves on the web follows the Linux backend (`nsh-platform-linux` `transition.rs`, `navigation.rs`), which was
 measured against it frame by frame (`requestAnimationFrame` samplers of computed styles in headless Chromium):
 
-- **Native values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
+- **Animated values** (`src/animation.rs`): the graph's clock is in seconds (`Graph::tick`), so `nsh_frame` divides the
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
   border overlay gets its own for border colors, widths and radii, since it draws the border.
 - **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
-  transforms follow the view's own (and the native values bound to it), as the native backends apply them after
+  transforms follow the view's own (and the animated values bound to it), as the native backends apply them after
   the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *
   var(--nsh-ko))`, and the keyframes add to the registered `--nsh-ko` (initial 1).
 - **Layout animations** (`op_la`, for the rest of the batch) run with Web Animations, which play over the views' own
@@ -390,8 +392,8 @@ browsers' touches into what phones report:
   pressable (Return presses it, Space when released); going back (Escape, Alt+Left, Cmd+[, BrowserBack); scrolling the
   scroll view around the focus or under the mouse (arrows by 40 points, Page Up / Down and Space by 0.875 of a page,
   Home / End).
-- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled or hidden,
-  so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
+- **Focus**: pressables are focusable (`tabindex=0`, role `button` unless they have one) unless disabled, hidden or
+  `focusable={false}` (a focused one that stops being a stop is blurred), so Tab and Shift+Tab reach them in DOM order; `focus:` states follow the keyboard focus (`:focus-visible`), which
   draws a ring inside the view; a popped page gives the focus back to what had it when the page was pushed
   (`screenGone`). A click never moves the focus (`mousedown` is prevented outside fields, selectable
   text and hosted pages), as in native apps; it focuses the app's window in an iframe. The views under the newest
@@ -460,6 +462,12 @@ backends); zoom changes go to `nsh_zoom` (`EngineControl::zoom`) before the offs
 
 ## Platform services
 
+- **Storage** (`nsh/storage`, `src/storage.rs`): `localStorage`, each entry under `nsh:<app id>:<key>`
+  (`nsh_engine::local_storage_prefix`; the id `nsh.json` gives, which published sites, the dev host and Rust apps
+  carry), so an app keeps its data wherever its page is and apps of one origin keep theirs apart. An app without an id
+  (the demo player's, the playground's) keeps its entries under `nsh:<page directory>:<key>` (the directory of
+  `document.baseURI`): apps run one after another on one such page share theirs. `nsh.js` wraps every call in try / catch (blocked
+  storage, private mode, quota) and hands failures back as messages.
 - **Alerts** (`AlertDialog`, both presentations) are drawn in the root: with the `desktop` idiom as the Linux and
   macOS backends' alerts (up to three buttons in a row, the last regular one the default), otherwise as iOS's alert
   and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's

@@ -64,7 +64,7 @@ hand over laid-out text. Besides that it only does what must happen on it:
 - **drawing text** that was already laid out on the engine thread;
 - **native animations**: values from `nsh/animated` are driven frame by frame (a `CADisplayLink` on iOS, a UI-thread
   animator on Android) and written to the views directly;
-- **gestures and scrolling**: touches become events sent to the engine thread; `scrollValue` and `pan` feed native
+- **gestures and scrolling**: touches become events sent to the engine thread; `scrollValue` and `pan` feed animated
   values in the same frame.
 
 **The main thread never waits for JS.** When the system needs an answer on the spot (may this text change, may the
@@ -85,7 +85,7 @@ the system's gestures.
 ```
 
 In the counter example, a tap costs about 0.12 ms in a release build on a Mac, JS and commit together, and produces a
-handful of mount items (see [Testing with nsh trace](./testing-and-trace.md)).
+handful of mount items (see [Testing](./testing-and-trace.md)).
 
 Three properties follow from this design:
 
@@ -157,7 +157,7 @@ the names show up in logs and docs:
 | `nsh-cli` | The `nsh` command. |
 
 The dependency direction is `nsh-core` ← `nsh-js` ← `nsh-engine` ← platforms; `nsh-base` builds on `nsh-core`. The core depends on no platform and no JS
-engine, which is what lets `nsh trace` run the real runtime headless on any machine.
+engine, which is what lets `nsh test` run the real runtime headless on any machine.
 
 ## See also
 

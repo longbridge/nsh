@@ -1,5 +1,5 @@
 import { computed, signal, Text, untracked, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { Platform } from "nsh/device";
 import { Image } from "nsh/image";
 import { List } from "nsh/list";
@@ -112,7 +112,7 @@ export function Photos() {
   const refreshes = signal(0);
   // Scroll offset, fed natively: the header's parallax, its fade and the
   // compact bar run without any JS per frame.
-  const scrollY = createNativeValue(0);
+  const scrollY = createAnimatedValue(0);
 
   const refresh = () => {
     refreshing.set(true);
@@ -213,6 +213,7 @@ export function Photos() {
         when={wide}
         else={
           <List
+            testID="photos"
             each={photos()}
             estimatedItemSize={76}
             style={{ flex: 1 }}
@@ -234,6 +235,7 @@ export function Photos() {
           const tile = untracked(() => ((paneWidth() - 48) / n) * 0.75 + 60);
           return (
             <List
+              testID="photos"
               each={photos()}
               numColumns={n}
               estimatedItemSize={tile}

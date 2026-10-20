@@ -28,7 +28,7 @@ requestAnimationFrame ───────────┘                      
 - **布局由核心完成。** 每个视图都是一个绝对定位的元素，位置和大小就是 Taffy 算出的 frame，所以 flexbox、grid、`aspectRatio` 和百分比的表现与设备上完全一致，浏览器自身的布局不参与。
 - **样式在 Rust 里转成 CSS。** 背景、边框、圆角、阴影（`shadow*` 和 `boxShadow`）、渐变、滤镜、`backdropFilter`、变换、`transformOrigin`、`outline`、`mixBlendMode`、过渡和内置的关键帧动画都会变成 CSS 属性。Tailwind 类、`active:`、`hover:`、`focus:` 状态和 `dark:` 与设备上一样在原生侧解析。
 - **文本在 Rust 里排版**，字体度量来自浏览器（`CanvasRenderingContext2D.measureText`），再按排版确定的位置逐段绘制，所以测量的就是绘制的。换行发生在空格之后、CJK 字符前后和 `\n` 处；`numberOfLines` 会截断并加省略号。
-- **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的原生值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。`LayoutAnimation`、样式过渡、`animate-*` 关键帧和页面切换的动效与桌面后端一致；开启 `prefers-reduced-motion` 时它们不再播放（页面切换改为淡入淡出）。
+- **原生动画在 Rust 里运行**，由 `requestAnimationFrame` 驱动：`Animated` 的 timing、spring、decay，`interpolate`，绑定到 `opacity`、`transform`、`backgroundColor` 的动画值，用 `pan` 绑定的拖拽、滚动联动的值和画布参数。和设备上一样，每一帧都不经过 JS。`LayoutAnimation`、样式过渡、`animate-*` 关键帧和页面切换的动效与桌面后端一致；开启 `prefers-reduced-motion` 时它们不再播放（页面切换改为淡入淡出）。
 - **输入**：带 `activeStyle` / `active:` 反馈的按压和长按、响应者系统（`onTouch*`、`PanResponder`）、原生拖拽和双指捏合、旋转、滚动视图（浏览器自身的滚动）、下拉刷新、可缩放的滚动视图（双指捏合、Ctrl+滚轮和触控板捏合、`zoomTo`）、受控的 `<Input>`（焦点、提交）、`Canvas`、带页面 `header` 的 `NavStack` 和 `NavPage`、`Dialog`。
 - **系统界面绘制在页面内**：`AlertDialog` 在桌面浏览器上与桌面后端的对话框外观一致，在手机上与 iOS 一致（即 `desktop` 界面类型，见下文），`Toast.show` 在底部显示提示。自定义字体在浏览器加载完成后会重新测量文本，应用导入的字体加载好之前不显示第一帧。
 - **对话框**与桌面后端一样，是覆盖整个应用的一层，显示应用的弹出层和背景。Escape、浏览器的返回按钮和点击背景会关闭它（`closeOnEscape`、`closeOnBackdropPress`），`animation`、`onOpen`、`onClose`、`onCancel` 和 `onOpenChange` 与设备上一致。
@@ -172,7 +172,9 @@ player.run(await (await fetch("./bundle.nshc")).arrayBuffer());
 
 `run(code, { chunks, chunkBase })` 还可以指定[拆分 bundle](#拆分-bundle) 的 chunk 所在位置。
 
-使用 `nsh-playground.wasm` 时，`player.runSource(tsx)` 会先编译 TSX，返回编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。
+页面运行不属于自己的代码时（就像嵌入 NSH 的应用那样），可以给它设置限制：`run(code, { limits: "memory=128MB,call=500ms" })` 设置页面写出的这几项，其余保持[嵌入时的默认值](./sandbox-and-capabilities.md#限制)（`limits: ""`：全部使用默认值）。引擎运行在页面主线程上，所以调用预算也能让页面保持响应。不传 `limits` 时，应用像发布出去的应用一样独立运行。
+
+使用 `nsh-playground.wasm` 时，`player.runSource(tsx, name, options)` 会先编译 TSX，再用 `run` 的选项运行，返回编译错误或 `null`；`player.compile(tsx)` 返回 `{ code }` 或 `{ error }`。官网的 playground 用 `{ limits: "" }` 运行访客写的代码。
 
 容器的尺寸就是应用的窗口（`windowSize()`），调整容器大小会同步调整应用。`player.setDark(true)` 可在运行时切换外观，应用通过 `colorScheme()` 和 `dark:` 类感知到变化。
 
@@ -254,4 +256,4 @@ Web 运行时用于演示和文档，下列能力不提供：
 
 - [打包](./packaging.md)：`nsh package` 的其他目标。
 - [架构](./architecture.md)：Web 版复用的引擎、核心和挂载批次。
-- [测试与 trace](./testing-and-trace.md)：`nsh trace` 以近似的文本引擎无界面地运行同一个引擎。
+- [测试](./testing-and-trace.md)：`nsh test` 以近似的文本引擎无界面地运行同一个引擎。

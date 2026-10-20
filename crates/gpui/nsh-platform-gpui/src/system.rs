@@ -65,7 +65,8 @@ use gpui::{
 };
 use nsh_core::{
     Color, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue,
-    ROOT_ID, Rect, platform::Appearance,
+    ROOT_ID, Rect,
+    platform::{Appearance, clipboard},
 };
 use nsh_engine::{ColorScheme, Environment, Insets, Locale};
 
@@ -294,7 +295,9 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: Appearance) {
     }
 }
 
-/// The embedding app set its appearance ([`crate::AppView::set_appearance`]).
+/// The embedding app set its appearance ([`crate::AppView::set_appearance`]),
+/// locale or text size: the system's settings are read again, with the
+/// host's over them.
 pub(crate) fn host_appearance_changed(surface: &Surface) {
     update(surface);
     surface.invalidate();
@@ -921,6 +924,34 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
                 }
             });
         }
+        Command::SetClipboardImage(uri) => set_clipboard_image(uri),
+        Command::ReadClipboardImage { id, has_only } => {
+            read_clipboard_image(surface.key(), *id, *has_only)
+        }
+        Command::ReadClipboardFiles { id } => {
+            let (key, id) = (surface.key(), *id);
+            crate::rt::on_app(move |cx| {
+                let files: Vec<String> = cx
+                    .read_from_clipboard()
+                    .into_iter()
+                    .flat_map(|item| item.into_entries())
+                    .filter_map(|entry| match entry {
+                        gpui::ClipboardEntry::ExternalPaths(paths) => Some(paths),
+                        _ => None,
+                    })
+                    .flat_map(|paths| paths.paths().to_vec())
+                    .filter(|path| path.is_absolute())
+                    .map(|path| clipboard::file_url(&path.to_string_lossy()))
+                    .collect();
+                if let Some(surface) = Surface::by_key(key) {
+                    surface.event(
+                        ROOT_ID,
+                        EventKind::Clipboard,
+                        clipboard::files_answer(id, &files),
+                    );
+                }
+            });
+        }
         Command::ExitApp => {
             // The window goes after the batch is applied (closing it stops
             // the surface). An embedded surface closes the window it is in,
@@ -950,6 +981,68 @@ fn clipboard_answer(id: u32, has: bool, text: Option<String>) -> EventPayload {
         fields.push(("text", PayloadValue::Str(text)));
     }
     EventPayload::Map(fields)
+}
+
+/// `Clipboard.setImage`: the image of a `data:` URI on GPUI's clipboard,
+/// in its own format when GPUI knows it.
+fn set_clipboard_image(uri: &str) {
+    let Some((mime, bytes)) = clipboard::decode_data_uri(uri) else {
+        log::warn!("Clipboard.setImage: not a base64 data: URI");
+        return;
+    };
+    let Some(format) = gpui::ImageFormat::from_mime_type(mime) else {
+        log::warn!("Clipboard.setImage: unsupported image type {mime}");
+        return;
+    };
+    let image = gpui::Image::from_bytes(format, bytes);
+    crate::rt::on_app(move |cx| cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image)));
+}
+
+/// `Clipboard.getImage` / `hasImage`: answers read `id` from GPUI's
+/// clipboard. Formats other than PNG, JPEG, GIF, BMP and WebP (a TIFF) are
+/// converted to PNG on a worker thread, so every image source shows them.
+fn read_clipboard_image(key: u64, id: u32, has_only: bool) {
+    crate::rt::on_app(move |cx| {
+        let image = cx
+            .read_from_clipboard()
+            .into_iter()
+            .flat_map(|item| item.into_entries())
+            .find_map(|entry| match entry {
+                gpui::ClipboardEntry::Image(image) => Some(image),
+                _ => None,
+            });
+        let answer = move |payload| {
+            if let Some(surface) = Surface::by_key(key) {
+                surface.event(ROOT_ID, EventKind::Clipboard, payload);
+            }
+        };
+        let image = match image {
+            Some(image) if !has_only => image,
+            other => return answer(clipboard::image_answer(id, other.is_some(), None)),
+        };
+        std::thread::spawn(move || {
+            let png = match clipboard::Image::sniff(&image.bytes) {
+                Some(_) => None,
+                None => to_png(&image.bytes),
+            };
+            let bytes = png.as_deref().unwrap_or(&image.bytes);
+            let payload = clipboard::image_answer(id, true, clipboard::Image::sniff(bytes));
+            crate::rt::invoke(move || answer(payload));
+        });
+    });
+}
+
+/// `bytes` decoded and encoded again as PNG.
+fn to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let decoded = image::load_from_memory(bytes)
+        .map_err(|e| log::warn!("clipboard image: {e}"))
+        .ok()?;
+    let mut png = Vec::new();
+    decoded
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|e| log::warn!("clipboard image: {e}"))
+        .ok()?;
+    Some(png)
 }
 
 /// The answer to dialog `id`: the button's index, -1 when dismissed.

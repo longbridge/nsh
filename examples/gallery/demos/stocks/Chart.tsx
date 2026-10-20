@@ -1,5 +1,5 @@
 import { computed, effect, signal, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
 import { colors, Legend, radius, Segmented } from "../../ui";
 import { type Candle, compact, OPEN, price, SESSION, type Stock, signed, time, toneOf } from "./market";
@@ -106,7 +106,7 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
   const cursor = signal<number | null>(null);
   const width = signal(0);
   const live = pulse(props.running);
-  // The live point's ring, built once: redraws reuse the same native nodes.
+  // The live point's ring, built once: redraws reuse the same animated nodes.
   const ringAlpha = live.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
   const ringRadius = live.interpolate({ inputRange: [0, 1], outputRange: [3, 13] });
   // The minutes are one array mutated in place: every run is a change.
@@ -135,10 +135,10 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
     scale.reset();
   });
 
-  // The crosshair: two hairlines and a dot placed by native values.
-  const cx = createNativeValue(0);
-  const cy = createNativeValue(0);
-  const shown = createNativeValue(0);
+  // The crosshair: two hairlines and a dot placed by animated values.
+  const cx = createAnimatedValue(0);
+  const cy = createAnimatedValue(0);
+  const shown = createAnimatedValue(0);
   const pick = (x: number | null) => {
     if (x === null) {
       cursor.set(null);
@@ -368,7 +368,7 @@ export function Chart(props: { stock: Stock; running: () => boolean; height?: nu
             ctx.fillText(p(last), width - 4, ly);
           }}
         />
-        {/* The crosshair over the canvas, moved by native values. */}
+        {/* The crosshair over the canvas, moved by animated values. */}
         <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: shown }}>
           <View
             style={{

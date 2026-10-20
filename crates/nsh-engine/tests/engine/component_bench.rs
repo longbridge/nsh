@@ -155,15 +155,20 @@ fn bytecode(entry: &str) -> Vec<u8> {
         );
         std::fs::write(dir.join(name), app).unwrap();
     }
-    let ui_sets = vec![crate::test_ui::registry()];
+    let ui_sets = [crate::test_ui::registry()];
     let bundle = nsh_bundler::bundle(&nsh_bundler::BundleOptions {
         entry: dir.join(entry),
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    nsh_js::compile_bytecode_with(&bundle.code, true, &ui_sets).unwrap()
+    nsh_js::compile_bytecode_with(
+        &bundle.code,
+        true,
+        &ui_sets.iter().map(Into::into).collect::<Vec<_>>(),
+    )
+    .unwrap()
 }
 
 impl App {

@@ -20,29 +20,31 @@ host elements' props and events, the easings and the canvas methods from the cor
 element and JSX types `nsh` exports), `nsh/jsx-runtime.d.ts` and `nsh/globals.d.ts`, and tests check every module's
 exports against its declarations; the CLI writes them into `.nsh/types` (`tooling.md`).
 `nsh` itself only has the reactive API, `mount`, the primitives every UI is made of (`View`, `Text`, `Scroll`,
-`Input`) and the types; there is no catch-all module, and moved APIs get no compatibility re-exports. Each primitive
+`Input`) and the types; there is no catch-all module. A released API that moves keeps its old place as a deprecated
+alias (`compatibility.md`), so apps built before keep running. Each primitive
 has one home, which is where apps import its tag from (`native-pipeline.md`): the table below. `If` and `Each` are
 globals.
 
 | Module | Exports | Implemented in (`crates/nsh-js/src`) |
 |---|---|---|
-| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`; `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs` |
+| `nsh` | `signal`, `computed`, `effect`, `batch`, `untracked`, `cleanup`, `context`, `split`, `mount`, `resource` (`resource.rs`: a callable object over four signals, its loads kept by `nsh_core::resource::Runs`); `View`, `Text`, `Scroll`, `Input` (host elements as components: `dom::host_component`); `YNode`, `Accessor`, `Signal`, `Context`, `Component`, the types of styles, element props, events and `JSX` | `reactive.rs`, `dom.rs` |
 | `nsh:rt` | what compiled JSX calls (`element`, `insert`, `spread`, `cond`, `each`, `list`, `font`, ...); apps never import it | `dom.rs`, `list.rs` |
 | (globals) | `If`, `Each` (control flow; their tags compile to `cond` / `each`) | `dom.rs` |
-| `nsh/animated` | `createNativeValue`, `NativeValue`, `NativeNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
-| `nsh/device` | `windowSize()`, `colorScheme()`, `fontScale()`, `Platform`, `PixelRatio`, `I18nManager` | `env.rs` |
+| `nsh/animated` | `createAnimatedValue`, `AnimatedValue`, `AnimatedNode`, `Animated`, `Easing`, `LayoutAnimation` | `animated.rs` |
+| `nsh/device` | `windowSize()`, `colorScheme()`, `fontScale()`, `locale()`, `Platform`, `PixelRatio`, `I18nManager` | `env.rs` |
 | `nsh/accessibility` | `AccessibilityInfo`, `screenReaderEnabled()`, `reduceMotion()` | `env.rs` + its registry (`nsh_core::runtime`) |
 | `nsh/list` | `List` | `list.rs` |
 | `nsh/canvas` | `Canvas`, `Path2D`, `CanvasRenderingContext2D`, `CanvasGradient` | `canvas.rs` |
 | `nsh/image` | `Image`: the image element's component, with `Image.getSize`, `Image.prefetch` (promises the core resolves from the root's `ImageInfo` event) | `modules.rs` + its registry (`components.rs`) |
 | `nsh/gesture` | `PanResponder` | `touch.rs` |
-| `nsh/clipboard` | `Clipboard.setString(text)`, `Clipboard.getString()` / `hasString()` (promises the core resolves from the root's `Clipboard` event; `hasString` does not read the text, so iOS shows no paste notice); UIPasteboard, ClipboardManager, `navigator.clipboard`; the `clipboard` capability | its registry (`nsh_core::runtime`) |
+| `nsh/clipboard` | `Clipboard.setString(text)`, `Clipboard.getString()` / `hasString()`, `setImage(uri)`, `getImage()` / `hasImage()`, `getFiles()` (promises the core resolves from the root's `Clipboard` event; the `has*` reads do not read the content, so iOS shows no paste notice). Images cross as base64 `data:` URIs (an image source and a `fetch` URL, so bytes stay native until JS asks for them), files as `file:` URLs one per line; the backends build both with `nsh_core::platform::clipboard`. UIPasteboard, ClipboardManager (text only), NSPasteboard, GDK, Win32, `navigator.clipboard`; the `clipboard` capability | its registry (`nsh_core::runtime`) |
+| `nsh/storage` | `Storage.getItem` / `setItem` / `removeItem` / `getAllKeys` / `clear` (async functions of the core; the entries live in memory in `nsh_core::storage`, loaded once from the platform's `StorageBackend` (`EngineConfig::storage`: `nsh_engine::FileStorage::open` in `<EngineConfig::data_dir>/<app id>` (the id travels with the app: `app.json`, the dev server, packages, `Root::app_id`), one per file in the process so a reload reads unflushed writes; a damaged file is set aside as `storage.json.corrupt`, an unreadable one leaves the changes in memory, never replacing it; `localStorage` under `nsh:<app id>:` on the web) and every change handed to it; 5 MB quota; no capability: the app's own data, kept where the host says) | its registry (`nsh_core::runtime`) |
 | `nsh/keymap` | `keymap.bind(keystroke, handler, { when, repeat })` / `keymap.bind({ keystroke: handler })`: keyboard shortcuts. Keystrokes are parsed and checked in Rust (`nsh_core::keymap`: syntax, `mod`, reserved keystrokes, which ones text inputs keep); the whole table goes to the platform as the root's `Prop::Keymap` → `MountItem::Keymap`, which matches keys on the spot and reports the root's `KeyCommand` event (the binding's id). Bindings made under an owner go with it; a module's top-level ones are undone when hot module replacement runs it again (`hot::undo_on_rerun`) | `keymap.rs` |
 | `nsh/webview`, `nsh/video` | `WebView`, `Video` | `platform_modules.rs` |
-| `nsh/native` | `nativeComponent(name, { props, events })`: a component for a native component the embedding app registered | `platform_modules.rs` |
+| `nsh/native` | `nativeComponent(name, { props, events })`: a component for a native component the embedding app registered; `nativeModule(specifier)`: the exports of a UI set the embedding app gave its engines (`EngineConfig::ui_sets`), as one object made by the loader's code (`modules::host_module`, the same values an import of the set gets) and kept per specifier; only the host's sets, never nsh's own modules or the runtime's registries | `platform_modules.rs`, `modules.rs` |
 | `nsh/ios` | `isAvailable`, `InputAccessoryView` | `platform_modules.rs` |
 | `nsh/android` | `isAvailable`, `Toast.show(message, "short" \| "long")`, `BackHandler` (`addEventListener` native, `exitApp` Rust) | `platform_modules.rs` + its registry |
-| `nsh/desktop` | `isAvailable`, `titleBar()` (the environment's `title_bar`), `Menu.setApplicationMenu` / `Menu.popup` (decoded natively into `nsh_core::desktop::MenuItem`s, the items' functions kept by id, called on the root's `onMenu`), `Window` (Rust: `setTitle`, `setTitleBar`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setLevel`, `close`); all of it is `Command::Desktop` on the root, which mobile platforms ignore | `desktop.rs` + its registry |
+| `nsh/desktop` | `isAvailable`, `titleBar()` (the environment's `title_bar`), `Menu.setApplicationMenu` / `Menu.popup` (decoded natively into `nsh_core::desktop::MenuItem`s, the items' functions kept by id, called on the root's `onMenu`), `Window` (Rust: `setTitle`, `setTitleBar`, `minimize`, `toggleMaximize`, `toggleFullScreen`, `setFrame`, `setLevel`, `orderFront`, `close`); all of it is `Command::Desktop` on the root, which mobile platforms ignore | `desktop.rs` + its registry |
 | `nsh/base` | The unstyled foundation of an app's UI. Navigation: `NavStack`, `NavPage`, `createNavStack`, `Dialog` (natives of `nsh-js`, `Registry::native_values`). Safe areas: `SafeAreaView` (Rust, with `Edge`), `safeArea()`, `safeAreaInsets()`, `Insets` (re-exported from the environment). Alerts: `AlertDialog.show({ title, description, actions, presentation })` (a promise of the chosen action's `id`, its `label` without one, `null` when closed without one; `presentation: "actionSheet"` is a list dialog on Android), the platform's own. A press target: `Button` (Rust; no look of its own). The keyboard: `KeyboardAvoidingView` (Rust, with `AvoidBehavior`), `Keyboard.dismiss`, `keyboardFrame()` (re-exported from the environment). The status bar: `statusBar` of `NavPage` and `Dialog` (a host prop of screens and modals; `StatusBar`, `StatusBarForeground` declared with the navigation) over `nsh.json`'s `"statusBar"` | `nsh_base::registry()` (`crates/nsh-base`); `navigation.rs`, `env.rs` |
 | an app's UI set (`app/native`) | The Rust components, modules and classes of the app's crate (`#[native_module("app/native")]`) | the registry (`components.rs`, `classes.rs`) |
 
@@ -86,4 +88,5 @@ and the renames decided so far).
   crate of their own (`docs/dev/components.md`).
 - Something only one platform has: `nsh/ios` / `nsh/android`, or a prop in `ios={{…}}` / `android={{…}}` /
   `desktop={{…}}`.
-- Never a compatibility re-export when something moves, never a React Native compatibility wrapper.
+- Never a React Native compatibility wrapper. Something released that moves keeps its old name and module as a
+  deprecated alias (`compatibility.md`); something unreleased simply moves.

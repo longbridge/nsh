@@ -1,5 +1,5 @@
 import { Input, Scroll, type ScrollEvent, signal, Text, View, type YNode } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { windowSize } from "nsh/device";
 import { List } from "nsh/list";
@@ -86,7 +86,7 @@ function Pager() {
   // Pages as wide as the scroll view (the Section's inset is 32 + 12 + 28 narrower than the window).
   const width = signal(windowSize().width - 72);
   const page = signal(0);
-  const x = createNativeValue(0);
+  const x = createAnimatedValue(0);
   const step = 16;
   return (
     <View style={{ gap: 12 }}>

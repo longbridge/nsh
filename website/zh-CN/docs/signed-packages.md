@@ -80,7 +80,7 @@ nsh publish App.tsx --key keys/release.secret --cert keys/release.cert
 ```
 
 ```text
-out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee
+out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets, 12 KB, signed by 3428d7136788c9ee, for runtime 0.1.1 or newer
 ```
 
 `nsh publish` 以 release 模式构建应用并签名。app id、名称、版本和构建号取自入口文件旁的 `nsh.json`，可以用下列参数覆盖：
@@ -93,6 +93,9 @@ out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets,
 | `--id <id>` | app id，例如 `com.example.app`。 |
 | `--app-version <version>` | 版本，例如 `1.2.0`。 |
 | `--build <n>` | 构建号。必填（在此处或 `nsh.json` 中指定）；每次发布都必须递增。 |
+| `--source-map <where>` | `package`（默认）：放进包里。`file`：写到包旁边的 `<package>.map`，不放进包里。`none`：不输出。见[已发布包的报错](#已发布包的报错)。 |
+| `--strip-debug` | 字节码中不保留行号和列号表：包更小，但报错调用栈里没有位置。 |
+| `--min-runtime <version>` | 能运行该包的最低运行时版本，例如 `0.2.0`（`nsh.json` 中的 `minRuntime`）。默认：本 CLI 的版本。见[哪些运行时能运行包](#哪些运行时能运行包)。 |
 
 凡是设备会拒绝的包，`nsh publish` 也拒绝签名：证书必须覆盖该 app id 和当前时间。
 
@@ -100,17 +103,47 @@ out/com.example.counter-2.nshpkg: com.example.counter 1.0.0 (build 2), 0 assets,
 error the release key's certificate does not cover this package: it does not cover app `com.example.counter` (only com.other.app)
 ```
 
+### 哪些运行时能运行包
+
+包里写明了能运行它的最低 NSH 运行时版本，运行时比它旧的宿主应用会在运行任何代码之前拒绝它：
+
+```text
+error the package needs runtime 0.2.0 or newer; this runtime is 0.1.1
+```
+
+默认值是构建该包的 CLI 的版本：bundle 是按这个 CLI 的模块编译的，所以已知能运行它的就是这个版本的运行时。如果线上的宿主
+应用运行时更旧，而应用只用到了那个运行时已有的功能，就用 `--min-runtime`（或 `nsh.json` 中的 `minRuntime`）为它发布：
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --min-runtime 0.1.0
+```
+
+版本号的格式是 `MAJOR.MINOR.PATCH`；带预发布后缀的版本（`0.2.0-beta.1`）按去掉后缀的版本计算。它不能比 CLI 更新。
+上传之前，先在带有该运行时的宿主应用上试一下这个包：旧运行时缺少的导入或函数，会在模块加载时报错。
+
 ### 包里有什么
 
-包是单个文件：先是一个 JSON 头（app id、名称、版本、构建号、声明的能力、字节码版本、签名时间、发布密钥的证书，以及
+包是单个文件：先是一个 JSON 头（app id、名称、版本、构建号、声明的能力、字节码版本、最低运行时版本、签名时间、发布密钥的证书，以及
 一张列出各文件及其 SHA-256 的文件表），然后是各个文件，最后是发布密钥对前面所有内容的 Ed25519 签名。其中的文件包括：
 
 - 应用的 JS 源码（始终包含）；
 - 它的字节码，仅当设备上运行时的字节码版本与之相同时才会使用（否则运行源码，因此包在更新的运行时上仍然可用）；
-- 它的 source map；
+- 它的 source map（用 `--source-map file` 或 `none` 发布时除外）；
 - 它导入的资源（图片、字体）。
 
 包的标识（用于吊销）是整个文件的 SHA-256。
+
+### 由更新版本的 NSH 签名的包
+
+只要宿主应用的运行时不低于包的[最低运行时版本](#哪些运行时能运行包)，它就能运行由更新的 `nsh publish` 签名的包。新版本新增、而宿主运行时
+不认识的内容会被略过，且绝不会扩大包能做的事：
+
+- 不认识的头字段和文件会被忽略（它们依然受签名和哈希保护），除非包把某个字段标记为运行时必须理解的字段：这时更旧的
+  运行时会拒绝该包；
+- 不认识的[能力](./sandbox-and-capabilities.md)不会被授予；某项能力或某条 `http` 授权中出现不认识的键时，会整个被丢弃，
+  因为这个键可能是对它的限制。
+
+包加载时会把略过的内容记录到日志。
 
 ## 验证包
 
@@ -170,7 +203,8 @@ nsh revoke --root keys/root.secret --extend revocations.json --key 3428d7136788c
 ## 回滚保护
 
 宿主应用接受一个包后，其信任存储会记录该 app id 的构建号，此后拒绝更旧的构建。即使攻击者拿到了一个存在已知漏洞的
-旧签名包，也无法让应用运行它。这条记录保存在信任存储的状态目录中（`nsh-trust.json`），重启后依然有效。
+旧签名包，也无法让应用运行它。这条记录保存在信任存储的状态目录中（`nsh-trust.json`），重启后依然有效。在 GPUI 上，宿主应用可以等新包被证明健康之后再记录（先
+`verify_package`，再 `accept_package`，见下文）。
 
 ## 在宿主应用中加载包
 
@@ -198,10 +232,66 @@ NshPackage pkg = trust.openPackage(downloaded);   // off the UI thread; throws N
 runOnUiThread(() -> nsh.runPackage(pkg));
 ```
 
+**GPUI（Rust）**，宿主应用还可以等包被证明健康之后再接受它：
+
+```rust
+use nsh_platform_gpui::{accept_package, package::{PublicKey, TrustStore}, verify_package};
+
+let mut trust = TrustStore::open(state_dir)?;
+trust.add_root(PublicKey::from_base64(ROOT_PUB)?);
+
+// Off the main thread: verified as strictly as ever, but the build is not recorded yet.
+let package = verify_package(&trust, &bytes, &packages_dir)?;
+view.read(cx).run_package(&package);
+// Later, once its first frame showed and no fatal error came for a while:
+accept_package(&mut trust, &package)?;
+```
+
+包被接受之前，此前接受过的构建依然能通过验证，所以新包出问题时宿主应用可以退回它之前运行的包（信号可以是
+`AppView::on_error` 收到的致命错误，或者在接受之前崩溃）。比已接受构建更旧的包仍会被拒绝，期间被吊销的包也不会被接受。
+`load_package` 会一次完成验证和接受，与 iOS、Android 上的 `openPackage` 相同。
+
 包声明的[能力](./sandbox-and-capabilities.md)随包一起传递：包只能做它声明的事，并且还要在宿主应用授予的范围之内。
 
 完整 API：[嵌入 iOS 应用](./embedding-ios.md)、
 [嵌入 Android 应用](./embedding-android.md)。
+
+## 已发布包的报错
+
+包里的字节码保留了行号和列号表，所以报错带有位置；运行时会先用包里的 source map 把它们映射到你的源码，再交给宿主应用的
+错误回调：
+
+```text
+Error: boom
+    at n (App.tsx:5:3)
+```
+
+source map 里包含应用的原始源码，往往也是包里最大的文件：gallery 示例 2.6 MB 的包里大约一半是它。如果不想把它随包分发，
+可以把它输出到包的旁边：
+
+```sh
+nsh publish App.tsx --key keys/release.secret --cert keys/release.cert --source-map file
+```
+
+```text
+✓ wrote the source map to out/com.example.counter-2.nshpkg.map (6.1 KB)
+```
+
+这时设备上报的是 bundle 中的位置（`at n (bundle.js:1:80)`）。把 source map 和对应的包一起保存好，再用 `nsh symbolicate`
+映射宿主应用上报的内容：
+
+```sh
+nsh symbolicate out/com.example.counter-2.nshpkg.map report.txt
+```
+
+```text
+Error: boom
+    at n (App.tsx:5:3)
+```
+
+`nsh symbolicate` 从文件或标准输入读取报错文本，接受 source map 文件，或带有 source map 的包。行号表会让字节码增大约
+五分之一（对带 source map 的包而言是 3–5%）；`--strip-debug` 会去掉它们，此时调用栈显示为 `at n (<null>:0:1)`，
+无法再映射。
 
 ## 在开发中试用包
 

@@ -35,7 +35,33 @@ pub trait CallbackHandle: std::any::Any {
 }
 
 type ArgsFn = Box<dyn for<'a> FnOnce(&'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>>;
-type ReplyFn = Box<dyn for<'a> FnOnce(Result<JsIn<'a>, String>)>;
+type ReplyFn = Box<dyn for<'a> FnOnce(Result<JsIn<'a>, Exception>)>;
+
+/// What a JS function threw ([`Callback::call_async_traced`]): its message
+/// and, for an `Error`, the stack where it was made (`    at f
+/// (bundle.js:12:5)` lines, the bundle's positions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exception {
+    /// The message (an `Error`'s `message`, else the value as a string).
+    pub message: String,
+    /// The stack, for an `Error`.
+    pub stack: Option<String>,
+}
+
+impl From<String> for Exception {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            stack: None,
+        }
+    }
+}
+
+impl fmt::Display for Exception {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
 
 /// A call of a JS function: its arguments, made when it runs, and what
 /// receives its result.
@@ -87,8 +113,8 @@ impl JsCall {
         self.settles
     }
 
-    /// Delivers the result (or the message of what the function threw).
-    pub fn reply(mut self, result: Result<JsIn<'_>, String>) {
+    /// Delivers the result (or what the function threw).
+    pub fn reply(mut self, result: Result<JsIn<'_>, Exception>) {
         if let Some(reply) = self.reply.take() {
             reply(result);
         }
@@ -98,7 +124,9 @@ impl JsCall {
 impl Drop for JsCall {
     fn drop(&mut self) {
         if let Some(reply) = self.reply.take() {
-            reply(Err("the JS function was not called (JS stopped)".to_owned()));
+            reply(Err("the JS function was not called (JS stopped)"
+                .to_owned()
+                .into()));
         }
     }
 }
@@ -112,7 +140,10 @@ impl fmt::Debug for JsCall {
 }
 
 /// A JS function a class's member or a function takes (TS:
-/// `Callback<(String, f64), bool>` is `(a: string, b: number) => boolean`):
+/// `Callback<f64>` is `(value: number) => void`, `Callback<(String, f64),
+/// bool>` is `(a: string, b: number) => boolean`; `#[args(name, amount)]`
+/// on the parameter names them, `(name: string, amount: number) =>
+/// boolean`):
 /// `A` is its argument (a [`JsValue`] type, an instance, a tuple of them
 /// for several, `()` for none), `R` what it returns. Cheap to clone; the JS
 /// function is released when the last clone goes. Kept in an instance's
@@ -164,7 +195,11 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
             self.handle.clone(),
             args,
             Some(Box::new(move |result| {
-                *slot.borrow_mut() = Some(result.and_then(|v| R::from_js(v).map_err(|e| e.0)));
+                *slot.borrow_mut() = Some(
+                    result
+                        .map_err(|e| e.message)
+                        .and_then(|v| R::from_js(v).map_err(|e| e.0)),
+                );
             })),
             false,
         );
@@ -189,7 +224,26 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
             self.handle.clone(),
             args,
             Some(Box::new(move |result| {
-                let value = result.and_then(|v| R::from_js(v).map_err(|e| e.0));
+                let value = result
+                    .map_err(|e| e.message)
+                    .and_then(|v| R::from_js(v).map_err(|e| e.0));
+                slot.borrow_mut().deliver(value);
+            })),
+            true,
+        ));
+        answer
+    }
+
+    /// [`Callback::call_async`], with what the function threw (or its
+    /// promise rejected with) whole: the message and the stack, which says
+    /// where it was thrown (a test's failing line).
+    pub fn call_async_traced(&self, args: A) -> Answer<Result<R, Exception>> {
+        let (answer, slot) = Answer::new();
+        self.handle.post(JsCall::new(
+            self.handle.clone(),
+            args,
+            Some(Box::new(move |result| {
+                let value = result.and_then(|v| R::from_js(v).map_err(|e| e.0.into()));
                 slot.borrow_mut().deliver(value);
             })),
             true,
@@ -200,8 +254,13 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Callback<A, R> {
 
 /// The arguments of a [`Callback`]: one value, `()` for none, or a tuple.
 pub trait CallbackArgs {
-    /// Its TypeScript parameters (`a: string, b: number`).
-    fn ts_params(types: &mut TsTypes) -> String;
+    /// How many there are.
+    const ARITY: usize;
+
+    /// Its TypeScript parameters, named `names` (`name: string, amount:
+    /// number`), or without names `value` for one and `a`, `b`, ... for
+    /// several.
+    fn ts_params(types: &mut TsTypes, names: &[&str]) -> String;
     /// The arguments as JS values.
     fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError>;
     /// Adds the classes the arguments name.
@@ -210,11 +269,17 @@ pub trait CallbackArgs {
 }
 
 impl<T: Ret> CallbackArgs for T {
-    fn ts_params(types: &mut TsTypes) -> String {
+    const ARITY: usize = if T::UNIT { 0 } else { 1 };
+
+    fn ts_params(types: &mut TsTypes, names: &[&str]) -> String {
         if T::UNIT {
             String::new()
         } else {
-            format!("a: {}", T::ts_type(types))
+            format!(
+                "{}: {}",
+                names.first().copied().unwrap_or("value"),
+                T::ts_type(types)
+            )
         }
     }
 
@@ -234,8 +299,16 @@ impl<T: Ret> CallbackArgs for T {
 macro_rules! callback_tuple {
     ($(($($t:ident $v:ident $n:literal),*)),*) => {$(
         impl<$($t: Ret),*> CallbackArgs for ($($t,)*) {
-            fn ts_params(types: &mut TsTypes) -> String {
-                [$(format!("{}: {}", $n, $t::ts_type(types))),*].join(", ")
+            const ARITY: usize = [$($n),*].len();
+
+            fn ts_params(types: &mut TsTypes, names: &[&str]) -> String {
+                let defaults = [$($n),*];
+                [$($t::ts_type(types)),*]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ts)| format!("{}: {ts}", names.get(i).copied().unwrap_or(defaults[i])))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             }
 
             fn into_js_args<'a>(self, host: &'a dyn JsHost) -> Result<Vec<JsOwned<'a>>, PropError> {
@@ -285,14 +358,46 @@ impl CallbackRet for () {
     }
 }
 
-/// The TypeScript type of a callback: `(a: string) => void`.
-fn callback_ts<A: CallbackArgs, R: CallbackRet>(types: &mut TsTypes) -> String {
-    format!("({}) => {}", A::ts_params(types), R::ts_type(types))
+/// The TypeScript type of a callback whose arguments are named `names`
+/// (none: the defaults): `(value: string) => void`.
+fn callback_ts<A: CallbackArgs, R: CallbackRet>(types: &mut TsTypes, names: &[&str]) -> String {
+    format!("({}) => {}", A::ts_params(types, names), R::ts_type(types))
+}
+
+/// A parameter whose JS function's arguments `#[args(..)]` names: a
+/// [`Callback`], or an `Option` of one.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`#[args(..)]` names the arguments of a `Callback`: `{Self}` is not one",
+    label = "`#[args(..)]` is for a `Callback<A, R>` parameter (or an `Option` of one)"
+)]
+pub trait NamedArgs {
+    /// How many arguments the function takes.
+    const ARITY: usize;
+    /// The parameter's TypeScript type, its function's arguments named
+    /// `names`.
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String;
+}
+
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> NamedArgs for Callback<A, R> {
+    const ARITY: usize = A::ARITY;
+
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
+        callback_ts::<A, R>(types, names)
+    }
+}
+
+impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> NamedArgs for Option<Callback<A, R>> {
+    const ARITY: usize = A::ARITY;
+
+    fn ts_named(types: &mut TsTypes, names: &[&str]) -> String {
+        format!("({}) | null", callback_ts::<A, R>(types, names))
+    }
 }
 
 impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R> {
     fn ts_type(types: &mut TsTypes) -> String {
-        callback_ts::<A, R>(types)
+        callback_ts::<A, R>(types, &[])
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
@@ -311,7 +416,7 @@ impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Callback<A, R>
 /// `null` or `undefined` is `None`.
 impl<A: CallbackArgs + 'static, R: CallbackRet + 'static> Arg for Option<Callback<A, R>> {
     fn ts_type(types: &mut TsTypes) -> String {
-        format!("({}) | null", callback_ts::<A, R>(types))
+        format!("({}) | null", callback_ts::<A, R>(types, &[]))
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {

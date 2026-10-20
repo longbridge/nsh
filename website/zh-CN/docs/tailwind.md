@@ -136,11 +136,41 @@ Rust 组件（`SafeAreaView`、`KeyboardAvoidingView` 以及应用自己 crate �
 
 未知的键和无效的值会导致构建错误（`nsh.json: tailwind: unknown theme key 'colours'`）。主题会编译进 bundle，并在第一帧之前生效。
 
-这个主题只影响你自己的类名。Rust 组件从组件主题，即 `nsh.json` 中的 `"theme"` 获取颜色（[用 Rust 开发](./rust.md)）。
+Tailwind 主题只影响你自己的类名。Rust 组件从组件主题，即 `nsh.json` 中的 `"theme"` 获取颜色（[用 Rust 开发](./rust.md)）。
+
+## 主题 token
+
+你的类名也可以引用组件主题里的颜色和数值，让应用跟它的 Rust 组件使用同一套主题：
+
+```tsx
+<View class="rounded-(--radius-lg) border border-border bg-background p-4">
+  <Text class="text-foreground">Balance</Text>
+  <Text class="text-muted-foreground">Updated just now</Text>
+  <View class="rounded-(--radius) bg-primary px-4 py-2 active:bg-primary-active">
+    <Text class="text-primary-foreground text-(length:--font-size)">Continue</Text>
+  </View>
+</View>
+```
+
+token 就是主题文件里的键，把其中的点写成连字符：`muted.foreground` 写作 `muted-foreground`，`radius.lg` 写作 `--radius-lg`。以 `.background` 结尾的键可以省略这一段：`bg-primary` 即 `primary.background`，`bg-primary-background` 同样可用。
+
+| 写法 | 取值 | 示例 |
+|---|---|---|
+| 任意颜色类里的颜色名 | 主题颜色 | `bg-primary`、`text-muted-foreground/70`、`border-t-border`、`ring-ring`、`from-accent`、`placeholder:text-muted-foreground` |
+| `(--name)`，Tailwind 4 的变量简写 | 主题颜色或数值 | `bg-(--primary)`、`rounded-(--radius)`、`p-(--gap-card)` |
+| `(color:--name)`、`(length:--name)`、`(number:--name)` | 同上，在一个类可以接受多种值时标明类型 | `text-(color:--link)`、`text-(length:--font-size)` |
+
+- **每个键都是 token。** 包括组件用到的键（`primary.background`、`border`、`radius`、`font.size` 等，列表见[用 Rust 开发](./rust.md)），以及主题文件里的其他任何键：`"sidebar.background"` 生成 `bg-sidebar`，`"chart.up": "#16a34a"` 生成 `text-chart-up`，数值 `"radius.card": 10` 生成 `rounded-(--radius-card)`。数值的单位是点；`(number:--name)` 传入不带单位的数值。
+- **两种外观。** token 带有主题的浅色值和深色值：`bg-primary` 会随外观自动切换，不需要 `dark:` 类。只在一种模式里设置的颜色在两种模式下都使用该值。
+- **你的 Tailwind 颜色优先。** `"tailwind"` 的 `colors` 或 Tailwind 调色板里的名称就是那个颜色，所以只有 Tailwind 主题里没有 `primary` 这个颜色时，`bg-primary` 才是主题 token。
+- **主题可以在运行时改变。** 嵌入原生应用的 NSH 应用拿到宿主的主题时，以及主题每次变化时，引用 token 的类会在原生侧重新应用样式，不运行 JavaScript。宿主主题里没有的 token 使用应用自己 `"theme"` 中的值（再没有则用默认主题的值）。
+- **与其他类名一样检查。** 既不是默认主题、也不是应用 `"theme"` 中 token 的名称，在构建时会报告为未知类（`unknown class 'bg-chart-up'`）。要使用只有宿主提供的 token，在应用的 `"theme"` 里也给它一个值：应用单独运行时显示这个值。
+
+引用 token 的类和其他类一样，每套主题只解析一次：绘制时的开销与调色板颜色相同。
 
 ## 类名检查
 
-`nsh build`、`nsh dev`、`nsh run` 和 `nsh trace` 会用运行时相同的解析器和主题检查 JSX 中的静态类名（`class` 中的字符串字面量以及 `classList` 的键），并对不存在的类发出警告：
+`nsh build`、`nsh dev`、`nsh run` 和 `nsh test` 会用运行时相同的解析器和主题检查 JSX 中的静态类名（`class` 中的字符串字面量以及 `classList` 的键），并对不存在的类发出警告：
 
 ```text
  warn nsh::build App.tsx:12:36: unknown class `bg-brand-550`

@@ -597,12 +597,13 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
 }
 
 /// Whether hovering `view` matters: for its `hover:` styles (the
-/// `HOVERED` state) or its `onHoverIn` / `onHoverOut`.
+/// `HOVERED` state) or its `onHoverIn` / `onHoverOut` / `onHoverMove`.
 fn hoverable(view: &NshView) -> bool {
     let s = view.state();
     s.tracked & HOVERED != 0
         || s.events.contains(EventKind::HoverIn)
         || s.events.contains(EventKind::HoverOut)
+        || s.events.contains(EventKind::HoverMove)
 }
 
 fn update_hover_tracking(surface: &Surface, view: &NshView) {
@@ -872,18 +873,42 @@ fn collect_drag(
     });
 }
 
-/// A right click at `(x, y)`: the edit menu of the text field or the
-/// selectable text under it.
-fn context_menu(surface: &Rc<Surface>, x: f32, y: f32) {
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it,
+/// unless a text field or selectable text is nearer: that shows its edit
+/// menu.
+fn context_menu(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     let Some(hit) = pick(&surface.root, x, y, true) else {
         return;
     };
     let mut view = Some(hit.view);
     while let Some(v) = view {
-        let (input, selectable) = {
+        let (id, listens, input, selectable) = {
             let s = v.state();
-            (s.kind == ViewKind::Input, crate::text::selectable(&s))
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+                crate::text::selectable(&s),
+            )
         };
+        if listens {
+            let (location_x, location_y) = local(&v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location_x,
+                location_y,
+                page_x: x,
+                page_y: y,
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: modifiers.ctrl,
+                    alt: modifiers.alt,
+                    shift: modifiers.shift,
+                    cmd: modifiers.meta,
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return;
+        }
         if input {
             crate::text_input::context_menu(surface, &v);
             return;
@@ -910,8 +935,10 @@ pub(crate) fn pointer(surface: &Rc<Surface>, event: PointerEvent) {
     let mouse = key == Key::Mouse;
     match event.kind {
         PointerKind::Down => {
+            // The secondary button (GPUI's macOS window already turns a
+            // Control-click into one).
             if mouse && event.button == 1 {
-                context_menu(surface, x, y);
+                context_menu(surface, x, y, event.modifiers);
                 return;
             }
             // Any press elsewhere clears a text selection.
@@ -2118,8 +2145,40 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32, modifiers: Modifiers) {
     }
     // While the mouse is down, its moves go to what it pressed.
     if !pressed {
+        if tracking {
+            hover_moved(surface, x, y, modifiers);
+        }
         let item = hit.and_then(|h| h.item.map(|n| Item::Hosted(h.view, n)));
         set_hover_item(surface, item, (x, y), modifiers);
+    }
+}
+
+/// `onHoverMove` of the hovered views that listen, with the mouse at
+/// `(x, y)` (root coordinates) in each.
+fn hover_moved(surface: &Surface, x: f32, y: f32, modifiers: Modifiers) {
+    let hovered = surface.input.hovered.borrow().clone();
+    for v in hovered {
+        let id = {
+            let s = v.state();
+            if !s.events.contains(EventKind::HoverMove) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(&v, x, y);
+        let event = nsh_core::HoverEvent {
+            location_x,
+            location_y,
+            page_x: x,
+            page_y: y,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: modifiers.ctrl,
+                alt: modifiers.alt,
+                shift: modifiers.shift,
+                cmd: modifiers.meta,
+            },
+        };
+        surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
 }
 
@@ -2887,7 +2946,6 @@ mod tests {
         events_changed(&surface, &outer);
         inner.state_mut().events.set(EventKind::HoverIn, true);
         events_changed(&surface, &inner);
-        let _ = quiet;
 
         move_to(&surface, 20.0, 20.0);
         assert_eq!(hovered_ids(&surface), vec![4, 2]);
@@ -2901,6 +2959,12 @@ mod tests {
         inner.state_mut().events.set(EventKind::HoverIn, false);
         events_changed(&surface, &inner);
         assert_eq!(hovered_ids(&surface), vec![2]);
+
+        // A move listener alone has its view hovered.
+        quiet.state_mut().events.set(EventKind::HoverMove, true);
+        events_changed(&surface, &quiet);
+        move_to(&surface, 120.0, 120.0);
+        assert_eq!(hovered_ids(&surface), vec![6, 2]);
     }
 
     #[test]

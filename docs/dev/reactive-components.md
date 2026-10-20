@@ -240,8 +240,8 @@ view().w(move || px(width.get()))
 - Styles that depend on app state: `.style_when(selected, |s| s.bg(theme.accent))` takes a reactive condition,
   lowers the extra layer once, and the binding switches it on and off. Native states (`.active`, `.hover`, `.dark`,
   `group_*`) stay native and need no binding, as today.
-- `NativeValue` animation bindings (`bind_opacity`, `bind_translate_y`, ...) stay: they are bindings already, evaluated
-  on the UI thread. A plain signal is for values the app computes; a native value for values the UI thread drives.
+- `AnimatedValue` animation bindings (`bind_opacity`, `bind_translate_y`, ...) stay: they are bindings already, evaluated
+  on the UI thread. A plain signal is for values the app computes; an animated value for values the UI thread drives.
 
 ### Control flow
 
@@ -288,6 +288,9 @@ dynamic(move || if wide.get() { two_columns() } else { one_column() })
   when the owner goes. Async code writes signals directly; `WeakComponent`, `this.update(..)` and `Updated` go.
 - `set_timeout`, `set_interval`, `request_animation_frame`, `timer(..).await`, `next_frame().await`: free functions,
   owned the same way. Dropping the returned handle still cancels early.
+- `resource(source, fetcher)` (TS: `resource`): a render effect reads the source and spawns the load, whose task the
+  next run (or the owner's disposal) drops, cancelling what it awaited; the value, error and state are signals, and
+  which load counts is `nsh_core::resource::Runs`, the JS face's too.
 - Platform services (`dialog`, `toast`, `set_clipboard`, `clipboard_string`, `announce`, `image_size`, ...) become free
   functions on the current runtime, as `nsh/*` modules are free functions in TSX. `Context`, `RenderCx` and `AsyncCx`
   go; `ModuleCx` keeps only what a module call needs.
@@ -314,7 +317,7 @@ bindings, and pushes `Op`s into a queue the core applies, exactly as JS's ops ar
 
 What leaves the core: `render_components`, `MAX_RENDERS`, `Expanded`, `reconcile_children` / `reconcile_node` /
 `reconcile_raw`, `Attrs::changes`, `ListConfig::changes`, per-render handler tables, `RenderReads` and the scans for
-readers of the environment, globals and context, `NativeNode::derive`'s de-duplication (it existed because renders ran
+readers of the environment, globals and context, `AnimatedNode::derive`'s de-duplication (it existed because renders ran
 again), the "absent means default" resets. What stays: host nodes, odd ids, prop decoding, event routing, slots and
 children holders, the JS glue, the declarations.
 

@@ -5,10 +5,10 @@ use crate::{
     ui::{ModuleCx, ToastDuration, module, task::Action},
 };
 
-/// Short messages at the bottom of the screen.
+/// Short messages at the bottom of the screen (Android's toasts).
+#[module]
 pub(crate) struct Toast;
 
-/// Short messages at the bottom of the screen (Android's toasts).
 #[module]
 impl Toast {
     /// Shows `message` (`"short"` by default).
@@ -17,10 +17,10 @@ impl Toast {
     }
 }
 
-/// The back button's functions (its listeners are JS's).
+/// The back button, after modals and stacks had their turn.
+#[module]
 pub(crate) struct BackHandler;
 
-/// The back button, after modals and stacks had their turn.
 #[module]
 impl BackHandler {
     /// Leaves the app.

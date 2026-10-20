@@ -95,6 +95,8 @@ impl nsh_engine::Assets for AssetReader {
 enum Source {
     Url(Retained<NSURL>),
     File(std::path::PathBuf),
+    /// A `data:` URI (base64), decoded off the main thread.
+    Data,
 }
 
 /// What the loader tells the mounter, on the main thread.
@@ -308,6 +310,19 @@ impl ImageLoader {
                 });
                 None
             }
+            Some(Source::Data) => {
+                let uri = uri.to_owned();
+                DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
+                    DispatchQueueGlobalPriority::Default,
+                ))
+                .exec_async(move || {
+                    let result = nsh_core::platform::clipboard::decode_data_uri(&uri)
+                        .map(|(_, bytes)| NSData::with_bytes(&bytes))
+                        .ok_or_else(|| "not a base64 data: URI".to_owned());
+                    on_main(&notify, LoadEvent::Bytes { uri, result });
+                });
+                None
+            }
             None => {
                 let result = Err(format!("unsupported image source `{uri}`"));
                 on_main(
@@ -485,6 +500,9 @@ impl ImageLoader {
         }
         if uri.starts_with("http://") || uri.starts_with("https://") {
             return url(uri).map(Source::Url);
+        }
+        if uri.starts_with("data:") {
+            return Some(Source::Data);
         }
         let path = uri.strip_prefix("file://").unwrap_or(uri);
         path.starts_with('/').then(|| Source::File(path.into()))

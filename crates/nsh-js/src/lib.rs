@@ -31,6 +31,8 @@ mod net;
 mod platform_modules;
 mod protocol;
 mod reactive;
+mod rejections;
+mod resource;
 mod sandbox;
 mod state;
 mod timers;
@@ -44,7 +46,7 @@ pub use nsh_core::{
 
 pub use crate::{
     bytecode::{
-        BUNDLE_NAME, BYTECODE_VERSION, compile_bytecode, compile_bytecode_with,
+        BUNDLE_NAME, BYTECODE_VERSION, Strip, compile_bytecode, compile_bytecode_with,
         compile_chunk_bytecode,
     },
     declarations::type_definitions,
@@ -53,3 +55,13 @@ pub use crate::{
     net::{FetchEvent, FetchOp, HttpBody, HttpHead, HttpRequest, NetworkQueue, RequestId},
     sandbox::compile_harden,
 };
+
+/// The names native module `specifier` exports, if it is one: nsh's own
+/// modules, the runtime's and those of `ui_sets` (a bundler checks named
+/// imports against them).
+pub fn native_module_exports(
+    specifier: &str,
+    ui_sets: &[nsh_core::ui::description::SetDescription],
+) -> Option<Vec<String>> {
+    modules::ModuleTable::compiling(ui_sets).export_names(specifier)
+}

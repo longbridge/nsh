@@ -4,8 +4,9 @@ name: Examples
 # workspace under `examples/`: their lints and tests, such as the Rust
 # gallery's black-box tests, which run every demo through the engine,
 # headless) and every app entry (a top-level `.tsx` of an example that calls
-# `mount`), bundled with `nsh build`. Both are found, so a new example is
-# checked without a change here. The other workflows only run for
+# `mount`, and the `nsh.json` of a Rust app, one declaring a `"root"`),
+# built with `nsh build`. All are found, so a new example is checked
+# without a change here. The other workflows only run for
 # `crates/**`, so a change to the examples alone was never built.
 
 on:
@@ -27,6 +28,14 @@ concurrency:
   group: examples-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # CI builds each crate once: no incremental state and no debug info
+  # (faster builds, smaller caches; panics still name their file and line).
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # The toolchain file's iOS and Android targets are only the release's.
+  RUSTUP_TOOLCHAIN: stable
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -43,16 +52,11 @@ jobs:
         with:
           components: clippy
 
+      # Dependencies only: main's runs save it, pull requests restore it.
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-examples-cargo-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-examples-cargo-
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Find the Rust examples
         id: crates
@@ -70,10 +74,11 @@ jobs:
         run: cargo test ${{ steps.crates.outputs.packages }}
 
       # An app with a Rust crate (`nsh.json` "rust") builds its own command
-      # line with the crate first.
-      - name: Bundle the apps
+      # line with the crate first; a Rust app has no bundle, its build
+      # gathers what it ships besides its runners.
+      - name: Build the apps
         run: |
           cargo build -p nsh-cli
-          for entry in $(grep -l "mount(" examples/*/*.tsx); do
+          for entry in $(grep -l "mount(" examples/*/*.tsx) $(grep -l '"root"' examples/*/nsh.json); do
             ./target/debug/nsh build "$entry" -o "$RUNNER_TEMP/bundles/${entry//\//_}"
           done

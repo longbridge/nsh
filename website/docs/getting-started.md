@@ -25,26 +25,30 @@ A module is what a host app loads: one or more `.tsx` files with an entry. `nsh 
 |---|---|
 | `App.tsx` | The entry module: renders the app with `mount` |
 | `nsh.json` | The app's name, id, version and build number ([Project structure](./project-structure.md#nshjson)) |
-| `tsconfig.json` | TypeScript settings that resolve `nsh` to the declarations in `.nsh/types` |
+| `tsconfig.json` | Extends `.nsh/tsconfig.json`, NSH's TypeScript settings, which resolve `nsh` to the declarations in `.nsh/types` |
 | `.gitignore` | Ignores `.nsh/` and `out/` |
 | `.nsh/types/` | Generated declarations of every NSH module, for your editor |
 
 The display name defaults to the directory's name; pass `--name "My App"` to choose another. The id becomes `com.example.<name>`: change it in `nsh.json` before you ship. Files that already exist are kept, so you can run `nsh init` in a directory that has some of them.
 
+On a terminal, `nsh init` first asks what the app is written in: `ts` (the default, above), `rust` or `mixed`. `--template` chooses without asking.
+
 ### Start with Rust
 
-Use `nsh init my-app --rust` to create a Cargo project with native Rust UI:
+Use `nsh init my-app --template rust` to create an app written in Rust, a Cargo project:
 
 ```sh
-nsh init my-app --rust
+nsh init my-app --template rust
 cd my-app
 nsh run            # --target ios, android, web, macos, linux, windows or gpui
 cargo run          # the same root, straight on the desktop backend
 ```
 
-`src/lib.rs` contains the UI, state and event handlers, and `nsh.json` names its root (`"root": "App"`): `nsh run` and `nsh package` mount it on every platform, the browser included, with no QuickJS. `src/main.rs` mounts the same root directly on macOS, Windows or Linux for `cargo run`. `App.tsx` imports it from `app/native`: `nsh run App.tsx` runs that TSX entry, for screens written in TSX on top of the Rust components. Rust development requires a Rust toolchain (and, for `cargo run`, the desktop backend's development libraries); the `nsh` commands build the app's runners from NSH's crates on crates.io, at the CLI's version.
+`src/lib.rs` contains the UI, state and event handlers, and `nsh.json` names its root (`"root": "App"`): `nsh run` and `nsh package` mount it on every platform, the browser included, with no QuickJS. `src/main.rs` mounts the same root directly on macOS, Windows or Linux for `cargo run`. The project's README says how to add a TSX entry later, for screens written in TSX on top of the Rust components.
 
-See [Building with Rust](./rust.md), [the CLI reference](./cli.md#nsh-init) and `examples/gallery-rs` in the repository.
+`nsh init my-app --template mixed` creates a TSX app with a Rust crate of its own instead: `App.tsx` imports a component, a module and a class from the crate in `native/`. Rust development requires a Rust toolchain (and, for `cargo run`, the desktop backend's development libraries); the `nsh` commands build the app's runners from NSH's crates on crates.io, at the CLI's version.
+
+See [Building with Rust](./rust.md), [the CLI reference](./cli.md#nsh-init), and `examples/gallery-rs` (a Rust app) and `examples/rust-exports` (a TSX app with a crate) in the repository.
 
 ### The entry module
 
@@ -83,7 +87,7 @@ Line by line:
 - **`mount(App)`** renders the component into the app's surface.
 
 > [!IMPORTANT]
-> Text must be inside `<Text>`. A bare string in a `<View>` (`<View>Hello</View>`) is not displayed.
+> Text shows in a `<Text>`. Text written straight in a `<View>` (`<View>Hello</View>`) is a build error that points at it, and a string an expression puts there (`<View>{name}</View>`) is reported in the log.
 
 ## Develop it
 
@@ -266,13 +270,13 @@ This is a supported use on every platform, and the quickest way to put a module 
 
 ## Try it in the terminal
 
-`nsh trace` runs an app headless (no device) and prints the native view operations it produces and their timings, then taps the first pressable view twice:
+`nsh test` runs an app's tests headless (no device): `nsh init` wrote one, `App.test.tsx`, which opens the app, presses its button and checks what it shows:
 
 ```sh
-nsh trace my-app/App.tsx
+nsh test my-app
 ```
 
-It is a quick way to check that an app starts without errors, and to see how much work an interaction causes ([Testing and trace](./testing-and-trace.md)).
+With `--trace`, it also prints the native view operations the app produces and their timings: a quick way to see how much work an interaction causes ([Testing](./testing-and-trace.md)).
 
 ## Next steps
 

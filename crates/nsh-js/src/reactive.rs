@@ -23,7 +23,9 @@ use std::{
     ptr,
 };
 
-use nsh_core::reactive::{self as r, Equals, Kind, NONE, UNOWNED};
+#[cfg(test)]
+use nsh_core::reactive::UNOWNED;
+use nsh_core::reactive::{self as r, Equals, Kind};
 #[cfg(test)]
 use rquickjs::Ctx;
 use rquickjs::qjs;
@@ -188,6 +190,7 @@ struct Classes {
     signal: qjs::JSClassID,
     setter: qjs::JSClassID,
     memo: qjs::JSClassID,
+    resource: qjs::JSClassID,
 }
 
 /// The graph of `ctx`.
@@ -666,11 +669,11 @@ unsafe extern "C" fn get_owner(
     _argc: c_int,
     _argv: *mut JsValue,
 ) -> JsValue {
-    let owner = unsafe { graph(ctx) }.owner();
-    if owner == NONE || owner == UNOWNED {
-        UNDEFINED
+    let g = unsafe { graph(ctx) };
+    if g.has_owner() {
+        handle_value(ctx, g.owner())
     } else {
-        handle_value(ctx, owner)
+        UNDEFINED
     }
 }
 
@@ -779,6 +782,7 @@ pub(crate) fn new_graph(raw: *mut JsContext) -> Graph {
                 true,
                 qjs::JS_DupValue(raw, function_proto),
             ),
+            resource: crate::resource::register(raw),
         };
         qjs::JS_FreeValue(raw, function_proto);
         Graph::new(JsData {
@@ -876,6 +880,15 @@ pub(crate) unsafe extern "C" fn signal(
     object(ctx, class, id)
 }
 
+/// Whether `v` (borrowed) is a signal object (`signal()`), and whether
+/// it is a memo's (`memo()`, read-only).
+pub(crate) fn signal_kind(ctx: *mut JsContext, v: JsValue) -> (bool, bool) {
+    let classes = unsafe { graph(ctx) }.data.classes;
+    // SAFETY: reads the class of a live value.
+    let class = unsafe { qjs::JS_GetClassID(v) };
+    (class == classes.signal, class == classes.memo)
+}
+
 /// The signal `this` names, or a thrown `TypeError`.
 fn this_signal(ctx: *mut JsContext, this: JsValue) -> Result<u32, JsValue> {
     let class = unsafe { graph(ctx) }.data.classes.signal;
@@ -946,9 +959,43 @@ pub(crate) unsafe extern "C" fn effect(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let mut args = [arg(argc, argv, 0)];
-    // SAFETY: as above.
-    unsafe { create_user_effect(ctx, UNDEFINED, 1, args.as_mut_ptr()) }
+    let mut data = [arg(argc, argv, 0)];
+    // SAFETY: the function keeps a dup of `fn`; the effect a dup of it.
+    unsafe {
+        let run = qjs::JS_NewCFunctionData(ctx, Some(effect_run), 0, 0, 1, data.as_mut_ptr());
+        let mut args = [run];
+        let r = create_user_effect(ctx, UNDEFINED, 1, args.as_mut_ptr());
+        qjs::JS_FreeValue(ctx, run);
+        r
+    }
+}
+
+/// A run of an `effect(fn)`: a function `fn` returns is its cleanup, as
+/// `cleanup(f)` in it would be (React's habit): it runs before the effect
+/// runs again or goes away. Anything else returned (an async effect's
+/// promise) is dropped.
+unsafe extern "C" fn effect_run(
+    ctx: *mut JsContext,
+    _this: JsValue,
+    _argc: c_int,
+    _argv: *mut JsValue,
+    _magic: c_int,
+    data: *mut JsValue,
+) -> JsValue {
+    // SAFETY: one data value (`effect`); the result is owned.
+    unsafe {
+        let r = qjs::JS_Call(ctx, *data, UNDEFINED, 0, ptr::null_mut());
+        if qjs::JS_IsException(r) {
+            return r;
+        }
+        if qjs::JS_IsFunction(ctx, r) {
+            // The effect is the running owner.
+            add_cleanup(ctx, r);
+        } else {
+            qjs::JS_FreeValue(ctx, r);
+        }
+    }
+    UNDEFINED
 }
 
 // --- For the renderer -------------------------------------------------------
@@ -966,6 +1013,19 @@ pub(crate) fn new_signal(ctx: *mut JsContext, value: JsValue) -> JsValue {
     let mut args = [value];
     // SAFETY: borrowed arguments, as `signal` takes them.
     unsafe { signal(ctx, UNDEFINED, 1, args.as_mut_ptr()) }
+}
+
+/// The class of resource objects (`crate::resource`).
+pub(crate) fn resource_class(ctx: *mut JsContext) -> qjs::JSClassID {
+    unsafe { graph(ctx) }.data.classes.resource
+}
+
+/// Registers `f` (owned) to run before the current owner runs again or is
+/// disposed (freed at once with no owner).
+pub(crate) fn add_cleanup(ctx: *mut JsContext, f: JsValue) {
+    if let Err(f) = unsafe { graph(ctx) }.on_cleanup(f) {
+        unsafe { qjs::JS_FreeValue(ctx, f) };
+    }
 }
 
 /// Writes `value` (owned) to signal object `obj` (does nothing for a dead
@@ -1038,8 +1098,7 @@ pub(crate) fn with_root<R>(ctx: *mut JsContext, f: impl FnOnce() -> R) -> (u32, 
 /// Whether something owns what runs now (a component, an effect, a
 /// root): its cleanups run when it goes.
 pub(crate) fn has_owner(ctx: *mut JsContext) -> bool {
-    let owner = unsafe { graph(ctx) }.owner();
-    owner != NONE && owner != UNOWNED
+    unsafe { graph(ctx) }.has_owner()
 }
 
 /// The current owner (for [`with_root_under`] later).

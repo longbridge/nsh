@@ -159,8 +159,8 @@ impl Region {
     }
 }
 
-/// What can be a region's elements: one element, none (`()`), an `Option`
-/// or a `Vec` of them.
+/// What can be a region's elements: one element, none (`()`), an
+/// `Option`, a `Vec` or an array of them.
 pub trait IntoElements {
     /// As elements.
     fn into_elements(self) -> Vec<AnyElement>;
@@ -179,6 +179,12 @@ impl<T: IntoElement> IntoElements for Option<T> {
 }
 
 impl<T: IntoElement> IntoElements for Vec<T> {
+    fn into_elements(self) -> Vec<AnyElement> {
+        self.into_iter().map(IntoElement::into_element).collect()
+    }
+}
+
+impl<T: IntoElement, const N: usize> IntoElements for [T; N] {
     fn into_elements(self) -> Vec<AnyElement> {
         self.into_iter().map(IntoElement::into_element).collect()
     }

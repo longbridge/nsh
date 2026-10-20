@@ -640,7 +640,7 @@ fn modal_body(
 pub(crate) fn Navigation() -> impl IntoElement {
     let sheet = signal(None::<Presented>);
     // The dialog's spring in, 0 to 1.
-    let pop = native_value(0.0);
+    let pop = animated_value(0.0);
     // The back button is intercepted, and the presses it caught.
     let intercepting = signal(false);
     let presses = signal(0_u32);
@@ -736,53 +736,49 @@ pub(crate) fn Navigation() -> impl IntoElement {
         );
         links
     };
-    let tiles = {
-        let pop = pop.clone();
-        move || {
-            modals().map(|(presented, _, title, note, icon_name)| {
-                let pop = pop.clone();
-                press_with(
-                    PressProps {
-                        label: Some(title.into()).into(),
-                        ..PressProps::default()
-                    },
-                    move |_: &()| {
-                        if presented == Presented::Dialog {
-                            // The dialog springs up from a little smaller each
-                            // time it opens.
-                            pop.set(0.0);
-                            pop.spring(1.0, motion::SETTLE);
-                        }
-                        sheet.set(Some(presented));
-                    },
-                )
-                .w(relative(0.485))
-                .child(
-                    view()
-                        .min_h(px(100.0))
-                        .p_3()
-                        .gap_3()
-                        .rounded(px(radius::INSET))
-                        .border_curve(BorderCurve::Continuous)
-                        .bg(colors::INSET)
-                        .border_1()
-                        .border_color(colors::LINE)
-                        .finish(Finish::Inset)
-                        .child(IconTile::new(icon_name).size(32.0))
-                        .child(
-                            view()
-                                .gap(px(2.0))
-                                .child(
-                                    text(title)
-                                        .text_size(px(15.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(colors::TEXT),
-                                )
-                                .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
-                        ),
-                )
-            })
-        }
+    let tiles = move || {
+        modals().map(|(presented, _, title, note, icon_name)| {
+            press_with(
+                PressProps {
+                    label: Some(title.into()).into(),
+                    ..PressProps::default()
+                },
+                move |_: &()| {
+                    if presented == Presented::Dialog {
+                        // The dialog springs up from a little smaller each
+                        // time it opens.
+                        pop.set(0.0);
+                        pop.spring(1.0, motion::SETTLE);
+                    }
+                    sheet.set(Some(presented));
+                },
+            )
+            .w(relative(0.485))
+            .child(
+                view()
+                    .min_h(px(100.0))
+                    .p_3()
+                    .gap_3()
+                    .rounded(px(radius::INSET))
+                    .border_curve(BorderCurve::Continuous)
+                    .bg(colors::INSET)
+                    .border_1()
+                    .border_color(colors::LINE)
+                    .finish(Finish::Inset)
+                    .child(IconTile::new(icon_name).size(32.0))
+                    .child(
+                        view()
+                            .gap(px(2.0))
+                            .child(
+                                text(title)
+                                    .text_size(px(15.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(colors::TEXT),
+                            )
+                            .child(text(note).text_size(px(13.0)).text_color(colors::FAINT)),
+                    ),
+            )
+        })
     };
     let close = move |_: &()| sheet.set(None);
     let modal_view = dynamic(move || {

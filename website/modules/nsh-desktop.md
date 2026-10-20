@@ -35,8 +35,10 @@ const Window: {
     width?: number;
     height?: number;
     animated?: boolean;
+    anchorTop?: boolean;
   }): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
+  orderFront(): void;
   close(): void;
 };
 ```
@@ -44,12 +46,13 @@ const Window: {
 | Member | Description |
 |---|---|
 | `setTitle(title)` | The window's title: the title bar, the taskbar or Dock, the window switcher. |
-| `setTitleBar(style, height?)` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it); without it they take the platform's height. `"default"` brings the system's title bar back. |
+| `setTitleBar(style, height?)` | `"hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `"default"` brings the system's title bar back. |
 | `minimize()` | Minimizes the window. |
 | `toggleMaximize()` | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | Enters or leaves full screen. |
-| `setFrame(frame)` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `width` and `height` include window decorations; on Linux they set GTK's default window size. `x` and `y` are the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). |
-| `setLevel(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level; on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
+| `setFrame(frame)` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `width` and `height` include window decorations; on Linux they set GTK's default window size. `x` and `y` are the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). `anchorTop: true` keeps the top edge where it is when `height` changes without a `y`: the window grows and shrinks at its bottom edge. |
+| `setLevel(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
+| `orderFront()` | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
 | `close()` | Closes the window; the app ends with it. |
 
 Window sizing is supported on macOS, Windows and Linux; positioning and levels on macOS and Windows. Linux's window manager controls placement and stacking. GPUI's host configures window bounds and level when opening the window.

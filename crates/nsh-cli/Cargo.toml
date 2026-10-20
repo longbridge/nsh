@@ -20,11 +20,12 @@ dunce.workspace = true
 semver.workspace = true
 nsh-bundler = { workspace = true, features = ["bundle"] }
 nsh-core.workspace = true
-nsh-engine = { workspace = true, features = ["js"] }
+nsh-engine = { workspace = true, features = ["js", "headless"] }
 nsh-dev = { workspace = true, features = ["server"] }
 nsh-js.workspace = true
 nsh-base.workspace = true
 nsh-package.workspace = true
+nsh-testing.workspace = true
 crossbeam-channel.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }

@@ -13,10 +13,11 @@ others and registered them all under its specifier.
 - `"rust"` takes a crate or a list of them: `"rust": ["native/charts", "native/storage"]`. Each is a library crate
   with its own `#[native_module("<specifier>")]` (one per crate, as before), so each is its own import:
   `import { Chart } from "app/charts"`, `import { Store } from "app/storage"`. A string is a list of one.
-- `rust_app.rs` writes one generated workspace with all of them: the command line and every host and runner (iOS,
-  Android, Linux, macOS, Windows, the web, the GPUI workspace, a Rust app's runners) depend on each crate and pass
-  `nsh_base::registry()` and all their registries (`main_with(ui_sets)`, `set_ui_sets`, `ui_sets!`) in the list's
-  order, served beside the runtime's modules.
+- `rust_app.rs` writes one generated workspace with all of them: the describe program, the headless runners and every
+  host and runner (iOS, Android, Linux, macOS, Windows, the web, the GPUI workspace, a Rust app's runners) depend on
+  each crate and pass all their registries (`Description::of`, `headless::runner`, `set_ui_sets`, `ui_sets!`) in the
+  list's order, after `nsh_base::registry()`, served beside the runtime's modules (the describe program describes
+  the app's sets only).
 - The generated code links each crate under a name of its own, `app_<package>` (`-` as `_`), and makes its set in a
   function of its own, `set_app_<package>()`, whose body glob-imports that crate: the fixed-name entry
   `__nsh_native_module` of each crate is found in its own scope, and one crate without an entry fails the build with
@@ -24,18 +25,19 @@ others and registered them all under its specifier.
 - Checked when the workspace is written (`rust_app::crates`): a crate listed twice, two crates with the same package
   name (Cargo takes `-` and `_` as one), or two whose `#[native_module("…")]` has the same specifier (read from the
   crate's `[lib] path` or `src/lib.rs`) fail with the two paths and what to change. That reading is early and
-  friendly; the authority is the command line itself, which refuses two of its sets with one specifier when it
-  starts (`main_with`), however the entry was written. `Registry::merged` already refuses two sets registering
+  friendly; the authority is the description the crates' describe program prints, in which `nsh` refuses two sets
+  with one specifier, or one with a specifier of nsh's own (`rust_app::check_specifiers`), however the entry was
+  written. `Registry::merged` already refuses two sets registering
   components or modules of the same name when an engine starts.
 - Each specifier gets its declarations (`.nsh/types/<specifier>.d.ts`) and its assets (`asset:/@<package>/...`,
-  already per package), as both come from the registries the app's command line has.
+  already per package), as both come from the description of its set.
 - `nsh dev` / `nsh run` watch every listed crate and the local crates they depend on by path, transitively
-  (`RustApp::watched`, kept in `.nsh/rust/app.json`; nsh's own crates and dev-dependencies are left out): a change to
-  any of them restarts the app's command line, as with one crate.
+  (`RustApp::watched`; nsh's own crates and dev-dependencies are left out): a change to any of them describes the app
+  again and restarts the session, as with one crate.
 - Crates may depend on each other, or on crates not listed (a shared crate of components that another crate's
   components use), through plain Cargo path dependencies; only the ones listed in `"rust"` export to TS.
 - A Rust app's `"root"` is a component of the first crate listed.
-- The generated binaries are named after all the crates' packages (`nsh-app-charts-storage-cli`), so they do not
+- The generated binaries are named after all the crates' packages (`nsh-app-charts-storage-describe`), so they do not
   clash with the crates' own binaries in the app's `target/`.
 
 ## Why a list of crates

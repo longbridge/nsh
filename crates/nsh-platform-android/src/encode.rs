@@ -561,6 +561,11 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                         e.int(id as i32);
                         e.bool(has_only);
                     }
+                    // Answered by the sink (`host::answer_clipboard_reads`);
+                    // images are not written to Android's clipboard.
+                    Command::ReadClipboardImage { .. }
+                    | Command::ReadClipboardFiles { .. }
+                    | Command::SetClipboardImage(_) => e.int(-1),
                     // Turned into a mount item / `ScrollTo` by the core.
                     Command::LayoutAnimation(_)
                     | Command::SetStatusBar(_)
@@ -1123,11 +1128,11 @@ fn input(e: &mut Encoded, c: &InputConfig) {
 // --- Canvas drawings (`CanvasBox.java`) -------------------------------------
 //
 // A word count, then the operations as 32-bit words: operation codes as in
-// `nsh_core::js::canvas` (`CV_*`), numbers as float bits, native value
+// `nsh_core::js::canvas` (`CV_*`), numbers as float bits, animated value
 // slots as `SLOT_BITS | slot` (a NaN no arithmetic produces), strings as
 // object indices.
 
-/// Marks a word as native value slot `word & 0xfffff`.
+/// Marks a word as animated value slot `word & 0xfffff`.
 const SLOT_BITS: u32 = 0x7fa0_0000;
 
 impl Encoded {
@@ -1389,7 +1394,7 @@ fn path(e: &mut Encoded, ops: Option<&[nsh_core::canvas::PathOp]>) {
     }
 }
 
-/// 0 color, 1 native value slot, 2 gradient (shape 0 linear / 1 radial /
+/// 0 color, 1 animated value slot, 2 gradient (shape 0 linear / 1 radial /
 /// 2 conic, its numbers, stop count, then offset and color pairs).
 fn paint(e: &mut Encoded, p: &nsh_core::canvas::Paint) {
     use nsh_core::canvas::{GradientShape, Paint};

@@ -7,7 +7,7 @@ demo: mod-canvas
 
 # nsh/canvas
 
-`nsh/canvas` draws with an HTML Canvas 2D–style context. Your `draw` function **records** the drawing; the platform replays it natively (Core Graphics on iOS, `android.graphics.Canvas` on Android) at the screen's resolution. Numbers and colors in a drawing may be [native values](./nsh-animated.md): when they animate, the platform redraws on its own, without running `draw` again.
+`nsh/canvas` draws with an HTML Canvas 2D–style context. Your `draw` function **records** the drawing; the platform replays it natively (Core Graphics on iOS, `android.graphics.Canvas` on Android) at the screen's resolution. Numbers and colors in a drawing may be [animated values](./nsh-animated.md): when they animate, the platform redraws on its own, without running `draw` again.
 
 ```ts
 import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
@@ -34,7 +34,7 @@ A view drawn with a 2D context. It takes every [view prop](../elements/view.md) 
 
 | Prop | Type | Description |
 |---|---|---|
-| `draw` | `(ctx, { width, height }) => void` | Draws the canvas. Runs once the size is known, again when the signals it reads change, and again when the canvas resizes. Native values passed as numbers or colors animate without running it. |
+| `draw` | `(ctx, { width, height }) => void` | Draws the canvas. Runs once the size is known, again when the signals it reads change, and again when the canvas resizes. Animated values passed as numbers or colors animate without running it. |
 
 Give the canvas a size through its style (`width` / `height`, `flex: 1`, `aspectRatio`, ...). Coordinates are in points, the origin at the top left.
 
@@ -69,13 +69,13 @@ mount(App);
 
 ## Animating without redrawing
 
-Any argument typed `CanvasNumber` and any paint (`fillStyle`, `strokeStyle`) accepts a `NativeNode`. The canvas then reads the node while it draws, and redraws natively on every frame of its animation:
+Any argument typed `CanvasNumber` and any paint (`fillStyle`, `strokeStyle`) accepts a `AnimatedNode`. The canvas then reads the node while it draws, and redraws natively on every frame of its animation:
 
 ```tsx
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
-const progress = createNativeValue(0);
+const progress = createAnimatedValue(0);
 
 <Canvas
   style={{ width: 120, height: 120 }}
@@ -85,7 +85,7 @@ const progress = createNativeValue(0);
     ctx.lineCap = "round";
     ctx.strokeStyle = "#6366f1";
     ctx.beginPath();
-    // The end angle is a native node: animating `progress` redraws natively.
+    // The end angle is an animated node: animating `progress` redraws natively.
     ctx.arc(c, c, c - 10, -Math.PI / 2, progress.mul(Math.PI * 2).sub(Math.PI / 2));
     ctx.stroke();
   }}
@@ -95,8 +95,8 @@ progress.timing(0.75, { duration: 900, easing: Easing.inOut(Easing.cubic) });
 ```
 
 ```ts
-type CanvasNumber = number | NativeNode;
-type CanvasPaint = string | CanvasGradient | NativeNode;
+type CanvasNumber = number | AnimatedNode;
+type CanvasPaint = string | CanvasGradient | AnimatedNode;
 ```
 
 ## CanvasRenderingContext2D

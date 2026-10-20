@@ -17,6 +17,8 @@
 //!   scrolls toward the end); `pad <x> <y> <dx> <dy>` a precise touchpad
 //!   scroll.
 //! - `hover <x> <y>`: moves the pointer.
+//! - `rightclick <x> <y>`: presses and releases the secondary button
+//!   (context menus).
 //! - `type <text>`: types into the focused field.
 //! - `mark <text>`: an IME's composition in the focused field (`mark`
 //!   alone ends it).
@@ -99,6 +101,7 @@ enum Step {
         scale: f32,
     },
     Tap(f32, f32),
+    RightClick(f32, f32),
     Drag {
         from: (f32, f32),
         to: (f32, f32),
@@ -265,6 +268,13 @@ async fn run_step(window: WindowHandle<AppView>, step: Step, cx: &mut AsyncApp) 
             input(cx, &|s| pointer(s, PointerKind::Up, to.0, to.1, touch))
         }
         Step::Hover(x, y) => input(cx, &|s| pointer(s, PointerKind::Move, x, y, false)),
+        Step::RightClick(x, y) => {
+            if !input(cx, &|s| secondary(s, PointerKind::Down, x, y)) {
+                return false;
+            }
+            sleep(cx, 60).await;
+            input(cx, &|s| secondary(s, PointerKind::Up, x, y))
+        }
         Step::Wheel {
             x,
             y,
@@ -412,6 +422,25 @@ fn pointer(surface: &Rc<Surface>, kind: PointerKind, x: f32, y: f32, touch: bool
     );
 }
 
+/// The mouse's secondary button.
+fn secondary(surface: &Rc<Surface>, kind: PointerKind, x: f32, y: f32) {
+    crate::input::pointer(
+        surface,
+        PointerEvent {
+            kind,
+            x,
+            y,
+            button: 1,
+            pointer: 1,
+            touch: false,
+            pen: false,
+            time: surface.clock(),
+            modifiers: Modifiers::default(),
+            clicks: 1,
+        },
+    );
+}
+
 fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
     for down in [true, false] {
         let handled = crate::input::key(
@@ -486,6 +515,10 @@ fn parse_step(step: &str) -> Result<Step, String> {
         "tap" => {
             let v = exactly(2)?;
             Step::Tap(v[0], v[1])
+        }
+        "rightclick" => {
+            let v = exactly(2)?;
+            Step::RightClick(v[0], v[1])
         }
         "hover" => {
             let v = exactly(2)?;
@@ -881,6 +914,10 @@ mod tests {
             vec![Step::Type("hello world".into())]
         );
         assert_eq!(parse("mark").unwrap(), vec![Step::Mark(String::new())]);
+        assert_eq!(
+            parse("rightclick 5 6").unwrap(),
+            vec![Step::RightClick(5.0, 6.0)]
+        );
         assert!(matches!(
             parse("pad 1 2 3 4").unwrap()[0],
             Step::Wheel { precise: true, .. }

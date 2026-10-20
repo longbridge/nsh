@@ -1,5 +1,5 @@
 import { effect, Input, type InputProps, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
-import { Animated, createNativeValue, LayoutAnimation } from "nsh/animated";
+import { Animated, createAnimatedValue, LayoutAnimation } from "nsh/animated";
 import { Keyboard, keyboardFrame, Dialog, KeyboardAvoidingView, NavPage, SafeAreaView, safeAreaInsets } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
@@ -15,8 +15,8 @@ function Field(
   props: InputProps & { label: string; api?: string; hint?: string; error?: string; prefix?: string; next?: () => YNode | undefined },
 ) {
   const [own, input] = split(props, ["label", "api", "hint", "error", "prefix", "next", "onFocus", "onBlur", "style"]);
-  const focus = createNativeValue(0);
-  const shake = createNativeValue(0);
+  const focus = createAnimatedValue(0);
+  const shake = createAnimatedValue(0);
   let shown = false;
   effect(() => {
     const has = !!own.error;
@@ -290,6 +290,7 @@ export function Form() {
               ref={ref(7)}
               next={next(7)}
               label="Verification code"
+              testID="code"
               hint={`${code().length}/6`}
               value={code()}
               onChange={(v) => code.set(v)}
@@ -321,6 +322,7 @@ export function Form() {
               ref={ref(12)}
               next={next(12)}
               label="Controlled"
+              testID="shout"
               hint="Uppercased as you type"
               value={shout()}
               onChange={(t) => shout.set(t.toUpperCase())}

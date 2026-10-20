@@ -57,11 +57,11 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_base::registry()]).unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_base::registry().into()]).unwrap();
     // SAFETY: compiled just now by this runtime.
     let app = unsafe { Bundle::bytecode(bytecode) };
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -76,6 +76,8 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: vec![nsh_base::registry()],
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -130,7 +132,7 @@ fn a_drawing_records_what_the_context_was_told() {
 }
 
 /// A drawing using every hand-written part of the context: the paints, the
-/// state stack, line dashes, text, images, paths and native values.
+/// state stack, line dashes, text, images, paths and animated values.
 const DRAW: &str = r##"(ctx, size) => {
   const log = [];
   const g = ctx.createLinearGradient(0, 0, size.width, 0);
@@ -199,9 +201,9 @@ const DRAW: &str = r##"(ctx, size) => {
 }"##;
 
 const DRAW_IMPORTS: &str = r##"import { Canvas, CanvasGradient, CanvasRenderingContext2D, Path2D } from "nsh/canvas";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 
-const v = createNativeValue(3);
+const v = createAnimatedValue(3);
 const color = v.interpolate({ inputRange: [0, 1], outputRange: ["#000000", "#ffffff"] });
 "##;
 
@@ -221,7 +223,7 @@ mount(() => <Canvas style={{{{ width: 100, height: 50 }}}} draw={{{DRAW}}} />);
         text.contains("2|3|butt|1|4,2,1,4,2,1|bold 14px system-ui|23.100000381469727|10px sans-serif|1|100|50|true|true|true"),
         "{text}"
     );
-    // The native value reads are slots of the drawing.
+    // The animated value reads are slots of the drawing.
     assert_eq!(drawing.slots.len(), 2, "{:?}", drawing.slots);
     let gradients = drawing
         .ops
@@ -273,14 +275,14 @@ fn canvases_redraw_when_what_they_read_changes() {
     assert_eq!(d[1].ops.len(), 2);
 }
 
-/// A `draw` that derives a node from a native value, run again: the same
+/// A `draw` that derives a node from an animated value, run again: the same
 /// node (no new one in the graph each time), the same slot.
 const DERIVED: &str = r#"import { signal, mount } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 
 const n = signal(1);
-const v = createNativeValue(0);
+const v = createAnimatedValue(0);
 // Chained, not two timers 30 ms apart: a late wake-up (coarse timers on
 // Windows, a loaded machine) would run both in one turn, one commit.
 setTimeout(() => {

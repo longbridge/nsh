@@ -89,7 +89,7 @@
     player = loaded;
     status.hidden = true;
     if (app.rust) player.runRust();
-    else player.run(code, { release: true, harden, capabilities: app.capabilities ?? "", chunks: app.chunks });
+    else player.run(code, { release: true, harden, capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks });
   } catch (err) {
     fail("This app could not be loaded.", String(err?.message ?? err));
   }

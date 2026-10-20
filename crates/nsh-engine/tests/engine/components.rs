@@ -49,10 +49,15 @@ fn start_with(
         entry,
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &ui_sets).unwrap();
+    let bytecode = nsh_js::compile_bytecode_with(
+        &bundle.code,
+        false,
+        &ui_sets.iter().map(Into::into).collect::<Vec<_>>(),
+    )
+    .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -70,6 +75,8 @@ fn start_with(
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -536,8 +543,12 @@ const shown = signal("waiting");
 let stepper!: StepperRef;
 setTimeout(async () => {
   let refused = "";
-  try { (stepper.setValue as any)("x"); } catch (e) { refused = `${e.name}: ${e.message}`; }
-  stepper.setValue(42.4);
+  // A method returning nothing is a plain call: `undefined`, and a wrong
+  // argument throws in the call.
+  try { (stepper.setValue as any)("x"); refused = "no throw"; } catch (e) { refused = `${e.name}: ${e.message}`; }
+  const set = stepper.setValue(42.4);
+  if (set !== undefined) refused = `returned ${set}`;
+  // One returning a value is a promise, settled after the call before it ran.
   const value = await stepper.value();
   shown.set(`got ${value} | ${refused}`);
 }, 0);
@@ -961,6 +972,91 @@ fn the_clipboard_needs_its_capability() {
     serve_clipboard(&engine, &rx, "false true copied");
 }
 
+const CLIPBOARD_IMAGE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh/clipboard";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const before = await Clipboard.hasImage();
+  Clipboard.setImage("data:image/png;base64,aGk=");
+  const image = await Clipboard.getImage();
+  const bytes = new Uint8Array(await (await fetch(image!.uri)).arrayBuffer());
+  const files = await Clipboard.getFiles();
+  shown.set(`${before} ${image!.width}x${image!.height} ${bytes.join(",")} ${files.join(" ")}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_images_and_files_reach_js() {
+    let (engine, rx) = start(CLIPBOARD_IMAGE);
+    let control = engine.control();
+    let mut board: Option<String> = None;
+    let mut commands = Vec::new();
+    until(&rx, |batch| {
+        for item in &batch.items {
+            let MountItem::Command {
+                id: ROOT_ID,
+                command,
+            } = item
+            else {
+                continue;
+            };
+            let payload = match command {
+                Command::SetClipboardImage(uri) => {
+                    board = Some(uri.clone());
+                    None
+                }
+                Command::ReadClipboardImage { id, has_only } => {
+                    let mut payload = vec![
+                        ("id", PayloadValue::Number(*id as f64)),
+                        ("has", PayloadValue::Bool(board.is_some())),
+                    ];
+                    if let (false, Some(uri)) = (has_only, &board) {
+                        payload.push(("uri", PayloadValue::Str(uri.clone())));
+                        payload.push(("width", PayloadValue::Number(2.0)));
+                        payload.push(("height", PayloadValue::Number(1.0)));
+                    }
+                    Some(payload)
+                }
+                Command::ReadClipboardFiles { id } => Some(vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("has", PayloadValue::Bool(true)),
+                    (
+                        "files",
+                        PayloadValue::Str("file:///tmp/a%20b.txt\nfile:///tmp/c/".into()),
+                    ),
+                ]),
+                _ => continue,
+            };
+            if let Some(payload) = payload {
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+            commands.push(command.clone());
+        }
+        shows(
+            batch,
+            "false 2x1 104,105 file:///tmp/a%20b.txt file:///tmp/c/",
+        )
+    });
+    assert_eq!(
+        commands,
+        [
+            Command::ReadClipboardImage {
+                id: 1,
+                has_only: true
+            },
+            Command::SetClipboardImage("data:image/png;base64,aGk=".into()),
+            Command::ReadClipboardImage {
+                id: 2,
+                has_only: false
+            },
+            Command::ReadClipboardFiles { id: 3 },
+        ]
+    );
+}
+
 const INPUT_TRAITS: &str = r##"import { mount, Input, Text } from "nsh";
 
 mount(() => (
@@ -1349,6 +1445,31 @@ fn menus_reach_the_platform_and_call_back() {
             ..
         }
     )));
+}
+
+const LOCALE: &str = r#"import { mount, Text } from "nsh";
+import { fontScale, locale } from "nsh/device";
+
+mount(() => (
+  <Text>{`${locale()} ${new Intl.NumberFormat().format(1234.5)} ${fontScale()}`}</Text>
+));
+"#;
+
+#[test]
+fn locale_and_font_scale_follow_the_environment() {
+    let (engine, rx) = start(LOCALE);
+    let first = until(&rx, |b| shows(b, "en-US 1,234.5 1"));
+    assert!(first.iter().any(|b| shows(b, "en-US 1,234.5 1")));
+    // What an embedding app sets in place of the system's.
+    let mut environment = Environment::default();
+    nsh_engine::HostEnvironment {
+        locale: nsh_engine::Locale::parse("de-DE"),
+        font_scale: Some(1.5),
+    }
+    .apply(&mut environment);
+    engine.control().set_environment(environment);
+    let after = until(&rx, |b| shows(b, "de-DE 1.234,5 1.5"));
+    assert!(after.iter().any(|b| shows(b, "de-DE 1.234,5 1.5")));
 }
 
 const BASE_BUTTON: &str = r#"import { mount, signal, Text } from "nsh";

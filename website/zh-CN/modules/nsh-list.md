@@ -72,6 +72,7 @@ mount(App);
 | `contentStyle` | `ListContentStyle` | | 内容的内边距和间距：`padding`、`paddingHorizontal`、`paddingVertical`、`paddingTop`、`paddingRight`、`paddingBottom`、`paddingLeft`、`gap`、`rowGap`、`columnGap`（数字）。 |
 | `contentClass` | `string` | | 以类名（`p-*`、`gap-*`）给出的内容内边距和间距；`contentStyle` 优先。 |
 | `style` | `StyleProp<ViewStyle>` | | 列表自身的样式（需要给它尺寸：`flex: 1` 或高度）。 |
+| `testID` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
 | `ref` | `YNode \| ((node: YNode) => void)` | | 见 [ref 方法](#ref-方法)。 |
 
 `ListSlot` 是一个组件（`Header`）或一个元素（`<Header />`）。
@@ -123,7 +124,7 @@ interface ViewabilityConfig {
 | `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | 点击是否收起键盘（`"never"`：这次点击只用来收起键盘）。 |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | 拖动时是否收起键盘。 |
 | `scrollEventThrottle` | `number` | | `onScroll` 事件之间的最小间隔毫秒数（无论如何每帧最多一次）。 |
-| `scrollValue` | `NativeValue` | | 在 UI 线程上接收滚动偏移（主轴方向）的[原生值](./nsh-animated.md)，用于与滚动联动的效果。 |
+| `scrollValue` | `AnimatedValue` | | 在 UI 线程上接收滚动偏移（主轴方向）的[动画值](./nsh-animated.md)，用于与滚动联动的效果。 |
 
 ### 滚动事件
 

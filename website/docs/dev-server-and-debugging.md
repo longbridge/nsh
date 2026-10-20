@@ -151,6 +151,20 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 objects and arrays as JSON. When the host is not connected, logs go to the platform's log (Xcode's console / the
 unified log on iOS, `adb logcat` on Android).
 
+A promise that is rejected and still has no handler once the work that rejected it is done (its microtasks ran) is
+logged as an error too, the way a browser reports it: an `async` function that throws while nobody awaits it, a
+`Promise.reject(…)` nobody catches, a call into Rust that fails with nothing waiting for it. The line goes wherever
+`console.error` goes (the terminal, the platform's log, the browser console on the web), with its stack pointing at
+your sources:
+
+```text
+error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
+          at loadProfile (App.tsx:12:11)
+```
+
+A handler attached later in the same turn (`const p = load(); …; p.catch(…)`) counts as handling it. Await the
+promise or give it a `.catch` where the failure matters.
+
 The rest of the terminal is one line per step (`✓` done, `→` where to connect, `•` what a device did); the output of
 the tools NSH runs (cargo, the hosts themselves) is only printed when one fails. `nsh run -v` (or `NSH_VERBOSE=1`)
 prints everything: every log line with its level and source, cargo's output and the hosts' own.
@@ -161,7 +175,7 @@ prints everything: every log line with its level and source, cargo's output and 
 perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 ```
 
-See [Testing with nsh trace](./testing-and-trace.md) for what these numbers mean.
+See [Testing](./testing-and-trace.md) for what these numbers mean.
 
 ## The error overlay
 
@@ -204,7 +218,8 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 ```
 
 `nsh build` writes the map as `bundle.js.map`; an embedding app that loads a bundle from a folder reads it from next to
-the bundle, and [signed packages](./signed-packages.md) carry it too.
+the bundle, and [signed packages](./signed-packages.md) carry it too, unless it is kept next to the package and applied
+with `nsh symbolicate` ([Errors from published packages](./signed-packages.md#errors-from-published-packages)).
 
 ## Debugging tips
 
@@ -213,7 +228,7 @@ the bundle, and [signed packages](./signed-packages.md) carry it too.
   signals and navigators on purpose. Restart with Ctrl-C and `nsh run`, or change the state's initializer.
 - **A request fails only in a packaged or embedded build**: check the app's [capabilities](./sandbox-and-capabilities.md);
   refusals are logged with the key to add.
-- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh trace`](./testing-and-trace.md), which
+- **Something is slow**: run with `--trace`, or reproduce it headless with [`nsh test --trace`](./testing-and-trace.md), which
   prints every native view operation.
 - **Type errors in the editor**: `nsh run` and `nsh dev` keep `.nsh/types` up to date; see
   [Project structure](./project-structure.md).
@@ -221,5 +236,5 @@ the bundle, and [signed packages](./signed-packages.md) carry it too.
 ## See also
 
 - [CLI](./cli.md)
-- [Testing with nsh trace](./testing-and-trace.md)
+- [Testing](./testing-and-trace.md)
 - [Embedding in iOS apps](./embedding-ios.md), [Embedding in Android apps](./embedding-android.md)

@@ -75,6 +75,8 @@ pub(crate) struct AppConfig {
     pub(crate) build: Option<u32>,
     /// App icon: a square PNG, ideally 1024×1024, relative to `nsh.json`.
     pub(crate) icon: Option<PathBuf>,
+    /// The lowest runtime that runs a signed package (`nsh publish`).
+    pub(crate) min_runtime: Option<String>,
     /// Read and checked by the bundler.
     #[serde(default, rename = "tailwind")]
     _tailwind: Option<serde::de::IgnoredAny>,
@@ -92,6 +94,9 @@ pub(crate) struct AppConfig {
     /// Read and checked by the bundler.
     #[serde(default, rename = "theme")]
     _theme: Option<serde::de::IgnoredAny>,
+    /// Read and checked by the bundler.
+    #[serde(default, rename = "resolve")]
+    _resolve: Option<serde::de::IgnoredAny>,
     /// The app's Rust crate: its builds are the app's own (`rust_app.rs`).
     #[serde(default, rename = "rust")]
     _rust: Option<serde::de::IgnoredAny>,
@@ -152,10 +157,39 @@ pub(crate) fn name_and_id(entry: &Path, config: &AppConfig) -> (String, String) 
     (name, id)
 }
 
+/// The app's id (`nsh.json` `"id"`, else made up from its name as
+/// [`name_and_id`] does): it travels with the bundle (`app.json`, the dev
+/// server's messages) and names where the app keeps its data.
+pub(crate) fn app_id(entry: &Path) -> anyhow::Result<String> {
+    let entry = dunce::canonicalize(entry)?;
+    let config = read_config(&entry).unwrap_or_default();
+    Ok(name_and_id(&entry, &config).1)
+}
+
+/// [`name_and_id`] for a release (`nsh package`, `nsh publish`): the id
+/// must be the app's own, written in `nsh.json`, since it also names where
+/// the app keeps its data (`nsh/storage`) and two apps with one id share it.
+pub(crate) fn release_name_and_id(
+    entry: &Path,
+    config: &AppConfig,
+) -> anyhow::Result<(String, String)> {
+    let Some(id) = &config.id else {
+        bail!(
+            "nsh.json needs an `id` for a release, in reverse-DNS form (`com.yourcompany.app`): it names the app and where it keeps its data, so no other app may use it"
+        );
+    };
+    if id.starts_with("com.example.") {
+        ui::warn(format!(
+            "app id `{id}` is a placeholder: give the app an id under a domain you own before releasing it, as apps with one id share their data"
+        ));
+    }
+    Ok(name_and_id(entry, config))
+}
+
 pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     let entry = dunce::canonicalize(options.entry)?;
     let config = &options.config;
-    let (name, id) = name_and_id(&entry, config);
+    let (name, id) = release_name_and_id(&entry, config)?;
     let executable: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let executable = if executable.is_empty() {
         "App".to_owned()
@@ -239,6 +273,11 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
     if let Some(json) = built.capabilities_json() {
         fs::write(resources.join("capabilities.json"), json)?;
     }
+    // The app's id, which names where it keeps its data (`Bundle::read`).
+    fs::write(
+        resources.join("app.json"),
+        serde_json::json!({ "id": id }).to_string(),
+    )?;
     for asset in &built.assets {
         let dest = resources.join("assets").join(&asset.path);
         if let Some(dir) = dest.parent() {
@@ -341,6 +380,11 @@ fn package_android(
     if let Some(json) = built.capabilities_json() {
         assets.push(("nsh/capabilities.json".to_owned(), json.into_bytes()));
     }
+    // The app's id, which names where it keeps its data.
+    assets.push((
+        "nsh/app.json".to_owned(),
+        serde_json::json!({ "id": id }).to_string().into_bytes(),
+    ));
     for asset in &built.assets {
         let bytes = fs::read(&asset.source).with_context(|| format!("read {}", asset.path))?;
         assets.push((format!("nsh/assets/{}", asset.path), bytes));
@@ -917,6 +961,36 @@ fn make_ipa(app: &Path, ipa: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_release_needs_the_apps_own_id() {
+        let entry = Path::new("apps/Orders/App.tsx");
+        let config = |id: Option<&str>| AppConfig {
+            id: id.map(str::to_owned),
+            ..AppConfig::default()
+        };
+        // Development makes one up from the name.
+        assert_eq!(
+            name_and_id(entry, &config(None)),
+            ("Orders".to_owned(), "com.example.orders".to_owned())
+        );
+        // A release asks for it.
+        let error = release_name_and_id(entry, &config(None))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("nsh.json needs an `id`"), "{error}");
+        // The placeholder is only warned about.
+        assert_eq!(
+            release_name_and_id(entry, &config(Some("com.example.orders")))
+                .unwrap()
+                .1,
+            "com.example.orders"
+        );
+        assert_eq!(
+            release_name_and_id(entry, &config(Some("com.acme.orders"))).unwrap(),
+            ("Orders".to_owned(), "com.acme.orders".to_owned())
+        );
+    }
 
     /// App icons are drawn at 1024 pixels, which `sips` alone cannot
     /// convert.

@@ -60,6 +60,33 @@
   the box is empty, so a component can size itself. Content masks are
   rectangles: rounded corners do not cut a component (videos follow them).
   `crates/gpui/nsh-platform-gpui/examples/embed.rs` runs `examples/embedded` with its badge as a GPUI element.
+- **Native modules** (`nsh/native`'s `nativeModule`; `platform_modules.rs`, `modules::host_module`): an embedding app
+  written in Rust gives its engines a UI set of its own (`Registry::ui_set("host/trading")` with its `#[module]`s,
+  `#[class]`es and Rust components) next to NSH's (`set_ui_sets` of the platform crate, `EngineConfig::ui_sets`), and
+  the app reaches it by name at run time: `nativeModule<{ Trading: TradingApi }>("host/trading")` is an object of
+  the set's exports, made as an import of the set makes them, once per specifier and engine. The app declares `T`
+  itself, so it is built with the stock `nsh build` and the CLI never needs the host's registry (an `import` of the
+  set needs a CLI built with it, `rust_app.rs`). Calls keep the typed machinery (`rust-classes.md`): plain functions
+  answer in the call, `cx` functions are ops, `async` ones tasks. Where the host gave no set under the specifier, it
+  throws a `ReferenceError` naming it.
+- **The host's data in every app.** Host and apps stay in step through the host: it keeps the shared state (a
+  `tokio::sync::watch` or `broadcast` channel in a static the module's functions reach), functions the apps call
+  change it, and an `async fn subscribe(on_change: Callback<State>)` keeps every app informed: its task (on the
+  engine thread; tokio's channels need no runtime there, their wakers wake the engine) posts the current state, then
+  awaits each change and posts it (`Callback::post`, which runs the callback in the engine's next JS turn). The
+  host's own UI reads and changes the same channel, so a change from the host, or from any app, reaches all of
+  them; the task ends with the engine (its callbacks are dropped with the VM). `examples/embed-gpui` keeps its
+  selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
+- **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
+  pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
+  / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`
+  (C `nsh_app_set_locale` / `nsh_app_set_font_scale`), Java `NshView.setLocale` / `setFontScale`. Each platform writes
+  them over the system's values where it builds the environment (`Surface::set_environment` on the desktops, the root
+  view's `environment()` on iOS, `publishEnvironment` in Java), so they reach the engine as a system change would and
+  are in the first frame of every app loaded later; the platform's own drawing that reads the environment (alerts,
+  toasts) follows too. `None` / `nil` / `null` / 0 follows the system's again (its settings are read again). The text
+  size scales what allows font scaling (`Core::set_font_scale`): texts, inputs, the components' labels; lengths, `rem`
+  in classes included, stay as they are. The layout direction stays the system's (`I18nManager` decides it in the app).
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library
@@ -72,8 +99,10 @@
 ## GPUI and GPUI Kit apps
 
 Desktop apps built with GPUI or GPUI Kit (Longbridge Pro, Allsum Desktop) embed NSH with `nsh-platform-gpui`'s
-`AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two surfaces
-in a resizable split.
+`AppView`, a GPUI view; `examples/embed-gpui` is a GPUI Kit window with a sidebar, buttons, an input and two order
+tickets in a resizable split, sharing the host's trading desk (`src/trading.rs`, `nativeModule("host/trading")`) with
+each other and with the host's sidebar and toolbar, and a "Show layers" toggle outlining what GPUI Kit draws and what
+NSH draws (`src/layers.rs`).
 
 - **One GPUI.** NSH draws with GPUI Fast (`gpui-fast` from crates.io); GPUI Kit (`gpui-kit` / `gpui-component`) must
   use it too: its `gpui-fast` feature. `cargo tree -i gpui-fast` must show one version, else the app has two GPUIs
@@ -101,7 +130,9 @@ in a resizable split.
 - **The host's theme in NSH.** `AppView::set_theme(Some(theme), cx)` gives the surface a `nsh_core::ui::Theme`
   (re-exported as `nsh_platform_gpui::Theme`) and `set_theme_json(json, cx)` one in gpui-kit's JSON: the Rust
   components (the app's UI sets) render with it instead of the app's own theme (`Core::set_host_theme`, which wins until cleared with
-  `None`), and the surface is drawn on its `background`. It applies at once and to every app loaded later, in their
+  `None`), and the surface is drawn on its `background`. The app's classes naming its tokens (`bg-primary`,
+  `bg-sidebar`, `rounded-(--radius)`; every key of the theme, so a GPUI Kit theme's own keys too) restyle with it;
+  keys it lacks keep the app's values. It applies at once and to every app loaded later, in their
   first frame (the surface starts engines with `Engine::start_with`, sending the theme before the start).
   `set_appearance(Appearance::Light | Dark, cx)` is the host's mode, standing in for the system's (`System` follows
   the window again); an app that sets its own appearance still wins, as over the system's. The example's
@@ -115,19 +146,38 @@ in a resizable split.
   colors and Tailwind palette names only: NSH also reads CSS colors (`rgb()`, names) GPUI Kit does not, and GPUI Kit
   reads gradients and `blue-500/50` that NSH rejects.
 - **From NSH to the host.** The app talks to the embedding app through the native components the latter registers
-  (`AppView::register_component`): their events and commands, as on the other platforms. A component can render GPUI
+  (`AppView::register_component`): their events and commands, as on the other platforms; and through the functions
+  of the UI sets it gives `set_ui_sets` ("Native modules" above): the example's tickets call `Trading.placeOrder` and
+  subscribe to the desk, whose `watch` channel the host's own GPUI widgets follow too (`cx.spawn` awaiting
+  `changed()`), so the host and every ticket show the same symbol and orders. A component can render GPUI
   Kit widgets in its box (`NativeComponent::render`), which take their own input: the example's "Extended hours" is a
   GPUI Kit `Switch` (`src/switch.rs`, `host.switch`) that reports its natural size (`ComponentContext::set_size`: its
   track and label, so the app's style leaves the box's size open), emits `change` to JS, and toggles on clicks and on
   Space or Enter while focused (NSH's fields do not see those keys). It returns a focus handle of its own
   (`NativeComponent::focus_handle`; a wrapper's, since the `Switch` keeps its handle internal), so it is a Tab stop
-  among the app's text fields, and a click focuses that handle too. `AppView::on_error` hears
-  the app's fatal errors (also logged).
+  among the app's text fields, and a click focuses that handle too.
 - **Limits.** `AppOptions::limits` (or `AppView::set_limits`, from the next load) are the VM limits of the apps the
   view runs, as `NshAppView.limits` and `NshView.setLimits` on iOS and Android: `Limits::default()` (an app embedded
-  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps with `Limits::standalone_desktop()`.
+  in another app) unless set; `nsh-gpui-host` and `nsh-gpui-app` run apps on their own, with `Limits::standalone()`
+  (`sandbox.md`).
+- **Storage.** Each app keeps `nsh/storage` in `<data dir>/<app id>/storage.json`, which the engine picks
+  (`EngineConfig::data_dir`, `app_dir_name(App::app_id())`, `default` without a valid id): the id travels with the app
+  (`app.json` next to a bundle, written by `nsh build` / `nsh package`; the dev server's bundle message; a verified
+  package's id; `Root::app_id` in Rust apps' generated code). Platforms only give the data dir: the system's
+  (`nsh_engine::data_dir()`) on the desktops (`AppOptions::data_dir` to change it), `Application Support/nsh` on iOS,
+  `filesDir/nsh` on Android. `AppOptions::storage`, `NshAppView.storageDirectory` and `NshView.setStorageDirectory`
+  override one app's place; all from the next load.
 - **Development.** With feature `dev`, `view.update(cx, |view, cx| view.connect_dev_server(url, cx))` loads the app
   from a `nsh dev` server and reloads it on every change, as `connectDevServer` on iOS and Android: the server's
   assets, logs forwarded to the developer's terminal, the status line and the error overlay over the view, the reload
   key. The embedding app's `on_error` keeps hearing the app's errors next to the overlay; connecting again replaces
   the session. `crates/gpui/nsh-platform-gpui/examples/embed.rs` takes a dev server's URL.
+- **Errors.** `AppView::on_app_error` hears every error of the app (also logged) as an `AppError` (`nsh_engine`,
+  re-exported): its `kind` (`Load`: the bundle did not start; `Uncaught`: an exception escaped a callback, the app goes
+  on; `Stopped`: the VM was stopped, reported once; `HotUpdate`; `Asset`), `is_fatal()` (`Load` or `Stopped`: no JS
+  of that app runs again, where a host falls back to another build), the `message` and the `stack` apart (the stack
+  mapped to the sources when the bundle has a source map), and the signed `package` it came from (`PackageInfo`: id,
+  name, version, build, SHA-256; `Bundle::package`, set by `Bundle::from_package`). `AppView::on_error` is the same
+  handler with the error's text. The engine reports them through `MountSink::report`, whose default calls
+  `MountSink::report_error` with the text, so the other platforms' text callbacks (`NshAppView.onError`,
+  `NshView.ErrorListener`) are unchanged.

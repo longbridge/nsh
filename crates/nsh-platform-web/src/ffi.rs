@@ -53,6 +53,26 @@ unsafe extern "C" {
     fn js_fetch_cancel(id: u32);
     #[link_name = "load_chunk"]
     fn js_load_chunk(id: *const u8, id_len: usize);
+    #[link_name = "storage_load"]
+    fn js_storage_load(prefix: *const u8, prefix_len: usize) -> u32;
+    #[link_name = "storage_set"]
+    fn js_storage_set(
+        prefix: *const u8,
+        prefix_len: usize,
+        key: *const u8,
+        key_len: usize,
+        value: *const u8,
+        value_len: usize,
+    ) -> u32;
+    #[link_name = "storage_remove"]
+    fn js_storage_remove(
+        prefix: *const u8,
+        prefix_len: usize,
+        key: *const u8,
+        key_len: usize,
+    ) -> u32;
+    #[link_name = "storage_clear"]
+    fn js_storage_clear(prefix: *const u8, prefix_len: usize) -> u32;
 }
 
 /// The width of `text` in CSS `font`, in points.
@@ -189,4 +209,52 @@ pub(crate) fn fetch_cancel(id: u32) {
 pub(crate) fn load_chunk(id: &str) {
     // SAFETY: the slice is valid for the call; JS copies it.
     unsafe { js_load_chunk(id.as_ptr(), id.len()) }
+}
+
+/// What a `storage_*` call returned: `done` 1, or 0 with the error, which
+/// JS hands over with `nsh_storage_reply` (as the entries `storage_load`
+/// read) before returning.
+fn storage_result(done: u32) -> Result<String, String> {
+    let reply = crate::storage::take_reply().unwrap_or_default();
+    if done == 0 { Err(reply) } else { Ok(reply) }
+}
+
+/// The `localStorage` entries whose keys start with `prefix`, as a JSON
+/// object without the prefix.
+pub(crate) fn storage_load(prefix: &str) -> Result<String, String> {
+    crate::storage::take_reply();
+    // SAFETY: the slice is valid for the call; JS only reads it.
+    storage_result(unsafe { js_storage_load(prefix.as_ptr(), prefix.len()) })
+}
+
+/// Sets `localStorage` entry `prefix` + `key` to `value`.
+pub(crate) fn storage_set(prefix: &str, key: &str, value: &str) -> Result<(), String> {
+    crate::storage::take_reply();
+    // SAFETY: the slices are valid for the call; JS only reads them.
+    let done = unsafe {
+        js_storage_set(
+            prefix.as_ptr(),
+            prefix.len(),
+            key.as_ptr(),
+            key.len(),
+            value.as_ptr(),
+            value.len(),
+        )
+    };
+    storage_result(done).map(drop)
+}
+
+/// Removes `localStorage` entry `prefix` + `key`.
+pub(crate) fn storage_remove(prefix: &str, key: &str) -> Result<(), String> {
+    crate::storage::take_reply();
+    // SAFETY: the slices are valid for the call; JS only reads them.
+    let done = unsafe { js_storage_remove(prefix.as_ptr(), prefix.len(), key.as_ptr(), key.len()) };
+    storage_result(done).map(drop)
+}
+
+/// Removes the `localStorage` entries whose keys start with `prefix`.
+pub(crate) fn storage_clear(prefix: &str) -> Result<(), String> {
+    crate::storage::take_reply();
+    // SAFETY: the slice is valid for the call; JS only reads it.
+    storage_result(unsafe { js_storage_clear(prefix.as_ptr(), prefix.len()) }).map(drop)
 }

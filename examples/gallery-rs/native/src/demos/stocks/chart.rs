@@ -8,7 +8,7 @@ use std::{f32::consts::TAU, rc::Rc};
 use nsh_core::{
     PanActivation, Rect,
     canvas::{CanvasGradient, CanvasTextAlign, CanvasTextBaseline, LineJoin},
-    ui::{NativeNode, prelude::*},
+    ui::{AnimatedNode, prelude::*},
 };
 
 use super::{
@@ -155,9 +155,10 @@ struct Plot {
 
 /// The live point's pulse as the intraday line draws it: the ring's alpha
 /// and radius (native: they move without a drawing).
+#[derive(Clone, Copy)]
 struct LivePoint {
-    alpha: NativeNode,
-    radius: NativeNode,
+    alpha: AnimatedNode,
+    radius: AnimatedNode,
 }
 
 impl Plot {
@@ -547,14 +548,18 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
     let scale = stored(Calm::new(0.06));
     // The live point's ring, pulsing while the market runs.
     let pulse = pulse();
-    let ring = Rc::new(LivePoint {
+    let ring = LivePoint {
         alpha: pulse.0.interpolate(&[0.0, 1.0], &[0.45, 0.0]),
         radius: pulse.0.interpolate(&[0.0, 1.0], &[3.0, 13.0]),
-    });
+    };
     let running = live.running;
     effect(move || run_pulse(&pulse, running.get()));
     // The crosshair: where it is, and whether it shows.
-    let [cross_x, cross_y, shown] = [native_value(0.0), native_value(0.0), native_value(0.0)];
+    let [cross_x, cross_y, shown] = [
+        animated_value(0.0),
+        animated_value(0.0),
+        animated_value(0.0),
+    ];
     // The data and its frame, after a tick that moved the stock (its
     // minutes moved with its quote), the period or the width changed.
     let plot = {
@@ -582,29 +587,26 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
         let at = focus_at.get();
         plot.with(|p| at.and_then(|i| p.data.get(i)).copied().unwrap_or_default())
     });
-    let pick = {
-        let (cross_x, cross_y, shown) = (cross_x.clone(), cross_y.clone(), shown.clone());
-        move |x: Option<f32>| {
-            let Some(x) = x else {
-                cursor.set(None);
-                let _ = shown.timing(0.0, 180.0, Easing::EaseInOut);
-                return;
-            };
-            let picked = plot.with_untracked(|p| {
-                p.pick(x)
-                    .map(|i| (i, p.x(i), p.frame.map(|f| f.y(p.data[i].c))))
-            });
-            let Some((i, at_x, at_y)) = picked else {
-                return;
-            };
-            if cursor.get_untracked().is_none() {
-                let _ = shown.timing(1.0, 140.0, Easing::EaseInOut);
-            }
-            cursor.set(Some(i));
-            cross_x.set(at_x);
-            if let Some(y) = at_y {
-                cross_y.set(y);
-            }
+    let pick = move |x: Option<f32>| {
+        let Some(x) = x else {
+            cursor.set(None);
+            let _ = shown.timing(0.0, 180.0, Easing::EaseInOut);
+            return;
+        };
+        let picked = plot.with_untracked(|p| {
+            p.pick(x)
+                .map(|i| (i, p.x(i), p.frame.map(|f| f.y(p.data[i].c))))
+        });
+        let Some((i, at_x, at_y)) = picked else {
+            return;
+        };
+        if cursor.get_untracked().is_none() {
+            let _ = shown.timing(1.0, 140.0, Easing::EaseInOut);
+        }
+        cursor.set(Some(i));
+        cross_x.set(at_x);
+        if let Some(y) = at_y {
+            cross_y.set(y);
         }
     };
     let price_tone = computed(move || tone_of(focus.get().c - prev_close));
@@ -699,7 +701,6 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                 )
         },
     );
-    let (grant, moved, released, ended) = (pick.clone(), pick.clone(), pick.clone(), pick);
     view()
         .gap(px(10.0))
         .child(
@@ -750,12 +751,12 @@ pub(crate) fn Chart(props: ChartProps) -> impl IntoElement {
                         // scroll the page.
                         .claim_touches(TouchClaim::on_pan(PanActivation::horizontal(6.0, 8.0)))
                         .keep_touches(true)
-                        .on_responder_grant(move |e: &ResponderEvent| grant(Some(e.location_x)))
-                        .on_responder_move(move |e: &ResponderEvent| moved(Some(e.location_x)))
-                        .on_responder_release(move |_: &ResponderEvent| released(None))
-                        .on_responder_terminate(move |_: &ResponderEvent| ended(None)),
+                        .on_responder_grant(move |e: &ResponderEvent| pick(Some(e.location_x)))
+                        .on_responder_move(move |e: &ResponderEvent| pick(Some(e.location_x)))
+                        .on_responder_release(move |_: &ResponderEvent| pick(None))
+                        .on_responder_terminate(move |_: &ResponderEvent| pick(None)),
                 )
-                // The crosshair over the canvas, moved by native values.
+                // The crosshair over the canvas, moved by animated values.
                 .child(
                     view()
                         .pointer_events(PointerEvents::None)

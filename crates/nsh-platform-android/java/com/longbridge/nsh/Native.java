@@ -64,8 +64,11 @@ final class Native {
     static final int FILE_DRAG_ENTER = 53;
     static final int FILE_DRAG_LEAVE = 54;
     static final int FILE_DROP = 55;
+    static final int HOVER_MOVE = 56;
+    static final int CONTEXT_MENU = 57;
 
-    static native long create(NshView view, float density, boolean trace);
+    /** A host whose apps keep their data in {@code dataDir}, each in a directory named by its id. */
+    static native long create(NshView view, float density, boolean trace, String dataDir);
 
     static native void destroy(long handle);
 
@@ -74,6 +77,12 @@ final class Native {
 
     /** VM limits of the apps loaded next (0 keeps a default). */
     static native void setLimits(long handle, int memoryMb, int stackKb, int loadMs, int callMs, int maxNodes);
+
+    /** No VM limits for the apps loaded next: they run on their own. */
+    static native void setStandaloneLimits(long handle);
+
+    /** The directory the storage of the apps loaded next is kept in (null: each app's own in the data directory). */
+    static native void setStorage(long handle, String dir);
 
     /** Whether the running app's web views may navigate to {@code url}. */
     static native boolean allowsWebview(long handle, String url);
@@ -84,8 +93,8 @@ final class Native {
      */
     static native String mediaRedirect(long handle, String base, String location);
 
-    /** {@code capabilities}: the app's declaration (JSON), or null for none. */
-    static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities);
+    /** {@code capabilities}: the app's declaration (JSON), {@code app}: its {@code app.json} ({@code id}); null for none. */
+    static native void load(long handle, byte[] code, boolean bytecode, String sourceMap, String capabilities, String app);
 
     static native boolean connectDevServer(long handle, String url);
 
@@ -129,6 +138,13 @@ final class Native {
     static native void environment(long handle, float[] values, boolean dark, String locale);
 
     static native void event(long handle, int id, int kind, String text, int count, float x, float y);
+
+    /**
+     * {@code onHoverMove} of view {@code id}: the pointer at ({@code x}, {@code y}) in it and at
+     * ({@code pageX}, {@code pageY}) in its root view (dp); {@code modifiers}: 1 Ctrl, 2 Alt,
+     * 4 Shift, 8 Meta.
+     */
+    static native void hover(long handle, int id, float x, float y, float pageX, float pageY, int modifiers);
 
     /**
      * An event with an object payload ({@code Double}, {@code Boolean} or

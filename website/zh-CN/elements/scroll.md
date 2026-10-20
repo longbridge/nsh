@@ -45,7 +45,7 @@ demo: el-scroll
 | `contentClass` | `string` | | 同上，写成类名，例如 `"grow justify-center p-4"`。 |
 | `keyboardDismissMode` | `"none" \| "on-drag" \| "interactive"` | `"none"` | 拖动时是否收起键盘。 |
 | `keyboardShouldPersistTaps` | `"never" \| "always" \| "handled" \| boolean` | `"never"` | 点击是否收起键盘：`never`（点击只收起键盘）、`always`（键盘保持）、`handled`（点击被某个元素处理时键盘保持）。 |
-| `scrollValue` | `NativeValue` | | 接收滚动偏移量（主轴方向）的原生值，用于随滚动变化的动画。 |
+| `scrollValue` | `AnimatedValue` | | 接收滚动偏移量（主轴方向）的动画值，用于随滚动变化的动画。 |
 | `scrollEventThrottle` | `number` | | 两次 `onScroll` 事件之间的最小毫秒数（无论如何每帧最多一次）。 |
 
 ### 下拉刷新
@@ -101,7 +101,7 @@ let photo!: YNode;
 `ScrollEvent` 为 `{ x, y, contentWidth, contentHeight, width, height, zoomScale }`：偏移量、（缩放后的）内容尺寸、视口尺寸和缩放比例（不缩放时为 1）。
 
 > [!TIP]
-> 要让某个元素随滚动位置移动（收缩的标题栏、视差图片），请把 `scrollValue` 绑定到一个原生值，并在样式中对它插值。它在 UI 线程上以屏幕刷新率运行，而 `onScroll`（每帧一个 JS 事件）无法保证这一点。参见[动画](../docs/animation.md)。
+> 要让某个元素随滚动位置移动（收缩的标题栏、视差图片），请把 `scrollValue` 绑定到一个动画值，并在样式中对它插值。它在 UI 线程上以屏幕刷新率运行，而 `onScroll`（每帧一个 JS 事件）无法保证这一点。参见[动画](../docs/animation.md)。
 
 ## ref 方法
 

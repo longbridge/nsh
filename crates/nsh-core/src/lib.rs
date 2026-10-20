@@ -25,8 +25,10 @@ mod ops;
 pub mod platform;
 mod props;
 pub mod reactive;
+pub mod resource;
 pub mod runtime;
 pub mod shape;
+pub mod storage;
 mod style;
 pub mod tailwind;
 mod text;
@@ -55,13 +57,13 @@ pub use crate::{
         NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps, ViewKind, WebProps,
     },
     ops::{
-        AutoCapitalize, AutoFill, CellSlot, Command, Dialog, DialogButton, DialogButtonStyle,
-        EventKind, EventMask, EventPayload, HeaderSlot, ImageProp, ImageSource, KeyboardAppearance,
-        KeyboardDismissMode, KeyboardTaps, KeyboardType, ListContentStyle, ModalAnimation,
-        ModalPresentation, ModalProp, NativeProp, NodeId, Op, PayloadValue, Prop, ROOT_ID,
-        ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, SnapAlignment,
-        StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent,
-        TouchPhase, TouchPoint, Viewability, WebSource,
+        AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
+        DialogButtonStyle, EventKind, EventMask, EventPayload, HeaderSlot, HoverEvent, ImageProp,
+        ImageSource, KeyboardAppearance, KeyboardDismissMode, KeyboardTaps, KeyboardType,
+        ListContentStyle, ModalAnimation, ModalPresentation, ModalProp, NativeProp, NodeId, Op,
+        PayloadValue, Prop, ROOT_ID, ResizeMode, ReturnKeyType, ScreenAnimation, ScreenProp,
+        ScrollProp, SnapAlignment, StatusBarConfig, StatusBarSetting, StatusBarStyle,
+        SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint, Viewability, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityProp, AccessibilityRole,
@@ -76,8 +78,9 @@ pub use crate::{
         TransformOrigin, ViewStyle,
     },
     text::{
-        ATTACHMENT_CHAR, ApproxTextEngine, AttributedText, ResolvedTextStyle, TextAttachment,
-        TextEngine, TextLayout, TextLine, TextLink, TextSpan,
+        ATTACHMENT_CHAR, ApproxTextEngine, AttributedText, BackgroundBox, LinePiece,
+        ResolvedTextStyle, TextAttachment, TextBackground, TextEngine, TextLayout, TextLine,
+        TextLink, TextSpan,
     },
     transform::{Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp},
 };

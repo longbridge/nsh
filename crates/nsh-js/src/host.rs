@@ -21,12 +21,14 @@ use crate::{
     error::JsError,
     net::{FetchEvent, NetworkQueue, RequestId},
     protocol::Warnings,
+    rejections::Rejections,
     sandbox::{self, Budget, Phase},
     timers::Timers,
     web,
 };
 
-/// Receives uncaught JS exceptions.
+/// Receives JS errors: uncaught exceptions ([`Host::set_error_handler`])
+/// or unhandled promise rejections ([`Host::set_rejection_handler`]).
 pub type ErrorHandler = Box<dyn Fn(&JsError)>;
 
 /// State shared between the host and the native functions installed in JS.
@@ -58,6 +60,8 @@ pub(crate) struct Shared {
     /// Why the VM was stopped (out of memory, over a quota): no JS runs
     /// after that.
     pub(crate) fatal: RefCell<Option<String>>,
+    /// Rejected promises without a handler, until the end of the turn.
+    rejections: RefCell<Rejections>,
 }
 
 impl Shared {
@@ -79,6 +83,7 @@ pub struct Host {
     exhausted: Arc<AtomicBool>,
     shared: Rc<Shared>,
     on_error: Option<ErrorHandler>,
+    on_rejection: Option<ErrorHandler>,
     budget: Budget,
 }
 
@@ -165,6 +170,15 @@ impl Host {
             limits,
             ..Shared::default()
         });
+        let tracked = shared.clone();
+        rt.set_host_promise_rejection_tracker(Some(Box::new(
+            move |ctx, promise, reason, handled| {
+                tracked
+                    .rejections
+                    .borrow_mut()
+                    .track(&ctx, promise, reason, handled);
+            },
+        )));
         ctx.with(|ctx| {
             crate::state::install(
                 &ctx,
@@ -193,6 +207,7 @@ impl Host {
             exhausted,
             shared,
             on_error: None,
+            on_rejection: None,
             budget,
         })
     }
@@ -271,6 +286,14 @@ impl Host {
         self.on_error = Some(handler);
     }
 
+    /// Sets the handler for unhandled promise rejections: promises still
+    /// rejected without a handler once a turn's jobs ran (as browsers
+    /// report them). Without a handler they are logged (target `js`, level
+    /// error), as `unhandled rejection: <reason>`.
+    pub fn set_rejection_handler(&mut self, handler: ErrorHandler) {
+        self.on_rejection = Some(handler);
+    }
+
     /// Evaluates a bundle given as source.
     pub fn eval_source(&self, source: &str) -> Result<(), JsError> {
         self.guarded(Phase::Load, || {
@@ -280,6 +303,8 @@ impl Host {
                         .catch(&ctx)
                         .map_err(JsError::caught)?;
                     let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
+                    // Its failure is the bundle's, reported as such.
+                    mark_handled(&ctx, &promise);
                     promise.finish::<()>().catch(&ctx).map_err(JsError::caught)
                 })
                 .map_err(|e| self.classify(e))?;
@@ -325,6 +350,8 @@ impl Host {
                         .catch(&ctx)
                         .map_err(JsError::caught)?;
                     let (_, promise) = module.eval().catch(&ctx).map_err(JsError::caught)?;
+                    // Its failure is the bundle's, reported as such.
+                    mark_handled(&ctx, &promise);
                     promise.finish::<()>().catch(&ctx).map_err(JsError::caught)
                 })
                 .map_err(|e| self.classify(e))?;
@@ -524,21 +551,66 @@ impl Host {
         }
     }
 
-    /// Runs pending promise jobs and microtasks until the queue is empty.
+    /// Runs pending promise jobs and microtasks until the queue is empty,
+    /// then reports the promises rejected meanwhile that are still without
+    /// a handler ([`Host::set_rejection_handler`]). Every call from Rust
+    /// into JS ends with it: it is the end of the turn.
     pub fn run_jobs(&self) {
         self.guarded(Phase::Call, || {
-            while self.rt.is_job_pending() {
-                if let Err(err) = self.rt.execute_pending_job() {
-                    let err = err.0.with(|ctx| {
-                        let caught = ctx.catch();
-                        let mut err = JsError::new(describe(caught.clone()));
-                        err.null = caught.is_null();
-                        err
-                    });
-                    self.uncaught(&err);
+            loop {
+                while self.rt.is_job_pending() {
+                    if let Err(err) = self.rt.execute_pending_job() {
+                        let err = err.0.with(|ctx| {
+                            let caught = ctx.catch();
+                            let mut err = JsError::new(describe(caught.clone()));
+                            err.null = caught.is_null();
+                            err
+                        });
+                        self.uncaught(&err);
+                    }
+                }
+                // Rendering a reason may run JS (a getter) and queue jobs.
+                if !self.report_rejections() {
+                    break;
                 }
             }
         });
+    }
+
+    /// Reports the rejections still unhandled; whether there were any.
+    fn report_rejections(&self) -> bool {
+        // Taken first: rendering a reason may run JS, which may reject.
+        let rejections = self.shared.rejections.borrow_mut().take();
+        if rejections.is_empty() {
+            return false;
+        }
+        // A VM out of memory stops with that report; what failed for it is
+        // not the app's to handle.
+        if self.exhausted.load(Ordering::Relaxed) || self.shared.fatal.borrow().is_some() {
+            return false;
+        }
+        self.ctx.with(|ctx| {
+            for rejection in rejections {
+                let mut text = String::new();
+                if let Ok(reason) = rejection.reason(&ctx) {
+                    console::format_value(&reason, &mut text);
+                }
+                // An error without a stack ends with its empty line.
+                text.truncate(text.trim_end().len());
+                let err = JsError::new(text);
+                match &self.on_rejection {
+                    Some(handler) => handler(&err),
+                    None => log::error!(target: "js", "unhandled rejection: {err}"),
+                }
+            }
+        });
+        true
+    }
+
+    /// How many rejections wait for the end of the turn (tests).
+    #[cfg(test)]
+    pub(crate) fn pending_rejections(&self) -> usize {
+        self.shared.rejections.borrow().len()
     }
 
     /// Whether warning `message` was logged (tests).
@@ -727,7 +799,16 @@ impl Drop for Host {
         self.shared.timers.borrow_mut().clear();
         self.shared.frames.borrow_mut().clear();
         self.ctx.with(|ctx| crate::state::uninstall(&ctx));
+        // After the state, whose freeing may reject what waits on it.
+        self.rt.set_host_promise_rejection_tracker(None);
+        self.shared.rejections.borrow_mut().clear();
     }
+}
+
+/// Marks `promise` handled: it is not reported as an unhandled rejection.
+fn mark_handled(ctx: &Ctx<'_>, promise: &rquickjs::Promise<'_>) {
+    // SAFETY: a live promise of this context.
+    unsafe { qjs::JS_PromiseMarkAsHandled(ctx.as_raw().as_ptr(), promise.as_raw()) };
 }
 
 /// The JS object handed to event handlers.
@@ -740,6 +821,26 @@ fn payload_object<'js>(ctx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resu
             for (key, value) in fields {
                 obj.set(*key, payload_value(ctx, value)?)?;
             }
+        }
+        EventPayload::Hover(e) => {
+            obj.set("locationX", e.location_x)?;
+            obj.set("locationY", e.location_y)?;
+            obj.set("pageX", e.page_x)?;
+            obj.set("pageY", e.page_y)?;
+            obj.set("altKey", e.modifiers.alt)?;
+            obj.set("ctrlKey", e.modifiers.ctrl)?;
+            obj.set("metaKey", e.modifiers.cmd)?;
+            obj.set("shiftKey", e.modifiers.shift)?;
+        }
+        EventPayload::ContextMenu(e) => {
+            obj.set("locationX", e.location_x)?;
+            obj.set("locationY", e.location_y)?;
+            obj.set("pageX", e.page_x)?;
+            obj.set("pageY", e.page_y)?;
+            obj.set("altKey", e.modifiers.alt)?;
+            obj.set("ctrlKey", e.modifiers.ctrl)?;
+            obj.set("metaKey", e.modifiers.cmd)?;
+            obj.set("shiftKey", e.modifiers.shift)?;
         }
         EventPayload::FileDrop(uris) => {
             let list = rquickjs::Array::new(ctx.clone())?;
@@ -920,12 +1021,19 @@ declare function clearInterval(id: number | undefined): void;
 declare function queueMicrotask(callback: () => void): void;
 /** Runs `callback` at the next display frame with its time in milliseconds. */
 declare function requestAnimationFrame(callback: (time: number) => void): number;
-declare function cancelAnimationFrame(id: number): void;
+declare function cancelAnimationFrame(id: number | undefined): void;
 declare function atob(data: string): string;
 declare function btoa(data: string): string;
 
 /** `<If when={…} else={…}>…</If>`: renders its children while `when` is
- * truthy, else `else`. A global (no import), like `Each`. */
+ * truthy, else `else`. A function child gets an accessor of `when`'s value,
+ * which is set while it shows: `<If when={user()}>{(u) => <Text>{u().name}</Text>}</If>`.
+ * A global (no import), like `Each`. */
+declare function If<T>(props: {
+  when: T;
+  else?: import("./types").JSX.Element;
+  children?: import("./types").JSX.Element | ((value: () => NonNullable<T>) => import("./types").JSX.Element);
+}): import("./types").JSX.Element;
 declare function If(props: {
   when: unknown;
   else?: import("./types").JSX.Element;
@@ -991,8 +1099,8 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
     let s = shared.clone();
     globals.set(
         "cancelAnimationFrame",
-        Function::new(ctx.clone(), move |id: Opt<u32>| {
-            if let Some(id) = id.0 {
+        Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+            if let Some(id) = handle_id(id) {
                 s.frames.borrow_mut().retain(|(i, _)| *i != id);
             }
         })?,
@@ -1001,14 +1109,34 @@ fn install(ctx: &Ctx<'_>, shared: &Rc<Shared>) -> rquickjs::Result<()> {
         let s = shared.clone();
         globals.set(
             name,
-            Function::new(ctx.clone(), move |id: Opt<u32>| {
-                if let Some(id) = id.0 {
+            Function::new(ctx.clone(), move |id: Opt<Value<'_>>| {
+                if let Some(id) = handle_id(id) {
                     s.timers.borrow_mut().cancel(id);
                 }
             })?,
         )?;
     }
     Ok(())
+}
+
+/// The id `clearTimeout`, `clearInterval` and `cancelAnimationFrame` were
+/// given, read as the web reads it (a number, truncated; a numeric string);
+/// anything else (`undefined`, `null`, objects) names no timer and is ignored,
+/// never thrown at: libraries call these with ids they never got.
+fn handle_id(id: Opt<Value<'_>>) -> Option<u32> {
+    let id = id.0?;
+    let n = match id.as_number() {
+        Some(n) => n,
+        None => id
+            .as_string()?
+            .to_string()
+            .ok()?
+            .trim()
+            .parse::<f64>()
+            .ok()?,
+    };
+    let n = n.trunc();
+    (n.is_finite() && n >= 1.0 && n <= f64::from(u32::MAX)).then_some(n as u32)
 }
 
 #[cfg(test)]
@@ -1018,6 +1146,162 @@ mod tests {
     use nsh_core::{EventKind, Op};
 
     use super::*;
+
+    #[test]
+    fn strings_outside_a_text_are_reported_once_per_element() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"import { append, element, insert, prop, text } from "nsh:rt";
+            const view = element("view");
+            insert(view, () => "a");
+            insert(view, () => "b");
+            const label = element("text");
+            insert(label, () => "shown");
+            // A Rust component places what is put in it.
+            const card = element("view");
+            prop(card, "component", "Card");
+            insert(card, () => "placed");
+            const scroll = element("scroll");
+            append(scroll, text("c"));"#,
+        )
+        .unwrap();
+        let tags = host
+            .ctx
+            .with(|ctx| crate::dom::unshown_text_tags(ctx.as_raw().as_ptr()));
+        let bit = |t: nsh_core::Tag| 1u64 << t as u32;
+        assert_eq!(tags, bit(nsh_core::Tag::View) | bit(nsh_core::Tag::Scroll));
+    }
+
+    #[test]
+    fn resources_follow_their_source_and_count_the_latest_load_only() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ effect, resource, signal }} from "nsh";
+const id = signal(1);
+const loads = [];
+globalThis.report = report;
+globalThis.id = id;
+globalThis.loads = loads;
+globalThis.user = resource(id, (n, info) => new Promise((resolve, reject) => {{
+  loads.push({{ n, resolve, reject, info }});
+  info.signal.addEventListener("abort", () => report(`aborted ${{n}}`));
+}}));
+effect(() => report(`${{user.state()}}|${{user() ?? ""}}|${{user.error() ?? ""}}|${{user.loading()}}`));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["pending|||true"]);
+        let step = |code: &str| {
+            host.eval_source(code).unwrap();
+            reported(&host)
+        };
+        // A new source aborts the running load; the old one ending later
+        // changes nothing.
+        assert_eq!(step("id.set(2);"), ["aborted 1"]);
+        assert_eq!(step(r#"loads[0].resolve("one");"#), Vec::<String>::new());
+        assert_eq!(step(r#"loads[1].resolve("two");"#), ["ready|two||false"]);
+        // A refetch keeps the value and says so to the fetcher.
+        assert_eq!(
+            step("user.refetch(); report(`refetching ${loads[2].info.refetching}`);"),
+            ["refreshing|two||true", "refetching true"]
+        );
+        // A failure keeps the value too.
+        assert_eq!(
+            step(r#"loads[2].reject(new Error("boom"));"#),
+            ["errored|two|Error: boom|false"]
+        );
+        // A value set here clears the error; no source loads nothing.
+        assert_eq!(step(r#"user.mutate("local");"#), ["ready|local||false"]);
+        assert!(step("id.set(null);").is_empty());
+        // Three loads in all: none for the unset source.
+        host.eval_source("if (loads.length !== 3) throw new Error(`${loads.length} loads`);")
+            .unwrap();
+    }
+
+    #[test]
+    fn resources_without_a_source_with_values_and_throws() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ effect, resource }} from "nsh";
+const now = resource(() => 42);
+const kept = resource(() => new Promise(() => {{}}), {{ initialValue: "first" }});
+const thrown = resource(() => {{ throw new Error("no"); }});
+effect(() => report(`${{now.state()}} ${{now()}} | ${{kept.state()}} ${{kept()}} | ${{thrown.state()}} ${{thrown.error()}}`));
+// The methods are bound: they work taken off their resource.
+const {{ loading, state }} = kept;
+report(`${{loading()}} ${{state()}}`);"#
+        ))
+        .unwrap();
+        assert_eq!(
+            reported(&host),
+            [
+                "ready 42 | refreshing first | errored Error: no",
+                "true refreshing"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_resource_going_with_its_owner_aborts_its_load() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ cond, component, element, insert }} from "nsh:rt";
+import {{ effect, resource, signal }} from "nsh";
+const shown = signal(true);
+globalThis.shown = shown;
+function Card() {{
+  const r = resource((info) => new Promise((resolve) => {{
+    globalThis.later = resolve;
+    info.signal.addEventListener("abort", () => report("aborted"));
+  }}));
+  effect(() => report(r.state()));
+  return element("view");
+}}
+const root = element("view");
+insert(root, cond(() => shown(), () => component(Card, {{}})));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["pending"]);
+        host.eval_source("shown.set(false);").unwrap();
+        assert_eq!(reported(&host), ["aborted"]);
+        // Its load ending later finds nothing to change.
+        host.eval_source(r#"later("late");"#).unwrap();
+        assert!(reported(&host).is_empty());
+    }
+
+    #[test]
+    fn a_function_an_effect_returns_is_its_cleanup() {
+        let host = Host::new().unwrap();
+        host.eval_source(&format!(
+            r#"{REPORT}
+import {{ cond, component, element, insert }} from "nsh:rt";
+import {{ effect, signal }} from "nsh";
+const n = signal(0);
+const shown = signal(true);
+globalThis.n = n;
+globalThis.shown = shown;
+function Ticker() {{
+  effect(() => {{
+    const v = n();
+    report(`run ${{v}}`);
+    return () => report(`cleanup ${{v}}`);
+  }});
+  // An async effect's promise is not a cleanup.
+  effect(async () => {{ n(); }});
+  return element("view");
+}}
+const root = element("view");
+insert(root, cond(() => shown(), () => component(Ticker, {{}})));"#
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["run 0"]);
+        host.eval_source("n.set(1);").unwrap();
+        assert_eq!(reported(&host), ["cleanup 0", "run 1"]);
+        host.eval_source("shown.set(false);").unwrap();
+        assert_eq!(reported(&host), ["cleanup 1"]);
+    }
 
     fn ops(host: &Host) -> Vec<Op> {
         let mut out = Vec::new();
@@ -1040,6 +1324,70 @@ const report = (v) => text(String(v));
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn hover_payload_has_both_positions_and_the_modifiers() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::HoverEvent {
+            location_x: 3.0,
+            location_y: 4.5,
+            page_x: 30.0,
+            page_y: 40.5,
+            modifiers: nsh_core::keymap::Modifiers {
+                shift: true,
+                cmd: true,
+                ..Default::default()
+            },
+        };
+        host.ctx.with(|ctx| {
+            let value = payload_object(&ctx, &EventPayload::Hover(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |k: &str| obj.get::<_, f64>(k).unwrap();
+            let flag = |k: &str| obj.get::<_, bool>(k).unwrap();
+            assert_eq!(
+                (
+                    num("locationX"),
+                    num("locationY"),
+                    num("pageX"),
+                    num("pageY")
+                ),
+                (3.0, 4.5, 30.0, 40.5)
+            );
+            assert!(flag("shiftKey") && flag("metaKey"));
+            assert!(!flag("altKey") && !flag("ctrlKey"));
+        });
+    }
+
+    #[test]
+    fn context_menu_payload_has_both_positions() {
+        let host = Host::new().unwrap();
+        let event = nsh_core::ContextMenuEvent {
+            location_x: 1.0,
+            location_y: 2.0,
+            page_x: 11.0,
+            page_y: 22.0,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        };
+        host.ctx.with(|ctx| {
+            let value = payload_object(&ctx, &EventPayload::ContextMenu(event)).unwrap();
+            let obj = value.as_object().unwrap();
+            let num = |k: &str| obj.get::<_, f64>(k).unwrap();
+            assert_eq!(
+                (
+                    num("locationX"),
+                    num("locationY"),
+                    num("pageX"),
+                    num("pageY")
+                ),
+                (1.0, 2.0, 11.0, 22.0)
+            );
+            assert!(obj.get::<_, bool>("ctrlKey").unwrap());
+            assert!(!obj.get::<_, bool>("metaKey").unwrap());
+        });
     }
 
     #[test]
@@ -1197,6 +1545,39 @@ const report = (v) => text(String(v));
         host.eval_source(&format!("{REPORT}report(log.join(\",\"));"))
             .unwrap();
         assert_eq!(reported(&host), ["micro,a,b"]);
+    }
+
+    #[test]
+    fn clearing_ids_that_name_no_timer_is_ignored() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            globalThis.log = [];
+            const t = setTimeout(() => log.push("timeout"), 0);
+            const i = setInterval(() => { log.push("interval"); clearInterval(i); }, 0);
+            const f = requestAnimationFrame(() => log.push("frame"));
+            for (const clear of [clearTimeout, clearInterval, cancelAnimationFrame]) {
+                clear();
+                for (const id of [undefined, null, 0, -1, NaN, Infinity, 1e12, 0.5, 99999, "x", "", {}, [], true, Symbol()])
+                    clear(id);
+            }
+            const gone = setTimeout(() => log.push("cancelled by string"), 0);
+            clearTimeout(String(gone));
+            const gone2 = setTimeout(() => log.push("cancelled by fraction"), 0);
+            clearTimeout(gone2 + 0.7);
+            const gone3 = requestAnimationFrame(() => log.push("cancelled frame"));
+            cancelAnimationFrame(gone3);
+            "#,
+        )
+        .unwrap();
+        host.run_frame();
+        while let Some(next) = host.next_timer() {
+            std::thread::sleep(next.saturating_duration_since(Instant::now()));
+            host.run_timers(Instant::now());
+        }
+        host.eval_source(&format!("{REPORT}report(log.join(\",\"));"))
+            .unwrap();
+        assert_eq!(reported(&host), ["frame,timeout,interval"]);
     }
 
     fn sandboxed(limits: Limits) -> Host {
@@ -1404,5 +1785,272 @@ const report = (v) => text(String(v));
         host.eval_source(&format!("{REPORT}report(eval(\"1 + 1\"));"))
             .unwrap();
         assert_eq!(reported(&host), ["2"]);
+    }
+
+    /// Captures the `js` errors logged on this thread (each test runs on
+    /// a thread of its own, its host too).
+    mod logs {
+        use std::cell::RefCell;
+
+        struct Capture;
+
+        thread_local! {
+            static LINES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        }
+
+        impl log::Log for Capture {
+            fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+                metadata.target() == "js" && metadata.level() == log::Level::Error
+            }
+
+            fn log(&self, record: &log::Record<'_>) {
+                if self.enabled(record.metadata()) {
+                    LINES.with_borrow_mut(|lines| lines.push(record.args().to_string()));
+                }
+            }
+
+            fn flush(&self) {}
+        }
+
+        static CAPTURE: Capture = Capture;
+
+        /// Captures from here on (the logger is the process's: installed
+        /// once).
+        pub(super) fn capture() {
+            static INSTALL: std::sync::Once = std::sync::Once::new();
+            INSTALL.call_once(|| {
+                if log::set_logger(&CAPTURE).is_ok() {
+                    log::set_max_level(log::LevelFilter::Error);
+                }
+            });
+            LINES.with_borrow_mut(Vec::clear);
+        }
+
+        /// The lines logged since the last call.
+        pub(super) fn take() -> Vec<String> {
+            LINES.with_borrow_mut(std::mem::take)
+        }
+    }
+
+    /// Lines about unhandled rejections among `lines`.
+    fn rejections(lines: &[String]) -> Vec<&String> {
+        lines
+            .iter()
+            .filter(|l| l.contains("unhandled rejection"))
+            .collect()
+    }
+
+    #[test]
+    fn unhandled_rejections_are_logged_once_the_turn_ends() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"function fail() { return Promise.reject(new Error("boom")); }
+            fail();
+            Promise.reject("plain");"#,
+        )
+        .unwrap();
+        let lines = logs::take();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].starts_with("unhandled rejection: Error: boom")
+                && lines[0].contains("at fail"),
+            "{}",
+            lines[0]
+        );
+        assert_eq!(lines[1], "unhandled rejection: plain");
+        // Reported once: the next turns have nothing left.
+        host.run_jobs();
+        host.collect_garbage();
+        assert!(logs::take().is_empty());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn rejections_handled_in_the_same_turn_are_not_logged() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"// A handler attached later in the same code.
+            const p = Promise.reject(new Error("later"));
+            const other = 1 + 1;
+            p.catch(() => {});
+            // One attached by a microtask of the same turn.
+            const q = Promise.reject(new Error("micro"));
+            Promise.resolve().then(() => Promise.resolve()).then(() => q.catch(() => {}));
+            // Handled the usual ways.
+            Promise.reject(new Error("caught")).catch(() => {});
+            Promise.reject(new Error("then")).then(undefined, () => {});
+            Promise.reject(new Error("chain")).then(() => 1).catch(() => {});
+            (async () => { try { await Promise.reject(new Error("awaited")); } catch (e) {} })();
+            Promise.allSettled([Promise.reject(new Error("settled"))]);"#,
+        )
+        .unwrap();
+        assert_eq!(logs::take(), Vec::<String>::new());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn a_rejection_left_by_a_chain_is_logged_once() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        // The first promise is handled by `then`, which rejects in turn.
+        host.eval_source(r#"Promise.reject(new Error("chained")).then(() => 1);"#)
+            .unwrap();
+        let lines = logs::take();
+        assert_eq!(rejections(&lines).len(), 1, "{lines:?}");
+        assert!(lines[0].contains("chained"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn async_functions_that_throw_unawaited_are_logged() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"async function now() { throw new Error("at once"); }
+            async function later() { await null; throw new TypeError("after await"); }
+            setTimeout(() => { now(); later(); }, 0);"#,
+        )
+        .unwrap();
+        assert!(logs::take().is_empty());
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        let lines = logs::take();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[0].contains("at once") && lines[0].contains("at now"),
+            "{}",
+            lines[0]
+        );
+        assert!(lines[1].contains("after await"), "{}", lines[1]);
+    }
+
+    #[test]
+    fn a_rejection_handled_in_a_later_turn_is_logged_once() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"const p = Promise.reject(new Error("too late"));
+            setTimeout(() => p.catch(() => {}), 0);"#,
+        )
+        .unwrap();
+        assert_eq!(rejections(&logs::take()).len(), 1);
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert!(logs::take().is_empty());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn rejections_go_to_the_handler_not_the_error_handler() {
+        logs::capture();
+        let mut host = Host::new().unwrap();
+        let (errors, rejected) = (
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(RefCell::new(Vec::new())),
+        );
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        let seen = rejected.clone();
+        host.set_rejection_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(r#"Promise.reject(new Error("to the handler"));"#)
+            .unwrap();
+        assert!(errors.borrow().is_empty());
+        assert_eq!(rejected.borrow().len(), 1);
+        assert!(rejected.borrow()[0].starts_with("Error: to the handler"));
+        assert!(logs::take().is_empty());
+    }
+
+    #[test]
+    fn a_failing_bundle_is_not_an_unhandled_rejection() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        let err = host
+            .eval_source(r#"throw new Error("top level");"#)
+            .unwrap_err();
+        assert!(err.message.contains("top level"), "{}", err.message);
+        assert!(rejections(&logs::take()).is_empty());
+        assert_eq!(host.pending_rejections(), 0);
+    }
+
+    #[test]
+    fn many_rejections_leave_nothing_behind() {
+        logs::capture();
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"globalThis.reject = (n) => {
+                for (let i = 0; i < n; i++) {
+                    Promise.reject(new Error("unhandled " + i));
+                    Promise.reject(new Error("handled " + i)).catch(() => {});
+                    (async () => { throw new Error("async " + i); })();
+                }
+            };
+            setTimeout(() => reject(1), 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        logs::take();
+        host.collect_garbage();
+        let before = host.object_count();
+        host.eval_script(
+            "rounds.js",
+            "for (let i = 0; i < 20; i++) setTimeout(() => reject(50), 0);",
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert_eq!(rejections(&logs::take()).len(), 20 * 50 * 2);
+        assert_eq!(host.pending_rejections(), 0);
+        host.collect_garbage();
+        // The 3000 promises and their errors are gone.
+        assert!(
+            host.object_count() < before + 100,
+            "{} → {}",
+            before,
+            host.object_count()
+        );
+    }
+
+    #[test]
+    fn interrupts_and_running_out_of_memory_are_not_rejections() {
+        logs::capture();
+        let mut host = sandboxed(Limits {
+            call_budget: Duration::from_millis(50),
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"setTimeout(async () => { await null; for (;;) {} }, 0);
+            setTimeout(async () => { try { for (;;) {} } catch (e) {} }, 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert_eq!(errors.borrow().len(), 2, "{:?}", errors.borrow());
+        assert!(
+            errors
+                .borrow()
+                .iter()
+                .all(|e| e.contains("budget of 50 ms"))
+        );
+        assert_eq!(rejections(&logs::take()), Vec::<&String>::new());
+        assert_eq!(host.pending_rejections(), 0);
+
+        let mut host = sandboxed(Limits {
+            memory_bytes: 16 << 20,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"setTimeout(async () => {
+                const keep = [];
+                for (;;) keep.push(new Array(100000).fill(1));
+            }, 0);"#,
+        )
+        .unwrap();
+        host.run_timers(Instant::now() + Duration::from_millis(1));
+        assert_eq!(errors.borrow().len(), 1, "{:?}", errors.borrow());
+        assert!(errors.borrow()[0].contains("limited to 16 MB"));
+        assert_eq!(rejections(&logs::take()), Vec::<&String>::new());
     }
 }

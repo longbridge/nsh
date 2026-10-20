@@ -3,7 +3,8 @@
 
 use nsh_core::ui::{Dialog, DialogButton, DialogButtonStyle, prelude::*};
 
-/// The system's alert dialog.
+/// The system's alert dialog (UIAlertController, AlertDialog).
+#[module]
 #[derive(Debug)]
 pub struct AlertDialog;
 
@@ -74,7 +75,6 @@ pub enum AlertDialogPresentation {
     ActionSheet,
 }
 
-/// The system's alert dialog (UIAlertController, AlertDialog).
 #[module]
 impl AlertDialog {
     /// Shows the dialog and resolves with the chosen action's `id` (its

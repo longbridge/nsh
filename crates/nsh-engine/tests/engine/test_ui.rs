@@ -370,7 +370,6 @@ pub(crate) fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> imp
         .child(If::new(
             move || !props.value.with(|v| v.is_empty()),
             move || {
-                let field = field.clone();
                 view()
                     .size_6()
                     .role(AccessibilityRole::Button)

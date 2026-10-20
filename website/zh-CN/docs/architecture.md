@@ -57,7 +57,7 @@ group: tools
 
 - **绘制文本**，这些文本已在引擎线程上布局完成；
 - **原生动画**：`nsh/animated` 的值逐帧驱动（iOS 上用 `CADisplayLink`，Android 上用 UI 线程动画器），并直接写入视图；
-- **手势和滚动**：触摸转换为事件发送到引擎线程；`scrollValue` 和 `pan` 在同一帧内为原生值提供数据。
+- **手势和滚动**：触摸转换为事件发送到引擎线程；`scrollValue` 和 `pan` 在同一帧内为动画值提供数据。
 
 **主线程从不等待 JS。** 当系统需要立即得到答复时（这段文本能否修改、返回键能否弹出此页面、这个 sheet 能否关闭），答案
 早已作为 prop 挂载好了，JS 事后通过事件得知。繁忙的引擎线程可能会延迟更新，但无法冻结滚动、动画或系统手势。
@@ -75,7 +75,7 @@ group: tools
 ```
 
 在计数器示例中，Mac 上的 release 构建里一次点击（JS 加 commit）约耗时 0.12 ms，并产生少量 mount item（参见
-[用 nsh trace 测试](./testing-and-trace.md)）。
+[测试](./testing-and-trace.md)）。
 
 这一设计带来三个特性：
 
@@ -143,7 +143,7 @@ NSH 是一个 Rust workspace。编写应用时你永远不需要构建它（发�
 | `nsh-cli` | `nsh` 命令。 |
 
 依赖方向是 `nsh-core` ← `nsh-js` ← `nsh-engine` ← 各平台；`nsh-base` 构建在 `nsh-core` 之上。core 不依赖任何平台，也不依赖任何 JS 引擎，正因如此
-`nsh trace` 才能在任何机器上无界面地运行真实的运行时。
+`nsh test` 才能在任何机器上无界面地运行真实的运行时。
 
 ## 另请参阅
 

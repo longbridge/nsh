@@ -1,5 +1,5 @@
 import { cleanup, Scroll, signal, Text, View } from "nsh";
-import { Animated, type CompositeAnimation, createNativeValue, Easing, LayoutAnimation, type LayoutAnimationConfig, type NativeNode } from "nsh/animated";
+import { Animated, type CompositeAnimation, createAnimatedValue, Easing, LayoutAnimation, type LayoutAnimationConfig, type AnimatedNode } from "nsh/animated";
 import { Canvas, type CanvasRenderingContext2D } from "nsh/canvas";
 import { Icon } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, Press, radius, Segmented, tints } from "../ui";
@@ -29,9 +29,9 @@ function useWidth() {
 
 /** An orbit, pulsing rings and a breathing core: three loops, started once. */
 function Hero() {
-  const spin = createNativeValue(0);
-  const rings = [0, 1, 2].map(() => createNativeValue(0));
-  const breathe = createNativeValue(0);
+  const spin = createAnimatedValue(0);
+  const rings = [0, 1, 2].map(() => createAnimatedValue(0));
+  const breathe = createAnimatedValue(0);
   const all = Animated.parallel([
     Animated.loop(Animated.timing(spin, { toValue: 360, duration: 3200, easing: Easing.linear }), { resetBeforeIteration: true }),
     Animated.stagger(
@@ -49,7 +49,7 @@ function Hero() {
   cleanup(() => all.stop());
 
   const S = 188;
-  const orbit = (size: number, angle: NativeNode, color: string, dot: number) => (
+  const orbit = (size: number, angle: AnimatedNode, color: string, dot: number) => (
     <View
       pointerEvents="none"
       style={{
@@ -185,8 +185,8 @@ function hatch(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
 /** One curve plotted, with a dot that rides it: x runs linearly, y with the curve, both native. */
 function EasingPlot() {
   const selected = signal(curves.length - 3);
-  const px = createNativeValue(0);
-  const py = createNativeValue(0);
+  const px = createAnimatedValue(0);
+  const py = createAnimatedValue(0);
   let running: CompositeAnimation | undefined;
   const play = () => {
     running?.stop();
@@ -259,7 +259,7 @@ function EasingPlot() {
           ctx.lineWidth = 2;
           ctx.lineJoin = "round";
           ctx.stroke();
-          // The playhead and the dot, from native values.
+          // The playhead and the dot, from animated values.
           const hx = px.mul(r - l).add(l);
           const hy = py.mul(-(b - t) / (hi - lo)).add(b + (lo * (b - t)) / (hi - lo));
           ctx.strokeStyle = alpha(colors.text, 0.22);
@@ -311,7 +311,7 @@ function EasingPlot() {
 
 /** Every curve at once: ten timings in one `Animated.parallel`. */
 function EasingRace() {
-  const dots = curves.map(() => createNativeValue(0));
+  const dots = curves.map(() => createAnimatedValue(0));
   const [width, measure] = useWidth();
   const there = signal(false);
   const play = () => {
@@ -379,9 +379,9 @@ function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
 
 /** sequence, parallel, stagger and loop, with stop and reset. */
 function Composition() {
-  const ys = tones().map(() => createNativeValue(0));
-  const spin = createNativeValue(0);
-  const fade = createNativeValue(1);
+  const ys = tones().map(() => createAnimatedValue(0));
+  const spin = createAnimatedValue(0);
+  const fade = createAnimatedValue(1);
   const state = signal<{ label: string; tone: "neutral" | "accent" | "warn" | "info" }>({ label: "idle", tone: "neutral" });
 
   const stagger = Animated.stagger(
@@ -494,8 +494,8 @@ function response(stiffness: number, damping: number, n: number) {
 
 /** Springs with different settings, released together; the plot's dots are the springs themselves. */
 function Springs() {
-  const xs = springs.map(() => createNativeValue(0));
-  const clock = createNativeValue(0);
+  const xs = springs.map(() => createAnimatedValue(0));
+  const clock = createAnimatedValue(0);
   const [width, measure] = useWidth();
   const there = signal(false);
   const play = () => {
@@ -614,7 +614,7 @@ function DialFace(props: { size: number }) {
 
 /** Colors, angles and scales from one value; outside the range they extend or clamp. */
 function Interpolations() {
-  const t = createNativeValue(0);
+  const t = createAnimatedValue(0);
   const at = signal<"0" | "1" | "2">("0");
   const go = (to: "0" | "1" | "2") => {
     at.set(to);
@@ -692,7 +692,7 @@ function Interpolations() {
 /** A header that hides while the list scrolls up and comes back as it
  * scrolls down: `diffClamp` of the scroll offset, natively. */
 function HidingHeader() {
-  const scroll = createNativeValue(0);
+  const scroll = createAnimatedValue(0);
   const H = 52;
   const header = scroll.diffClamp(0, H);
   return (

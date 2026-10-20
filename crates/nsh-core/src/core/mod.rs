@@ -327,6 +327,12 @@ struct InputState {
     content: Option<Rect>,
     /// Last size `onContentSizeChange` reported.
     content_size: Option<Size>,
+    /// The input is measured with its placeholder (its value is empty).
+    placeholder_measured: bool,
+    /// The size of an empty line in the style of the measured placeholder,
+    /// by the placeholder text's `layout_hash`: what `onContentSizeChange`
+    /// reports for an empty input.
+    empty_line: Option<(u64, Size)>,
 }
 
 #[derive(Debug, Default)]
@@ -399,7 +405,7 @@ struct Node {
     component: Option<Box<ComponentState>>,
     /// Recycling slot (or role) of a list cell.
     slot: Option<CellSlot>,
-    /// Native values driven by gestures on the view.
+    /// Animated values driven by gestures on the view.
     gestures: GestureValues,
     /// The native view exists.
     created: bool,
@@ -809,6 +815,14 @@ impl<M: TextEngine> Core<M> {
     /// sources, web views and the status bar are checked against it.
     pub fn set_access(&mut self, access: Arc<crate::access::Access>) {
         self.access = access;
+    }
+
+    /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
+    /// memory, for the core's life.
+    pub fn set_storage(&mut self, backend: Option<Arc<dyn crate::storage::StorageBackend>>) {
+        self.components
+            .runtime
+            .set_storage(crate::storage::Store::new(backend));
     }
 
     /// Logs (once) that the app was refused `what`.
@@ -1235,11 +1249,18 @@ impl<M: TextEngine> Core<M> {
                     self.deny(message);
                     continue;
                 }
-                Command::SetClipboard(_) | Command::ReadClipboard { .. }
+                Command::SetClipboard(_)
+                | Command::ReadClipboard { .. }
+                | Command::SetClipboardImage(_)
+                | Command::ReadClipboardImage { .. }
+                | Command::ReadClipboardFiles { .. }
                     if !self.access.allows_clipboard() =>
                 {
-                    if let Command::ReadClipboard { id: request, .. } = &command {
-                        self.answer_clipboard(*request, None, false);
+                    if let Command::ReadClipboard { id: request, .. }
+                    | Command::ReadClipboardImage { id: request, .. }
+                    | Command::ReadClipboardFiles { id: request } = &command
+                    {
+                        self.answer_clipboard(*request, components::ClipboardAnswer::default());
                     }
                     self.deny("the clipboard is not granted: add `\"clipboard\": true` to capabilities in nsh.json".into());
                     continue;
@@ -1251,6 +1272,7 @@ impl<M: TextEngine> Core<M> {
                 _ => {}
             }
             let node = &self.nodes[key as usize];
+            let id = node.id;
             match command {
                 Command::ScrollToEnd { animated } => {
                     let Some(content) = node.scroll.as_ref().and_then(|s| s.content) else {
@@ -1296,6 +1318,42 @@ impl<M: TextEngine> Core<M> {
         let key = self.nodes.insert(Node::new(id, kind)) as Key;
         self.slots[idx] = key + 1;
         Ok(key)
+    }
+
+    /// Makes `alias` another name of node `id`: a component whose view's
+    /// root is another component makes that one on its own host, under a
+    /// name of its own (the nested component's host), with no node of its
+    /// own. What the core sends names the node by its own id.
+    pub(super) fn alias(&mut self, alias: NodeId, id: NodeId) -> Result<(), ApplyError> {
+        let key = self.key(id)?;
+        let idx = alias as usize;
+        if idx > self.slots.len().saturating_add(self.max_nodes) {
+            return Err(ApplyError::IdOutOfRange(alias));
+        }
+        if idx >= self.slots.len() {
+            self.slots.resize((idx + 1).next_power_of_two(), 0);
+        } else if self.slots[idx] != 0 {
+            return Err(ApplyError::DuplicateNode(alias));
+        }
+        self.slots[idx] = key + 1;
+        Ok(())
+    }
+
+    /// Whether `id` is another name of a node ([`Self::alias`]).
+    pub(super) fn is_alias(&self, id: NodeId) -> bool {
+        self.key(id).is_ok_and(|k| self.nodes[k as usize].id != id)
+    }
+
+    /// Forgets alias `id` (its node stays).
+    pub(super) fn unalias(&mut self, id: NodeId) {
+        if self.is_alias(id) {
+            self.slots[id as usize] = 0;
+        }
+    }
+
+    /// The id node `id` has natively (another for an alias).
+    pub(super) fn native_id(&self, id: NodeId) -> NodeId {
+        self.key(id).map_or(id, |k| self.nodes[k as usize].id)
     }
 
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
@@ -1347,6 +1405,7 @@ impl<M: TextEngine> Core<M> {
         if node.kind == kind {
             return true;
         }
+        let id = node.id;
         let unsent = self
             .mount
             .iter()
@@ -1397,7 +1456,38 @@ impl<M: TextEngine> Core<M> {
         let (Some(input), Some(layout)) = (&node.input, node.layout) else {
             return;
         };
-        let multiline = input.config.multiline;
+        let placeholder = input.value.is_empty() && !input.config.placeholder.is_empty();
+        let text = self.input_text(
+            key,
+            if placeholder {
+                &input.config.placeholder
+            } else {
+                &input.value
+            },
+        );
+        let ctx = self.text_ctx(layout);
+        let same = ctx.text.layout_eq(&text);
+        let input = self.nodes[key as usize]
+            .input
+            .as_mut()
+            .expect("input state");
+        // A value that reads as the placeholder measures the same, but
+        // its content size is the value's: laid out again to report it.
+        if same && input.placeholder_measured == placeholder {
+            return;
+        }
+        input.placeholder_measured = placeholder;
+        if !same {
+            *self.text_ctx(layout) = TextContext::new(Arc::new(text));
+        }
+        self.layout.mark_dirty(layout).expect("taffy dirty");
+        self.needs_layout = true;
+    }
+
+    /// `content` in the text style of input `key`, as it is measured.
+    fn input_text(&self, key: Key, content: &str) -> AttributedText {
+        let node = &self.nodes[key as usize];
+        let multiline = node.input.as_ref().is_some_and(|i| i.config.multiline);
         let mut text = AttributedText {
             max_lines: if multiline { 0 } else { 1 },
             ..AttributedText::default()
@@ -1406,24 +1496,13 @@ impl<M: TextEngine> Core<M> {
             self.inherited_text_style(key).inherit(&node.text_style),
             node.paragraph.font_multiplier(self.font_scale),
         );
-        let content = if !input.value.is_empty() {
-            &input.value
-        } else {
-            &input.config.placeholder
-        };
         text.push(content, style);
         // An empty last line still takes space (a trailing line break, or no
         // text at all).
         if content.is_empty() || (multiline && content.ends_with('\n')) {
             text.push("\u{200b}", style);
         }
-        let ctx = self.text_ctx(layout);
-        if ctx.text.layout_eq(&text) {
-            return;
-        }
-        *ctx = TextContext::new(Arc::new(text));
-        self.layout.mark_dirty(layout).expect("taffy dirty");
-        self.needs_layout = true;
+        text
     }
 
     /// Pushes the effective taffy style of `key`: the JS style, adjusted
@@ -1556,7 +1635,11 @@ impl<M: TextEngine> Core<M> {
         let flipped = node.rtl != rtl;
         node.rtl = rtl;
         let view_changed = node.view_style != view;
-        let text_changed = node.text_style != text;
+        // A span's background is part of its block's text.
+        let span_background_changed = node.inline
+            && node.kind == Kind::Text
+            && span_background(&node.view_style, node.id) != span_background(&view, node.id);
+        let text_changed = node.text_style != text || span_background_changed;
         let animation_changed = node.animated != animated;
         let z_changed = node.z_index != z_index;
         node.view_style = view;
@@ -2176,6 +2259,13 @@ impl<M: TextEngine> Core<M> {
                     flags |= dirty::VIEW_PROPS;
                 }
             }
+            Prop::Focusable(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.focusable != value {
+                    props.focusable = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
             Prop::Accessibility(prop) => {
                 // A label changing on mounted props goes alone: it is
                 // the one that follows app state (a count, a value).
@@ -2551,9 +2641,10 @@ impl<M: TextEngine> Core<M> {
             if parent_created {
                 self.ensure_created(child);
                 let before = self.native_before(parent, child);
+                // By the nodes' own ids (the ops may name an alias).
                 self.mount.push(MountItem::Insert {
-                    parent: parent_id,
-                    child: child_id,
+                    parent: self.nodes[parent as usize].id,
+                    child: self.nodes[child as usize].id,
                     before,
                 });
             }
@@ -3215,18 +3306,38 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// `onContentSizeChange` of input `key` if the size of its text (at the
-    /// content box's width when multiline) changed.
+    /// `onContentSizeChange` of input `key` if the size of its value (at the
+    /// content box's width when multiline) changed. An empty input reports
+    /// an empty line, as React Native does, though it is measured (sized)
+    /// with its placeholder.
     fn report_content_size(&mut self, key: Key, width: f32) {
         let node = &self.nodes[key as usize];
         let (Some(input), Some(layout)) = (node.input.as_ref(), node.layout) else {
             return;
         };
         let max = input.config.multiline.then_some(width);
+        let (placeholder, empty_line) = (input.placeholder_measured, input.empty_line);
         let Some(LeafContext::Text(ctx)) = self.layout.get_node_context_mut(layout) else {
             return;
         };
-        let size = measure_text(&self.text_engine, &mut self.measure_cache, ctx, max);
+        let size = if !placeholder {
+            measure_text(&self.text_engine, &mut self.measure_cache, ctx, max)
+        } else if let Some((hash, size)) = empty_line
+            && hash == ctx.layout_hash
+        {
+            size
+        } else {
+            // Measured once per placeholder and style.
+            let hash = ctx.layout_hash;
+            let mut empty = TextContext::new(Arc::new(self.input_text(key, "")));
+            let size = measure_text(&self.text_engine, &mut self.measure_cache, &mut empty, max);
+            let input = self.nodes[key as usize]
+                .input
+                .as_mut()
+                .expect("input state");
+            input.empty_line = Some((hash, size));
+            size
+        };
         let node = &mut self.nodes[key as usize];
         let input = node.input.as_mut().expect("input state");
         if input.content_size == Some(size) {
@@ -3387,7 +3498,11 @@ impl<M: TextEngine> Core<M> {
                 Kind::RawText => out.push(&child.text, style),
                 Kind::Text => {
                     let start = out.len_utf16();
-                    self.collect_text(c, style.inherit(&child.text_style), out);
+                    let mut inner = style.inherit(&child.text_style);
+                    if let Some(b) = span_background(&child.view_style, child.id) {
+                        inner.background = Some(b);
+                    }
+                    self.collect_text(c, inner, out);
                     if pressable(child.events) {
                         out.links.push(crate::text::TextLink {
                             start,
@@ -4807,6 +4922,15 @@ const PRESSES: [EventKind; 4] = [
     EventKind::PressDown,
     EventKind::PressUp,
 ];
+
+/// The background a nested text's view style gives its characters.
+fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextBackground> {
+    (style.background_color.0 & 0xff != 0).then_some(crate::text::TextBackground {
+        color: style.background_color,
+        radius: style.border_radius.max(0.0),
+        node,
+    })
+}
 
 /// Whether a span with `events` takes presses (a link in its text block).
 fn pressable(events: EventMask) -> bool {

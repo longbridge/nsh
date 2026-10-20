@@ -37,10 +37,10 @@ runs a built bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --size 1200x800   # in a checkout: target/debug/nsh-macos-host
+dist/nsh/runtime/macos/nsh-macos-host --bundle build/bundle.nshc --window-size 1200x800   # in a checkout: target/debug/nsh-macos-host
 ```
 
-`--size` is the window's initial size; the window can be resized.
+`--window-size` is the window's initial size; the window can be resized.
 
 ### Performance monitor
 
@@ -124,6 +124,10 @@ or update relaunch, call `nsh_platform_macos::quit_app()` from any thread. It
 closes the retained window, stops the engine and returns from `run_app`.
 `nsh_core::ui::desktop::close_window()` follows the chosen window-close policy.
 
+
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-macos-rust).

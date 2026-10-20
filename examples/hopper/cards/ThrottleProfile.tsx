@@ -1,5 +1,5 @@
 import { computed, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { Icon } from "../icons";
 import {
@@ -41,14 +41,14 @@ const ease = (p: Phase, x: number) => (p.easing === "spring" ? springAt(x) : bez
 const HEIGHT = 240;
 const pad = { left: 20, right: 20, top: 28, bottom: 28 };
 
-type NativeValue = ReturnType<typeof createNativeValue>;
+type AnimatedValue = ReturnType<typeof createAnimatedValue>;
 
 /**
  * Throttle into the selected phase: the eased curve over a filled area. Drag
  * the two rings (the bezier's control points) to reshape it; a dot replays
  * it on the UI thread during a preview.
  */
-function Curve(props: { phase: Phase; onBezier: (b: Bezier) => void; time: NativeValue; value: NativeValue }) {
+function Curve(props: { phase: Phase; onBezier: (b: Bezier) => void; time: AnimatedValue; value: AnimatedValue }) {
   const width = signal(0);
   let handle: 0 | 1 | null = null;
   const box = () => ({ w: width() - pad.left - pad.right, h: HEIGHT - pad.top - pad.bottom });
@@ -258,8 +258,8 @@ function Choices(props: { value: EasingName; onPick: (e: EasingName) => void }) 
 
 export function ThrottleProfile() {
   const open = signal(false);
-  const time = createNativeValue(0);
-  const value = createNativeValue(0);
+  const time = createAnimatedValue(0);
+  const value = createAnimatedValue(0);
   const playing = signal(false);
 
   const index = computed(() => Math.max(0, phases().findIndex((p) => p.id === selectedPhase())));

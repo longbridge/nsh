@@ -555,6 +555,20 @@ pub(crate) mod __private {
         }
     }
 
+    /// The TypeScript type of `T`, a callback parameter whose function's
+    /// arguments `#[args(..)]` names `names`; nothing in builds without
+    /// declarations.
+    pub fn named_arg_ts<T: crate::ui::callback::NamedArgs>(
+        types: &mut TsTypes,
+        names: &[&str],
+    ) -> String {
+        if crate::ui::DECLARATIONS {
+            T::ts_named(types, names)
+        } else {
+            String::new()
+        }
+    }
+
     /// `T`'s TypeScript type as a result.
     pub const fn ret_ts<T: Ret>() -> TsType {
         if crate::ui::DECLARATIONS {
@@ -613,6 +627,34 @@ pub(crate) mod __private {
     /// The value of `instance`, borrowed mutably for a call.
     pub fn borrow_mut<C: Class>(instance: &Instance<C>) -> Result<RefMut<'_, C>, Thrown> {
         instance.borrow_mut()
+    }
+
+    /// The value of `instance`, argument `name` of `what` (`Account.transfer`,
+    /// `to`), borrowed for the call: its error names them, as a wrong
+    /// argument's does (``Account.transfer: `to`: Account is disposed``).
+    pub fn borrow_arg<'a, C: Class>(
+        instance: &'a Instance<C>,
+        what: &str,
+        name: &str,
+    ) -> Result<Ref<'a, C>, Thrown> {
+        instance.borrow().map_err(|e| arg_error(e, what, name))
+    }
+
+    /// [`borrow_arg`], mutably.
+    pub fn borrow_arg_mut<'a, C: Class>(
+        instance: &'a Instance<C>,
+        what: &str,
+        name: &str,
+    ) -> Result<RefMut<'a, C>, Thrown> {
+        instance.borrow_mut().map_err(|e| arg_error(e, what, name))
+    }
+
+    /// `e`, an argument's error, after `what` and the argument's `name`.
+    fn arg_error(e: Thrown, what: &str, name: &str) -> Thrown {
+        match e {
+            Thrown::Type(m) => Thrown::Type(format!("{what}: `{name}`: {m}")),
+            Thrown::Error(m) => Thrown::Error(format!("{what}: `{name}`: {m}")),
+        }
     }
 
     /// The result of a synchronous call as a JS value.
@@ -674,6 +716,17 @@ pub(crate) mod __private {
         const DOC: &'static str;
     }
 
+    /// The documentation of a module (`#[module]` on its struct, or the
+    /// `#[component]` of its name).
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` needs `#[module]` on its struct too",
+        label = "a module's struct and its `impl` block both have `#[module]` (the struct's doc comment documents it)"
+    )]
+    pub trait ModuleDoc {
+        /// The struct's (or component function's) doc comment.
+        const DOC: &'static str;
+    }
+
     /// A field of a class's struct, traced when its type implements
     /// [`Trace`] (`#[class]` calls `(&&Field(&self.x)).trace_field(t)`: the
     /// method of `TraceField` applies to types that implement it, the one
@@ -731,7 +784,7 @@ mod tests {
     #[class]
     impl Tally {
         /// Starts at `start` (0 when left out).
-        fn new(start: Option<i64>) -> Self {
+        pub(crate) fn new(start: Option<i64>) -> Self {
             Tally {
                 count: start.unwrap_or(0),
                 label: None,
@@ -739,7 +792,7 @@ mod tests {
         }
 
         /// Adds `by`; the new count.
-        fn add(&mut self, by: i64, label: Option<String>) -> i64 {
+        pub(crate) fn add(&mut self, by: i64, label: Option<String>) -> i64 {
             let _ = label;
             self.count += by;
             self.count
@@ -747,55 +800,59 @@ mod tests {
 
         /// The count.
         #[getter]
-        fn count(&self) -> i64 {
+        pub(crate) fn count(&self) -> i64 {
             self.count
         }
 
         #[setter]
-        fn set_count(&mut self, count: i64) {
+        pub(crate) fn set_count(&mut self, count: i64) {
             self.count = count;
         }
 
         #[getter]
-        fn label(&self) -> Option<String> {
+        pub(crate) fn label(&self) -> Option<String> {
             self.label.clone()
         }
 
         /// A setter's value is required, even an `Option`.
         #[setter]
-        fn set_label(&mut self, label: Option<String>) {
+        pub(crate) fn set_label(&mut self, label: Option<String>) {
             self.label = label;
         }
 
         /// Only where it is compiled.
         #[cfg(any())]
-        fn nowhere(&self) -> i64 {
+        pub(crate) fn nowhere(&self) -> i64 {
             0
         }
 
         /// A tally from `"12"`; throws on anything else.
-        fn parse(text: String) -> Result<Tally, String> {
+        pub(crate) fn parse(text: String) -> Result<Tally, String> {
             text.parse()
                 .map(|count| Tally { count, label: None })
                 .map_err(|_| text)
         }
 
-        fn reset(&mut self, to: Option<i64>, by: i64) {
+        pub(crate) fn reset(&mut self, to: Option<i64>, by: i64) {
             self.count = to.unwrap_or(0) + by;
         }
 
-        fn absorb(&mut self, other: &Tally, token: Option<Instance<Token>>) -> Instance<Token> {
+        pub(crate) fn absorb(
+            &mut self,
+            other: &Tally,
+            token: Option<Instance<Token>>,
+        ) -> Instance<Token> {
             self.count += other.count;
             token.unwrap_or_else(|| Instance::new(Token))
         }
 
         /// Saves the count; resolves when it is written.
-        async fn save(this: Instance<Self>, path: String) -> Result<(), String> {
+        pub(crate) async fn save(this: Instance<Self>, path: String) -> Result<(), String> {
             let _ = (this, path);
             Ok(())
         }
 
-        async fn later(start: i64) -> Tally {
+        pub(crate) async fn later(start: i64) -> Tally {
             Tally {
                 count: start,
                 label: None,
@@ -803,12 +860,28 @@ mod tests {
         }
 
         /// Sorts with the app's comparison.
-        fn sort_by(&mut self, compare: Callback<(String, String), f64>) {
+        pub(crate) fn sort_by(&mut self, compare: Callback<(String, String), f64>) {
             let _ = compare;
         }
 
-        fn on(&mut self, listener: Option<Callback<i64>>, done: Option<Callback>) {
+        pub(crate) fn on(
+            &mut self,
+            #[args(count)] listener: Option<Callback<i64>>,
+            done: Option<Callback>,
+        ) {
             let _ = (listener, done);
+        }
+
+        /// A helper without `pub`: Rust's only, not in TS.
+        #[allow(dead_code)]
+        fn bump(&mut self) {
+            self.count += 1;
+        }
+
+        /// A private associated function: not a static in TS either.
+        #[allow(dead_code)]
+        async fn private_later() -> i64 {
+            0
         }
     }
 
@@ -818,7 +891,7 @@ mod tests {
 
     #[class]
     impl Token {
-        fn mint() -> Token {
+        pub(crate) fn mint() -> Token {
             Token
         }
     }
@@ -827,6 +900,13 @@ mod tests {
     fn classes_are_declared_from_their_definitions() {
         let mut registry = Registry::ui_set("test/ui");
         registry.class::<Tally>().class::<Token>();
+        // Helpers without `pub` stay Rust's: neither declared nor members.
+        assert!(
+            !<Tally as crate::ui::Class>::DEF
+                .members
+                .iter()
+                .any(|m| m.name == "bump" || m.name == "privateLater")
+        );
         assert_eq!(
             declarations(&registry, &[]),
             r#"/** A tally kept in Rust. */
@@ -850,7 +930,7 @@ export declare class Tally {
   static later(start: number): Promise<Tally>;
   /** Sorts with the app's comparison. */
   sortBy(compare: (a: string, b: string) => number): void;
-  on(listener?: ((a: number) => void) | null, done?: (() => void) | null): void;
+  on(listener?: ((count: number) => void) | null, done?: (() => void) | null): void;
   /** Frees the Rust value now (else when the object is collected); the object throws after. */
   dispose(): void;
   [Symbol.dispose](): void;
@@ -871,49 +951,98 @@ export declare class Token {
     }
 
     /// Functions of the three kinds.
+    #[module]
     struct Tools;
 
     #[module]
     impl Tools {
         /// The sum, at once.
-        fn sum(values: Vec<f64>) -> f64 {
+        pub(crate) fn sum(values: Vec<f64>) -> f64 {
             values.iter().sum()
         }
 
-        fn shout(text: String) {
+        pub(crate) fn shout(text: String) {
             let _ = text;
         }
 
         /// A promise of the length.
-        fn measure(text: String, cx: &mut ModuleCx) -> usize {
+        pub(crate) fn measure(text: String, cx: &mut ModuleCx) -> usize {
             let _ = cx;
             text.len()
         }
 
-        async fn later(listener: Callback<i64, String>) -> Result<String, String> {
+        /// Picks with the app's choice, its arguments named.
+        pub(crate) fn pick(#[args(old_value, new_value)] choose: Callback<(f64, f64), f64>) -> f64 {
+            choose.call((0.0, 1.0)).unwrap_or(0.0)
+        }
+
+        /// An op returning nothing: a plain call.
+        pub(crate) fn beep(cx: &mut ModuleCx) {
+            let _ = cx;
+        }
+
+        /// An op that may fail: a promise, rejected with an `Err`.
+        pub(crate) fn check(cx: &mut ModuleCx) -> Result<(), String> {
+            let _ = cx;
+            Ok(())
+        }
+
+        /// `-> ()` written out: the same as no return type.
+        #[allow(clippy::unused_unit)]
+        pub(crate) fn hum(cx: &mut ModuleCx) -> () {
+            let _ = cx;
+        }
+
+        /// A task returning nothing.
+        pub(crate) async fn settle() {}
+
+        pub(crate) async fn later(listener: Callback<i64, String>) -> Result<String, String> {
             listener.call_async(1).await
         }
 
         /// Only where it is compiled.
         #[cfg(any())]
-        fn nowhere() {}
+        pub(crate) fn nowhere() {}
+
+        /// A helper without `pub`: not exported.
+        #[allow(dead_code)]
+        fn helper(text: String) -> String {
+            text
+        }
     }
 
     #[test]
     fn functions_without_a_context_return_their_values() {
         let mut registry = Registry::ui_set("test/ui");
         registry.module::<Tools>();
+        assert!(
+            !<Tools as crate::ui::Module>::FUNCTIONS
+                .iter()
+                .any(|f| f.name == "helper")
+        );
         assert_eq!(
             declarations(&registry, &[]),
-            r#"export interface ToolsModule {
+            r#"/** Functions of the three kinds. */
+export interface ToolsModule {
   /** The sum, at once. */
   sum(values: (number)[]): number;
   shout(text: string): void;
   /** A promise of the length. */
   measure(text: string): Promise<number>;
-  later(listener: (a: number) => string): Promise<string>;
+  /** Picks with the app's choice, its arguments named. */
+  pick(choose: (oldValue: number, newValue: number) => number): number;
+  /** An op returning nothing: a plain call. */
+  beep(): void;
+  /** An op that may fail: a promise, rejected with an `Err`. */
+  check(): Promise<void>;
+  /** `-> ()` written out: the same as no return type. */
+  hum(): void;
+  /** A task returning nothing. */
+  settle(): Promise<void>;
+  later(listener: (value: number) => string): Promise<string>;
 }
 
+/** Functions of the three kinds. */
 export declare const Tools: ToolsModule;
 
 "#

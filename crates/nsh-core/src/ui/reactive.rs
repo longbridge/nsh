@@ -6,7 +6,9 @@
 //! the graph, so closures and async blocks capture them as they are. What is
 //! made under an owner (a component, an effect, a branch of `If`, a row of
 //! `Each`) is disposed with it; a handle of a disposed node reads as gone
-//! ([`Signal::try_get`]) and panics when read as live.
+//! ([`Signal::try_get`]) and panics when read as live. The UI's other
+//! handles (animated values, element refs) are kept the same way
+//! (`Kept`), but find their value gone rather than panic.
 //!
 //! The graph is the engine's: the core enters it ([`Runtime::enter`]) while
 //! Rust code of the components runs on the engine thread, and the functions
@@ -21,7 +23,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::reactive::{self as r, Equals, Kind, NONE, UNOWNED};
+use crate::reactive::{self as r, DISPOSED, Equals, Kind, NONE, UNOWNED};
 
 /// A value in the graph (`None`: none yet, an effect's).
 type Value = Option<Rc<dyn Any>>;
@@ -307,6 +309,13 @@ impl Runtime {
         std::mem::take(&mut graph().data.emits)
     }
 
+    /// The graph's slots in use.
+    #[cfg(test)]
+    pub(crate) fn slots_in_use(&self) -> usize {
+        let _entered = self.enter();
+        graph().slots().0
+    }
+
     /// Frees what the graph holds (at teardown; no component code runs).
     pub(crate) fn free_all(&self) {
         let _entered = self.enter();
@@ -473,13 +482,102 @@ pub fn stored<T: 'static>(value: T) -> Stored<T> {
     ))
 }
 
+/// A value the current owner keeps for a `Copy` handle that is not a
+/// signal ([`super::AnimatedValue`], [`super::ElementRef`]): released with
+/// the owner (with no owner, it lives as long as the graph, as a signal
+/// does). Unlike a signal's, its handle finds it gone afterwards rather
+/// than panicking, and off the engine thread, where no graph is entered.
+pub(crate) struct Kept<T: 'static> {
+    handle: Handle,
+    _t: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for Kept<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Kept<T> {}
+
+impl<T> PartialEq for Kept<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.handle == other.handle
+    }
+}
+
+impl<T: 'static> Kept<T> {
+    /// Keeps `value` in the current owner. The `Rc` is the graph's value
+    /// as it is (no allocation of its own).
+    pub(crate) fn new(value: Rc<T>) -> Self {
+        Self {
+            handle: owned_signal(Some(value as Rc<dyn Any>), Equals::Never),
+            _t: PhantomData,
+        }
+    }
+
+    /// A handle of nothing: always gone.
+    pub(crate) fn gone() -> Self {
+        Self {
+            handle: Handle {
+                id: u32::MAX,
+                generation: 0,
+            },
+            _t: PhantomData,
+        }
+    }
+
+    /// `f` of the graph's value while the owner lives (and a graph is
+    /// entered). `f` must not reach the graph: it runs inside a borrow.
+    fn raw<R>(self, f: impl FnOnce(&Rc<dyn Any>) -> R) -> Option<R> {
+        let graph = CURRENT.with(Cell::get);
+        if graph.is_null() {
+            return None;
+        }
+        // SAFETY: an entered graph lives until its guard drops; the borrow
+        // ends with `f`, which does not reach the graph.
+        let graph = unsafe { &*graph };
+        let Handle { id, generation } = self.handle;
+        if !graph.live(id, generation, u32::MAX) {
+            return None;
+        }
+        graph.value(id).as_ref().map(f)
+    }
+
+    /// `f` of the value while its owner lives (and a graph is entered).
+    /// `f` must not reach the graph: it runs inside a borrow of it.
+    pub(crate) fn with<R>(self, f: impl FnOnce(&T) -> R) -> Option<R> {
+        self.raw(|v| v.downcast_ref::<T>().map(f)).flatten()
+    }
+
+    /// Whether its owner lives (and a graph is entered).
+    pub(crate) fn is_live(self) -> bool {
+        self.raw(|_| ()).is_some()
+    }
+
+    /// The value while its owner lives (and a graph is entered).
+    pub(crate) fn get(self) -> Option<Rc<T>> {
+        self.raw(Rc::clone)?.downcast::<T>().ok()
+    }
+}
+
 fn make_signal<T: 'static>(value: T, equals: Equals<Compare>) -> Signal<T> {
-    let graph = graph();
-    let id = graph.owned_signal(Some(Rc::new(value)), equals);
     Signal {
-        handle: Handle::of(graph, id),
+        handle: owned_signal(Some(Rc::new(value)), equals),
         _t: PhantomData,
     }
+}
+
+/// A signal node of the current owner; under [`DISPOSED`] one disposed at
+/// once, its handle naming nothing.
+fn owned_signal(value: Value, equals: Equals<Compare>) -> Handle {
+    let graph = graph();
+    let id = graph.owned_signal(value, equals);
+    let handle = Handle::of(graph, id);
+    if graph.owner() == DISPOSED {
+        r::dispose(Rust, id);
+    }
+    handle
 }
 
 impl<T: 'static> Signal<T> {
@@ -709,9 +807,14 @@ pub(crate) fn render_effect(f: impl Fn() + 'static) {
 }
 
 /// Runs `f` before the current owner runs again or is disposed (TS:
-/// `cleanup(fn)`). With no owner it never runs.
+/// `cleanup(fn)`). With no owner it never runs; under an owner disposed
+/// while it ran ([`Owner::scope`]) it runs at once.
 pub fn cleanup(f: impl FnOnce() + 'static) {
-    let _ = graph().on_cleanup(Box::new(f));
+    if let Err(f) = graph().on_cleanup(Box::new(f))
+        && graph().owner() == DISPOSED
+    {
+        r::Host::run_cleanup(Rust, f);
+    }
 }
 
 /// Runs `f`; its writes notify together at its end (TS: `batch(fn)`).
@@ -778,6 +881,9 @@ impl Owner {
     fn of(graph: &r::Graph<Rust>, id: u32) -> Self {
         if id == NONE || id == UNOWNED {
             Owner(None)
+        } else if id == DISPOSED {
+            // A handle of no node: never live.
+            Owner(Some(Handle { id, generation: 0 }))
         } else {
             Owner(Some(Handle::of(graph, id)))
         }
@@ -805,13 +911,48 @@ impl Owner {
         self.0.is_some_and(|h| h.live() && !graph().disposed(h.id))
     }
 
-    /// Runs `f` under this owner, untracked (what it makes is this owner's).
+    /// Runs `f` under this owner, untracked (what it makes is this owner's;
+    /// once it is disposed, what `f` makes is disposed at once).
     pub fn run<R>(&self, f: impl FnOnce() -> R) -> R {
-        let id = match self.0 {
+        rethrow(r::with_owner(Rust, self.graph_id(), shielded(f)))
+    }
+
+    /// The graph's id of it: [`DISPOSED`] once it is disposed.
+    fn graph_id(&self) -> u32 {
+        match self.0 {
             Some(h) if self.is_live() => h.id,
-            _ => NONE,
-        };
-        rethrow(r::with_owner(Rust, id, shielded(f)))
+            Some(_) => DISPOSED,
+            None => NONE,
+        }
+    }
+
+    /// The owner of what runs now, or none where no graph is entered.
+    pub(crate) fn current_or_detached() -> Self {
+        if CURRENT.with(Cell::get).is_null() {
+            Self::detached()
+        } else {
+            Self::current()
+        }
+    }
+
+    /// Runs `f` with this owner current, so what it makes is this owner's.
+    /// Once the owner is disposed, before `f` or while it runs (a listener
+    /// closing the view it belongs to), what `f` makes from then on is
+    /// disposed at once: signals and memos panic when used, as disposed ones
+    /// do, effects never run, cleanups (a task's cancel) run at once, and
+    /// animated values and element refs do nothing. Unlike [`Self::run`] it
+    /// is no batch and keeps the listener: writes notify as they happen, as
+    /// they did before (listeners and tasks run their code this way).
+    pub(crate) fn scope<R>(&self, f: impl FnOnce() -> R) -> R {
+        /// Puts the previous owner back, on a panic too.
+        struct Restore(r::SavedOwner);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                graph().leave_owner(self.0);
+            }
+        }
+        let _restore = Restore(graph().enter_owner(self.graph_id()));
+        f()
     }
 
     /// Disposes it: what was made under it, its cleanups first.

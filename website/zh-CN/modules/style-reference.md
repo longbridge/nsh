@@ -56,7 +56,7 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | `DimensionValue` | `number`（点）、`` `${number}%` ``（相对父元素）或 `"auto"`。 |
 | `LengthValue` | `number`（点）或 `` `${number}%` ``，不接受 `"auto"`。 |
 | `ColorValue` | CSS 颜色字符串：`#rgb`、`#rgba`、`#rrggbb`、`#rrggbbaa`、`rgb()`、`rgba()`、`hsl()`、`hsla()`、`oklch()`、`oklab()`，或 CSS 命名颜色（`black`、`white`、`transparent`、`rebeccapurple` 等）。 |
-| `NativeNode` | 原生动画值，或由它派生的节点（见 [nsh/animated](./nsh-animated.md)）。`backgroundColor`、`opacity` 和 `transform` 的各步骤接受它，值会在 UI 线程上动画，不经过 JS。 |
+| `AnimatedNode` | 原生动画值，或由它派生的节点（见 [nsh/animated](./nsh-animated.md)）。`backgroundColor`、`opacity` 和 `transform` 的各步骤接受它，值会在 UI 线程上动画，不经过 JS。 |
 
 采用 CSS 语法的字符串（`boxShadow`、`backgroundImage`、`filter`、`gridTemplateColumns` 等）中，长度可写 `px` 或裸数字（都是点）、`pt`，或 `rem`（16 点）。
 
@@ -174,7 +174,7 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 | 键 | 类型 | 说明 |
 |---|---|---|
-| `backgroundColor` | `ColorValue \| NativeNode` | 填充色。接受原生动画颜色。 |
+| `backgroundColor` | `ColorValue \| AnimatedNode` | 填充色。接受原生动画颜色。 |
 | `backgroundImage` | `string` | 画在背景色之上的 CSS 渐变：`linear-gradient(...)`、`radial-gradient(...)`、`conic-gradient(...)`，多个用逗号分隔。 |
 | `experimental_backgroundImage` | `string` | `backgroundImage` 的别名。 |
 
@@ -252,7 +252,7 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 
 | 键 | 类型 | 说明 |
 |---|---|---|
-| `opacity` | `number \| NativeNode` | 0（不可见）到 1。接受原生动画值。 |
+| `opacity` | `number \| AnimatedNode` | 0（不可见）到 1。接受原生动画值。 |
 | `visibility` | `"visible" \| "hidden" \| "collapse"` | 隐藏的视图仍占据布局空间（与 `display: "none"` 不同）。 |
 | `overflow` | `"visible" \| "hidden"` | `"hidden"` 将子元素裁剪到视图边界（含圆角）。 |
 | `backfaceVisibility` | `"visible" \| "hidden"` | `"hidden"`：3D 旋转转到背面时不可见。 |

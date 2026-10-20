@@ -18,6 +18,7 @@ demo: guide-device
 | `safeArea()` | `nsh/base` | surface 中未被系统 UI 遮挡的 inset：`{ top, right, bottom, left }`。 |
 | `safeAreaInsets()` | `nsh/base` | 调用组件渲染位置（页面、对话框）的 inset。 |
 | `keyboardFrame()` | `nsh/base` | 软键盘的 `{ height, duration }`。 |
+| `locale()` | `nsh/device` | 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`）：`Intl` 默认按它格式化。 |
 | `I18nManager.isRTL` | `nsh/device` | 应用是否从右到左布局。 |
 | `reduceMotion()`、`screenReaderEnabled()` | `nsh/accessibility` | 见[无障碍](./accessibility.md)。 |
 
@@ -128,6 +129,25 @@ import { colorScheme, setColorScheme } from "nsh/device";
 
 对于不会自动跟随文字的布局，读取 `fontScale()` 来调整，例如文字变大时把横排改为竖排：`flexDirection: fontScale() > 1.3 ? "column" : "row"`。
 
+文字大小缩放的是文字：所有允许字体缩放的 `<Text>` 和 `<Input>`，以及平台的提示框和 toast。长度保持原样：间距、宽高、圆角、边框和图片，无论写成点数还是类名（`p-4`、`rounded-lg`、`w-[2rem]`）。按内容决定大小的盒子会随文字一起变大。
+
+## 语言和地区
+
+`locale()` 是用户的区域设置，形式为 BCP 47 标签。`Intl` 默认按它格式化数字和日期，所以 `new Intl.NumberFormat().format(1234.5)` 在 `en-US` 下得到 `1,234.5`，在 `de-DE` 下得到 `1.234,5`。读取 `locale()` 来选择你自己的翻译文案：读取它的文字会在它变化时更新。
+
+```tsx
+import { Text } from "nsh";
+import { locale } from "nsh/device";
+
+const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
+
+<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+```
+
+## 在嵌入它的应用中
+
+嵌入在原生应用中的 NSH 应用，会跟随宿主应用自己设置的语言和文字大小：嵌入 API 设置的语言和文字大小（Rust 中 [GPUI](./gpui.md)、[macOS](./macos.md)、[Linux](./linux.md) 和 [Windows](./windows.md) 的 `AppView::set_locale` 和 `set_font_scale`，[iOS](./embedding-ios.md) 上 Swift 的 `locale` 和 `fontScale`，[Android](./embedding-android.md) 上 Java 的 `setLocale` 和 `setFontScale`）代替系统的语言和文字大小。`locale()`、`Intl`、`fontScale()` 和文字会立即跟随，就像跟随系统设置的变化一样；宿主清除设置后恢复为系统的值。原生应用允许用户选择自己的语言或文字大小时使用它们。
+
 ## 安全区域
 
 刘海、Home 指示条、状态栏、Android 导航栏以及 Mac Catalyst 的标题栏会遮挡 surface 的一部分。NSH 应用在所有平台上都是全屏绘制，被遮挡的部分以 inset 的形式提供。
@@ -178,7 +198,7 @@ import { Platform } from "nsh/device";
 const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
 ```
 
-`nsh trace` 以 iOS 身份无界面运行。
+`nsh test` 以 iOS 身份无界面运行。
 
 在 [Linux](./linux.md) 上，`Platform.OS` 为 `"linux"`，界面风格为 `"desktop"`，`Platform.Version` 为内核的主、次版本号（`"6.12"`）：
 各发行版给版本编号的方式无法相互比较。在那里，安全区域和键盘高度为 0，`colorScheme()` 实时跟随桌面的设置（XDG 设置门户），

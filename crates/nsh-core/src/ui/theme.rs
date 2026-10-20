@@ -1,15 +1,23 @@
 //! The theme of Rust components: semantic colors with a light and a dark
 //! value, corner radii and the base font size. A theme file names the
 //! colors by role and state (`primary.background`,
-//! `primary.active.background`, ...); keys only desktop components use are
-//! ignored.
+//! `primary.active.background`, ...); keys no component uses leave the
+//! components as they are.
 //!
 //! The app's theme is `nsh.json`'s `"theme"`: a theme file's path or its
 //! content, `{ "themes": [{ "mode": "light", "colors": { … } }, { "mode":
 //! "dark", … }] }`, over the default (`default-theme.json`). Colors are CSS
 //! colors or Tailwind palette names (`neutral-900`).
+//!
+//! Every color and number of a theme is also a token the app's Tailwind
+//! classes name (`bg-primary`, `rounded-(--radius)`; `tailwind/theme.rs`
+//! `Tokens`), including the keys no component uses (`sidebar.background`,
+//! `chart.up`, `radius.card`): those are kept by key ([`Theme::color`],
+//! [`Theme::number`]).
 
 use std::sync::LazyLock;
+
+use rustc_hash::FxHashMap;
 
 use super::style::AdaptiveColor;
 use crate::{JsonValue, style::Color, tailwind};
@@ -29,6 +37,19 @@ macro_rules! theme_colors {
                     $( $key $(| $alias)* => &mut self.$field, )*
                     _ => return None,
                 })
+            }
+
+            /// The color of JSON key `key`.
+            fn get(&self, key: &str) -> Option<AdaptiveColor> {
+                Some(match key {
+                    $( $key $(| $alias)* => self.$field, )*
+                    _ => return None,
+                })
+            }
+
+            /// Each color under each of its keys.
+            fn each(&self, mut f: impl FnMut(&str, AdaptiveColor)) {
+                $( $( f($alias, self.$field); )* f($key, self.$field); )*
             }
         }
     };
@@ -155,6 +176,15 @@ pub struct Theme {
     pub radius_lg: f32,
     /// The base font size, in points.
     pub font_size: f32,
+    /// Colors and numbers under the keys the fields above do not have.
+    custom: Custom,
+}
+
+/// A theme's colors and numbers under keys no component uses.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Custom {
+    colors: FxHashMap<Box<str>, AdaptiveColor>,
+    numbers: FxHashMap<Box<str>, f32>,
 }
 
 impl std::ops::Deref for Theme {
@@ -183,6 +213,7 @@ static DEFAULT: LazyLock<Theme> = LazyLock::new(|| {
         radius: 0.0,
         radius_lg: 0.0,
         font_size: 0.0,
+        custom: Custom::default(),
     };
     theme
         .apply(include_str!("default-theme.json"))
@@ -247,9 +278,80 @@ impl Theme {
         Ok(theme)
     }
 
+    /// The color of theme key `key` (`primary.background`,
+    /// `sidebar.background`, any key a theme sets).
+    pub fn color(&self, key: &str) -> Option<AdaptiveColor> {
+        self.colors
+            .get(key)
+            .or_else(|| self.custom.colors.get(key).copied())
+    }
+
+    /// Sets the color of theme key `key`: a field's when it has one, else
+    /// a custom token apps name in classes.
+    pub fn set_color(&mut self, key: &str, color: AdaptiveColor) {
+        match self.colors.by_key(key) {
+            Some(field) => *field = color,
+            None => {
+                self.custom.colors.insert(key.into(), color);
+            }
+        }
+    }
+
+    /// The number of theme key `key` (`radius`, `radius.lg`, `font.size`,
+    /// any other number a theme sets).
+    pub fn number(&self, key: &str) -> Option<f32> {
+        match key {
+            "radius" => Some(self.radius),
+            "radius.lg" => Some(self.radius_lg),
+            "font.size" => Some(self.font_size),
+            key => self.custom.numbers.get(key).copied(),
+        }
+    }
+
+    /// Sets the number of theme key `key`.
+    pub fn set_number(&mut self, key: &str, value: f32) {
+        match key {
+            "radius" => self.radius = value,
+            "radius.lg" => self.radius_lg = value,
+            "font.size" => self.font_size = value,
+            key => {
+                self.custom.numbers.insert(key.into(), value);
+            }
+        }
+    }
+
+    /// Each color by key (a field's under each of its keys).
+    pub(crate) fn each_color(&self, mut f: impl FnMut(&str, AdaptiveColor)) {
+        self.colors.each(&mut f);
+        for (key, c) in &self.custom.colors {
+            f(key, *c);
+        }
+    }
+
+    /// Each number by key.
+    pub(crate) fn each_number(&self, mut f: impl FnMut(&str, f32)) {
+        f("radius", self.radius);
+        f("radius.lg", self.radius_lg);
+        f("font.size", self.font_size);
+        for (key, n) in &self.custom.numbers {
+            f(key, *n);
+        }
+    }
+
+    /// Takes the custom colors and numbers `fallback` has and `self` does
+    /// not: a host's theme keeps the app's own tokens it does not know.
+    pub(crate) fn inherit(&mut self, fallback: &Theme) {
+        for (key, c) in &fallback.custom.colors {
+            self.custom.colors.entry(key.clone()).or_insert(*c);
+        }
+        for (key, n) in &fallback.custom.numbers {
+            self.custom.numbers.entry(key.clone()).or_insert(*n);
+        }
+    }
+
     /// Applies the themes of `json` over `self`: each entry's `mode` picks
-    /// the colors it sets; `radius`, `radius.lg` and `font.size` come from
-    /// any entry.
+    /// the colors it sets; `radius`, `radius.lg`, `font.size` and other
+    /// numbers come from any entry.
     fn apply(&mut self, json: &str) -> Result<(), ThemeError> {
         let value: JsonValue =
             serde_json::from_str(json).map_err(|e| ThemeError(format!("not JSON: {e}")))?;
@@ -273,6 +375,17 @@ impl Theme {
             if let Some(s) = number("font.size") {
                 self.font_size = s;
             }
+            // Other numbers (`radius.card`, `mono_font.size`) are
+            // tokens for classes.
+            if let JsonValue::Object(fields) = entry {
+                for (key, value) in fields {
+                    if let Some(n) = value.as_f64()
+                        && !matches!(key.as_str(), "radius" | "radius.lg" | "font.size")
+                    {
+                        self.custom.numbers.insert(key.as_str().into(), n as f32);
+                    }
+                }
+            }
             let Some(JsonValue::Object(colors)) = entry.get("colors") else {
                 continue;
             };
@@ -291,15 +404,30 @@ impl Theme {
                 }
             }
             for (key, value) in colors {
-                // Keys of desktop components (sidebars, title bars, ...)
-                // have no field here.
-                let Some(field) = self.colors.by_key(key) else {
-                    continue;
-                };
                 // A theme file may write the colors it leaves unset as null.
                 if value.is_null() {
                     continue;
                 }
+                // Keys of desktop components (sidebars, title bars, ...)
+                // and the app's own have no field here: tokens for
+                // classes, set in both modes until a mode sets its own.
+                // Values NSH does not read (gradients) are left
+                // out.
+                let Some(field) = self.colors.by_key(key) else {
+                    if let Some(c) = color(value) {
+                        let custom = self
+                            .custom
+                            .colors
+                            .entry(key.as_str().into())
+                            .or_insert(AdaptiveColor::from(c));
+                        if dark {
+                            custom.dark = c;
+                        } else {
+                            custom.light = c;
+                        }
+                    }
+                    continue;
+                };
                 let c = color(value)
                     .ok_or_else(|| ThemeError(format!("`{key}`: not a color: {value}")))?;
                 if dark {
@@ -351,6 +479,41 @@ mod tests {
     }
 
     #[test]
+    fn keys_no_component_uses_are_kept_as_tokens() {
+        let theme = Theme::from_json(
+            r##"{ "themes": [
+                { "mode": "dark", "radius.card": 10, "colors": {
+                    "sidebar.background": "#111111", "chart.up": "green-500",
+                    "title_bar.background": "linear-gradient(red, blue)" } },
+                { "mode": "light", "colors": { "sidebar.background": "#eeeeee" } }
+            ] }"##,
+        )
+        .unwrap();
+        let sidebar = theme.color("sidebar.background").unwrap();
+        assert_eq!(
+            (sidebar.light, sidebar.dark),
+            (rgb(0xeeeeee), rgb(0x111111))
+        );
+        // Set in one mode only: both.
+        let up = theme.color("chart.up").unwrap();
+        assert_eq!(up.light, up.dark);
+        // Values NSH does not read are left out, as before.
+        assert_eq!(theme.color("title_bar.background"), None);
+        assert_eq!(theme.color("primary.background"), Some(theme.primary));
+        assert_eq!(theme.number("radius.card"), Some(10.0));
+        assert_eq!(theme.number("radius"), Some(theme.radius));
+        let mut host = Theme::default();
+        host.set_color("sidebar.background", rgb(0x222222).into());
+        host.inherit(&theme);
+        assert_eq!(
+            host.color("sidebar.background").unwrap().dark,
+            rgb(0x222222)
+        );
+        assert_eq!(host.color("chart.up"), Some(up));
+        assert_eq!(host.number("radius.card"), Some(10.0));
+    }
+
+    #[test]
     fn colors_a_theme_leaves_unset_keep_their_value() {
         // A theme file may write unset colors (and numbers) as null.
         let theme = Theme::from_json(
@@ -368,5 +531,43 @@ mod tests {
         assert_eq!(theme.ring.light, default.ring.light);
         // A null pressed color follows its base color.
         assert_eq!(theme.danger_active.dark, mix(rgb(0xff0000), 0xff, 0.12));
+    }
+
+    /// Text on the status colors, at rest and pressed, reads in both
+    /// appearances: a contrast of at least 4.5:1 (WCAG AA for text the
+    /// size of a button's label).
+    #[test]
+    fn text_on_status_colors_stands_out() {
+        let theme = Theme::default();
+        // WCAG's relative luminance.
+        let luminance = |c: Color| {
+            let channel = |shift: u32| {
+                let v = f32::from(((c.0 >> shift) & 0xff) as u8) / 255.0;
+                if v <= 0.039_28 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(24) + 0.7152 * channel(16) + 0.0722 * channel(8)
+        };
+        let contrast = |a: Color, b: Color| {
+            let (a, b) = (luminance(a), luminance(b));
+            (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        };
+        for (background, text) in [
+            (theme.danger, theme.danger_foreground),
+            (theme.danger_active, theme.danger_foreground),
+            (theme.info, theme.info_foreground),
+            (theme.info_active, theme.info_foreground),
+            (theme.success, theme.success_foreground),
+            (theme.success_active, theme.success_foreground),
+            (theme.warning, theme.warning_foreground),
+            (theme.warning_active, theme.warning_foreground),
+        ] {
+            for (b, t) in [(background.light, text.light), (background.dark, text.dark)] {
+                assert!(contrast(b, t) >= 4.5, "{b:?} / {t:?}: {}", contrast(b, t));
+            }
+        }
     }
 }

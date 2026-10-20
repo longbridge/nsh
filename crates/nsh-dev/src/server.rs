@@ -70,12 +70,24 @@ pub struct ClientLog {
     pub message: String,
 }
 
+/// What a published bundle says about its app.
+#[derive(Debug, Clone, Default)]
+pub struct AppInfo {
+    /// What the app declares it may reach (JSON), so development runs with
+    /// the same capabilities as the release.
+    pub capabilities: Option<String>,
+    /// The app's id (`nsh.json` `"id"`), which names where it keeps its
+    /// data.
+    pub id: Option<String>,
+}
+
 struct Bundle {
     version: u64,
     bytecode: axum::body::Bytes,
     source: axum::body::Bytes,
     source_map: Option<axum::body::Bytes>,
     capabilities: Option<String>,
+    app_id: Option<String>,
     /// The UI sets it imports.
     ui_sets: Arc<[String]>,
 }
@@ -108,6 +120,8 @@ struct Shared {
     web: Mutex<std::collections::HashMap<String, axum::body::Bytes>>,
     /// The commands that install the app's host, by platform.
     install: Mutex<std::collections::HashMap<HostPlatform, String>>,
+    /// The limits hosts run apps with ([`DevServer::set_limits`]).
+    limits: Mutex<Option<String>>,
     /// The state a newly connected client must see first.
     latest: Mutex<Option<Event>>,
     events: broadcast::Sender<Event>,
@@ -158,6 +172,7 @@ impl DevServer {
             files: Mutex::default(),
             web: Mutex::default(),
             install: Mutex::default(),
+            limits: Mutex::default(),
             latest: Mutex::new(None),
             events: broadcast::channel(16).0,
             bytecode_version: bytecode_version.into(),
@@ -216,6 +231,14 @@ impl DevServer {
         *self.shared.install.lock().expect("install lock") = commands.into_iter().collect();
     }
 
+    /// The VM limits hosts run the apps with, from the next bundle on:
+    /// those an embedding app would set (`nsh_core::js::HostLimits`'
+    /// syntax, as `nsh run --limits` takes them; empty: the embedding
+    /// defaults), or `None` (the default): none, as an app on its own.
+    pub fn set_limits(&self, limits: Option<String>) {
+        *self.shared.limits.lock().expect("limits lock") = limits;
+    }
+
     /// The bound address (useful with port 0).
     pub fn local_addr(&self) -> SocketAddr {
         self.addr
@@ -241,7 +264,7 @@ impl DevServer {
         bytecode: Vec<u8>,
         source: String,
         source_map: Option<String>,
-        capabilities: Option<String>,
+        app: AppInfo,
         patch: Option<(String, Option<String>)>,
         ui_sets: Vec<String>,
     ) {
@@ -268,7 +291,8 @@ impl DevServer {
             bytecode: bytecode.into(),
             source: source.into(),
             source_map: source_map.map(Into::into),
-            capabilities,
+            capabilities: app.capabilities,
+            app_id: app.id,
             ui_sets,
         })));
     }
@@ -644,6 +668,7 @@ async fn send_event(
             }
             host.refused = None;
             let format = host.format;
+            let limits = shared.limits.lock().expect("limits lock").clone();
             send(
                 socket,
                 &ServerMessage::Bundle {
@@ -651,6 +676,8 @@ async fn send_event(
                     format,
                     source_map: bundle.source_map.is_some(),
                     capabilities: bundle.capabilities.clone(),
+                    app_id: bundle.app_id.clone(),
+                    limits,
                 },
             )
             .await?;

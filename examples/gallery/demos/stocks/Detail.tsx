@@ -1,5 +1,5 @@
 import { cleanup, computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { Dialog, NavPage, safeAreaInsets } from "nsh/base";
 import { Icon } from "../../icons";
@@ -18,7 +18,7 @@ import { createBanner, type Side, Ticket } from "./Ticket";
  */
 function DayRange(props: { stock: Stock }) {
   const q = () => props.stock.quote();
-  const x = createNativeValue(0);
+  const x = createAnimatedValue(0);
   let width = 0;
   const span = () => {
     const lo = Math.min(q().low, q().prevClose), hi = Math.max(q().high, q().prevClose);
@@ -88,7 +88,7 @@ function Quote(props: { market: Market; stock: Stock }) {
   // Price, arrow and change all follow the day's direction; the arrow
   // turns over natively when it flips.
   let down = change() < 0;
-  const turn = createNativeValue(down ? 1 : 0);
+  const turn = createAnimatedValue(down ? 1 : 0);
   effect(() => {
     if (change() < 0 === down) return;
     down = !down;

@@ -30,6 +30,7 @@ const PRESSED = 1;
 const HOVERED = 2;
 const FOCUSED = 4;
 const PRESS_EVENTS = ["onPress", "onLongPress", "onPressIn", "onPressOut"];
+const HOVER_EVENTS = ["onHoverIn", "onHoverOut", "onHoverMove"];
 /** `accessibilityRole`s whose ARIA role has another name; others are the same. */
 const ARIA_ROLES = {
   none: null, header: "heading", image: "img", imagebutton: "button", keyboardkey: "button", adjustable: "slider",
@@ -118,6 +119,7 @@ const KEYFRAMES = `
 .nsh-bar > div { position: absolute; border-radius: 2px; background: rgba(0,0,0,.45); transition: opacity .3s; }
 .nsh-dark .nsh-bar > div { background: rgba(255,255,255,.55); }
 .nsh-run { position: absolute; white-space: pre; }
+.nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 .nsh-pointer { cursor: pointer; }
 /* The mounter's own styles: no element has an inline style but its frame
@@ -397,6 +399,11 @@ function webBridge(token) {
 })();`;
 }
 
+/// Measurements between dropping the measuring context (see `measure_text`):
+/// 5000 ≈ 4 seconds for a table that measures on every frame, which holds
+/// Blink's shape cache around 5 MB.
+const MEASURE_ROUNDS = 5000;
+
 function measureContext() {
   const canvas = typeof OffscreenCanvas !== "undefined"
     ? new OffscreenCanvas(1, 1)
@@ -450,6 +457,7 @@ class Player {
     this.timer = 0;
     this.frame = 0;
     this.measure = measureContext();
+    this.measureUses = 0;
     this.metricsCache = new Map();
     this.layoutAnimation = null;
     // Views created and removed while a layout animation is configured.
@@ -476,6 +484,18 @@ class Player {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
         measure_text: (fp, fl, tp, tl) => {
+          // Blink keeps every shaped string in the measuring context's
+          // PlainTextPainter (a FrameShapeCache keyed by font), and drops it
+          // only under critical memory pressure: an app that measures strings
+          // it has not measured before — a price table measuring the numbers
+          // that changed, every frame — piles up `blink::PlainTextNode`s
+          // without bound (25 MB in 20s, 52 MB in 6 minutes for a 40-row
+          // table). A context is cheap, and a fresh one starts empty; the old
+          // one, its painter and its cache become unreachable and go.
+          if (++this.measureUses >= MEASURE_ROUNDS) {
+            this.measureUses = 0;
+            this.measure = measureContext();
+          }
           this.measure.font = this.str(fp, fl);
           return this.measure.measureText(this.str(tp, tl)).width;
         },
@@ -513,6 +533,31 @@ class Player {
         fetch_pause: (id, paused) => this.fetchPause(id, paused !== 0),
         fetch_cancel: (id) => this.fetchCancel(id),
         load_chunk: (p, l) => this.loadChunk(this.str(p, l)),
+        // The app's storage (`nsh/storage`): the entries of `localStorage`
+        // under the app's prefix. 1 when done, 0 when the browser refused
+        // (the error handed over with `nsh_storage_reply`).
+        storage_load: (pp, pl) => this.storage(() => {
+          const prefix = this.str(pp, pl);
+          const entries = Object.create(null);
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith(prefix)) entries[key.slice(prefix.length)] = localStorage.getItem(key);
+          }
+          return JSON.stringify(entries);
+        }),
+        storage_set: (pp, pl, kp, kl, vp, vl) =>
+          this.storage(() => localStorage.setItem(this.str(pp, pl) + this.str(kp, kl), this.str(vp, vl))),
+        storage_remove: (pp, pl, kp, kl) =>
+          this.storage(() => localStorage.removeItem(this.str(pp, pl) + this.str(kp, kl))),
+        storage_clear: (pp, pl) => this.storage(() => {
+          const prefix = this.str(pp, pl);
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith(prefix)) keys.push(key);
+          }
+          for (const key of keys) localStorage.removeItem(key);
+        }),
       },
     };
     const response = () => (typeof url === "string" || url instanceof URL ? fetch(url) : url);
@@ -554,6 +599,23 @@ class Player {
 
   bytes(ptr, len) {
     return new Uint8Array(this.wasm.memory.buffer, ptr, len);
+  }
+
+  /**
+   * Runs a `localStorage` call for the app's storage: 1 and what `f`
+   * returned (a string) handed over, or 0 and the error.
+   */
+  storage(f) {
+    let reply, done;
+    try {
+      reply = f();
+      done = 1;
+    } catch (e) {
+      reply = String(e?.message ?? e);
+      done = 0;
+    }
+    if (typeof reply === "string") this.withStrings([reply], (p, l) => this.wasm.nsh_storage_reply(p, l));
+    return done;
   }
 
   /** Calls `f(ptr, len, ...)` for each string, freeing them afterwards. */
@@ -624,7 +686,11 @@ class Player {
    * `release` (hardened, as packaged apps run; default: development
    * settings), `harden` (with bytecode: the hardening's bytecode the CLI
    * ships, `harden.nshc`), `capabilities` (the app's `capabilities.json`),
-   * `sourceMap` (JSON), and where a split bundle's chunks are: `chunks[id]`
+   * `sourceMap` (JSON), `appId` (`nsh.json` `"id"`: the app's storage is
+   * kept under it; without one, under the page's path), `limits` (the VM
+   * limits the page runs the app with, as an app embedding it sets them:
+   * `"memory=128MB,call=2s"`, `""` for the embedding defaults; without it
+   * the app runs on its own, with none), and where a split bundle's chunks are: `chunks[id]`
    * (a URL), else `id` relative to `chunkBase` (default: the page); the
    * chunks of a bytecode bundle are bytecode too.
    */
@@ -633,6 +699,8 @@ class Player {
     harden = null,
     capabilities = "",
     sourceMap = "",
+    appId = "",
+    limits = null,
     chunks = this.options.chunks,
     chunkBase = this.options.chunkBase,
   } = {}) {
@@ -640,9 +708,10 @@ class Player {
     const bytecode = typeof code !== "string";
     const [width, height] = this.reset();
     this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
-    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? ""], (cp, cl, mp, ml) =>
-      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml)));
+    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? "", appId ?? ""], (cp, cl, mp, ml, ip, il) =>
+      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml, ip, il)));
     if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
+    if (limits != null) this.call(() => this.withStrings([limits], (p, l) => this.wasm.nsh_bundle_limits(p, l)));
     this.begin(width, (environment) => {
       this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
       const start = bytecode ? this.wasm.nsh_start_bytecode : this.wasm.nsh_start;
@@ -734,11 +803,11 @@ class Player {
     return ok ? { code: text } : { error: text };
   }
 
-  /** Compiles and runs `source`; the compile error, or null. */
-  runSource(source, name = "App.tsx") {
+  /** Compiles and runs `source` (with `run`'s `options`); the compile error, or null. */
+  runSource(source, name = "App.tsx", options = {}) {
     const result = this.compile(source, name);
     if (result.error) return result.error;
-    this.run(result.code);
+    this.run(result.code, options);
     return null;
   }
 
@@ -1214,10 +1283,18 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds]) {
     const el = this.view(id);
     if (!el) return;
     const frag = document.createDocumentFragment();
+    // Span backgrounds, behind the runs: one box per span and line.
+    for (const [x, y, w, h, r, color] of backgrounds ?? []) {
+      const box = document.createElement("div");
+      box.className = "nsh-run-bg";
+      box.style.cssText = `left:${cx + x}px;top:${cy + y}px;width:${w}px;height:${h}px;` +
+        `border-radius:${r}px;background:${color}`;
+      frag.append(box);
+    }
     for (const [x, y, text, style, after] of runs) {
       const span = document.createElement("span");
       const name = this.styleClass(styles[style]);
@@ -1229,7 +1306,7 @@ class Player {
       if (el._animation.color) span.style.color = el._animation.color;
       frag.append(span);
     }
-    for (const span of [...el.querySelectorAll(":scope > .nsh-run")]) span.remove();
+    for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
     el.classList.toggle("nsh-selectable", !!selectable);
     el.classList.toggle("nsh-autoselect", selectable == null);
@@ -1250,6 +1327,42 @@ class Player {
     this.updateFocusable(el);
     this.updateTouchAction(el);
     if (el._kind === "scroll" && el._events.has("onRefresh")) this.installPull(el);
+    if (!el._hoverEvents && HOVER_EVENTS.some((e) => el._events.has(e))) this.installHover(el);
+  }
+
+  /**
+   * `onHoverIn` / `onHoverOut` / `onHoverMove` of `el`, from the mouse's
+   * pointer events (pointerenter and pointerleave reach the views around
+   * the one under the mouse too, as with `:hover`). Moves with a button
+   * down are not hovers.
+   */
+  installHover(el) {
+    el._hoverEvents = true;
+    el.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse") return;
+      el._hoverIn = true;
+      if (el._events.has("onHoverIn")) this.event(el._id, "onHoverIn");
+    });
+    el.addEventListener("pointerleave", () => {
+      if (!el._hoverIn) return;
+      el._hoverIn = false;
+      if (el._events.has("onHoverOut")) this.event(el._id, "onHoverOut");
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (e.pointerType !== "mouse" || e.buttons || !el._events.has("onHoverMove")) return;
+      const [pageX, pageY] = this.point(e);
+      const r = el.getBoundingClientRect();
+      this.event(el._id, "onHoverMove", {
+        locationX: e.clientX - r.left,
+        locationY: e.clientY - r.top,
+        pageX,
+        pageY,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+      });
+    });
   }
 
   op_ts([, id, states]) {
@@ -1315,12 +1428,18 @@ class Player {
   }
 
   /** Pressables take the keyboard focus (Tab; Enter and Space press them),
-   * unless disabled or hidden from assistive technologies. */
+   * unless disabled, hidden from assistive technologies or `focusable`
+   * false. */
   updateFocusable(el) {
     const p = el._props;
-    const focusable = el._pressable && !p?.disabled && !p?.hidden;
+    const focusable = el._pressable && !p?.disabled && !p?.hidden && p?.focusable !== false;
     if (focusable) el.tabIndex = 0;
-    else if (el.hasAttribute("tabindex") && !el._a11yFocus) el.removeAttribute("tabindex");
+    // Programmatic focus only for what screen-reader focus moved to.
+    else if (el._a11yFocus) el.tabIndex = -1;
+    else if (el.hasAttribute("tabindex")) el.removeAttribute("tabindex");
+    // No longer a stop with the focus on it: it leaves, as on macOS (browsers
+    // move it without a `blur`, which would leave `focus:` on).
+    if (!focusable && !el._a11yFocus && document.activeElement === el) el.blur();
     if (focusable && !el._focusListeners) {
       el._focusListeners = true;
       // `focus:` classes follow the keyboard focus (the browser draws a
@@ -2926,6 +3045,10 @@ class Player {
       case "seek": if (el?._video) el._video.currentTime = args[0]; break;
       case "setClipboard": this.writeClipboard(args[0]); break;
       case "readClipboard": this.readClipboard(args[0], args[1]); break;
+      case "setClipboardImage": this.writeClipboardImage(args[0]); break;
+      case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
+      // Pages see no local paths: never any files.
+      case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
       case "back": this.defaultBack(); break;
       case "announce":
@@ -2985,6 +3108,46 @@ class Player {
     const payload = { id: request, has: text.length > 0 };
     if (!hasOnly && text) payload.text = text;
     this.event(ROOT_ID, "onClipboard", payload);
+  }
+
+  /** `Clipboard.setImage`: a `data:` URI's image as a clipboard item (browsers take PNG). */
+  async writeClipboardImage(uri) {
+    try {
+      const blob = await (await fetch(uri)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    } catch {
+      // Denied, an insecure context, or a type the browser does not write.
+    }
+  }
+
+  /** `Clipboard.getImage` / `hasImage`: the first image item, as a `data:` URI with its size. */
+  async readClipboardImage(request, hasOnly) {
+    const app = this.app;
+    const answer = (payload) => app === this.app && this.event(ROOT_ID, "onClipboard", { id: request, ...payload });
+    let blob = null;
+    try {
+      for (const item of (await navigator.clipboard?.read()) ?? []) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          blob = await item.getType(type);
+          break;
+        }
+      }
+    } catch {
+      // Denied, or no clipboard access (an insecure context).
+    }
+    if (!blob || hasOnly) return answer({ has: !!blob });
+    const uri = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+    if (!uri) return answer({ has: true });
+    const img = new Image();
+    img.onload = () => answer({ has: true, uri, width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => answer({ has: true });
+    img.src = uri;
   }
 
   /** `Image.getSize` / `prefetch`: loads the image (the browser keeps it cached for the views that show it). */
@@ -3295,7 +3458,7 @@ class Player {
     });
     // No page menu over the app (nor iOS's callout on a long press); fields
     // and selectable text keep theirs.
-    root.addEventListener("contextmenu", (e) => this.editable(e.target) || e.preventDefault());
+    root.addEventListener("contextmenu", (e) => this.contextMenu(e) || this.editable(e.target) || e.preventDefault());
     root.addEventListener("copy", (e) => this.copyText(e));
     root.addEventListener("wheel", (e) => this.wheel(e), { passive: false });
     // Safari's touchpad pinches (it sends no ctrl+wheel).
@@ -3324,6 +3487,37 @@ class Player {
     this.live.className = "nsh-live";
     this.live.setAttribute("aria-live", "polite");
     if (this.history) this.installHistory();
+  }
+
+  /**
+   * `onContextMenu` of the nearest view around `e`'s target that listens,
+   * unless a field or selectable text is nearer (it keeps the browser's
+   * menu); true when a view took it. The browser raises `contextmenu` for
+   * right clicks, Control-clicks on macOS and the keyboard's menu key.
+   */
+  contextMenu(e) {
+    const view = this.viewOf(e.target);
+    if (!view) return false;
+    for (const el of this.ancestors(view)) {
+      if (el._events?.has("onContextMenu")) {
+        e.preventDefault();
+        const [pageX, pageY] = this.point(e);
+        const r = el.getBoundingClientRect();
+        this.event(el._id, "onContextMenu", {
+          locationX: e.clientX - r.left,
+          locationY: e.clientY - r.top,
+          pageX,
+          pageY,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          shiftKey: e.shiftKey,
+        });
+        return true;
+      }
+      if (el.matches(".nsh-field, .nsh-selectable")) return false;
+    }
+    return false;
   }
 
   /** Whether the browser handles presses at `target` itself: fields,
@@ -3632,7 +3826,7 @@ class Player {
     return true;
   }
 
-  /** Ctrl + wheel pinches the view under the pointer (native values),
+  /** Ctrl + wheel pinches the view under the pointer (animated values),
    * ending when the wheel stops for 150 ms. */
   wheelPinch(e) {
     let t = this.wheelPinchState;

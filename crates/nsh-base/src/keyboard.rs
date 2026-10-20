@@ -3,10 +3,10 @@
 use nsh_core::ui::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, prelude::*};
 
 /// The software keyboard.
+#[module]
 #[derive(Debug)]
 pub struct Keyboard;
 
-/// The software keyboard.
 #[module]
 impl Keyboard {
     /// Unfocuses the focused input, hiding the keyboard.
@@ -15,12 +15,7 @@ impl Keyboard {
     }
 }
 
-/// A view that keeps its content above the software keyboard, animated
-/// with the keyboard. For content outside scroll views, such as a message
-/// bar at the bottom of a screen (inputs inside scroll views are kept
-/// visible natively). It assumes it reaches the bottom of the surface, as
-/// a screen's content does. Where the window shrinks for the keyboard
-/// instead (an Android host that resizes), nothing moves.
+/// The props of [`KeyboardAvoidingView`].
 #[derive(Debug, Clone, PartialEq, Props)]
 pub struct KeyboardAvoidingViewProps {
     /// Avoid the keyboard (default true).
@@ -49,7 +44,12 @@ pub enum AvoidBehavior {
     Height,
 }
 
-/// A view keeping its content above the keyboard ([`KeyboardAvoidingViewProps`]).
+/// A view that keeps its content above the software keyboard, animated
+/// with the keyboard. For content outside scroll views, such as a message
+/// bar at the bottom of a screen (inputs inside scroll views are kept
+/// visible natively). It assumes it reaches the bottom of the surface, as
+/// a screen's content does. Where the window shrinks for the keyboard
+/// instead (an Android host that resizes), nothing moves.
 #[component]
 pub fn KeyboardAvoidingView(props: KeyboardAvoidingViewProps) -> impl IntoElement {
     // Moves with the keyboard: the frame change animates natively.

@@ -184,7 +184,7 @@ Building the Android runtime from a checkout (`cargo xtask android`) additionall
 
 | Command | macOS | Linux | Windows |
 |---|---|---|---|
-| `nsh init`, `nsh build`, `nsh trace`, `nsh dev`, `nsh check` | Yes | Yes | Yes |
+| `nsh init`, `nsh build`, `nsh test`, `nsh dev`, `nsh check` | Yes | Yes | Yes |
 | `nsh run` (Mac Catalyst, the default on macOS) | Yes | No | No |
 | `nsh run --target macos`, `nsh package --target macos` | Yes | No | No |
 | `nsh run --target linux` (the default on Linux), `nsh package --target linux` | No | Yes | No |

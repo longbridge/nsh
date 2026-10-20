@@ -14,7 +14,7 @@ use std::{
 
 use super::{
     Accessible, AnyElement, If, Interactive, IntoReactive, Position, Reactive,
-    element::{BoundListConfig, ElKind, ElNode, Element, IntoElement, ListConfig, Listener},
+    element::{BoundListConfig, ElKind, ElNode, Element, IntoElement, IntoListener, ListConfig},
     events,
 };
 use crate::{
@@ -309,18 +309,21 @@ impl VirtualList {
     }
 
     /// The viewable rows changed (TS: `onViewableItemsChanged`).
-    pub fn on_viewable_items_changed(self, listener: impl Into<Listener<ViewableItems>>) -> Self {
+    pub fn on_viewable_items_changed<M>(
+        self,
+        listener: impl IntoListener<ViewableItems, M>,
+    ) -> Self {
         self.on(
             EventKind::ViewableItemsChanged,
-            events::typed(listener.into(), viewable),
+            events::typed(listener.into_listener(), viewable),
         )
     }
 
     /// Scrolled close to the end (load more).
-    pub fn on_end_reached(self, listener: impl Into<Listener<()>>) -> Self {
+    pub fn on_end_reached<M>(self, listener: impl IntoListener<(), M>) -> Self {
         self.on(
             EventKind::EndReached,
-            events::typed(listener.into(), events::unit),
+            events::typed(listener.into_listener(), events::unit),
         )
     }
 

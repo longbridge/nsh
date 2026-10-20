@@ -30,7 +30,7 @@ pub(crate) fn install(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
 
 /// Formats like a browser console: strings verbatim, errors with their
 /// stack, functions by name, objects and arrays as JSON.
-fn format_value(value: &Value<'_>, out: &mut String) {
+pub(crate) fn format_value(value: &Value<'_>, out: &mut String) {
     match value.type_of() {
         Type::String => {
             if let Some(Ok(s)) = value.as_string().map(|s| s.to_string()) {

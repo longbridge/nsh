@@ -59,7 +59,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         entry: dir.join("App.tsx"),
         minify: false,
         split: false,
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
@@ -76,6 +76,8 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

@@ -17,6 +17,7 @@ mod jsx;
 mod minify;
 #[cfg(feature = "bundle")]
 mod plugin;
+mod props;
 #[cfg(feature = "bundle")]
 mod split;
 #[cfg(feature = "bundle")]
@@ -27,7 +28,7 @@ pub use bundle::*;
 #[cfg(feature = "bundle")]
 pub use minify::minify_module;
 #[cfg(feature = "bundle")]
-pub use types::{TSCONFIG, type_definitions};
+pub use types::{TSCONFIG, TSCONFIG_BASE, type_definitions};
 
 /// Compiles one module (TSX, JSX, TS or JS, as `name`'s extension says) to
 /// the ES module the runtime runs: TypeScript removed, JSX compiled, imports
@@ -38,14 +39,17 @@ pub use types::{TSCONFIG, type_definitions};
 pub fn compile_module(
     name: &str,
     source: &str,
-    ui_sets: &[nsh_core::ui::Registry],
+    ui_sets: &[nsh_core::ui::description::SetDescription],
 ) -> Result<String, String> {
     let path = std::path::Path::new(name);
     let source_type = oxc::span::SourceType::from_path(path).map_err(|e| e.to_string())?;
     let modules = compile::NativeModules::new(ui_sets);
-    compile::compile_native(path, source_type, source, None, None, &modules)
-        .map(|(code, _)| code)
-        .map_err(|e| compile::strip_ansi(&e))
+    let compiled = compile::compile_native(path, source_type, source, None, None, &modules)
+        .map_err(|e| compile::strip_ansi(&e))?;
+    for d in &compiled.destructured {
+        log::warn!(target: "nsh::build", "{name}:{}:{}: {}", d.line, d.column, d.message());
+    }
+    Ok(compiled.code)
 }
 
 #[cfg(test)]
@@ -59,7 +63,7 @@ mod tests {
              const n: number = 1;\n\
              function App() { const c = signal(n); return <SafeAreaView><View onPress={() => c.set(2)} /></SafeAreaView>; }\n\
              mount(App);\n",
-            &[nsh_base::registry()],
+            &[nsh_base::registry().into()],
         )
         .unwrap();
         assert!(code.contains("from \"nsh:rt\""), "{code}");

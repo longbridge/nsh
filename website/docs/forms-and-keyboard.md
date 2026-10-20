@@ -101,7 +101,7 @@ Events:
 | `onFocus` / `onBlur` | | The input gained / lost focus. |
 | `onSelectionChange` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onKeyPress` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
-| `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline). |
+| `onContentSizeChange` | `{ width, height }` | The text's size changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
 
 An input is styled like text: `fontSize`, `color`, `fontFamily`, `textAlign`, `letterSpacing` and the rest of [text styles](./text.md), plus borders, padding and backgrounds. The `focus:` Tailwind variant (or `focusStyle`) applies while the input has focus. The placeholder's color is the
 `placeholderColor` style key (`placeholder:text-*`), and the caret and selection's color is `selectionColor`

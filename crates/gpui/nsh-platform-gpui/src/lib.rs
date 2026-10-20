@@ -54,12 +54,20 @@ mod text_input;
 mod transition;
 mod view;
 
+// Windows of GPUI's test platform, which `shot` turns on.
+#[cfg(all(test, feature = "shot"))]
+mod tests;
+
 pub use gpui;
 pub use nsh_core::{
-    platform::Appearance,
+    platform::{Appearance, Locale},
     ui::{AdaptiveColor, Color, Theme, ThemeColors, ThemeError},
 };
-pub use nsh_engine::{App, Bundle, Limits, Root};
+pub use nsh_engine::{App, AppError, AppErrorKind, Bundle, Limits, PackageInfo, Root};
+/// Signed packages: verifying, unpacking and accepting them
+/// (`docs/dev/signed-packages.md`).
+#[cfg(feature = "js")]
+pub use nsh_engine::{LoadedPackage, accept_package, load_package, package, verify_package};
 
 pub use crate::{
     app::{AppOptions, AppSource, AppView, open_app_window, run_app, set_ui_sets},

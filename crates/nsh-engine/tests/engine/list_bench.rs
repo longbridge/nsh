@@ -30,7 +30,7 @@ fn bench_gallery_scroll() {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, true).unwrap();

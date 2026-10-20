@@ -338,12 +338,13 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
 }
 
 /// Whether hovering `view` matters: for its `hover:` styles (the
-/// `HOVERED` state) or its `onHoverIn` / `onHoverOut`.
+/// `HOVERED` state) or its `onHoverIn` / `onHoverOut` / `onHoverMove`.
 fn hoverable(view: &NshView) -> bool {
     let s = view.state();
     s.tracked & HOVERED != 0
         || s.events.contains(EventKind::HoverIn)
         || s.events.contains(EventKind::HoverOut)
+        || s.events.contains(EventKind::HoverMove)
 }
 
 fn update_hover_tracking(surface: &Surface, view: &NshView) {
@@ -586,6 +587,15 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
     let time = event.timestamp() * 1000.0;
     let input = &surface.input;
     match ty {
+        // Control-click is the secondary click on macOS.
+        NSEventType::LeftMouseDown
+            if event
+                .modifierFlags()
+                .contains(NSEventModifierFlags::Control) =>
+        {
+            context_menu(surface, x, y, event.modifierFlags());
+        }
+        NSEventType::RightMouseDown => context_menu(surface, x, y, event.modifierFlags()),
         NSEventType::LeftMouseDown => {
             // A title bar of the app's own moves the window.
             if crate::chrome::mouse_down(surface, event, x, y) {
@@ -614,6 +624,7 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         NSEventType::MouseMoved | NSEventType::MouseEntered => {
             input.last.set(Some((x, y)));
             hover(surface, x, y);
+            hover_moved(surface, x, y, event.modifierFlags());
             reveal_indicators(surface, x, y);
             update_cursor(surface, x, y);
         }
@@ -629,9 +640,46 @@ pub(crate) fn event(surface: &Rc<Surface>, event: &NSEvent) {
         NSEventType::ScrollWheel => scroll_event(surface, event, x, y, time),
         NSEventType::Magnify => magnify(surface, event, x, y),
         NSEventType::Rotate => rotate(surface, event, x, y),
-        // Right and other buttons do nothing (no context menus), as on
-        // Linux.
         _ => {}
+    }
+}
+
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it. Text
+/// fields are AppKit's views, which show their own menu.
+fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return;
+    };
+    for v in chain(&hit.view) {
+        let (id, listens, input) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+            )
+        };
+        if listens {
+            let (location_x, location_y) = local(surface, &v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location_x,
+                location_y,
+                page_x: x,
+                page_y: y,
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: flags.contains(NSEventModifierFlags::Control),
+                    alt: flags.contains(NSEventModifierFlags::Option),
+                    shift: flags.contains(NSEventModifierFlags::Shift),
+                    cmd: flags.contains(NSEventModifierFlags::Command),
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return;
+        }
+        if input {
+            return;
+        }
     }
 }
 
@@ -724,6 +772,7 @@ pub(crate) fn is_key_control(view: &NshView) -> bool {
     let state = view.state();
     state.kind != ViewKind::Input
         && state.events.contains(EventKind::Press)
+        && state.props.focusable != Some(false)
         && !state.props.accessibility.state.disabled
         && view.can_target()
         && !view.ns().isHiddenOrHasHiddenAncestor()
@@ -1790,6 +1839,35 @@ fn set_hovered(surface: &Surface, views: Vec<NshView>) {
     for v in views.iter().rev().filter(|v| !old.contains(v)) {
         set_state(surface, v, HOVERED, true);
         hover_event(surface, v, EventKind::HoverIn);
+    }
+}
+
+/// `onHoverMove` of the hovered views that listen, with the mouse at
+/// `(x, y)` (root coordinates) in each.
+fn hover_moved(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) {
+    let hovered = surface.input.hovered.borrow().clone();
+    for v in hovered {
+        let id = {
+            let s = v.state();
+            if !s.events.contains(EventKind::HoverMove) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(surface, &v, x, y);
+        let event = nsh_core::HoverEvent {
+            location_x,
+            location_y,
+            page_x: x,
+            page_y: y,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: flags.contains(NSEventModifierFlags::Control),
+                alt: flags.contains(NSEventModifierFlags::Option),
+                shift: flags.contains(NSEventModifierFlags::Shift),
+                cmd: flags.contains(NSEventModifierFlags::Command),
+            },
+        };
+        surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
 }
 

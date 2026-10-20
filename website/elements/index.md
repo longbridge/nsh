@@ -110,18 +110,25 @@ while the view is disabled.
 
 ### Hover
 
-On macOS, Linux and the GPUI backend, JS can hear the mouse come over a view and leave it (other platforms do not raise these events
-yet; `hover:` classes style hovered views everywhere the platform tracks hover).
+JS can hear the mouse come over a view, move over it and leave it: on macOS, Windows, Linux, the GPUI backend and in
+desktop browsers, with an iPad's pointer or a Mac's mouse on iOS, and with a mouse or a stylus on Android. `hover:`
+classes style hovered views in the same places.
 
 | Prop | Type | Description |
 |---|---|---|
 | `onHoverIn` | `() => void` | The mouse came over the view or a view inside it. |
+| `onHoverMove` | `(e: HoverEvent) => void` | The mouse moved over the view (or a view inside it) with no button down. |
 | `onHoverOut` | `() => void` | The mouse left the view and the views inside it, or the window. |
 
 Like CSS `:hover`, a view counts as hovered while the mouse is over it or over anything inside it, so the views around
 the one under the mouse hear `onHoverIn` too (from the outside in; `onHoverOut` from the inside out). The events come
-after the fact and never on touches. A view removed from under the mouse hears `onHoverOut`, on Linux at the next mouse
-move.
+after the fact and never on touches; a move with a button down is a touch (`onTouchMove`, the responder). A view removed
+from under the mouse hears `onHoverOut`, on Linux and Windows at the next mouse move.
+
+`HoverEvent` says where the mouse is: `locationX` / `locationY` in the view (points, its transforms undone), `pageX` /
+`pageY` in the root view it is in, as touches give them, and the modifier keys held (`altKey`, `ctrlKey`, `metaKey`:
+Command on Apple platforms, the Windows key elsewhere, `shiftKey`). Moves come at most once a frame, the latest one,
+and always before the `onHoverOut` that follows them, so a handler can redraw on each move:
 
 ```tsx
 const hovered = signal<string | null>(null);
@@ -129,6 +136,57 @@ const hovered = signal<string | null>(null);
 <View onHoverIn={() => hovered.set(file.path)} onHoverOut={() => hovered.set(null)} class="hover:bg-zinc-100">
   <Text>{file.name}</Text>
 </View>
+
+// A crosshair over a chart.
+const at = signal<number | null>(null);
+
+<View onHoverMove={(e) => at.set(e.locationX)} onHoverOut={() => at.set(null)} style={{ height: 200 }}>
+  <If when={at() !== null}>
+    <View style={{ position: "absolute", left: at()!, top: 0, bottom: 0, width: 1, backgroundColor: "#888" }} />
+  </If>
+</View>
+```
+
+### Context menus
+
+`onContextMenu` tells a view that the secondary button was pressed over it: a right click, Control-click on macOS, a
+two-finger click on a touchpad, the secondary click of an iPad's pointer; in browsers also the keyboard's menu key.
+Open the app's own menu there with [`Menu.popup`](../modules/nsh-desktop.md):
+
+```tsx
+import { Menu } from "nsh/desktop";
+
+<View onContextMenu={(e) => Menu.popup(rowMenu(row), { x: e.pageX, y: e.pageY })}>…</View>
+```
+
+| Prop | Type | Description |
+|---|---|---|
+| `onContextMenu` | `(e: ContextMenuEvent) => void` | The secondary button was pressed over the view or a view inside it. |
+
+`ContextMenuEvent` has `locationX` / `locationY` in the view, `pageX` / `pageY` in its root view (where `Menu.popup`
+places a menu) and the modifier keys (`altKey`, `ctrlKey`, `metaKey`, `shiftKey`). The nearest view that listens, from
+the one under the pointer outwards, hears it. A text input, or selectable text with an edit menu (Windows, the GPUI
+backend, browsers), nearer than that view shows its own menu instead. The platform decides this as the button goes
+down, from what is mounted, so the handler is told after the fact and nothing has to be cancelled. On touchscreens, a
+long press opens menus: handle `onLongPress` with the same function.
+
+### Keyboard focus
+
+On macOS and the web, Tab moves the keyboard focus between the views that take presses (and the inputs), Return or
+Space presses the focused view, and `focus:` classes style it. A click presses a view without focusing it, so `focus:`
+shows for keyboard focus only.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `focusable` | `boolean` | `true` | Whether a view that takes presses is a stop of Tab; `false` leaves it to the pointer (a backdrop that closes a popover, rows the arrow keys move between). |
+
+```tsx
+<View class="rounded-lg p-3 focus:bg-sky-100" onPress={open}>
+  <Text>Open</Text>
+</View>
+
+{/* An overlay's backdrop: a click closes it, Tab goes past it to the content. */}
+<View class="absolute inset-0" focusable={false} onPress={close} />
 ```
 
 ### Layout and identity
@@ -140,19 +198,19 @@ const hovered = signal<string | null>(null);
 | `nativeID` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 
-### Gestures driving native values
+### Gestures driving animated values
 
 These props bind a gesture to [native animated values](../modules/nsh-animated.md) that move on the UI thread, with no
 JS per frame. See [touch and gestures](../docs/touch-and-gestures.md).
 
 | Prop | Type | Description |
 |---|---|---|
-| `pan` | `{ x?: NativeValue; y?: NativeValue }` | Drags drive these values (points). |
+| `pan` | `{ x?: AnimatedValue; y?: AnimatedValue }` | Drags drive these values (points). |
 | `onPanStart` | `(e: PanEvent) => void` | A drag started. |
 | `onPanEnd` | `(e: PanEvent) => void` | A drag ended, with the release velocity (e.g. to start a `decay`). |
-| `pinch` | `{ scale?: NativeValue }` | Two-finger pinches drive `scale`. |
+| `pinch` | `{ scale?: AnimatedValue }` | Two-finger pinches drive `scale`. |
 | `onPinchStart` / `onPinchEnd` | `(e: { scale: number; velocity: number }) => void` | A pinch started / ended. |
-| `rotation` | `{ angle?: NativeValue }` | Two-finger rotations drive `angle` (degrees). |
+| `rotation` | `{ angle?: AnimatedValue }` | Two-finger rotations drive `angle` (degrees). |
 | `onRotationStart` / `onRotationEnd` | `(e: { rotation: number; velocity: number }) => void` | A rotation started / ended. |
 
 `PanEvent` is `{ translationX, translationY, velocityX, velocityY, valueX?, valueY? }`: the translation since the start,

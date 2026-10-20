@@ -251,6 +251,17 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
+        DesktopCommand::OrderFront => {
+            // Restoring an already maximized or snapped window would change
+            // its bounds when the caller only asked to focus it.
+            // SAFETY: hwnd is the surface's live top-level window.
+            unsafe {
+                if IsIconic(hwnd).as_bool() {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
         DesktopCommand::Close => close(hwnd),
         DesktopCommand::SetMenu(menu) => {
             *c.menu.borrow_mut() = menu.clone();

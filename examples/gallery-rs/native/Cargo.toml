@@ -17,7 +17,8 @@ nsh-base.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-nsh-engine.workspace = true
+# `headless`: the gallery on an engine without a window, with display frames.
+nsh-engine = { workspace = true, features = ["headless"] }
 crossbeam-channel.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

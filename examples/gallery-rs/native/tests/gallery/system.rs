@@ -231,3 +231,34 @@ fn system_counts_frames() {
     crate::common::press(&engine, &rx, &mut screen, "Stop counting frames");
     assert!(shows(&screen, "– fps stopped"), "{:?}", screen.texts);
 }
+
+#[test]
+fn the_network_card_loads_and_shows_how_the_request_went() {
+    let (engine, rx, mut screen) = crate::common::open("System");
+    assert!(shows(&screen, "fetch()"), "{:?}", screen.texts);
+    // Headless, there is no network: the request fails, and says why.
+    crate::common::press(&engine, &rx, &mut screen, "fetch()");
+    for _ in 0..50 {
+        if shows(&screen, "this host has no network stack") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        crate::common::drain(&rx, &mut screen);
+    }
+    assert!(
+        shows(&screen, "this host has no network stack"),
+        "{:?}",
+        screen.texts
+    );
+    // Done: the button is back, and pressing it loads again.
+    assert!(shows(&screen, "fetch()"), "{:?}", screen.texts);
+    crate::common::press(&engine, &rx, &mut screen, "fetch()");
+    for _ in 0..50 {
+        if shows(&screen, "this host has no network stack") && shows(&screen, "fetch()") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        crate::common::drain(&rx, &mut screen);
+    }
+    assert!(shows(&screen, "this host has no network stack"));
+}

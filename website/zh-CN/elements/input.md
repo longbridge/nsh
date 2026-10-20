@@ -108,7 +108,7 @@ function NameField() {
 | `onFocus` / `onBlur` | 无 | 输入框获得 / 失去焦点。 |
 | `onSelectionChange` | `{ start, end }` | 光标或选区移动（UTF-16 单位）。 |
 | `onKeyPress` | `{ key }` | 文本变化之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
-| `onContentSizeChange` | `{ width, height }` | 文本尺寸变化（多行时按输入框宽度计算）。 |
+| `onContentSizeChange` | `{ width, height }` | 文本尺寸变化（多行时按输入框宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
 
 随文本增高的多行输入框：
 

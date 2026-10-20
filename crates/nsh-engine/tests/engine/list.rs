@@ -92,7 +92,7 @@ fn scrolls_with_recycled_cells(app: &str) {
         entry,
         minify: false,
         split: false,
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode(&bundle.code, false).unwrap();
@@ -110,6 +110,8 @@ fn scrolls_with_recycled_cells(app: &str) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, Sink(tx)).unwrap();
     let first = rx.recv_timeout(Duration::from_secs(5)).unwrap();

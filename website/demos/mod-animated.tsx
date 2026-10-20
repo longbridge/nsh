@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { Animated, createNativeValue, Easing } from "nsh/animated";
+import { Animated, createAnimatedValue, Easing } from "nsh/animated";
 import { ui } from "./palette";
 
 const TRACK = 240;
@@ -33,8 +33,8 @@ function Button(props: { label: string; onPress: () => void }) {
 }
 
 function App() {
-  const dots = curves.map(() => createNativeValue(0));
-  const spin = createNativeValue(0);
+  const dots = curves.map(() => createAnimatedValue(0));
+  const spin = createAnimatedValue(0);
   const status = signal("Tap a button");
   let there = false;
 
@@ -88,7 +88,7 @@ function App() {
           }}
         />
         <Text style={{ flex: 1, color: ui().muted, fontSize: 13 }}>
-          Rotation and color are interpolated from one native value.
+          Rotation and color are interpolated from one animated value.
         </Text>
       </View>
       <View style={{ flexDirection: "row", gap: 10 }}>

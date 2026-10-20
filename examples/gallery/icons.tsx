@@ -19,6 +19,7 @@ export type IconName =
   | "text"
   | "media"
   | "system"
+  | "storage"
   | "stocks"
   | "chat"
   | "chevron"
@@ -143,6 +144,18 @@ const glyphs: Record<IconName, Draw> = {
     for (let i = 0; i < 8; i++) {
       const a = (i * Math.PI) / 4;
       line(c, [10 + Math.cos(a) * 5.5, 10 + Math.sin(a) * 5.5, 10 + Math.cos(a) * 7.5, 10 + Math.sin(a) * 7.5]);
+    }
+  },
+  storage: (c) => {
+    c.beginPath();
+    c.ellipse(10, 5, 6, 2.2, 0, 0, Math.PI * 2);
+    c.stroke();
+    line(c, [4, 5, 4, 15]);
+    line(c, [16, 5, 16, 15]);
+    for (const y of [10, 15]) {
+      c.beginPath();
+      c.ellipse(10, y, 6, 2.2, 0, 0, Math.PI);
+      c.stroke();
     }
   },
   stocks: (c) => {

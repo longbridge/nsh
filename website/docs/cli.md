@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Every NSH subcommand and flag - init, build, trace, check, dev, run, package, and the signing commands keygen, certify, publish, verify and revoke.
+description: Every NSH subcommand and flag - init, build, test, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
 order: 6
 group: start
 ---
@@ -12,18 +12,19 @@ group: start
 ```text
 nsh <COMMAND>
 
-  init     Create an app
-  build    Bundle an app and compile it to QuickJS bytecode
-  trace    Run an app headless and print the mount instructions and timings
-  check    Type check an app with TypeScript's native compiler
-  dev      Serve an app to dev hosts (simulators, devices) and push rebuilds
-  run      Like dev, and also run the app in a development host
-  package  Package an installable app from the prebuilt runtime
-  keygen   Create a signing key
-  certify  Certify a release key with a root key
-  publish  Build an app in release mode and sign it into a package (.nshpkg)
-  verify   Verify a package
-  revoke   Sign a revocation list
+  init         Create an app
+  build        Bundle an app and compile it to QuickJS bytecode
+  test         Run an app's tests headless
+  check        Type check an app with TypeScript's native compiler
+  dev          Serve an app to dev hosts (simulators, devices) and push rebuilds
+  run          Like dev, and also run the app in a development host
+  package      Package an installable app from the prebuilt runtime
+  keygen       Create a signing key
+  certify      Certify a release key with a root key
+  publish      Build an app in release mode and sign it into a package (.nshpkg)
+  verify       Verify a package
+  symbolicate  Map the positions in a reported error stack to the app's sources
+  revoke       Sign a revocation list
 ```
 
 `nsh <command> --help` prints the flags of a command; `nsh --version` prints the version.
@@ -53,23 +54,29 @@ source, cargo's output and the hosts' own.
 ## nsh init
 
 ```sh
-nsh init [DIR] [--name <NAME>] [--rust [--nsh-source <DIR>]]
+nsh init [DIR] [--name <NAME>] [--template <ts|rust|mixed>] [--nsh-source <DIR>]
 ```
 
-By default, creates a TSX app in `DIR` (default: the current directory, created if missing): `App.tsx`, `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already.
+Creates an app in `DIR` (default: the current directory, created if missing) from a template. Without `--template`, `nsh init` asks which one on a terminal (Enter picks `ts`) and takes `ts` elsewhere (a script, CI).
+
+| Template | What it creates |
+|---|---|
+| `ts` | A TSX app: `App.tsx`, its test `App.test.tsx` (`nsh test`), `nsh.json`, `tsconfig.json`, `.gitignore` and `.nsh/types`. Files that exist are kept; it fails only if all of them exist already. |
+| `rust` | An app written in Rust: a Cargo project (`Cargo.toml`, `src/lib.rs` with the root component, `src/main.rs` for `cargo run`), `nsh.json` with `"rust": "."` and `"root": "App"`, `.gitignore` and a README, which also says how to add a TSX entry later. `nsh run` and `nsh package` mount the root with no QuickJS on every target (`nsh test` opens it for TypeScript tests), the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly. |
+| `mixed` | A TSX app with a Rust crate of its own: `App.tsx`, `tsconfig.json`, `nsh.json` with `"rust": "native"`, `.gitignore`, `.nsh/types`, a README, and the crate in `native/`, whose `#[native_module("<name>/native")]` exports a component, a module and a class that `App.tsx` uses. |
 
 | Flag | Description |
 |---|---|
-| `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case). |
-| `--rust` | Creates a Cargo project with a native Rust entry (`cargo run`) and a TSX entry sharing its Rust components. Requires Rust and the native desktop backend's development libraries. |
-| `--nsh-source <DIR>` | With `--rust`: the project depends on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
+| `--name <NAME>` | Display name written to `nsh.json`. Default: the directory's name. The id becomes `com.example.<name>` (letters and digits only, lower case), and the crates' import specifier `<name>/native` (lower case, words joined by `-`). |
+| `--template <TEMPLATE>` | `ts`, `rust` or `mixed` (above). `rust` and `mixed` need Rust; `cargo run` also needs the native desktop backend's development libraries. |
+| `--nsh-source <DIR>` | With `rust` or `mixed`: the crates depend on the NSH crates of the checkout in `DIR`, by path, to build the app against NSH's sources. |
 
-With `--rust`, the project also contains `Cargo.toml`, `src/main.rs`, `src/lib.rs` and a README; `nsh.json` sets `"rust": "."` and `"root": "App"`. `nsh run` and `nsh package` then mount the Rust root with no QuickJS on every target, the browser included ([Building with Rust](./rust.md)); `cargo run` starts it on macOS, Windows or Linux directly; `nsh run App.tsx` runs the TSX entry. The project depends on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners from the same crates. Create Rust projects in a new app directory. Existing Cargo manifests, Rust entry files, `App.tsx` or `nsh.json` are reported as conflicts before app files are written.
+The crates of `rust` and `mixed` depend on NSH's crates on crates.io at the CLI's version (with `--nsh-source`, on a checkout's), and the `nsh` commands build the app's runners and hosts from the same crates. Before each command on such an app, `nsh` builds a small program of the app's crates and NSH's core that describes their components, modules and classes, and runs it when the crates changed; with that description the CLI itself bundles, compiles, type-checks, serves and packages the app. A Rust app's builds compile its crates and NSH's core alone. Create them in a new app directory: any of their files existing is reported as a conflict before anything is written.
 
 ## nsh run
 
 ```sh
-nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--trace] [--fps]
+nsh run [ENTRY] [--target catalyst|ios|android|macos|linux|windows|gpui|web] [--device <DEVICE>] [--port <PORT>] [--release] [--limits [<LIMITS>]] [--trace] [--fps] [--name <NAME>] [--window-size <WIDTHxHEIGHT>] [--script <STEPS>]
 ```
 
 Starts the dev server (as `nsh dev`), launches a development host that loads the app from it, and rebuilds on every save. Hot module replacement patches the running app in place; logs and errors from the app are printed in the terminal. Stop it with Ctrl-C (or by closing the Catalyst, macOS, Linux, Windows or GPUI window). However it ends (Ctrl-C, `kill` / `pkill`, an error), it stops the host it started: the Catalyst app, the macOS, Linux, Windows or GPUI host, the development host in the simulator, or on the Android device.
@@ -82,15 +89,19 @@ A Rust app (`nsh.json` `"root"`, [Building with Rust](./rust.md)) runs with no d
 | `--device <DEVICE>` | | iOS simulator to use, by name (`"iPhone 16 Pro"`) or UDID. Default: a booted one, else the newest iPhone, which is booted. |
 | `--port <PORT>` | `8790` | Dev server port. If it is taken, the next free one is used. |
 | `--release` | | Minify and strip debug info. Release bundles have no hot module replacement: every save reloads the app. |
+| `--limits [<LIMITS>]` | | Runs the app as an app embedded in another one, within the limits its host app sets: `memory` and `stack` (in `KB`, `MB` or `GB`), `load` and `call` (in `ms` or `s`) and `nodes`, such as `--limits memory=128MB,call=500ms`. The ones left out keep the embedding defaults, which `--limits` alone runs with ([Sandbox and capabilities](./sandbox-and-capabilities.md#limits)). Without it the app runs on its own, as a packaged app does. TSX entries. |
 | `--trace` | | The host logs the timing of every commit (JS, layout, mount items) to the terminal. |
 | `--fps` | | Shows the performance monitor over the app: frame rate, what frames and commits cost, CPU, GPU and memory ([macOS](./macos.md#performance-monitor); `--target macos` only for now). |
+| `--name <NAME>` | `nsh.json` name | Application display name in the menu bar and initial window title (`--target macos`, TSX entries). |
+| `--window-size <WIDTHxHEIGHT>` | Host default | Initial window size in points, such as `800x600` (`--target macos`, `linux`, `windows` and `gpui`, TSX entries). |
+| `--script <STEPS>` | | Runs semicolon-separated automation steps, such as `"wait 800; shot a.png; quit"` (`--target macos`, `linux`, `windows` and `gpui`; an app written in Rust: `macos`, `linux` and `windows`). With `quit` the command ends with the script: screenshots of an app with a Rust crate of its own need no host started by hand. On macOS, screenshot-only scripts start in the background; scripted presses activate the app when needed. |
 
 With `--target android`, the first device `adb devices` lists is used; the dev server's port is forwarded to it with `adb reverse`. See [Getting started](./getting-started.md#run-it) and [Dev server and debugging](./dev-server-and-debugging.md).
 
 ## nsh dev
 
 ```sh
-nsh dev [ENTRY] [--port <PORT>] [--release]
+nsh dev [ENTRY] [--port <PORT>] [--release] [--limits [<LIMITS>]]
 ```
 
 Runs only the dev server: it builds the app, watches the entry's directory, and pushes every rebuild to the hosts connected to it. It prints the URL for hosts on this machine and one per LAN address for devices, and, when the web runtime is there, the page browsers open to run the app ([Web](./web.md#develop-in-the-browser)):
@@ -105,38 +116,23 @@ Runs only the dev server: it builds the app, watches the entry's directory, and 
 
 Use it with hosts you start yourself, for example an app that embeds the development SDK (`NativeShellDev.xcframework`, `nsh-dev.aar`). Flags as for `nsh run`.
 
-## nsh trace
+## nsh test
 
 ```sh
-nsh trace [ENTRY] [--tap <SELECTOR>]... [--taps <N>] [--idle-ms <MS>] [--wait <MS>] [--duration <MS>]
-          [--scroll <POINTS>] [--width <W>] [--height <H>] [--safe-area <INSETS>]
+nsh test [PATH] [--filter <NAME>] [--trace]
 ```
 
-Runs the app headless, in the CLI's own process with the same core and runtime as a device but no views, and prints every mount instruction (create, insert, style, frame, text) and the time of each commit. Then it taps views (the ones `--tap` names, or the first pressable one) and prints what each tap changed. Use it to check that an app starts without errors, to count the work an interaction causes, and in CI ([Testing and trace](./testing-and-trace.md)).
+Runs the app's tests headless ([Testing](./testing-and-trace.md)): the test files (`*.test.tsx`, `*.test.ts`, importing `nsh/test`) in `PATH`, a directory (default: the current one; hidden directories, `node_modules` and `target` are skipped), or the test file `PATH`. Each test file runs on an engine of its own and each app its tests open on another, fresh one. It prints a line per test, and for a failure what was thrown, where in the test file and the texts on screen; any failure makes it exit with a non-zero code. Given the app's entry (`nsh test App.tsx`; a Rust app's: `nsh test nsh.json`), it opens the app on the network, lets it run for 1.2 s and takes the steps standard input gives (`await app.press("Add")`, with `app` the app). A TSX app runs in the CLI's own process; an app with Rust crates of its own runs in a headless runner built with them, which the CLI builds the entries for. Headless runs behave as iOS: `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
 
 ```text
-✓ bundled App.tsx (3255 B in 12.6 ms)
-perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
-── initial render: 49 items
-   Create { id: 2, kind: View }
-   ...
-── tap #1 on view 20: 3 items
-   Text { id: 14, text: "1", content: 71x77 @ 0,0 }
+✓ App.test.tsx › counts taps (321ms)
+✓ 1 test: 1 passed, 0 failed (343ms)
 ```
 
-| Flag | Default | Description |
-|---|---|---|
-| `--tap <SELECTOR>` | | Tap a view; repeat it for several taps, in order. `id:<testID>`, `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` (a view id from the output), or a bare string, matched as a `testID`, then a label, then a text. The first match on screen is tapped, or its nearest pressable ancestor (the button around a text). No match is an error. |
-| `--taps <N>` | `2` | Without `--tap`: taps sent to the first pressable view. A tap that changes nothing is an error (exit code 1). |
-| `--idle-ms <MS>` | `1200` | Before tapping, wait until the app renders nothing for this long (at most 10 s, for apps with timers or animations). The default lets the engine's idle garbage collection run first, so retention bugs show up. |
-| `--wait <MS>` | | Run timers and animations exactly this long before the first tap and after each one, printing what they render, instead of waiting until the app is idle. |
-| `--duration <MS>` | `0` | Keep running this long after the last tap. |
-| `--safe-area <INSETS>` | `0` | Safe area insets in points, `top,right,bottom,left` (or one value for all four), e.g. `47,0,34,0` for a phone with a notch. |
-| `--scroll <POINTS>` | | Scrolls the first scroll view or list by this many points, 10 points per frame, and prints each frame's batch. |
-| `--width <W>` | `390` | Viewport width in points. |
-| `--height <H>` | `844` | Viewport height in points. |
-
-`nsh trace` behaves as iOS: `Platform.OS` is `"ios"`, and `ios:` classes and `ios={{…}}` props apply.
+| Flag | Description |
+|---|---|
+| `--filter <NAME>` | Runs only the tests whose name contains `NAME`. |
+| `--trace` | Prints every mount batch of the apps the tests open, under the step it came in (`── press(Add): 7 items`), and the time of every commit: what the first frame, a step or a frame of scrolling costs. |
 
 ## nsh check
 
@@ -144,7 +140,7 @@ perf commit: 56 ops, 412µs (list js 6µs), 49 mount items, 21 nodes
 nsh check [ENTRY] [--tsc <TSC>] [-- <TSC ARGS>...]
 ```
 
-Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum NSH records, and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code.
+Type checks the app: refreshes `.nsh/types` and `.nsh/tsconfig.json`, then runs `tsc -p <app directory> --noEmit` with the app's `tsconfig.json`. It uses TypeScript 7, the native compiler, which needs no Node: the first run downloads it from the npm registry (about 9 MB), checks it against the checksum NSH records, and keeps it in NSH's cache (`~/Library/Caches/nsh` on macOS, `~/.cache/nsh` on Linux, `%LOCALAPPDATA%\nsh` on Windows, or `NSH_CACHE`). Type errors make it exit with a non-zero code. It warns when `tsconfig.json` does not extend `./.nsh/tsconfig.json`, where NSH keeps its TypeScript settings ([Project structure](./project-structure.md#tsconfigjson-and-nshtypes)).
 
 | Flag | Description |
 |---|---|
@@ -157,7 +153,7 @@ Type checks the app: refreshes `.nsh/types`, then runs `tsc -p <app directory> -
 nsh build [ENTRY] [-o <OUT>] [--release] [--split]
 ```
 
-Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves.
+Bundles the app and compiles it to QuickJS bytecode, for apps that embed NSH and ship the bundle themselves. For a Rust app (`nsh.json` `"root"`), it builds and describes the app's crates and writes `app.json` and the files they ship (`assets/`): its runners mount the root, so there is no bundle.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -245,6 +241,7 @@ Certifies a release key with a root key for some app ids and a time window; pack
 
 ```sh
 nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--app-version <V>] [--build <N>]
+            [--source-map package|file|none] [--strip-debug] [--min-runtime <VERSION>]
 ```
 
 Builds the app in release mode and signs it into a package. Metadata comes from `nsh.json`, overridden by the flags.
@@ -257,6 +254,9 @@ Builds the app in release mode and signs it into a package. Metadata comes from 
 | `--id <ID>` | App id. |
 | `--app-version <VERSION>` | Version. |
 | `--build <BUILD>` | Build number: must grow with every release. |
+| `--source-map <WHERE>` | Where the source map goes: `package` (default), `file` (`<package>.map` next to the package) or `none` ([Signed packages](./signed-packages.md#errors-from-published-packages)). |
+| `--strip-debug` | Leave the line and column tables out of the bytecode: smaller, but error stacks have no positions. |
+| `--min-runtime <VERSION>` | The lowest runtime that runs the package, e.g. `0.2.0`; older runtimes refuse it. Default: this CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
 
 ### nsh verify
 
@@ -265,6 +265,16 @@ nsh verify <PACKAGE> [--root <ROOT.pub>]... [--revocations <LIST>]
 ```
 
 Verifies a package as an app trusting the given roots would. Without `--root`, only the package's own signature is checked. It prints the package's SHA-256, which `nsh revoke --package` takes.
+
+### nsh symbolicate
+
+```sh
+nsh symbolicate <MAP> [INPUT]
+```
+
+Rewrites the bundle positions (`bundle.js:LINE:COL`) of an error a package reported to your sources and prints the
+result. `MAP` is a source map (`<package>.map` from `nsh publish --source-map file`, `bundle.js.map`) or a package that
+holds one; `INPUT` is the error text (default: standard input).
 
 ### nsh revoke
 
@@ -288,6 +298,7 @@ Signs a revocation list: release keys and packages that must not load any more.
 | Variable | Used by | Description |
 |---|---|---|
 | `ANDROID_HOME`, `ANDROID_SDK_ROOT` | Android targets | The Android SDK. Fallback: `~/Library/Android/sdk`. |
+| `CARGO_TARGET_DIR` | apps with Rust crates | Where the app's runners build. Default: the app's `target/`. |
 | `NSH_KEYSTORE_PASSWORD` | `package --target android` | The keystore password. |
 | `NSH_RUNTIME` | `run`, `package` | A runtime directory to use instead of the one next to the CLI. |
 | `NSH_VERBOSE` | every command | `1`: as `--verbose`. |

@@ -181,6 +181,11 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         // GTK 4 has no window levels.
         DesktopCommand::SetLevel(_) => {}
+        DesktopCommand::OrderFront => {
+            if let Some(window) = window(surface) {
+                window.present();
+            }
+        }
         DesktopCommand::Close => close(surface),
     }
 }

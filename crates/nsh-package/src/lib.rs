@@ -43,6 +43,30 @@
 //! `BYTECODE_VERSION` matches (QuickJS bytecode is trusted input: loading
 //! crafted bytecode is memory corruption, so it is only ever loaded from a
 //! verified package or the app's own signed resources).
+//!
+//! # Format evolution
+//!
+//! Packages outlive the runtime that reads them: a host app in the field
+//! runs packages signed by newer tools. So an addition is optional unless
+//! said otherwise, and what a runtime does not know never widens what a
+//! package may do:
+//!
+//! - header and `app` fields it does not know are ignored;
+//! - a file of a kind it does not know, or with a field it does not know
+//!   (which may change what its bytes are), is not used; it still tiles
+//!   the data and is hashed;
+//! - a header field it must not ignore (a new restriction, a new meaning
+//!   of the bytes) is named in the header's `critical` list, and a runtime
+//!   that does not know a field listed there refuses the package;
+//! - capabilities it does not know are not granted, and an unknown key
+//!   inside one drops that capability (`Capabilities::from_json_lenient`).
+//!
+//! Signers write `critical` only when it is not empty, and nothing else
+//! older runtimes do not read. What was ignored is in
+//! [`VerifiedPackage::ignored`]. An incompatible change bumps the format
+//! version, which runtimes require to match. All of this applies to
+//! runtimes the package's minimum runtime admits: older ones refuse it
+//! ([`Error::RuntimeTooOld`]).
 
 mod keys;
 mod package;
@@ -50,7 +74,10 @@ mod trust;
 
 pub use crate::{
     keys::{PublicKey, SecretKey},
-    package::{App, Contents, FileKind, Header, VerifiedPackage, build, verify_signature},
+    package::{
+        App, Contents, FileKind, Header, PackageReceipt, VerifiedPackage, build, source_map,
+        verify_signature,
+    },
     trust::{Certificate, Revocations, TrustStore, certify, revoke},
 };
 
@@ -89,7 +116,7 @@ pub enum Error {
         accepted: u64,
     },
     /// The package needs a newer runtime.
-    #[error("the package needs runtime {needs}, this is {runtime}")]
+    #[error("the package needs runtime {needs} or newer; this runtime is {runtime}")]
     RuntimeTooOld {
         /// What the package needs.
         needs: String,
@@ -125,15 +152,40 @@ pub(crate) fn app_matches(pattern: &str, id: &str) -> bool {
     }
 }
 
-/// Whether semver-like `have` (`1.2.3`) is at least `needs`.
+/// Whether semver-like `have` (`1.2.3`) is at least `needs`. Missing parts
+/// count as 0 (`1.2` is `1.2.0`); pre-release and build suffixes are
+/// ignored (`0.2.0-beta.1` is `0.2.0`).
 pub(crate) fn version_at_least(have: &str, needs: &str) -> bool {
-    let parse = |v: &str| -> Vec<u64> {
-        v.split(['.', '-', '+'])
-            .take(3)
-            .map(|p| p.parse().unwrap_or(0))
-            .collect()
+    let parse = |v: &str| -> [u64; 3] {
+        let mut parts = [0; 3];
+        let core = v.split(['-', '+']).next().unwrap_or_default();
+        for (part, text) in parts.iter_mut().zip(core.split('.')) {
+            *part = text.parse().unwrap_or(0);
+        }
+        parts
     };
     parse(have) >= parse(needs)
+}
+
+/// Checks a package's minimum runtime before signing: `MAJOR.MINOR.PATCH`,
+/// optionally with a pre-release (`-beta.1`) or build (`+abc`) suffix,
+/// which comparisons ignore, and no newer than this runtime (nothing newer
+/// is known to run what this runtime's tools built).
+pub fn check_min_runtime(version: &str) -> Result<(), String> {
+    let core = version.split(['-', '+']).next().unwrap_or_default();
+    let parts: Vec<&str> = core.split('.').collect();
+    let numeric = |p: &&str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    if parts.len() != 3 || !parts.iter().all(numeric) {
+        return Err(format!(
+            "minimum runtime `{version}` is not a version (MAJOR.MINOR.PATCH, e.g. 0.2.0)"
+        ));
+    }
+    if !version_at_least(RUNTIME_VERSION, version) {
+        return Err(format!(
+            "minimum runtime {version} is newer than this runtime, {RUNTIME_VERSION}"
+        ));
+    }
+    Ok(())
 }
 
 /// Unix seconds now.
@@ -141,4 +193,32 @@ pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_compare_by_their_numbers() {
+        assert!(version_at_least("0.2.0", "0.2.0"));
+        assert!(version_at_least("0.10.0", "0.9.9"));
+        assert!(!version_at_least("0.1.9", "0.2.0"));
+        // Missing parts are 0; suffixes do not count.
+        assert!(version_at_least("1.2", "1.2.0"));
+        assert!(version_at_least("0.2.0-beta.1", "0.2.0"));
+        assert!(version_at_least("0.2.0", "0.2.0+abc"));
+    }
+
+    #[test]
+    fn minimum_runtimes_are_versions_up_to_this_one() {
+        assert!(check_min_runtime("0.0.1").is_ok());
+        assert!(check_min_runtime(RUNTIME_VERSION).is_ok());
+        assert!(check_min_runtime("0.0.1-beta.1").is_ok());
+        for bad in [
+            "", "1", "1.2", "1.2.x", "v1.2.3", "1.2.3.4", "1..3", "999.0.0",
+        ] {
+            assert!(check_min_runtime(bad).is_err(), "{bad}");
+        }
+    }
 }

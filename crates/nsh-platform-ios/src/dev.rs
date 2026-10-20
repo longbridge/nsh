@@ -17,7 +17,7 @@ use nsh_dev::{
     DevClient, DevEvent, HostInfo,
     protocol::{BundleFormat, HostPlatform},
 };
-use nsh_engine::{BYTECODE_VERSION, Bundle, Policy};
+use nsh_engine::{BYTECODE_VERSION, Bundle, Limits, Policy};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
 };
@@ -245,6 +245,8 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             bytes,
             source_map,
             capabilities,
+            app_id,
+            limits,
         } => {
             let mut bundle = match format {
                 // SAFETY: compiled for this runtime's bytecode version (the
@@ -268,9 +270,14 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             if let Some(map) = source_map {
                 bundle = bundle.with_source_map(map);
             }
+            bundle = bundle.with_app_id(app_id.as_deref());
             bundle = match bundle.with_capabilities_json(capabilities.as_deref()) {
                 Ok(bundle) => bundle,
                 Err(err) => return show_error(ui, container, "Invalid capabilities", &err, true),
+            };
+            let limits = match Limits::development(limits.as_deref()) {
+                Ok(limits) => limits,
+                Err(err) => return show_error(ui, container, "Invalid limits", &err, true),
             };
             hide_status(ui);
             let running = {
@@ -284,6 +291,7 @@ fn handle(view: &Rc<Inner>, ui: &Rc<RefCell<DevUi>>, event: DevEvent) {
             }
             log::info!("loading build {version}");
             hide_error(ui);
+            view.set_limits(limits);
             Inner::load(view, bundle.into());
         }
         DevEvent::Patch {

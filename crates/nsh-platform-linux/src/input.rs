@@ -375,12 +375,13 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
 }
 
 /// Whether hovering `view` matters: for its `hover:` styles (the
-/// `HOVERED` state) or its `onHoverIn` / `onHoverOut`.
+/// `HOVERED` state) or its `onHoverIn` / `onHoverOut` / `onHoverMove`.
 fn hoverable(view: &NshView) -> bool {
     let s = view.state();
     s.tracked & HOVERED != 0
         || s.events.contains(EventKind::HoverIn)
         || s.events.contains(EventKind::HoverOut)
+        || s.events.contains(EventKind::HoverMove)
 }
 
 fn update_hover_tracking(surface: &Surface, view: &NshView) {
@@ -620,10 +621,25 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
             down(surface, Key::Mouse, x, y, time)
         }
+        T::ButtonPress
+            if button() == Some(gdk::BUTTON_SECONDARY)
+                && context_menu(surface, x, y, event.modifier_state()) =>
+        {
+            return glib::Propagation::Stop;
+        }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
             up(surface, Key::Mouse, x, y, time, false)
         }
-        T::MotionNotify => motion(surface, Key::Mouse, x, y, time),
+        T::MotionNotify => {
+            motion(surface, Key::Mouse, x, y, time);
+            let state = event.modifier_state();
+            let buttons = gdk::ModifierType::BUTTON1_MASK
+                | gdk::ModifierType::BUTTON2_MASK
+                | gdk::ModifierType::BUTTON3_MASK;
+            if !state.intersects(buttons) {
+                hover_moved(surface, x, y, state);
+            }
+        }
         T::TouchBegin => down(surface, touch_key(event), x, y, time),
         T::TouchUpdate => motion(surface, touch_key(event), x, y, time),
         T::TouchEnd => up(surface, touch_key(event), x, y, time, false),
@@ -648,6 +664,47 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         _ => {}
     }
     glib::Propagation::Proceed
+}
+
+/// A secondary click at `(x, y)` (root coordinates): the nearest view
+/// around the one under it that listens to `onContextMenu` hears it (true:
+/// the click is taken). Text fields are GTK's widgets, which show their
+/// own menu.
+fn context_menu(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) -> bool {
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return false;
+    };
+    for v in chain(&hit.view) {
+        let (id, listens, input) = {
+            let s = v.state();
+            (
+                s.id,
+                s.events.contains(EventKind::ContextMenu),
+                s.kind == ViewKind::Input,
+            )
+        };
+        if listens {
+            let (location_x, location_y) = local(surface, &v, x, y);
+            let event = nsh_core::ContextMenuEvent {
+                location_x,
+                location_y,
+                page_x: x,
+                page_y: y,
+                modifiers: nsh_core::keymap::Modifiers {
+                    ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+                    alt: state.contains(gdk::ModifierType::ALT_MASK),
+                    shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+                    cmd: state.contains(gdk::ModifierType::SUPER_MASK),
+                },
+            };
+            surface.event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+            return true;
+        }
+        if input {
+            return false;
+        }
+    }
+    false
 }
 
 /// The event's position in the root's coordinates (`None` for events of
@@ -765,7 +822,10 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             let step = WheelInput::Step { notches: false };
             wheel_input(surface, x, y, dx, dy, time, step);
         }
-        Simulated::Hover(x, y) => hover(surface, x, y),
+        Simulated::Hover(x, y) => {
+            hover(surface, x, y);
+            hover_moved(surface, x, y, gdk::ModifierType::empty());
+        }
     }
 }
 
@@ -1791,6 +1851,35 @@ fn set_hovered(surface: &Surface, views: Vec<NshView>) {
     for v in views.iter().rev().filter(|v| !old.contains(v)) {
         set_state(surface, v, HOVERED, true);
         hover_event(surface, v, EventKind::HoverIn);
+    }
+}
+
+/// `onHoverMove` of the hovered views that listen, with the mouse at
+/// `(x, y)` (root coordinates) in each.
+fn hover_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
+    let hovered = surface.input.hovered.borrow().clone();
+    for v in hovered {
+        let id = {
+            let s = v.state();
+            if !s.events.contains(EventKind::HoverMove) {
+                continue;
+            }
+            s.id
+        };
+        let (location_x, location_y) = local(surface, &v, x, y);
+        let event = nsh_core::HoverEvent {
+            location_x,
+            location_y,
+            page_x: x,
+            page_y: y,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+                alt: state.contains(gdk::ModifierType::ALT_MASK),
+                shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+                cmd: state.contains(gdk::ModifierType::SUPER_MASK),
+            },
+        };
+        surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
     }
 }
 

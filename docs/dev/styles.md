@@ -22,7 +22,13 @@
   keys are build errors). Rust components do not use classes: their typed styles (`ui/style.rs`, every utility group has its
   methods, tested against the classes) lower into the same rules and their
   colors come from the component theme, `nsh.json` `"theme"` (`docs/dev/components.md`); the Tailwind theme only
-  shapes the app's own classes. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
+  shapes the app's own classes. The app's classes name the component theme's tokens (`tailwind/theme.rs` `Tokens`:
+  every color and number of the theme by its key, dots as dashes, `.background` optional; `bg-primary` when the
+  Tailwind theme has no such color, `rounded-(--radius)`): such a utility is parsed with the light and the dark
+  values as arbitrary ones (two rules of its rank when they differ) and depends on `deps::THEME`. When the theme the
+  components draw with changes (`Core::set_theme`, `set_host_theme`; a host theme keeps the app's custom keys it
+  lacks, `ui::Theme::inherit`), `Core::theme_tokens_changed` drops the cached strings that name tokens and resolves
+  their nodes (and the app's classes on Rust components) again; when the names change, every class. `nsh build` / `nsh dev` warn about unknown static classes in app code (`file:line:col:
   unknown class '...'`, target `nsh::build`); the core logs each unknown class once at run time. Class-only settings
   that are props in React Native (`line-clamp-*`, `truncate`, `whitespace-nowrap`, `pointer-events-*`, `object-*`,
   `caret-*`) lose to explicit props; `placeholder:text-*` / `selection:text-*` lose to the `placeholderColor` /

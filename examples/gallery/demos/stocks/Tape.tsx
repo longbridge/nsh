@@ -1,5 +1,5 @@
 import { computed, effect, signal, Text, untracked, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { colors, Legend, tints } from "../../ui";
 import { BLOCK, buckets, compact, type Market, price, type Stock, type Trade, time } from "./market";
@@ -18,7 +18,7 @@ const HELD = SHOWN + 4;
  */
 export function Tape(props: { market: Market; stock: Stock }) {
   const shown = signal<Trade[]>([]);
-  const offset = createNativeValue(0);
+  const offset = createAnimatedValue(0);
   let top = -1;
   // Four times a second: what came in since, and the slide that shows it.
   effect(() => {

@@ -10,7 +10,9 @@ use syn::{
     spanned::Spanned,
 };
 
-use crate::{camel, decl, docs, last_segment, module_cx, result_ok};
+use crate::{
+    camel, decl, docs, exported, last_segment, module_cx, param_ts, result_ok, strip_args,
+};
 
 pub(crate) fn class(item: syn::Item) -> syn::Result<TokenStream2> {
     match item {
@@ -219,16 +221,34 @@ fn class_impl(mut item: ItemImpl) -> syn::Result<TokenStream2> {
         ));
     };
     let class_name = type_name.to_string();
+    crate::no_block_doc(&item, "#[class]")?;
     let mut members = Vec::new();
     for member in &item.items {
         let ImplItem::Fn(f) = member else { continue };
+        if !exported(&f.vis) {
+            // A helper: Rust's only. A getter or setter is TS's, so one
+            // without a visibility is a mistake, not a helper.
+            if let Some(attr) = f
+                .attrs
+                .iter()
+                .find(|a| a.path().is_ident("getter") || a.path().is_ident("setter"))
+            {
+                return Err(syn::Error::new(
+                    attr.span(),
+                    "a getter or setter is exported: make it `pub fn` (functions without a \
+                     visibility are the block's helpers, Rust's only)",
+                ));
+            }
+            continue;
+        }
         members.push(member_def(f, &class_name)?);
     }
-    // The getters' and setters' attributes are the macro's.
+    // The getters', setters' and callbacks' attributes are the macro's.
     for member in &mut item.items {
         if let ImplItem::Fn(f) = member {
             f.attrs
                 .retain(|a| !a.path().is_ident("getter") && !a.path().is_ident("setter"));
+            strip_args(&mut f.sig);
         }
     }
     Ok(quote! {
@@ -295,6 +315,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
     let is_async = matches!(kind, Kind::AsyncMethod | Kind::AsyncStatic);
     let mut params = Vec::new();
     let mut names = Vec::new();
+    let mut attrs = Vec::new();
     for arg in f.sig.inputs.iter().skip(skip) {
         let FnArg::Typed(t) = arg else {
             return Err(syn::Error::new(arg.span(), "one receiver"));
@@ -313,6 +334,7 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
             ));
         };
         names.push(camel(&name.ident.to_string()));
+        attrs.push(&t.attrs);
         params.push(match &*t.ty {
             Type::Reference(_) if is_async => {
                 return Err(syn::Error::new(
@@ -344,14 +366,17 @@ fn member_def(f: &ImplItemFn, class: &str) -> syn::Result<TokenStream2> {
         .iter()
         .zip(&names)
         .zip(&optional)
-        .map(|((p, name), optional)| {
+        .zip(&attrs)
+        .map(|(((p, name), optional), attrs)| {
             let ts = match p {
-                Param::Value(ty) => quote!(#private::arg_ts::<#ty>()),
-                Param::Borrowed { elem, .. } => quote!(#private::arg_ts::<#ui::Instance<#elem>>()),
+                Param::Value(ty) => param_ts(ty, attrs)?,
+                Param::Borrowed { elem, .. } => {
+                    param_ts(&syn::parse_quote!(#ui::Instance<#elem>), attrs)?
+                }
             };
-            quote!((#name, #ts, #optional))
+            Ok(quote!((#name, #ts, #optional)))
         })
-        .collect();
+        .collect::<syn::Result<_>>()?;
     // The classes the signature names, registered with this one.
     let mut refs: Vec<TokenStream2> = params
         .iter()
@@ -448,11 +473,16 @@ fn sync_call(
                     let #held: #ui::Instance<#elem> =
                         #private::arg::<#ui::Instance<#elem>>(host, #i, #what, #name)?;
                 });
+                // A disposed or busy instance's error names the argument.
                 if *mutable {
-                    borrow.push(quote!(let mut #local = #private::borrow_mut::<#elem>(&#held)?;));
+                    borrow.push(quote!(
+                        let mut #local = #private::borrow_arg_mut::<#elem>(&#held, #what, #name)?;
+                    ));
                     args.push(quote!(&mut *#local));
                 } else {
-                    borrow.push(quote!(let #local = #private::borrow::<#elem>(&#held)?;));
+                    borrow.push(quote!(
+                        let #local = #private::borrow_arg::<#elem>(&#held, #what, #name)?;
+                    ));
                     args.push(quote!(&*#local));
                 }
                 release.push(quote!(::core::mem::drop(#local);));
@@ -580,25 +610,60 @@ mod tests {
     #[test]
     fn names_the_object_has_are_refused() {
         assert!(
-            error(quote!(impl T { fn dispose(&self) {} }))
+            error(quote!(impl T { pub fn dispose(&self) {} }))
                 .contains("`dispose` is every class's own")
         );
-        assert!(error(quote!(impl T { fn constructor(&self) {} })).contains("`constructor`"));
+        assert!(error(quote!(impl T { pub fn constructor(&self) {} })).contains("`constructor`"));
         for name in ["prototype", "name", "length"] {
             let ident = quote::format_ident!("{name}");
             assert!(
-                error(quote!(impl T { fn #ident() -> u32 { 0 } })).contains("a static named"),
+                error(quote!(impl T { pub fn #ident() -> u32 { 0 } })).contains("a static named"),
                 "{name}"
             );
             assert!(
-                error(quote!(impl T { async fn #ident() -> u32 { 0 } })).contains("a static named"),
+                error(quote!(impl T { pub async fn #ident() -> u32 { 0 } }))
+                    .contains("a static named"),
                 "async {name}"
             );
         }
         // A method may be called `name` (it is on the prototype).
         assert_eq!(
-            error(quote!(impl T { fn name(&self) -> u32 { 0 } })),
+            error(quote!(impl T { pub fn name(&self) -> u32 { 0 } })),
             "no error"
+        );
+    }
+
+    #[test]
+    fn a_doc_comment_on_the_block_is_refused() {
+        // TS shows the struct's: one here would be lost.
+        assert!(
+            error(quote!(
+                #[doc = " A tally."]
+                impl T {
+                    pub fn new() -> Self {
+                        T
+                    }
+                }
+            ))
+            .contains("document the export on its struct")
+        );
+    }
+
+    #[test]
+    fn functions_without_a_visibility_are_helpers() {
+        // Not exported, so not checked against the object's names.
+        assert_eq!(
+            error(quote!(impl T { fn dispose(&self) {} fn constructor() {} })),
+            "no error"
+        );
+        assert_eq!(
+            error(quote!(impl T { pub(self) fn dispose(&self) {} })),
+            "no error"
+        );
+        // A getter or setter is TS's: one without `pub` is refused.
+        assert!(
+            error(quote!(impl T { #[getter] fn count(&self) -> u32 { 0 } }))
+                .contains("make it `pub fn`")
         );
     }
 }

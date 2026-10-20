@@ -89,7 +89,7 @@ fn item_height(id: usize) -> usize {
 /// `columns`.
 fn grid_header(
     visible: Signal<Option<(usize, usize)>>,
-    list: &ElementRef,
+    list: ElementRef,
     columns: u32,
 ) -> impl IntoElement {
     let progress = computed(move || {
@@ -97,7 +97,6 @@ fn grid_header(
             .get()
             .map_or(0.0, |(_, last)| (last + 1) as f32 / ITEMS as f32)
     });
-    let (jump, end) = (list.clone(), list.clone());
     view()
         .bg(colors::SURFACE)
         .rounded(px(radius::CARD))
@@ -159,9 +158,9 @@ fn grid_header(
                 .child(action(
                     "Jump to 60",
                     Some(IconName::ArrowDown),
-                    move |_: &()| jump.scroll_to_index(60, 0.5, 0.0, true),
+                    move |_: &()| list.scroll_to_index(60, 0.5, 0.0, true),
                 ))
-                .child(action("End", None, move |_: &()| end.scroll_to_end(true))),
+                .child(action("End", None, move |_: &()| list.scroll_to_end(true))),
         )
 }
 
@@ -175,7 +174,7 @@ fn Grid() -> impl IntoElement {
     let wide = untracked(desktop);
     let grid = move |columns: u32| {
         let list = element_ref();
-        let header = grid_header(visible, &list, columns);
+        let header = grid_header(visible, list, columns);
         let (padding, gap) = if wide { (24.0, 12.0) } else { (16.0, 8.0) };
         // A cell shows other items as it is reused: what differs between
         // items is bound to its position.

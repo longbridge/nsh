@@ -6,21 +6,43 @@
 //! ([`ENTRY`]); each crate is linked under a name of its own
 //! ([`AppCrate::name`]), so their entries do not clash.
 //!
-//! The prebuilt toolchain cannot know such components, so `nsh` builds the
-//! app its own: a Cargo workspace in `.nsh/rust` with the command line
-//! (`nsh_cli::main_with` of `nsh/base` and the app's sets), the iOS,
-//! macOS, Linux, Windows and GPUI development hosts and release runners,
-//! the Android library and the web runtime (a WebAssembly module,
-//! [`RustApp::web`]),
-//! each linking the app's crates. A command on the app runs again in the
-//! app's command line ([`reexec`]), which builds the hosts it needs
-//! ([`RustApp::runtime`], [`RustApp::android`]) instead of taking the prebuilt
-//! ones. The workspace takes nsh's crates where the app's crates do
+//! The prebuilt `nsh` does not link such components, and never needs to:
+//! the toolchain reads a UI set as data (nsh-core `ui::description`). `nsh`
+//! writes a Cargo workspace in `.nsh/rust` ([`RustApp::write_workspace`])
+//! with:
+//!
+//! - `describe`, a program of nsh-core and the app's crates only, which
+//!   calls each crate's entry and prints the sets' description: their
+//!   exports and kinds, TypeScript declarations, re-exports and files.
+//!   `nsh` builds and runs it before every command on the app
+//!   ([`RustApp::describe`]; Cargo says whether the crates changed, the
+//!   output is kept in `.nsh/rust/description.json` until they do), then
+//!   bundles, compiles bytecode, writes `.nsh/types`, serves and packages
+//!   the app itself;
+//! - the iOS, macOS, Linux, Windows and GPUI development hosts and release
+//!   runners, the Android library and the web runtime (a WebAssembly
+//!   module, [`RustApp::web`]), each linking the app's crates: `nsh` builds
+//!   the ones a command needs ([`RustApp::runtime`], [`RustApp::android`])
+//!   instead of taking the prebuilt ones;
+//! - `test`, the headless runner of `nsh test` (`nsh_testing::runner`):
+//!   engines with the app's crates, which run the test files and the apps
+//!   they open (for a Rust app, its root) with the bytecode `nsh` compiles
+//!   for it ([`RustApp::test_runner`]);
+//! - for a Rust app (`nsh.json` `"root"`), its runners without a JS
+//!   runtime: `rust-<platform>`, with no QuickJS, so such an app never
+//!   builds the JS engine, the bundler or the CLI to run.
+//!
+//! During `nsh dev` / `nsh run` a change to the app's Rust code ends the
+//! session ([`Restart`]); the command describes the app again, builds what
+//! it runs anew and starts again in the same process (a build that fails
+//! then waits for the next change: [`RustApp::wait_after`]).
+//!
+//! The workspace takes nsh's crates where the app's crates do
 //! ([`Nsh::of`]): from crates.io at this `nsh`'s version ([`VERSION`]: the
 //! generated code calls their API), or from the checkout they depend on by
 //! path, with the app's crates.io dependencies on nsh patched to it. It
 //! builds in the app's own `target`, as a Cargo project in the app's
-//! directory would.
+//! directory would, or in `CARGO_TARGET_DIR`.
 
 use std::{
     env, fs,
@@ -29,6 +51,7 @@ use std::{
 };
 
 use anyhow::{Context as _, bail};
+use nsh_core::ui::description::{Description, SetDescription};
 
 use crate::{runtime::Platform, ui};
 
@@ -36,21 +59,32 @@ use crate::{runtime::Platform, ui};
 /// (`nsh-macros` `native_module.rs`): the crate's UI set.
 const ENTRY: &str = "__nsh_native_module";
 
-/// Set in the app's command line: which app it is for (its workspace).
-const APP_ENV: &str = "NSH_RUST_APP";
+/// The app of this command, if it has Rust crates ([`set_current`]).
+static CURRENT: std::sync::Mutex<Option<RustApp>> = std::sync::Mutex::new(None);
 
-/// Set in the app's command line when it runs again after a change
-/// ([`RESTART`]): a failed build then waits for the next change instead of
-/// ending the development session.
-const RESTARTED_ENV: &str = "NSH_RUST_RESTARTED";
+/// Set once a development session started again after a change to the
+/// app's Rust code: a failed build then waits for the next change instead
+/// of ending the session ([`RustApp::build_with`]).
+static RESTARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The exit code of the app's command line when the app's Rust code changed
-/// during `nsh dev` / `nsh run`: `nsh` builds it again and runs the command
-/// anew ([`reexec`]).
-pub(crate) const RESTART: u8 = 75;
+/// Makes `app` the app of this command ([`current`]).
+pub(crate) fn set_current(app: RustApp) {
+    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = Some(app);
+}
+
+/// The app of this command, if it has Rust crates of its own.
+pub(crate) fn current() -> Option<RustApp> {
+    CURRENT.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Records that the development session starts again after a change
+/// ([`RESTARTED`]).
+pub(crate) fn set_restarted() {
+    RESTARTED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// The error a development session ends with when the app's Rust code
-/// changed ([`RESTART`]).
+/// changed: the command starts again (`lib.rs` `run`).
 #[derive(Debug)]
 pub(crate) struct Restart;
 
@@ -114,11 +148,11 @@ impl AppCrate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Nsh {
     /// crates.io, at this `nsh`'s version ([`VERSION`]): the app's crates
-    /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --rust` writes).
+    /// ask for it (`nsh-core = "0.1.1"`, what `nsh init --template rust` writes).
     Registry,
-    /// The checkout the app's crates depend on by path (`nsh init --rust
-    /// --nsh-source <dir>`): nsh's own examples, or an app trying changes to
-    /// nsh.
+    /// The checkout the app's crates depend on by path (`nsh init
+    /// --template rust --nsh-source <dir>`): nsh's own examples, or an app
+    /// trying changes to nsh.
     Source(PathBuf),
 }
 
@@ -251,6 +285,9 @@ pub(crate) struct RootConfig {
     theme: Option<PathBuf>,
     /// `"light"` / `"dark"`; `None`: the system's.
     appearance: Option<String>,
+    /// The app's id (`nsh.json` `"id"`), which names where it keeps its
+    /// data.
+    app_id: Option<String>,
     /// `"statusBar"` (JSON, checked): the status bar's default.
     status_bar: Option<String>,
 }
@@ -508,124 +545,9 @@ fn root_config(
         component,
         theme,
         appearance,
+        app_id: crate::package::app_id(&dir.join("nsh.json")).ok(),
         status_bar,
     })
-}
-
-/// The app this command line runs for (`None`: the prebuilt `nsh`).
-pub(crate) fn current() -> Option<RustApp> {
-    load(PathBuf::from(env::var_os(APP_ENV)?))
-}
-
-/// The app whose generated workspace is `workspace`, as its `app.json`
-/// describes it ([`RustApp::write_workspace`]).
-fn load(workspace: PathBuf) -> Option<RustApp> {
-    let text = fs::read_to_string(workspace.join("app.json")).ok()?;
-    let app: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let root = app.get("root").and_then(|root| {
-        Some(RootConfig {
-            component: root.get("component")?.as_str()?.to_owned(),
-            theme: root.get("theme")?.as_str().map(PathBuf::from),
-            appearance: root.get("appearance")?.as_str().map(str::to_owned),
-            status_bar: root
-                .get("statusBar")
-                .and_then(|s| s.as_str())
-                .map(str::to_owned),
-        })
-    });
-    let paths = |key: &str| -> Option<Vec<PathBuf>> {
-        app.get(key)?
-            .as_array()?
-            .iter()
-            .map(|p| p.as_str().map(PathBuf::from))
-            .collect()
-    };
-    let crates = app
-        .get("crates")?
-        .as_array()?
-        .iter()
-        .map(|c| {
-            Some(AppCrate {
-                package: c.get("package")?.as_str()?.to_owned(),
-                dir: PathBuf::from(c.get("dir")?.as_str()?),
-            })
-        })
-        .collect::<Option<_>>()?;
-    let nsh = match app.get("source")? {
-        serde_json::Value::String(dir) => Nsh::Source(PathBuf::from(dir)),
-        _ => Nsh::Registry,
-    };
-    Some(RustApp {
-        workspace,
-        nsh,
-        crates,
-        watched: paths("watched")?,
-        root,
-    })
-}
-
-/// When this is the prebuilt `nsh` and the command's app has a Rust crate:
-/// builds the app's command line and runs the command in it.
-pub(crate) fn reexec(entry: Option<&Path>) -> anyhow::Result<Option<std::process::ExitStatus>> {
-    if env::var_os(APP_ENV).is_some() {
-        return Ok(None);
-    }
-    let Some(entry) = entry else {
-        return Ok(None);
-    };
-    let Some(app) = of(entry)? else {
-        return Ok(None);
-    };
-    let mut restarted = false;
-    loop {
-        let what = match app.crates.as_slice() {
-            [one] => format!("the Rust crate {}", one.package),
-            _ => format!("the Rust crates {}", app.packages()),
-        };
-        let cli = match app.build(&app.workspace, &app.bin("cli"), None, false, &[], &what) {
-            Ok(cli) => cli,
-            Err(e) if restarted => {
-                app.wait_after(&e)?;
-                continue;
-            }
-            Err(e) => return Err(e),
-        };
-        let mut command = Command::new(&cli);
-        command
-            .args(env::args_os().skip(1))
-            .env(APP_ENV, &app.workspace);
-        if restarted {
-            command.env(RESTARTED_ENV, "1");
-        }
-        let status = {
-            // Ctrl-C reaches both: this one waits while that one undoes
-            // what it set up (a stop sent to this one alone is passed on).
-            let _stoppable = ui::Stoppable::new();
-            let mut child = command
-                .spawn()
-                .with_context(|| format!("run {}", cli.display()))?;
-            // It (and the host it runs) goes with this one, however this
-            // one ends.
-            #[cfg(windows)]
-            let _job = crate::run::KillOnClose::assign(&child);
-            let mut passed_on = false;
-            loop {
-                if let Some(status) = child.try_wait()? {
-                    break status;
-                }
-                if !passed_on && ui::stop_requested() {
-                    ui::pass_stop_on(&child);
-                    passed_on = true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        };
-        if status.code() != Some(i32::from(RESTART)) || ui::stop_requested() {
-            return Ok(Some(status));
-        }
-        restarted = true;
-        ui::note("the app's Rust code changed: building it again");
-    }
 }
 
 /// nsh's crates an app's crate may depend on ([`Nsh::of`]; built against a
@@ -640,7 +562,6 @@ const NSH_CRATES: &[&str] = &[
     "nsh-engine",
     "nsh-bundler",
     "nsh-dev",
-    "nsh-cli",
     "nsh-platform-ios",
     "nsh-platform-android",
     "nsh-platform-linux",
@@ -743,8 +664,21 @@ impl RustApp {
 
     /// Whether `path` is part of the app's Rust code (the sources and
     /// manifest of a crate it builds with, and the files of its `assets/`
-    /// directory: the crate reads them when it builds).
+    /// directory: the crate reads them when it builds), never what its
+    /// builds write (a `target/`, or `CARGO_TARGET_DIR` in a crate's
+    /// directory).
     pub(crate) fn is_rust(&self, path: &Path) -> bool {
+        self.is_rust_in(path, self.target_dir().ok().as_deref())
+    }
+
+    /// [`Self::is_rust`] with the builds in `target`.
+    fn is_rust_in(&self, path: &Path, target: Option<&Path>) -> bool {
+        if let Some(target) = target
+            && (path.starts_with(target)
+                || fs::canonicalize(target).is_ok_and(|t| path.starts_with(t)))
+        {
+            return false;
+        }
         self.watched.iter().any(|dir| {
             let Ok(rest) = path.strip_prefix(dir) else {
                 return false;
@@ -776,7 +710,7 @@ impl RustApp {
 
     /// Reports `error` (a build of the code just saved failed) and waits for
     /// the app's Rust code to change again.
-    fn wait_after(&self, error: &anyhow::Error) -> anyhow::Result<()> {
+    pub(crate) fn wait_after(&self, error: &anyhow::Error) -> anyhow::Result<()> {
         ui::report(error);
         ui::detail(ui::dim("fix the code and save: nsh builds it again"));
         let (tx, rx) = std::sync::mpsc::channel();
@@ -799,6 +733,73 @@ impl RustApp {
             }
         }
         bail!("stopped watching the app's Rust code")
+    }
+
+    /// What the steps say they build: `the Rust crate charts`, `the Rust
+    /// crates charts, storage`.
+    fn crates_what(&self) -> String {
+        match self.crates.as_slice() {
+            [one] => format!("the Rust crate {}", one.package),
+            _ => format!("the Rust crates {}", self.packages()),
+        }
+    }
+
+    /// The UI sets of the app's crates, in `nsh.json`'s order, as their
+    /// describe program says (built first: Cargo builds it again when the
+    /// app's Rust code changed). Its output is kept in
+    /// `.nsh/rust/description.json`, with the program's size and time, until
+    /// the program changes.
+    pub(crate) fn describe(&self) -> anyhow::Result<Vec<SetDescription>> {
+        let what = self.crates_what();
+        let program = self.build(
+            &self.workspace,
+            &self.bin("describe"),
+            None,
+            false,
+            &[],
+            &what,
+        )?;
+        let cache = self.workspace.join("description.json");
+        let stamp = stamp(&program)?;
+        let cached = fs::read_to_string(&cache).ok().and_then(|text| {
+            let cached: serde_json::Value = serde_json::from_str(&text).ok()?;
+            (cached["stamp"].as_str()? == stamp)
+                .then(|| cached["description"].as_str().map(str::to_owned))?
+        });
+        let text = match cached {
+            Some(text) => text,
+            None => {
+                let output = Command::new(&program)
+                    .output()
+                    .with_context(|| format!("run {}", program.display()))?;
+                if !output.status.success() {
+                    return Err(ui::failure(
+                        format!("describing {what} failed ({})", output.status),
+                        String::from_utf8_lossy(&output.stderr),
+                    ));
+                }
+                let text = String::from_utf8(output.stdout)
+                    .with_context(|| format!("the description of {what} is not UTF-8"))?;
+                write(
+                    &cache,
+                    &serde_json::json!({ "stamp": stamp, "description": text }).to_string(),
+                )?;
+                text
+            }
+        };
+        read_description(&text, &self.crates, &what)
+    }
+
+    /// The app's headless runner (`nsh test`), built for this machine.
+    pub(crate) fn test_runner(&self) -> anyhow::Result<PathBuf> {
+        self.build(
+            &self.workspace,
+            &self.bin("test"),
+            None,
+            false,
+            &[],
+            &format!("the headless runner of {}", self.packages()),
+        )
     }
 
     /// The generated workspace.
@@ -825,7 +826,7 @@ impl RustApp {
             &format!("# Generated by nsh for the app's Rust crate (nsh.json \"rust\"): do not edit.\n\
              [workspace]
 resolver = \"3\"
-members = [\"cli\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"linux-host\", \"linux-app\", \"windows-host\", \"windows-app\", \"android\", \"web\"{rust}]
+members = [\"describe\", \"test\", \"ios-host\", \"ios-app\", \"macos-host\", \"macos-app\", \"linux-host\", \"linux-app\", \"windows-host\", \"windows-app\", \"android\", \"web\"{rust}]
 # GPUI's hosts are a workspace of their own, written when they are built
 # (`RustApp::gpui_workspace`): other builds never resolve GPUI's crates.
 exclude = [\"gpui\"]
@@ -844,44 +845,14 @@ opt-level = 3
 "),
             false,
         )?;
-        write(
-            &ws.join("app.json"),
-            &serde_json::json!({
-                // `null`: crates.io.
-                "source": self.nsh.source().map(|s| s.to_string_lossy()),
-                "crates": self.crates.iter().map(|c| serde_json::json!({
-                    "package": c.package,
-                    "dir": c.dir.to_string_lossy(),
-                })).collect::<Vec<_>>(),
-                "watched": self.watched.iter().map(|d| d.to_string_lossy()).collect::<Vec<_>>(),
-                "root": self.root.as_ref().map(|root| serde_json::json!({
-                    "component": root.component,
-                    "theme": root.theme.as_ref().map(|t| t.to_string_lossy()),
-                    "appearance": root.appearance,
-                    "statusBar": root.status_bar,
-                })),
-            })
-            .to_string(),
-        )?;
-        write(
-            &ws.join("cli/Cargo.toml"),
-            &format!(
-                "{}\n[[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\nnsh-cli = {}\nnsh-core = {}\nnsh-base = {}\n{app}\n",
-                package("cli"),
-                self.bin("cli"),
-                src("nsh-cli"),
-                src("nsh-core"),
-                src("nsh-base"),
-            ),
-        )?;
-        write(
-            &ws.join("cli/main.rs"),
-            &format!(
-                "//! `nsh` for this app: `nsh/base` and the app's Rust components.\n\n\
-                 fn main() -> std::process::ExitCode {{\n    nsh_cli::main_with({sets})\n}}\n{}",
-                self.app_sets("")
-            ),
-        )?;
+        // What earlier versions of nsh wrote: the app's own command line,
+        // the runners of the former `nsh trace`.
+        for old in ["cli", "trace", "rust-trace"] {
+            let _ = fs::remove_dir_all(ws.join(old));
+        }
+        let _ = fs::remove_file(ws.join("app.json"));
+        self.write_describe(ws)?;
+        self.write_test(ws)?;
         for (dir, lib, what) in [
             ("ios-host", "nsh-ios-host", "development host"),
             ("ios-app", "nsh-ios-app", "release runner"),
@@ -901,9 +872,10 @@ opt-level = 3
         write(
             &ws.join("android/Cargo.toml"),
             &format!(
-                "{}\n[lib]\nname = \"nsh_app\"\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
+                "{}\n[lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n[features]\ndev = [\"nsh-platform-android/dev\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-platform-android = {}\nnsh-base = {}\n{app}\n",
                 package("android"),
+                self.android_lib(false),
                 src("nsh-core"),
                 src("nsh-platform-android"),
                 src("nsh-base"),
@@ -918,6 +890,76 @@ opt-level = 3
             ),
         )?;
         Ok(())
+    }
+
+    /// Writes the crate `<ws>/describe`: the program that describes the
+    /// app's UI sets (nsh-core `ui::description`), linking only its crates
+    /// and what their registries need, so `nsh` learns of them without
+    /// building them into itself.
+    fn write_describe(&self, ws: &Path) -> anyhow::Result<()> {
+        write(
+            &ws.join("describe/Cargo.toml"),
+            &format!(
+                "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\nnsh-core = {}\n{}\n",
+                self.bin("describe"),
+                self.bin("describe"),
+                self.nsh.dep("nsh-core", ""),
+                self.dependencies(),
+            ),
+        )?;
+        let calls: Vec<String> = self
+            .crates
+            .iter()
+            .map(|c| format!("{}()", set_fn(c)))
+            .collect();
+        write(
+            &ws.join("describe/main.rs"),
+            &format!(
+                "//! Describes the app's UI sets for `nsh`: one JSON document on standard\n\
+                 //! output (nsh-core `ui::description`).\n\n\
+                 fn main() {{\n    let sets = vec![{}];\n    \
+                 println!(\"{{}}\", nsh_core::ui::description::Description::of(&sets).to_json());\n}}\n{}",
+                calls.join(", "),
+                self.app_sets("")
+            ),
+        )
+    }
+
+    /// Writes the crate `<ws>/test`: the app's headless runner (`nsh test`,
+    /// `nsh_testing::runner`) with `nsh/base` and the app's sets, and a
+    /// Rust app's root. It bundles nothing (`nsh-testing` without its
+    /// feature `bundle`): `nsh` builds the entries it asks for.
+    fn write_test(&self, ws: &Path) -> anyhow::Result<()> {
+        write(
+            &ws.join("test/Cargo.toml"),
+            &format!(
+                "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [[bin]]\nname = {:?}\npath = \"main.rs\"\n\n[dependencies]\n\
+                 nsh-core = {}\nnsh-testing = {}\nnsh-base = {}\n{}\n",
+                self.bin("test"),
+                self.bin("test"),
+                self.nsh.dep("nsh-core", ""),
+                self.nsh.dep("nsh-testing", ", default-features = false"),
+                self.nsh.dep("nsh-base", ""),
+                self.dependencies(),
+            ),
+        )?;
+        let (make_root, root_fn) = match &self.root {
+            Some(root) => ("Some(app_root)", self.root_fn("", root)),
+            None => ("None", String::new()),
+        };
+        write(
+            &ws.join("test/main.rs"),
+            &format!(
+                "//! The app's headless runner (`nsh test`): its test files and the apps\n\
+                 //! they open, with `nsh/base` and the app's Rust components.\n\n\
+                 fn main() -> std::process::ExitCode {{\n    \
+                 nsh_testing::runner({}, {make_root})\n}}\n{}{root_fn}",
+                self.sets(),
+                self.app_sets(""),
+            ),
+        )
     }
 
     /// Writes a Rust app's runners (`<ws>/rust-<platform>`): the release
@@ -936,11 +978,12 @@ opt-level = 3
             &ws.join("rust-android/Cargo.toml"),
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
-                 [lib]\nname = \"nsh_rust_app\"\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
+                 [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_os = \"android\")'.dependencies]\n\
                  nsh-platform-android = {}\n",
                 self.bin("rust-android"),
+                self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", ""),
                 self.nsh
@@ -1087,6 +1130,15 @@ opt-level = 3
     /// The Rust app's web runtime's library name ([`Self::web_lib`]).
     fn rust_web_lib(&self) -> String {
         self.bin("rust-web").replace('-', "_")
+    }
+
+    /// The library name of the app's Android library (`rust`: a Rust app's
+    /// runner), named after the app as its binaries are, so apps sharing a
+    /// target directory (`CARGO_TARGET_DIR`) never take each other's; it is
+    /// installed as `libnsh.so`.
+    fn android_lib(&self, rust: bool) -> String {
+        self.bin(if rust { "rust-android" } else { "android" })
+            .replace('-', "_")
     }
 
     /// Writes the crate `<ws>/web`: the web runtime (`nsh-platform-web`, a
@@ -1274,9 +1326,12 @@ opt-level = 3
         let mut manifest = base.to_owned();
         if let Nsh::Source(source) = &self.nsh {
             manifest.push_str("\n[patch.crates-io]\n");
+            // The generated crates never build the bundler (nor does an
+            // app's), and Cargo warns of a patch that goes unused.
             for name in NSH_CRATES
                 .iter()
                 .filter(|name| gpui || **name != "nsh-platform-gpui")
+                .filter(|name| **name != "nsh-bundler")
             {
                 manifest.push_str(&format!(
                     "{name} = {{ path = {:?} }}\n",
@@ -1346,15 +1401,12 @@ opt-level = 3
         )
     }
 
-    /// The target directory: the app's own `target` (the workspace is
-    /// `<app>/.nsh/rust`), where its crates build with `cargo` too.
+    /// The target directory: `CARGO_TARGET_DIR` when it is set, as for any
+    /// Cargo build (a directory several checkouts or CI jobs share), else
+    /// the app's own `target` (the workspace is `<app>/.nsh/rust`), where its
+    /// crates build with `cargo` too.
     fn target_dir(&self) -> anyhow::Result<PathBuf> {
-        let app = self
-            .workspace
-            .parent()
-            .and_then(Path::parent)
-            .context("the generated workspace is not in an app's .nsh")?;
-        Ok(app.join("target"))
+        target_dir(&self.workspace, env::var_os("CARGO_TARGET_DIR"))
     }
 
     /// `cargo build`s package `package` of the workspace `workspace` (for
@@ -1417,7 +1469,7 @@ opt-level = 3
         if let Err(error) = ui::cargo(&mut cmd, what) {
             // A development session that ran: a mistake in the code just
             // saved waits for the fix (the command line runs again).
-            if env::var_os(RESTARTED_ENV).is_some() {
+            if RESTARTED.load(std::sync::atomic::Ordering::Relaxed) {
                 self.wait_after(&error)?;
                 return Err(Restart.into());
             }
@@ -1455,12 +1507,19 @@ opt-level = 3
             (_, true) => "ios-app",
         };
         let what = platform.host(runner);
-        let workspace = match platform {
-            Platform::Gpui => self.gpui_workspace()?,
-            _ => self.workspace.clone(),
+        let (workspace, features) = match platform {
+            Platform::Gpui => (self.gpui_workspace()?, crate::runtime::gpui_features()),
+            _ => (self.workspace.clone(), &[][..]),
         };
         let package = self.bin(name);
-        self.build(&workspace, &package, platform.triple(), runner, &[], &what)
+        self.build(
+            &workspace,
+            &package,
+            platform.triple(),
+            runner,
+            features,
+            &what,
+        )
     }
 
     /// A Rust app's runner for `platform` (`rust-<platform>`): a release
@@ -1490,12 +1549,16 @@ opt-level = 3
             self.packages(),
             if release { "" } else { " (debug)" }
         );
+        let features = match platform {
+            Platform::Gpui => crate::runtime::gpui_features(),
+            _ => &[],
+        };
         self.build(
             &workspace,
             &self.bin(dir),
             platform.triple(),
             release,
-            &[],
+            features,
             &what,
         )
     }
@@ -1560,11 +1623,8 @@ opt-level = 3
             } else {
                 &[]
             };
-            let (package, artifact) = if rust {
-                (self.bin("rust-android"), "libnsh_rust_app.so")
-            } else {
-                (self.bin("android"), "libnsh_app.so")
-            };
+            let package = self.bin(if rust { "rust-android" } else { "android" });
+            let artifact = format!("lib{}.so", self.android_lib(rust));
             let build = Build {
                 workspace: &self.workspace,
                 package: &package,
@@ -1572,7 +1632,7 @@ opt-level = 3
                 release: !dev,
                 profile: None,
                 extra: features,
-                artifact,
+                artifact: &artifact,
                 what: &format!("libnsh.so of {} for {abi}", self.packages()),
             };
             let lib = self.build_with(sdk.ndk_cargo(triple)?, &build)?;
@@ -1651,7 +1711,7 @@ impl RustApp {
     }
 
     /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-    /// `"appearance"`: a component of the first crate `"rust"` lists), for
+    /// `"appearance"`, `"statusBar"`: a component of the first crate `"rust"` lists), for
     /// the generated code, under `cfg`.
     fn root_fn(&self, cfg: &str, root: &RootConfig) -> String {
         let krate = self.crates.first().map(AppCrate::name).unwrap_or_default();
@@ -1666,7 +1726,7 @@ fn set_fn(krate: &AppCrate) -> String {
 }
 
 /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
-/// `"appearance"`, `"statusBar"`) in the crate the generated code links as `krate`, under
+/// `"appearance"`, `"statusBar"`, `"id"`) in the crate the generated code links as `krate`, under
 /// `cfg`.
 fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     let mut make = format!("nsh_core::ui::Root::of::<{krate}::{}>()", root.component);
@@ -1676,6 +1736,9 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
              .expect(\"nsh.json: theme\"),\n        )",
             theme.to_string_lossy()
         ));
+    }
+    if let Some(id) = &root.app_id {
+        make.push_str(&format!("\n        .app_id({id:?})"));
     }
     if let Some(appearance) = &root.appearance {
         let variant = if appearance == "dark" {
@@ -1714,6 +1777,81 @@ fn root_fn(cfg: &str, krate: &str, root: &RootConfig) -> String {
     )
 }
 
+/// What tells one build of `program` from another: its size and time.
+fn stamp(program: &Path) -> anyhow::Result<String> {
+    let metadata = fs::metadata(program).with_context(|| format!("no {}", program.display()))?;
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(format!("{}:{}", metadata.len(), modified.as_nanos()))
+}
+
+/// The sets of `crates` (`what` the steps call them) in `text`, the output
+/// of their describe program: a description of this nsh's format and
+/// version, one set per crate, each imported by a specifier of its own.
+fn read_description(
+    text: &str,
+    crates: &[AppCrate],
+    what: &str,
+) -> anyhow::Result<Vec<SetDescription>> {
+    let description = Description::from_json(text)
+        .map_err(|e| anyhow::anyhow!("the description of {what}: {e}"))?;
+    if description.nsh != VERSION {
+        bail!(
+            "{what} were described by nsh {} and this nsh is {VERSION}",
+            description.nsh
+        );
+    }
+    if description.sets.len() != crates.len() {
+        bail!(
+            "the description of {what} has {} UI sets for {} crates",
+            description.sets.len(),
+            crates.len()
+        );
+    }
+    check_specifiers(crates, &description.sets)?;
+    Ok(description.sets)
+}
+
+/// Checks the specifiers of `sets` (those of `crates`, in their order):
+/// each is imported by its specifier, so none may be one of nsh's modules
+/// or another crate's.
+fn check_specifiers(crates: &[AppCrate], sets: &[SetDescription]) -> anyhow::Result<()> {
+    let nsh: Vec<&str> = nsh_core::js::NATIVE_MODULES
+        .iter()
+        .copied()
+        .chain(
+            nsh_core::runtime::registries()
+                .iter()
+                .filter_map(|r| r.specifier()),
+        )
+        .chain(crate::own_sets().iter().filter_map(|r| r.specifier()))
+        .collect();
+    for (i, (krate, set)) in crates.iter().zip(sets).enumerate() {
+        let specifier = set.specifier.as_str();
+        if nsh.contains(&specifier) {
+            bail!(
+                "the crate {} is imported as {specifier:?}, one of nsh's own modules: give its `#[native_module(\"…\")]` a specifier of its own",
+                krate.package
+            );
+        }
+        if let Some((other, _)) = crates
+            .iter()
+            .zip(sets)
+            .take(i)
+            .find(|(_, s)| s.specifier == specifier)
+        {
+            bail!(
+                "the crates {} and {} are both imported as {specifier:?}: give each crate of the app a `#[native_module(\"…\")]` specifier of its own",
+                other.package,
+                krate.package
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Copies `from` to `to` when it is newer.
 fn install(from: &Path, to: &Path) -> anyhow::Result<()> {
     let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
@@ -1727,6 +1865,28 @@ fn install(from: &Path, to: &Path) -> anyhow::Result<()> {
 /// The cargo to run.
 fn cargo() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
+}
+
+/// The target directory of the generated `workspace` ([`RustApp::target_dir`]):
+/// `cargo_target_dir` (a relative one against the current directory, as Cargo
+/// takes it), else the app's `target`.
+fn target_dir(
+    workspace: &Path,
+    cargo_target_dir: Option<std::ffi::OsString>,
+) -> anyhow::Result<PathBuf> {
+    if let Some(dir) = cargo_target_dir.filter(|d| !d.is_empty()) {
+        let dir = PathBuf::from(dir);
+        return Ok(if dir.is_absolute() {
+            dir
+        } else {
+            env::current_dir()?.join(dir)
+        });
+    }
+    let app = workspace
+        .parent()
+        .and_then(Path::parent)
+        .context("the generated workspace is not in an app's .nsh")?;
+    Ok(app.join("target"))
 }
 
 /// The directory of nsh's crate `name` in the checkout at `source`: the GPUI
@@ -1794,7 +1954,7 @@ mod tests {
             ("/app/native/assets/logo@2x.png", true),
             ("/app/native/assets/fonts/Script.ttf", true),
             ("/app/native/target/debug/build.rs", false),
-            ("/app/native/.nsh/rust/cli/main.rs", false),
+            ("/app/native/.nsh/rust/test/main.rs", false),
             ("/app/native/.git/hooks/build.rs", false),
             ("/app/native/README.md", false),
             ("/app/App.tsx", false),
@@ -1803,6 +1963,50 @@ mod tests {
             ("/shared/other.rs", false),
         ] {
             assert_eq!(app.is_rust(Path::new(path)), rust, "{path}");
+        }
+    }
+
+    #[test]
+    fn what_builds_write_in_a_crate_is_not_its_code() {
+        let app = app(
+            Path::new("/app"),
+            &[("app-native", "/app/native".into())],
+            None,
+        );
+        let target = Some(Path::new("/app/native/build-cache"));
+        for (path, rust) in [
+            ("/app/native/src/lib.rs", true),
+            ("/app/native/build-cache/debug/build/out.rs", false),
+            ("/app/native/build-cache/Cargo.toml", false),
+        ] {
+            assert_eq!(app.is_rust_in(Path::new(path), target), rust, "{path}");
+        }
+    }
+
+    #[test]
+    fn android_libraries_are_named_after_the_app() {
+        let lib = |package: &str, file: &str| {
+            let dir = std::env::temp_dir()
+                .join(format!("nsh-rust-android-{package}-{}", std::process::id()));
+            let root = RootConfig {
+                component: "App".into(),
+                theme: None,
+                appearance: None,
+                app_id: None,
+                status_bar: None,
+            };
+            let app = app(&dir, &[(package, dir.join("native"))], Some(root));
+            app.write_workspace().unwrap();
+            let manifest = std::fs::read_to_string(app.workspace.join(file)).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            let at = manifest.find("[lib]\nname = ").expect("a [lib]");
+            manifest[at..].lines().nth(1).unwrap().to_owned()
+        };
+        for file in ["android/Cargo.toml", "rust-android/Cargo.toml"] {
+            // Apps sharing CARGO_TARGET_DIR build libraries of their own.
+            let (charts, notes) = (lib("charts", file), lib("notes", file));
+            assert_ne!(charts, notes, "{file}");
+            assert!(charts.contains("charts"), "{file}: {charts}");
         }
     }
 
@@ -2052,6 +2256,7 @@ mod tests {
                 component: "App".into(),
                 theme: Some("/app/theme.json".into()),
                 appearance: Some("dark".into()),
+                app_id: Some("com.example.app".into()),
                 status_bar: Some(r#"{"foreground":"light","hidden":false}"#.into()),
             },
         );
@@ -2060,6 +2265,7 @@ mod tests {
             "nsh_core::ui::Root::of::<app_native::App>()",
             "include_str!(\"/app/theme.json\")",
             ".appearance(nsh_core::ui::Appearance::Dark)",
+            ".app_id(\"com.example.app\")",
             ".status_bar(nsh_core::StatusBarSetting::default().foreground(nsh_core::StatusBarStyle::Light).hidden(false))",
         ] {
             assert!(code.contains(line), "no {line:?} in\n{code}");
@@ -2077,6 +2283,7 @@ mod tests {
                 component: "App".into(),
                 theme: None,
                 appearance: None,
+                app_id: None,
                 status_bar: None,
             }),
         );
@@ -2120,8 +2327,14 @@ mod tests {
         assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_base::registry(), set_app_app_native()], app_root());"), "{web}");
         assert!(read("rust-web/Cargo.toml").contains("default-features = false"));
         assert!(read("rust-web/build.rs").contains("-zstack-size=8388608"));
-        // The root reaches the app's command line (`current`).
-        assert!(read("app.json").contains("\"component\":\"App\""));
+        // Its headless runner opens the root for the tests.
+        let test = read("test/main.rs");
+        assert!(test.contains("nsh_testing::runner(vec![nsh_base::registry(), set_app_app_native()], Some(app_root))"), "{test}");
+        assert!(
+            test.contains("nsh_core::ui::Root::of::<app_app_native::App>()"),
+            "{test}"
+        );
+        assert!(manifest.contains("\"rust-web\"]"), "{manifest}");
         app.gpui_workspace().unwrap();
         assert!(read("gpui/Cargo.toml").contains("\"rust-gpui\""));
         assert!(read("gpui/rust-gpui/main.rs").contains("nsh_gpui_app::run_rust(app_root())"));
@@ -2134,8 +2347,20 @@ mod tests {
         let app = app(&dir, &[("app-native", dir.join("native"))], None);
         app.write_workspace().unwrap();
         let manifest = std::fs::read_to_string(app.workspace.join("Cargo.toml")).unwrap();
-        assert!(!manifest.contains("rust-"), "{manifest}");
+        // No `rust-*` members (paths may hold the word: a checkout in
+        // `yf-rust-exports`).
+        assert!(!manifest.contains("\"rust-"), "{manifest}");
         assert!(!app.workspace.join("rust-web").exists());
+        // Its headless runner runs the bytecode the CLI compiles for it.
+        let test = std::fs::read_to_string(app.workspace.join("test/main.rs")).unwrap();
+        assert!(
+            test.contains(
+                "nsh_testing::runner(vec![nsh_base::registry(), set_app_app_native()], None)"
+            ) && !test.contains("app_root"),
+            "{test}"
+        );
+        let cargo = std::fs::read_to_string(app.workspace.join("test/Cargo.toml")).unwrap();
+        assert!(cargo.contains("default-features = false"), "{cargo}");
         assert!(super::is_root(Path::new("/app/nsh.json")));
         assert!(!super::is_root(Path::new("/app/App.tsx")));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2150,7 +2375,8 @@ mod tests {
         app.gpui_workspace().unwrap();
         let exact = format!("{{ version = \"={}\"", super::VERSION);
         for file in [
-            "cli/Cargo.toml",
+            "describe/Cargo.toml",
+            "test/Cargo.toml",
             "macos-host/Cargo.toml",
             "ios-app/Cargo.toml",
             "android/Cargo.toml",
@@ -2171,13 +2397,25 @@ mod tests {
                 "{file}: {manifest}"
             );
         }
-        let app_json = std::fs::read_to_string(app.workspace.join("app.json")).unwrap();
-        assert_eq!(
-            super::load(app.workspace.clone()).unwrap().nsh,
-            Nsh::Registry,
-            "{app_json}"
-        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn builds_go_to_cargo_target_dir_else_the_app_s_target() {
+        let ws = Path::new("/apps/charts/.nsh/rust");
+        let app = super::target_dir(ws, None).unwrap();
+        assert_eq!(app, Path::new("/apps/charts/target"));
+        assert_eq!(super::target_dir(ws, Some("".into())).unwrap(), app);
+        // Absolute on this system: `/cache/target` has no drive on Windows.
+        let absolute = if cfg!(windows) {
+            r"C:\cache\target"
+        } else {
+            "/cache/target"
+        };
+        let shared = super::target_dir(ws, Some(absolute.into())).unwrap();
+        assert_eq!(shared, Path::new(absolute));
+        let relative = super::target_dir(ws, Some("build".into())).unwrap();
+        assert_eq!(relative, std::env::current_dir().unwrap().join("build"));
     }
 
     #[test]
@@ -2259,7 +2497,7 @@ mod tests {
         assert_eq!(app.gpui_workspace().unwrap(), app.workspace.join("gpui"));
         assert!(read("gpui/Cargo.toml").contains("members = [\"gpui-host\", \"gpui-app\"]"));
         for (file, cfg) in [
-            ("cli/main.rs", ""),
+            ("test/main.rs", ""),
             ("ios-host/main.rs", "#[cfg(target_os = \"ios\")]\n"),
             ("ios-app/main.rs", "#[cfg(target_os = \"ios\")]\n"),
             ("linux-host/main.rs", "#[cfg(target_os = \"linux\")]\n"),
@@ -2293,7 +2531,8 @@ mod tests {
             }
         }
         for dir in [
-            "cli",
+            "describe",
+            "test",
             "ios-host",
             "ios-app",
             "linux-host",
@@ -2328,6 +2567,7 @@ mod tests {
                 component: "shell::Home".into(),
                 theme: None,
                 appearance: None,
+                app_id: None,
                 status_bar: None,
             }),
         );
@@ -2336,7 +2576,7 @@ mod tests {
         let read = |file: &str| std::fs::read_to_string(app.workspace.join(file)).unwrap();
         let sets = "vec![nsh_base::registry(), set_app_charts(), set_app_app_storage()]";
         for dir in [
-            "cli",
+            "test",
             "ios-host",
             "ios-app",
             "linux-host",
@@ -2396,14 +2636,95 @@ mod tests {
                 );
             }
         }
+        // The describe program: the app's sets only, and nsh-core.
+        let describe = read("describe/main.rs");
+        assert!(
+            describe.contains("let sets = vec![set_app_charts(), set_app_app_storage()];"),
+            "{describe}"
+        );
+        assert!(
+            describe.contains("Description::of(&sets).to_json()"),
+            "{describe}"
+        );
+        let manifest = read("describe/Cargo.toml");
+        let nsh: Vec<&str> = manifest
+            .lines()
+            .filter(|l| l.starts_with("nsh-"))
+            .map(|l| l.split(' ').next().unwrap())
+            .collect();
+        assert_eq!(nsh, ["nsh-core"], "{manifest}");
+        assert!(manifest.contains("name = \"nsh-app-charts-app-storage-describe\""));
         // Named after all its crates: another app's crates build apart.
-        assert!(read("cli/Cargo.toml").contains("name = \"nsh-app-charts-app-storage-cli\""));
-        // The app's command line finds them again (`current`).
-        let loaded = super::load(app.workspace.clone()).unwrap();
-        assert_eq!(loaded.crates, app.crates);
-        assert_eq!(loaded.watched, app.watched);
-        assert_eq!(loaded.root, app.root);
+        assert!(read("test/Cargo.toml").contains("name = \"nsh-app-charts-app-storage-test\""));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_cli_reads_the_description_of_the_app_s_crates() {
+        use nsh_core::ui::description::{Description, SetDescription};
+        let crates = |packages: &[&str]| -> Vec<AppCrate> {
+            packages
+                .iter()
+                .map(|p| AppCrate {
+                    package: (*p).into(),
+                    dir: PathBuf::from("/app").join(p),
+                })
+                .collect()
+        };
+        let set = |specifier: &'static str| -> SetDescription {
+            nsh_core::ui::Registry::ui_set(specifier).into()
+        };
+        let text = |sets: Vec<SetDescription>| {
+            Description {
+                nsh: super::VERSION.into(),
+                sets,
+            }
+            .to_json()
+        };
+        let read = |text: &str, packages: &[&str]| {
+            super::read_description(text, &crates(packages), "the Rust crates")
+                .map_err(|e| e.to_string())
+        };
+        let two = text(vec![set("app/charts"), set("app/storage")]);
+        let sets = read(&two, &["charts", "storage"]).unwrap();
+        assert_eq!(sets[1].specifier, "app/storage");
+        // One set per crate.
+        assert_eq!(
+            read(&two, &["charts"]).unwrap_err(),
+            "the description of the Rust crates has 2 UI sets for 1 crates"
+        );
+        // Another nsh's description.
+        let mut other = Description::from_json(&two).unwrap();
+        other.nsh = "0.0.1".into();
+        let error = read(&other.to_json(), &["charts", "storage"]).unwrap_err();
+        assert!(
+            error.contains("described by nsh 0.0.1 and this nsh is"),
+            "{error}"
+        );
+        assert!(
+            read("{\"format\": 0}", &["charts"])
+                .unwrap_err()
+                .starts_with("the description of the Rust crates: the description is in format 0")
+        );
+        // A specifier of nsh's own or of another crate.
+        for nsh in ["nsh/base", "nsh", "nsh/image"] {
+            let error = read(&text(vec![set(nsh)]), &["charts"]).unwrap_err();
+            assert!(
+                error.contains(&format!(
+                    "the crate charts is imported as {nsh:?}, one of nsh's own modules"
+                )),
+                "{error}"
+            );
+        }
+        let error = read(
+            &text(vec![set("app/charts"), set("app/charts")]),
+            &["charts", "storage"],
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("the crates charts and storage are both imported as \"app/charts\""),
+            "{error}"
+        );
     }
 
     /// The directory `path` of the app's crates, as the generated code

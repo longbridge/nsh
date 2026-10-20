@@ -30,6 +30,27 @@ paragraph (`color`, `fontSize`, `fontWeight`, …) and override what they set. T
 </Text>
 ```
 
+### Span backgrounds
+
+A span with `backgroundColor` fills the box of its characters, behind them: as tall as its font (the ascent above the
+baseline and the descent below it, whatever the line height), and on every line it wraps to, each line's part a box of
+its own with the span's `borderRadius`. Spans inside it share its background unless they set their own. It is drawing
+only: the text lays out as without it, and a selectable text copies the span's characters with the rest. Inline code
+is a span:
+
+```tsx
+<Text style={{ fontSize: 15, lineHeight: 22 }} selectable>
+  {"Run "}
+  <Text style={{ fontFamily: "ui-monospace", fontSize: 13, backgroundColor: "#eff1f3", borderRadius: 4 }}>
+    {" cargo test "}
+  </Text>
+  {" before you commit."}
+</Text>
+```
+
+The Tailwind classes work the same way: `<Text class="bg-gray-100 rounded">`. Padding and borders are box styles and
+leave spans as they are; spaces inside the span give the box room on its sides.
+
 ### Links
 
 A span with a press handler is a link: a press on its characters goes to the span, a press elsewhere to the paragraph.

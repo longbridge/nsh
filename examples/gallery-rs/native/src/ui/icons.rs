@@ -49,6 +49,8 @@ pub(crate) enum IconName {
     Stocks,
     /// A speech bubble.
     Chat,
+    /// A cylinder of stacked disks.
+    Storage,
     /// `>`.
     #[default]
     Chevron,
@@ -229,6 +231,20 @@ impl IconName {
                 );
                 let c = line(c, &[7.0, 8.0, 13.0, 8.0]);
                 line(c, &[7.0, 10.5, 11.0, 10.5])
+            }
+            IconName::Storage => {
+                // The top, then the front edge of two disks under it.
+                let c = c
+                    .begin_path()
+                    .ellipse(10.0, 5.0, (6.0, 2.2), 0.0, 0.0, TAU, false)
+                    .stroke();
+                let c = line(c, &[4.0, 5.0, 4.0, 15.0]);
+                let c = line(c, &[16.0, 5.0, 16.0, 15.0]);
+                [10.0, 15.0].into_iter().fold(c, |c, y| {
+                    c.begin_path()
+                        .ellipse(10.0, y, (6.0, 2.2), 0.0, 0.0, PI, false)
+                        .stroke()
+                })
             }
             IconName::Chevron => line(c, &[7.5, 5.0, 12.5, 10.0, 7.5, 15.0]),
             IconName::Check => line(c, &[4.5, 10.5, 8.5, 14.0, 15.5, 6.0]),

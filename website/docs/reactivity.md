@@ -123,6 +123,52 @@ effect(() => {
 > [!TIP]
 > Do not use effects to keep one signal in sync with another (`effect(() => b.set(a() * 2))`). Use `computed`: it is never out of date and does not cause a second pass. An effect that writes a signal it also reads runs itself again and again until NSH stops it with an error.
 
+## resource
+
+`resource(source, fetcher)` loads a value asynchronously and keeps where the load is, so a component shows data, a spinner or an error without managing them itself:
+
+```tsx
+import { resource, signal, Text } from "nsh";
+import { List } from "nsh/list";
+
+type Post = { id: number; title: string };
+
+const url = signal("https://jsonplaceholder.typicode.com/posts?_limit=20");
+const posts = resource(url, async (u, { signal }) => {
+  const response = await fetch(u, { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as Post[];
+});
+
+<If when={posts.error()}>
+  <Text>Failed: {String(posts.error())}</Text>
+</If>
+<List
+  each={posts() ?? []}
+  refreshing={posts.state() === "refreshing"}
+  onRefresh={posts.refetch}
+>
+  {(post) => <Text>{post().title}</Text>}
+</List>
+```
+
+`source` is an accessor (a signal, a function) or a value. It is tracked: whenever it gives a new value, `fetcher(value, info)` loads again. A source of `undefined`, `null` or `false` loads nothing, for a user not signed in yet or nothing picked. With no source, `resource(fetcher)` loads once, calling `fetcher(info)`.
+
+| Member | What it is |
+|---|---|
+| `posts()` | The latest value: `undefined` before the first load ends, kept while loading again and after a failure. |
+| `posts.loading()` | Whether a load runs. |
+| `posts.error()` | The last load's error, `undefined` once a load gives a value. |
+| `posts.state()` | `"unresolved"` (nothing to load), `"pending"` (the first load), `"ready"`, `"refreshing"` (loading again, the value kept), `"errored"`. |
+| `posts.refetch()` | Loads again from the same source: a retry, a pull to refresh. |
+| `posts.mutate(value)` | Sets the value here with no load, an optimistic update, and clears the error. |
+
+The members are bound, so `onRefresh={posts.refetch}` and `const loading = posts.loading` work as they are.
+
+Only the latest load counts. A new one aborts the one running through `info.signal`, which `fetch` takes, and so does the component going away; a load that ends after it was superseded changes nothing. `info.refetching` says that `refetch()` started the load. `fetcher` may return a plain value as well as a promise; a throw is a failure. With `{ initialValue }` the resource has a value from the start, and its type has no `undefined`.
+
+Rust components have the same: `resource(move || source(), |value, info| async move { .. })` with a `Result` for the outcome ([Building with Rust](./rust.md)).
+
 ## cleanup
 
 `cleanup(fn)` registers `fn` to run before the current effect runs again, or when the component or effect it belongs to goes away:
@@ -139,6 +185,15 @@ effect(() => {
   if (!running()) return;
   const id = setInterval(tick, 100);
   cleanup(() => clearInterval(id));       // before the next run, or on removal
+});
+```
+
+An effect can also return its cleanup, as in React: a function `fn` returns runs at the same moments as one it passes to `cleanup`.
+
+```tsx
+effect(() => {
+  const id = setInterval(tick, 100);
+  return () => clearInterval(id);
 });
 ```
 
@@ -256,4 +311,4 @@ function Good() {
 
 - [JSX and components](./jsx-and-components.md): props as getters, `<If>`, `<Each>`.
 - [`nsh` module reference](../modules/nsh.md): every function's signature.
-- [Animation](./animation.md): native values that animate on the UI thread without signals.
+- [Animation](./animation.md): animated values that animate on the UI thread without signals.

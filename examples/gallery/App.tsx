@@ -1,8 +1,11 @@
-import { mount, Scroll, signal, Text, untracked, View } from "nsh";
+import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Platform, windowSize } from "nsh/device";
+import { isAvailable as hasWindow, Window } from "nsh/desktop";
 import { Image } from "nsh/image";
 import { NavPage, NavStack } from "nsh/base";
+import { Storage } from "nsh/storage";
 import { Icon } from "./icons";
+import { TitleBar } from "./TitleBar";
 import logo from "./logo@2x.png";
 import { type DemoEntry, nav } from "./nav";
 import { Appear, Badge, colors, desktop, header, IconTile, lazy, mono, PageHeader, Press, radius, SIDEBAR } from "./ui";
@@ -50,6 +53,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Components", detail: "Press feedback, sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
       { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
+      { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
     ],
   },
 ];
@@ -162,7 +166,7 @@ const select = (demo: DemoEntry) => {
 /** A demo in the sidebar: an accent bar and a raised fill when selected,
  * a fill under the pointer otherwise. */
 function SidebarRow(props: { demo: DemoEntry }) {
-  const active = () => selected() === props.demo;
+  const active = () => selected().name === props.demo.name;
   return (
     <View
       onPress={() => select(props.demo)}
@@ -218,7 +222,7 @@ function Sidebar() {
 
 /** The selected demo under a toolbar with its name and what it shows. */
 function DemoPane() {
-  const group = () => groups.find((g) => g.demos.includes(selected()))!.title;
+  const group = () => groups.find((g) => g.demos.some((demo) => demo.name === selected().name))?.title ?? "Gallery";
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
@@ -275,9 +279,50 @@ function Desktop() {
   );
 }
 
+/** The key of the demo left open, shown again on the next launch. */
+const LAST_DEMO = "lastDemo";
+
+/**
+ * Reopens the demo left open last time (selected on a desktop, pushed on
+ * a phone), then keeps the key current: the demo shown, or none when a
+ * phone is back on the index. A name no demo has any more is ignored.
+ */
+function rememberDemo() {
+  const restored = signal(false);
+  let asked = false;
+  effect(() => {
+    // Once the window has its size, so the layout is the one that stays
+    // (a demo pushed in the phone layout would open again in the desktop's).
+    if (asked || windowSize().width === 0) return;
+    asked = true;
+    Storage.getItem(LAST_DEMO)
+      .then((name) => {
+        const demo = groups.flatMap((g) => g.demos).find((d) => d.name === name);
+        // Only on a fresh start: not over what the user already opened.
+        if (demo && untracked(nav.routes).length === 1) {
+          if (untracked(desktop)) selected.set(demo);
+          else nav.push({ name: "demo", demo });
+        }
+      })
+      .finally(() => restored.set(true));
+  });
+  effect(() => {
+    const open = desktop() ? selected() : nav.routes().find((r) => r.name === "demo")?.demo;
+    if (!restored()) return;
+    if (open) Storage.setItem(LAST_DEMO, open.name);
+    else Storage.removeItem(LAST_DEMO);
+  });
+}
+
 function App() {
+  if (hasWindow) {
+    Window.setTitle("Gallery");
+    Window.setTitleBar("hidden", 40);
+  }
+  rememberDemo();
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <TitleBar />
       <If when={desktop()} else={<Phone />}>
         <Desktop />
       </If>

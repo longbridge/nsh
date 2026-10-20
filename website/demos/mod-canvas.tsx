@@ -1,5 +1,5 @@
 import { mount, signal, Text, View } from "nsh";
-import { createNativeValue, Easing } from "nsh/animated";
+import { createAnimatedValue, Easing } from "nsh/animated";
 import { Canvas, Path2D } from "nsh/canvas";
 import { tint, ui } from "./palette";
 
@@ -28,7 +28,7 @@ function Chip(props: { label: string; onPress: () => void }) {
 
 function App() {
   const data = signal([12, 30, 22, 48, 36, 60, 52, 75, 64, 88]);
-  const progress = createNativeValue(0.3);
+  const progress = createAnimatedValue(0.3);
   const target = signal(0.3);
   const go = () => {
     const to = Math.round(Math.random() * 100) / 100;

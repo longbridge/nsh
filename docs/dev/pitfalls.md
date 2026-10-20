@@ -6,10 +6,17 @@ Things that were found the hard way. Read the section of the area you change bef
 
 - **QuickJS microtasks are run by the host.** Call `Host::run_jobs()` after every call from Rust into JS. `setTimeout` / `console` are our own;
   `queueMicrotask`, `WeakRef` and `FinalizationRegistry` are built into QuickJS-NG.
+- **`Host::run_jobs()` is also the end of the turn for unhandled rejections** (`rejections.rs`): QuickJS's rejection
+  tracker reports a promise rejected without a handler and one that gets a handler later; the host holds the first
+  kind until the job queue is drained, then reports those still unhandled (`Host::set_rejection_handler`, else a
+  `js` error log). A handler attached later in the same turn makes no report, as in browsers. A promise the host
+  settles or reads natively without `then` (the bundle's evaluation promise, a stream's) is marked handled
+  (`JS_PromiseMarkAsHandled`), or it is reported. Interrupts are uncatchable and reject nothing; rejections while
+  the heap ran out are dropped, the VM stops with that report.
 - **The JS object graph must stay reachable from a GC root.** The renderer holds the root node, which holds its children's
   objects and each node its handlers (`dom.rs`, reported by the classes' GC marks). Without that the whole rendered app (nodes,
-  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh trace` taps after 1.2s of idling by
-  default; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
+  handlers, signals) is an isolated cycle that idle GC collects, and taps stop working. `nsh test App.tsx` runs the steps of stdin after 1.2s of idling
+  for that; `crates/nsh-engine/tests/engine/counter.rs` is the regression test.
 - **Nodes are released by GC, not by Remove.** A memo may keep removed nodes and insert them again, so `Remove` only detaches;
   `Release` (queued by the node's finalizer) frees the node and its native view.
 - **`nsh_js::BUNDLE_NAME` (`bundle.js`)** is the module name of every bundle and is how stacks are matched for symbolication; `BYTECODE_VERSION`
@@ -210,7 +217,7 @@ Things that were found the hard way. Read the section of the area you change bef
 - **GTK delivers pointer events by allocation**, ignoring NSH's clipping (`overflow: hidden` in `snapshot`), `hidden`
   and `pointerEvents`: a hosted widget (a web view's page) gets clicks and wheels outside what is drawn of it unless
   the root's capture controller stops them (`input.rs`'s `shields_page`).
-- **Tiling window managers ignore the host's `--size`** (the window's default size): scripted screenshots have the size
+- **Tiling window managers ignore the host's `--window-size`** (the window's default size): scripted screenshots have the size
   the window got, and the script's `resize` too (it resizes on X11 and floating windows).
 
 ## macOS, AppKit

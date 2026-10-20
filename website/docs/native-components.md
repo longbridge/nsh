@@ -111,7 +111,7 @@ signal changes, and only then.
 | A prop's value changes | That prop with its new value |
 | A prop becomes `undefined` | That prop with no value (`nil` in Swift, `null` in Java) |
 
-Values that are not JSON (functions, class instances, `NativeValue`s) cannot cross; keep the interface to data.
+Values that are not JSON (functions, class instances, `AnimatedValue`s) cannot cross; keep the interface to data.
 
 ## Events
 

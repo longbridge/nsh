@@ -1,11 +1,12 @@
 import { cleanup, effect, Input, type JSX, Scroll, signal, Text, View } from "nsh";
-import { createNativeValue } from "nsh/animated";
+import { createAnimatedValue } from "nsh/animated";
 import { BackHandler } from "nsh/android";
 import { Platform } from "nsh/device";
 import { AlertDialog, Dialog, NavPage, SafeAreaView, safeAreaInsets } from "nsh/base";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { Appear, Badge, Button, Card, colors, DemoPage, Figure, finish, header, hint, IconTile, Inset, isDark, mono, motion, PageHeader, Press, radius, Section, Stat, tints, Toggle } from "../ui";
+import { TitleBar } from "../TitleBar";
 
 const edges = ["top", "bottom", "left", "right"] as const;
 
@@ -342,9 +343,10 @@ const modals: { key: Exclude<Sheet, null>; title: string; note: string; icon: Ic
 ];
 
 /** A modal's content: what it is, its safe area, a close button. */
-function ModalBody(props: { title: string; note: string; body: string; onClose: () => void }) {
+function ModalBody(props: { title: string; note: string; body: string; fullScreen?: boolean; onClose: () => void }) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <If when={props.fullScreen}><TitleBar /></If>
       <View style={{ flex: 1, padding: 16, gap: 16 }}>
         <View style={{ gap: 8, paddingHorizontal: 4, paddingTop: 8 }}>
           <View style={{ flexDirection: "row" }}>
@@ -381,7 +383,7 @@ export function Navigation() {
   });
   const push = (page: () => JSX.Element) => () => nav.push({ name: "page", page });
   // The dialog springs up from a little smaller each time it opens.
-  const pop = createNativeValue(0);
+  const pop = createAnimatedValue(0);
   effect(() => {
     if (sheet() !== "dialog") return;
     pop.set(0);
@@ -467,6 +469,7 @@ export function Navigation() {
         onOpenChange={(open) => !open && close()}
       >
         <ModalBody
+          fullScreen={sheet() === "fullScreen" || sheet() === "fade"}
           title={current()?.title ?? ""}
           note={String(sheet())}
           body={hint(

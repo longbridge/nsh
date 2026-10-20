@@ -37,10 +37,10 @@ outlives `nsh`, however it ends. The host also runs a built bundle on its own:
 
 ```sh
 nsh build my-app --release -o build
-dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --size 390x844   # in a checkout: target\debug\nsh-windows-host
+dist\nsh\runtime\windows\nsh-windows-host --bundle build\bundle.nshc --window-size 390x844   # in a checkout: target\debug\nsh-windows-host
 ```
 
-`--size` is the window's size in points (`<width>x<height>`).
+`--window-size` is the window's size in points (`<width>x<height>`).
 
 ## Packaging
 
@@ -104,6 +104,10 @@ parent resizes. `AppView::load` replaces whatever ran; `stop` (or destroying the
 tells it where `asset:/` URIs resolve (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`)
 load with `unsafe { Bundle::bytecode(bytes) }` (or `Bundle::read_trusted(path)`, unsafe too): QuickJS bytecode is trusted input, so
 only load it from your own app's files. A standalone window is `nsh_platform_windows::run_app(source, options)`.
+
+`AppView::set_locale(Some(locale))` and `AppView::set_font_scale(Some(scale))` give the app your app's language and
+text size in place of the system's (`None` follows the system's again): `locale()`, `Intl`, `fontScale()` and text
+follow at once ([Device and environment](./device-and-environment.md#in-an-embedding-app)).
 
 Native components are registered with `AppView::register_component`; see
 [Native components](./native-components.md#registering-on-windows-rust).

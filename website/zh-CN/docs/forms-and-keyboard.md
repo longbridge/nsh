@@ -101,7 +101,7 @@ mount(App);
 | `onFocus` / `onBlur` | | 获得 / 失去焦点。 |
 | `onSelectionChange` | `{ start, end }` | 光标或选区移动（UTF-16 码元）。 |
 | `onKeyPress` | `{ key }` | 文本改变之前：`key` 是输入的文本、`"Backspace"` 或 `"Enter"`。 |
-| `onContentSizeChange` | `{ width, height }` | 文本尺寸改变（多行时按输入框的宽度计算）。 |
+| `onContentSizeChange` | `{ width, height }` | 文本尺寸改变（多行时按输入框的宽度计算），随输入报告；输入框为空时报告一行空行的尺寸，与占位文字无关。 |
 
 输入框的样式与文本相同：`fontSize`、`color`、`fontFamily`、`textAlign`、`letterSpacing` 以及其余[文本样式](./text.md)，再加上边框、内边距和背景。Tailwind 的 `focus:` 变体（或 `focusStyle`）在输入框获得焦点时生效。占位文字的颜色是样式键 `placeholderColor`（`placeholder:text-*`），光标和选区的颜色是 `selectionColor`（`selection:text-*`）：
 

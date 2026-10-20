@@ -18,6 +18,7 @@ The environment an app runs in changes while it runs: the window resizes (rotati
 | `safeArea()` | `nsh/base` | Insets of the surface not covered by system UI: `{ top, right, bottom, left }`. |
 | `safeAreaInsets()` | `nsh/base` | The insets where the calling component renders (a page, a dialog). |
 | `keyboardFrame()` | `nsh/base` | `{ height, duration }` of the software keyboard. |
+| `locale()` | `nsh/device` | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
 | `I18nManager.isRTL` | `nsh/device` | Whether the app lays out right to left. |
 | `reduceMotion()`, `screenReaderEnabled()` | `nsh/accessibility` | See [Accessibility](./accessibility.md). |
 
@@ -128,6 +129,25 @@ import { colorScheme, setColorScheme } from "nsh/device";
 
 Read `fontScale()` to adapt layout that does not follow text automatically, such as switching a row to a column when the text gets large: `flexDirection: fontScale() > 1.3 ? "column" : "row"`.
 
+The text size scales text: every `<Text>` and `<Input>` that allows font scaling, and the platform's alerts and toasts. Lengths keep their size: spacing, widths and heights, corner radii, borders and images, in points or in classes (`p-4`, `rounded-lg`, `w-[2rem]`). Boxes sized by their content grow with their text.
+
+## Language and region
+
+`locale()` is the user's locale, as a BCP 47 tag. `Intl` formats numbers and dates for it by default, so `new Intl.NumberFormat().format(1234.5)` gives `1,234.5` in `en-US` and `1.234,5` in `de-DE`. Read `locale()` to pick the strings of your own translations: the texts that read it update when it changes.
+
+```tsx
+import { Text } from "nsh";
+import { locale } from "nsh/device";
+
+const greetings: Record<string, string> = { en: "Welcome", de: "Willkommen", zh: "欢迎" };
+
+<Text>{greetings[locale().split("-")[0]] ?? greetings.en}</Text>
+```
+
+## In an embedding app
+
+An app shown inside a native app follows that app's own settings when it sets them: the embedding APIs' locale and text size (`AppView::set_locale` and `set_font_scale` in Rust on [GPUI](./gpui.md), [macOS](./macos.md), [Linux](./linux.md) and [Windows](./windows.md), `locale` and `fontScale` in Swift on [iOS](./embedding-ios.md), `setLocale` and `setFontScale` in Java on [Android](./embedding-android.md)) stand in for the system's language and text size. `locale()`, `Intl`, `fontScale()` and text follow them at once, as they follow a system change, and the system's come back when the embedding app clears them. Use them when the native app lets its users choose a language or a text size of its own.
+
 ## Safe areas
 
 Notches, the home indicator, the status bar, Android's navigation bar and the Mac Catalyst title bar cover parts of the surface. NSH apps draw edge to edge on every platform, and get the covered parts as insets.
@@ -178,7 +198,7 @@ import { Platform } from "nsh/device";
 const hapticsSupported = Platform.OS === "ios" || (Platform.OS === "android" && (Platform.Version as number) >= 30);
 ```
 
-`nsh trace` runs headless as iOS.
+`nsh test` runs headless as iOS.
 
 On [Linux](./linux.md), `Platform.OS` is `"linux"`, the idiom `"desktop"` and `Platform.Version` the kernel's major
 and minor version (`"6.12"`): distributions number their releases in ways that cannot be compared. There, the safe

@@ -83,7 +83,7 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     let mut options = AppOptions {
         asset_base: Some(AssetBase::Directory(dir.join("assets"))),
         // An app on its own, not a module embedded in another app.
-        limits: Limits::standalone_desktop(),
+        limits: Limits::standalone(),
         ..AppOptions::default()
     };
     let info = std::fs::read_to_string(dir.join("app.json"))
@@ -93,6 +93,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
         info.as_ref()
             .and_then(|info| info.get(key)?.as_str().map(str::to_owned))
     };
+    if let Some(id) = field("id") {
+        options.app_id = id;
+    }
     if let Some(name) = field("name") {
         options.title = name;
     }
@@ -104,6 +107,9 @@ fn setup() -> (std::path::PathBuf, nsh_platform_macos::AppOptions) {
     }
     // `open -a <App> --args --fps` shows the performance monitor.
     options.fps = std::env::args().any(|arg| arg == "--fps");
+    // `--script` steps (screenshots, simulated input) for checks
+    // (`nsh run --script`).
+    options.script = std::env::var("NSH_SCRIPT").ok();
     (dir, options)
 }
 

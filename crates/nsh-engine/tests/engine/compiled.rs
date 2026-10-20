@@ -49,12 +49,12 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         entry: dir.join("App.tsx"),
         minify: true,
         split: false,
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
     assert!(!bundle.code.contains("solid"), "only the app's code");
     let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, true, &[nsh_base::registry()]).unwrap();
+        nsh_js::compile_bytecode_with(&bundle.code, true, &[nsh_base::registry().into()]).unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -68,6 +68,8 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -191,11 +193,21 @@ fn start_app_with(app: &str, header_heights: (f32, f32)) -> (Engine, Receiver<Mo
         entry: dir.join("App.tsx"),
         minify: false,
         split: false,
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![
+            nsh_base::registry().into(),
+            crate::test_ui::registry().into(),
+        ],
     })
     .unwrap();
-    let bytecode =
-        nsh_js::compile_bytecode_with(&bundle.code, false, &[nsh_base::registry()]).unwrap();
+    let bytecode = nsh_js::compile_bytecode_with(
+        &bundle.code,
+        false,
+        &[
+            nsh_base::registry().into(),
+            crate::test_ui::registry().into(),
+        ],
+    )
+    .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -207,8 +219,10 @@ fn start_app_with(app: &str, header_heights: (f32, f32)) -> (Engine, Receiver<Mo
         environment: Default::default(),
         header_heights,
         limits: nsh_engine::Limits::default(),
-        ui_sets: vec![nsh_base::registry()],
+        ui_sets: vec![nsh_base::registry(), crate::test_ui::registry()],
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -351,6 +365,350 @@ fn removed_modal_hears_its_dismissal() {
     control.dispatch_event(modal, EventKind::Dismiss, EventPayload::None);
     let batch = next(&rx, |b| text_id(b, "dismissed").is_some());
     assert!(text_id(&batch, "dismissed").is_some());
+}
+
+const BUILT_ONCE: &str = r#"import { mount, signal, Text, View } from "nsh";
+import { Dialog, NavPage, NavStack, createNavStack } from "nsh/base";
+
+const nav = createNavStack<{ name: string }>([{ name: "home" }]);
+const built: Record<string, number> = {};
+const summary = signal("");
+setTimeout(() => summary.set(Object.keys(built).sort().map((k) => `${k} ${built[k]}`).join(", ")), 0);
+
+function Part(props: { name: string }) {
+  built[props.name] = (built[props.name] ?? 0) + 1;
+  return <Text>{props.name}</Text>;
+}
+
+mount(() => (
+  <View style={{ flex: 1 }}>
+    <NavStack state={nav} style={{ flex: 1 }}>
+      {() => (
+        <NavPage title="home" headerRight={<Part name="header" />}>
+          <Part name="screen" />
+        </NavPage>
+      )}
+    </NavStack>
+    <Dialog open={true}>
+      <Part name="modal" />
+    </Dialog>
+    <Text>{summary()}</Text>
+  </View>
+));
+"#;
+
+/// A screen's content, its header's items and a modal's content are built
+/// once each: the props a component spreads on its view leave `children`
+/// (a getter that builds them) unread.
+#[test]
+fn screens_and_modals_build_their_content_once() {
+    let (_engine, rx) = start_app(BUILT_ONCE);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t.starts_with("header ")));
+    let shown = texts(&batch);
+    assert!(
+        shown.contains(&"header 1, modal 1, screen 1".to_owned()),
+        "{shown:?}"
+    );
+}
+
+const CHILDREN_SIBLINGS: &str = r#"
+import { Input, mount, signal, Text, View } from "nsh";
+import { KeyboardAvoidingView } from "nsh/base";
+
+function Wrap(props: { children?: any }) {
+  return <View>{props.children}</View>;
+}
+
+const saved = signal(false);
+mount(() => (
+  <View>
+    <KeyboardAvoidingView>
+      <Input testID="a" />
+      <If when={saved()}><Text>saved a</Text></If>
+    </KeyboardAvoidingView>
+    <Wrap>
+      <Input testID="b" />
+      {saved() ? <Text>saved b</Text> : null}
+    </Wrap>
+    <Wrap>
+      <Input testID="c" />
+      <Each of={saved() ? ["saved c"] : []}>{(t: string) => <Text>{t}</Text>}</Each>
+    </Wrap>
+    <Text onPress={() => saved.set(true)}>save</Text>
+  </View>
+));
+"#;
+
+/// A change in one child of a component's children (`<If>`, a ternary,
+/// `<Each>`) updates that child alone: its siblings, made by the same
+/// `children` getter, stay (an input keeps its text and focus).
+#[test]
+fn a_changing_child_leaves_its_siblings() {
+    let (engine, rx) = start_app(CHILDREN_SIBLINGS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let save = text_id(&first, "save").expect("the save text");
+    engine
+        .control()
+        .dispatch_event(save, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t.starts_with("saved")));
+    let shown = texts(&batch);
+    for text in ["saved a", "saved b", "saved c"] {
+        assert!(shown.contains(&text.to_owned()), "{shown:?}");
+    }
+    let remade: Vec<&MountItem> = batch
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i,
+                MountItem::Create {
+                    kind: nsh_core::ViewKind::Input,
+                    ..
+                } | MountItem::Remove { .. }
+                    | MountItem::Delete { .. }
+            )
+        })
+        .collect();
+    assert!(remade.is_empty(), "{remade:#?}");
+}
+
+const NESTED_CHILDREN: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+function Wrap(props: { children?: any }) {
+  return <View>{props.children}</View>;
+}
+
+const list = signal(true);
+const extra = signal(false);
+mount(() => (
+  <View>
+    <Wrap>
+      {list()
+        ? [<Text>first</Text>, <If when={extra()}><Text>extra</Text></If>]
+        : <Text>other</Text>}
+    </Wrap>
+    <Text onPress={() => extra.set(!extra())}>extra?</Text>
+    <Text onPress={() => list.set(!list())}>list?</Text>
+  </View>
+));
+"#;
+
+/// An insert whose value changes (the getter reads `list`) makes its items'
+/// effect again, for the new value: the one of the old value no longer
+/// shows anything.
+#[test]
+fn a_new_value_replaces_the_effect_of_its_items() {
+    let (engine, rx) = start_app(NESTED_CHILDREN);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let (extra, list) = (
+        text_id(&first, "extra?").expect("extra?"),
+        text_id(&first, "list?").expect("list?"),
+    );
+    let press = |id| control.dispatch_event(id, EventKind::Press, EventPayload::None);
+    press(extra);
+    let batch = next(&rx, |b| texts(b).contains(&"extra".to_owned()));
+    assert!(!texts(&batch).contains(&"first".to_owned()), "first stays");
+    press(list);
+    let batch = next(&rx, |b| texts(b).contains(&"other".to_owned()));
+    let removed = batch
+        .items
+        .iter()
+        .filter(|i| matches!(i, MountItem::Remove { .. }))
+        .count();
+    assert_eq!(removed, 2, "{:#?}", batch.items);
+    // The old value's `<If>` shows nothing any more, in any batch until the
+    // new value is shown again.
+    press(extra);
+    press(list);
+    loop {
+        let batch = rx.recv_timeout(Duration::from_secs(5)).expect("a batch");
+        let shown = texts(&batch);
+        assert!(!shown.contains(&"extra".to_owned()), "{shown:?}");
+        if shown.contains(&"first".to_owned()) {
+            break;
+        }
+    }
+}
+
+const IF_VALUE: &str = r#"
+import { mount, signal, Text, View } from "nsh";
+
+const user = signal<{ name: string } | null>(null);
+mount(() => (
+  <View>
+    <If when={user()} else={<Text>signed out</Text>}>
+      {(u) => <Text>{`hello ${u().name}`}</Text>}
+    </If>
+    <Text onPress={() => user.set({ name: user()?.name === "Ada" ? "Grace" : "Ada" })}>next</Text>
+    <Text onPress={() => user.set(null)}>out</Text>
+  </View>
+));
+"#;
+
+/// An `<If>`'s function child gets an accessor of `when`: the branch is
+/// made when it turns truthy, follows its value in place while it stays
+/// so, and goes when it turns falsy.
+#[test]
+fn an_if_hands_its_function_child_the_value() {
+    let (engine, rx) = start_app(IF_VALUE);
+    let control = engine.control();
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(texts(&first).contains(&"signed out".to_owned()));
+    let (next_id, out) = (
+        text_id(&first, "next").expect("next"),
+        text_id(&first, "out").expect("out"),
+    );
+    let press = |id| control.dispatch_event(id, EventKind::Press, EventPayload::None);
+    press(next_id);
+    let batch = next(&rx, |b| texts(b).contains(&"hello Ada".to_owned()));
+    let hello = text_id(&batch, "hello Ada").expect("the branch's text");
+    press(next_id);
+    let batch = next(&rx, |b| texts(b).contains(&"hello Grace".to_owned()));
+    // The same text, updated: the branch stayed.
+    assert_eq!(text_id(&batch, "hello Grace"), Some(hello));
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Create { .. })),
+        "{:#?}",
+        batch.items
+    );
+    press(out);
+    next(&rx, |b| texts(b).contains(&"signed out".to_owned()));
+}
+
+const REFS: &str = r#"
+import { Input, mount, signal, Text, View, type YNode } from "nsh";
+import { Stepper, type StepperRef } from "test/ui";
+
+function Field(props: { ref?: (node: YNode) => void }) {
+  return <Input ref={props.ref} />;
+}
+
+let assigned: YNode | undefined;
+const held = signal<YNode | undefined>(undefined);
+const fields: { input?: YNode; [key: string]: YNode | undefined } = {};
+const key = () => "computed";
+let called: YNode | undefined;
+let forwarded: YNode | undefined;
+const stepper = signal<StepperRef | undefined>(undefined);
+const report = signal("");
+
+mount(() => (
+  <View>
+    <View ref={assigned} />
+    <Input ref={held} />
+    <Input ref={fields.input} />
+    <Input ref={fields[key()]} />
+    <View ref={(n) => (called = n)} />
+    <Field ref={forwarded!} />
+    <Stepper ref={stepper} />
+    <Text onPress={() => report.set([assigned, held(), fields.input, fields.computed, called, forwarded, stepper()]
+      .map((r) => (r ? "set" : "unset")).join(" "))}>check</Text>
+    <Text>{report()}</Text>
+  </View>
+));
+"#;
+
+/// Every kind of ref target gets the element (or the component's ref): a
+/// `let` variable and fields are assigned, a signal set, a function
+/// called, also through a TS component and on a Rust component.
+#[test]
+fn refs_reach_variables_signals_fields_and_functions() {
+    let (engine, rx) = start_app(REFS);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let check = text_id(&first, "check").expect("the check text");
+    engine
+        .control()
+        .dispatch_event(check, EventKind::Press, EventPayload::None);
+    let batch = next(&rx, |b| texts(b).iter().any(|t| t.contains("set")));
+    assert!(
+        texts(&batch).contains(&"set set set set set set set".to_owned()),
+        "{:?}",
+        texts(&batch)
+    );
+}
+
+const CONTENT_SIZE: &str = r#"
+import { Input, mount, signal, Text, View } from "nsh";
+
+const size = signal("none");
+mount(() => (
+  <View>
+    <Input
+      placeholder="A much longer placeholder"
+      style={{ width: 300, height: 40 }}
+      onContentSizeChange={(e) => size.set(`${e.width}x${e.height}`)}
+    />
+    <Text>{`size ${size()}`}</Text>
+  </View>
+));
+"#;
+
+/// A fixed-size input reports the size of its text as the user types (its
+/// own frame never changes), and an empty one the size of an empty line,
+/// not its placeholder's.
+#[test]
+fn inputs_report_their_text_size_as_it_changes() {
+    let (engine, rx) = start_app(CONTENT_SIZE);
+    let mut input = None;
+    let mut size = String::new();
+    // The batches until the size shown is not `last`.
+    let mut wait = |last: &str| {
+        loop {
+            let batch = rx.recv_timeout(Duration::from_secs(5)).expect("a batch");
+            for item in &batch.items {
+                match item {
+                    MountItem::Create {
+                        id,
+                        kind: nsh_core::ViewKind::Input,
+                    } => input = Some(*id),
+                    MountItem::Text { text, .. } if text.text.starts_with("size ") => {
+                        size = text.text.clone();
+                    }
+                    _ => {}
+                }
+            }
+            if size != last && size != "size none" && !size.is_empty() {
+                return (input.expect("an input"), size.clone());
+            }
+        }
+    };
+    let (input, empty) = wait("");
+    // An empty line (ApproxTextEngine gives its zero-width space a width).
+    assert_eq!(empty, "size 8x17");
+    let control = engine.control();
+    let mut last = empty;
+    for (count, (text, want)) in [
+        ("ab", "size 16x17"),
+        ("abc", "size 24x17"),
+        ("", "size 8x17"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        control.dispatch_event(
+            input,
+            EventKind::ChangeText,
+            EventPayload::Text {
+                text: text.into(),
+                count: count as u32 + 1,
+            },
+        );
+        last = wait(&last).1;
+        assert_eq!(last, want, "after {text:?}");
+    }
 }
 
 const SAME_ROUTE_TWICE: &str = r#"import { mount, Text, View } from "nsh";

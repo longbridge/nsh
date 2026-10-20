@@ -58,17 +58,17 @@ impl<'a> Visit<'a> for HasJsx {
     }
 }
 
-fn is_component_name(name: &str) -> bool {
+pub(crate) fn is_component_name(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
-fn function_has_jsx(f: &oxc::ast::ast::Function<'_>) -> bool {
+pub(crate) fn function_has_jsx(f: &oxc::ast::ast::Function<'_>) -> bool {
     let mut v = HasJsx::default();
     v.visit_function(f, oxc::syntax::scope::ScopeFlags::empty());
     v.0
 }
 
-fn expression_has_jsx(e: &Expression<'_>) -> bool {
+pub(crate) fn expression_has_jsx(e: &Expression<'_>) -> bool {
     let mut v = HasJsx::default();
     v.visit_expression(e);
     v.0

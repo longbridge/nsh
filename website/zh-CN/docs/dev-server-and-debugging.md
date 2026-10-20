@@ -125,6 +125,18 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 `console.log` 像浏览器控制台一样格式化值：字符串原样输出，错误附带调用栈，函数显示名称，对象和数组输出为 JSON。宿主
 未连接时，日志会写入平台日志（iOS 上是 Xcode 控制台 / 统一日志，Android 上是 `adb logcat`）。
 
+被 reject 的 Promise，如果在引起它的那段工作结束（它的微任务都已运行）时仍然没有处理函数，也会像浏览器那样记录为一条错误：
+没人 await 的 `async` 函数抛出了异常、没人 catch 的 `Promise.reject(…)`、没有人等待结果的 Rust 调用失败了。这一行和
+`console.error` 去往同样的地方（终端、平台日志，Web 上是浏览器控制台），调用栈指向你的源码：
+
+```text
+error iPhone 16 Pro: unhandled rejection: Error: HTTP 404
+          at loadProfile (App.tsx:12:11)
+```
+
+在同一轮中稍后附加的处理函数（`const p = load(); …; p.catch(…)`）也算作处理了它。失败需要处理的地方，请 await 这个
+Promise 或给它加上 `.catch`。
+
 终端里的其余内容是每个步骤一行（`✓` 完成，`→` 连接地址，`•` 设备的动态）；NSH 调用的工具（cargo、宿主本身）的输出
 只在出错时打印。`nsh run -v`（或 `NSH_VERBOSE=1`）打印全部内容：每条日志及其级别和来源、cargo 的输出以及宿主自己的输出。
 
@@ -134,7 +146,7 @@ error iPhone 16 Pro: uncaught exception: TypeError: cannot read property 'id' of
 perf commit: 10 ops, 151µs (list js 2µs), 8 mount items, 27 nodes
 ```
 
-这些数字的含义参见[用 nsh trace 测试](./testing-and-trace.md)。
+这些数字的含义参见[测试](./testing-and-trace.md)。
 
 ## 错误浮层
 
@@ -175,7 +187,7 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 ```
 
 `nsh build` 把 source map 写为 `bundle.js.map`；从文件夹加载 bundle 的嵌入式应用会从 bundle 旁边读取它，
-[签名包](./signed-packages.md)中也带有它。
+[签名包](./signed-packages.md)中也带有它，除非把它放在包旁边、再用 `nsh symbolicate` 映射（[已发布包的报错](./signed-packages.md#已发布包的报错)）。
 
 ## 调试技巧
 
@@ -183,12 +195,12 @@ error Mac Catalyst: uncaught exception: Error: tap boom
 - **应用保留了你以为会重置的旧状态**：热替换会刻意保留未变化组件的状态。用 Ctrl-C 后重新 `nsh run` 重启，或者修改入口
   模块。
 - **请求只在打包或嵌入的构建中失败**：检查应用的[能力](./sandbox-and-capabilities.md)；被拒绝时日志会写明需要添加的键。
-- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
+- **某些操作很慢**：加上 `--trace` 运行，或者用 [`nsh test --trace`](./testing-and-trace.md) 以无界面方式复现，它会打印每一个
   原生视图操作。
 - **编辑器中出现类型错误**：`nsh run` 和 `nsh dev` 会保持 `.nsh/types` 为最新；参见[项目结构](./project-structure.md)。
 
 ## 另请参阅
 
 - [CLI](./cli.md)
-- [用 nsh trace 测试](./testing-and-trace.md)
+- [测试](./testing-and-trace.md)
 - [嵌入 iOS 应用](./embedding-ios.md)、[嵌入 Android 应用](./embedding-android.md)

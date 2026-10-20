@@ -12,7 +12,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
-use nsh_core::ui::Registry;
+use nsh_core::ui::{Registry, description::SetDescription};
 
 use crate::modules::{Item, MODULES, NativeModule, Ts};
 
@@ -240,7 +240,27 @@ fn registry_part(out: &mut String, registry: &Registry, own: &[Item]) {
     let omit: Vec<&str> = own.iter().map(|(n, ..)| *n).collect();
     out.push_str(&nsh_core::ui::declarations(registry, &omit));
     let (values, types) = registry.reexports();
-    let natives = registry.native_value_names();
+    reexports_part(out, values, types, registry.native_value_names());
+}
+
+/// The declarations of a described UI set's exports.
+fn set_part(out: &mut String, set: &SetDescription) {
+    out.push_str(&set.declarations);
+    fn strs(names: &[String]) -> Vec<&str> {
+        names.iter().map(String::as_str).collect()
+    }
+    reexports_part(
+        out,
+        &strs(&set.reexported_values),
+        &strs(&set.reexported_types),
+        &strs(&set.native_values),
+    );
+}
+
+/// The declarations of what a set exports as the runtime makes it: the
+/// runtime's `values` and `types`, and the values nsh-js makes for it
+/// (`natives`: navigation's).
+fn reexports_part(out: &mut String, values: &[&str], types: &[&str], natives: &[&str]) {
     let made = crate::env::REEXPORTS
         .iter()
         .chain(crate::navigation::EXPORTS);
@@ -261,12 +281,9 @@ fn registry_part(out: &mut String, registry: &Registry, own: &[Item]) {
 }
 
 /// The modules' files, before imports: (path, body).
-fn bodies(ui_sets: &[Registry]) -> Vec<(String, String)> {
+fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
     let mut files = vec![("nsh/types.d.ts".to_owned(), element_types())];
-    let registries: Vec<&Registry> = nsh_core::runtime::registries()
-        .iter()
-        .chain(ui_sets)
-        .collect();
+    let registries = nsh_core::runtime::registries();
     let declared = |m: &&NativeModule| m.exports.iter().any(|e| !matches!(e.2, Ts::Internal));
     for m in MODULES.iter().filter(declared) {
         let mut body = String::from(m.types);
@@ -277,11 +294,16 @@ fn bodies(ui_sets: &[Registry]) -> Vec<(String, String)> {
         for registry in registries.iter().filter(|r| r.specifier() == Some(m.name)) {
             registry_part(&mut body, registry, m.exports);
         }
+        // A UI set is a module of its own (the command line refuses one
+        // named as nsh's): nothing of nsh's to leave out.
+        for set in ui_sets.iter().filter(|s| s.specifier == m.name) {
+            set_part(&mut body, set);
+        }
         exports(&mut body, m.exports);
         files.push((path_of(m.name), body));
     }
     // The registries that are modules of their own (`nsh/base`, `nsh/image`).
-    for registry in &registries {
+    for registry in registries {
         let Some(specifier) = registry.specifier() else {
             continue;
         };
@@ -291,6 +313,15 @@ fn bodies(ui_sets: &[Registry]) -> Vec<(String, String)> {
         let mut body = String::new();
         registry_part(&mut body, registry, &[]);
         files.push((path_of(specifier), body));
+    }
+    // The UI sets (`nsh/base`, an app's own).
+    for set in ui_sets {
+        if MODULES.iter().any(|m| m.name == set.specifier) {
+            continue;
+        }
+        let mut body = String::new();
+        set_part(&mut body, set);
+        files.push((path_of(&set.specifier), body));
     }
     files
 }
@@ -429,10 +460,13 @@ fn references(body: &str) -> (Vec<String>, Vec<String>) {
             .rsplit(|c: char| !is_ident(c))
             .next()
             .unwrap_or_default();
+        let after = &code[before.len() + word.len()..];
         if DECLARING.contains(&prev_word) && prev.ends_with(prev_word) {
             local.push(word.to_owned());
         } else if prev.ends_with('.') {
             // A member (`JSX.Element`, `Symbol.iterator`).
+        } else if after.starts_with(':') || after.starts_with("?:") {
+            // A property's or a parameter's name (`safeArea?: SafeArea`).
         } else {
             used.push(word.to_owned());
         }
@@ -472,11 +506,12 @@ fn relative(from: &str, to: &str) -> String {
 }
 
 /// The files of `.nsh/types` for apps whose hosts serve `ui_sets`
-/// (`nsh/base`, ...), as (path relative to it, contents): one per
+/// (`nsh/base`, an app's own, as data: their declarations come with
+/// them), as (path relative to it, contents): one per
 /// module apps import, `nsh/types.d.ts` (the element types `nsh` exports),
 /// `nsh/jsx-runtime.d.ts` (where TypeScript finds the JSX namespace:
 /// `jsxImportSource: "nsh"`) and `nsh/globals.d.ts`.
-pub fn type_definitions(ui_sets: &[Registry]) -> Vec<(String, String)> {
+pub fn type_definitions(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
     let files = bodies(ui_sets);
     // Who declares each name.
     let mut owner: BTreeMap<String, &str> = BTreeMap::new();
@@ -613,8 +648,10 @@ mod tests {
     #[test]
     fn references_skip_members_strings_and_declarations() {
         let (used, local) = references(
-            "/** A `Foo` */\nexport interface Bar<T> { a: JSX.Element; b: \"Baz\"; c: Qux<T> }",
+            "/** A `Foo` */\nexport interface Bar<T> { a: JSX.Element; b: \"Baz\"; c: Qux<T>; safeArea?: Quux }",
         );
+        assert!(used.contains(&"Quux".to_owned()));
+        assert!(!used.contains(&"safeArea".to_owned()));
         assert!(used.contains(&"JSX".to_owned()));
         assert!(used.contains(&"Qux".to_owned()));
         assert!(!used.contains(&"Element".to_owned()));
@@ -626,7 +663,7 @@ mod tests {
     /// A name a file imports is declared in one file only.
     #[test]
     fn imports_are_unambiguous() {
-        let files = bodies(&[nsh_base::registry()]);
+        let files = bodies(&[nsh_base::registry().into()]);
         let mut owners: BTreeMap<String, Vec<&str>> = BTreeMap::new();
         for (path, body) in &files {
             for name in exported_names(body) {
@@ -774,7 +811,7 @@ mod tests {
             ..crate::HostOptions::default()
         })
         .unwrap();
-        let files = bodies(&sets);
+        let files = bodies(&sets.iter().cloned().map(Into::into).collect::<Vec<_>>());
         assert!(
             files.iter().any(|(path, body)| path == "test/classes.d.ts"
                 && body.contains("export declare class Tally {")),

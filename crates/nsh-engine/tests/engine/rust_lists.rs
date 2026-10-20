@@ -30,6 +30,8 @@ fn start(root: Root) -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -301,10 +303,15 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
         entry,
         minify: false,
         split: false,
-        ui_sets: ui_sets.clone(),
+        ui_sets: ui_sets.iter().map(Into::into).collect(),
     })
     .unwrap();
-    let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &ui_sets).unwrap();
+    let bytecode = nsh_js::compile_bytecode_with(
+        &bundle.code,
+        false,
+        &ui_sets.iter().map(Into::into).collect::<Vec<_>>(),
+    )
+    .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
         // SAFETY: compiled just now by this runtime.
@@ -318,6 +325,8 @@ fn start_js(app: &str) -> (Engine, Receiver<MountBatch>) {
         limits: nsh_engine::Limits::default(),
         ui_sets,
         runtime: None,
+        data_dir: None,
+        storage: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -363,12 +372,11 @@ fn the_apps_handlers_on_a_list_views_rows_run() {
 fn Asker() -> impl IntoElement {
     let asked = signal(String::new());
     let stepper = component_ref::<Stepper>();
-    let asking = stepper.clone();
     view()
         .flex_1()
         .child(
             text(move || format!("asked {}", asked.get())).on_press(move |_: &()| {
-                let value = asking.api::<StepperApi>().map(|api| {
+                let value = stepper.api::<StepperApi>().map(|api| {
                     let value = api.value();
                     api.set_value(5.0);
                     value

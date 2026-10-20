@@ -102,10 +102,15 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         for &id in &path {
-            if let Some(host) = self.host_of(id)
-                && let Some(listener) = self.handler(host, id, EventKind::Touch)
-            {
-                self.run_listener(host, &listener, payload);
+            if let Some(host) = self.host_of(id) {
+                let mut from = 0;
+                while let Some((at, listener)) = self.next_handler(host, id, EventKind::Touch, from)
+                {
+                    from = at + 1;
+                    if !self.run_listener(host, &listener, payload) {
+                        break;
+                    }
+                }
             }
         }
         // A pan the platform activated: its element claims the touches.
@@ -162,7 +167,7 @@ impl<M: TextEngine> Core<M> {
     /// the negotiation.
     fn hears_touches(&self, id: NodeId) -> bool {
         self.host_of(id).is_some_and(|host| {
-            self.handler(host, id, EventKind::Touch).is_some()
+            self.next_handler(host, id, EventKind::Touch, 0).is_some()
                 || self.responder_el(host, id).is_some()
         })
     }

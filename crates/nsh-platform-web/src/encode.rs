@@ -757,6 +757,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(t) = &p.test_id {
         let _ = write!(s, ",\"testID\":{}", json_str(t));
     }
+    if p.focusable == Some(false) {
+        s.push_str(",\"focusable\":false");
+    }
     s.push('}');
     s
 }
@@ -1007,7 +1010,25 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(on) => out.bool(on),
                 None => out.raw("null"),
             };
-            out.class_arg(selection).end();
+            out.class_arg(selection);
+            if !layout.backgrounds.is_empty() {
+                // Span backgrounds: `[x, y, width, height, radius, color]`.
+                out.s.push_str(",[");
+                for (i, b) in layout.backgrounds.iter().enumerate() {
+                    if i > 0 {
+                        out.s.push(',');
+                    }
+                    let _ = write!(
+                        out.s,
+                        "[{},{},{},{},{},",
+                        b.x, b.y, b.width, b.height, b.radius
+                    );
+                    push_str(&mut out.s, &css_color(b.color));
+                    out.s.push(']');
+                }
+                out.s.push(']');
+            }
+            out.end();
         }
         MountItem::Events { id, events } => {
             out.item("e").num(*id);
@@ -1302,6 +1323,30 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
                 .str("readClipboard")
                 .num(*request)
                 .bool(*has_only)
+                .end();
+        }
+        Command::SetClipboardImage(uri) => out
+            .item("cmd")
+            .num(id)
+            .str("setClipboardImage")
+            .str(uri)
+            .end(),
+        Command::ReadClipboardImage {
+            id: request,
+            has_only,
+        } => {
+            out.item("cmd")
+                .num(id)
+                .str("readClipboardImage")
+                .num(*request)
+                .bool(*has_only)
+                .end();
+        }
+        Command::ReadClipboardFiles { id: request } => {
+            out.item("cmd")
+                .num(id)
+                .str("readClipboardFiles")
+                .num(*request)
                 .end();
         }
         Command::ImageInfo { id: request, uri } => {

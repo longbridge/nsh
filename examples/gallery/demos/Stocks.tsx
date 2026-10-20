@@ -1,5 +1,5 @@
 import { cleanup, computed, effect, Scroll, signal, Text, untracked, View } from "nsh";
-import { createNativeValue, Easing, LayoutAnimation } from "nsh/animated";
+import { createAnimatedValue, Easing, LayoutAnimation } from "nsh/animated";
 import { Canvas } from "nsh/canvas";
 import { Icon } from "../icons";
 import { nav } from "../nav";
@@ -87,7 +87,7 @@ function Breadth(props: { market: Market }) {
  */
 function MarketStrip(props: { market: Market }) {
   const opened = signal(false);
-  const turn = createNativeValue(0);
+  const turn = createAnimatedValue(0);
   const level = () => props.market.composite();
   const change = () => ((level() - INDEX_BASE) / INDEX_BASE) * 100;
   const running = () => props.market.running();
@@ -152,7 +152,7 @@ const PULSE_GAP = 600;
  */
 function Sparkline(props: { stock: Stock }) {
   const scale = calm(0.1);
-  const ring = createNativeValue(1);
+  const ring = createAnimatedValue(1);
   const ringRadius = ring.interpolate({ inputRange: [0, 1], outputRange: [3, RING] });
   const haloAlpha = ring.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
   const strokeAlpha = ring.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] });

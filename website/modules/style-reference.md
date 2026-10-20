@@ -56,7 +56,7 @@ const title: TextStyle = { fontSize: 17, fontWeight: "600", color: "#111" };
 | `DimensionValue` | `number` (points), `` `${number}%` `` (of the parent), or `"auto"`. |
 | `LengthValue` | `number` (points) or `` `${number}%` ``. No `"auto"`. |
 | `ColorValue` | A CSS color string: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`, `oklch()`, `oklab()`, or a named CSS color (`black`, `white`, `transparent`, `rebeccapurple`, ...). |
-| `NativeNode` | A native animated value or a node derived from it (see [nsh/animated](./nsh-animated.md)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. |
+| `AnimatedNode` | A native animated value or a node derived from it (see [nsh/animated](./nsh-animated.md)). Accepted by `backgroundColor`, `opacity` and the steps of `transform`; the value then animates on the UI thread without JS. |
 
 Strings with CSS syntax (`boxShadow`, `backgroundImage`, `filter`, `gridTemplateColumns`, ...) take lengths in `px` and bare numbers (both points), `pt`, or `rem` (16 points).
 
@@ -174,7 +174,7 @@ Everything drawn by a view. All keys of `LayoutStyle` apply too.
 
 | Key | Type | Description |
 |---|---|---|
-| `backgroundColor` | `ColorValue \| NativeNode` | The fill color. Takes a native animated color. |
+| `backgroundColor` | `ColorValue \| AnimatedNode` | The fill color. Takes a native animated color. |
 | `backgroundImage` | `string` | CSS gradients drawn over the background color: `linear-gradient(...)`, `radial-gradient(...)`, `conic-gradient(...)`, several separated by commas. |
 | `experimental_backgroundImage` | `string` | Alias of `backgroundImage`. |
 
@@ -252,7 +252,7 @@ Two ways to cast a shadow: the CSS `boxShadow` (several layers, spread, inset) o
 
 | Key | Type | Description |
 |---|---|---|
-| `opacity` | `number \| NativeNode` | 0 (invisible) to 1. Takes a native animated value. |
+| `opacity` | `number \| AnimatedNode` | 0 (invisible) to 1. Takes a native animated value. |
 | `visibility` | `"visible" \| "hidden" \| "collapse"` | Hidden views keep their space in layout (unlike `display: "none"`). |
 | `overflow` | `"visible" \| "hidden"` | `"hidden"` clips children to the view's bounds (and corners). |
 | `backfaceVisibility` | `"visible" \| "hidden"` | `"hidden"`: invisible while a 3D rotation turns it away. |

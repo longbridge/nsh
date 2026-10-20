@@ -129,8 +129,11 @@ impl Native {
 #[derive(Default)]
 struct Gestures {
     press: Option<Retained<PressRecognizer>>,
-    /// Reports `hover:` (pointers).
+    /// Reports `hover:` and the hover events (pointers).
     hover: Option<Retained<objc2_ui_kit::UIHoverGestureRecognizer>>,
+    /// `onContextMenu`: secondary clicks (iPad pointers, Mac Catalyst's
+    /// mouse).
+    context: Option<Retained<objc2_ui_kit::UITapGestureRecognizer>>,
     /// `cursor`: the pointer's look.
     pointer: Option<Retained<objc2_ui_kit::UIPointerInteraction>>,
     pan: Option<Retained<UIPanGestureRecognizer>>,
@@ -602,6 +605,9 @@ impl Mounter {
             MountItem::Delete { id } => {
                 self.remove_hosted(id);
                 self.sticky.remove(&id);
+                // A removal animation it was running ends with it: its end
+                // must not find the id, which a new view may take.
+                self.disappearing.remove(&id);
                 self.target.scroll_deleted(id);
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
                     // A modal deleted while presented (its subtree released
@@ -1108,6 +1114,17 @@ impl Mounter {
                     EventPayload::Map(fields),
                 );
             }
+            (Command::SetClipboardImage(uri), _) => crate::system::set_clipboard_image(&uri),
+            (Command::ReadClipboardImage { id, has_only }, _) => self.control.dispatch_event(
+                nsh_core::ROOT_ID,
+                EventKind::Clipboard,
+                crate::system::read_clipboard_image(id, has_only),
+            ),
+            (Command::ReadClipboardFiles { id }, _) => self.control.dispatch_event(
+                nsh_core::ROOT_ID,
+                EventKind::Clipboard,
+                crate::system::read_clipboard_files(id),
+            ),
             (Command::AccessibilityFocus, native) => {
                 crate::system::accessibility_focus(native.view())
             }
@@ -1636,9 +1653,105 @@ impl Mounter {
         }
     }
 
-    /// A pointer entered or left view `id`.
-    pub(crate) fn hover_changed(&mut self, id: NodeId, on: bool) {
+    /// A pointer (an iPad's, a Mac's mouse) entered (`Began`), moved over
+    /// or left view `id`, at `in_window` (the window's coordinates).
+    pub(crate) fn hover(
+        &mut self,
+        id: NodeId,
+        state: UIGestureRecognizerState,
+        in_window: CGPoint,
+        modifiers: isize,
+    ) {
+        let on = matches!(
+            state,
+            UIGestureRecognizerState::Began | UIGestureRecognizerState::Changed
+        );
         self.report_state(id, nsh_core::tailwind::state::HOVERED, on);
+        let Some(events) = self.slot(id).map(|s| s.events) else {
+            return;
+        };
+        let changed = match state {
+            UIGestureRecognizerState::Began => Some(EventKind::HoverIn),
+            UIGestureRecognizerState::Ended | UIGestureRecognizerState::Cancelled => {
+                Some(EventKind::HoverOut)
+            }
+            _ => None,
+        };
+        if let Some(kind) = changed.filter(|k| events.contains(*k)) {
+            self.control.dispatch_event(id, kind, EventPayload::None);
+        }
+        if !on || !events.contains(EventKind::HoverMove) {
+            return;
+        }
+        let Some(view) = self.slot(id).map(|s| s.native.view().retain()) else {
+            return;
+        };
+        let local = view.convertPoint_fromView(in_window, None);
+        let page = self.root_view_of(&view).map_or(in_window, |root| {
+            root.convertPoint_fromView(in_window, None)
+        });
+        // UIKeyModifierShift, Control, Alternate, Command.
+        let has = |bit: u32| modifiers & (1 << bit) != 0;
+        let event = nsh_core::HoverEvent {
+            location_x: local.x as f32,
+            location_y: local.y as f32,
+            page_x: page.x as f32,
+            page_y: page.y as f32,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: has(18),
+                alt: has(19),
+                shift: has(17),
+                cmd: has(20),
+            },
+        };
+        self.control
+            .dispatch_event(id, EventKind::HoverMove, EventPayload::Hover(event));
+    }
+
+    /// A secondary click on view `id`, at `in_window` (the window's
+    /// coordinates).
+    pub(crate) fn context_menu(&mut self, id: NodeId, in_window: CGPoint, modifiers: isize) {
+        let Some(view) = self.slot(id).map(|s| s.native.view().retain()) else {
+            return;
+        };
+        let local = view.convertPoint_fromView(in_window, None);
+        let page = self.root_view_of(&view).map_or(in_window, |root| {
+            root.convertPoint_fromView(in_window, None)
+        });
+        // UIKeyModifierShift, Control, Alternate, Command.
+        let has = |bit: u32| modifiers & (1 << bit) != 0;
+        let event = nsh_core::ContextMenuEvent {
+            location_x: local.x as f32,
+            location_y: local.y as f32,
+            page_x: page.x as f32,
+            page_y: page.y as f32,
+            modifiers: nsh_core::keymap::Modifiers {
+                ctrl: has(18),
+                alt: has(19),
+                shift: has(17),
+                cmd: has(20),
+            },
+        };
+        self.control
+            .dispatch_event(id, EventKind::ContextMenu, EventPayload::ContextMenu(event));
+    }
+
+    /// The root view `view` is in: the surface's, or its modal's (touches'
+    /// page coordinates are in it).
+    fn root_view_of(&self, view: &UIView) -> Option<Retained<UIView>> {
+        let mut current = Some(view.retain());
+        while let Some(v) = current {
+            let tag = v.tag() as NodeId;
+            if tag == nsh_core::ROOT_ID
+                || self
+                    .slot(tag)
+                    .is_some_and(|s| matches!(s.native, Native::Modal(_)))
+            {
+                return Some(v);
+            }
+            current = v.superview();
+        }
+        None
     }
 
     /// The pointer's look over view `id`.
@@ -2008,7 +2121,10 @@ impl Mounter {
             press.set_own(own_press);
             press.set_long_press_delay(slot.long_press_delay);
         }
-        let wants_hover = slot.tracked & nsh_core::tailwind::state::HOVERED != 0;
+        let wants_hover = slot.tracked & nsh_core::tailwind::state::HOVERED != 0
+            || events.contains(EventKind::HoverIn)
+            || events.contains(EventKind::HoverOut)
+            || events.contains(EventKind::HoverMove);
         toggle(&mut slot.gestures.hover, wants_hover, view, || {
             // SAFETY: `handleHover:` is implemented by the target, which
             // outlives the recognizer.
@@ -2020,8 +2136,30 @@ impl Mounter {
                 )
             }
         });
+        let wants_context = events.contains(EventKind::ContextMenu);
+        toggle(&mut slot.gestures.context, wants_context, view, || {
+            // SAFETY: `handleContextMenu:` is implemented by the target,
+            // which outlives the recognizer; `buttonMaskRequired` is
+            // UIGestureRecognizer's (iOS 13.4), UIEventButtonMaskSecondary.
+            unsafe {
+                let r = objc2_ui_kit::UITapGestureRecognizer::initWithTarget_action(
+                    objc2_ui_kit::UITapGestureRecognizer::alloc(mtm),
+                    Some(&target),
+                    Some(sel!(handleContextMenu:)),
+                );
+                let _: () = objc2::msg_send![&r, setButtonMaskRequired: 1isize << 1];
+                r
+            }
+        });
         let wants_touch = events.contains(EventKind::Touch);
-        if wants_press || wants_pan || wants_pinch || wants_rotation || wants_touch || wants_hover {
+        if wants_press
+            || wants_pan
+            || wants_pinch
+            || wants_rotation
+            || wants_touch
+            || wants_hover
+            || wants_context
+        {
             view.setUserInteractionEnabled(true);
         }
         if let Some(nsh) = slot.native.nsh() {
