@@ -248,7 +248,7 @@ accept_package(&mut trust, &package)?;
 ```
 
 包被接受之前，此前接受过的构建依然能通过验证，所以新包出问题时宿主应用可以退回它之前运行的包（信号可以是
-`AppView::on_app_error` 收到的致命错误，或者在接受之前崩溃）。比已接受构建更旧的包仍会被拒绝，期间被吊销的包也不会被接受。
+`AppView::on_error` 收到的致命错误，或者在接受之前崩溃）。比已接受构建更旧的包仍会被拒绝，期间被吊销的包也不会被接受。
 `load_package` 会一次完成验证和接受，与 iOS、Android 上的 `openPackage` 相同。
 
 包声明的[能力](./sandbox-and-capabilities.md)随包一起传递：包只能做它声明的事，并且还要在宿主应用授予的范围之内。

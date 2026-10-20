@@ -262,7 +262,7 @@ accept_package(&mut trust, &package)?;
 ```
 
 Until a package is accepted, the build accepted before still verifies, so a host app whose new package fails can go
-back to the one it ran (`AppView::on_app_error`'s fatal errors, or a crash before accepting, are the signals). Builds
+back to the one it ran (`AppView::on_error`'s fatal errors, or a crash before accepting, are the signals). Builds
 older than the accepted one stay refused, and a package revoked in between is not accepted. `load_package` verifies and
 accepts at once, as `openPackage` does on iOS and Android.
 
