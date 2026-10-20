@@ -917,8 +917,8 @@ opt-level = 3
 
     /// Writes the crate `<ws>/test`: the app's headless runner (`nsh test`,
     /// `nsh_testing::runner`) with the mobile UI and the app's sets, and a
-    /// Rust app's root. It bundles nothing (`nsh-testing` without its
-    /// feature `bundle`): `nsh` builds the entries it asks for.
+    /// Rust app's root. It bundles nothing (`nsh-testing` with `js`, without
+    /// `bundle`): `nsh` builds the entries it asks for.
     fn write_test(&self, ws: &Path) -> anyhow::Result<()> {
         write(
             &ws.join("test/Cargo.toml"),
@@ -929,7 +929,7 @@ opt-level = 3
                 self.bin("test"),
                 self.bin("test"),
                 self.nsh.dep("nsh-core", ""),
-                self.nsh.dep("nsh-testing", ", default-features = false"),
+                self.nsh.dep("nsh-testing", ", features = [\"js\"]"),
                 self.nsh.dep("nsh-ui-mobile", ""),
                 self.dependencies(),
             ),
@@ -2296,7 +2296,7 @@ mod tests {
             "{test}"
         );
         let cargo = std::fs::read_to_string(app.workspace.join("test/Cargo.toml")).unwrap();
-        assert!(cargo.contains("default-features = false"), "{cargo}");
+        assert!(cargo.contains("features = [\"js\"]"), "{cargo}");
         assert!(super::is_root(Path::new("/app/nsh.json")));
         assert!(!super::is_root(Path::new("/app/App.tsx")));
         let _ = std::fs::remove_dir_all(&dir);

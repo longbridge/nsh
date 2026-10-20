@@ -1,6 +1,5 @@
-//! Headless runs (feature `headless`): an app on an engine with no
-//! platform, driven by steps a user's hands would take, its mount batches
-//! seen as they come.
+//! Headless runs: an app on an engine with no platform, driven by steps a
+//! user's hands would take, its mount batches seen as they come.
 //!
 //! [`Headless`] is the driver: it starts an app on an engine with display
 //! frames at 60 Hz ([`start`]), applies its batches to a model of the
@@ -15,8 +14,9 @@
 //! `nsh test --trace` does). [`StubNetwork`] and [`MemoryStorage`] stand in for
 //! the device's network and storage.
 //!
-//! `nsh test` runs apps this way (`nsh-testing`), printing the batches
-//! under their steps with `--trace`; so do Rust tests of an app's crate.
+//! `nsh test` runs apps this way (feature `js`: [`crate::run_file`]),
+//! printing the batches under their steps with `--trace`; so do Rust tests
+//! of an app's crate, which need no QuickJS for a Rust root.
 
 mod net;
 mod screen;
@@ -33,6 +33,7 @@ use nsh_core::{
     ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId,
     PayloadValue, SubmitBehavior,
 };
+use nsh_engine::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, MountSink};
 
 use self::screen::Selector;
 pub use self::{
@@ -40,7 +41,6 @@ pub use self::{
     screen::Screen,
     stub::{MemoryStorage, StubNetwork, StubResponse},
 };
-use crate::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, MountSink};
 
 /// How long [`Headless::wait_for`] and [`Headless::wait_until`] wait by
 /// default, and a first render at most.
@@ -644,10 +644,7 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{
-        platform::Os,
-        ui::{Root, prelude::*},
-    };
+    use nsh_core::ui::{Root, prelude::*};
 
     use super::*;
 
@@ -794,16 +791,21 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "js")]
     #[test]
     fn a_step_fails_when_the_app_throws() {
-        let app = crate::Bundle::source("throw new Error('boom')".into());
+        let app = nsh_engine::Bundle::source("throw new Error('boom')".into());
         let mut app = Headless::start(EngineConfig::new(app)).unwrap();
         let error = app.first_render().unwrap_err();
         assert!(error.starts_with("the app threw: Error: boom"), "{error}");
     }
+
+    #[cfg(feature = "js")]
     #[test]
     fn process_exit_ends_a_timed_headless_wait() {
-        let bundle = crate::Bundle::source(
+        use nsh_core::platform::Os;
+
+        let bundle = nsh_engine::Bundle::source(
             "import process from 'process'; setTimeout(() => process.exit(0), 10);".into(),
         )
         .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))

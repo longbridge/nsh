@@ -10,9 +10,11 @@ use nsh_core::{
     JsonValue,
     ui::{JsHost, JsIn, JsOwned, JsValue, PropError, Registry, TsTypes, prelude::*},
 };
-use nsh_engine::headless::{Headless, MemoryStorage, StubResponse};
 
-use crate::run::{OpenApp, Session};
+use crate::{
+    headless::{Headless, MemoryStorage, StubResponse},
+    run::{OpenApp, Session},
+};
 
 /// The specifier test files import.
 pub const SPECIFIER: &str = "nsh/test";
@@ -343,7 +345,7 @@ impl App {
         selector: String,
         timeout: Option<f64>,
     ) -> Result<(), String> {
-        let timeout = timeout.map_or(nsh_engine::headless::WAIT, |ms| {
+        let timeout = timeout.map_or(crate::headless::WAIT, |ms| {
             Duration::from_secs_f64(ms.max(0.0) / 1000.0)
         });
         step(&this, move |app| app.wait_for_within(&selector, timeout)).await

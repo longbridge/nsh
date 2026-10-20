@@ -1507,6 +1507,7 @@ dependencies = [
  "nsh-platform-linux",
  "nsh-platform-macos",
  "nsh-platform-windows",
+ "nsh-testing",
  "nsh-ui-mobile",
  "serde_json",
 ]
@@ -2827,7 +2828,6 @@ dependencies = [
  "taffy",
  "tokio",
  "tokio-tungstenite 0.28.0",
- "ureq",
 ]
 
 [[package]]
@@ -3081,6 +3081,7 @@ dependencies = [
  "nsh-js",
  "serde",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

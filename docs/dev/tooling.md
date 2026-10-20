@@ -190,7 +190,8 @@ package`, `publish`, the dev server) the bundle holds the whole app.
 
 ## Headless runs
 
-`nsh-engine`'s `headless` module (feature `headless`) runs apps without a platform, on its driver `headless::Headless`:
+`nsh-testing`'s `headless` module runs apps without a platform, on its driver `Headless` (the crate's default
+features, without QuickJS):
 the app on an engine (`ApproxTextEngine`, a channel as the mount sink, 60 Hz frames from a timer thread), its batches
 applied to a model of the native views (`headless::Screen`, `headless/screen.rs`), and steps taken on what they show.
 An observer sees every batch with the step it came in; `print_batch` prints it as `nsh test --trace` does
@@ -220,11 +221,11 @@ failure is the log's only). The model keeps inputs' text and edit count as platf
 edits than were typed is dropped. `headless::StubNetwork` (responses by `"<METHOD> <URL>"`, others fail) and
 `headless::MemoryStorage` (entries given up front) stand in for the device's services.
 
-Rust tests use the driver directly: `headless::start` (the engine with its frames, the batches to the caller), `headless::Screen`
-(texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `headless::Headless`.
-`EngineConfig::new(app)` is the phone-sized config the tests start from. `nsh-testing` adds what a TSX
-entry needs, the bundle and its bytecode against given sets (`compile_tsx`, `tsx`), outside nsh-engine so that a Rust
-app's tests link neither the bundler nor QuickJS.
+Rust tests use the driver directly: `nsh_testing::start` (the engine with its frames, the batches to the caller),
+`Screen` (texts in tree order, the commands sent, `press_target`, `matches`, `input_text`) and `Headless`.
+`EngineConfig::new(app)` is the phone-sized config the tests start from. The features add the rest in layers, so a
+Rust app's tests link neither the bundler nor QuickJS: `js` is `nsh test`'s side (below), `bundle` builds a TSX entry
+against given sets in process (`compile_tsx`, `tsx`, `compiler`).
 
 ## `nsh test`
 

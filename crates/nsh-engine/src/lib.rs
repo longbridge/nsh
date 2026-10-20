@@ -11,8 +11,6 @@
 mod access;
 mod app_directory;
 mod error;
-#[cfg(all(feature = "headless", not(target_arch = "wasm32")))]
-pub mod headless;
 mod local_storage;
 pub mod perf;
 mod script;

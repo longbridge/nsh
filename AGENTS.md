@@ -50,9 +50,7 @@ crates/
                        the catalog and its loader, LLRT's `buffer` / `crypto` / `path` / `url` / `zlib`, `console`,
                        the globals `WebSocket`, `process` and `nextTick`); the TypeScript declarations of all of it
                        (`declarations.rs`, from the declaration next to each export and spec)
-  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform; feature
-                       `headless`: headless runs (`headless/`: the driver of `nsh test` and Rust tests, its model of the views and its steps,
-                       stand-in network and storage, fetch on ureq, the runner of apps with Rust crates)
+  nsh-engine/          Engine thread: drives nsh-js + nsh-core and hands one MountBatch per frame to the platform
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
@@ -63,10 +61,11 @@ crates/
                        all of that, without it only `compile_module` (`compile.rs`: one module, no rolldown) is left, which
                        also builds for WebAssembly (the website's playground)
   nsh-dev/             Dev tooling: dev server protocol, server (CLI, feature `server`), client (host, feature `client`)
-  nsh-testing/         Headless tests of an app's TSX entry (`cargo test`): built against UI sets as `nsh run` builds it, run on
-                       `nsh_engine::headless::Headless` (an engine without a window, display frames, a model of the views, steps);
-                       `nsh test`'s runner: the `nsh/test` module test files import (`module.rs`, Rust), each test file on an
-                       engine of its own and each app it opens on a headless one (`run.rs`); feature `bundle`: building entries
+  nsh-testing/         Headless tests: the driver (`headless/`: an engine without a window, display frames, a model of the views,
+                       the steps, stand-in network and storage, fetch on ureq; no QuickJS, for Rust apps' `cargo test`); feature
+                       `js`: `nsh test`'s side, the `nsh/test` module test files import (`module.rs`, Rust), each test file on an
+                       engine of its own and each app it opens on a headless one (`run.rs`), apps' headless runners (`runner.rs`);
+                       feature `bundle`: building entries in process (TSX entries of `cargo test`, the CLI's compiler)
   nsh-platform-ios/    UIKit backend (iOS / simulator / Mac Catalyst): native view mounting, CoreText text engine, input, AppView, standalone app;
                        feature `dev`: dev server client, log forwarding, error overlay; feature `embed`: the C ABI (`embed.rs`,
                        `include/nsh.h`) under the `NativeShell` Swift module (`swift/NativeShell.swift`) iOS apps embed nsh with
