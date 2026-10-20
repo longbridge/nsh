@@ -1,8 +1,8 @@
 //! The theme of Rust components: semantic colors with a light and a dark
 //! value, corner radii and the base font size. A theme file names the
 //! colors by role and state (`primary.background`,
-//! `primary.active.background`, ...); keys only desktop components use are
-//! ignored.
+//! `primary.active.background`, ...); keys no component uses leave the
+//! components as they are.
 //!
 //! The app's theme is `nsh.json`'s `"theme"`: a theme file's path or its
 //! content, `{ "themes": [{ "mode": "light", "colors": { … } }, { "mode":
