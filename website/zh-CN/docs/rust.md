@@ -294,18 +294,20 @@ test("a tap counts", async () => {
 ```
 
 测试也可以在 `cargo test` 中用同一个驱动无界面地运行应用：运行在真实的引擎上，没有窗口，以 60 Hz 提供显示帧，所以定时器、
-任务和动画都像在屏幕上一样运行。`nsh_engine::headless::Headless`（nsh-engine 的特性 `headless`）启动应用，维护一份它所显示
+任务和动画都像在屏幕上一样运行。`nsh_testing::Headless`（nsh-testing 的默认特性，不含 QuickJS）启动应用，维护一份它所显示
 视图的模型（`app.screen()`：它们的文本、应用发送的命令），并执行 `nsh test` 的那些步骤（`press`、`type_text`、`submit`、
 `scroll`、`wait_for`），视图用同样的选择器指定（文本、无障碍标签或 test id；`text:`、`label:`、`id:`）；步骤无法执行时
 返回带有屏幕文字的错误。Rust 应用运行它的根组件；`EngineConfig::new` 是一个手机尺寸、其余都未设置的引擎：
 
 ```toml
 [dev-dependencies]
-nsh-engine = { version = "0.1", features = ["headless"] }
+nsh-engine = "0.1"
+nsh-testing = "0.1"
 ```
 
 ```rust
-use nsh_engine::{EngineConfig, headless::Headless};
+use nsh_engine::EngineConfig;
+use nsh_testing::Headless;
 
 #[test]
 fn a_tap_counts() {
@@ -316,12 +318,12 @@ fn a_tap_counts() {
 }
 ```
 
-TSX 入口用 `nsh-testing` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由 `#[native_module]` 生成的
-`registry()`：
+TSX 入口用 `nsh-testing` 的特性 `bundle` 按 `nsh run` 的方式构建，使用它的宿主提供的 UI 集合：NSH 的，以及每个 crate 由
+`#[native_module]` 生成的 `registry()`：
 
 ```toml
 [dev-dependencies]
-nsh-testing = "0.1"
+nsh-testing = { version = "0.1", features = ["bundle"] }
 nsh-base = "0.1"
 ```
 
@@ -334,7 +336,7 @@ fn the_module_formats_money() {
 }
 ```
 
-`nsh_testing::compile_tsx` 只构建一次入口供多个测试使用，`nsh_engine::headless::start` 把批次交给自己维护屏幕模型的测试。
+`nsh_testing::compile_tsx` 只构建一次入口供多个测试使用，`nsh_testing::start` 把批次交给自己维护屏幕模型的测试。
 `examples/rust-exports` 用这种方式测试它的 TSX 入口，`examples/gallery-rs` 测试它的 Rust 根组件。
 
 ## 主题

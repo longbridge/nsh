@@ -25,10 +25,12 @@ use nsh_core::{
 };
 use nsh_engine::{
     AppError, AppErrorKind, Bundle, Engine, EngineConfig, Environment, Insets, MountSink,
-    headless::{DirectoryAssets, Headless, MemoryStorage, StubNetwork, UreqNetwork, print_batch},
 };
 
-use crate::module::{NetworkOption, OpenOptions};
+use crate::{
+    headless::{DirectoryAssets, Headless, MemoryStorage, StubNetwork, UreqNetwork, print_batch},
+    module::{NetworkOption, OpenOptions},
+};
 
 /// How long a test may take.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -353,6 +355,9 @@ impl Session {
             .ok()
             .and_then(|cwd| path.strip_prefix(cwd).ok().map(Path::to_path_buf))
             .unwrap_or_else(|| path.clone());
+        // `App` answers dialogs after each step, with the test's handler.
+        app.answer_dialogs_myself();
+        app.set_clipboard(options.clipboard);
         app.step(format!("open({})", shown.display()));
         app.first_render()?;
         let app = Arc::new(Mutex::new(Some(app)));

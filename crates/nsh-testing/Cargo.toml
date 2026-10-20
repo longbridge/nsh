@@ -1,6 +1,6 @@
 [package]
 name = "nsh-testing"
-description = "Headless tests of nsh apps' TSX entries: built against the app's crates as nsh run builds them, run on an engine without a window."
+description = "Headless tests of nsh apps: the driver that runs an app on an engine without a window and takes a user's steps on it, and the runner of nsh test."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,21 +12,33 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["bundle"]
+# The headless driver alone: no QuickJS, so a Rust app's tests run its root
+# with none.
+default = []
+# `nsh test`'s side: the `nsh/test` module, test files on an engine of their
+# own (`run_file`) and apps' headless runners (`runner`): QuickJS.
+js = ["nsh-engine/js", "dep:dunce", "dep:serde", "dep:serde_json"]
 # Building entries in this process (`compile_tsx`, `tsx`, `compiler`): nsh's
 # bundler. Off in apps' headless runners, which `nsh` builds the entries for.
-bundle = ["dep:nsh-bundler", "dep:nsh-js"]
+bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
 
 [dependencies]
 nsh-bundler = { workspace = true, features = ["bundle"], optional = true }
+nsh-animation.workspace = true
 nsh-core.workspace = true
-nsh-engine = { workspace = true, features = ["js", "headless"] }
+nsh-engine.workspace = true
 nsh-js = { workspace = true, optional = true }
 crossbeam-channel.workspace = true
-dunce.workspace = true
+dunce = { workspace = true, optional = true }
 log.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+ureq.workspace = true
+
+[dev-dependencies]
+# The fetch tests drive a VM's network by hand (`headless/net_fetch_tests.rs`).
+nsh-js.workspace = true
+nsh-base.workspace = true
 
 [[test]]
 name = "testing"

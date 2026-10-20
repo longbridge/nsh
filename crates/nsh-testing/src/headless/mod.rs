@@ -1,6 +1,5 @@
-//! Headless runs (feature `headless`): an app on an engine with no
-//! platform, driven by steps a user's hands would take, its mount batches
-//! seen as they come.
+//! Headless runs: an app on an engine with no platform, driven by steps a
+//! user's hands would take, its mount batches seen as they come.
 //!
 //! [`Headless`] is the driver: it starts an app on an engine with display
 //! frames at 60 Hz ([`start`]), applies its batches to a model of the
@@ -15,9 +14,11 @@
 //! `nsh test --trace` does). [`StubNetwork`] and [`MemoryStorage`] stand in for
 //! the device's network and storage.
 //!
-//! `nsh test` runs apps this way (`nsh-testing`), printing the batches
-//! under their steps with `--trace`; so do Rust tests of an app's crate.
+//! `nsh test` runs apps this way (feature `js`: [`crate::run_file`]),
+//! printing the batches under their steps with `--trace`; so do Rust tests
+//! of an app's crate, which need no QuickJS for a Rust root.
 
+mod animation;
 mod net;
 mod screen;
 mod stub;
@@ -28,19 +29,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use nsh_core::{
-    ApproxTextEngine, Command, EventKind, EventPayload, MountBatch, MountItem, NodeId,
-    PayloadValue, SubmitBehavior,
+    ApproxTextEngine, Command, Dialog, DialogButtonStyle, EventKind, EventPayload, MountBatch,
+    MountItem, NodeId, PayloadValue, ROOT_ID, SubmitBehavior,
 };
+use nsh_engine::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, MountSink};
 
-use self::screen::Selector;
+use self::{
+    animation::{Animator, FRAME},
+    screen::{Back, Selector},
+};
 pub use self::{
     net::{DirectoryAssets, UreqNetwork},
     screen::Screen,
     stub::{MemoryStorage, StubNetwork, StubResponse},
 };
-use crate::{AppError, AppErrorKind, Engine, EngineConfig, EngineControl, MountSink};
 
 /// How long [`Headless::wait_for`] and [`Headless::wait_until`] wait by
 /// default, and a first render at most.
@@ -52,8 +56,6 @@ const QUIET: Duration = Duration::from_millis(100);
 const SETTLE: Duration = Duration::from_secs(2);
 /// How long [`Headless::idle`] may take at most.
 const MAX_IDLE: Duration = Duration::from_secs(10);
-/// A display frame at 60 Hz.
-const FRAME: Duration = Duration::from_micros(16_667);
 /// How far a scroll moves per display frame, in points.
 const SCROLL_STEP: f32 = 10.0;
 
@@ -111,9 +113,43 @@ fn launch(
 /// Sees each batch a [`Headless`] applies, with the step it came in.
 type Observer = Box<dyn FnMut(&str, &MountBatch) + Send>;
 
+/// Answers a dialog ([`Headless::on_dialog`]).
+type DialogHandler = Box<dyn FnMut(&Dialog) -> DialogAnswer + Send>;
+
+/// The answer to a dialog (`Alert.alert`, an action sheet).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DialogAnswer {
+    /// Press the button with this text.
+    Press(String),
+    /// Close it without a button (tapping outside, the back button).
+    Dismiss,
+}
+
+/// Who answers the dialogs a step shows.
+enum Dialogs {
+    /// [`default_answer`].
+    Default,
+    /// A test's handler.
+    Handler(DialogHandler),
+    /// The caller, after the step ([`Headless::answer_dialog`]).
+    Caller,
+}
+
+/// What [`Headless::pump`] saw.
+enum Pumped {
+    /// A batch, applied.
+    Batch,
+    /// The app threw.
+    Error,
+    /// The deadline passed.
+    Timeout,
+    /// The app left: nothing more comes.
+    Exited,
+}
+
 /// An app on a headless engine ([`start`]) and what it shows ([`Screen`]),
-/// driven by steps: press views, type into inputs, scroll, wait for what
-/// it shows.
+/// driven by steps: press views, type into inputs, scroll, go back, wait
+/// for what it shows.
 ///
 /// ```ignore
 /// let mut app = Headless::start(EngineConfig::new(Root::of::<my_app::App>())).unwrap();
@@ -125,16 +161,29 @@ type Observer = Box<dyn FnMut(&str, &MountBatch) + Send>;
 /// A step takes the batches that came since the last one first (they
 /// belong to it), then names itself the step of the batches that follow:
 /// what [`Headless::observe`] sees. Steps that act on the app return once
-/// it rendered nothing for 100 ms (2 s at most), and fail when the app
-/// threw meanwhile: an exception that escaped a callback, a bundle that
-/// did not load, a VM that was stopped.
+/// it rendered nothing for 100 ms and no native animation runs (2 s at
+/// most), and fail when the app threw meanwhile (an exception that
+/// escaped a callback, a bundle that did not load, a VM that was stopped)
+/// or asked what only a real platform answers (an image's size).
+///
+/// It plays the platform's part the NSH protocol defines and nothing
+/// else: the native animation graph runs frame by frame (`nsh-animation`),
+/// a back pops screens and closes modals, dialogs are answered (by the
+/// test, else [`default_answer`]), the clipboard holds text. Images are
+/// not loaded: no `onLoad` comes.
 pub struct Headless {
     engine: Engine,
     batches: Receiver<MountBatch>,
     errors: Receiver<AppError>,
+    /// The app's errors seen while waiting, for the next check.
+    seen: Vec<AppError>,
     screen: Screen,
+    animator: Animator,
+    dialogs: Dialogs,
     step: String,
     applied: u64,
+    /// The app left (`process.exit`, `Command::ExitApp`): no more batches
+    /// come, and waits end.
     exited: bool,
     observer: Option<Observer>,
 }
@@ -147,7 +196,10 @@ impl Headless {
             engine,
             batches,
             errors,
+            seen: Vec::new(),
             screen: Screen::default(),
+            animator: Animator::default(),
+            dialogs: Dialogs::Default,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -177,6 +229,37 @@ impl Headless {
         self.observer = Some(Box::new(observer));
     }
 
+    /// Answers the dialogs steps show with `handler`, instead of
+    /// [`default_answer`].
+    pub fn on_dialog(&mut self, handler: impl FnMut(&Dialog) -> DialogAnswer + Send + 'static) {
+        self.dialogs = Dialogs::Handler(Box::new(handler));
+    }
+
+    /// Leaves the dialogs steps show to the caller: a step returns with
+    /// one shown ([`Headless::pending_dialog`]) until
+    /// [`Headless::answer_dialog`] answers it.
+    pub fn answer_dialogs_myself(&mut self) {
+        self.dialogs = Dialogs::Caller;
+    }
+
+    /// The oldest dialog shown and not answered yet.
+    pub fn pending_dialog(&self) -> Option<&Dialog> {
+        self.screen.pending_dialog()
+    }
+
+    /// Answers the oldest dialog not answered yet with `answer`, as the
+    /// user would, then waits until the app is quiet; an error for a
+    /// button it has not, or a dialog that cannot be dismissed.
+    pub fn answer_dialog(&mut self, answer: DialogAnswer) -> Result<(), String> {
+        self.answer(answer)?;
+        self.done()
+    }
+
+    /// Puts `text` on the clipboard (`None`: nothing), as the user copying.
+    pub fn set_clipboard(&mut self, text: Option<String>) {
+        self.screen.set_clipboard(text);
+    }
+
     /// Takes the batches that came, then names the step of those that
     /// follow.
     pub fn step(&mut self, name: impl Into<String>) {
@@ -200,17 +283,52 @@ impl Headless {
                 }
             )
         });
+        for item in &batch.items {
+            self.animator.apply(item);
+        }
         self.applied += 1;
         if let Some(observer) = &mut self.observer {
             observer(&self.step, batch);
         }
-        // A platform reports where a command moved a scroll view.
+        self.react();
+    }
+
+    /// Does what a platform does after a batch: reports where commands
+    /// moved scroll views, tells modals they show, answers clipboard reads,
+    /// goes back when the app asked, reports finished animations.
+    fn react(&mut self) {
+        let control = self.engine.control();
         for id in self.screen.take_scrolled() {
             if let Some(scroll) = self.screen.scroll(id) {
-                self.engine
-                    .control()
-                    .scroll(id, scroll.x, scroll.y, scroll.applied);
+                let (x, y) = (scroll.x, scroll.y);
+                control.scroll(id, x, y, scroll.applied);
+                self.animator.scrolled(id, x, y);
             }
+        }
+        for modal in self.screen.take_presented() {
+            self.send(modal, EventKind::Show, EventPayload::None);
+        }
+        for (id, has_only) in self.screen.take_clipboard_reads() {
+            let text = self.screen.clipboard().map(str::to_owned);
+            let mut fields = vec![
+                ("id", PayloadValue::Number(f64::from(id))),
+                ("has", PayloadValue::Bool(text.is_some())),
+            ];
+            if let Some(text) = text.filter(|_| !has_only) {
+                fields.push(("text", PayloadValue::Str(text)));
+            }
+            control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(fields));
+        }
+        if self.screen.take_back_asked() {
+            self.go_back();
+        }
+        self.report_finished();
+    }
+
+    fn report_finished(&mut self) {
+        let finished = self.animator.take_finished();
+        if !finished.is_empty() {
+            self.engine.control().animations_finished(finished);
         }
     }
 
@@ -225,6 +343,45 @@ impl Headless {
         while let Ok(batch) = self.batches.try_recv() {
             self.apply(&batch);
         }
+        self.animator.tick();
+        self.report_finished();
+    }
+
+    /// Applies the next batch, waiting until `deadline` at most, while the
+    /// native animations run frame by frame; the app's errors are kept for
+    /// the next check.
+    fn pump(&mut self, deadline: Instant) -> Pumped {
+        loop {
+            if self.exited {
+                return Pumped::Exited;
+            }
+            let wake = self
+                .animator
+                .next_frame()
+                .map_or(deadline, |frame| frame.min(deadline));
+            let timeout = wake.saturating_duration_since(Instant::now());
+            crossbeam_channel::select_biased! {
+                recv(self.errors) -> error => {
+                    if let Ok(error) = error {
+                        self.seen.push(error);
+                        return Pumped::Error;
+                    }
+                }
+                recv(self.batches) -> batch => match batch {
+                    Ok(batch) => {
+                        self.apply(&batch);
+                        return Pumped::Batch;
+                    }
+                    Err(_) => return Pumped::Timeout,
+                },
+                default(timeout) => {}
+            }
+            self.animator.tick();
+            self.report_finished();
+            if Instant::now() >= deadline {
+                return Pumped::Timeout;
+            }
+        }
     }
 
     /// Applies the next batch, waiting `timeout` at most: the batch, or
@@ -233,40 +390,38 @@ impl Headless {
         if self.exited {
             return None;
         }
-        let batch = self.batches.recv_timeout(timeout).ok()?;
+        let deadline = Instant::now() + timeout;
+        let wait = deadline.saturating_duration_since(Instant::now());
+        let batch = self.batches.recv_timeout(wait).ok()?;
         self.apply(&batch);
         Some(batch)
     }
 
-    /// Applies batches until none comes for `quiet`, or for `limit` at
-    /// most: false if the limit ended it.
+    /// Applies batches until none comes for `quiet` and no native
+    /// animation runs, or for `limit` at most: false if the limit ended it.
     fn quiet(&mut self, quiet: Duration, limit: Duration) -> bool {
-        if self.exited {
-            return true;
-        }
         let end = Instant::now() + limit;
+        let mut last = Instant::now();
         loop {
-            let left = end.saturating_duration_since(Instant::now());
-            let timeout = quiet.min(left);
-            match self.batches.recv_timeout(timeout) {
-                Ok(batch) => {
-                    self.apply(&batch);
-                    if self.exited {
+            match self.pump((last + quiet).min(end)) {
+                Pumped::Batch => last = Instant::now(),
+                Pumped::Error | Pumped::Exited => return true,
+                Pumped::Timeout => {
+                    let now = Instant::now();
+                    if !self.animator.running() && now >= last + quiet {
                         return true;
                     }
+                    if now >= end {
+                        return false;
+                    }
                 }
-                Err(RecvTimeoutError::Disconnected) => return true,
-                Err(RecvTimeoutError::Timeout) => return timeout < left,
-            }
-            if Instant::now() >= end {
-                return false;
             }
         }
     }
 
-    /// Applies batches until none comes for 100 ms, or for 2 s at most (an
-    /// app updating all the time never goes quiet): false if the limit
-    /// ended it.
+    /// Applies batches until none comes for 100 ms and no native animation
+    /// runs, or for 2 s at most (an app updating all the time never goes
+    /// quiet): false if the limit ended it.
     pub fn settle(&mut self) -> bool {
         self.quiet(QUIET, SETTLE)
     }
@@ -281,44 +436,123 @@ impl Headless {
         self.check().map(|()| quiet)
     }
 
-    /// Fails with the app's first error since the last check: what threw
-    /// (an asset's failure is the log's only).
+    /// Fails with the app's first error since the last check (an asset's
+    /// failure is the log's only), or with what it asked that only a real
+    /// platform answers.
     fn check(&mut self) -> Result<(), String> {
         while let Ok(error) = self.errors.try_recv() {
+            self.seen.push(error);
+        }
+        for error in std::mem::take(&mut self.seen) {
             failure(error)?;
+        }
+        if let Some(what) = self.screen.take_unsupported().first() {
+            return Err(format!(
+                "the app asked for {what}, which only a real platform answers: headless runs have none"
+            ));
         }
         Ok(())
     }
 
-    /// Applies the next batch, waiting until `deadline` at most: false
-    /// when none came; an error when the app threw first.
-    fn next_until(&mut self, deadline: Instant) -> Result<bool, String> {
-        if self.exited {
-            return Ok(false);
-        }
-        let timeout = deadline.saturating_duration_since(Instant::now());
-        crossbeam_channel::select_biased! {
-            recv(self.errors) -> error => {
-                if let Ok(error) = error {
-                    failure(error)?;
-                }
-                Ok(true)
-            }
-            recv(self.batches) -> batch => match batch {
-                Ok(batch) => {
-                    self.apply(&batch);
-                    Ok(true)
-                }
-                Err(_) => Ok(false),
-            },
-            default(timeout) => Ok(false),
+    /// Settles after a step, answers the dialogs it showed (unless the
+    /// caller answers them), and fails if the app threw.
+    fn done(&mut self) -> Result<(), String> {
+        self.settle();
+        self.check()?;
+        loop {
+            let answer = match (&mut self.dialogs, self.screen.pending_dialog()) {
+                (_, None) | (Dialogs::Caller, _) => return Ok(()),
+                (Dialogs::Default, Some(dialog)) => default_answer(dialog)?,
+                (Dialogs::Handler(handler), Some(dialog)) => handler(dialog),
+            };
+            self.answer(answer)?;
+            self.settle();
+            self.check()?;
         }
     }
 
-    /// Settles after a step and fails if the app threw.
-    fn done(&mut self) -> Result<(), String> {
-        self.settle();
-        self.check()
+    /// Answers the oldest dialog not answered yet.
+    fn answer(&mut self, answer: DialogAnswer) -> Result<(), String> {
+        let dialog = self.screen.pending_dialog().ok_or("no dialog to answer")?;
+        let index = match &answer {
+            DialogAnswer::Press(text) => dialog
+                .buttons
+                .iter()
+                .position(|b| b.text == *text)
+                .ok_or_else(|| {
+                    let buttons: Vec<&str> =
+                        dialog.buttons.iter().map(|b| b.text.as_str()).collect();
+                    format!(
+                        "the dialog {} has no button {text:?}: {buttons:?}",
+                        describe(dialog)
+                    )
+                })? as f64,
+            DialogAnswer::Dismiss if dialog.cancelable => -1.0,
+            DialogAnswer::Dismiss => {
+                return Err(format!(
+                    "the dialog {} cannot be dismissed: press one of its buttons",
+                    describe(dialog)
+                ));
+            }
+        };
+        let id = f64::from(dialog.id);
+        self.screen.answered();
+        self.engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::Dialog,
+            EventPayload::Map(vec![
+                ("id", PayloadValue::Number(id)),
+                ("index", PayloadValue::Number(index)),
+            ]),
+        );
+        Ok(())
+    }
+
+    /// The step `back`: goes back as the user does (a header's back button,
+    /// the back key): in the newest modal, else the whole screen, the
+    /// innermost stack that can go back tells its top page (`onBackPress`,
+    /// when it listens) and pops it (`onDismiss`) unless the page keeps the
+    /// user (`popOnBack={false}`); without one, the newest dialog gets a
+    /// close attempt (`onCancel`, reason `"cancel"`) and closes when
+    /// `closeOnEscape`. Fails when there is nothing to go back from.
+    pub fn back(&mut self) -> Result<(), String> {
+        self.step("back");
+        if !self.go_back() {
+            return Err(format!("nothing to go back from; {}", self.on_screen()));
+        }
+        self.done()
+    }
+
+    /// Goes back as a platform does; false when nothing could.
+    fn go_back(&mut self) -> bool {
+        let control = self.engine.control();
+        match self.screen.back_target() {
+            Back::Pop(screen) => {
+                // Platforms tell a page that listens of every back press.
+                if self.screen.hears(screen, EventKind::BackRequest) {
+                    control.dispatch_event(screen, EventKind::BackRequest, EventPayload::None);
+                }
+                self.screen.pop(screen);
+                control.dispatch_event(screen, EventKind::Dismiss, EventPayload::None);
+            }
+            Back::Ask(screen) => {
+                control.dispatch_event(screen, EventKind::BackRequest, EventPayload::None);
+            }
+            Back::Close {
+                modal,
+                close_on_escape,
+            } => {
+                let reason =
+                    EventPayload::Map(vec![("reason", PayloadValue::Str("cancel".into()))]);
+                control.dispatch_event(modal, EventKind::RequestClose, reason);
+                if close_on_escape {
+                    self.screen.close(modal);
+                    control.dispatch_event(modal, EventKind::Dismiss, EventPayload::None);
+                }
+            }
+            Back::Nothing => return false,
+        }
+        true
     }
 
     /// The texts on screen, for errors.
@@ -331,8 +565,16 @@ impl Headless {
     pub fn first_render(&mut self) -> Result<(), String> {
         let deadline = Instant::now() + WAIT;
         while self.applied == 0 {
-            if !self.next_until(deadline)? {
-                return Err(format!("the app rendered nothing in {} s", WAIT.as_secs()));
+            match self.pump(deadline) {
+                Pumped::Batch => {}
+                Pumped::Error => self.check()?,
+                Pumped::Exited => return self.check(),
+                Pumped::Timeout => {
+                    if Instant::now() >= deadline {
+                        self.check()?;
+                        return Err(format!("the app rendered nothing in {} s", WAIT.as_secs()));
+                    }
+                }
             }
         }
         self.done()
@@ -343,11 +585,12 @@ impl Headless {
     pub fn wait(&mut self, time: Duration) -> Result<(), String> {
         self.step(format!("wait({})", time.as_millis()));
         let end = Instant::now() + time;
-        while !self.exited {
-            let Ok(batch) = self.batches.recv_deadline(end) else {
-                break;
-            };
-            self.apply(&batch);
+        while Instant::now() < end {
+            match self.pump(end) {
+                Pumped::Error => self.check()?,
+                Pumped::Exited => break,
+                Pumped::Batch | Pumped::Timeout => {}
+            }
         }
         self.check()
     }
@@ -364,12 +607,24 @@ impl Headless {
         self.drain();
         self.check()?;
         while !done(&self.screen) {
-            if !self.next_until(deadline)? {
-                return Err(format!(
-                    "{what} never happened in {} ms; {}",
-                    timeout.as_millis(),
-                    self.on_screen()
-                ));
+            match self.pump(deadline) {
+                Pumped::Batch => {}
+                Pumped::Error => self.check()?,
+                Pumped::Exited => {
+                    return Err(format!(
+                        "{what} never happened: the app left; {}",
+                        self.on_screen()
+                    ));
+                }
+                Pumped::Timeout => {
+                    if Instant::now() >= deadline {
+                        return Err(format!(
+                            "{what} never happened in {} ms; {}",
+                            timeout.as_millis(),
+                            self.on_screen()
+                        ));
+                    }
+                }
             }
         }
         Ok(())
@@ -575,9 +830,6 @@ impl Headless {
         // moves on from where the view is.
         let mut frames = ((target - start).abs() / SCROLL_STEP).ceil() as usize * 2 + 10;
         loop {
-            if self.exited {
-                break;
-            }
             let now = at(&self.screen);
             if (target - now).abs() < 0.5 || frames == 0 {
                 break;
@@ -598,14 +850,53 @@ impl Headless {
             }
             let (x, y, applied) = (scroll.x, scroll.y, scroll.applied);
             self.engine.control().scroll(id, x, y, applied);
+            self.animator.scrolled(id, x, y);
             // One display frame per step; a frame that needs nothing
             // produces no batch, and a late one is applied with the next.
-            self.next_batch(FRAME);
+            let frame = Instant::now() + FRAME;
+            while Instant::now() < frame {
+                if let Pumped::Batch | Pumped::Exited = self.pump(frame) {
+                    break;
+                }
+            }
         }
         self.send(id, EventKind::ScrollEndDrag, offset(&self.screen));
         self.send(id, EventKind::ScrollEnd, offset(&self.screen));
         self.done()
     }
+}
+
+/// How a dialog is answered when the test says nothing, as a user backing
+/// out does: its cancel button, else closed when it can be; a dialog that
+/// can only be answered by one of its other buttons needs the test's
+/// answer ([`Headless::on_dialog`]).
+pub fn default_answer(dialog: &Dialog) -> Result<DialogAnswer, String> {
+    if let Some(cancel) = dialog
+        .buttons
+        .iter()
+        .find(|b| b.style == DialogButtonStyle::Cancel)
+    {
+        return Ok(DialogAnswer::Press(cancel.text.clone()));
+    }
+    if dialog.cancelable {
+        return Ok(DialogAnswer::Dismiss);
+    }
+    Err(format!(
+        "the dialog {} needs an answer: say which button to press (`onDialog`)",
+        describe(dialog)
+    ))
+}
+
+/// A dialog, as errors name it: its title, else its message.
+fn describe(dialog: &Dialog) -> String {
+    format!(
+        "{:?}",
+        dialog
+            .title
+            .as_deref()
+            .or(dialog.message.as_deref())
+            .unwrap_or("")
+    )
 }
 
 /// The error a step fails with for `error` of the app: none for an
@@ -644,10 +935,7 @@ pub fn print_batch(out: &mut dyn Write, step: &str, batch: &MountBatch) {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::{
-        platform::Os,
-        ui::{Root, prelude::*},
-    };
+    use nsh_core::ui::{Root, prelude::*};
 
     use super::*;
 
@@ -794,16 +1082,21 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "js")]
     #[test]
     fn a_step_fails_when_the_app_throws() {
-        let app = crate::Bundle::source("throw new Error('boom')".into());
+        let app = nsh_engine::Bundle::source("throw new Error('boom')".into());
         let mut app = Headless::start(EngineConfig::new(app)).unwrap();
         let error = app.first_render().unwrap_err();
         assert!(error.starts_with("the app threw: Error: boom"), "{error}");
     }
+
+    #[cfg(feature = "js")]
     #[test]
     fn process_exit_ends_a_timed_headless_wait() {
-        let bundle = crate::Bundle::source(
+        use nsh_core::platform::Os;
+
+        let bundle = nsh_engine::Bundle::source(
             "import process from 'process'; setTimeout(() => process.exit(0), 10);".into(),
         )
         .with_capabilities_json(Some(r#"{"process":{"exit":true}}"#))

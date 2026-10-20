@@ -8,8 +8,7 @@ use std::{
 };
 
 use nsh_core::storage::{StorageBackend, StorageChange};
-
-use crate::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
+use nsh_engine::{FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
 
 /// A response [`StubNetwork`] gives.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -1508,6 +1508,7 @@ dependencies = [
  "nsh-platform-linux",
  "nsh-platform-macos",
  "nsh-platform-windows",
+ "nsh-testing",
  "serde_json",
 ]
 
@@ -2834,7 +2835,6 @@ dependencies = [
  "taffy",
  "tokio",
  "tokio-tungstenite 0.28.0",
- "ureq",
 ]
 
 [[package]]
@@ -3082,12 +3082,15 @@ dependencies = [
  "crossbeam-channel",
  "dunce",
  "log",
+ "nsh-animation",
+ "nsh-base",
  "nsh-bundler",
  "nsh-core",
  "nsh-engine",
  "nsh-js",
  "serde",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

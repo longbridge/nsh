@@ -12,9 +12,10 @@ use std::{
     time::Duration,
 };
 
+use nsh_engine::{
+    Assets, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network,
+};
 use ureq::{Agent, ResponseExt, SendBody, http};
-
-use crate::{Assets, FetchEvent, FetchEvents, FetchTask, HttpBody, HttpHead, HttpRequest, Network};
 
 /// `asset:/…` files: the UI sets' files (`Registry::assets`), else
 /// relative to the app's source directory.

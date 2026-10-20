@@ -71,7 +71,7 @@ env:
   PACKAGES: >-
     -p nsh-core -p nsh-animation -p nsh-macros -p nsh-js -p nsh-base -p nsh-engine
     -p nsh-bundler -p nsh-package -p nsh-testing
-    --features nsh-bundler/bundle,nsh-engine/headless
+    --features nsh-bundler/bundle,nsh-testing/bundle
 
 jobs:
   check:
