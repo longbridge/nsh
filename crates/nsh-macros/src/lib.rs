@@ -12,7 +12,7 @@
 //!   methods of the component's ref in JS (`ref.setValue(5)`,
 //!   `await ref.value()`).
 //! - `#[module]` on an `impl` block of a unit struct: functions of a JS
-//!   object (`Alert.alert(...)`).
+//!   object (`AlertDialog.show(...)`).
 //! - `#[class]` on a struct and on its `impl` block: a JS class backed by
 //!   the Rust value (`new Tally(3)`, `tally.add(2)`).
 //!
@@ -1517,7 +1517,7 @@ fn module_cx(ty: &Type) -> bool {
 /// `#[module]` on an `impl` block of a unit struct: its functions with a
 /// visibility (`pub fn`, `pub(crate) fn`; no receiver) become functions of
 /// a JS object named after the struct
-/// (`Alert.alert(...)`), documented by their doc comments. The struct
+/// (`AlertDialog.show(...)`), documented by their doc comments. The struct
 /// takes `#[module]` too, and its doc comment documents the object (a doc
 /// comment on the block is an error: TS shows the struct's); a
 /// component's struct (`#[component]`) needs none. The signature decides

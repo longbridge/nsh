@@ -384,8 +384,8 @@ impl Component for Stepper {
                 .disabled(off)
                 .role(AccessibilityRole::Button)
                 .label(name)
-                .on_press_down(move |_| press(direction))
-                .on_press_up(move |_| repeat.set(None))
+                .on_press_in(move |_| press(direction))
+                .on_press_out(move |_| repeat.set(None))
                 .child(text(label).text_size(px(theme().font_size + 4.0)))
         };
         view()

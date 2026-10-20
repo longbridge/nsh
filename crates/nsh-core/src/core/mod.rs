@@ -2675,8 +2675,8 @@ impl<M: TextEngine> Core<M> {
             self.positions_changed(parent);
         }
         self.nodes[key as usize].parent = NO_KEY;
-        self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.groups_changed(key, parent);
+        self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
         if inline {
