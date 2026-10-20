@@ -1,12 +1,14 @@
 # The GPUI backend (macOS, Windows, Linux)
 
 `crates/gpui/nsh-platform-gpui` renders NSH apps with GPUI (GPUI Fast: crates.io `gpui-fast` 0.1.x, aliased as `gpui` in
-its workspace), on macOS, Windows and Linux alike. `crates/gpui/nsh-gpui-host` is its development host (`nsh run --target
-gpui`), `crates/gpui/nsh-gpui-app` the release runner of `nsh package --target gpui`. Its main purpose is embedding: an
-`AppView` is a GPUI view, so GPUI and GPUI Kit apps (`gpui_component`) show NSH modules anywhere in their element tree.
-The crate started as a port of the Windows backend (`windows.md`): one retained view per node, NSH draws every view
-itself, and the input, scrolling, transition, keymap and editing logic is the Windows backend's, platform-free. Only
-drawing, text, the main-thread queue, events and the window are GPUI's. User-facing page: `website/docs/gpui.md`.
+its workspace), on macOS, Windows and Linux alike. Its purpose is embedding: an `AppView` is a GPUI view, so GPUI and
+GPUI Kit apps (`gpui_component`) show NSH modules anywhere in their element tree. Standalone apps run and are packaged
+with each OS's own backend (AppKit, Win32, GTK 4). `crates/gpui/nsh-gpui-host` is the development host (`nsh run
+--target gpui`): it shows a TSX app in a GPUI window as the apps that embed it show it, with hot reload, `--script`
+steps and screenshots for checking the backend. The crate started as a port of the Windows backend (`windows.md`): one
+retained view per node, NSH draws every view itself, and the input, scrolling, transition, keymap and editing logic is
+the Windows backend's, platform-free. Only drawing, text, the main-thread queue, events and the window are GPUI's.
+User-facing page: `website/docs/gpui.md`.
 
 Every area of the other desktop backends is ported; "Not implemented, or different" lists where GPUI's primitives make
 it draw or behave differently.
@@ -25,22 +27,22 @@ sudo apt-get install clang libclang-dev pkg-config libfontconfig-dev libfreetype
 
 macOS needs Xcode and its Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`), with which GPUI's build
 script precompiles its shaders. A Mac without it builds with the feature `runtime-shaders` (`nsh-platform-gpui`'s,
-forwarded by `nsh-gpui-host` and `nsh-gpui-app`), with which GPUI compiles the shaders when it makes a window's renderer:
+forwarded by `nsh-gpui-host`), with which GPUI compiles the shaders when it makes a window's renderer:
 
 ```sh
 cargo build --manifest-path crates/gpui/Cargo.toml --target-dir target -p nsh-gpui-host --features nsh-gpui-host/runtime-shaders
 (cd examples/embed-gpui && cargo run --features nsh-platform-gpui/runtime-shaders)
 ```
 
-The CLI adds it by itself where `xcrun metal` fails (`runtime::gpui_features`): to the GPUI host and runner it builds
-in a checkout (`nsh run` / `nsh package --target gpui`) and to the GPUI workspace of an app with Rust crates
+The CLI adds it by itself where `xcrun metal` fails (`runtime::gpui_features`): to the GPUI host it builds
+in a checkout (`nsh run --target gpui`) and to the GPUI workspace of an app with Rust crates
 (`.nsh/rust/gpui`), and says so in a note. Compiling them took 0.3 to 0.5 s on Apple silicon the first time a Mac saw
 their source (a new GPUI version); macOS caches the result, so later windows and starts took no measurable time.
 
 Windows needs the MSVC toolchain and LLVM as for the Windows backend (`RUST_MIN_STACK` included). Off the three
 desktops the crates are empty.
 
-The three crates are a workspace of their own, `crates/gpui` (its own `Cargo.toml`, `Cargo.lock` and the dependencies
+The two crates are a workspace of their own, `crates/gpui` (its own `Cargo.toml`, `Cargo.lock` and the dependencies
 only they use: GPUI, wry, GStreamer, tiny-skia, ...), excluded from the main workspace, so the main workspace's builds,
 `cargo test --workspace`, clippy and CI never build GPUI. It builds into the repository's `target/`
 (`crates/gpui/.cargo/config.toml`; the CLI and xtask pass `--manifest-path` and `--target-dir` from the root). The
@@ -57,8 +59,8 @@ cargo +nightly fmt --all                          # the main workspace's fmt doe
 cargo build -p nsh-gpui-host                      # ../../target/debug/nsh-gpui-host
 ```
 
-The GPUI binaries are built for the machine itself, so the CLI finds them in `target/<profile>` and builds them first
-in a checkout; `cargo xtask dist` puts them in `dist/nsh/runtime/gpui/` on each of the three OSes (`tooling.md`,
+The GPUI host is built for the machine itself, so the CLI finds it in `target/<profile>` and builds it first
+in a checkout; `cargo xtask dist` puts it in `dist/nsh/runtime/gpui/` on each of the three OSes (`tooling.md`,
 `embedding.md`). CI: `.github/workflows/gpui.yml` (Ubuntu 24.04, macOS 15 and Windows: clippy with `-D warnings` and
 tests of the GPUI workspace; on Linux clippy of `examples/embed-gpui` too), run when `crates/gpui` or the example
 changes and daily, which catches what changes to the crates it shares with the main workspace (`nsh-core`,
@@ -66,20 +68,19 @@ changes and daily, which catches what changes to the crates it shares with the m
 
 Features:
 
-| Feature | Does | Host | Runner |
-|---|---|---|---|
-| `js` (default) | JS apps; without it the crate only runs Rust apps and links no QuickJS | yes | yes |
-| `webview` (default) | web views with wry (`native/web.rs`; GTK 3 and WebKitGTK on Linux) | yes | yes |
-| `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux | Linux |
-| `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes | no |
-| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows | no |
-| `runtime-shaders` | GPUI's Metal shaders compiled when the app starts, not by the build (`gpui_platform/runtime_shaders`): builds on a Mac without the Metal Toolchain; nothing elsewhere | the CLI's, where `xcrun metal` fails | the CLI's, where `xcrun metal` fails; never the distribution's |
+| Feature | Does | Host |
+|---|---|---|
+| `js` (default) | JS apps; without it the crate only runs Rust apps and links no QuickJS | yes |
+| `webview` (default) | web views with wry (`native/web.rs`; GTK 3 and WebKitGTK on Linux) | yes |
+| `video` | videos with GStreamer (`native/video.rs`); without it a video is a placeholder that reports `onError` | Linux |
+| `dev` | the dev server client, log forwarding, the error overlay (`dev.rs`) | yes |
+| `shot` | `--script` shots on macOS and Windows through GPUI's `test-support` (`Window::render_to_image`); the tests in windows of GPUI's test platform (`tests.rs`) | macOS, Windows |
+| `runtime-shaders` | GPUI's Metal shaders compiled when the app starts, not by the build (`gpui_platform/runtime_shaders`): builds on a Mac without the Metal Toolchain; nothing elsewhere | the CLI's, where `xcrun metal` fails; never the distribution's |
 
-`shot` turns on GPUI's test support: never in the release runner. With it, the crate's tests include `tests.rs`:
-surfaces in windows of GPUI's test platform (`TestAppContext`), drawn and given GPUI's input with the engine on its
-own thread (`allow_parking`), such as keys reaching a field beside a native component; CI runs them on Linux. Cargo
-unifies features per build, so the distribution builds the host and the runner in separate `cargo build` runs (`cargo
-xtask dist`), never together.
+`shot` turns on GPUI's test support, for the host and the tests; apps that embed the crate leave it off. With it, the
+crate's tests include `tests.rs`: surfaces in windows of GPUI's test platform (`TestAppContext`), drawn and given
+GPUI's input with the engine on its own thread (`allow_parking`), such as keys reaching a field beside a native
+component; CI runs them on Linux.
 
 ### Looking at a change on Linux
 
@@ -151,9 +152,9 @@ import -window root -display :170 whole.png        # the display, if the window'
   scrolling, keymap and editing code reads.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a GPUI view: `cx.new(|cx| AppView::new(options, window,
   cx))`, then `load(App::Js(bundle))` or `load(App::Rust(root))`; it renders a `SurfaceElement` and is `Focusable`.
-  `open_app_window` opens one in a window of a running GPUI app; `run_app` runs the standalone app (one `AppView`
-  filling a window, the process quits when the last window closes). `register_component` registers native
-  components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
+  `open_app_window` opens one in a window of a running GPUI app; `run_app` runs one app on its own, as the development
+  host does (one `AppView` filling a window, the process quits when the last window closes). `register_component`
+  registers native components (GPUI elements); `set_theme` / `set_appearance` give the surface the host's theme and mode; `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets), and gives the host's own sets, which apps reach by name (`nativeModule`,
   `embedding.md` "Native modules"). Several views are several
@@ -244,12 +245,12 @@ shots of macOS and Windows.
   Windows CI machines list no fonts through DirectWrite, so font weights and registered fonts are untested on Windows
   (the tests that check them skip where no fonts are listed); the text threads initialize COM, which DirectWrite
   wants off the main thread.
-- **Packaged apps** are laid out as the native backend's of the machine they are made on (a directory and `.tar.gz`
-  on Linux, an ad hoc signed `.app` on macOS, a directory and `.zip` on Windows; `embedding.md`), with
-  `nsh-gpui-app` as the executable (features `js` and `webview`, plus `video` on Linux). The Linux runner links
-  WebKitGTK 4.1 (with GTK 3) and GStreamer dynamically: every machine a Linux package runs on needs them installed
-  (`libwebkit2gtk-4.1-0`, `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, and `gstreamer1.0-plugins-good` for
-  common formats), besides a Vulkan driver and xkbcommon.
+- **Packages**: GPUI apps embed the crate and ship it in their own executable; standalone NSH apps are packaged with
+  the OS's own backend (`nsh package --target macos|windows|linux`, `embedding.md`), and `nsh package` refuses
+  `--target gpui`. With the features `webview` and `video` on Linux, the GPUI app links WebKitGTK 4.1 (with GTK 3)
+  and GStreamer dynamically: every machine it runs on needs them installed (`libwebkit2gtk-4.1-0`,
+  `libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0`, and `gstreamer1.0-plugins-good` for common formats), besides
+  a Vulkan driver and xkbcommon.
 - **Dev logs** (feature `dev`): the log forwarder is per process (`dev.rs`' `CLIENT` / `CONNECTED`), so with several
   `AppView`s connected to dev servers every view's logs go to the most recent session.
 

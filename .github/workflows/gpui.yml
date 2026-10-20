@@ -3,7 +3,7 @@ name: GPUI
 # Builds, lints and tests the GPUI backend (the workspace in `crates/gpui`) on
 # macOS, Windows and Linux, and lints the GPUI Kit example
 # (`examples/embed-gpui`, a workspace of its own) on Linux. The main workspace's CI covers the CLI that runs
-# it (`nsh run --target gpui`, `nsh package --target gpui`).
+# it (`nsh run --target gpui`).
 
 on:
   # Only the GPUI workspace's own changes run it; a daily run catches what

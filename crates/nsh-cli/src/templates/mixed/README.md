@@ -7,7 +7,7 @@ that `App.tsx` imports from `__SPECIFIER__`.
 ```sh
 nsh run                      # this machine's backend; --target ios, android, web, macos, linux, windows or gpui
 nsh check                    # type checks App.tsx against the declarations generated from the Rust code
-nsh package --target web     # or ios, android, macos, linux, windows, gpui
+nsh package --target web     # or ios, android, macos, linux, windows
 ```
 
 `nsh` describes the crate's exports with a small program of the crate and builds the app's hosts with it linked in.

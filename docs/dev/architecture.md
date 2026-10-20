@@ -92,7 +92,7 @@ use one a third party publishes as a crate.
 
 ## Crates
 
-Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ← `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host` / `nsh-gpui-app`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-base` depends on `nsh-core` only and is used by the bundler, the platforms and the CLI; an app's own crates (its UI sets, `components.md`) depend on `nsh-core` only. `nsh-core` must not depend on any platform or JS crate.
+Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-package`) ← `nsh-platform-*` ← `nsh-ios-host` / `nsh-ios-app` / `nsh-linux-host` / `nsh-linux-app` / `nsh-macos-host` / `nsh-macos-app` / `nsh-windows-host` / `nsh-windows-app` / `nsh-gpui-host`; `nsh-cli` depends on `nsh-bundler`, `nsh-js` and `nsh-engine`; `nsh-base` depends on `nsh-core` only and is used by the bundler, the platforms and the CLI; an app's own crates (its UI sets, `components.md`) depend on `nsh-core` only. `nsh-core` must not depend on any platform or JS crate.
 
 The CoreText, StaticLayout, Pango, DirectWrite and GPUI text engines are documented in
 `crates/nsh-platform-ios/src/text.rs`, `crates/nsh-platform-android/src/text.rs`, `crates/nsh-platform-linux/src/text.rs`,

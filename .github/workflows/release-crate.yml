@@ -4,7 +4,7 @@ name: Release crates
 # not inherit `publish = false` (Cargo.toml), the libraries and the
 # development hosts and release runners (`nsh` builds an app with Rust
 # crates of its own from them, at its own version), then the GPUI
-# workspace's (`crates/gpui`: `nsh-platform-gpui` and its host and runner),
+# workspace's (`crates/gpui`: `nsh-platform-gpui` and its development host),
 # which depend on them.
 #
 # - Pushing a tag `vX.Y.Z` (the workspace version in Cargo.toml) publishes

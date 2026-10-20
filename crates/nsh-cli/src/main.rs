@@ -238,7 +238,7 @@ enum Command {
         /// Script steps to run once the window shows (`wait`, `shot`,
         /// `tap`, `quit`, ...; the desktop hosts: `--target macos`,
         /// `linux`, `windows`, `gpui`; an app of Rust only: `macos`,
-        /// `linux`, `windows`). With `quit` the command exits when the
+        /// `linux`, `windows`, as GPUI has no runner of its own). With `quit` the command exits when the
         /// script does — snapshots without a window staying open.
         #[arg(long)]
         script: Option<String>,

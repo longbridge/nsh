@@ -120,7 +120,7 @@ let info = try await app.loadPackage(at: downloadedFile, trust: trust)   // 先�
 | macOS | 已支持（macOS 14+） | AppKit | 独立应用；通过 `AppView` 嵌入（[macOS](./macos.md)） |
 | Windows | 已支持（Windows 10 1809+） | Win32、Direct2D | 独立应用；通过 `AppView` 嵌入（[Windows](./windows.md)） |
 | Linux | 已支持（GTK 4.14+） | GTK 4 | 独立应用；通过 `AppView` 嵌入（[Linux](./linux.md)） |
-| GPUI（macOS、Windows、Linux） | 已支持 | GPUI | 独立应用；通过 `AppView` 嵌入 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)） |
+| GPUI（macOS、Windows、Linux） | 已支持 | GPUI | 通过 `AppView` 嵌入 GPUI 和 GPUI Kit 应用（[GPUI](./gpui.md)） |
 | Web | 已支持（现代浏览器） | HTML | 静态网站；在网页中用 `createPlayer` 或 iframe 嵌入（[Web](./web.md)） |
 | Mac Catalyst | 用于开发 | UIKit | `nsh run` 在 Mac 上打开的 iPhone 尺寸窗口，用来查看模块在手机上的样子 |
 

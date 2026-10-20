@@ -1,6 +1,6 @@
 //! `AppView` (one surface as a GPUI view, for embedding in any GPUI or
-//! GPUI Kit app) and the standalone app ([`run_app`]: one `AppView`
-//! filling a window).
+//! GPUI Kit app) and the development host's window ([`run_app`]: one
+//! `AppView` filling a window).
 
 use std::{
     cell::RefCell,
@@ -117,9 +117,8 @@ pub struct AppOptions {
     /// [`AppView::set_fps_monitor`].
     pub fps: bool,
     /// The VM limits of the apps it runs: [`Limits::default`] (an app
-    /// embedded in a host app) unless set; the development host and the
-    /// release runner run apps on their own, with none
-    /// ([`Limits::standalone`]). See [`AppView::set_limits`].
+    /// embedded in a host app) unless set; the development host runs
+    /// apps on their own, with none ([`Limits::standalone`]). See [`AppView::set_limits`].
     pub limits: Limits,
     /// Where the apps it runs keep their data, each in `<dir>/<app id>`
     /// (`nsh.json` `"id"`, which travels with the bundle): `None` uses the

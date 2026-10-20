@@ -35,8 +35,8 @@ Rust 和原生代码：在 iOS、Android、macOS、Windows、Linux、GPUI 和 We
 ```sh
 nsh init my-app --template rust
 cd my-app
-nsh run                        # 本机的后端；--target ios、android、web、macos、linux、windows 或 gpui
-nsh package --target web       # 或 ios、ios-simulator、android、macos、linux、windows、gpui
+nsh run                        # 本机的后端；--target ios、android、web、macos、linux 或 windows
+nsh package --target web       # 或 ios、ios-simulator、android、macos、linux、windows
 ```
 
 `src/lib.rs` 包含整个应用：组件、状态、事件处理和任务。
@@ -103,7 +103,7 @@ pub fn App() -> impl IntoElement {
 
 | 目标 | 运行的内容 |
 |---|---|
-| macOS、Windows、Linux、GPUI | 带有你的 crate 的发布运行器，在窗口中运行；`nsh run` 使用 debug 构建，并在终端显示应用日志 |
+| macOS、Windows、Linux | 带有你的 crate 的发布运行器，在窗口中运行；`nsh run` 使用 debug 构建，并在终端显示应用日志 |
 | iOS、iOS 模拟器、Mac Catalyst | 带有你的 crate 的 iOS 运行器 |
 | Android | 带有你的 crate 的应用 `libnsh.so`，由运行时的 Activity 启动 |
 | Web | 包含引擎和你的 crate 的 `nsh.wasm`（整个 Rust gallery 为 3.3 MB，brotli 压缩后 0.75 MB）；页面直接挂载根组件 |
