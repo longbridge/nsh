@@ -94,7 +94,7 @@ fn safe_area_diagram() -> AnyElement {
         .h(move || px((window().height * width / window().width.max(px(1.0))).round()))
         .rounded(px(14.0))
         .border_curve(BorderCurve::Continuous)
-        .border(1.5)
+        .border(px(1.5))
         .border_color(colors::BORDER)
         .bg(colors::SURFACE)
         .finish_fill(Finish::Card)
@@ -113,7 +113,7 @@ fn safe_area_diagram() -> AnyElement {
                 .border_color(colors::LINE)
                 .border_dashed(),
         )
-        .child(view().h(move || band(keyboard_height())).bg(tints::WARN))
+        .child(view().h(move || band(keyboard_height().0)).bg(tints::WARN))
         .child(view().h(move || band(safe_area().bottom)).bg(tints::INFO))
         .into_element()
 }
@@ -131,7 +131,7 @@ fn environment() -> AnyElement {
         Stat::new(label, move || value(safe_area()).round().to_string()).width(0.25)
     });
     let keyboard_stat =
-        || Stat::new("Keyboard", || format!("{} pt", keyboard_height().round())).width(0.5);
+        || Stat::new("Keyboard", || format!("{} pt", keyboard_height().0.round())).width(0.5);
     Card::new()
         .icon(IconName::System)
         .title("Environment")
@@ -164,7 +164,7 @@ fn environment() -> AnyElement {
                                 .flex_row()
                                 .child(
                                     If::new(
-                                        || keyboard_height() > 0.0,
+                                        || keyboard_height() > px(0.0),
                                         move || keyboard_stat().tone(Tone::Warn),
                                     )
                                     .otherwise(keyboard_stat),

@@ -131,7 +131,13 @@ pub(crate) fn asset(lit: LitStr) -> syn::Result<TokenStream> {
             let height = (dim.height as f64 / scale) as f32;
             quote! {{
                 const _: &[u8] = ::core::include_bytes!(#source);
-                #ui::ImageAsset { uri: #uri, width: #width, height: #height }
+                #ui::ImageAsset {
+                    uri: #uri,
+                    size: ::nsh_core::geometry::size(
+                        ::nsh_core::geometry::Points(#width),
+                        ::nsh_core::geometry::Points(#height),
+                    ),
+                }
             }}
         }
         Kind::Font => {

@@ -305,7 +305,7 @@ fn nav_button(
             .border_color(colors::BORDER)
             .items_center()
             .justify_center()
-            .when(flip, |v| v.rotate(180.0))
+            .when(flip, |v| v.rotate(deg(180.0)))
             .child(icon(IconName::Chevron, 18.0, colors::TEXT)),
     )
 }

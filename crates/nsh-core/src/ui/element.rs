@@ -12,7 +12,7 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, Bounds, ContextMenuEvent, EdgeInsets,
     EventKind, EventPayload, HoverEvent, Hsla, ImageSource, ListContentStyle, NativeProp, NodeId,
-    PointerEvents, Points, Prop, Size, Tag, TouchEvent, style::Color,
+    PointerEvents, Points, Prop, Size, Tag, TouchEvent, geometry::Radians, style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
@@ -1224,8 +1224,8 @@ pub trait Interactive: Element {
         )
     }
 
-    /// A two-finger rotation started (radians).
-    fn on_rotation_start<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
+    /// A two-finger rotation started (its angle).
+    fn on_rotation_start<M>(self, listener: impl IntoListener<GestureEvent<Radians>, M>) -> Self {
         self.on(
             EventKind::RotationStart,
             events::typed(listener.into_listener(), events::rotation),
@@ -1233,7 +1233,7 @@ pub trait Interactive: Element {
     }
 
     /// The rotation ended.
-    fn on_rotation_end<M>(self, listener: impl IntoListener<GestureEvent, M>) -> Self {
+    fn on_rotation_end<M>(self, listener: impl IntoListener<GestureEvent<Radians>, M>) -> Self {
         self.on(
             EventKind::RotationEnd,
             events::typed(listener.into_listener(), events::rotation),
@@ -1284,8 +1284,8 @@ pub trait Interactive: Element {
     }
 
     /// The elevation shadow (Android).
-    fn elevation(mut self, elevation: f32) -> Self {
-        super::host::set(self.node(), Prop::Elevation(elevation));
+    fn elevation(mut self, elevation: impl Into<Points>) -> Self {
+        super::host::set(self.node(), Prop::Elevation(elevation.into().0));
         self
     }
 
@@ -1544,11 +1544,11 @@ impl Image {
         self
     }
 
-    /// Blurs it (points).
-    pub fn blur_radius(mut self, radius: f32) -> Self {
+    /// Blurs it.
+    pub fn blur_radius(mut self, radius: impl Into<Points>) -> Self {
         super::host::set(
             &mut self.0,
-            Prop::Image(crate::ImageProp::BlurRadius(radius)),
+            Prop::Image(crate::ImageProp::BlurRadius(radius.into().0)),
         );
         self
     }

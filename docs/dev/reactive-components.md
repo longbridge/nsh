@@ -373,7 +373,7 @@ impl Component for Stepper {
                 .size_10()
                 .items_center()
                 .justify_center()
-                .rounded(px(theme().radius))
+                .rounded(theme().radius)
                 .bg(theme().secondary)
                 .active(|s| s.bg(theme().secondary_active))
                 .style_when(off, |s| s.opacity(0.4))
@@ -382,7 +382,7 @@ impl Component for Stepper {
                 .label(name)
                 .on_press_in(move |_| press(direction))
                 .on_press_out(move |_| repeat.set(None))
-                .child(text(label).text_size(px(theme().font_size + 4.0)))
+                .child(text(label).text_size(theme().font_size + px(4.0)))
         };
         view()
             .flex_row()

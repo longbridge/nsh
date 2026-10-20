@@ -16,7 +16,7 @@ pub struct Environment {
     /// Space reserved for system controls in a custom desktop title bar.
     pub title_bar: crate::geometry::Edges<crate::geometry::Points>,
     /// The software keyboard's height, 0 when hidden.
-    pub keyboard_height: f32,
+    pub keyboard_height: Points,
     /// How long the keyboard's show / hide animation takes, in seconds.
     pub keyboard_duration: f32,
     /// Dark appearance.
@@ -51,7 +51,7 @@ impl Default for Environment {
             window: crate::geometry::size_pt(0.0, 0.0),
             safe_area: EdgeInsets::default(),
             title_bar: crate::geometry::Edges::default(),
-            keyboard_height: 0.0,
+            keyboard_height: Points(0.0),
             keyboard_duration: 0.0,
             dark: false,
             font_scale: 1.0,

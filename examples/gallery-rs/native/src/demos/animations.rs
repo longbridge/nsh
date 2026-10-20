@@ -233,7 +233,7 @@ fn Hero() -> impl IntoElement {
             .top(px(34.0))
             .size(px(S - 68.0))
             .rounded(px((S - 68.0) / 2.0))
-            .border(1.5)
+            .border(px(1.5))
             .border_color(colors::ACCENT)
             .bind_opacity(&r.interpolate(&[0.0, 0.15, 1.0], &[0.0, 0.6, 0.0]))
             .bind_scale(&r.interpolate(&[0.0, 1.0], &[0.35, 1.45]))

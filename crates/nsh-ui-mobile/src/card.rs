@@ -32,7 +32,7 @@ pub enum CardVariant {
 pub fn Card(props: CardProps) -> impl IntoElement {
     let has_header = move || props.header.with(Option::is_some);
     view()
-        .rounded(move || px(theme().radius_lg))
+        .rounded(move || theme().radius_lg)
         .bg(move || theme().group_box)
         .text_color(move || theme().group_box_foreground)
         .border_1()
@@ -45,7 +45,7 @@ pub fn Card(props: CardProps) -> impl IntoElement {
             header
                 .px_4()
                 .pt_4()
-                .text_size(move || px(theme().font_size + 1.0))
+                .text_size(move || theme().font_size + px(1.0))
                 .font_weight(FontWeight::SEMIBOLD)
         }))
         .child(

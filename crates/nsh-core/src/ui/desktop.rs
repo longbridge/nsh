@@ -20,10 +20,10 @@ use crate::{
 /// above; [`title_bar`] reports the actual native height for layout. An
 /// embedding host's existing toolbar keeps its own style and height.
 /// On platforms without desktop windows this has no effect.
-pub fn set_title_bar(style: TitleBarStyle, height: Option<f32>) {
+pub fn set_title_bar(style: TitleBarStyle, height: Option<Points>) {
     super::ambient::desktop_command(DesktopCommand::SetTitleBar {
         style,
-        height: crate::desktop::title_bar_height(height),
+        height: crate::desktop::title_bar_height(height.map(|h| h.0)),
     });
 }
 

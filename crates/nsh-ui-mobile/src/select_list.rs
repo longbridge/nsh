@@ -55,7 +55,7 @@ pub fn SelectList(props: SelectListProps, cx: Scope<SelectListEvent>) -> impl In
                     }))
             },
         )
-        .estimated_item_size(48.0)
+        .estimated_item_size(px(48.0))
         .keys(move || options.get())
         .flex_1(),
     )

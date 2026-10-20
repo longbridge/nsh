@@ -60,7 +60,7 @@ fn title_block(badge: impl Into<SharedString>, title: impl Into<SharedString>, s
             text(title.into())
                 .text_size(px(size))
                 .font_weight(FontWeight::BOLD)
-                .letter_spacing(-0.5)
+                .letter_spacing(px(-0.5))
                 .text_color(colors::TEXT),
         )
 }

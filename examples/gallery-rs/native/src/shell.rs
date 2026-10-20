@@ -239,7 +239,7 @@ fn sidebar() -> AnyElement {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors::FAINT)
-                    .letter_spacing(0.6)
+                    .letter_spacing(px(0.6))
                     .px(px(10.0))
                     .pt_4()
                     .pb(px(6.0)),

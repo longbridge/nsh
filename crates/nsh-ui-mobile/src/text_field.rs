@@ -72,7 +72,7 @@ pub fn TextField(props: TextFieldProps, cx: Scope<TextFieldEvent>) -> impl IntoE
                 .min_h(px(44.0))
                 .px_3()
                 .gap_2()
-                .rounded(move || px(theme().radius))
+                .rounded(move || theme().radius)
                 .bg(move || theme().background)
                 .border_1()
                 .border_color(move || {

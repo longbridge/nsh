@@ -48,7 +48,7 @@ pub fn Button(props: ButtonProps, cx: Scope<ButtonEvent>) -> impl IntoElement {
     view()
         .px_4()
         .py_3()
-        .rounded(move || px(theme().radius))
+        .rounded(move || theme().radius)
         .bg(move || theme().primary)
         .active(|s| s.bg(move || theme().primary_active))
         .on_press(move || cx.emit(ButtonEvent::Press))
@@ -108,7 +108,7 @@ reasons: `reactive-components.md`.
     `is_first()`, `is_last()`, signals read in bindings).
   - `items: Items`: virtualized rows. In JS the component takes `List`'s data props (`each`, the row renderer as
     children, `keyExtractor`, `onEndReached`, `ListHeaderComponent`, ... : `ListItemsProps<T>`, so the component is
-    generic over the row type). `.list(props.items, |l| l.flex_1().estimated_item_size(48.0), |row, at|
+    generic over the row type). `.list(props.items, |l| l.flex_1().estimated_item_size(px(48.0)), |row, at|
     view().px_4().style_when(move || at.is_last(), |v| v.rounded_b(px(16.0))).child(row))` places the list, lays it
     out (size, columns, padding, gaps, direction; bound layout values update it in place) and wraps each row; only
     rows near the viewport exist and cells are recycled as with `List`.
@@ -202,10 +202,10 @@ reasons: `reactive-components.md`.
   | a callback TS passes (`items.sort((a, b) => ..)`, a listener) | a `Callback<A, R>` parameter: `call(args)` inside a synchronous call, `post(args)` / `call_async(args).await` from tasks; kept in a class's field, it is collected with a cycle through the object |
   | a portal | none (TS has none either); overlays are `modal().transparent(true)` |
   | `ref={el}`, `el.focus()`, `await el.measure()` | `element_ref()`, `.element_ref(&r)` on the element, `r.focus()` / `.scroll_to(..)` / `.seek(..)` / `.command(..)` from listeners and tasks; `r.measure()` is an `Answer<Option<Measurement>>` (frame, `page_x` / `page_y`) to await in a task |
-  | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(10.0, 10.0))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location_x`, `page_x`, ... and `gesture: PanGesture`: `dx`, `dy`, `vx`, `vy`, the centroid; `PanGesture::begin` / `update` follow one from `on_touch`) |
+  | `onStartShouldSetResponder`, `onMoveShouldSetResponder(Capture)`, `PanResponder.create` | `.claim_touches(TouchClaim::on_start())` (`::on_move()`, `.capture()`, `.ask(\|request: &ClaimRequest\| request.claim())` to decide with state and the gesture, `.block_native(false)`; `TouchClaim::on_pan(PanActivation::horizontal(10.0, 10.0))` (`panActivation`) claims when the platform activates a pan, deciding on the main thread, `elements.md`), `.keep_touches(true)` (`onResponderTerminationRequest` → false); `.on_responder_grant` / `_move` / `_release` / `_terminate` / `_start` / `_end` / `_reject` get a `ResponderEvent` (the finger's `location` and `page`, `Point<Points>`, and `gesture: PanGesture`: `delta`, `vx`, `vy`, the centroid's `position` and `origin`; `PanGesture::begin` / `update` follow one from `on_touch`) |
   | a ref to a component, `await stepper.value()`, `stepper.setValue(5)` | `component_ref::<Stepper>()`, `Stepper::element(..).component_ref(&r)`, `r.api::<StepperApi>()`: the API its view registered, its methods called directly |
   | `<List ListHeaderComponent ListFooterComponent ListEmptyComponent ItemSeparatorComponent stickyHeaderIndices viewabilityConfig onViewableItemsChanged onEndReachedThreshold initialScrollIndex>` | `virtual_list(count, row).header(..).footer(..).empty(..).separator(\|\| ..).sticky_header_indices(..).viewability(..).minimum_view_time(..).on_viewable_items_changed(..).end_reached_threshold(..).initial_scroll_index(..)`: the header, footer and empty view are part of the view, never recycled |
-  | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(40.0)` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
+  | `<List maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 40 }}>` | `.follow_end(px(40.0))` (`ListLayout`: on `virtual_list(..)` and on a placed `ListElement`) |
   | `<ListView each={rows} keyExtractor ListHeaderComponent={Header}>{row}</ListView>` | `ListView::element(props).items(virtual_list(n, row).keys(move \|\| ids).header(..))` |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
   | `class="group"`, `group-active:`, `dark:`, `disabled:` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)` (native, no binding) |
@@ -398,8 +398,8 @@ the core sets the root's direction from it and the language (in an app whose JS 
 ## Assets
 
 A crate ships files in its `assets/` directory, as TS imports them: `asset!("logo@2x.png")` (`nsh-macros`, the path
-relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, width, height }` (the natural size
-in points: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the
+relative to `assets/`) reads the file at compile time and is an `ImageAsset { uri, size }` (the natural size
+in points, `Size<Points>`: `@2x` / `@3x` divide the pixels), a `FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the
 font's name table) or a `FileAsset { uri }`; a missing or unreadable file fails the build, a changed one builds the
 crate again (`include_bytes!`). The URI is `asset:/@<package>/<path>`, apart from the app's own files. The registry
 ships the directory: `registry.assets(assets!())` lists every file (`AssetFile`: URI, the file where the crate was
@@ -412,14 +412,14 @@ copies into packages next to the imported assets, and whose fonts the engine reg
 `Styled` methods are named as in GPUI and Tailwind (`.flex_row()`, `.items_center()`, `.p_4()` = 16pt, `.gap(px(6.0))`,
 `.rounded_xl()`, `.border_1()`, `.shadow_md()`, `.text_sm()`, `.font_weight(FontWeight::SEMIBOLD)`, ...); spacing steps
 follow Tailwind's default scale, independent of the app's Tailwind theme. They cover what classes and styles do:
-per-side borders and colors (`.border_t(6.0).border_t_color(..)`), `.border_dashed()`, per-corner and start / end
+per-side borders and colors (`.border_t(px(6.0)).border_t_color(..)`), `.border_dashed()`, per-corner and start / end
 radii (`.rounded_tl(..)`, `.rounded_ss(..)`), `.border_curve(BorderCurve::Continuous)`; shadows of their own
 (`.shadow([BoxShadow { .. }])`, React Native's `.shadow_opacity(..).shadow_radius(..).shadow_offset(..)`,
 `.shadow_color(..)` for both and the presets), `.inset_shadow_sm()`, rings, outlines, text shadows; 3D transforms and
 skews, `.transform_origin(..)` / `.origin_top_left()`, `.backface_hidden()`; decorations (`.underline().line_through()`
 draw both, `.text_decoration_wavy()`, `.text_decoration_color(..)`), `.uppercase()`, `.tabular_nums()`,
 `.writing_direction(..)`; gradients (`.bg_linear_to_br().gradient_from(..).gradient_via(..).gradient_to(..)`,
-`.bg_radial()`, `.bg_conic(..)`), filters and backdrop filters (`.grayscale(1.0)`, `.backdrop_blur(12.0)`),
+`.bg_radial()`, `.bg_conic(..)`), filters and backdrop filters (`.grayscale(1.0)`, `.backdrop_blur(px(12.0))`),
 `.mix_blend_mode(..)`, the pointer (`.cursor_pointer()`, `.cursor(Cursor::Text)`), transitions (`.transition_colors().duration(150.0).ease_out()`), keyframes (`.animate_spin()`; with TS's own timing keys
 `.animation(KeyframeAnimation::new(Keyframes::Spin).duration(800.0))`),
 grids (`.grid_cols(3)`, `.col_span(2)`), `.flex_grow(n)`. Tailwind's palette is typed too
@@ -450,7 +450,7 @@ is no string to parse and no `.class()`.
 
 `Theme` (`ui/theme.rs`) has gpui-kit's semantic colors (`primary`, `primary_active`, `primary_foreground`,
 `secondary`, `danger`, `muted`, `border`, `group_box`, `list_*`, `switch*`, `tab*`, ...: the fields mobile components
-use) plus `radius`, `radius_lg` and `font_size`, and derefs to its colors (`theme.primary`). The default
+use) plus `radius`, `radius_lg` and `font_size` (`Points`), and derefs to its colors (`theme.primary`). The default
 (`default-theme.json`) is gpui-kit's default theme with mobile radii. An app sets its own in `nsh.json`: `"theme":
 "brand.json"` (a gpui-kit theme file, relative to `nsh.json`) or the same JSON inline. Keys no field has (desktop
 components', the app's own) are kept by key, colors and numbers alike (`Theme::color` / `number`, `set_color` /

@@ -30,6 +30,29 @@ declarations. They serialize as numbers.
 Rust components style with them: `Styled`'s length methods take `impl IntoReactive<Length>`, so `.w(px(120.0))`,
 `.w(relative(0.5))`, `.p(rems(1.0))`, `.h(Length::Auto)` and closures returning any of them all work.
 
+The rest of the Rust UI API (`nsh_core::ui`) follows GPUI's element APIs:
+
+- **Box lengths** that layout does not resolve (`border*`, `outline`, `outline_offset`, `ring*`, `letter_spacing`,
+  `perspective`) take `impl IntoReactive<AbsoluteLength>`, as GPUI's border widths are `AbsoluteLength`s: points or
+  rems (a rem at `REM_SIZE`). `translate_x` / `translate_y` take a `DefiniteLength`: points, or `relative(-0.5)` of the
+  view's own size. Shadow and decoration geometry is `Points`, as GPUI's `BoxShadow` and `UnderlineStyle` have it
+  (`shadow_radius`, `shadow_offset(point(px(0.0), px(2.0)))`, `text_decoration_thickness`, `underline_offset`, `blur`,
+  `backdrop_blur`, `Image::blur_radius`, `Interactive::elevation`).
+- **Angles** are `Radians` (`rotate(deg(45.0))`, `skew_x`, `bg_linear`, `bg_conic`, `hue_rotate`, a rotation's
+  `GestureEvent<Radians>`); **fractions** are `Percentage` (`gradient_*_position`, `scroll_to_index`'s
+  `view_position`).
+- **Positions** are `Point<Points>` (`ScrollEvent::offset`, the scroll listeners' offsets, `PanEvent::translation`,
+  `ResponderEvent::location` / `page`, `PanGesture`'s `position`, `origin` and `delta`, `ElementRef::scroll_to`,
+  `zoom_to`'s center, `Scrollable::content_offset`); **sizes** are `Size<Points>` (`ScrollEvent`'s `size` and
+  `content_size`, `ImageAsset::size`); single lengths are `Points` (`ListLayout`'s paddings, gaps and estimates,
+  `Scrollable::snap_interval` / `snap_offsets`, `Theme`'s `radius`, `radius_lg` and `font_size`, `keyboard_height()`,
+  `measure_text`, `round_to_nearest_pixel`, `set_title_bar`'s height).
+- **Natural sizes of images**: what a platform decodes is counted in pixels, as GPUI's `RenderImage::size` is
+  `Size<DevicePixels>`: `ImageSize` (`Image.getSize`), `ClipboardImage` and `VideoInfo` are `DevicePixels`. An
+  `ImageAsset`'s size is the size it lays out at, the file's pixels over the `@2x` / `@3x` of its name, so it is
+  `Size<Points>`. `ImageSize` and `ClipboardImage` keep flat `width` / `height` fields (each has `size()`) because they
+  are JS objects too, `{ width, height }`.
+
 ### Deviations from GPUI, and why
 
 - **Points, not pixels.** NSH lays out in the platform's density-independent unit on every backend; GPUI's `Pixels`

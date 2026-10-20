@@ -403,7 +403,7 @@ impl IntoElement for Figure {
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(colors::TEXT)
             .tabular_nums()
-            .letter_spacing(-0.5)
+            .letter_spacing(px(-0.5))
             .children(self.unit.map(|unit| {
                 text(unit.map(|unit| SharedString::from(format!(" {unit}"))))
                     .text_size(px(17.0))

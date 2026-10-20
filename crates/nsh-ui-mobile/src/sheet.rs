@@ -102,13 +102,13 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
                     .pb(move || px(safe_area().bottom + 16.0))
                     .px_4()
                     .gap_3()
-                    .rounded_t(move || px(theme().radius_lg.max(16.0)))
+                    .rounded_t(move || theme().radius_lg.max(px(16.0)))
                     .bg(move || theme().background)
                     .shadow_lg()
                     .bind_translate_y(&offset)
                     .pan_values(None, Some(&offset))
                     .on_pan_end(move |e: &PanEvent| {
-                        if e.translation_y > CLOSE_DISTANCE || e.velocity_y > CLOSE_VELOCITY {
+                        if e.translation.y.0 > CLOSE_DISTANCE || e.velocity_y > CLOSE_VELOCITY {
                             close();
                         } else {
                             offset.spring(0.0, settle(Some(e.velocity_y)));

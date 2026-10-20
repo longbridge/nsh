@@ -370,12 +370,12 @@ fn gesture_state(ctx: *mut JsContext) -> JsValue {
     // SAFETY: a new object taking its fields.
     let o = unsafe { qjs::JS_NewObject(ctx) };
     for (k, v) in [
-        (c"moveX", g.move_x),
-        (c"moveY", g.move_y),
-        (c"x0", g.x0),
-        (c"y0", g.y0),
-        (c"dx", g.dx),
-        (c"dy", g.dy),
+        (c"moveX", g.position.x.0),
+        (c"moveY", g.position.y.0),
+        (c"x0", g.origin.x.0),
+        (c"y0", g.origin.y.0),
+        (c"dx", g.delta.x.0),
+        (c"dy", g.delta.y.0),
         (c"vx", g.vx),
         (c"vy", g.vy),
     ] {

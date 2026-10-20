@@ -26,7 +26,7 @@ pub fn Group(props: GroupProps) -> impl IntoElement {
         }))
         .child(
             view()
-                .rounded(move || px(theme().radius_lg))
+                .rounded(move || theme().radius_lg)
                 .bg(move || theme().group_box)
                 .text_color(move || theme().group_box_foreground)
                 .overflow_hidden()

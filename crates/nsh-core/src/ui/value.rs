@@ -296,6 +296,21 @@ macro_rules! number {
 number!(any: f32, f64);
 number!(whole: i32, i64, u32, u64, usize);
 
+/// A whole number of pixels (an image's size).
+impl JsValue for crate::geometry::DevicePixels {
+    fn ts_type(types: &mut TsTypes) -> String {
+        i32::ts_type(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        i32::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+
 impl JsValue for SharedString {
     fn ts_type(_types: &mut TsTypes) -> String {
         "string".into()

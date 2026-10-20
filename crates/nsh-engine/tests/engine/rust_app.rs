@@ -396,7 +396,7 @@ fn Measured() -> impl IntoElement {
         .child(
             scroll()
                 .flex_1()
-                .on_scroll(move |e: &ScrollEvent| scrolled.set(e.y))
+                .on_scroll(move |e: &ScrollEvent| scrolled.set(e.offset.y.0))
                 .child(view().h(px(2000.0))),
         )
 }

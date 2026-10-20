@@ -5091,7 +5091,7 @@ mod components {
             ..Default::default()
         };
         c.set_environment(crate::ui::Environment {
-            keyboard_height: 300.0,
+            keyboard_height: px(300.0),
             ..env
         });
         assert!(c.commit().is_none());
@@ -5914,7 +5914,7 @@ mod components {
                                 .child(text(move || rows.with(|r| r[at.index()].clone())))
                         },
                     )
-                    .estimated_item_size(40.0)
+                    .estimated_item_size(px(40.0))
                     .flex_1()
                 },
                 |e, _| text(format!("failed: {}", e.message)),
@@ -5973,8 +5973,8 @@ mod components {
                         })
                     })
                 })
-                .estimated_item_size(40.0)
-                .follow_end(10.0)
+                .estimated_item_size(px(40.0))
+                .follow_end(px(10.0))
                 .flex_1(),
             )
     }
@@ -6178,7 +6178,7 @@ mod components {
                     let has = has.await;
                     let image = image
                         .await
-                        .map(|i| format!("{}x{} {}", i.width, i.height, i.uri));
+                        .map(|i| format!("{}x{} {}", i.width.0, i.height.0, i.uri));
                     let files = files.await.join(",");
                     pasted.set(format!("{has} {image:?} {files}"));
                 });
@@ -6456,7 +6456,7 @@ mod touch {
         view()
             .on_touch(move |t: &TouchEvent| log.update(|l| l.push(format!("touch {:?}", t.phase))))
             .claim_touches(TouchClaim::on_move().capture().ask(|r: &ClaimRequest| {
-                if r.event.gesture.dx.abs() > 50.0 {
+                if r.event.gesture.delta.x.abs() > px(50.0) {
                     r.claim();
                 }
             }))
@@ -6468,10 +6468,10 @@ mod touch {
                     .claim_touches(TouchClaim::on_start())
                     .keep_touches(props.keep)
                     .on_responder_grant(note("grant at ", |e| {
-                        format!("{},{}", e.location_x, e.location_y)
+                        format!("{},{}", e.location.x.0, e.location.y.0)
                     }))
                     .on_responder_move(note("move ", |e| {
-                        format!("{},{}", e.gesture.dx, e.gesture.dy)
+                        format!("{},{}", e.gesture.delta.x.0, e.gesture.delta.y.0)
                     }))
                     .on_responder_release(note("release ", |e| format!("{:.2}", e.gesture.vx)))
                     .on_responder_terminate(note("terminate", none)),
@@ -6837,7 +6837,7 @@ mod painter {
             .stroke_path(&svg_path("M20 6L9 17l-5-5"))
             .fill_style(CanvasGradient::radial(0.0, 0.0, 4.0, 0.0, 0.0, 40.0))
             .fill_path(&svg_path("M0 0h10v10z"), FillRule::EvenOdd)
-            .fill_text("100%", 50.0 - width, 20.0);
+            .fill_text("100%", 50.0 - width.0, 20.0);
         let x = p.num(&offset);
         p = p.op(CanvasOp::LineDashOffset(x));
         view().child(canvas(p))
@@ -7865,7 +7865,7 @@ mod views {
                                 }))
                         },
                     )
-                    .estimated_item_size(40.0)
+                    .estimated_item_size(px(40.0))
                     .keys(move || rows.get())
                     .flex_1(),
                 )
@@ -8960,7 +8960,7 @@ mod views {
                     )
                     .child(Plaque::element(PlaqueProps {}))
             })
-            .estimated_item_size(40.0)
+            .estimated_item_size(px(40.0))
             .flex_1(),
         )
     }
@@ -9705,7 +9705,7 @@ mod rust_desktop {
 
     #[component]
     fn Chrome() -> impl IntoElement {
-        set_title_bar(TitleBarStyle::Hidden, Some(42.0));
+        set_title_bar(TitleBarStyle::Hidden, Some(px(42.0)));
         let drag = signal(true);
         DRAG.set(Some(drag));
         view()

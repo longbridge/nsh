@@ -284,7 +284,7 @@ fn Device() -> impl IntoElement {
             os().name(),
             idiom(),
             pixel_ratio(),
-            round_to_nearest_pixel(10.3),
+            round_to_nearest_pixel(px(10.3)).0,
             locale(),
         )
     }))

@@ -169,10 +169,10 @@ fn Transformable() -> impl IntoElement {
                         .pinch_value(&scale)
                         .rotation_value(&angle)
                         .on_pan_end(move |e: &PanEvent| {
-                            drag.set(e.translation_x.hypot(e.translation_y).round());
+                            drag.set(e.translation.x.0.hypot(e.translation.y.0).round());
                         })
                         .on_pinch_end(move |e: &GestureEvent| pinched.set(e.value))
-                        .on_rotation_end(move |e: &GestureEvent| turned.set(e.value))
+                        .on_rotation_end(move |e: &GestureEvent<Radians>| turned.set(e.value.0))
                         .bind_translate_x(&x)
                         .bind_translate_y(&y)
                         .bind_scale(&scale)
@@ -246,7 +246,7 @@ fn Ball() -> impl IntoElement {
             .map(knob)
             .style_with(move |s| {
                 let (x, y) = pos.get();
-                s.translate_x(x).translate_y(y)
+                s.translate_x(px(x)).translate_y(px(y))
             })
             .bind_scale(&grab.interpolate(&[0.0, 1.0], &[1.0, 1.15]))
             .claim_touches(TouchClaim::on_start())
@@ -258,7 +258,7 @@ fn Ball() -> impl IntoElement {
             .on_responder_move(move |e: &ResponderEvent| {
                 let g = e.gesture;
                 let (x, y) = start.with(|s| *s);
-                pos.set((x + g.dx, y + g.dy));
+                pos.set((x + g.delta.x.0, y + g.delta.y.0));
             })
             .on_responder_release(move |e: &ResponderEvent| {
                 let g = e.gesture;

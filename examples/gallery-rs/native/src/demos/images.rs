@@ -256,7 +256,7 @@ fn info() -> AnyElement {
         let answer = image_size(big());
         let wait = spawn(async move {
             size.set(match answer.await {
-                Ok(ImageSize { width, height }) => format!("{width}×{height} px").into(),
+                Ok(ImageSize { width, height }) => format!("{}×{} px", width.0, height.0).into(),
                 Err(error) => error.into(),
             });
         });
@@ -371,7 +371,7 @@ fn events() -> AnyElement {
         .absolute()
         .left(px(-1.0))
         .top(px(-1.0))
-        .border(0.0);
+        .border(px(0.0));
     let label = |host: &'static str, status: AnyElement| {
         view()
             .flex_1()

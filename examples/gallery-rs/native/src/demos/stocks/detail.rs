@@ -136,7 +136,7 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                     .pt(px(14.0))
                     .text_size(px(22.0))
                     .font_weight(FontWeight::BOLD)
-                    .letter_spacing(-0.3)
+                    .letter_spacing(px(-0.3))
                     .text_color(colors::TEXT),
             )
             .child(
@@ -428,7 +428,7 @@ fn QuoteSection(props: StockProps) -> impl IntoElement {
                     text(move || p(quote.get().last))
                         .text_size(px(36.0))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .letter_spacing(-1.0)
+                        .letter_spacing(px(-1.0))
                         .text_color(tone)
                         .tabular_nums(),
                 )
@@ -577,7 +577,7 @@ fn DayRange(props: StockProps) -> impl IntoElement {
                         .left(px(-7.0))
                         .size(px(14.0))
                         .rounded(px(7.0))
-                        .border(3.0)
+                        .border(px(3.0))
                         .border_color(colors::BACKGROUND)
                         .bg(move || {
                             let q = quote.get();

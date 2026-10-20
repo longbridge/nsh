@@ -65,7 +65,7 @@ struct EnvSignals {
     window: Memo<Size<Points>>,
     safe_area: Memo<EdgeInsets>,
     title_bar: Memo<crate::geometry::Edges<crate::geometry::Points>>,
-    keyboard_height: Memo<f32>,
+    keyboard_height: Memo<Points>,
     keyboard_duration: Memo<f32>,
     dark: Memo<bool>,
     font_scale: Memo<f32>,
@@ -203,7 +203,7 @@ pub fn safe_area() -> EdgeInsets {
 
 /// The software keyboard's height over the surface, 0 when hidden (TS:
 /// `keyboard().height`).
-pub fn keyboard_height() -> f32 {
+pub fn keyboard_height() -> Points {
     env(|e| e.keyboard_height)
 }
 
@@ -252,9 +252,9 @@ pub fn pixel_ratio() -> f32 {
 
 /// `points` rounded to whole device pixels (TS:
 /// `PixelRatio.roundToNearestPixel`).
-pub fn round_to_nearest_pixel(points: f32) -> f32 {
+pub fn round_to_nearest_pixel(points: Points) -> Points {
     let ratio = pixel_ratio().max(f32::MIN_POSITIVE);
-    (points * ratio).round() / ratio
+    Points((points.0 * ratio).round() / ratio)
 }
 
 /// The user's locale (TS: what `Intl` formats for by default).
@@ -303,10 +303,10 @@ pub fn theme() -> Arc<Theme> {
 /// The width of `text` on one line in `font` (the CSS `font` shorthand; an
 /// invalid one measures in `10px sans-serif`), by the platform's text engine
 /// (TS: a canvas's `measureText(text).width`).
-pub fn measure_text(font: &str, text: &str) -> f32 {
+pub fn measure_text(font: &str, text: &str) -> Points {
     let font = CanvasFont::parse(font).unwrap_or_default();
     let measure = with_data(|d| d.ambient.measure.clone()).expect("the core sets the text engine");
-    measure(&font, text)
+    Points(measure(&font, text))
 }
 
 /// The surface's `G`: one signal per type, made with `Default` the first

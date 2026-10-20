@@ -195,7 +195,7 @@ fn hero() -> AnyElement {
                 .bg_radial()
                 .gradient_from(rgb_a(CITRUS, 0.2))
                 .gradient_to(AdaptiveColor::TRANSPARENT)
-                .gradient_to_position(0.7),
+                .gradient_to_position(percentage(0.7)),
         )
         .child(
             view()
@@ -212,7 +212,7 @@ fn hero() -> AnyElement {
                         .rounded_full()
                         .bg(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.1)))
                         .px_2p5()
-                        .ring(1.0)
+                        .ring(px(1.0))
                         .ring_inset()
                         .ring_color(adaptive(BLACK.opacity(0.1), WHITE.opacity(0.1)))
                         .child(
@@ -263,14 +263,14 @@ fn hero() -> AnyElement {
                 .text_5xl()
                 .font_weight(FontWeight::SEMIBOLD)
                 // `tracking-tight`: -0.025em.
-                .letter_spacing(-1.2)
+                .letter_spacing(px(-1.2))
                 .text_color(zinc(900, 100))
                 .tabular_nums()
                 .child(
                     text(" cards")
                         .text_size(px(17.0))
                         .font_weight(FontWeight::NORMAL)
-                        .letter_spacing(0.0)
+                        .letter_spacing(px(0.0))
                         .text_color(zinc(500, 400)),
                 ),
         )
@@ -329,7 +329,7 @@ fn stats() -> AnyElement {
                 text(value)
                     .text_size(px(26.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .letter_spacing(-0.65)
+                    .letter_spacing(px(-0.65))
                     .text_color(zinc(900, 100))
                     .tabular_nums(),
             )
@@ -453,7 +453,7 @@ fn buttons() -> AnyElement {
                 .text_color(colors::ACCENT)
                 .underline()
                 .text_decoration_dotted()
-                .underline_offset(4.0),
+                .underline_offset(px(4.0)),
         );
     card(
         IconName::Components,
@@ -484,7 +484,7 @@ fn cards() -> AnyElement {
         .p_3()
         .shadow_md()
         .shadow_color(adaptive(BLACK.opacity(0.1), BLACK.opacity(0.4)))
-        .ring(1.0)
+        .ring(px(1.0))
         .ring_inset()
         .ring_color(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.1)))
         .transition_transform()
@@ -513,7 +513,7 @@ fn cards() -> AnyElement {
                 .text_2xl()
                 .text_color(zinc(400, 600))
                 .transition_transform()
-                .group_active(|s| s.translate_x(4.0)),
+                .group_active(|s| s.translate_x(px(4.0))),
         );
     let tinted = |hue: Hue, label: &'static str| {
         view()
@@ -702,7 +702,7 @@ fn shadows() -> AnyElement {
                         .bg(adaptive(rgb(0xf0f0ec), BLACK))
                         .inset_shadow_sm()
                         .inset_shadow_color(adaptive(BLACK.opacity(0.1), WHITE.opacity(0.1)))
-                        .ring(1.0)
+                        .ring(px(1.0))
                         .ring_inset()
                         .ring_color(adaptive(BLACK.opacity(0.05), WHITE.opacity(0.1))),
                     "Inset",
@@ -711,9 +711,9 @@ fn shadows() -> AnyElement {
                     8.0,
                     tile()
                         .bg(colors::RAISED)
-                        .ring(2.0)
+                        .ring(px(2.0))
                         .ring_color(SKY.shade(400))
-                        .ring_offset(2.0)
+                        .ring_offset(px(2.0))
                         .ring_offset_color(colors::INSET),
                     "Ring",
                 ))
@@ -722,8 +722,8 @@ fn shadows() -> AnyElement {
                     tile()
                         .rounded_full()
                         .bg(colors::RAISED)
-                        .outline(2.0)
-                        .outline_offset(2.0)
+                        .outline(px(2.0))
+                        .outline_offset(px(2.0))
                         .outline_dashed()
                         .outline_color(PINK.shade(400)),
                     "Outline",
@@ -762,7 +762,7 @@ fn gradients() -> AnyElement {
             .child(captioned(
                 8.0,
                 tile()
-                    .bg_linear(45.0)
+                    .bg_linear(deg(45.0))
                     .gradient_from(ROSE.shade(400))
                     .gradient_via(FUCHSIA.shade(500))
                     .gradient_to(INDIGO.shade(500)),
@@ -779,7 +779,7 @@ fn gradients() -> AnyElement {
             .child(captioned(
                 8.0,
                 tile()
-                    .bg_conic(0.0)
+                    .bg_conic(deg(0.0))
                     .gradient_from(RED.shade(500))
                     .gradient_via(GREEN.shade(500))
                     .gradient_to(RED.shade(500)),
@@ -801,7 +801,7 @@ fn typography() -> AnyElement {
                 .text_3xl()
                 .font_weight(FontWeight::BLACK)
                 // `tracking-tight`: -0.025em.
-                .letter_spacing(-0.75)
+                .letter_spacing(px(-0.75))
                 .text_color(zinc(900, 100))
                 .into_element(),
             text("Light, large and relaxed")
@@ -844,7 +844,7 @@ fn typography() -> AnyElement {
                     text("dashed")
                         .underline()
                         .text_decoration_dashed()
-                        .text_decoration_thickness(2.0),
+                        .text_decoration_thickness(px(2.0)),
                 )
                 .child(
                     text("struck")
@@ -857,7 +857,7 @@ fn typography() -> AnyElement {
                         .font_weight(FontWeight::SEMIBOLD)
                         .uppercase()
                         // `tracking-widest`: 0.1em.
-                        .letter_spacing(1.2)
+                        .letter_spacing(px(1.2))
                         .text_color(colors::ACCENT),
                 )
                 .into_element(),
@@ -1017,8 +1017,8 @@ fn motion() -> AnyElement {
                 10.0,
                 view()
                     .size_8()
-                    .rotate(12.0)
-                    .skew_x(6.0)
+                    .rotate(deg(12.0))
+                    .skew_x(deg(6.0))
                     .scale(0.9)
                     .rounded_lg()
                     .bg(EMERALD.shade(400)),
@@ -1089,7 +1089,7 @@ fn inputs() -> AnyElement {
                 .text_color(zinc(900, 100))
                 .focus(|s| {
                     s.border_color(colors::ACCENT)
-                        .ring(2.0)
+                        .ring(px(2.0))
                         .ring_color(adaptive(rgb_a(CITRUS, 0.4), rgb_a(CITRUS, 0.25)))
                 })
                 .into_element(),

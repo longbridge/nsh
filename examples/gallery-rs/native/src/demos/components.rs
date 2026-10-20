@@ -84,7 +84,7 @@ fn title_block(badge: impl Into<SharedString>, title: &str) -> View {
             text(title.to_owned())
                 .text_size(px(28.0))
                 .font_weight(FontWeight::BOLD)
-                .letter_spacing(-0.5)
+                .letter_spacing(px(-0.5))
                 .text_color(colors::TEXT),
         )
 }
@@ -526,7 +526,7 @@ fn Accessory() -> impl IntoElement {
                     .gap_2()
                     .px_4()
                     .py_2()
-                    .border_t(hairline)
+                    .border_t(move || px(hairline()))
                     .border_t_color(colors::BORDER)
                     .child(
                         text(move || {
@@ -655,7 +655,7 @@ fn ModalOptions() -> impl IntoElement {
                                 text("A modal")
                                     .text_size(px(28.0))
                                     .font_weight(FontWeight::BOLD)
-                                    .letter_spacing(-0.5)
+                                    .letter_spacing(px(-0.5))
                                     .text_color(colors::TEXT),
                             )
                             .child(
@@ -738,7 +738,7 @@ fn PlatformInfo() -> impl IntoElement {
         ),
         (
             "roundToNearestPixel(10.3)",
-            (|| round_to_nearest_pixel(10.3).to_string()).into_reactive(),
+            (|| round_to_nearest_pixel(px(10.3)).0.to_string()).into_reactive(),
         ),
         (
             "screenReaderEnabled()",

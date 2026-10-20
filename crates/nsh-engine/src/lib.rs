@@ -1819,7 +1819,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::ui::Envi
         window,
         safe_area: insets(env),
         title_bar: env.title_bar,
-        keyboard_height: env.keyboard_height.0,
+        keyboard_height: env.keyboard_height,
         keyboard_duration: env.keyboard_duration,
         dark: env.color_scheme == ColorScheme::Dark,
         font_scale: env.font_scale,

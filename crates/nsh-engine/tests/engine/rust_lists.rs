@@ -126,7 +126,7 @@ fn Own() -> impl IntoElement {
                 move || count.get(),
                 |at| text(move || format!("row {}", at.index())).h(px(40.0)),
             )
-            .estimated_item_size(40.0)
+            .estimated_item_size(px(40.0))
             .flex_1()
             .header(
                 text(move || format!("header {}", header_taps.get()))

@@ -44,12 +44,12 @@ fn Sketch() -> impl IntoElement {
             .claim_touches(TouchClaim::on_start())
             .keep_touches(true)
             .on_responder_grant(move |e: &ResponderEvent| {
-                strokes.update(|s| s.push(vec![(e.location_x, e.location_y)]));
+                strokes.update(|s| s.push(vec![(e.location.x.0, e.location.y.0)]));
             })
             .on_responder_move(move |e: &ResponderEvent| {
                 strokes.update(|s| {
                     if let Some(stroke) = s.last_mut() {
-                        stroke.push((e.location_x, e.location_y));
+                        stroke.push((e.location.x.0, e.location.y.0));
                     }
                 });
             })
