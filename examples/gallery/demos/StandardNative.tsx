@@ -54,8 +54,10 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
       const filename = path.join(dataDirectory(), "gallery.txt");
       const url = pathToFileURL(filename);
       const hash = createHash("sha256").update(bytes).digest("hex");
+      const roundTrip = fileURLToPath(url);
+      const roundTripStatus = roundTrip === filename ? "matches original path" : "MISMATCH (upstream URL module)";
       console.info("Gallery utilities", hash);
-      return `${bytes.toString("base64")}\nSHA-256: ${hash}\nUUID: ${randomUUID()}\nGlobal UUID: ${crypto.randomUUID()}\nGlobal Buffer: ${globalThis.Buffer.from("NSH").toString("hex")}\nGzip: ${packed.length} bytes → ${gunzipSync(packed).toString()}\n${url.href}\n${fileURLToPath(url)}\n${path.basename(filename)}`;
+      return `${bytes.toString("base64")}\nSHA-256: ${hash}\nUUID: ${randomUUID()}\nGlobal UUID: ${crypto.randomUUID()}\nGlobal Buffer: ${globalThis.Buffer.from("NSH").toString("hex")}\nGzip: ${packed.length} bytes → ${gunzipSync(packed).toString()}\n${url.href}\nFile URL round trip: ${roundTripStatus}\n${roundTrip}\n${path.basename(filename)}`;
     }} />;
   }
   function Environment() {
@@ -79,11 +81,15 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
         const entries = await fs.readdir(dir, { withFileTypes: true });
         const names = await fs.readdir(dir);
         let linkResult: string;
-        try { linkResult = await fs.readlink(file); } catch (error) { linkResult = String(error); }
+        try { linkResult = `Unexpected symlink target: ${await fs.readlink(file)}`; }
+        catch (error) {
+          if (!(error instanceof Error) || !("code" in error) || error.code !== "EINVAL") throw error;
+          linkResult = "Expected EINVAL: note.txt is a regular file, not a symbolic link";
+        }
         await fs.rename(file, moved);
         const exists = await fs.exists(moved);
         await fs.unlink(moved);
-        return `${text}\n${bytes.length} bytes, stat: ${stats.size}, file: ${link.isFile()}\nMode: ${stats.mode.toString(8)}, directory: ${stats.isDirectory()}, symlink: ${link.isSymbolicLink()}\nModified: ${stats.mtime.toISOString()} (${stats.mtimeMs})\nAccessed: ${stats.atime.toISOString()} (${stats.atimeMs})\nCreated: ${stats.birthtime.toISOString()} (${stats.birthtimeMs})\n${names.join(", ")}\n${entries.map((entry) => `${entry.name}: directory=${entry.isDirectory()}`).join("\n")}\nRenamed: ${exists}; removed: ${!(await fs.exists(moved))}\nreadlink on regular file: ${linkResult}`;
+        return `${text}\n${bytes.length} bytes, stat: ${stats.size}, file: ${link.isFile()}\nMode: ${stats.mode.toString(8)}, directory: ${stats.isDirectory()}, symlink: ${link.isSymbolicLink()}\nModified: ${stats.mtime.toISOString()} (${stats.mtimeMs})\nAccessed: ${stats.atime.toISOString()} (${stats.atimeMs})\nCreated: ${stats.birthtime.toISOString()} (${stats.birthtimeMs})\n${names.join(", ")}\n${entries.map((entry) => `${entry.name}: directory=${entry.isDirectory()}`).join("\n")}\nRenamed: ${exists}; removed: ${!(await fs.exists(moved))}\nreadlink validation: ${linkResult}`;
       } finally {
         for (const name of await fs.readdir(dir)) await fs.unlink(path.join(dir, name));
         await fs.rmdir(dir);
@@ -112,7 +118,7 @@ function nativeDemo({ Buffer, createHash, randomUUID, path, fileURLToPath, pathT
     }} />;
   }
   function Exit() {
-    return <Action name="Request host exit" detail="process.exit(0) · enable capabilities.process.exit to let the host handle this request" action={async () => {
+    return <Action name="Request host exit" detail="process.exit(0) · close this Gallery window" action={async () => {
       process.exit(0);
       return "Exit requested from the host";
     }} />;
