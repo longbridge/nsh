@@ -69,7 +69,7 @@ repository holds that suite and the record of what apps depend on:
 api/
   runtime.txt           every module's exports (`nsh:rt` included) and the globals, with their members and kinds
   types/                the declarations of `.nsh/types`
-  tailwind.txt          every Tailwind class the resolver offers and the style it resolves to, in each context
+  tailwind.txt          every Tailwind class the resolver offers and what it sets, in each context: scales, rules and classes
   apps/<app>/           fixture apps: bundle.js and assets/ as some checkout's `nsh build --release` wrote them
     script.txt          what a user does and sees in it, and the API it checks (`covers`)
   cases/<case>.tsx      the sources of small fixtures: the tests of single APIs
@@ -117,13 +117,28 @@ The engine's tests (`crates/nsh-engine/tests/engine/compat/`) check, on every pu
   test.
 - `declarations_are_understood`: every declaration is one `compare.rs` can read, so none escapes the comparison.
 
-`tailwind.txt` has one line per class, `<class> <style>`: the resolved style's fields that differ from the defaults,
-then ` | <context>: <style>` for each context (dark, a platform, a window width, a state, a group's state, a sibling
-position, rtl, reduce motion) where the class resolves differently. The classes are enumerated from the code: the
-resolver's utilities and prefixes, each prefix with every theme scale name, the component theme's tokens, a number
-scale, fractions and representative arbitrary values, and each variant on one utility. The style is printed from the
-resolver's own types, so renaming one of their fields changes the record without changing what apps see: such a pull
-request records it with `cargo xtask api` and says so.
+`tailwind.txt` says what each class sets as apps write styles: NSH's style keys with CSS's values (`p-4 padding: 16`,
+`bg-red-500 backgroundColor: #fb2c36`), then ` | <context>: <decls>` for each context (dark, a platform, a window
+width, a state, a group's state, a sibling position, rtl, reduce motion) where the class resolves differently, `-` for
+none. It never prints the core's types, so refactoring them leaves it alone; `tailwind_record_is_faithful` checks that
+it misses nothing they hold (two classes it writes alike set the same fields). It holds rules, not every value of every
+utility, in three sections:
+
+- `[scales]`: the values utilities share, each what a probe utility sets (`spacing` is what `p-*` sets, `color` what
+  `bg-*` sets) or numbers as written (`n`, `int`, `percent`), as `<scale> <name>=<value>`; a value that differs per
+  context is `<name>=<value>;<context>=<value>` (the theme's tokens, light and dark);
+- `[rules]`: `<utility>-{<scale>} <line>`: the utility takes every name of the scale, its line with `{<scale>}` (and
+  `{<scale>@<context>}`) as the name's value (`m-{spacing} margin: {spacing}`); an earlier rule's class wins;
+- `[classes]`: every other class with its line, and `!` for a class a rule names that is no class.
+
+The rules are inferred from what the classes resolve to, never written by hand, and the comparison expands the
+record into every class first, so a change to a scale's value shows as one line and is held for every class that
+takes it. The classes are enumerated from the code: the resolver's utilities and prefixes, each prefix with every
+theme scale name, the component theme's tokens (by name and as `(--token)`), a number scale, fractions and
+representative arbitrary values, negated where the sign does something, and each variant on one utility. Forms a
+utility ignores (an arbitrary value or a variable that sets nothing, a sign it drops) are not recorded: they are no
+API. A base recorded before this format (one line per class with the core's `{:?}`) only holds that its classes are
+still classes.
 
 ### Changing the API
 
