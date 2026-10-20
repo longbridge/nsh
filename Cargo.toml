@@ -143,12 +143,12 @@ tokio = { version = "1", default-features = false }
 # upstream rquickjs 0.14 in the browser. Both build QuickJS-NG 0fdea21, so bytecode the CLI compiles
 # loads in the web runtime (`nsh_js::BYTECODE_VERSION`).
 # `full` is avoided on purpose: it enables `dyn-load` (dlopen2), which does not build for iOS / Catalyst.
-rquickjs-jit = { package = "quickjs-jit", version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "macro"] }
+rquickjs-jit = { package = "quickjs-jit", version = "=0.14.1", default-features = false, features = ["std", "futures", "loader", "macro"] }
 rquickjs = { version = "=0.14.0", default-features = false, features = ["std", "futures", "loader", "macro"] }
 
 # The standard modules `buffer`, `crypto`, `path`, `url` and `zlib` (native targets): LLRT d9fd873e,
 # vendored by quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
-quickjs-jit-stdlib = { version = "=0.14.0", default-features = false, features = ["buffer", "crypto", "path", "zlib", "zlib-zstd"] }
+quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "crypto", "path", "zlib", "zlib-zstd"] }
 cap-std = "4.0.3"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }

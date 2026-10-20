@@ -119,7 +119,7 @@ which vendors LLRT `d9fd873e793c6551c5d92b2e31480f3279e3cd8d` with one feature p
 QuickJS-NG) and no LLRT: `standard::NATIVE_ONLY` (`buffer`, `crypto`, `path`, `url`, `zlib`, `websocket`) are
 not compiled there, an import of one throws an error naming it (the CLI compiles web apps natively, so their
 bytecode may import them), `Buffer` and `crypto` are not defined, and the declarations say so. The two crates are
-published together at one version and pinned exactly (`=0.14.0`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
+published together at one version and pinned exactly (`=0.14.1`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
 `third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The
 declared interfaces define the API: Node-shaped subsets compatible with gpui-shell's, not Node.js itself; where
